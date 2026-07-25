@@ -2515,3 +2515,94 @@ offline gate passes, run this new frozen 600-game screen:
 Require at least 52.5% aggregate and every deck at least 45%. A pass still
 requires a separately predeclared 2,000-game evaluation on another seed
 before any Handcrafted comparison.
+
+### Value G8 Late-Mix50 result: rejected offline
+
+The implementation passed its strict mechanism checks before the canonical
+run:
+
+- the canonical T800 artifact remained 10,424,027 bytes with SHA-256
+  `d2883a661609cc0115ae209d0df8381a53791fae8b2fac21993230a6b49ab110`;
+- canonical and Mix50 artifacts have distinct magic, recipe, and cache
+  validation and reject cross-family loads;
+- base and G1-G4 remain byte/fingerprint-identical to canonical, and Mix50
+  first diverges at G5;
+- same-seed/different-seed, immutable-checkpoint, exact even/odd assignment,
+  accounting, corruption/refresh, Actor-owned probe-cache reuse, and
+  hidden-repartition tests pass;
+- the current strict suites pass 66 engine, 6 learned-iteration, 12 probe
+  corpus, 10 probe-metric, and 12 probe-runner tests plus the full CLI
+  lifecycle; and
+- ASan/UBSan pass all 66 engine and 12 probe-runner tests with no diagnostic.
+
+The exact preregistered rejection-only run was:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --score-probes \
+  --actor-generation 0 --value-recipe mix50 --value-generation 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+```
+
+Training took 129.04 seconds and the full command took 171.35 seconds. It
+generated the versioned 10 MiB artifact
+`build/model-cache/value-g8-mix50-v1-t800-s424242.bin`, SHA-256
+`2bc9bae74059323686665356496b4ec7884e493baabb7a34778abf28dbe1d44e`,
+with final model fingerprint
+`302b48c119c746a920986ca932bfa18741ffdc2a283f71b9429872b67ee3a559`.
+A separate frozen-artifact load reproduced the report/fingerprint in 0.05
+seconds. The Actor G0, legacy Value G0, base, and G1-G4 fingerprints all
+reproduced exactly. The existing Actor-owned labels loaded without rewrite,
+and all 14 scored checkpoint/policy views were bit-identical under hidden
+repartition.
+
+Late collection accounting was exactly the declared 50/50 split by games:
+
+| generation | raw games/examples | search games/examples | search rollouts |
+| --- | ---: | ---: | ---: |
+| G5 | 100 / 8,520 | 100 / 7,894 | 14,615 |
+| G6 | 100 / 9,240 | 100 / 7,854 | 15,449 |
+| G7 | 100 / 10,324 | 100 / 8,590 | 18,320 |
+| G8 | 100 / 12,450 | 100 / 8,558 | 20,967 |
+
+The offline metrics nevertheless failed:
+
+| checkpoint | pooled top-one | stable-pair agreement | regret | Brier | Green / Red / Blue / White regret |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| canonical/Mix G4 | 87.50% | 100.00% | 0.0021 | 0.0531 | 0.0055 / 0 / 0.0029 / 0 |
+| Mix G5 | 75.00% | 85.19% | 0.0146 | 0.0621 | 0.0010 / 0.0321 / 0.0029 / 0.0224 |
+| Mix G6 | 75.00% | 85.19% | 0.0146 | 0.0684 | 0.0010 / 0.0321 / 0.0029 / 0.0224 |
+| Mix G7 | 75.00% | 92.59% | 0.0114 | 0.0816 | 0.0045 / 0.0321 / 0.0029 / 0.0061 |
+| Mix G8 | 68.75% | 81.48% | 0.0203 | 0.0725 | 0.0045 / 0.0321 / 0.0283 / 0.0164 |
+
+Gate decisions:
+
+1. canonical preservation: pass;
+2. exact G1-G4 equality and first divergence at G5: pass;
+3. exact 100/100 late game split and accounting: pass;
+4. determinism, immutability, and hidden-information invariance: pass;
+5. G5 Red <= 0.0114 and White <= 0.0112: **fail** at 0.0321 and
+   0.0224;
+6. final per-deck limits: Green passes, **Red, Blue, and White fail**;
+7. final regret <= 0.0110: **fail** at 0.0203; Brier <= 0.0916 passes at
+   0.0725; and
+8. strict/cache/hidden verification: pass.
+
+Decision: reject Late-Mix50 and do not run its 600-game screen. Halving the
+searched trajectories did improve final calibration relative to canonical
+G8 (Brier 0.0725 versus 0.1145), but it made final action regret worse
+(0.0203 versus 0.0138) and did not prevent the sharp G4-to-G5 Red/White
+collapse. Therefore the evidence no longer supports search-trajectory share
+as the isolated root cause.
+
+Next experiment: isolate whether *any* fifth fitted update causes the
+collapse. Continue the exact canonical G4 checkpoint with an all-raw G5
+collection while keeping the anchor, last-three replay, exploration,
+bootstrap targets, optimizer, seed/deck sequence, and 200-game corpus fixed.
+Score only that diagnostic G5 first. If raw G5 remains bad, collection search
+is exonerated and the next causal test is replay-window eviction/update
+stability; if raw G5 retains G4's action quality, then the response to search
+share is nonlinear and only then is a smaller searched fraction justified.
+The exact artifact/CLI recipe and numerical gate will be preregistered before
+implementation or execution.
