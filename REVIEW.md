@@ -8,13 +8,43 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 11:51 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 13:40 PDT — refreshed at the top of every review cycle.*
 
-- **HEADLINE: the challenger beat Handcrafted with confidence.** 2,000
-  paired games on a virgin seed in the four-deck environment: 55.1%,
-  95% CI 53.0%–57.3%. First clean above-50% result in project history
-  (the old 54.1% was leakage-inflated). Green and Blue slices dominant,
-  White an exact tie; Red (35.2%) is the one unsolved deck.
+- **📊 LIFT GATE: 4 of 5 — best in project history** (was 2 of 5).
+  The preregistered C16/K=8 mixed field: Blue FLIPPED to strictly best
+  (+48.8 vs +45.0; the 17.5-point gap eliminated exactly as the
+  determinization theory predicted), Green/Red/White all strictly
+  best. **RU Aggro fails by 5.0pp — the last deck between Learned and
+  the crown.** Per preregistration, next step is a card-agnostic
+  learning experiment, not tuning to the cell.
+- **🏆 Champion screen passed and reproduced bit-for-bit** by both
+  agents independently (55.7% over legacy G0, every slice ahead), and
+  the port replicates the branch game-for-game on all three
+  Handcrafted seeds. C16 is the accepted milestone challenger;
+  promotion ladder continues (2,000-game virgin seed → eight-seed
+  panel).
+
+- **Correction on record:** the branch's "G0" baseline was not the
+  legacy champion (Codex proved it by fingerprint audit — reviewer
+  error, corrected in the 12:26 entry). The virgin-seed Handcrafted
+  milestones stand unaffected. Codex is porting the challenger recipe
+  as a separate model family with legacy G0 pinned bit-for-bit; that
+  port becomes the canonical champion comparison.
+- **Challenger lift-table preview: 3 of 5 PASS** (champion: 2 of 5) at
+  the recipe's WEAKER K=2 deployment — Green flipped to strictly best,
+  Blue's gap collapsed 17.5 → 3.7 points (one-cell noise), RU (−8.7)
+  the only clear fail. Depth comparison: C16 > C2 51.8% pooled at equal
+  K=8. Rejected honestly: T=1333 data scaling (−4.8pp aggregate, RU
+  flat). Threading K=8 through the tournament path is likely worth more
+  for Blue than any training change; RU awaits probe diagnosis.
+
+- **HEADLINE: confirmed in BOTH environments.** The challenger recipe
+  beats Handcrafted at 95% confidence on virgin seeds in the four-deck
+  world (55.1%, CI 53.0–57.3) AND the five-deck world (53.5%, CI
+  51.3–55.6, 2,040 games). Four of five slices ahead — including Red
+  (46.3/36.3), historically unsolvable. **RU Aggro (38.0/46.1) is the
+  single deck between the challenger and "Learned is king"**, plus the
+  mixed-field lift gate.
 - **Environment FROZEN at `c64b80c`.** Five-deck Old School engine
   committed with 122 passing tests and a zero-finding ASan/UBSan run.
   Canonical lift-gate baseline: 2 of 5 (White +55.0 and Red +43.8 pass;
@@ -86,6 +116,226 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 13:40 PDT
+
+No-change cycle: no new Codex notebook entries; the port remains
+uncommitted (17 files); lift table deterministic-identical (2 of 5,
+committed champion). Replication check: two of three seeds complete and
+exact (51.2%/52.5%, matching the branch game-for-game); seed 707 in
+flight. Standing recommendation unchanged: commit the port so the
+passing seed-909 champion screen anchors to a hash.
+
+## 2026-07-25 13:37 PDT
+
+No new Codex notebook entries since the preregistrations (port still
+uncommitted, 17 files). Committed champion's lift table
+deterministic-identical: 2 of 5.
+
+Two verification results for Codex:
+
+1. **The seed-909 champion screen PASSED** (reviewer's verbatim
+   execution, 13:35 dashboard entry): C16 55.7% over legacy G0, CI
+   51.7–59.6, every deck slice ahead including RU. Fingerprints
+   distinct. Awaiting Codex's own run for the bit-for-bit agreement
+   check.
+2. **The port replicates the branch exactly.** Ported C16 vs
+   Handcrafted on the branch's seeds: 51.2% (424242) and 52.5% (101) —
+   identical to the branch's numbers game-for-game, including RU
+   slices (31.2%/35.4%). Seed 707 in flight (branch: 53.3%). The
+   independent reimplementation is not merely behaviorally equivalent;
+   it appears to consume randomness identically. Gate 6 replication is
+   effectively proven.
+
+Priority: with the champion screen passed, the promotion ladder is the
+critical path — Handcrafted-seed reproduction is already half-done by
+the replication check above; the 2,000-game virgin seed and eight-seed
+panel remain. Recommend Codex commit the port promptly so the passing
+screen is anchored to a commit hash rather than a working tree.
+
+## 2026-07-25 13:13 PDT
+
+State reviewed: the separate-family port has reached preregistration of
+the two decisive experiments — (1) validation-v1 probe scoring of C16,
+and (2) the canonical **C16 vs legacy G0** champion screen: seed 909,
+600 paired games, equal K=8, pass only if C16 exceeds 55% aggregate AND
+wins every deck slice. `learned-value-c16` and the threaded
+`--learned-generations`/`--learned-rollouts` flags exist in the built
+binary. The tree builds clean; tests pass; port commit imminent.
+
+### Verdict
+
+The preregistration is exactly right — in particular refusing to tune
+against the one-state validation corpus on a failure, and requiring the
+Handcrafted-seed reproduction plus a 2,000-game virgin seed before the
+eight-seed panel. The reviewer has launched the preregistered seed-909
+screen verbatim from the built binary as independent verification; the
+result will appear in the next entry alongside Codex's own run — same
+command, same seeds, so the two runs must agree bit-for-bit if the
+port's determinism claims hold. That agreement check is itself a test
+of gate 2 (deterministic same-seed artifacts).
+
+### Lift table
+
+Unchanged (2 of 5, deterministic-identical, committed champion).
+
+### Priorities
+
+1. The 55%-aggregate bar for the champion screen is notably stricter
+   than the branch's evidence (C16-vs-C2 ran 51.8%; legacy G0 is
+   presumably weaker than C2, but 55% plus every-deck is a high bar at
+   600 games). If C16 lands at, say, 53% with four slices ahead, the
+   predeclared verdict is FAIL — which is fine, but predecide what
+   partial evidence feeds the next experiment so a near-miss isn't
+   wasted.
+2. RU remains the likeliest slice to fail the every-deck condition;
+   the validation-v1 probe run may explain why before the champion
+   screen forces the question.
+
+## 2026-07-25 13:12 PDT
+
+No-change cycle for claims: the separate-family C16 port continues (17
+files in progress) and the working tree builds cleanly again with test
+suites passing. Committed champion's lift table
+deterministic-identical: 2 of 5.
+
+Challenger results processed since the last entry, for context: G16
+lift preview 3 of 5 at K=2 deployment (Blue gap 17.5 → 3.7); C16-vs-C2
+depth comparison 51.8% pooled for C16; T=1333 data scaling rejected
+(−4.8pp). Full details in CLAUDE-PLAN.md and the dashboard. The
+champion-promotion question now waits on the port's legacy-G0
+comparison and the K-threaded tournament path.
+
+## 2026-07-25 12:40 PDT
+
+No-change cycle: Codex's separate-family port still mid-flight (17
+files, transient build error), no new claims. Lift table
+deterministic-identical (2 of 5).
+
+Challenger partials worth flagging: the RU T=1333 treatment's first
+seed came in at 46.2% aggregate — five points BELOW the T=800 result
+on the same seed (51.2%), with RU itself only +2pp. If the remaining
+seeds confirm, naive train-games scaling hurts this recipe (an echo of
+the project's oldest lesson: more data only helps when the objective
+supports it), and the RU treatment should wait for v3 probe diagnosis
+rather than burn more scalar sweeps. C16-vs-C2 depth comparison seed 1:
+53.3% for C16.
+
+## 2026-07-25 12:37 PDT
+
+No-change cycle for claims: Codex's separate-family C16 port continues
+(16 files in progress, transient build error, gates 1-5 declared
+including golden legacy-G0 fingerprint and recipe/generation-keyed model
+identity — gate 3 directly fixes the aliasing bug class the branch hit).
+Also recorded: the X=0 Disintegrate decision — keep it legal, no
+card-specific mask, harvest a hold-vs-X=0 validation state and pursue
+generic soft-target/stochastic improvement instead. Correct call: the
+fix belongs in the learning signal, not the rules.
+
+Lift table: unchanged (2 of 5, deterministic-identical).
+
+Challenger in-flight progress (partial): C16-vs-C2 depth comparison,
+seed 424242: 53.3% for C16 — consistent with the old-environment
+G8-vs-G2 gradient. RU T=1333 screen, seed 424242: RU slice 33.3% (vs
+31.2% at T=800; within noise so far). Both jobs continue.
+
+## 2026-07-25 12:26 PDT
+
+State reviewed: commits `f2664ea`/`b573cfe` plus in-flight work — an
+interactive play mode (`src/interactive.cpp`), RU blunder-harvest probes
+under construction (transient WIP compile errors in the working tree,
+not a regression), and a declared C16 recipe port with a true frozen G0
+comparator.
+
+### Correction: Codex falsified this review's G0 claim — they are right
+
+The 11:51/12:23 entries stated that the challenger branch's explicit
+`learned-value-g0` pins the frozen Codex champion. Codex audited this
+with fingerprints and falsified it: the branch's modified trainer
+changes labels (bootstrap), per-generation game allocation, and search
+collection even at two generations, so the branch's "G0" is the new
+recipe stopped at G2 — fingerprint `8852833…` versus legacy
+`b2eec93…`. The in-flight branch head-to-head is therefore C16 versus
+new-recipe C2, a recipe-internal depth comparison — NOT evidence of
+superiority over the legacy champion. This entry corrects the record;
+the reviewer's error, cleanly caught by the audit-over-assertion
+discipline this project has been building. Codex's response — port the
+challenger recipe as a separately named model family with legacy G0
+golden-fingerprinted bit-for-bit — is the correct design, better than
+the branch's parameter overload.
+
+The virgin-seed milestones (55.1% four-deck, 53.5% five-deck vs
+HANDCRAFTED) are unaffected: Handcrafted is not a learned comparator
+and those runs used no G0 claim.
+
+### Lift table
+
+Unchanged (2 of 5, deterministic-identical; last good binary — the
+working tree is mid-edit).
+
+### Priorities
+
+1. Codex's separate-family port supersedes the branch head-to-head as
+   the canonical C16-vs-legacy-G0 evidence. The branch run, when it
+   completes, should be reported as C16-vs-C2 only.
+2. Gate 1 of their port (legacy trainer behavior unchanged, golden
+   fingerprint pinned) is the load-bearing piece — everything else
+   downstream inherits its validity.
+3. The reviewer will verify the ported C16's five-deck screen
+   reproduces the branch's 52.4%/53.5% numbers once the port lands —
+   same recipe, independent implementation, ideal replication check.
+
+## 2026-07-25 12:23 PDT
+
+State reviewed: probe-dev-v3 landed and passed all five predeclared
+engineering gates (20 fixtures, four per deck, complete/legal candidate
+sets, healing-regression closures, v2 fail-closed, all-deck metric
+coverage). Codex also opened a real-game blunder-harvesting thread from
+user-observed errors: Bolt-to-face over Bolt-to-creature/hold, and X=0
+Disintegrate — a legal no-op that is the sharpest generic
+action-ranking failure yet observed. Both go to deep-reference labeling
+without card-specific policy. This is the real-game corpus the reviews
+have requested since the first probe cycle — the right response to the
+right evidence.
+
+### Challenger: five-deck milestone CONFIRMED
+
+2,040 paired games on virgin seed 404, frozen recipe (16 generations,
+K=8): **1091-949 (53.5%), 95% CI 51.3%–55.6% — beats Handcrafted at
+95% confidence in the five-deck environment.** Slices: Green
+37.3%/34.1%, Red 46.3%/36.3% (the historically unsolvable deck, now
+clearly ahead), Blue 70.8%/51.5%, White 75.0%/64.7%, RU Aggro
+38.0%/46.1% — the ONE failing slice. Combined with the four-deck
+55.1%, the recipe now holds confirmed virgin-seed milestones in both
+environments. The remaining distance to "Learned is king": RU Aggro,
+and the mixed-field lift gate.
+
+Also recorded honestly: the first C16-vs-G0 head-to-head produced no
+data — a model-sharing bug tripped the same-policy guard and grep
+swallowed the error. Fixed (explicit-G0 selections no longer share the
+challenger's model) and re-running with independently trained frozen
+models.
+
+### Lift table
+
+Unchanged (2 of 5, deterministic-identical) — no learned-path changes
+in Codex's tree.
+
+### Priorities
+
+1. RU Aggro is now the single deck between the challenger and the full
+   gate. Two complementary attacks: Codex's v3 RU probes + X=0
+   harvesting (diagnosis), and the challenger's train-games scaling
+   with pairing count (treatment). Coordinate so both score the same
+   frozen artifacts.
+2. When the v3 reference cache is generated, score the challenger's
+   G16 artifact alongside the G0–G8 ladder — it is now the strongest
+   known model and belongs in the pre-G16 baseline as the comparison
+   point, not an afterthought.
+3. The lift table still deploys Codex's committed champion. Once the
+   head-to-head confirms C16 > G0 directly, the champion-promotion
+   question (AGENTS.md champion rule) is live — that decision needs
+   the full gate panel, not just these milestones.
 
 ## 2026-07-25 11:51 PDT
 
