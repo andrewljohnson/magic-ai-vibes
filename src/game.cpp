@@ -148,12 +148,68 @@ constexpr LearnedDecisionTraceMode
     kValueContextChallengerTraceMode =
         LearnedDecisionTraceMode::Sparse;
 constexpr std::size_t kValueContextChallengerTraceLimit = 0;
+constexpr std::array<std::uint8_t, 8>
+    kValueDenseContextMaskedArtifactMagic = {
+        'O', 'S', 'M', 'V', 'D', '0', '0', '1',
+    };
+constexpr std::array<std::uint8_t, 8>
+    kValueDenseContextLiveArtifactMagic = {
+        'O', 'S', 'M', 'V', 'D', '1', '0', '1',
+    };
+constexpr std::uint32_t
+    kValueDenseContextArtifactSchema = 1;
+constexpr std::string_view
+    kValueDenseContextMaskedRecipeId =
+        "old-school.learned-value-context-d0-dense-masked."
+        "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
+constexpr std::string_view
+    kValueDenseContextLiveRecipeId =
+        "old-school.learned-value-context-d1-dense-live."
+        "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
+constexpr LearnedDecisionTraceMode
+    kValueDenseContextTraceMode =
+        LearnedDecisionTraceMode::Dense;
+constexpr std::size_t kValueDenseContextTraceLimit =
+    kLearnedDenseDecisionTraceLimit;
 constexpr std::size_t kMaximumValueG8ArtifactBytes =
     64U * 1024U * 1024U;
 constexpr std::size_t kMaximumValueG8ArtifactStringBytes = 256;
 constexpr std::size_t kMaximumValueG8ArtifactNodes = 128;
 constexpr std::size_t kMaximumValueG8ArtifactDepth = 8;
 constexpr std::size_t kMaximumValueG8EnsembleMembers = 16;
+
+struct ValueDenseContextTreatmentDefinition {
+    std::array<std::uint8_t, 8> artifact_magic{};
+    std::string_view recipe_id;
+    std::string_view cache_cell;
+    bool context_masked = false;
+};
+
+ValueDenseContextTreatmentDefinition
+value_dense_context_treatment_definition(
+    LearnedValueDenseContextTreatment treatment) {
+    switch (treatment) {
+    case LearnedValueDenseContextTreatment::ContextMasked:
+        return {
+            .artifact_magic =
+                kValueDenseContextMaskedArtifactMagic,
+            .recipe_id =
+                kValueDenseContextMaskedRecipeId,
+            .cache_cell = "d0",
+            .context_masked = true,
+        };
+    case LearnedValueDenseContextTreatment::ContextLive:
+        return {
+            .artifact_magic =
+                kValueDenseContextLiveArtifactMagic,
+            .recipe_id = kValueDenseContextLiveRecipeId,
+            .cache_cell = "d1",
+            .context_masked = false,
+        };
+    }
+    throw std::invalid_argument(
+        "unknown Learned Value dense-context treatment");
+}
 
 void validate_value_continuation_epsilon(double epsilon) {
     if (!std::isfinite(epsilon) || epsilon < 0.0 ||
@@ -1302,6 +1358,17 @@ class LearnedModel {
         std::size_t expected_training_games,
         std::uint64_t expected_seed,
         std::size_t expected_self_play_generations);
+    friend void
+    write_learned_value_dense_context_challenger_artifact_atomic(
+        const std::string& path,
+        const LearnedValueDenseContextChallengerArtifact& artifact);
+    friend LearnedValueDenseContextChallengerArtifact
+    load_learned_value_dense_context_challenger_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed,
+        std::size_t expected_self_play_generations,
+        LearnedValueDenseContextTreatment expected_treatment);
 
     std::array<std::array<double, kFeatureCount>, kHiddenCount>
         input_weights_{};
@@ -1763,12 +1830,12 @@ void add_value_context_root_coverage(
             context.consecutive_passes < 0 ||
             context.consecutive_passes > 1 || phase >= 7) {
             throw std::logic_error(
-                "contextual S1 trace contains an invalid decision root");
+                "contextual trace contains an invalid decision root");
         }
         if (source_total ==
             std::numeric_limits<std::size_t>::max()) {
             throw std::overflow_error(
-                "contextual S1 root coverage overflow");
+                "contextual root coverage overflow");
         }
         ++source_total;
         const std::size_t deck = static_cast<std::size_t>(
@@ -1789,10 +1856,19 @@ struct LearnedValueContextTrainingResult {
     LearnedValueContextRootCoverage root_coverage;
 };
 
+struct LearnedValueContextTrainingConfig {
+    LearnedDecisionTraceMode trace_mode =
+        LearnedDecisionTraceMode::Sparse;
+    bool context_masked = false;
+    std::string_view coverage_source =
+        "Learned Value context S1 training";
+};
+
 LearnedValueContextTrainingResult
 train_learned_value_context_challenger_internal(
     std::size_t training_games, std::uint64_t seed,
-    std::size_t self_play_generations);
+    std::size_t self_play_generations,
+    LearnedValueContextTrainingConfig config);
 
 } // namespace
 

@@ -3984,3 +3984,84 @@ both also waste it when Red can pay, exactly the hold-versus-spend defect the
 context treatment targets. S1 must flip the payable state to Pass while
 retaining Force Spike in the live state before it can clear the preregistered
 offline gate.
+
+### Sparse/context-live S1 offline cell (result: rejected)
+
+Recorded after rereading the independent review timestamped 2026-07-25 16:10
+PDT. This is the preregistered S1 cell only: the existing sparse decision-root
+trace with the neutral decision context live. It used the frozen S0 artifact,
+the same Actor-owned labels and common worlds, and no Handcrafted data or
+gameplay result:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-worlds 8 --probe-horizon 0 \
+  --learned-generations 16 \
+  --challenger learned-value-context-c16 \
+  --learned-rollouts 8 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
+```
+
+The run reproduced the exact frozen identities for Actor G0
+`7639176465b7b7c240e9d0d0067d352b0cac052a7083b47e6504073206068a84`,
+Value G0
+`c900b03b9b66e788c5a0d1efadea038c526968c229b7ab626b3d603dc43496a0`,
+and S0 C16
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`.
+S1 trained in 281.20 seconds and atomically published
+`build/model-cache/old-school-value-context-s1-v2-c16-t800-s424242.bin`
+with fingerprint
+`68d0ffefa511318983588c10cebf04d1008ba2b1a40b8315bef6190cd530d742`.
+
+S1 retained 108,428 sparse roots: 30,041 random anchors and 78,387
+self-play roots. Decision-player deck coverage was Green 17,194, Red 15,956,
+Blue 25,024, White 34,401, and RU Aggro 15,853. It included 5,643 pass-one
+roots and 13,143 nonempty-stack roots. Hidden-zone repartition was
+bit-identical for all seven policy views across all 20 probes.
+
+Offline metrics:
+
+- S0: pooled top-1 90.0%, stable-pair agreement 94.44%, mean regret
+  0.0085, critic Brier 0.0528; deck regrets Green 0.0368, Red 0, Blue
+  0, White 0.0013, RU Aggro 0.0045.
+- S1: pooled top-1 90.0%, stable-pair agreement 96.30%, mean regret
+  0.0061, critic Brier 0.0711; deck regrets Green 0, Red 0, Blue 0,
+  White 0.0259, RU Aggro 0.0045.
+- S1 fixed the Green Growth selection and retained zero Blue regret with no
+  reported Counterspell selection regression. It nevertheless worsened White
+  regret by 0.0246 and critic Brier by 0.0183.
+- Force Spike live control: S1 scored Pass 0.1921 and Force Spike 0.2701,
+  uniquely selecting Force Spike (pass).
+- Force Spike payable control: S1 scored Pass 0.1686 and Force Spike 0.2284,
+  again selecting Force Spike (fail).
+
+Decision: reject S1 before gameplay. It improved pooled regret, but failed the
+explicit payable-tax behavior gate and exceeded the per-deck +0.01 regret
+nonregression limit on White. The result is informative rather than an
+implementation failure: the critic can represent the public mana difference,
+but sparse collection omits many forced-pass successor roots used by shallow
+search. Per the preregistration, implement and score dense/context-masked D0
+and dense/context-live D1 next; neither may be selected from a gameplay seed.
+
+### Learned-pilot deck evolution route (engineering result)
+
+The deck-evolution CLI previously hardcoded Handcrafted. It now accepts an
+explicit immutable context challenger while preserving Handcrafted as the
+default. The deterministic routing smoke was:
+
+```sh
+./build/old-school-sim --evolve-deck \
+  --evolve-pilot learned-value-context-c1 \
+  --generations 1 --population 5 --games 1 --seed 7 \
+  --learned-rollouts 1 --train-games 1 --train-seed 424242
+```
+
+Fresh generation and cached reload used the same fingerprint
+`cdfacd5620c449bfd18b4e86a1799f5a1b66f3c5da0006e10a6ac753cad16058`
+and produced byte-identical evolution reports. The loaded run identified the
+pilot as `Learned Value Context C1 (K=1, training seed 424242, 1 initial
+games)` and returned the Green seed list at 50.0% (10-10) overall, exactly
+2-2 against each of the five metagame decks. This is a T1/C1 lifecycle smoke,
+not evidence that the deck or pilot is strong. Real use should select the
+frozen C16 artifact, K=8, and an independently sized evolution search.

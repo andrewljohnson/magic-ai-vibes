@@ -1215,6 +1215,85 @@ load_learned_value_context_challenger_artifact(
     std::uint64_t expected_seed,
     std::size_t expected_self_play_generations);
 
+// The preregistered dense-trace ablation keeps one implementation while
+// publishing D0 (context columns masked to zero) and D1 (live context) as
+// distinct, fail-closed artifact families.
+enum class LearnedValueDenseContextTreatment : std::uint8_t {
+    ContextMasked,
+    ContextLive,
+};
+
+class LearnedValueDenseContextChallengerArtifact {
+  public:
+    std::shared_ptr<const LearnedModel> model() const;
+    std::size_t training_games() const;
+    std::uint64_t seed() const;
+    std::size_t self_play_generations() const;
+    LearnedValueDenseContextTreatment treatment() const;
+    LearnedCriticSchema critic_schema() const;
+    bool context_masked() const;
+    LearnedDecisionTraceMode trace_mode() const;
+    std::size_t trace_limit() const;
+    const LearnedValueContextRootCoverage& root_coverage() const;
+
+  private:
+    LearnedValueDenseContextChallengerArtifact(
+        std::shared_ptr<const LearnedModel> model,
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations,
+        LearnedValueDenseContextTreatment treatment,
+        LearnedValueContextRootCoverage root_coverage);
+
+    std::shared_ptr<const LearnedModel> model_;
+    std::size_t training_games_ = 0;
+    std::uint64_t seed_ = 0;
+    std::size_t self_play_generations_ = 0;
+    LearnedValueDenseContextTreatment treatment_ =
+        LearnedValueDenseContextTreatment::ContextMasked;
+    LearnedValueContextRootCoverage root_coverage_;
+
+    friend LearnedValueDenseContextChallengerArtifact
+    train_learned_value_dense_context_challenger_artifact(
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations,
+        LearnedValueDenseContextTreatment treatment);
+    friend void
+    write_learned_value_dense_context_challenger_artifact_atomic(
+        const std::string& path,
+        const LearnedValueDenseContextChallengerArtifact& artifact);
+    friend LearnedValueDenseContextChallengerArtifact
+    load_learned_value_dense_context_challenger_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed,
+        std::size_t expected_self_play_generations,
+        LearnedValueDenseContextTreatment expected_treatment);
+};
+
+std::shared_ptr<const LearnedModel>
+train_learned_value_dense_context_challenger(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations,
+    LearnedValueDenseContextTreatment treatment);
+LearnedValueDenseContextChallengerArtifact
+train_learned_value_dense_context_challenger_artifact(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations,
+    LearnedValueDenseContextTreatment treatment);
+std::string learned_value_dense_context_challenger_cache_path(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations,
+    LearnedValueDenseContextTreatment treatment);
+void write_learned_value_dense_context_challenger_artifact_atomic(
+    const std::string& path,
+    const LearnedValueDenseContextChallengerArtifact& artifact);
+LearnedValueDenseContextChallengerArtifact
+load_learned_value_dense_context_challenger_artifact(
+    const std::string& path, std::size_t expected_training_games,
+    std::uint64_t expected_seed,
+    std::size_t expected_self_play_generations,
+    LearnedValueDenseContextTreatment expected_treatment);
+
 std::shared_ptr<const LearnedModel>
 train_learned_actor_model(std::size_t training_games,
                           std::uint64_t seed);
