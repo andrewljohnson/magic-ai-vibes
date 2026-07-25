@@ -935,3 +935,402 @@ Follow-up development screen:
 - Next: improve the self-play/search target itself or use a genuinely
   different learned improvement operator; do not tune this distillation
   prior further.
+
+### Unified observation-action actor
+
+Hypothesis: replacing all phase-specific Learned action evaluation with one
+masked observation-action actor, bootstrapped from random outcomes and then
+improved by Learned mirror self-play, will remove opponent-hand leakage while
+raising Learned above Handcrafted in aggregate and in every deck slice at
+seed 424242. In the balanced mixed field, its lift over Random must equal or
+exceed every other policy's lift for Green, Red, Blue, and White. If it fails
+either per-deck development gate, reject it before the fixed eight-seed
+panel.
+
+The candidate uses:
+
+- the existing private/public state observation and frozen-separate value
+  critic;
+- one action-conditional neural actor for priority, attacker inclusion,
+  blocker assignment, and damage order;
+- factorized combat declarations followed by one rules-engine combat
+  resolution, with no combat outcome scoring;
+- outcome-advantage training from Random games and Learned-vs-Learned games
+  only, balanced by player and decision kind;
+- no deployment rollout or access to an opponent's real hidden cards.
+
+Pre-benchmark verification:
+
+- the project builds with all warnings treated as errors;
+- 38/38 unit and integration tests pass;
+- a new observation-invariance test proves that changing opponent hand and
+  library identities at fixed sizes cannot change the learner's input, while
+  own-hand and public-zone changes do;
+- tournament tests now require zero Learned deployment rollouts.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 67-133 (33.5%), 95% interval 27.3%-40.3%.
+- Learned/Handcrafted by challenger deck: Green 20%/42%, Red 32%/70%,
+  Blue 30%/84%, White 52%/70%.
+- Learned used 19.7 decisions and zero rollouts per game. Runtime was 16.91
+  seconds, substantially cheaper than the value-search candidate.
+- Decision: rejected in this form. A single outcome-weighted actor satisfies
+  the information boundary and speed goal but loses every deck slice.
+- Likely cause: terminal REINFORCE credit is too weak to replace the
+  calibrated value policy after only the existing random/mirror corpus.
+- Next: retain the unified action representation and combat factorization,
+  but test actor-critic policy improvement with denser value advantages or
+  substantially more cheap mirror self-play before considering ISMCTS.
+
+Actor-critic follow-up hypothesis: blending terminal advantage with a
+backward temporal-difference advantage from the separate value critic, then
+adding four cheap actor-only mirror generations, will raise the seed-424242
+screen above 50% and recover at least three of four deck slices without
+changing the observation boundary or reintroducing combat scoring. If it
+does not meet both thresholds, reject additional terminal actor tuning and
+move to information-set search.
+
+Status: implementation complete; 38/38 correctness tests passed before the
+development screen.
+
+Follow-up development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 71-129 (35.5%), 95% interval 29.2%-42.3%.
+- Learned/Handcrafted by challenger deck: Green 20%/42%, Red 40%/68%,
+  Blue 30%/84%, White 52%/64%.
+- Runtime: 27.26 seconds; Learned again used zero deployment rollouts.
+- Decision: rejected. It improved Red by four games and the aggregate by two
+  games, but missed the predeclared aggregate threshold and recovered no deck
+  slice.
+- Next: stop tuning terminal policy gradients. Keep the shared action
+  representation as an information-safe policy prior and test
+  information-set search using sampled opponent hands, never the actual
+  hidden state.
+
+### Common-world information-set priority search
+
+Hypothesis: two root simulations per legal priority action, evaluated over
+the same sampled information-set worlds and continued by zero-search Learned
+actors through the priority window, will restore the seed-424242 result above
+50% and win at least three deck slices without opponent-hand leakage. Combat
+remains entirely actor-selected and is resolved once by the rules engine. If
+the candidate misses either threshold, do not advance it to the fixed seed
+panel.
+
+The root sampler reconstructs the opponent hand from its known decklist,
+public zones, and public hand size. It never reads the actual hidden card
+identities. Pass count and main/instant phase context are now explicit policy
+inputs so the actor can distinguish yielding priority from resolving a stack
+object or ending a window.
+
+Status: implementation complete; 39/39 correctness tests passed before the
+development screen.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 87-113 (43.5%), 95% interval 36.8%-50.4%.
+- Learned/Handcrafted by challenger deck: Green 24%/38%, Red 36%/50%,
+  Blue 58%/62%, White 56%/76%.
+- Search used 157.8 information-set simulations per Learned game. Runtime was
+  36.02 seconds.
+- Decision: rejected. Common-world information-set search recovered ten
+  aggregate percentage points over the actor-only candidate and made Blue
+  competitive, but it remained below 50% and lost all four deck slices.
+- Next: do not run the fixed panel. The remaining weakness is the actor used
+  for combat and sampled continuations; increasing root determinizations
+  cannot repair that policy by itself.
+
+### Behavior-consistent mirror actor with search supervision
+
+Hypothesis: eliminating the actor's behavior/loss mismatch and supervising
+priority choices from its own information-set root search will raise the
+seed-424242 screen above 50% and win at least three deck slices. If either
+threshold fails, reject the candidate without tuning its learning rate or
+running the fixed seed panel.
+
+This bounded candidate:
+
+- uses one shared actor head outside the two-member value ensemble;
+- initializes generation-zero actor logits to exactly uniform;
+- does not actor-train on Random games;
+- freezes the actor for each complete mirror-self-play collection
+  generation;
+- samples combat from that shared actor at temperature 1.0, matching the
+  softmax used by its one-epoch loss;
+- treats common-world information-set root-search choices as positive
+  cross-entropy targets for priority only;
+- trains combat only from on-policy terminal/critic advantage, without
+  enumerating or scoring combat candidates;
+- keeps the value ensemble and its existing two fitted generations
+  separate.
+
+Status: implementation complete; 39/39 correctness tests passed before the
+development screen.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 83-117 (41.5%), 95% interval 34.9%-48.4%.
+- Learned/Handcrafted by challenger deck: Green 22%/36%, Red 40%/42%,
+  Blue 66%/64%, White 38%/92%.
+- Learned used 171.2 information-set simulations per game. Runtime was 37.42
+  seconds.
+- Decision: rejected. The behavior-consistent actor recovered Blue and made
+  Red nearly even, but missed the predeclared aggregate threshold and won
+  only one deck slice. White regressed sharply because outcome-only combat
+  learning did not learn a reliable Millstone/Moat control plan.
+- Next: do not tune this candidate or run the fixed panel. A stronger combat
+  policy needs denser self-generated supervision that still avoids bespoke
+  combat outcome scoring.
+
+### Behavior-consistent data-scaling check
+
+Hypothesis: the corrected shared actor is undertrained rather than
+architecturally limited. Holding the algorithm and learning rates fixed while
+raising `--train-games` from 800 to 4,000 will exceed 50% aggregate against
+Handcrafted and win at least three deck slices at seed 424242. This is a
+one-shot scaling check, not a hyperparameter sweep; if either gate fails,
+reject sparse terminal combat credit and change the learning signal.
+
+Planned development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 4000
+```
+
+- Aggregate: 76-124 (38.0%), 95% interval 31.6%-44.9%.
+- Learned/Handcrafted by challenger deck: Green 12%/44%, Red 40%/46%,
+  Blue 54%/68%, White 46%/90%.
+- Search used 195.1 information-set simulations per Learned game. Runtime was
+  212.26 seconds.
+- Decision: rejected. Five times the data made the aggregate and every deck
+  slice worse, with Green collapsing most sharply. Sparse terminal combat
+  credit is not merely undertrained, and more games are not the next step.
+- Next: separate decision heads to prevent priority/combat gradient
+  interference and replace noisy hard root labels with soft score
+  distributions; do not scale this objective again.
+
+### Isolated soft priority teacher with phase-faithful search
+
+Hypothesis: White's regression is a priority-learning failure caused by
+shared-head interference, noisy one-hot labels from two sampled worlds, and
+bootstrapping Pass before its phase transition. A separate Priority network,
+soft targets from all common-world root scores, a frozen critic teacher, and
+candidate continuation through the real remaining phase sequence to the next
+turn observation will recover White and Blue without bespoke card or combat
+knowledge.
+
+The priority target is
+`0.9 * softmax((q - max(q)) / 0.10) + 0.1 / legal_actions`, weighted equally
+per actor-game. Priority receives no terminal policy-gradient loss. Attack,
+block, and damage-order learning remain isolated, on-policy, and
+card-agnostic. The search budget remains two common sampled worlds per legal
+action.
+
+Development gate: at seed 424242 with five paired repetitions and 800
+training games, White and Blue must each reach at least 60% and aggregate
+Learned must reach at least 45%. Otherwise reject this teacher/horizon and do
+not scale its data.
+
+Planned command:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+Status: implementation complete; 40/40 correctness tests passed before the
+development screen. The critic was fit once from Random traces and remained
+frozen through all four actor generations.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 80-120 (40.0%), 95% interval 33.5%-46.9%.
+- Learned/Handcrafted by challenger deck: Green 22%/40%, Red 32%/56%,
+  Blue 52%/76%, White 54%/68%.
+- Learned used 154.9 information-set simulations per game. Runtime was
+  29.05 seconds.
+- Decision: rejected. White missed its 60% gate by six points, Blue missed
+  its 60% gate by eight points, and aggregate missed its 45% gate by five
+  points. The isolated soft teacher recovered White relative to the prior
+  behavior-consistent actor, but lost Blue and did not improve aggregate.
+- Next: do not tune or scale this candidate and do not run the fixed seed
+  panel. Before another actor objective, measure teacher quality offline by
+  comparing the K=2 root rankings on held-out decision states with much
+  larger common-world estimates; this will distinguish an under-sampled
+  teacher from critic-horizon bias without changing the deployed bot.
+
+### White lock-plan teacher diagnostic
+
+Hypothesis: the two-world search teacher is too noisy, but its critic and
+next-turn horizon contain the right underlying preference. In a valid held-out
+White first-main state with one Moat, one untapped Millstone, four Plains, and
+a redundant Moat in hand against a ground attacker, a 64-world reference
+must rank milling the opponent above casting the redundant Moat. Repeated
+two-world rankings should agree with that reference less than 80% of the
+time; that combination would justify improving teacher sampling. If the
+64-world reference itself prefers the redundant Moat, the critic/continuation
+is biased and more root samples cannot solve White.
+
+This is an evaluation-only fixture and must not feed card-specific labels or
+features into Learned training.
+
+The diagnostic uses the same seed-derived model as the paired benchmark. It
+holds the model fixed, evaluates every legal root action over 64 shared
+information-set worlds, then creates 32 independent rankings from two shared
+worlds apiece. Actor continuations remain Learned mirrors at training
+temperature, and the fixture/result API is not called by training or deployed
+policy code.
+
+Status: implementation complete; 41/41 correctness tests passed. The fixture
+test checks exact deck conservation, the four expected legal actions, the
+ready ground creature, and that Moat rejects its attack.
+
+Planned diagnostic:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --diagnose-white-plan \
+  --seed 424242 --train-games 800
+```
+
+Diagnostic result:
+
+- K=64 scores: Pass 0.503323, redundant Moat 0.522587, self-mill
+  0.446958, and opponent mill 0.577475.
+- The reference best action was opponent mill. It exceeded redundant Moat by
+  0.054888, so the frozen critic and next-turn horizon contain the desired
+  lock-plan preference.
+- Across 32 independent K=2 rankings, opponent mill was best 25 times and
+  Pass was best seven times. Redundant Moat and self-mill were never best.
+  Reference-best agreement was 25/32 (78.1%), just below the predeclared 80%
+  threshold.
+- In the narrower plan comparison, opponent mill beat redundant Moat in all
+  32 K=2 trials. The seven reference disagreements were therefore
+  mill-versus-Pass errors, not redundant-Moat errors.
+- Runtime: 28.44 seconds including 800-game model training.
+- Interpretation: the preregistered sampling-noise condition passed, so a
+  higher-sample teacher is justified as a bounded next experiment. However,
+  this fixture does not support sampling noise as the direct cause of
+  redundant-Moat play: even K=2 preserved the correct pairwise plan ordering
+  100% of the time. State coverage or policy distillation may still be the
+  White bottleneck.
+- Next: do not tune this diagnostic. If continuing, predeclare a
+  teacher-sampling experiment that raises collection K while holding the
+  critic, actor loss, fixture-independent features, and deployment search
+  fixed; separately track Pass-versus-action labels so a gain cannot be
+  misattributed to the Moat comparison.
+
+### Independent training/evaluation seed variance study
+
+Process correction: prior CLI benchmarks derived the Learned training seed
+from the evaluation seed, and the stability panel trained a new model for
+each evaluation run. That confounds model-generation variance with game
+sampling variance. Training and evaluation seeds must now be independent,
+and a fixed trained model must be reused across every evaluation seed and
+baseline in a panel.
+
+Hypothesis: model-generation variance is the larger source of the observed
+Learned instability. In a 3x3 Learned-versus-Handcrafted matrix with training
+seeds `424242, 101, 707` and evaluation seeds `424242, 101, 707`, the mean of
+the three column spans (variation across training seeds at fixed evaluation)
+will exceed the mean of the three row spans (variation across evaluation
+seeds for one fixed model). This is an evaluation-process experiment only;
+no policy result will be accepted or rejected from it.
+
+Planned command:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --variance-study \
+  --games 5 --train-games 800
+```
+
+Status: implementation complete; 42/42 correctness tests passed. The new
+regression test trains one explicit model, reuses it for repeated and
+different evaluation seeds, and verifies that the reported training seed
+does not change. Benchmark, White diagnostic, and stability CLI paths now
+pretrain exactly once from `--train-seed` (default `424242`); the stability
+panel reuses that model across every evaluation seed and baseline.
+
+Study result (Learned win rate against Handcrafted):
+
+| training seed \ evaluation seed | 424242 | 101 | 707 | row span |
+| --- | ---: | ---: | ---: | ---: |
+| 424242 | 37.5% | 41.5% | 44.5% | 7.0 pp |
+| 101 | 43.0% | 43.5% | 49.5% | 6.5 pp |
+| 707 | 40.0% | 43.0% | 48.5% | 8.5 pp |
+
+- Column spans across training seeds were 5.5 points at evaluation seed
+  424242, 2.0 points at 101, and 5.0 points at 707.
+- Mean row span (evaluation variance with a fixed model) was 7.3 points.
+  Mean column span (training variance at a fixed evaluation seed) was 4.2
+  points.
+- Runtime: 105.86 seconds for three 800-game training runs and nine
+  200-game paired evaluations.
+- Decision: the preregistered hypothesis was not supported. Training seed
+  changed results materially, but evaluation-seed variation was larger in
+  this panel. Evaluation seed 707 was consistently favorable and 424242
+  consistently unfavorable across all three fixed models.
+- Next: keep training/evaluation seeds independent permanently. Bot-strength
+  claims should pool the fixed evaluation-seed panel against one explicitly
+  named fixed model, then repeat that complete panel across training seeds
+  only when measuring model-generation robustness. Do not select either seed
+  from this matrix or tune the policy to it.
+
+## Evaluation-process correction
+
+Three reported reruns of the identical current binary/configuration, changing
+only the coupled CLI seed, produced 40.0% at seed 424242, 44.0% at seed 101,
+and 50.5% at seed 707 over 200 paired games each. Near 50%, 200 games have a
+rough 95% sampling margin of seven percentage points and each 50-game deck
+slice has a margin near fourteen points. These screens cannot support the
+two-to-four-point accept/reject decisions repeatedly made above.
+
+The spread combines two sources because `--seed` currently controls both
+model training and benchmark games: training-procedure variance and finite
+evaluation variance. It therefore proves that the end-to-end decision
+procedure is unstable, but does not by itself identify which source
+dominates.
+
+Decision: change the research workflow before further policy tuning.
+
+- Add a separate training seed and hold one trained model fixed across
+  evaluation seeds.
+- Use a factorial train-seed/evaluation-seed study to measure both variance
+  components.
+- Keep 200-game runs only as large-regression smoke tests; use held-out
+  decision/value metrics for iteration and at least 2,000 paired games for
+  milestone claims around three percentage points.
+- Restore the strongest clean value-search architecture as the working
+  champion, but replace its old opponent-hand-peeking rollout with
+  information-set sampling before treating it as valid.
+- Generalize the White diagnostic into deck-balanced held-out probes,
+  including Red burn targeting/holding decisions.
+- Train future policy/value generations by iterated search supervision and
+  compare each frozen generation against prior frozen generations before
+  consulting Handcrafted at a milestone.

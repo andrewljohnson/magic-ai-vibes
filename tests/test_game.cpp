@@ -1,6 +1,8 @@
 #include "alpha/game.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <iostream>
@@ -74,6 +76,134 @@ alpha::CreaturePermanent creature(alpha::PermanentId id,
         .summoning_sick = summoning_sick,
         .damage = 0,
     };
+}
+
+void remove_fixture_card(std::vector<alpha::CardId>& cards,
+                         alpha::CardId card) {
+    const auto position = std::find(cards.begin(), cards.end(), card);
+    if (position == cards.end()) {
+        throw std::runtime_error("fixture card is missing from deck");
+    }
+    cards.erase(position);
+}
+
+struct DeterminizationFixture {
+    alpha::GameState state;
+    std::array<std::vector<alpha::CardId>, 2> decks;
+};
+
+DeterminizationFixture determinization_fixture() {
+    DeterminizationFixture fixture{
+        .state = {},
+        .decks = {
+            alpha::white_control_deck(),
+            alpha::blue_alpha_deck(),
+        },
+    };
+    auto& state = fixture.state;
+    state.active_player = 1;
+    state.turn_number = 9;
+
+    state.players[0].hand = {
+        alpha::CardId::Plains,
+        alpha::CardId::Moat,
+        alpha::CardId::Plains,
+    };
+    state.players[0].graveyard = {alpha::CardId::Moat};
+    state.players[0].lands = {
+        {.card = alpha::CardId::Plains, .tapped = true},
+    };
+    state.players[0].artifacts = {
+        {.id = 41, .card = alpha::CardId::Millstone, .tapped = true},
+    };
+
+    state.players[1].graveyard = {
+        alpha::CardId::Counterspell,
+        alpha::CardId::Island,
+    };
+    state.players[1].lands = {
+        {.card = alpha::CardId::Island, .tapped = true},
+    };
+    state.players[1].creatures = {
+        creature(51, alpha::CardId::WaterElemental),
+    };
+
+    state.stack = {
+        {
+            .kind = alpha::StackObjectKind::Spell,
+            .id = 70,
+            .card = alpha::CardId::WaterElemental,
+            .controller = 1,
+            .target = std::nullopt,
+            .spell_target = std::nullopt,
+        },
+        {
+            .kind = alpha::StackObjectKind::ActivatedAbility,
+            .id = 71,
+            .card = alpha::CardId::Millstone,
+            .controller = 0,
+            .target = alpha::Target::player_target(1),
+            .spell_target = std::nullopt,
+        },
+    };
+
+    auto observer_library = fixture.decks[0];
+    for (const alpha::CardId card : state.players[0].hand) {
+        remove_fixture_card(observer_library, card);
+    }
+    remove_fixture_card(observer_library, alpha::CardId::Moat);
+    remove_fixture_card(observer_library, alpha::CardId::Plains);
+    remove_fixture_card(observer_library, alpha::CardId::Millstone);
+    state.players[0].library = std::move(observer_library);
+
+    auto opponent_hidden = fixture.decks[1];
+    remove_fixture_card(opponent_hidden, alpha::CardId::Counterspell);
+    remove_fixture_card(opponent_hidden, alpha::CardId::Island);
+    remove_fixture_card(opponent_hidden, alpha::CardId::Island);
+    remove_fixture_card(opponent_hidden, alpha::CardId::WaterElemental);
+    // A spell stack object is another physical Water Elemental.
+    remove_fixture_card(opponent_hidden, alpha::CardId::WaterElemental);
+    constexpr std::size_t kOpponentHandSize = 5;
+    state.players[1].hand.assign(
+        opponent_hidden.begin(),
+        opponent_hidden.begin() +
+            static_cast<std::ptrdiff_t>(kOpponentHandSize));
+    state.players[1].library.assign(
+        opponent_hidden.begin() +
+            static_cast<std::ptrdiff_t>(kOpponentHandSize),
+        opponent_hidden.end());
+    return fixture;
+}
+
+std::vector<alpha::CardId>
+physical_cards(const alpha::GameState& state, std::size_t player) {
+    std::vector<alpha::CardId> cards;
+    const auto& player_state = state.players[player];
+    cards.insert(cards.end(), player_state.library.begin(),
+                 player_state.library.end());
+    cards.insert(cards.end(), player_state.hand.begin(),
+                 player_state.hand.end());
+    cards.insert(cards.end(), player_state.graveyard.begin(),
+                 player_state.graveyard.end());
+    for (const auto& land : player_state.lands) {
+        cards.push_back(land.card);
+    }
+    for (const auto& permanent : player_state.creatures) {
+        cards.push_back(permanent.card);
+    }
+    for (const auto& permanent : player_state.artifacts) {
+        cards.push_back(permanent.card);
+    }
+    cards.insert(cards.end(), player_state.enchantments.begin(),
+                 player_state.enchantments.end());
+    for (const auto& object : state.stack) {
+        if (object.controller == player &&
+            object.kind == alpha::StackObjectKind::Spell) {
+            cards.push_back(object.card);
+        }
+    }
+    std::sort(cards.begin(), cards.end());
+    return cards;
 }
 
 TEST(alpha_card_definitions_are_complete) {
@@ -187,6 +317,263 @@ TEST(starting_decks_have_the_requested_cards) {
     CHECK(count_card(white_deck, alpha::CardId::Plains) == 22);
     CHECK(count_card(white_deck, alpha::CardId::Millstone) == 3);
     CHECK(count_card(white_deck, alpha::CardId::Moat) == 15);
+}
+
+TEST(determinization_is_reproducible_and_preserves_observer_hand) {
+    const auto fixture = determinization_fixture();
+    constexpr std::uint64_t kSeed = 0xD37E2A11ULL;
+    const auto first = alpha::sample_determinization(
+        fixture.state, fixture.decks, 0, kSeed);
+    const auto repeated = alpha::sample_determinization(
+        fixture.state, fixture.decks, 0, kSeed);
+
+    CHECK(first.players[0].hand == fixture.state.players[0].hand);
+    CHECK(first.players[0].library == repeated.players[0].library);
+    CHECK(first.players[1].hand == repeated.players[1].hand);
+    CHECK(first.players[1].library == repeated.players[1].library);
+    CHECK(first.players[0].library.size() ==
+          fixture.state.players[0].library.size());
+    CHECK(first.players[1].hand.size() ==
+          fixture.state.players[1].hand.size());
+    CHECK(first.players[1].library.size() ==
+          fixture.state.players[1].library.size());
+    CHECK(first.stack.size() == fixture.state.stack.size());
+    CHECK(first.stack[0].id == fixture.state.stack[0].id);
+    CHECK(first.stack[1].kind ==
+          alpha::StackObjectKind::ActivatedAbility);
+
+    const auto other_observer = alpha::sample_determinization(
+        fixture.state, fixture.decks, 1, kSeed);
+    CHECK(other_observer.players[1].hand ==
+          fixture.state.players[1].hand);
+    CHECK(other_observer.players[0].hand.size() ==
+          fixture.state.players[0].hand.size());
+}
+
+TEST(determinization_does_not_consult_hidden_cards) {
+    const auto fixture = determinization_fixture();
+    auto altered = fixture.state;
+    std::reverse(altered.players[0].library.begin(),
+                 altered.players[0].library.end());
+
+    const auto different_card = std::find_if(
+        altered.players[1].library.begin(),
+        altered.players[1].library.end(),
+        [&](alpha::CardId card) {
+            return card != altered.players[1].hand.front();
+        });
+    CHECK(different_card != altered.players[1].library.end());
+    std::iter_swap(altered.players[1].hand.begin(), different_card);
+    std::reverse(altered.players[1].hand.begin(),
+                 altered.players[1].hand.end());
+    std::reverse(altered.players[1].library.begin(),
+                 altered.players[1].library.end());
+
+    constexpr std::uint64_t kSeed = 0x1AF05E7ULL;
+    const auto original_sample = alpha::sample_determinization(
+        fixture.state, fixture.decks, 0, kSeed);
+    const auto altered_sample = alpha::sample_determinization(
+        altered, fixture.decks, 0, kSeed);
+    CHECK(original_sample.players[0].library ==
+          altered_sample.players[0].library);
+    CHECK(original_sample.players[1].hand ==
+          altered_sample.players[1].hand);
+    CHECK(original_sample.players[1].library ==
+          altered_sample.players[1].library);
+}
+
+TEST(determinization_conserves_spells_but_not_ability_objects) {
+    const auto fixture = determinization_fixture();
+    const auto sampled = alpha::sample_determinization(
+        fixture.state, fixture.decks, 0, 0xC0A53A7EULL);
+
+    for (std::size_t player = 0; player < fixture.decks.size();
+         ++player) {
+        auto expected = fixture.decks[player];
+        std::sort(expected.begin(), expected.end());
+        CHECK(physical_cards(sampled, player) == expected);
+        CHECK(physical_cards(sampled, player).size() ==
+              fixture.decks[player].size());
+    }
+    CHECK(count_card(physical_cards(sampled, 0),
+                     alpha::CardId::Millstone) ==
+          count_card(fixture.decks[0], alpha::CardId::Millstone));
+    CHECK(count_card(physical_cards(sampled, 1),
+                     alpha::CardId::WaterElemental) ==
+          count_card(fixture.decks[1],
+                     alpha::CardId::WaterElemental));
+}
+
+TEST(determinization_varies_by_seed_and_rejects_invalid_public_state) {
+    const auto fixture = determinization_fixture();
+    const auto baseline = alpha::sample_determinization(
+        fixture.state, fixture.decks, 0, 0x5EEDULL);
+    bool found_variation = false;
+    for (std::uint64_t seed = 1; seed <= 16; ++seed) {
+        const auto candidate = alpha::sample_determinization(
+            fixture.state, fixture.decks, 0, seed);
+        found_variation =
+            found_variation ||
+            candidate.players[0].library !=
+                baseline.players[0].library ||
+            candidate.players[1].hand != baseline.players[1].hand ||
+            candidate.players[1].library !=
+                baseline.players[1].library;
+    }
+    CHECK(found_variation);
+
+    auto invalid = fixture.state;
+    invalid.players[1].graveyard.push_back(alpha::CardId::Forest);
+    bool rejected = false;
+    try {
+        static_cast<void>(alpha::sample_determinization(
+            invalid, fixture.decks, 0, 0xBADULL));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    CHECK(rejected);
+}
+
+TEST(learned_observation_excludes_opponent_hidden_card_identities) {
+    const auto fixture = determinization_fixture();
+    const auto baseline =
+        alpha::learned_observation(fixture.state, 0);
+
+    auto changed_hidden = fixture.state;
+    std::fill(changed_hidden.players[1].hand.begin(),
+              changed_hidden.players[1].hand.end(),
+              alpha::CardId::LightningBolt);
+    std::fill(changed_hidden.players[1].library.begin(),
+              changed_hidden.players[1].library.end(),
+              alpha::CardId::Forest);
+    CHECK(alpha::learned_observation(changed_hidden, 0) == baseline);
+
+    auto changed_own_hand = fixture.state;
+    changed_own_hand.players[0].hand[0] =
+        alpha::CardId::LightningBolt;
+    CHECK(alpha::learned_observation(changed_own_hand, 0) != baseline);
+
+    auto changed_public_zone = fixture.state;
+    changed_public_zone.players[1].graveyard[0] =
+        alpha::CardId::LightningBolt;
+    CHECK(alpha::learned_observation(changed_public_zone, 0) !=
+          baseline);
+}
+
+TEST(learned_priority_policy_encodes_phase_and_pass_context) {
+    const auto fixture = determinization_fixture();
+    const auto pass = alpha::PriorityAction::pass();
+    const auto beginning_of_combat =
+        alpha::learned_priority_policy_features(
+            fixture.state, 0, pass, false,
+            alpha::TurnPhase::BeginCombat, 0);
+    const auto first_main =
+        alpha::learned_priority_policy_features(
+            fixture.state, 0, pass, true,
+            alpha::TurnPhase::FirstMain, 0);
+    const auto second_main =
+        alpha::learned_priority_policy_features(
+            fixture.state, 0, pass, true,
+            alpha::TurnPhase::SecondMain, 0);
+    const auto resolving_pass =
+        alpha::learned_priority_policy_features(
+            fixture.state, 0, pass, false,
+            alpha::TurnPhase::BeginCombat, 1);
+    CHECK(beginning_of_combat != first_main);
+    CHECK(first_main != second_main);
+    CHECK(beginning_of_combat != resolving_pass);
+
+    auto changed_hidden = fixture.state;
+    std::fill(changed_hidden.players[1].hand.begin(),
+              changed_hidden.players[1].hand.end(),
+              alpha::CardId::LightningBolt);
+    std::fill(changed_hidden.players[1].library.begin(),
+              changed_hidden.players[1].library.end(),
+              alpha::CardId::Forest);
+    CHECK(alpha::learned_priority_policy_features(
+              changed_hidden, 0, pass, false,
+              alpha::TurnPhase::BeginCombat, 1) ==
+          resolving_pass);
+}
+
+TEST(learned_soft_priority_target_is_smoothed_and_ordered) {
+    const auto targets =
+        alpha::learned_soft_priority_target({0.2, 0.4, 0.4});
+    CHECK(targets.size() == 3);
+    CHECK(std::abs(targets[0] + targets[1] + targets[2] - 1.0) <
+          1.0e-12);
+    CHECK(targets[0] >= 0.1 / 3.0);
+    CHECK(targets[1] > targets[0]);
+    CHECK(std::abs(targets[1] - targets[2]) < 1.0e-12);
+
+    const auto uniform =
+        alpha::learned_soft_priority_target({0.5, 0.5, 0.5});
+    CHECK(uniform.size() == 3);
+    for (const double target : uniform) {
+        CHECK(std::abs(target - 1.0 / 3.0) < 1.0e-12);
+    }
+    CHECK(alpha::learned_soft_priority_target({}).empty());
+}
+
+TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
+    const auto state = alpha::white_lock_plan_diagnostic_state();
+    CHECK(state.active_player == 0);
+    CHECK(state.stack.empty());
+    CHECK(state.players[0].land_played_this_turn);
+    CHECK(state.players[0].lands.size() == 4);
+    CHECK(std::all_of(
+        state.players[0].lands.begin(),
+        state.players[0].lands.end(),
+        [](const alpha::LandPermanent& land) {
+            return land.card == alpha::CardId::Plains &&
+                   !land.tapped;
+        }));
+    CHECK(state.players[0].artifacts.size() == 1);
+    CHECK(state.players[0].artifacts[0].card ==
+          alpha::CardId::Millstone);
+    CHECK(!state.players[0].artifacts[0].tapped);
+    CHECK(count_card(
+              state.players[0].enchantments,
+              alpha::CardId::Moat) == 1);
+    CHECK(count_card(
+              state.players[0].hand,
+              alpha::CardId::Moat) == 7);
+
+    CHECK(state.players[1].creatures.size() == 1);
+    const auto& attacker = state.players[1].creatures[0];
+    CHECK(attacker.card == alpha::CardId::FireElemental);
+    CHECK(!attacker.tapped);
+    CHECK(!attacker.summoning_sick);
+    CHECK(!alpha::card_definition(attacker.card).flying);
+
+    const auto actions =
+        alpha::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() == 4);
+    CHECK(has_action(
+        actions,
+        alpha::PriorityAction::cast_enchantment(
+            alpha::CardId::Moat)));
+    CHECK(has_action(
+        actions,
+        alpha::PriorityAction::activate_millstone(
+            state.players[0].artifacts[0].id,
+            alpha::Target::player_target(1))));
+
+    const std::array<std::vector<alpha::CardId>, 2> decks = {
+        alpha::white_control_deck(),
+        alpha::red_alpha_deck(),
+    };
+    const auto sampled =
+        alpha::sample_determinization(state, decks, 0, 0x10C4ULL);
+    for (std::size_t player = 0; player < decks.size(); ++player) {
+        auto expected = decks[player];
+        std::sort(expected.begin(), expected.end());
+        CHECK(physical_cards(sampled, player) == expected);
+    }
+
+    auto attempted_combat = state;
+    CHECK(!alpha::resolve_combat(
+        attempted_combat, 1, {attacker.id}, {}));
 }
 
 TEST(basic_lands_can_be_played_once_per_turn) {
@@ -1001,6 +1388,44 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
           result.challenger_win_rate());
 }
 
+TEST(benchmark_training_seed_is_independent_and_model_is_reusable) {
+    constexpr std::uint64_t kTrainingSeed = 707;
+    const alpha::BotConfig learned = {
+        .kind = alpha::BotKind::Learned,
+        .rollouts_per_action = 0,
+        .training_games = 1,
+    };
+    const alpha::BotConfig random = {
+        .kind = alpha::BotKind::Random,
+        .rollouts_per_action = 1,
+    };
+    alpha::GameConfig shared_config;
+    CHECK(shared_config.learned_training_seed ==
+          alpha::kDefaultLearnedTrainingSeed);
+    shared_config.learned_training_seed = kTrainingSeed;
+    shared_config.learned_model =
+        alpha::train_learned_model(1, kTrainingSeed);
+
+    const auto first = alpha::run_bot_benchmark(
+        1, 101, learned, random, shared_config);
+    const auto repeated = alpha::run_bot_benchmark(
+        1, 101, learned, random, shared_config);
+    const auto other_evaluation_seed =
+        alpha::run_bot_benchmark(
+            1, 424242, learned, random, shared_config);
+
+    CHECK(first.learned_training_seed == kTrainingSeed);
+    CHECK(repeated.learned_training_seed == kTrainingSeed);
+    CHECK(other_evaluation_seed.learned_training_seed ==
+          kTrainingSeed);
+    CHECK(first.challenger_stats.wins ==
+          repeated.challenger_stats.wins);
+    CHECK(first.challenger_stats.losses ==
+          repeated.challenger_stats.losses);
+    CHECK(first.challenger_stats.draws ==
+          repeated.challenger_stats.draws);
+}
+
 TEST(handcrafted_bot_beats_monte_carlo_in_seeded_benchmark) {
     const alpha::BotConfig challenger = {
         .kind = alpha::BotKind::Handcrafted,
@@ -1038,10 +1463,10 @@ TEST(handcrafted_bot_beats_deep_monte_carlo_in_seeded_benchmark) {
     CHECK(result.baseline_stats.average_rollouts() > 500.0);
 }
 
-TEST(learned_value_bot_beats_monte_carlo_without_handcrafted_values) {
+TEST(learned_policy_bot_beats_monte_carlo_without_rollouts_or_handcrafted_values) {
     const alpha::BotConfig challenger = {
         .kind = alpha::BotKind::Learned,
-        .rollouts_per_action = 1,
+        .rollouts_per_action = 0,
         .training_games = 200,
     };
     const alpha::BotConfig baseline = {
@@ -1054,7 +1479,7 @@ TEST(learned_value_bot_beats_monte_carlo_without_handcrafted_values) {
     CHECK(result.total_games == 200);
     CHECK(result.challenger_win_rate() > 70.0);
     CHECK(result.challenger_is_better_95());
-    CHECK(result.challenger_stats.total_rollouts > 0);
+    CHECK(result.challenger_stats.total_rollouts == 0);
     CHECK(result.baseline_stats.total_rollouts > 0);
 }
 

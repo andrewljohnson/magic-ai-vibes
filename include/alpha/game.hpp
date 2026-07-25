@@ -145,6 +145,16 @@ struct GameState {
     StackObjectId next_stack_object_id = 1;
 };
 
+// Samples a complete state consistent with everything `observer` can know.
+// The original decklists and all public physical zones determine each
+// player's hidden card pool. The observer's hand is preserved, the opposing
+// hand is sampled by its public size, and both libraries receive fresh random
+// orders. Spell stack objects are physical cards; activated abilities are not.
+GameState sample_determinization(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t observer, std::uint64_t seed);
+
 enum class PriorityActionKind : std::uint8_t {
     Pass,
     PlayLand,
@@ -193,6 +203,16 @@ struct PriorityState {
     int consecutive_passes = 0;
 };
 
+enum class TurnPhase : std::uint8_t {
+    FirstMain,
+    BeginCombat,
+    DeclareAttackers,
+    DeclareBlockers,
+    DamageOrder,
+    EndCombat,
+    SecondMain,
+};
+
 enum class PriorityPassResult : std::uint8_t {
     Passed,
     StackObjectResolved,
@@ -231,6 +251,9 @@ inline constexpr std::size_t kBotMatchupCount =
     kBotKindCount * (kBotKindCount - 1) / 2;
 
 class LearnedModel;
+class LearnedPolicyRecorder;
+
+inline constexpr std::uint64_t kDefaultLearnedTrainingSeed = 424242;
 
 struct BotConfig {
     BotKind kind = BotKind::Random;
@@ -258,8 +281,44 @@ struct GameConfig {
     std::size_t max_turns = 500;
     std::optional<std::size_t> starting_player;
     std::array<BotConfig, 2> bots = {BotConfig{}, BotConfig{}};
+    // Independent from every game/evaluation seed.
+    std::uint64_t learned_training_seed =
+        kDefaultLearnedTrainingSeed;
     std::shared_ptr<const LearnedModel> learned_model;
+    // Training-only sink. The concrete recorder is intentionally opaque so
+    // runtime callers cannot inspect or provide hidden game state.
+    std::shared_ptr<LearnedPolicyRecorder> learned_policy_recorder;
 };
+
+struct WhitePlanActionDiagnostic {
+    PriorityAction action;
+    double reference_score = 0.0;
+    std::size_t two_world_first_place_count = 0;
+};
+
+struct WhitePlanTeacherDiagnostic {
+    GameState state;
+    std::vector<WhitePlanActionDiagnostic> actions;
+    std::size_t reference_worlds = 0;
+    std::size_t reference_best_action = 0;
+    std::size_t two_world_trials = 0;
+    std::size_t two_world_reference_agreements = 0;
+    std::size_t two_world_plan_order_agreements = 0;
+    std::size_t two_world_millstone_preferences = 0;
+    std::size_t two_world_moat_preferences = 0;
+    std::size_t two_world_plan_ties = 0;
+    std::optional<std::size_t> opponent_millstone_action;
+    std::optional<std::size_t> redundant_moat_action;
+
+    double two_world_reference_agreement_rate() const;
+    double two_world_plan_order_agreement_rate() const;
+};
+
+// Evaluation-only held-out state and root-search diagnostic. Neither is used
+// by Learned training or runtime policy decisions.
+GameState white_lock_plan_diagnostic_state();
+WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed);
 
 class Game {
   public:
@@ -272,27 +331,31 @@ class Game {
     const GameState& state() const;
 
   private:
+    friend WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
+        std::shared_ptr<const LearnedModel> model,
+        std::uint64_t seed);
+
     void initialize();
     bool draw_card(std::size_t player);
     std::optional<GameResult>
-    play_priority_window(bool sorcery_actions);
+    play_priority_window(bool sorcery_actions, TurnPhase phase);
     std::optional<GameResult>
     continue_priority_window(bool sorcery_actions,
-                             PriorityState priority);
+                             TurnPhase phase, PriorityState priority);
     std::optional<GameResult> play_combat();
+    std::optional<GameResult> play_combat_after_beginning();
     PriorityAction
     choose_priority_action(const std::vector<PriorityAction>& actions,
-                           std::size_t player, bool sorcery_actions);
+                           std::size_t player, bool sorcery_actions,
+                           TurnPhase phase, int consecutive_passes);
+    double learned_information_set_action_score(
+        const PriorityAction& action, std::size_t player,
+        bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes,
+        const GameState& sampled_state, std::uint64_t seed) const;
     PriorityAction
     choose_handcrafted_action(const std::vector<PriorityAction>& actions,
                               std::size_t player);
-    PriorityAction
-    choose_learned_action(const std::vector<PriorityAction>& actions,
-                          std::size_t player, bool sorcery_actions);
-    double learned_rollout_action(const PriorityAction& action,
-                                  std::size_t player,
-                                  bool sorcery_actions,
-                                  std::uint64_t seed) const;
     double handcrafted_action_score(const PriorityAction& action,
                                     std::size_t player) const;
     double rollout_action(const PriorityAction& action,
@@ -417,6 +480,8 @@ struct MatchupSummary {
 struct TournamentSummary {
     std::size_t games_per_matchup = 0;
     std::size_t total_games = 0;
+    std::uint64_t learned_training_seed =
+        kDefaultLearnedTrainingSeed;
     std::array<DeckSimulationStats, 4> decks;
     std::array<std::array<DeckSimulationStats, kBotKindCount>, 4>
         deck_bots;
@@ -461,6 +526,8 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
 struct BotBenchmarkSummary {
     BotConfig challenger;
     BotConfig baseline;
+    std::uint64_t learned_training_seed =
+        kDefaultLearnedTrainingSeed;
     std::size_t repetitions_per_deck_pairing = 0;
     std::size_t total_games = 0;
     BotSimulationStats challenger_stats;
@@ -481,6 +548,16 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
 
 std::shared_ptr<const LearnedModel>
 train_learned_model(std::size_t training_games, std::uint64_t seed);
+// Observation presented to Learned: own private zones plus public
+// information, never the opponent's hidden card identities.
+std::vector<double>
+learned_observation(const GameState& state, std::size_t perspective);
+std::vector<double> learned_priority_policy_features(
+    const GameState& state, std::size_t perspective,
+    const PriorityAction& action, bool sorcery_actions,
+    TurnPhase phase, int consecutive_passes);
+std::vector<double>
+learned_soft_priority_target(const std::vector<double>& scores);
 
 struct DeckEvolutionConfig {
     std::size_t generations = 10;

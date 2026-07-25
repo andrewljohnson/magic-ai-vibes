@@ -21,8 +21,31 @@ keeping the implementation small enough to understand and extend.
    only successful runs.
 5. Use the paired benchmark for bot-strength claims. It must balance deck,
    policy seat, and play/draw.
-6. Screen changes at seed `424242`, then validate promising candidates on the
-   fixed seed panel `101, 202, 303, 404, 505, 606, 707, 808`.
+6. Use seed `424242` and 200 paired games only as a large-regression smoke
+   screen. Do not accept or reject effects of a few percentage points from
+   that screen or from its 50-game deck slices.
+7. Validate milestone candidates with a frozen trained model, an explicitly
+   separate evaluation seed, and a predeclared sample size/MDE. Use at least
+   2,000 paired games for claims about roughly three-point effects, then run
+   the fixed evaluation-seed panel `101, 202, 303, 404, 505, 606, 707, 808`.
+
+## Evaluation discipline
+
+- Training randomness and evaluation randomness must have separate seeds and
+  both must be reported. A benchmark seed must not silently retrain a new
+  model.
+- Preserve the strongest accepted clean policy as the champion. New research
+  policies remain challengers until they beat the champion under the full
+  gates; never replace a champion because of one small development screen.
+- Before end-to-end tuning, maintain held-out, deck-balanced decision probes
+  labeled by a deeper information-set reference. Report policy ranking
+  agreement per deck plus value loss/calibration when changing learning code.
+- Treat 200 paired games as sensitive only to large changes (about ten
+  percentage points near a 50% win rate). Prefer fast offline metrics for
+  iteration and reserve 2,000+ paired games for milestone decisions.
+- Compare trained generations against frozen previous generations or a
+  champion league. Touch Handcrafted only at milestones, not as training data
+  or a per-step tuning oracle.
 
 ## Learned Value isolation
 

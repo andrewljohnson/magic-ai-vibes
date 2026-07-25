@@ -22,8 +22,29 @@ class LearnedModel {
     static constexpr std::size_t kFeatureCount =
         kScalarFeatureCount + kCardPlanes * kLearnedCardCount;
     static constexpr std::size_t kHiddenCount = 16;
+    static constexpr std::size_t kPolicyDecisionCount = 4;
+    static constexpr std::size_t kPolicyPhaseCount = 7;
+    static constexpr std::size_t kPolicyVerbCount = 8;
+    static constexpr std::size_t kPolicyCardPlanes = 6;
+    static constexpr std::size_t kPolicyScalarCount = 36;
+    static constexpr std::size_t kPolicyFeatureCount =
+        kFeatureCount + kPolicyDecisionCount + kPolicyPhaseCount +
+        kPolicyVerbCount + kPolicyCardPlanes * kLearnedCardCount +
+        kPolicyScalarCount;
+    static constexpr std::size_t kPolicyHiddenCount = 32;
     using FeatureVector = std::array<double, kFeatureCount>;
     using TrainingExample = std::pair<FeatureVector, double>;
+    using PolicyFeatureVector =
+        std::array<double, kPolicyFeatureCount>;
+
+    struct PolicyTrainingExample {
+        std::vector<PolicyFeatureVector> options;
+        std::vector<double> target_probabilities;
+        std::size_t chosen = 0;
+        std::size_t decision_kind = 0;
+        double advantage = 0.0;
+        double weight = 1.0;
+    };
 
     explicit LearnedModel(std::uint64_t seed) {
         std::mt19937_64 random(seed);
@@ -36,15 +57,18 @@ class LearnedModel {
         for (double& weight : output_weights_) {
             weight = initialize(random);
         }
+        initialize_policy(seed ^ 0x504F4C494359ULL);
     }
 
     explicit LearnedModel(
-        std::vector<std::shared_ptr<const LearnedModel>> members)
+        std::vector<std::shared_ptr<const LearnedModel>> members,
+        std::uint64_t policy_seed)
         : ensemble_(std::move(members)) {
         if (ensemble_.empty()) {
             throw std::invalid_argument(
                 "learned ensemble requires at least one member");
         }
+        initialize_policy(policy_seed);
     }
 
     double predict(const FeatureVector& features) const {
@@ -69,6 +93,32 @@ class LearnedModel {
             }
         }
         return 1.0 / (1.0 + std::exp(-output));
+    }
+
+    double policy_logit(const PolicyFeatureVector& features,
+                        std::size_t decision_kind) const {
+        if (decision_kind >= kPolicyDecisionCount) {
+            throw std::out_of_range(
+                "unknown Learned policy decision kind");
+        }
+        const auto hidden =
+            policy_hidden_values(features, decision_kind);
+        double output = policy_output_bias_[decision_kind];
+        for (std::size_t index = 0; index < hidden.size(); ++index) {
+            output +=
+                policy_output_weights_[decision_kind][index] *
+                hidden[index];
+        }
+        for (std::size_t feature = 0; feature < features.size();
+             ++feature) {
+            if (features[feature] != 0.0) {
+                output +=
+                    policy_direct_output_weights_[decision_kind]
+                                                 [feature] *
+                    features[feature];
+            }
+        }
+        return output;
     }
 
     void train(const std::vector<TrainingExample>& examples,
@@ -148,7 +198,181 @@ class LearnedModel {
         }
     }
 
+    void train_policy(
+        const std::vector<PolicyTrainingExample>& examples,
+        std::size_t epochs, double learning_rate,
+        std::uint64_t seed) {
+        if (examples.empty()) {
+            return;
+        }
+
+        std::mt19937_64 random(seed);
+        std::vector<std::size_t> order(examples.size());
+        for (std::size_t index = 0; index < order.size(); ++index) {
+            order[index] = index;
+        }
+        for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
+            std::shuffle(order.begin(), order.end(), random);
+            const double rate =
+                learning_rate /
+                (1.0 + 0.15 * static_cast<double>(epoch));
+            for (const std::size_t example_index : order) {
+                const auto& example = examples[example_index];
+                if (example.options.size() < 2 ||
+                    example.chosen >= example.options.size() ||
+                    example.decision_kind >=
+                        kPolicyDecisionCount) {
+                    continue;
+                }
+                const std::size_t decision_kind =
+                    example.decision_kind;
+
+                std::vector<std::array<double, kPolicyHiddenCount>>
+                    hidden;
+                std::vector<double> logits;
+                hidden.reserve(example.options.size());
+                logits.reserve(example.options.size());
+                for (const auto& option : example.options) {
+                    hidden.push_back(policy_hidden_values(
+                        option, decision_kind));
+                    double logit =
+                        policy_output_bias_[decision_kind];
+                    for (std::size_t hidden_index = 0;
+                         hidden_index < kPolicyHiddenCount;
+                         ++hidden_index) {
+                        logit +=
+                            policy_output_weights_[decision_kind]
+                                                  [hidden_index] *
+                            hidden.back()[hidden_index];
+                    }
+                    for (std::size_t feature = 0;
+                         feature < option.size(); ++feature) {
+                        if (option[feature] != 0.0) {
+                            logit +=
+                                policy_direct_output_weights_
+                                    [decision_kind][feature] *
+                                option[feature];
+                        }
+                    }
+                    logits.push_back(logit);
+                }
+
+                const double max_logit =
+                    *std::max_element(logits.begin(), logits.end());
+                std::vector<double> probabilities(logits.size());
+                double probability_sum = 0.0;
+                for (std::size_t index = 0;
+                     index < logits.size(); ++index) {
+                    probabilities[index] =
+                        std::exp(logits[index] - max_logit);
+                    probability_sum += probabilities[index];
+                }
+                double probability_log_average = 0.0;
+                for (double& probability : probabilities) {
+                    probability /= probability_sum;
+                    probability_log_average +=
+                        probability *
+                        std::log(std::max(probability, 1.0e-12));
+                }
+
+                const auto old_output_weights =
+                    policy_output_weights_[decision_kind];
+                constexpr double entropy_weight = 0.01;
+                const bool has_soft_target =
+                    example.target_probabilities.size() ==
+                    example.options.size();
+                for (std::size_t option_index = 0;
+                     option_index < example.options.size();
+                     ++option_index) {
+                    const double chosen =
+                        option_index == example.chosen ? 1.0 : 0.0;
+                    const double policy_gradient =
+                        has_soft_target
+                            ? example.weight *
+                                  (probabilities[option_index] -
+                                   example.target_probabilities
+                                       [option_index])
+                            : example.weight * example.advantage *
+                                  (probabilities[option_index] -
+                                   chosen);
+                    const double entropy_gradient =
+                        has_soft_target
+                            ? 0.0
+                            : entropy_weight * example.weight *
+                                  probabilities[option_index] *
+                                  (std::log(std::max(
+                                       probabilities[option_index],
+                                       1.0e-12)) -
+                                   probability_log_average);
+                    const double output_error = std::clamp(
+                        policy_gradient + entropy_gradient, -1.0, 1.0);
+
+                    for (std::size_t hidden_index = 0;
+                         hidden_index < kPolicyHiddenCount;
+                         ++hidden_index) {
+                        policy_output_weights_[decision_kind]
+                                              [hidden_index] -=
+                            rate * output_error *
+                            hidden[option_index][hidden_index];
+                    }
+                    for (std::size_t feature = 0;
+                         feature < kPolicyFeatureCount; ++feature) {
+                        if (example.options[option_index][feature] !=
+                            0.0) {
+                            policy_direct_output_weights_
+                                [decision_kind][feature] -=
+                                rate * output_error *
+                                example.options[option_index][feature];
+                        }
+                    }
+                    policy_output_bias_[decision_kind] -=
+                        rate * output_error;
+
+                    for (std::size_t hidden_index = 0;
+                         hidden_index < kPolicyHiddenCount;
+                         ++hidden_index) {
+                        const double hidden_error =
+                            output_error *
+                            old_output_weights[hidden_index] *
+                            (1.0 -
+                             hidden[option_index][hidden_index] *
+                                 hidden[option_index][hidden_index]);
+                        for (std::size_t feature = 0;
+                             feature < kPolicyFeatureCount; ++feature) {
+                            if (example.options[option_index][feature] !=
+                                0.0) {
+                                policy_input_weights_
+                                    [decision_kind][hidden_index]
+                                    [feature] -=
+                                    rate * hidden_error *
+                                    example.options[option_index][feature];
+                            }
+                        }
+                        policy_hidden_biases_[decision_kind]
+                                               [hidden_index] -=
+                            rate * hidden_error;
+                    }
+                }
+            }
+        }
+    }
+
   private:
+    void initialize_policy(std::uint64_t seed) {
+        std::mt19937_64 random(seed);
+        std::normal_distribution<double> initialize(0.0, 0.06);
+        for (auto& decision_weights : policy_input_weights_) {
+            for (auto& hidden_weights : decision_weights) {
+                for (double& weight : hidden_weights) {
+                    weight = initialize(random);
+                }
+            }
+        }
+        // Zero output paths make generation-zero behavior exactly uniform.
+        // The random hidden trunk only breaks symmetry after the first
+        // supervised/on-policy update.
+    }
+
     std::array<double, kHiddenCount>
     hidden_values(const FeatureVector& features) const {
         std::array<double, kHiddenCount> hidden;
@@ -167,13 +391,71 @@ class LearnedModel {
         return hidden;
     }
 
+    std::array<double, kPolicyHiddenCount> policy_hidden_values(
+        const PolicyFeatureVector& features,
+        std::size_t decision_kind) const {
+        std::array<double, kPolicyHiddenCount> hidden;
+        for (std::size_t hidden_index = 0;
+             hidden_index < kPolicyHiddenCount; ++hidden_index) {
+            double sum =
+                policy_hidden_biases_[decision_kind][hidden_index];
+            for (std::size_t feature = 0;
+                 feature < kPolicyFeatureCount; ++feature) {
+                if (features[feature] != 0.0) {
+                    sum +=
+                        policy_input_weights_
+                            [decision_kind][hidden_index][feature] *
+                        features[feature];
+                }
+            }
+            hidden[hidden_index] = std::tanh(sum);
+        }
+        return hidden;
+    }
+
     std::array<std::array<double, kFeatureCount>, kHiddenCount>
         input_weights_{};
     std::array<double, kHiddenCount> hidden_biases_{};
     std::array<double, kHiddenCount> output_weights_{};
     std::array<double, kFeatureCount> direct_output_weights_{};
     double output_bias_ = 0.0;
+    std::array<std::array<
+                   std::array<double, kPolicyFeatureCount>,
+                   kPolicyHiddenCount>,
+               kPolicyDecisionCount>
+        policy_input_weights_{};
+    std::array<std::array<double, kPolicyHiddenCount>,
+               kPolicyDecisionCount>
+        policy_hidden_biases_{};
+    std::array<std::array<double, kPolicyHiddenCount>,
+               kPolicyDecisionCount>
+        policy_output_weights_{};
+    std::array<std::array<double, kPolicyFeatureCount>,
+               kPolicyDecisionCount>
+        policy_direct_output_weights_{};
+    std::array<double, kPolicyDecisionCount> policy_output_bias_{};
     std::vector<std::shared_ptr<const LearnedModel>> ensemble_;
+};
+
+enum class LearnedDecisionKind : std::uint8_t {
+    Priority,
+    Attack,
+    Block,
+    DamageOrder,
+};
+
+class LearnedPolicyRecorder {
+  public:
+    struct Step {
+        std::vector<LearnedModel::PolicyFeatureVector> options;
+        std::size_t chosen = 0;
+        std::size_t actor = 0;
+        LearnedDecisionKind kind = LearnedDecisionKind::Priority;
+        double critic_baseline = 0.5;
+        std::vector<double> target_probabilities;
+    };
+
+    std::vector<Step> steps;
 };
 
 namespace {
@@ -284,6 +566,99 @@ bool remove_card(std::vector<CardId>& cards, CardId wanted) {
     }
     cards.erase(position);
     return true;
+}
+
+using CardCounts = std::array<std::size_t, kCardDefinitions.size()>;
+
+std::size_t checked_card_index(CardId card) {
+    const auto index = static_cast<std::size_t>(card);
+    if (index >= kCardDefinitions.size()) {
+        throw std::invalid_argument("state contains an unknown card");
+    }
+    return index;
+}
+
+void add_card(CardCounts& counts, CardId card) {
+    ++counts[checked_card_index(card)];
+}
+
+void subtract_card(CardCounts& counts, CardId card) {
+    auto& count = counts[checked_card_index(card)];
+    if (count == 0) {
+        throw std::invalid_argument(
+            "public state is inconsistent with original deck");
+    }
+    --count;
+}
+
+CardCounts card_counts(const std::vector<CardId>& cards) {
+    CardCounts counts{};
+    for (const CardId card : cards) {
+        add_card(counts, card);
+    }
+    return counts;
+}
+
+void subtract_public_cards(CardCounts& remaining,
+                           const PlayerState& player) {
+    for (const CardId card : player.graveyard) {
+        subtract_card(remaining, card);
+    }
+    for (const auto& land : player.lands) {
+        subtract_card(remaining, land.card);
+    }
+    for (const auto& creature : player.creatures) {
+        subtract_card(remaining, creature.card);
+    }
+    for (const auto& artifact : player.artifacts) {
+        subtract_card(remaining, artifact.card);
+    }
+    for (const CardId card : player.enchantments) {
+        subtract_card(remaining, card);
+    }
+}
+
+std::vector<CardId> expand_card_counts(const CardCounts& counts) {
+    std::vector<CardId> cards;
+    for (std::size_t index = 0; index < counts.size(); ++index) {
+        cards.insert(cards.end(), counts[index],
+                     static_cast<CardId>(index));
+    }
+    return cards;
+}
+
+CardCounts physical_card_counts(const GameState& state,
+                                std::size_t player) {
+    CardCounts counts{};
+    const auto& player_state = state.players[player];
+    for (const CardId card : player_state.library) {
+        add_card(counts, card);
+    }
+    for (const CardId card : player_state.hand) {
+        add_card(counts, card);
+    }
+    for (const CardId card : player_state.graveyard) {
+        add_card(counts, card);
+    }
+    for (const auto& land : player_state.lands) {
+        add_card(counts, land.card);
+    }
+    for (const auto& creature : player_state.creatures) {
+        add_card(counts, creature.card);
+    }
+    for (const auto& artifact : player_state.artifacts) {
+        add_card(counts, artifact.card);
+    }
+    for (const CardId card : player_state.enchantments) {
+        add_card(counts, card);
+    }
+    for (const auto& object : state.stack) {
+        if (object.controller == player &&
+            object.kind == StackObjectKind::Spell) {
+            add_card(counts, object.card);
+        }
+    }
+    return counts;
 }
 
 bool is_land(CardId card) {
@@ -607,109 +982,554 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     return features;
 }
 
-std::vector<std::vector<PermanentId>> learned_attack_candidates(
-    const std::vector<PermanentId>& legal_attackers,
-    std::mt19937_64& random) {
-    constexpr std::size_t kExhaustiveLimit = 256;
-    std::vector<std::vector<PermanentId>> candidates;
-    if (legal_attackers.size() < 63 &&
-        (std::uint64_t{1} << legal_attackers.size()) <=
-            kExhaustiveLimit) {
-        const std::uint64_t combinations =
-            std::uint64_t{1} << legal_attackers.size();
-        candidates.reserve(static_cast<std::size_t>(combinations));
-        for (std::uint64_t mask = 0; mask < combinations; ++mask) {
-            std::vector<PermanentId> candidate;
-            for (std::size_t index = 0;
-                 index < legal_attackers.size(); ++index) {
-                if ((mask & (std::uint64_t{1} << index)) != 0) {
-                    candidate.push_back(legal_attackers[index]);
-                }
-            }
-            candidates.push_back(std::move(candidate));
-        }
-        return candidates;
-    }
+enum class LearnedPolicyVerb : std::uint8_t {
+    Pass,
+    Play,
+    Cast,
+    Activate,
+    Skip,
+    Include,
+    Assign,
+    ChooseNext,
+};
 
-    candidates = {{}, legal_attackers};
-    for (const PermanentId attacker : legal_attackers) {
-        candidates.push_back({attacker});
-    }
-    std::uniform_int_distribution<int> include_attacker(0, 1);
-    constexpr int kRandomCandidates = 48;
-    for (int sample = 0; sample < kRandomCandidates; ++sample) {
-        std::vector<PermanentId> candidate;
-        for (const PermanentId attacker : legal_attackers) {
-            if (include_attacker(random) == 1) {
-                candidate.push_back(attacker);
-            }
-        }
-        candidates.push_back(std::move(candidate));
-    }
-    return candidates;
+enum class LearnedTargetRelation : std::uint8_t {
+    None,
+    PlayerSelf,
+    PlayerOpponent,
+    PermanentSelf,
+    PermanentOpponent,
+    StackSelf,
+    StackOpponent,
+};
+
+using LearnedCardPlane = std::array<double, kLearnedCardCount>;
+
+struct LearnedPolicyObject {
+    std::optional<CardId> card;
+    int power = 0;
+    int toughness = 0;
+    int damage = 0;
+    bool tapped = false;
+    bool summoning_sick = false;
+};
+
+struct LearnedPolicyOption {
+    LearnedDecisionKind decision = LearnedDecisionKind::Priority;
+    TurnPhase phase = TurnPhase::FirstMain;
+    LearnedPolicyVerb verb = LearnedPolicyVerb::Pass;
+    LearnedPolicyObject source;
+    LearnedPolicyObject target;
+    LearnedTargetRelation target_relation =
+        LearnedTargetRelation::None;
+    LearnedCardPlane selected_attackers{};
+    LearnedCardPlane assigned_blockers{};
+    LearnedCardPlane relevant_blockers{};
+    LearnedCardPlane ordered_blockers{};
+    double remaining_options = 0.0;
+    double chosen_count = 0.0;
+    double assigned_to_target_count = 0.0;
+    double selected_power = 0.0;
+    double assigned_power = 0.0;
+    double consecutive_passes = 0.0;
+    bool sorcery_actions = false;
+};
+
+LearnedPolicyObject policy_card_object(CardId card) {
+    const auto& definition = card_definition(card);
+    return {
+        .card = card,
+        .power = definition.power,
+        .toughness = definition.toughness,
+    };
 }
 
-std::vector<std::vector<std::pair<PermanentId, PermanentId>>>
-learned_block_candidates(
-    const std::vector<PermanentId>& attackers,
-    const std::vector<PermanentId>& available_blockers,
-    std::mt19937_64& random, std::size_t exhaustive_limit,
-    int random_samples) {
-    using Block = std::pair<PermanentId, PermanentId>;
-    std::vector<std::vector<Block>> candidates;
-    const std::size_t choices = attackers.size() + 1;
-    std::size_t combinations = 1;
-    bool exhaustive = !attackers.empty();
-    for (std::size_t blocker = 0;
-         blocker < available_blockers.size(); ++blocker) {
-        if (combinations > exhaustive_limit / choices) {
-            exhaustive = false;
-            break;
-        }
-        combinations *= choices;
+LearnedPolicyObject
+policy_creature_object(const CreaturePermanent& creature) {
+    const auto& definition = card_definition(creature.card);
+    return {
+        .card = creature.card,
+        .power = definition.power,
+        .toughness = definition.toughness,
+        .damage = creature.damage,
+        .tapped = creature.tapped,
+        .summoning_sick = creature.summoning_sick,
+    };
+}
+
+const CreaturePermanent*
+find_creature_for_policy(const PlayerState& player, PermanentId id) {
+    const auto creature = std::find_if(
+        player.creatures.begin(), player.creatures.end(),
+        [id](const CreaturePermanent& candidate) {
+            return candidate.id == id;
+        });
+    return creature == player.creatures.end() ? nullptr : &*creature;
+}
+
+LearnedModel::PolicyFeatureVector learned_policy_features(
+    const GameState& state, std::size_t perspective,
+    const LearnedPolicyOption& option) {
+    LearnedModel::PolicyFeatureVector features{};
+    const auto observation = learned_features(state, perspective);
+    std::copy(observation.begin(), observation.end(), features.begin());
+    std::size_t feature = LearnedModel::kFeatureCount;
+
+    features[feature +
+             static_cast<std::size_t>(option.decision)] = 1.0;
+    feature += LearnedModel::kPolicyDecisionCount;
+    features[feature + static_cast<std::size_t>(option.phase)] = 1.0;
+    feature += LearnedModel::kPolicyPhaseCount;
+    features[feature + static_cast<std::size_t>(option.verb)] = 1.0;
+    feature += LearnedModel::kPolicyVerbCount;
+
+    LearnedCardPlane source_card{};
+    LearnedCardPlane target_card{};
+    if (option.source.card.has_value()) {
+        source_card[static_cast<std::size_t>(*option.source.card)] =
+            1.0;
     }
-    if (exhaustive) {
-        candidates.reserve(combinations);
-        for (std::size_t encoding = 0; encoding < combinations;
-             ++encoding) {
-            std::size_t remaining = encoding;
-            std::vector<Block> candidate;
-            for (const PermanentId blocker : available_blockers) {
-                const std::size_t choice = remaining % choices;
-                remaining /= choices;
-                if (choice != 0) {
-                    candidate.emplace_back(attackers[choice - 1],
-                                           blocker);
-                }
-            }
-            candidates.push_back(std::move(candidate));
+    if (option.target.card.has_value()) {
+        target_card[static_cast<std::size_t>(*option.target.card)] =
+            1.0;
+    }
+    const auto append_plane = [&](const LearnedCardPlane& plane) {
+        for (const double value : plane) {
+            features[feature++] = value / 10.0;
         }
-        return candidates;
+    };
+    const auto append_identity_plane =
+        [&](const LearnedCardPlane& plane) {
+            for (const double value : plane) {
+                features[feature++] = value;
+            }
+        };
+    append_identity_plane(source_card);
+    append_identity_plane(target_card);
+    append_plane(option.selected_attackers);
+    append_plane(option.assigned_blockers);
+    append_plane(option.relevant_blockers);
+    append_plane(option.ordered_blockers);
+
+    std::array<double, LearnedModel::kPolicyScalarCount> scalars{};
+    std::size_t scalar = 0;
+    if (option.source.card.has_value()) {
+        const auto& definition =
+            card_definition(*option.source.card);
+        scalars[scalar + static_cast<std::size_t>(definition.type)] =
+            1.0;
+        scalar += 6;
+        scalars[scalar++] =
+            static_cast<double>(definition.cost.generic) / 10.0;
+        scalars[scalar++] =
+            static_cast<double>(definition.cost.green) / 5.0;
+        scalars[scalar++] =
+            static_cast<double>(definition.cost.red) / 5.0;
+        scalars[scalar++] =
+            static_cast<double>(definition.cost.blue) / 5.0;
+        scalars[scalar++] =
+            static_cast<double>(definition.cost.white) / 5.0;
+        scalars[scalar++] =
+            static_cast<double>(definition.power) / 10.0;
+        scalars[scalar++] =
+            static_cast<double>(definition.toughness) / 10.0;
+        scalars[scalar++] =
+            static_cast<double>(definition.effect_damage) / 10.0;
+    } else {
+        scalar += 14;
+    }
+    scalars[scalar++] =
+        static_cast<double>(option.source.damage) / 10.0;
+    scalars[scalar++] = option.source.tapped ? 1.0 : 0.0;
+    scalars[scalar++] =
+        option.source.summoning_sick ? 1.0 : 0.0;
+
+    scalars[scalar +
+            static_cast<std::size_t>(option.target_relation)] = 1.0;
+    scalar += 7;
+    scalars[scalar++] =
+        static_cast<double>(option.target.power) / 10.0;
+    scalars[scalar++] =
+        static_cast<double>(option.target.toughness) / 10.0;
+    scalars[scalar++] =
+        static_cast<double>(option.target.damage) / 10.0;
+    scalars[scalar++] = option.target.tapped ? 1.0 : 0.0;
+    scalars[scalar++] =
+        option.target.summoning_sick ? 1.0 : 0.0;
+    scalars[scalar++] = option.remaining_options / 10.0;
+    scalars[scalar++] = option.chosen_count / 10.0;
+    scalars[scalar++] = option.assigned_to_target_count / 10.0;
+    scalars[scalar++] = option.selected_power / 20.0;
+    scalars[scalar++] = option.assigned_power / 20.0;
+    scalars[scalar++] = option.consecutive_passes / 2.0;
+    scalars[scalar++] = option.sorcery_actions ? 1.0 : 0.0;
+    if (scalar != scalars.size()) {
+        throw std::logic_error(
+            "Learned policy scalar feature count is inconsistent");
+    }
+    for (const double value : scalars) {
+        features[feature++] = value;
+    }
+    if (feature != features.size()) {
+        throw std::logic_error(
+            "Learned policy feature count is inconsistent");
+    }
+    return features;
+}
+
+std::vector<LearnedModel::PolicyFeatureVector>
+encode_learned_policy_options(
+    const GameState& state, std::size_t player,
+    const std::vector<LearnedPolicyOption>& options) {
+    std::vector<LearnedModel::PolicyFeatureVector> encoded;
+    encoded.reserve(options.size());
+    for (const auto& option : options) {
+        encoded.push_back(
+            learned_policy_features(state, player, option));
+    }
+    return encoded;
+}
+
+void record_learned_policy_choice(
+    const GameState& state, const GameConfig& config,
+    std::size_t player, LearnedDecisionKind kind,
+    std::vector<LearnedModel::PolicyFeatureVector> encoded,
+    std::size_t chosen,
+    std::vector<double> target_probabilities = {}) {
+    if (!config.learned_policy_recorder || encoded.size() < 2) {
+        return;
+    }
+    const double baseline =
+        config.learned_model
+            ? config.learned_model->predict(
+                  learned_features(state, player))
+            : 0.5;
+    config.learned_policy_recorder->steps.push_back({
+        .options = std::move(encoded),
+        .chosen = chosen,
+        .actor = player,
+        .kind = kind,
+        .critic_baseline = baseline,
+        .target_probabilities =
+            std::move(target_probabilities),
+    });
+}
+
+std::size_t choose_learned_policy_option(
+    const GameState& state, const GameConfig& config,
+    const std::vector<LearnedPolicyOption>& options,
+    std::size_t player, std::mt19937_64& random) {
+    if (!config.learned_model) {
+        throw std::logic_error("Learned bot has no policy model");
+    }
+    if (options.empty()) {
+        throw std::logic_error("Learned policy has no legal options");
+    }
+    auto encoded =
+        encode_learned_policy_options(state, player, options);
+    std::vector<double> logits;
+    logits.reserve(encoded.size());
+    for (const auto& option : encoded) {
+        logits.push_back(config.learned_model->policy_logit(
+            option,
+            static_cast<std::size_t>(
+                options.front().decision)));
     }
 
-    candidates.push_back({});
-    for (const PermanentId attacker : attackers) {
-        std::vector<Block> all_on_attacker;
-        for (const PermanentId blocker : available_blockers) {
-            all_on_attacker.emplace_back(attacker, blocker);
+    std::size_t chosen = 0;
+    const double temperature =
+        config.bots[player].exploration_rate;
+    if (temperature > 0.0) {
+        const double max_logit =
+            *std::max_element(logits.begin(), logits.end());
+        std::vector<double> weights;
+        weights.reserve(logits.size());
+        for (const double logit : logits) {
+            weights.push_back(
+                std::exp((logit - max_logit) / temperature));
         }
-        candidates.push_back(std::move(all_on_attacker));
-    }
-    for (int sample = 0; sample < random_samples; ++sample) {
-        std::vector<Block> candidate;
-        std::uniform_int_distribution<std::size_t> choose_block(
-            0, attackers.size());
-        for (const PermanentId blocker : available_blockers) {
-            const std::size_t choice = choose_block(random);
-            if (choice != 0) {
-                candidate.emplace_back(attackers[choice - 1],
-                                       blocker);
+        std::discrete_distribution<std::size_t> sample(
+            weights.begin(), weights.end());
+        chosen = sample(random);
+    } else {
+        const double best =
+            *std::max_element(logits.begin(), logits.end());
+        std::vector<std::size_t> best_options;
+        for (std::size_t index = 0; index < logits.size(); ++index) {
+            if (logits[index] == best) {
+                best_options.push_back(index);
             }
         }
-        std::shuffle(candidate.begin(), candidate.end(), random);
-        candidates.push_back(std::move(candidate));
+        std::uniform_int_distribution<std::size_t> break_tie(
+            0, best_options.size() - 1);
+        chosen = best_options[break_tie(random)];
     }
-    return candidates;
+    record_learned_policy_choice(
+        state, config, player, options.front().decision,
+        std::move(encoded), chosen);
+    return chosen;
+}
+
+void record_uniform_policy_option(
+    const GameState& state, const GameConfig& config,
+    const std::vector<LearnedPolicyOption>& options,
+    std::size_t player, std::size_t chosen) {
+    if (!config.learned_policy_recorder) {
+        return;
+    }
+    record_learned_policy_choice(
+        state, config, player, options.front().decision,
+        encode_learned_policy_options(state, player, options), chosen);
+}
+
+LearnedPolicyOption priority_policy_option(
+    const GameState& state, std::size_t player,
+    const PriorityAction& action, bool sorcery_actions,
+    TurnPhase phase, int consecutive_passes) {
+    LearnedPolicyOption option;
+    option.decision = LearnedDecisionKind::Priority;
+    option.phase = phase;
+    option.sorcery_actions = sorcery_actions;
+    option.consecutive_passes =
+        static_cast<double>(consecutive_passes);
+    switch (action.kind) {
+    case PriorityActionKind::Pass:
+        option.verb = LearnedPolicyVerb::Pass;
+        return option;
+    case PriorityActionKind::PlayLand:
+        option.verb = LearnedPolicyVerb::Play;
+        break;
+    case PriorityActionKind::ActivateMillstone:
+        option.verb = LearnedPolicyVerb::Activate;
+        break;
+    case PriorityActionKind::CastCreature:
+    case PriorityActionKind::CastSorcery:
+    case PriorityActionKind::CastArtifact:
+    case PriorityActionKind::CastEnchantment:
+    case PriorityActionKind::CastLightningBolt:
+    case PriorityActionKind::CastCounterspell:
+        option.verb = LearnedPolicyVerb::Cast;
+        break;
+    }
+    option.source = policy_card_object(action.card);
+
+    if (action.target.has_value()) {
+        const Target& target = *action.target;
+        if (!target.creature.has_value()) {
+            option.target_relation =
+                target.player == player
+                    ? LearnedTargetRelation::PlayerSelf
+                    : LearnedTargetRelation::PlayerOpponent;
+        } else {
+            option.target_relation =
+                target.player == player
+                    ? LearnedTargetRelation::PermanentSelf
+                    : LearnedTargetRelation::PermanentOpponent;
+            const auto* creature = find_creature_for_policy(
+                state.players[target.player], *target.creature);
+            if (creature != nullptr) {
+                option.target = policy_creature_object(*creature);
+            }
+        }
+    } else if (action.spell_target.has_value()) {
+        const auto stack_object = std::find_if(
+            state.stack.begin(), state.stack.end(),
+            [&](const StackObject& object) {
+                return object.id == *action.spell_target;
+            });
+        if (stack_object != state.stack.end()) {
+            option.target =
+                policy_card_object(stack_object->card);
+            option.target_relation =
+                stack_object->controller == player
+                    ? LearnedTargetRelation::StackSelf
+                    : LearnedTargetRelation::StackOpponent;
+        }
+    }
+    return option;
+}
+
+std::vector<LearnedPolicyOption> priority_policy_options(
+    const GameState& state, std::size_t player,
+    const std::vector<PriorityAction>& actions,
+    bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes) {
+    std::vector<LearnedPolicyOption> options;
+    options.reserve(actions.size());
+    for (const auto& action : actions) {
+        options.push_back(
+            priority_policy_option(
+                state, player, action, sorcery_actions,
+                phase, consecutive_passes));
+    }
+    return options;
+}
+
+void add_policy_creature(
+    const PlayerState& player, PermanentId id,
+    LearnedCardPlane& plane, double& total_power) {
+    const auto* creature = find_creature_for_policy(player, id);
+    if (creature == nullptr) {
+        throw std::logic_error(
+            "Learned policy context references a missing creature");
+    }
+    ++plane[static_cast<std::size_t>(creature->card)];
+    total_power +=
+        static_cast<double>(card_definition(creature->card).power);
+}
+
+std::vector<LearnedPolicyOption> attack_policy_options(
+    const GameState& state, std::size_t attacking_player,
+    PermanentId subject, const std::vector<PermanentId>& selected,
+    std::size_t remaining) {
+    const auto* creature = find_creature_for_policy(
+        state.players[attacking_player], subject);
+    if (creature == nullptr) {
+        throw std::logic_error(
+            "Learned attack decision has a missing attacker");
+    }
+
+    LearnedPolicyOption base;
+    base.decision = LearnedDecisionKind::Attack;
+    base.phase = TurnPhase::DeclareAttackers;
+    base.source = policy_creature_object(*creature);
+    base.remaining_options = static_cast<double>(remaining);
+    base.chosen_count = static_cast<double>(selected.size());
+    for (const PermanentId attacker : selected) {
+        add_policy_creature(
+            state.players[attacking_player], attacker,
+            base.selected_attackers, base.selected_power);
+    }
+
+    auto skip = base;
+    skip.verb = LearnedPolicyVerb::Skip;
+    auto include = base;
+    include.verb = LearnedPolicyVerb::Include;
+    return {std::move(skip), std::move(include)};
+}
+
+std::vector<LearnedPolicyOption> block_policy_options(
+    const GameState& state, std::size_t attacking_player,
+    PermanentId subject, const std::vector<PermanentId>& attackers,
+    const std::unordered_map<PermanentId, std::vector<PermanentId>>&
+        blockers_by_attacker,
+    std::size_t remaining) {
+    const std::size_t defending_player =
+        opponent_of(attacking_player);
+    const auto* blocker = find_creature_for_policy(
+        state.players[defending_player], subject);
+    if (blocker == nullptr) {
+        throw std::logic_error(
+            "Learned block decision has a missing blocker");
+    }
+
+    LearnedPolicyOption base;
+    base.decision = LearnedDecisionKind::Block;
+    base.phase = TurnPhase::DeclareBlockers;
+    base.source = policy_creature_object(*blocker);
+    base.remaining_options = static_cast<double>(remaining);
+    for (const PermanentId attacker : attackers) {
+        double ignored_power = 0.0;
+        add_policy_creature(
+            state.players[attacking_player], attacker,
+            base.selected_attackers, ignored_power);
+    }
+    for (const auto& [attacker, assigned] :
+         blockers_by_attacker) {
+        static_cast<void>(attacker);
+        for (const PermanentId assigned_blocker : assigned) {
+            add_policy_creature(
+                state.players[defending_player],
+                assigned_blocker, base.assigned_blockers,
+                base.assigned_power);
+            base.chosen_count += 1.0;
+        }
+    }
+
+    std::vector<LearnedPolicyOption> options;
+    options.reserve(attackers.size() + 1);
+    auto skip = base;
+    skip.verb = LearnedPolicyVerb::Skip;
+    options.push_back(std::move(skip));
+    for (const PermanentId attacker : attackers) {
+        const auto* target = find_creature_for_policy(
+            state.players[attacking_player], attacker);
+        if (target == nullptr) {
+            throw std::logic_error(
+                "Learned block target is missing");
+        }
+        auto assign = base;
+        assign.verb = LearnedPolicyVerb::Assign;
+        assign.target = policy_creature_object(*target);
+        assign.target_relation =
+            LearnedTargetRelation::PermanentOpponent;
+        const auto assigned =
+            blockers_by_attacker.find(attacker);
+        if (assigned != blockers_by_attacker.end()) {
+            assign.assigned_to_target_count =
+                static_cast<double>(assigned->second.size());
+            double ignored_power = 0.0;
+            for (const PermanentId existing : assigned->second) {
+                add_policy_creature(
+                    state.players[defending_player], existing,
+                    assign.relevant_blockers, ignored_power);
+            }
+        }
+        options.push_back(std::move(assign));
+    }
+    return options;
+}
+
+std::vector<LearnedPolicyOption> damage_order_policy_options(
+    const GameState& state, std::size_t attacking_player,
+    PermanentId attacker, const std::vector<PermanentId>& all_blockers,
+    const std::vector<PermanentId>& remaining,
+    const std::vector<PermanentId>& ordered) {
+    const std::size_t defending_player =
+        opponent_of(attacking_player);
+    const auto* source = find_creature_for_policy(
+        state.players[attacking_player], attacker);
+    if (source == nullptr) {
+        throw std::logic_error(
+            "Learned damage-order attacker is missing");
+    }
+
+    LearnedPolicyOption base;
+    base.decision = LearnedDecisionKind::DamageOrder;
+    base.phase = TurnPhase::DamageOrder;
+    base.verb = LearnedPolicyVerb::ChooseNext;
+    base.source = policy_creature_object(*source);
+    base.remaining_options = static_cast<double>(remaining.size());
+    base.chosen_count = static_cast<double>(ordered.size());
+    for (const PermanentId blocker : all_blockers) {
+        double ignored_power = 0.0;
+        add_policy_creature(
+            state.players[defending_player], blocker,
+            base.relevant_blockers, ignored_power);
+    }
+    for (const PermanentId blocker : ordered) {
+        double ignored_power = 0.0;
+        add_policy_creature(
+            state.players[defending_player], blocker,
+            base.ordered_blockers, ignored_power);
+    }
+
+    std::vector<LearnedPolicyOption> options;
+    options.reserve(remaining.size());
+    for (const PermanentId blocker : remaining) {
+        const auto* target = find_creature_for_policy(
+            state.players[defending_player], blocker);
+        if (target == nullptr) {
+            throw std::logic_error(
+                "Learned damage-order blocker is missing");
+        }
+        auto option = base;
+        option.target = policy_creature_object(*target);
+        option.target_relation =
+            LearnedTargetRelation::PermanentOpponent;
+        options.push_back(std::move(option));
+    }
+    return options;
 }
 
 } // namespace
@@ -749,6 +1569,125 @@ std::vector<CardId> white_control_deck() {
     deck.insert(deck.end(), 3, CardId::Millstone);
     deck.insert(deck.end(), 15, CardId::Moat);
     return deck;
+}
+
+GameState white_lock_plan_diagnostic_state() {
+    GameState state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 13;
+    state.next_permanent_id = 3;
+    state.next_stack_object_id = 4;
+
+    auto& white = state.players[0];
+    white.library.assign(18, CardId::Plains);
+    white.library.insert(
+        white.library.end(), 2, CardId::Millstone);
+    white.library.insert(white.library.end(), 7, CardId::Moat);
+    white.hand.assign(7, CardId::Moat);
+    white.lands.assign(
+        4, LandPermanent{.card = CardId::Plains, .tapped = false});
+    white.artifacts = {
+        ArtifactPermanent{
+            .id = 1,
+            .card = CardId::Millstone,
+            .tapped = false,
+        },
+    };
+    white.enchantments = {CardId::Moat};
+    white.land_played_this_turn = true;
+
+    auto& red = state.players[1];
+    red.library.assign(13, CardId::Mountain);
+    red.library.insert(
+        red.library.end(), 3, CardId::LightningBolt);
+    red.library.insert(
+        red.library.end(), 11, CardId::FireElemental);
+    red.hand.assign(7, CardId::LightningBolt);
+    red.lands.assign(
+        5, LandPermanent{.card = CardId::Mountain, .tapped = false});
+    red.creatures = {
+        CreaturePermanent{
+            .id = 2,
+            .card = CardId::FireElemental,
+            .tapped = false,
+            .summoning_sick = false,
+            .damage = 0,
+        },
+    };
+
+    return state;
+}
+
+GameState sample_determinization(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t observer, std::uint64_t seed) {
+    if (observer >= state.players.size()) {
+        throw std::out_of_range("observer must be player 0 or 1");
+    }
+    for (const auto& object : state.stack) {
+        if (object.controller >= state.players.size()) {
+            throw std::invalid_argument(
+                "stack object has an invalid controller");
+        }
+    }
+
+    GameState sampled = state;
+    std::mt19937_64 random(seed);
+    for (std::size_t player = 0; player < state.players.size();
+         ++player) {
+        CardCounts remaining = card_counts(original_decks[player]);
+        subtract_public_cards(remaining, state.players[player]);
+        for (const auto& object : state.stack) {
+            if (object.controller == player &&
+                object.kind == StackObjectKind::Spell) {
+                subtract_card(remaining, object.card);
+            }
+        }
+
+        if (player == observer) {
+            for (const CardId card : state.players[player].hand) {
+                subtract_card(remaining, card);
+            }
+        }
+
+        auto hidden_cards = expand_card_counts(remaining);
+        const std::size_t expected_hidden =
+            player == observer
+                ? state.players[player].library.size()
+                : state.players[player].hand.size() +
+                      state.players[player].library.size();
+        if (hidden_cards.size() != expected_hidden) {
+            throw std::invalid_argument(
+                "hidden zone sizes are inconsistent with original deck");
+        }
+        std::shuffle(hidden_cards.begin(), hidden_cards.end(), random);
+
+        if (player == observer) {
+            sampled.players[player].hand = state.players[player].hand;
+            sampled.players[player].library = std::move(hidden_cards);
+            continue;
+        }
+
+        const std::size_t hand_size = state.players[player].hand.size();
+        const auto hand_end = hidden_cards.begin() +
+                              static_cast<std::ptrdiff_t>(hand_size);
+        sampled.players[player].hand.assign(hidden_cards.begin(),
+                                            hand_end);
+        sampled.players[player].library.assign(hand_end,
+                                               hidden_cards.end());
+    }
+
+    for (std::size_t player = 0; player < state.players.size();
+         ++player) {
+        if (physical_card_counts(sampled, player) !=
+            card_counts(original_decks[player])) {
+            throw std::logic_error(
+                "determinization failed physical card conservation");
+        }
+    }
+    return sampled;
 }
 
 Target Target::player_target(std::size_t player_index) {
@@ -1424,16 +2363,18 @@ std::optional<GameResult> Game::life_total_result() const {
 }
 
 std::optional<GameResult>
-Game::play_priority_window(bool sorcery_actions) {
+Game::play_priority_window(bool sorcery_actions, TurnPhase phase) {
     PriorityState priority = {
         .player = state_.active_player,
         .consecutive_passes = 0,
     };
-    return continue_priority_window(sorcery_actions, priority);
+    return continue_priority_window(
+        sorcery_actions, phase, priority);
 }
 
 std::optional<GameResult>
 Game::continue_priority_window(bool sorcery_actions,
+                               TurnPhase phase,
                                PriorityState priority) {
     while (true) {
         const auto actions =
@@ -1441,7 +2382,8 @@ Game::continue_priority_window(bool sorcery_actions,
                                    sorcery_actions);
         const PriorityAction action =
             choose_priority_action(actions, priority.player,
-                                   sorcery_actions);
+                                   sorcery_actions, phase,
+                                   priority.consecutive_passes);
 
         if (action.kind == PriorityActionKind::Pass) {
             const PriorityPassResult pass =
@@ -1470,7 +2412,8 @@ Game::continue_priority_window(bool sorcery_actions,
 
 PriorityAction Game::choose_priority_action(
     const std::vector<PriorityAction>& actions, std::size_t player,
-    bool sorcery_actions) {
+    bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes) {
     if (actions.empty()) {
         throw std::logic_error("priority window has no pass action");
     }
@@ -1495,23 +2438,88 @@ PriorityAction Game::choose_priority_action(
     if (bot.kind == BotKind::Random) {
         std::uniform_int_distribution<std::size_t> choose_action(
             0, actions.size() - 1);
-        return actions[choose_action(random_)];
+        const std::size_t chosen = choose_action(random_);
+        if (config_.learned_policy_recorder) {
+            record_uniform_policy_option(
+                state_, config_,
+                priority_policy_options(
+                    state_, player, actions, sorcery_actions,
+                    phase, consecutive_passes),
+                player, chosen);
+        }
+        return actions[chosen];
     }
     if (bot.kind == BotKind::Handcrafted) {
         return choose_handcrafted_action(actions, player);
     }
     if (bot.kind == BotKind::Learned) {
-        if (bot.exploration_rate > 0.0) {
-            std::bernoulli_distribution explore(
-                bot.exploration_rate);
-            if (explore(random_)) {
-                std::uniform_int_distribution<std::size_t>
-                    choose_action(0, actions.size() - 1);
-                return actions[choose_action(random_)];
+        const auto options =
+            priority_policy_options(
+                state_, player, actions, sorcery_actions,
+                phase, consecutive_passes);
+        if (bot.rollouts_per_action == 0) {
+            return actions[choose_learned_policy_option(
+                state_, config_, options, player, random_)];
+        }
+
+        struct SampledWorld {
+            GameState state;
+            std::uint64_t continuation_seed = 0;
+        };
+        std::vector<SampledWorld> worlds;
+        worlds.reserve(bot.rollouts_per_action);
+        for (std::size_t rollout = 0;
+             rollout < bot.rollouts_per_action; ++rollout) {
+            const std::uint64_t world_seed = random_();
+            worlds.push_back({
+                .state = sample_determinization(
+                    state_, decks_, player, world_seed),
+                .continuation_seed = random_(),
+            });
+        }
+
+        std::vector<double> scores(actions.size(), 0.0);
+        for (std::size_t action_index = 0;
+             action_index < actions.size(); ++action_index) {
+            for (const auto& world : worlds) {
+                scores[action_index] +=
+                    learned_information_set_action_score(
+                        actions[action_index], player,
+                        sorcery_actions, phase,
+                        consecutive_passes,
+                        world.state, world.continuation_seed);
             }
         }
-        return choose_learned_action(actions, player,
-                                     sorcery_actions);
+        state_.stats[player].monte_carlo_rollouts +=
+            actions.size() * bot.rollouts_per_action;
+
+        std::vector<double> average_scores = scores;
+        for (double& score : average_scores) {
+            score /= static_cast<double>(worlds.size());
+        }
+        const double best = *std::max_element(
+            average_scores.begin(), average_scores.end());
+        std::vector<std::size_t> best_actions;
+        for (std::size_t index = 0;
+             index < average_scores.size(); ++index) {
+            if (average_scores[index] == best) {
+                best_actions.push_back(index);
+            }
+        }
+        std::uniform_int_distribution<std::size_t> break_tie(
+            0, best_actions.size() - 1);
+        const std::size_t chosen =
+            best_actions[break_tie(random_)];
+        if (config_.learned_policy_recorder) {
+            record_learned_policy_choice(
+                state_, config_, player,
+                LearnedDecisionKind::Priority,
+                encode_learned_policy_options(
+                    state_, player, options),
+                chosen,
+                learned_soft_priority_target(average_scores));
+        }
+        return actions[chosen];
     }
 
     std::vector<double> scores(actions.size(), 0.0);
@@ -1541,108 +2549,61 @@ PriorityAction Game::choose_priority_action(
     return actions[best_actions[break_tie(random_)]];
 }
 
-PriorityAction Game::choose_learned_action(
-    const std::vector<PriorityAction>& actions, std::size_t player,
-    bool sorcery_actions) {
-    if (!config_.learned_model) {
-        throw std::logic_error("Learned bot has no value model");
-    }
-
-    std::vector<double> scores;
-    scores.reserve(actions.size());
-    for (const auto& action : actions) {
-        Game successor = *this;
-        successor.trace_ = nullptr;
-        if (action.kind != PriorityActionKind::Pass &&
-            !apply_priority_action(successor.state_, player, action,
-                                   sorcery_actions)) {
-            scores.push_back(
-                -std::numeric_limits<double>::infinity());
-            continue;
-        }
-
-        bool terminal = false;
-        double terminal_score = 0.5;
-        while (!successor.state_.stack.empty()) {
-            if (!resolve_top_of_stack(successor.state_)) {
-                throw std::logic_error(
-                    "Learned bot failed to resolve successor stack");
-            }
-            if (const auto result = successor.life_total_result();
-                result.has_value()) {
-                terminal = true;
-                terminal_score =
-                    result->winner < 0
-                        ? 0.5
-                        : (result->winner == static_cast<int>(player)
-                               ? 1.0
-                               : 0.0);
-                break;
-            }
-        }
-        double score =
-            terminal
-                ? terminal_score
-                : config_.learned_model->predict(
-                      learned_features(successor.state_, player));
-        const std::size_t search_rollouts =
-            config_.bots[player].rollouts_per_action;
-        for (std::size_t rollout = 0; rollout < search_rollouts;
-             ++rollout) {
-            score += learned_rollout_action(
-                action, player, sorcery_actions, random_());
-        }
-        scores.push_back(
-            score / static_cast<double>(search_rollouts + 1));
-    }
-    state_.stats[player].monte_carlo_rollouts +=
-        actions.size() *
-        config_.bots[player].rollouts_per_action;
-
-    const double best_score =
-        *std::max_element(scores.begin(), scores.end());
-    std::vector<std::size_t> best_actions;
-    for (std::size_t index = 0; index < scores.size(); ++index) {
-        if (scores[index] == best_score) {
-            best_actions.push_back(index);
-        }
-    }
-    std::uniform_int_distribution<std::size_t> break_tie(
-        0, best_actions.size() - 1);
-    return actions[best_actions[break_tie(random_)]];
-}
-
-double Game::learned_rollout_action(const PriorityAction& action,
-                                    std::size_t player,
-                                    bool sorcery_actions,
-                                    std::uint64_t seed) const {
-    Game rollout = *this;
-    rollout.random_.seed(seed);
-    rollout.trace_ = nullptr;
-    rollout.config_.bots = {
+double Game::learned_information_set_action_score(
+    const PriorityAction& action, std::size_t player,
+    bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes,
+    const GameState& sampled_state, std::uint64_t seed) const {
+    Game simulation = *this;
+    simulation.state_ = sampled_state;
+    simulation.random_.seed(seed);
+    simulation.trace_ = nullptr;
+    simulation.config_.learned_policy_recorder.reset();
+    simulation.config_.bots = {
         BotConfig{
             .kind = BotKind::Learned,
             .rollouts_per_action = 0,
+            .exploration_rate =
+                config_.bots[player].exploration_rate,
         },
         BotConfig{
             .kind = BotKind::Learned,
             .rollouts_per_action = 0,
+            .exploration_rate =
+                config_.bots[player].exploration_rate,
         },
     };
 
-    for (auto& player_state : rollout.state_.players) {
-        std::shuffle(player_state.library.begin(),
-                     player_state.library.end(), rollout.random_);
-    }
-    PriorityState priority;
-    if (action.kind == PriorityActionKind::Pass) {
-        priority = {
-            .player = opponent_of(player),
-            .consecutive_passes = 1,
+    PriorityState priority = {
+        .player = player,
+        .consecutive_passes = consecutive_passes,
+    };
+    const auto result_score =
+        [player](const GameResult& result) {
+            return result.winner < 0
+                       ? 0.5
+                       : (result.winner ==
+                                  static_cast<int>(player)
+                              ? 1.0
+                              : 0.0);
         };
+    bool window_ended = false;
+    if (action.kind == PriorityActionKind::Pass) {
+        const PriorityPassResult pass =
+            pass_priority(simulation.state_, priority);
+        if (pass == PriorityPassResult::WindowEnded) {
+            window_ended = true;
+        }
+        if (pass == PriorityPassResult::StackObjectResolved) {
+            if (const auto result = simulation.life_total_result();
+                result.has_value()) {
+                return result_score(*result);
+            }
+        }
     } else {
-        if (!apply_priority_action(rollout.state_, player, action,
-                                   sorcery_actions)) {
+        if (!apply_priority_action(
+                simulation.state_, player, action,
+                sorcery_actions)) {
             return 0.0;
         }
         priority = {
@@ -1650,32 +2611,95 @@ double Game::learned_rollout_action(const PriorityAction& action,
             .consecutive_passes = 0,
         };
     }
-    if (const auto result = rollout.continue_priority_window(
-            sorcery_actions, priority);
-        result.has_value()) {
-        return result->winner < 0
-                   ? 0.5
-                   : (result->winner == static_cast<int>(player)
-                          ? 1.0
-                          : 0.0);
+
+    if (!window_ended) {
+        if (const auto result =
+                simulation.continue_priority_window(
+                    sorcery_actions, phase, priority);
+            result.has_value()) {
+            return result_score(*result);
+        }
     }
 
-    cleanup_turn(rollout.state_);
-    constexpr std::size_t kSearchHorizonTurns = 4;
-    rollout.config_.max_turns =
-        std::min(rollout.config_.max_turns,
-                 rollout.state_.turn_number + kSearchHorizonTurns);
-    const GameResult result =
-        rollout.run_from_turn(rollout.state_.turn_number + 1);
-    if (result.reason != EndReason::TurnLimit) {
-        return result.winner < 0
-                   ? 0.5
-                   : (result.winner == static_cast<int>(player)
-                          ? 1.0
-                          : 0.0);
+    const auto phase_result_score =
+        [&](const std::optional<GameResult>& result)
+        -> std::optional<double> {
+        if (!result.has_value()) {
+            return std::nullopt;
+        }
+        return result_score(*result);
+    };
+    switch (phase) {
+    case TurnPhase::FirstMain:
+        if (const auto score =
+                phase_result_score(simulation.play_combat());
+            score.has_value()) {
+            return *score;
+        }
+        if (const auto score = phase_result_score(
+                simulation.play_priority_window(
+                    true, TurnPhase::SecondMain));
+            score.has_value()) {
+            return *score;
+        }
+        break;
+    case TurnPhase::BeginCombat:
+        if (const auto score = phase_result_score(
+                simulation.play_combat_after_beginning());
+            score.has_value()) {
+            return *score;
+        }
+        if (const auto score = phase_result_score(
+                simulation.play_priority_window(
+                    true, TurnPhase::SecondMain));
+            score.has_value()) {
+            return *score;
+        }
+        break;
+    case TurnPhase::EndCombat:
+        if (const auto score = phase_result_score(
+                simulation.play_priority_window(
+                    true, TurnPhase::SecondMain));
+            score.has_value()) {
+            return *score;
+        }
+        break;
+    case TurnPhase::SecondMain:
+        break;
+    case TurnPhase::DeclareAttackers:
+    case TurnPhase::DeclareBlockers:
+    case TurnPhase::DamageOrder:
+        throw std::logic_error(
+            "priority search started from a declaration phase");
     }
-    return rollout.config_.learned_model->predict(
-        learned_features(rollout.state_, player));
+
+    cleanup_turn(simulation.state_);
+    if (simulation.state_.turn_number >=
+        simulation.config_.max_turns) {
+        return result_score(
+            simulation.make_result(-1, EndReason::TurnLimit));
+    }
+    const std::size_t next_turn =
+        simulation.state_.turn_number + 1;
+    simulation.state_.turn_number = next_turn;
+    simulation.state_.active_player =
+        (simulation.state_.starting_player + next_turn - 1) % 2;
+    begin_turn(
+        simulation.state_, simulation.state_.active_player);
+    const bool starting_player_first_turn =
+        next_turn == 1 &&
+        simulation.state_.active_player ==
+            simulation.state_.starting_player;
+    if (!starting_player_first_turn &&
+        !simulation.draw_card(simulation.state_.active_player)) {
+        const GameResult result = simulation.make_result(
+            static_cast<int>(opponent_of(
+                simulation.state_.active_player)),
+            EndReason::EmptyLibrary);
+        return result_score(result);
+    }
+    return simulation.config_.learned_model->predict(
+        learned_features(simulation.state_, player));
 }
 
 PriorityAction Game::choose_handcrafted_action(
@@ -1872,11 +2896,15 @@ double Game::rollout_action(const PriorityAction& action,
 }
 
 std::optional<GameResult> Game::play_combat() {
-    if (const auto result = play_priority_window(false);
+    if (const auto result = play_priority_window(
+            false, TurnPhase::BeginCombat);
         result.has_value()) {
         return result;
     }
+    return play_combat_after_beginning();
+}
 
+std::optional<GameResult> Game::play_combat_after_beginning() {
     auto& attacking_state = state_.players[state_.active_player];
     const std::size_t defending_player = opponent_of(state_.active_player);
     auto& defending_state = state_.players[defending_player];
@@ -1925,68 +2953,47 @@ std::optional<GameResult> Game::play_combat() {
                 legal_attackers.push_back(creature.id);
             }
         }
-
-        const auto candidates =
-            learned_attack_candidates(legal_attackers, random_);
-
-        double best_score =
-            -std::numeric_limits<double>::infinity();
-        for (const auto& candidate : candidates) {
-            const auto block_candidates = learned_block_candidates(
-                candidate,
-                [&] {
-                    std::vector<PermanentId> blockers;
-                    for (const auto& blocker :
-                         defending_state.creatures) {
-                        if (!blocker.tapped) {
-                            blockers.push_back(blocker.id);
-                        }
-                    }
-                    return blockers;
-                }(),
-                random_, 64, 48);
-            double total_score = 0.0;
-            for (const auto& sampled_blocks : block_candidates) {
-                GameState successor = state_;
-                if (!resolve_combat(successor, state_.active_player,
-                                    candidate, sampled_blocks)) {
-                    throw std::logic_error(
-                        "Learned bot sampled illegal combat");
-                }
-                double sample_score = 0.0;
-                if (successor.players[defending_player].life <= 0) {
-                    sample_score = 1.0;
-                } else if (
-                    successor.players[state_.active_player].life <= 0) {
-                    sample_score = 0.0;
-                } else {
-                    sample_score = config_.learned_model->predict(
-                        learned_features(successor,
-                                         state_.active_player));
-                }
-                total_score += sample_score;
-            }
-            const double expected_score =
-                total_score /
-                static_cast<double>(block_candidates.size());
-            if (expected_score > best_score) {
-                best_score = expected_score;
-                attackers = candidate;
+        for (std::size_t index = 0;
+             index < legal_attackers.size(); ++index) {
+            const auto options = attack_policy_options(
+                state_, state_.active_player, legal_attackers[index],
+                attackers, legal_attackers.size() - index);
+            if (choose_learned_policy_option(
+                    state_, config_, options, state_.active_player,
+                    random_) == 1) {
+                attackers.push_back(legal_attackers[index]);
             }
         }
     } else {
         std::uniform_int_distribution<int> attack_or_not(0, 1);
+        std::vector<PermanentId> legal_attackers;
         for (const auto& creature : attacking_state.creatures) {
             if (!creature.tapped && !creature.summoning_sick &&
-                can_attack_through_moat(state_, creature) &&
-                attack_or_not(random_) == 1) {
-                attackers.push_back(creature.id);
+                can_attack_through_moat(state_, creature)) {
+                legal_attackers.push_back(creature.id);
+            }
+        }
+        for (std::size_t index = 0;
+             index < legal_attackers.size(); ++index) {
+            const std::size_t chosen =
+                static_cast<std::size_t>(attack_or_not(random_));
+            if (config_.learned_policy_recorder) {
+                record_uniform_policy_option(
+                    state_, config_,
+                    attack_policy_options(
+                        state_, state_.active_player,
+                        legal_attackers[index], attackers,
+                        legal_attackers.size() - index),
+                    state_.active_player, chosen);
+            }
+            if (chosen == 1) {
+                attackers.push_back(legal_attackers[index]);
             }
         }
     }
 
     if (attackers.empty()) {
-        return play_priority_window(false);
+        return play_priority_window(false, TurnPhase::EndCombat);
     }
 
     std::vector<PermanentId> available_blockers;
@@ -2066,49 +3073,45 @@ std::optional<GameResult> Game::play_combat() {
             }
         }
     } else if (learned_defender) {
-        const auto candidates = learned_block_candidates(
-            attackers, available_blockers, random_, 512, 96);
-
-        double best_score =
-            -std::numeric_limits<double>::infinity();
-        std::vector<std::pair<PermanentId, PermanentId>> best_blocks;
-        for (const auto& candidate : candidates) {
-            GameState successor = state_;
-            if (!resolve_combat(successor, state_.active_player,
-                                attackers, candidate)) {
-                throw std::logic_error(
-                    "Learned bot sampled illegal blocks");
+        for (std::size_t index = 0;
+             index < available_blockers.size(); ++index) {
+            const auto options = block_policy_options(
+                state_, state_.active_player,
+                available_blockers[index], attackers,
+                blockers_by_attacker,
+                available_blockers.size() - index);
+            const std::size_t chosen =
+                choose_learned_policy_option(
+                    state_, config_, options, defending_player,
+                    random_);
+            if (chosen != 0) {
+                blockers_by_attacker[attackers[chosen - 1]]
+                    .push_back(available_blockers[index]);
             }
-            double score = 0.0;
-            if (successor.players[defending_player].life <= 0) {
-                score = 0.0;
-            } else if (
-                successor.players[state_.active_player].life <= 0) {
-                score = 1.0;
-            } else {
-                score = config_.learned_model->predict(
-                    learned_features(successor, defending_player));
-            }
-            if (score > best_score) {
-                best_score = score;
-                best_blocks = candidate;
-            }
-        }
-        for (const auto& [attacker, blocker] : best_blocks) {
-            blockers_by_attacker[attacker].push_back(blocker);
         }
     } else {
         std::shuffle(available_blockers.begin(),
                      available_blockers.end(), random_);
-        for (const PermanentId blocker : available_blockers) {
+        for (std::size_t index = 0;
+             index < available_blockers.size(); ++index) {
             // Zero means no block; other values select an attacker. Multiple
             // blockers may legally select the same attacker.
             std::uniform_int_distribution<std::size_t> choose_block(
                 0, attackers.size());
             const std::size_t choice = choose_block(random_);
+            if (config_.learned_policy_recorder) {
+                record_uniform_policy_option(
+                    state_, config_,
+                    block_policy_options(
+                        state_, state_.active_player,
+                        available_blockers[index], attackers,
+                        blockers_by_attacker,
+                        available_blockers.size() - index),
+                    defending_player, choice);
+            }
             if (choice != 0) {
                 blockers_by_attacker[attackers[choice - 1]].push_back(
-                    blocker);
+                    available_blockers[index]);
             }
         }
     }
@@ -2131,6 +3134,46 @@ std::optional<GameResult> Game::play_combat() {
                                  card_definition(right_creature->card)
                                      .toughness;
                       });
+        } else if (learned_attacker) {
+            const std::vector<PermanentId> all_blockers = blockers;
+            std::vector<PermanentId> remaining = blockers;
+            std::vector<PermanentId> ordered;
+            ordered.reserve(blockers.size());
+            while (!remaining.empty()) {
+                const auto options = damage_order_policy_options(
+                    state_, state_.active_player, attacker,
+                    all_blockers, remaining, ordered);
+                const std::size_t chosen =
+                    choose_learned_policy_option(
+                        state_, config_, options,
+                        state_.active_player, random_);
+                ordered.push_back(remaining[chosen]);
+                remaining.erase(
+                    remaining.begin() +
+                    static_cast<std::ptrdiff_t>(chosen));
+            }
+            blockers = std::move(ordered);
+        } else if (config_.learned_policy_recorder) {
+            const std::vector<PermanentId> all_blockers = blockers;
+            std::vector<PermanentId> remaining = blockers;
+            std::vector<PermanentId> ordered;
+            ordered.reserve(blockers.size());
+            while (!remaining.empty()) {
+                std::uniform_int_distribution<std::size_t>
+                    choose_next(0, remaining.size() - 1);
+                const std::size_t chosen = choose_next(random_);
+                record_uniform_policy_option(
+                    state_, config_,
+                    damage_order_policy_options(
+                        state_, state_.active_player, attacker,
+                        all_blockers, remaining, ordered),
+                    state_.active_player, chosen);
+                ordered.push_back(remaining[chosen]);
+                remaining.erase(
+                    remaining.begin() +
+                    static_cast<std::ptrdiff_t>(chosen));
+            }
+            blockers = std::move(ordered);
         } else {
             std::shuffle(blockers.begin(), blockers.end(), random_);
         }
@@ -2145,7 +3188,7 @@ std::optional<GameResult> Game::play_combat() {
     if (const auto result = life_total_result(); result.has_value()) {
         return result;
     }
-    return play_priority_window(false);
+    return play_priority_window(false, TurnPhase::EndCombat);
 }
 
 GameResult Game::run() {
@@ -2183,14 +3226,16 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
             trace_->push_back(state_);
         }
 
-        if (const auto result = play_priority_window(true);
+        if (const auto result = play_priority_window(
+                true, TurnPhase::FirstMain);
             result.has_value()) {
             return *result;
         }
         if (const auto result = play_combat(); result.has_value()) {
             return *result;
         }
-        if (const auto result = play_priority_window(true);
+        if (const auto result = play_priority_window(
+                true, TurnPhase::SecondMain);
             result.has_value()) {
             return *result;
         }
@@ -2794,12 +3839,14 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
     if (uses_learned && !game_config.learned_model) {
         game_config.learned_model = train_learned_model(
             tournament_config.learned_training_games,
-            seed ^ 0x4C4541524E454455ULL);
+            game_config.learned_training_seed);
     }
 
     TournamentSummary summary;
     summary.games_per_matchup = games_per_matchup;
     summary.total_games = games_per_matchup * summary.matchups.size();
+    summary.learned_training_seed =
+        game_config.learned_training_seed;
     summary.bot_matchups = empty_bot_matchups();
 
     constexpr std::array<std::pair<DeckId, DeckId>, 6> pairings = {{
@@ -2860,6 +3907,70 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
     return summary;
 }
 
+std::vector<double>
+learned_observation(const GameState& state, std::size_t perspective) {
+    if (perspective >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned observation perspective must be 0 or 1");
+    }
+    const auto features = learned_features(state, perspective);
+    return {features.begin(), features.end()};
+}
+
+std::vector<double> learned_priority_policy_features(
+    const GameState& state, std::size_t perspective,
+    const PriorityAction& action, bool sorcery_actions,
+    TurnPhase phase, int consecutive_passes) {
+    if (perspective >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned policy perspective must be 0 or 1");
+    }
+    if (consecutive_passes < 0 || consecutive_passes > 1) {
+        throw std::out_of_range(
+            "Learned policy pass count must be zero or one");
+    }
+    const auto features = learned_policy_features(
+        state, perspective,
+        priority_policy_option(
+            state, perspective, action, sorcery_actions,
+            phase, consecutive_passes));
+    return {features.begin(), features.end()};
+}
+
+std::vector<double>
+learned_soft_priority_target(const std::vector<double>& scores) {
+    if (scores.empty()) {
+        return {};
+    }
+    if (!std::all_of(scores.begin(), scores.end(),
+                     [](double score) {
+                         return std::isfinite(score);
+                     })) {
+        throw std::invalid_argument(
+            "priority teacher scores must be finite");
+    }
+    constexpr double temperature = 0.10;
+    constexpr double teacher_weight = 0.90;
+    const double maximum =
+        *std::max_element(scores.begin(), scores.end());
+    std::vector<double> targets;
+    targets.reserve(scores.size());
+    double total = 0.0;
+    for (const double score : scores) {
+        targets.push_back(
+            std::exp((score - maximum) / temperature));
+        total += targets.back();
+    }
+    const double uniform =
+        (1.0 - teacher_weight) /
+        static_cast<double>(scores.size());
+    for (double& target : targets) {
+        target =
+            teacher_weight * target / total + uniform;
+    }
+    return targets;
+}
+
 std::shared_ptr<const LearnedModel>
 train_learned_model(std::size_t training_games, std::uint64_t seed) {
     if (training_games == 0) {
@@ -2880,6 +3991,15 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
             static_cast<DeckId>(second),
         };
     };
+
+    constexpr std::size_t kEnsembleMembers = 2;
+    std::array<std::shared_ptr<LearnedModel>, kEnsembleMembers>
+        members;
+    for (std::size_t member = 0; member < members.size(); ++member) {
+        members[member] = std::make_shared<LearnedModel>(
+            seed ^ (0x4D4F44454C000000ULL + member));
+    }
+
     std::vector<LearnedModel::TrainingExample> examples;
     examples.reserve(training_games * 120);
     const auto add_trace =
@@ -2917,14 +4037,6 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
         const GameResult result = game.run_with_trace(trace);
         add_trace(trace, result, examples);
     }
-
-    constexpr std::size_t kEnsembleMembers = 2;
-    std::array<std::shared_ptr<LearnedModel>, kEnsembleMembers>
-        members;
-    for (std::size_t member = 0; member < members.size(); ++member) {
-        members[member] = std::make_shared<LearnedModel>(
-            seed ^ (0x4D4F44454C000000ULL + member));
-    }
     {
         std::array<std::thread, kEnsembleMembers> trainers;
         for (std::size_t member = 0; member < members.size();
@@ -2939,70 +4051,334 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
             trainer.join();
         }
     }
-    const auto make_ensemble = [&] {
-        std::vector<std::shared_ptr<const LearnedModel>>
-            ensemble_members;
-        ensemble_members.reserve(members.size());
-        for (const auto& member : members) {
-            ensemble_members.push_back(member);
-        }
-        return std::make_shared<LearnedModel>(
-            std::move(ensemble_members));
-    };
-    std::shared_ptr<const LearnedModel> model = make_ensemble();
 
-    // Two fitted self-play iterations move the value function toward states
-    // produced by its own policy while retaining the random-play replay set.
-    for (std::size_t generation = 0; generation < 2; ++generation) {
-        std::vector<LearnedModel::TrainingExample> self_play_examples;
+    std::vector<std::shared_ptr<const LearnedModel>> ensemble_members;
+    ensemble_members.reserve(members.size());
+    for (const auto& member : members) {
+        ensemble_members.push_back(member);
+    }
+    auto model = std::make_shared<LearnedModel>(
+        std::move(ensemble_members),
+        seed ^ 0x534841524544504FULL);
+
+    std::vector<LearnedModel::PolicyTrainingExample> policy_batch;
+    const auto append_policy_game =
+        [&](LearnedPolicyRecorder& recorder,
+            const GameResult& result) {
+        constexpr std::size_t kDecisionKinds =
+            LearnedModel::kPolicyDecisionCount;
+        constexpr std::size_t kMaxStepsPerActorKind = 24;
+        const auto has_training_target =
+            [](const LearnedPolicyRecorder::Step& step) {
+                if (step.kind != LearnedDecisionKind::Priority) {
+                    return true;
+                }
+                return step.target_probabilities.size() ==
+                       step.options.size();
+            };
+        std::array<std::array<std::size_t, kDecisionKinds>, 2>
+            totals{};
+        for (const auto& step : recorder.steps) {
+            if (!has_training_target(step)) {
+                continue;
+            }
+            ++totals[step.actor][static_cast<std::size_t>(
+                step.kind)];
+        }
+
+        std::array<std::array<std::size_t, kDecisionKinds>, 2>
+            seen{};
+        std::array<std::array<std::size_t, kDecisionKinds>, 2>
+            retained{};
+        for (const auto& step : recorder.steps) {
+            if (!has_training_target(step)) {
+                continue;
+            }
+            const std::size_t kind =
+                static_cast<std::size_t>(step.kind);
+            const std::size_t ordinal = seen[step.actor][kind]++;
+            const std::size_t total = totals[step.actor][kind];
+            if (total <= kMaxStepsPerActorKind ||
+                ((ordinal + 1) * kMaxStepsPerActorKind / total !=
+                 ordinal * kMaxStepsPerActorKind / total)) {
+                ++retained[step.actor][kind];
+            }
+        }
+
+        seen = {};
+        for (auto& step : recorder.steps) {
+            if (!has_training_target(step)) {
+                continue;
+            }
+            const std::size_t kind =
+                static_cast<std::size_t>(step.kind);
+            const std::size_t ordinal = seen[step.actor][kind]++;
+            const std::size_t total = totals[step.actor][kind];
+            const bool retain =
+                total <= kMaxStepsPerActorKind ||
+                ((ordinal + 1) * kMaxStepsPerActorKind / total !=
+                 ordinal * kMaxStepsPerActorKind / total);
+            if (!retain) {
+                continue;
+            }
+
+            double outcome = 0.0;
+            if (result.winner >= 0) {
+                outcome =
+                    result.winner == static_cast<int>(step.actor)
+                        ? 1.0
+                        : -1.0;
+            }
+            const double critic =
+                2.0 * step.critic_baseline - 1.0;
+            const bool priority =
+                step.kind == LearnedDecisionKind::Priority;
+            policy_batch.push_back({
+                .options = std::move(step.options),
+                .target_probabilities =
+                    std::move(step.target_probabilities),
+                .chosen = step.chosen,
+                .decision_kind = kind,
+                .advantage =
+                    priority
+                        ? 0.0
+                        : std::clamp(
+                              outcome - critic, -1.0, 1.0),
+                .weight =
+                    1.0 /
+                    static_cast<double>(
+                        std::max<std::size_t>(
+                            1, retained[step.actor][kind])),
+            });
+        }
+    };
+
+    // The critic is fit once from random-play traces, then frozen throughout
+    // actor collection. Each actor generation is likewise frozen while its
+    // common-world Priority teacher and on-policy combat data are collected.
+    constexpr std::size_t kPolicyGenerations = 4;
+    for (std::size_t generation = 0;
+         generation < kPolicyGenerations; ++generation) {
         const std::size_t generation_games =
             std::max<std::size_t>(1, training_games / 2);
-        self_play_examples.reserve(generation_games * 60);
+        policy_batch.clear();
         for (std::size_t game_index = 0;
              game_index < generation_games; ++game_index) {
             GameConfig config;
             config.learned_model = model;
+            config.learned_policy_recorder =
+                std::make_shared<LearnedPolicyRecorder>();
             config.bots = {
                 BotConfig{
                     .kind = BotKind::Learned,
-                    .rollouts_per_action = 0,
-                    .exploration_rate =
-                        generation == 0 ? 0.10 : 0.05,
+                    .rollouts_per_action = 2,
+                    .exploration_rate = 1.0,
                 },
                 BotConfig{
                     .kind = BotKind::Learned,
-                    .rollouts_per_action = 0,
-                    .exploration_rate =
-                        generation == 0 ? 0.10 : 0.05,
+                    .rollouts_per_action = 2,
+                    .exploration_rate = 1.0,
                 },
             };
             const auto [first_deck, second_deck] =
                 choose_distinct_decks();
             Game game(deck_cards(first_deck), deck_cards(second_deck),
                       random(), config);
-            std::vector<GameState> trace;
-            const GameResult result = game.run_with_trace(trace);
-            add_trace(trace, result, self_play_examples);
+            const GameResult result = game.run();
+            append_policy_game(
+                *config.learned_policy_recorder, result);
         }
-        examples.insert(examples.end(), self_play_examples.begin(),
-                        self_play_examples.end());
-        std::array<std::thread, kEnsembleMembers> trainers;
-        for (std::size_t member = 0; member < members.size();
-             ++member) {
-            trainers[member] = std::thread([&, member] {
-                members[member]->train(
-                    examples, 3, 0.006,
-                    seed ^ (0x53454C4600000000ULL +
-                            0x100ULL * generation + member));
-            });
-        }
-        for (auto& trainer : trainers) {
-            trainer.join();
-        }
-        model = make_ensemble();
+        model->train_policy(
+            policy_batch, 1, 0.001,
+            seed ^ (0x504F4C4943590000ULL + generation));
     }
 
     return model;
+}
+
+double WhitePlanTeacherDiagnostic::
+    two_world_reference_agreement_rate() const {
+    return two_world_trials == 0
+               ? 0.0
+               : 100.0 *
+                     static_cast<double>(
+                         two_world_reference_agreements) /
+                     static_cast<double>(two_world_trials);
+}
+
+double WhitePlanTeacherDiagnostic::
+    two_world_plan_order_agreement_rate() const {
+    return two_world_trials == 0
+               ? 0.0
+               : 100.0 *
+                     static_cast<double>(
+                         two_world_plan_order_agreements) /
+                     static_cast<double>(two_world_trials);
+}
+
+WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed) {
+    if (!model) {
+        throw std::invalid_argument(
+            "White plan diagnostic requires a Learned model");
+    }
+
+    constexpr std::size_t kReferenceWorlds = 64;
+    constexpr std::size_t kTwoWorldTrials = 32;
+    WhitePlanTeacherDiagnostic diagnostic;
+    diagnostic.state = white_lock_plan_diagnostic_state();
+    diagnostic.reference_worlds = kReferenceWorlds;
+    diagnostic.two_world_trials = kTwoWorldTrials;
+
+    const auto actions =
+        legal_priority_actions(diagnostic.state, 0, true);
+    if (actions.size() < 2) {
+        throw std::logic_error(
+            "White plan diagnostic has no non-pass action");
+    }
+
+    GameConfig config;
+    config.learned_model = std::move(model);
+    config.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .rollouts_per_action = 0,
+            .exploration_rate = 1.0,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .rollouts_per_action = 0,
+            .exploration_rate = 1.0,
+        },
+    };
+    Game evaluator(
+        white_control_deck(), red_alpha_deck(),
+        seed ^ 0x444941474E4F5354ULL, config);
+    evaluator.state_ = diagnostic.state;
+
+    const auto evaluate_common_worlds =
+        [&](std::size_t world_count,
+            std::uint64_t evaluation_seed) {
+            struct SampledWorld {
+                GameState state;
+                std::uint64_t continuation_seed = 0;
+            };
+            std::mt19937_64 random(evaluation_seed);
+            std::vector<SampledWorld> worlds;
+            worlds.reserve(world_count);
+            for (std::size_t world = 0; world < world_count;
+                 ++world) {
+                const std::uint64_t world_seed = random();
+                worlds.push_back({
+                    .state = sample_determinization(
+                        diagnostic.state, evaluator.decks_, 0,
+                        world_seed),
+                    .continuation_seed = random(),
+                });
+            }
+
+            std::vector<double> scores(actions.size(), 0.0);
+            for (std::size_t action_index = 0;
+                 action_index < actions.size(); ++action_index) {
+                for (const auto& world : worlds) {
+                    scores[action_index] +=
+                        evaluator
+                            .learned_information_set_action_score(
+                                actions[action_index], 0, true,
+                                TurnPhase::FirstMain, 0,
+                                world.state,
+                                world.continuation_seed);
+                }
+                scores[action_index] /=
+                    static_cast<double>(world_count);
+            }
+            return scores;
+        };
+    const auto best_action =
+        [](const std::vector<double>& scores) {
+            return static_cast<std::size_t>(
+                std::distance(
+                    scores.begin(),
+                    std::max_element(
+                        scores.begin(), scores.end())));
+        };
+
+    std::mt19937_64 evaluation_seeds(
+        seed ^ 0x5748495445504C41ULL);
+    const auto reference_scores =
+        evaluate_common_worlds(
+            kReferenceWorlds, evaluation_seeds());
+    diagnostic.reference_best_action =
+        best_action(reference_scores);
+    diagnostic.actions.reserve(actions.size());
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        diagnostic.actions.push_back({
+            .action = actions[index],
+            .reference_score = reference_scores[index],
+        });
+        if (actions[index].kind ==
+                PriorityActionKind::ActivateMillstone &&
+            actions[index].target.has_value() &&
+            actions[index].target->player == 1 &&
+            !actions[index].target->creature.has_value()) {
+            diagnostic.opponent_millstone_action = index;
+        }
+        if (actions[index].kind ==
+                PriorityActionKind::CastEnchantment &&
+            actions[index].card == CardId::Moat) {
+            diagnostic.redundant_moat_action = index;
+        }
+    }
+    if (!diagnostic.opponent_millstone_action.has_value() ||
+        !diagnostic.redundant_moat_action.has_value()) {
+        throw std::logic_error(
+            "White plan diagnostic is missing a plan action");
+    }
+    const std::size_t millstone_action =
+        *diagnostic.opponent_millstone_action;
+    const std::size_t moat_action =
+        *diagnostic.redundant_moat_action;
+    const auto compare_plan =
+        [millstone_action, moat_action](
+            const std::vector<double>& scores) {
+            if (scores[millstone_action] >
+                scores[moat_action]) {
+                return 1;
+            }
+            if (scores[moat_action] >
+                scores[millstone_action]) {
+                return -1;
+            }
+            return 0;
+        };
+    const int reference_plan_order =
+        compare_plan(reference_scores);
+
+    for (std::size_t trial = 0; trial < kTwoWorldTrials;
+         ++trial) {
+        const auto trial_scores =
+            evaluate_common_worlds(2, evaluation_seeds());
+        const std::size_t trial_best =
+            best_action(trial_scores);
+        ++diagnostic.actions[trial_best]
+              .two_world_first_place_count;
+        if (trial_best == diagnostic.reference_best_action) {
+            ++diagnostic.two_world_reference_agreements;
+        }
+        const int trial_plan_order = compare_plan(trial_scores);
+        if (trial_plan_order > 0) {
+            ++diagnostic.two_world_millstone_preferences;
+        } else if (trial_plan_order < 0) {
+            ++diagnostic.two_world_moat_preferences;
+        } else {
+            ++diagnostic.two_world_plan_ties;
+        }
+        if (trial_plan_order == reference_plan_order) {
+            ++diagnostic.two_world_plan_order_agreements;
+        }
+    }
+
+    return diagnostic;
 }
 
 double BotBenchmarkSummary::challenger_win_rate() const {
@@ -3078,12 +4454,15 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
                 ? baseline.training_games
                 : std::size_t{0});
         game_config.learned_model = train_learned_model(
-            training_games, seed ^ 0x42454E43484E4EULL);
+            training_games,
+            game_config.learned_training_seed);
     }
 
     BotBenchmarkSummary summary = {
         .challenger = challenger,
         .baseline = baseline,
+        .learned_training_seed =
+            game_config.learned_training_seed,
         .repetitions_per_deck_pairing =
             repetitions_per_deck_pairing,
     };
@@ -3220,7 +4599,7 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         !game_config.learned_model) {
         game_config.learned_model = train_learned_model(
             config.pilot.training_games,
-            seed ^ 0x45564F4C56454E4EULL);
+            game_config.learned_training_seed);
     }
     game_config.bots = {config.pilot, config.pilot};
 

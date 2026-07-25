@@ -24,13 +24,16 @@ For reproducible or larger runs:
 ```sh
 make
 ./build/alpha-sim --games 100 --seed 42 --bots mixed \
-  --rollouts 2 --deep-rollouts 8 --train-games 800
+  --rollouts 2 --deep-rollouts 8 --train-games 800 \
+  --train-seed 424242
 ```
 
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
 `handcrafted`, or `learned`. `--rollouts` and `--deep-rollouts` control sampled
 continuations; `--train-games` controls Learned Value's random self-play
-dataset. Mixed mode uses a 25-game rotation containing all ordered policy
+dataset. `--train-seed` controls model generation independently from the
+game/evaluation `--seed` and defaults to `424242`. Mixed mode uses a 25-game
+rotation containing all ordered policy
 pairings, including mirrors. Games in a policy matrix use common shuffle seeds
 and balanced play/draw assignments, and independent games run in parallel.
 
@@ -153,7 +156,7 @@ make benchmark-learned
 
 ./build/alpha-sim --benchmark --games 20 --seed 424242 \
   --challenger learned --baseline monte-carlo \
-  --rollouts 2 --train-games 800
+  --rollouts 2 --train-games 800 --train-seed 424242
 ```
 
 For every repetition, it covers all ten unordered deck pairings, including
@@ -169,10 +172,20 @@ Validate Learned against every other policy over independent seeds:
 make stability
 ```
 
-The all-policy harness trains one model per seed, reuses it against Random,
-Monte Carlo, Deep Monte Carlo, and Handcrafted Policy, and requires aggregate,
-per-seed, confidence, and per-deck gates. `EXPERIMENTS.md` is the lab notebook
-for successful and failed tuning runs.
+The all-policy harness trains one model from `--train-seed`, reuses that exact
+model against Random, Monte Carlo, Deep Monte Carlo, and Handcrafted Policy
+across every evaluation seed, and requires aggregate, per-seed, confidence,
+and per-deck gates.
+
+To measure training-seed and evaluation-seed variance separately:
+
+```sh
+./build/alpha-sim --variance-study --games 5 --train-games 800
+```
+
+This fixed 3x3 study trains each row model once and reuses it across all three
+evaluation-seed columns. `EXPERIMENTS.md` is the lab notebook for successful
+and failed tuning and evaluation runs.
 
 There are no mulligans, sideboards, concessions, or draw effects yet. A
 500-individual-turn safety limit is included, though these decks normally end
