@@ -2,12 +2,115 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace alpha {
+
+class LearnedModel {
+  public:
+    static constexpr std::size_t kFeatureCount = 22;
+    static constexpr std::size_t kHiddenCount = 16;
+    using FeatureVector = std::array<double, kFeatureCount>;
+    using TrainingExample = std::pair<FeatureVector, double>;
+
+    explicit LearnedModel(std::uint64_t seed) {
+        std::mt19937_64 random(seed);
+        std::normal_distribution<double> initialize(0.0, 0.12);
+        for (auto& hidden_weights : input_weights_) {
+            for (double& weight : hidden_weights) {
+                weight = initialize(random);
+            }
+        }
+        for (double& weight : output_weights_) {
+            weight = initialize(random);
+        }
+    }
+
+    double predict(const FeatureVector& features) const {
+        const auto hidden = hidden_values(features);
+        double output = output_bias_;
+        for (std::size_t index = 0; index < hidden.size(); ++index) {
+            output += output_weights_[index] * hidden[index];
+        }
+        return 1.0 / (1.0 + std::exp(-output));
+    }
+
+    void train(std::vector<TrainingExample> examples,
+               std::size_t epochs, double learning_rate,
+               std::uint64_t seed) {
+        std::mt19937_64 random(seed);
+        for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
+            std::shuffle(examples.begin(), examples.end(), random);
+            const double rate =
+                learning_rate /
+                (1.0 + 0.15 * static_cast<double>(epoch));
+            for (const auto& [features, target] : examples) {
+                const auto hidden = hidden_values(features);
+                double output_sum = output_bias_;
+                for (std::size_t index = 0; index < hidden.size();
+                     ++index) {
+                    output_sum +=
+                        output_weights_[index] * hidden[index];
+                }
+                const double output =
+                    1.0 / (1.0 + std::exp(-output_sum));
+                // Sigmoid + cross entropy derivative.
+                const double output_error = output - target;
+                const auto old_output_weights = output_weights_;
+
+                for (std::size_t hidden_index = 0;
+                     hidden_index < kHiddenCount; ++hidden_index) {
+                    output_weights_[hidden_index] -=
+                        rate * output_error * hidden[hidden_index];
+                }
+                output_bias_ -= rate * output_error;
+
+                for (std::size_t hidden_index = 0;
+                     hidden_index < kHiddenCount; ++hidden_index) {
+                    const double hidden_error =
+                        output_error *
+                        old_output_weights[hidden_index] *
+                        (1.0 - hidden[hidden_index] *
+                                   hidden[hidden_index]);
+                    for (std::size_t feature = 0;
+                         feature < kFeatureCount; ++feature) {
+                        input_weights_[hidden_index][feature] -=
+                            rate * hidden_error * features[feature];
+                    }
+                    hidden_biases_[hidden_index] -= rate * hidden_error;
+                }
+            }
+        }
+    }
+
+  private:
+    std::array<double, kHiddenCount>
+    hidden_values(const FeatureVector& features) const {
+        std::array<double, kHiddenCount> hidden;
+        for (std::size_t hidden_index = 0;
+             hidden_index < kHiddenCount; ++hidden_index) {
+            double sum = hidden_biases_[hidden_index];
+            for (std::size_t feature = 0; feature < kFeatureCount;
+                 ++feature) {
+                sum += input_weights_[hidden_index][feature] *
+                       features[feature];
+            }
+            hidden[hidden_index] = std::tanh(sum);
+        }
+        return hidden;
+    }
+
+    std::array<std::array<double, kFeatureCount>, kHiddenCount>
+        input_weights_{};
+    std::array<double, kHiddenCount> hidden_biases_{};
+    std::array<double, kHiddenCount> output_weights_{};
+    double output_bias_ = 0.0;
+};
+
 namespace {
 
 constexpr std::array<CardDefinition, 13> kCardDefinitions = {{
@@ -244,6 +347,107 @@ bool contains_action(const std::vector<PriorityAction>& actions,
 
 std::size_t opponent_of(std::size_t player) {
     return 1 - player;
+}
+
+double strategic_card_value(CardId card) {
+    switch (card) {
+    case CardId::Forest:
+    case CardId::Mountain:
+    case CardId::Island:
+    case CardId::Plains:
+        return 100.0;
+    case CardId::GrizzlyBears:
+        return 400.0;
+    case CardId::IronrootTreefolk:
+        return 700.0;
+    case CardId::FireElemental:
+    case CardId::WaterElemental:
+        return 900.0;
+    case CardId::LightningBolt:
+        return 800.0;
+    case CardId::Counterspell:
+        return 1'000.0;
+    case CardId::Tsunami:
+        return 700.0;
+    case CardId::Millstone:
+        return 1'100.0;
+    case CardId::Moat:
+        return 1'300.0;
+    }
+    return 0.0;
+}
+
+LearnedModel::FeatureVector learned_features(const GameState& state,
+                                             std::size_t perspective) {
+    const std::size_t opponent = opponent_of(perspective);
+    const auto& self = state.players[perspective];
+    const auto& enemy = state.players[opponent];
+    const auto untapped_lands = [](const PlayerState& player) {
+        return std::count_if(
+            player.lands.begin(), player.lands.end(),
+            [](const LandPermanent& land) { return !land.tapped; });
+    };
+    const auto total_power = [](const PlayerState& player) {
+        int total = 0;
+        for (const auto& creature : player.creatures) {
+            total += card_definition(creature.card).power;
+        }
+        return total;
+    };
+    const auto total_toughness = [](const PlayerState& player) {
+        int total = 0;
+        for (const auto& creature : player.creatures) {
+            total += std::max(
+                0, card_definition(creature.card).toughness -
+                       creature.damage);
+        }
+        return total;
+    };
+    const auto available_power = [](const PlayerState& player) {
+        int total = 0;
+        for (const auto& creature : player.creatures) {
+            if (!creature.tapped && !creature.summoning_sick) {
+                total += card_definition(creature.card).power;
+            }
+        }
+        return total;
+    };
+    const auto permanent_count = [](const PlayerState& player) {
+        return player.artifacts.size() + player.enchantments.size();
+    };
+
+    int stack_advantage = 0;
+    for (const auto& object : state.stack) {
+        stack_advantage += object.controller == perspective ? 1 : -1;
+    }
+
+    return {
+        static_cast<double>(self.life) / 20.0,
+        static_cast<double>(enemy.life) / 20.0,
+        static_cast<double>(self.library.size()) / 40.0,
+        static_cast<double>(enemy.library.size()) / 40.0,
+        static_cast<double>(self.hand.size()) / 10.0,
+        static_cast<double>(enemy.hand.size()) / 10.0,
+        static_cast<double>(self.lands.size()) / 10.0,
+        static_cast<double>(enemy.lands.size()) / 10.0,
+        static_cast<double>(untapped_lands(self)) / 10.0,
+        static_cast<double>(untapped_lands(enemy)) / 10.0,
+        static_cast<double>(self.creatures.size()) / 10.0,
+        static_cast<double>(enemy.creatures.size()) / 10.0,
+        static_cast<double>(total_power(self)) / 20.0,
+        static_cast<double>(total_power(enemy)) / 20.0,
+        static_cast<double>(total_toughness(self)) / 20.0,
+        static_cast<double>(total_toughness(enemy)) / 20.0,
+        static_cast<double>(available_power(self)) / 20.0,
+        static_cast<double>(available_power(enemy)) / 20.0,
+        static_cast<double>(permanent_count(self)) / 5.0,
+        static_cast<double>(permanent_count(enemy)) / 5.0,
+        static_cast<double>(state.stack.size()) / 5.0,
+        static_cast<double>(stack_advantage) / 5.0 +
+            (state.active_player == perspective ? 0.25 : -0.25) +
+            std::min(1.0, static_cast<double>(state.turn_number) / 80.0) *
+                0.1,
+    };
 }
 
 } // namespace
@@ -867,11 +1071,21 @@ Game::Game(std::vector<CardId> player_zero_deck,
         throw std::invalid_argument("maximum turns must be positive");
     }
     for (const auto& bot : config_.bots) {
-        if (bot.kind != BotKind::Random &&
+        if ((bot.kind == BotKind::MonteCarlo ||
+             bot.kind == BotKind::DeepMonteCarlo) &&
             bot.rollouts_per_action == 0) {
             throw std::invalid_argument(
                 "Monte Carlo rollouts per action must be positive");
         }
+    }
+    const bool uses_learned =
+        std::any_of(config_.bots.begin(), config_.bots.end(),
+                    [](const BotConfig& bot) {
+                        return bot.kind == BotKind::Learned;
+                    });
+    if (uses_learned && !config_.learned_model) {
+        throw std::invalid_argument(
+            "Learned bot requires a trained value model");
     }
 }
 
@@ -1004,6 +1218,13 @@ PriorityAction Game::choose_priority_action(
             0, actions.size() - 1);
         return actions[choose_action(random_)];
     }
+    if (bot.kind == BotKind::Strategic) {
+        return choose_strategic_action(actions, player);
+    }
+    if (bot.kind == BotKind::Learned) {
+        return choose_learned_action(actions, player,
+                                     sorcery_actions);
+    }
 
     std::vector<double> scores(actions.size(), 0.0);
     for (std::size_t action_index = 0; action_index < actions.size();
@@ -1030,6 +1251,209 @@ PriorityAction Game::choose_priority_action(
     std::uniform_int_distribution<std::size_t> break_tie(
         0, best_actions.size() - 1);
     return actions[best_actions[break_tie(random_)]];
+}
+
+PriorityAction Game::choose_learned_action(
+    const std::vector<PriorityAction>& actions, std::size_t player,
+    bool sorcery_actions) {
+    if (!config_.learned_model) {
+        throw std::logic_error("Learned bot has no value model");
+    }
+
+    std::vector<double> scores;
+    scores.reserve(actions.size());
+    for (const auto& action : actions) {
+        Game successor = *this;
+        successor.trace_ = nullptr;
+        if (action.kind != PriorityActionKind::Pass &&
+            !apply_priority_action(successor.state_, player, action,
+                                   sorcery_actions)) {
+            scores.push_back(
+                -std::numeric_limits<double>::infinity());
+            continue;
+        }
+
+        bool terminal = false;
+        double terminal_score = 0.5;
+        while (!successor.state_.stack.empty()) {
+            if (!resolve_top_of_stack(successor.state_)) {
+                throw std::logic_error(
+                    "Learned bot failed to resolve successor stack");
+            }
+            if (const auto result = successor.life_total_result();
+                result.has_value()) {
+                terminal = true;
+                terminal_score =
+                    result->winner < 0
+                        ? 0.5
+                        : (result->winner == static_cast<int>(player)
+                               ? 1.0
+                               : 0.0);
+                break;
+            }
+        }
+        scores.push_back(
+            terminal
+                ? terminal_score
+                : config_.learned_model->predict(
+                      learned_features(successor.state_, player)));
+    }
+
+    const double best_score =
+        *std::max_element(scores.begin(), scores.end());
+    std::vector<std::size_t> best_actions;
+    for (std::size_t index = 0; index < scores.size(); ++index) {
+        if (scores[index] == best_score) {
+            best_actions.push_back(index);
+        }
+    }
+    std::uniform_int_distribution<std::size_t> break_tie(
+        0, best_actions.size() - 1);
+    return actions[best_actions[break_tie(random_)]];
+}
+
+PriorityAction Game::choose_strategic_action(
+    const std::vector<PriorityAction>& actions, std::size_t player) {
+    std::vector<double> scores;
+    scores.reserve(actions.size());
+    for (const auto& action : actions) {
+        scores.push_back(strategic_action_score(action, player));
+    }
+
+    const double best_score =
+        *std::max_element(scores.begin(), scores.end());
+    std::vector<std::size_t> best_actions;
+    for (std::size_t index = 0; index < scores.size(); ++index) {
+        if (scores[index] == best_score) {
+            best_actions.push_back(index);
+        }
+    }
+    std::uniform_int_distribution<std::size_t> break_tie(
+        0, best_actions.size() - 1);
+    return actions[best_actions[break_tie(random_)]];
+}
+
+double Game::strategic_action_score(const PriorityAction& action,
+                                    std::size_t player) const {
+    const auto& player_state = state_.players[player];
+    const std::size_t opponent = opponent_of(player);
+    const auto& opponent_state = state_.players[opponent];
+
+    switch (action.kind) {
+    case PriorityActionKind::Pass:
+        if (!state_.stack.empty() &&
+            state_.stack.back().controller == player) {
+            return 5'000.0;
+        }
+        return state_.stack.empty() ? -10.0 : 0.0;
+
+    case PriorityActionKind::PlayLand:
+        return 4'000.0;
+
+    case PriorityActionKind::CastCreature: {
+        double score = 1'200.0 + strategic_card_value(action.card);
+        const bool holding_counterspell =
+            has_card(player_state.hand, CardId::Counterspell);
+        const int untapped_lands = static_cast<int>(std::count_if(
+            player_state.lands.begin(), player_state.lands.end(),
+            [](const LandPermanent& land) { return !land.tapped; }));
+        const auto& cost = card_definition(action.card).cost;
+        const int total_cost = cost.generic + cost.green + cost.red +
+                               cost.blue + cost.white;
+        if (holding_counterspell && untapped_lands < total_cost + 2) {
+            score -= 1'500.0;
+        }
+        return score;
+    }
+
+    case PriorityActionKind::CastSorcery: {
+        const auto count_islands = [](const PlayerState& state) {
+            return std::count_if(
+                state.lands.begin(), state.lands.end(),
+                [](const LandPermanent& land) {
+                    return land.card == CardId::Island;
+                });
+        };
+        const auto enemy_islands = count_islands(opponent_state);
+        const auto own_islands = count_islands(player_state);
+        return 700.0 + 800.0 * static_cast<double>(enemy_islands) -
+               800.0 * static_cast<double>(own_islands);
+    }
+
+    case PriorityActionKind::CastArtifact:
+        return 1'500.0;
+
+    case PriorityActionKind::CastEnchantment: {
+        const double battlefield_swing =
+            250.0 * static_cast<double>(opponent_state.creatures.size()) -
+            150.0 * static_cast<double>(player_state.creatures.size());
+        return 1'800.0 + battlefield_swing;
+    }
+
+    case PriorityActionKind::CastLightningBolt:
+        if (!action.target.has_value()) {
+            return -10'000.0;
+        }
+        if (!action.target->creature.has_value()) {
+            if (action.target->player == player) {
+                return -10'000.0;
+            }
+            if (opponent_state.life <= 3) {
+                return 10'000.0;
+            }
+            return 900.0 +
+                   10.0 * static_cast<double>(20 - opponent_state.life);
+        } else {
+            if (action.target->player == player) {
+                return -10'000.0;
+            }
+            const auto target = std::find_if(
+                opponent_state.creatures.begin(),
+                opponent_state.creatures.end(),
+                [&](const CreaturePermanent& creature) {
+                    return creature.id == *action.target->creature;
+                });
+            if (target == opponent_state.creatures.end()) {
+                return -10'000.0;
+            }
+            const auto& definition = card_definition(target->card);
+            const bool lethal =
+                target->damage + card_definition(CardId::LightningBolt)
+                                     .effect_damage >=
+                definition.toughness;
+            return (lethal ? 2'000.0 : 500.0) +
+                   strategic_card_value(target->card);
+        }
+
+    case PriorityActionKind::CastCounterspell: {
+        if (!action.spell_target.has_value()) {
+            return -10'000.0;
+        }
+        const auto target = std::find_if(
+            state_.stack.begin(), state_.stack.end(),
+            [&](const StackObject& object) {
+                return object.id == *action.spell_target;
+            });
+        if (target == state_.stack.end() ||
+            target->controller == player) {
+            return -10'000.0;
+        }
+        return 3'000.0 + strategic_card_value(target->card);
+    }
+
+    case PriorityActionKind::ActivateMillstone:
+        if (!action.target.has_value() ||
+            action.target->player == player) {
+            return -10'000.0;
+        }
+        if (opponent_state.library.size() <= 2) {
+            return 10'000.0;
+        }
+        return 1'600.0 +
+               static_cast<double>(40 - opponent_state.library.size()) *
+                   10.0;
+    }
+    return -10'000.0;
 }
 
 double Game::rollout_action(const PriorityAction& action,
@@ -1081,7 +1505,7 @@ double Game::rollout_action(const PriorityAction& action,
     return result.winner == static_cast<int>(player) ? 1.0 : 0.0;
 }
 
-std::optional<GameResult> Game::play_random_combat() {
+std::optional<GameResult> Game::play_combat() {
     if (const auto result = play_priority_window(false);
         result.has_value()) {
         return result;
@@ -1092,12 +1516,126 @@ std::optional<GameResult> Game::play_random_combat() {
     auto& defending_state = state_.players[defending_player];
 
     std::vector<PermanentId> attackers;
-    std::uniform_int_distribution<int> attack_or_not(0, 1);
-    for (const auto& creature : attacking_state.creatures) {
-        if (!creature.tapped && !creature.summoning_sick &&
-            can_attack_through_moat(state_, creature) &&
-            attack_or_not(random_) == 1) {
-            attackers.push_back(creature.id);
+    const bool strategic_attacker =
+        config_.bots[state_.active_player].kind == BotKind::Strategic;
+    const bool learned_attacker =
+        config_.bots[state_.active_player].kind == BotKind::Learned;
+    if (strategic_attacker) {
+        std::vector<const CreaturePermanent*> legal_attackers;
+        int total_power = 0;
+        for (const auto& creature : attacking_state.creatures) {
+            if (!creature.tapped && !creature.summoning_sick &&
+                can_attack_through_moat(state_, creature)) {
+                legal_attackers.push_back(&creature);
+                total_power += card_definition(creature.card).power;
+            }
+        }
+
+        const bool attack_for_lethal =
+            total_power >= defending_state.life;
+        for (const auto* creature : legal_attackers) {
+            bool favorable_attack = defending_state.creatures.empty();
+            const auto& attacker = card_definition(creature->card);
+            for (const auto& blocker : defending_state.creatures) {
+                if (blocker.tapped) {
+                    continue;
+                }
+                const auto& blocker_definition =
+                    card_definition(blocker.card);
+                if (attacker.power >= blocker_definition.toughness) {
+                    favorable_attack = true;
+                    break;
+                }
+            }
+            if (attack_for_lethal || favorable_attack) {
+                attackers.push_back(creature->id);
+            }
+        }
+    } else if (learned_attacker) {
+        std::vector<PermanentId> legal_attackers;
+        for (const auto& creature : attacking_state.creatures) {
+            if (!creature.tapped && !creature.summoning_sick &&
+                can_attack_through_moat(state_, creature)) {
+                legal_attackers.push_back(creature.id);
+            }
+        }
+
+        std::vector<std::vector<PermanentId>> candidates = {
+            {},
+            legal_attackers,
+        };
+        for (const PermanentId attacker : legal_attackers) {
+            candidates.push_back({attacker});
+        }
+        std::uniform_int_distribution<int> include_attacker(0, 1);
+        for (int sample = 0; sample < 12; ++sample) {
+            std::vector<PermanentId> candidate;
+            for (const PermanentId attacker : legal_attackers) {
+                if (include_attacker(random_) == 1) {
+                    candidate.push_back(attacker);
+                }
+            }
+            candidates.push_back(std::move(candidate));
+        }
+
+        double best_score =
+            -std::numeric_limits<double>::infinity();
+        for (const auto& candidate : candidates) {
+            double total_score = 0.0;
+            constexpr int kBlockSamples = 6;
+            for (int sample = 0; sample < kBlockSamples; ++sample) {
+                GameState successor = state_;
+                std::vector<std::pair<PermanentId, PermanentId>>
+                    sampled_blocks;
+                if (!candidate.empty()) {
+                    for (const auto& blocker :
+                         successor.players[defending_player].creatures) {
+                        if (blocker.tapped) {
+                            continue;
+                        }
+                        std::uniform_int_distribution<std::size_t>
+                            choose_block(0, candidate.size());
+                        const std::size_t choice =
+                            choose_block(random_);
+                        if (choice != 0) {
+                            sampled_blocks.emplace_back(
+                                candidate[choice - 1], blocker.id);
+                        }
+                    }
+                    std::shuffle(sampled_blocks.begin(),
+                                 sampled_blocks.end(), random_);
+                }
+                if (!resolve_combat(successor, state_.active_player,
+                                    candidate, sampled_blocks)) {
+                    throw std::logic_error(
+                        "Learned bot sampled illegal combat");
+                }
+                if (successor.players[defending_player].life <= 0) {
+                    total_score += 1.0;
+                } else if (
+                    successor.players[state_.active_player].life <= 0) {
+                    total_score += 0.0;
+                } else {
+                    total_score += config_.learned_model->predict(
+                        learned_features(successor,
+                                         state_.active_player));
+                }
+            }
+            const double score =
+                total_score / static_cast<double>(kBlockSamples);
+            if (score > best_score) {
+                best_score = score;
+                attackers = candidate;
+            }
+        }
+    } else {
+        std::uniform_int_distribution<int> attack_or_not(0, 1);
+        for (const auto& creature : attacking_state.creatures) {
+            if (!creature.tapped && !creature.summoning_sick &&
+                can_attack_through_moat(state_, creature) &&
+                attack_or_not(random_) == 1) {
+                attackers.push_back(creature.id);
+            }
         }
     }
 
@@ -1111,27 +1649,161 @@ std::optional<GameResult> Game::play_random_combat() {
             available_blockers.push_back(creature.id);
         }
     }
-    std::shuffle(available_blockers.begin(), available_blockers.end(),
-                 random_);
-
     std::unordered_map<PermanentId, std::vector<PermanentId>>
         blockers_by_attacker;
-    for (const PermanentId blocker : available_blockers) {
-        // Zero means no block; other values select an attacker. Multiple
-        // blockers may legally select the same attacker.
-        std::uniform_int_distribution<std::size_t> choose_block(
-            0, attackers.size());
-        const std::size_t choice = choose_block(random_);
-        if (choice != 0) {
-            blockers_by_attacker[attackers[choice - 1]].push_back(blocker);
+    const bool strategic_defender =
+        config_.bots[defending_player].kind == BotKind::Strategic;
+    const bool learned_defender =
+        config_.bots[defending_player].kind == BotKind::Learned;
+    if (strategic_defender) {
+        std::vector<PermanentId> unassigned = available_blockers;
+        std::vector<PermanentId> ordered_attackers = attackers;
+        std::sort(ordered_attackers.begin(), ordered_attackers.end(),
+                  [&](PermanentId left, PermanentId right) {
+                      const auto* left_creature =
+                          find_creature(attacking_state, left);
+                      const auto* right_creature =
+                          find_creature(attacking_state, right);
+                      return card_definition(left_creature->card).power >
+                             card_definition(right_creature->card).power;
+                  });
+
+        int incoming_power = 0;
+        for (const PermanentId attacker_id : attackers) {
+            const auto* attacker =
+                find_creature(attacking_state, attacker_id);
+            incoming_power += card_definition(attacker->card).power;
+        }
+        const bool must_block = incoming_power >= defending_state.life;
+
+        for (const PermanentId attacker_id : ordered_attackers) {
+            const auto* attacker =
+                find_creature(attacking_state, attacker_id);
+            const auto& attacker_definition =
+                card_definition(attacker->card);
+            auto best_blocker = unassigned.end();
+            double best_score = must_block ? 1.0 : 0.0;
+
+            for (auto blocker = unassigned.begin();
+                 blocker != unassigned.end(); ++blocker) {
+                const auto* blocker_creature =
+                    find_creature(defending_state, *blocker);
+                const auto& blocker_definition =
+                    card_definition(blocker_creature->card);
+                const bool kills_attacker =
+                    blocker_definition.power >=
+                    attacker_definition.toughness;
+                const bool survives =
+                    blocker_definition.toughness >
+                    attacker_definition.power;
+                double score =
+                    20.0 * static_cast<double>(attacker_definition.power);
+                if (kills_attacker) {
+                    score += 1'000.0 +
+                             strategic_card_value(attacker->card);
+                }
+                if (survives) {
+                    score += 500.0;
+                } else {
+                    score -= strategic_card_value(
+                        blocker_creature->card);
+                }
+                if (score > best_score) {
+                    best_score = score;
+                    best_blocker = blocker;
+                }
+            }
+            if (best_blocker != unassigned.end()) {
+                blockers_by_attacker[attacker_id].push_back(
+                    *best_blocker);
+                unassigned.erase(best_blocker);
+            }
+        }
+    } else if (learned_defender) {
+        std::vector<std::vector<
+            std::pair<PermanentId, PermanentId>>>
+            candidates = {{}};
+        constexpr int kBlockCandidates = 32;
+        for (int sample = 0; sample < kBlockCandidates; ++sample) {
+            std::vector<std::pair<PermanentId, PermanentId>>
+                candidate;
+            for (const PermanentId blocker : available_blockers) {
+                std::uniform_int_distribution<std::size_t>
+                    choose_block(0, attackers.size());
+                const std::size_t choice = choose_block(random_);
+                if (choice != 0) {
+                    candidate.emplace_back(attackers[choice - 1],
+                                           blocker);
+                }
+            }
+            std::shuffle(candidate.begin(), candidate.end(), random_);
+            candidates.push_back(std::move(candidate));
+        }
+
+        double best_score =
+            -std::numeric_limits<double>::infinity();
+        std::vector<std::pair<PermanentId, PermanentId>> best_blocks;
+        for (const auto& candidate : candidates) {
+            GameState successor = state_;
+            if (!resolve_combat(successor, state_.active_player,
+                                attackers, candidate)) {
+                throw std::logic_error(
+                    "Learned bot sampled illegal blocks");
+            }
+            double score = 0.0;
+            if (successor.players[defending_player].life <= 0) {
+                score = 0.0;
+            } else if (
+                successor.players[state_.active_player].life <= 0) {
+                score = 1.0;
+            } else {
+                score = config_.learned_model->predict(
+                    learned_features(successor, defending_player));
+            }
+            if (score > best_score) {
+                best_score = score;
+                best_blocks = candidate;
+            }
+        }
+        for (const auto& [attacker, blocker] : best_blocks) {
+            blockers_by_attacker[attacker].push_back(blocker);
+        }
+    } else {
+        std::shuffle(available_blockers.begin(),
+                     available_blockers.end(), random_);
+        for (const PermanentId blocker : available_blockers) {
+            // Zero means no block; other values select an attacker. Multiple
+            // blockers may legally select the same attacker.
+            std::uniform_int_distribution<std::size_t> choose_block(
+                0, attackers.size());
+            const std::size_t choice = choose_block(random_);
+            if (choice != 0) {
+                blockers_by_attacker[attackers[choice - 1]].push_back(
+                    blocker);
+            }
         }
     }
 
     std::vector<std::pair<PermanentId, PermanentId>> blocks;
     for (const PermanentId attacker : attackers) {
         auto& blockers = blockers_by_attacker[attacker];
-        // The attacking player chooses damage assignment order.
-        std::shuffle(blockers.begin(), blockers.end(), random_);
+        // The attacking player chooses damage assignment order. The strategic
+        // policy orders the easiest creatures to kill first.
+        if (strategic_attacker) {
+            std::sort(blockers.begin(), blockers.end(),
+                      [&](PermanentId left, PermanentId right) {
+                          const auto* left_creature =
+                              find_creature(defending_state, left);
+                          const auto* right_creature =
+                              find_creature(defending_state, right);
+                          return card_definition(left_creature->card)
+                                     .toughness <
+                                 card_definition(right_creature->card)
+                                     .toughness;
+                      });
+        } else {
+            std::shuffle(blockers.begin(), blockers.end(), random_);
+        }
         for (const PermanentId blocker : blockers) {
             blocks.emplace_back(attacker, blocker);
         }
@@ -1154,6 +1826,14 @@ GameResult Game::run() {
     return run_from_turn(1);
 }
 
+GameResult Game::run_with_trace(std::vector<GameState>& trace) {
+    trace.clear();
+    trace_ = &trace;
+    const GameResult result = run();
+    trace_ = nullptr;
+    return result;
+}
+
 GameResult Game::run_from_turn(std::size_t first_turn) {
     for (std::size_t turn = first_turn; turn <= config_.max_turns;
          ++turn) {
@@ -1169,12 +1849,15 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
                 static_cast<int>(opponent_of(state_.active_player)),
                 EndReason::EmptyLibrary);
         }
+        if (trace_ != nullptr) {
+            trace_->push_back(state_);
+        }
 
         if (const auto result = play_priority_window(true);
             result.has_value()) {
             return *result;
         }
-        if (const auto result = play_random_combat(); result.has_value()) {
+        if (const auto result = play_combat(); result.has_value()) {
             return *result;
         }
         if (const auto result = play_priority_window(true);
@@ -1283,21 +1966,20 @@ double BotMatchupStats::second_win_rate() const {
 
 namespace {
 
-std::array<BotMatchupStats, 3> empty_bot_matchups() {
-    return {{
-        {
-            .first_bot = BotKind::Random,
-            .second_bot = BotKind::MonteCarlo,
-        },
-        {
-            .first_bot = BotKind::Random,
-            .second_bot = BotKind::DeepMonteCarlo,
-        },
-        {
-            .first_bot = BotKind::MonteCarlo,
-            .second_bot = BotKind::DeepMonteCarlo,
-        },
-    }};
+std::array<BotMatchupStats, kBotMatchupCount>
+empty_bot_matchups() {
+    std::array<BotMatchupStats, kBotMatchupCount> matchups;
+    std::size_t matchup = 0;
+    for (std::size_t first = 0; first < kBotKindCount; ++first) {
+        for (std::size_t second = first + 1;
+             second < kBotKindCount; ++second) {
+            matchups[matchup++] = {
+                .first_bot = static_cast<BotKind>(first),
+                .second_bot = static_cast<BotKind>(second),
+            };
+        }
+    }
+    return matchups;
 }
 
 std::size_t bot_matchup_index(BotKind first, BotKind second) {
@@ -1305,17 +1987,16 @@ std::size_t bot_matchup_index(BotKind first, BotKind second) {
                               static_cast<std::size_t>(second));
     const auto high = std::max(static_cast<std::size_t>(first),
                                static_cast<std::size_t>(second));
-    if (low == static_cast<std::size_t>(BotKind::Random) &&
-        high == static_cast<std::size_t>(BotKind::MonteCarlo)) {
-        return 0;
-    }
-    if (low == static_cast<std::size_t>(BotKind::Random) &&
-        high == static_cast<std::size_t>(BotKind::DeepMonteCarlo)) {
-        return 1;
-    }
-    if (low == static_cast<std::size_t>(BotKind::MonteCarlo) &&
-        high == static_cast<std::size_t>(BotKind::DeepMonteCarlo)) {
-        return 2;
+    std::size_t matchup = 0;
+    for (std::size_t candidate_low = 0;
+         candidate_low < kBotKindCount; ++candidate_low) {
+        for (std::size_t candidate_high = candidate_low + 1;
+             candidate_high < kBotKindCount;
+             ++candidate_high, ++matchup) {
+            if (low == candidate_low && high == candidate_high) {
+                return matchup;
+            }
+        }
     }
     throw std::logic_error("bot matchup requires two different bots");
 }
@@ -1337,6 +2018,15 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
         .rollouts_per_action =
             tournament_config.deep_monte_carlo_rollouts,
     };
+    const BotConfig strategic = {
+        .kind = BotKind::Strategic,
+        .rollouts_per_action = 1,
+    };
+    const BotConfig learned = {
+        .kind = BotKind::Learned,
+        .rollouts_per_action = 1,
+        .training_games = tournament_config.learned_training_games,
+    };
 
     switch (tournament_config.bot_field) {
     case BotField::Random:
@@ -1348,40 +2038,29 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
     case BotField::DeepMonteCarlo:
         game_config.bots = {deep_monte_carlo, deep_monte_carlo};
         break;
+    case BotField::Strategic:
+        game_config.bots = {strategic, strategic};
+        break;
+    case BotField::Learned:
+        game_config.bots = {learned, learned};
+        break;
     case BotField::Mixed:
-        // A nine-game rotation covers every ordered cross-policy pairing and
-        // every same-policy pairing. Each bot occupies six of the 18 seats.
-        switch (game_index % 9) {
-        case 0:
-            game_config.bots = {random, random};
-            break;
-        case 1:
-            game_config.bots = {monte_carlo, random};
-            break;
-        case 2:
-            game_config.bots = {random, monte_carlo};
-            break;
-        case 3:
-            game_config.bots = {deep_monte_carlo, random};
-            break;
-        case 4:
-            game_config.bots = {random, deep_monte_carlo};
-            break;
-        case 5:
-            game_config.bots = {monte_carlo, monte_carlo};
-            break;
-        case 6:
-            game_config.bots = {deep_monte_carlo, monte_carlo};
-            break;
-        case 7:
-            game_config.bots = {monte_carlo, deep_monte_carlo};
-            break;
-        default:
-            game_config.bots = {
+        // The square rotation covers all ordered pairings, including mirrors.
+        // Every bot has equal exposure in both seats.
+        {
+            const std::array<BotConfig, kBotKindCount> bots = {
+                random,
+                monte_carlo,
                 deep_monte_carlo,
-                deep_monte_carlo,
+                strategic,
+                learned,
             };
-            break;
+            const std::size_t pairing =
+                game_index % (kBotKindCount * kBotKindCount);
+            game_config.bots = {
+                bots[pairing / kBotKindCount],
+                bots[pairing % kBotKindCount],
+            };
         }
         break;
     }
@@ -1422,6 +2101,22 @@ void record_deck_result(DeckSimulationStats& deck,
     deck.total_cards_milled += result.player_stats[player].cards_milled;
 }
 
+void record_bot_result(BotSimulationStats& bot,
+                       const GameResult& result,
+                       std::size_t player) {
+    ++bot.games;
+    if (result.winner < 0) {
+        ++bot.draws;
+    } else if (result.winner == static_cast<int>(player)) {
+        ++bot.wins;
+    } else {
+        ++bot.losses;
+    }
+    bot.total_decisions += result.player_stats[player].decisions;
+    bot.total_rollouts +=
+        result.player_stats[player].monte_carlo_rollouts;
+}
+
 SimulationSummary run_matchup(const std::vector<CardId>& first_deck,
                               const std::vector<CardId>& second_deck,
                               std::size_t games, std::uint64_t seed,
@@ -1455,19 +2150,7 @@ SimulationSummary run_matchup(const std::vector<CardId>& first_deck,
             record_deck_result(
                 summary.deck_bots[player][bot_index], result, player);
 
-            auto& bot = summary.bots[bot_index];
-            ++bot.games;
-            if (result.winner < 0) {
-                ++bot.draws;
-            } else if (result.winner == static_cast<int>(player)) {
-                ++bot.wins;
-            } else {
-                ++bot.losses;
-            }
-            bot.total_decisions +=
-                result.player_stats[player].decisions;
-            bot.total_rollouts +=
-                result.player_stats[player].monte_carlo_rollouts;
+            record_bot_result(summary.bots[bot_index], result, player);
         }
 
         if (result.bots[0] != result.bots[1]) {
@@ -1606,6 +2289,10 @@ std::string_view bot_name(BotKind bot) {
         return "Monte Carlo";
     case BotKind::DeepMonteCarlo:
         return "Deep Monte Carlo";
+    case BotKind::Strategic:
+        return "Strategic";
+    case BotKind::Learned:
+        return "Learned Value";
     }
     return "Unknown";
 }
@@ -1627,6 +2314,9 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
     const bool uses_deep_monte_carlo =
         tournament_config.bot_field == BotField::DeepMonteCarlo ||
         tournament_config.bot_field == BotField::Mixed;
+    const bool uses_learned =
+        tournament_config.bot_field == BotField::Learned ||
+        tournament_config.bot_field == BotField::Mixed;
     if (uses_monte_carlo &&
         tournament_config.monte_carlo_rollouts == 0) {
         throw std::invalid_argument(
@@ -1642,6 +2332,17 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
             tournament_config.monte_carlo_rollouts) {
         throw std::invalid_argument(
             "deep Monte Carlo must use more rollouts than Monte Carlo");
+    }
+    if (uses_learned &&
+        tournament_config.learned_training_games == 0 &&
+        !game_config.learned_model) {
+        throw std::invalid_argument(
+            "Learned bot training games must be positive");
+    }
+    if (uses_learned && !game_config.learned_model) {
+        game_config.learned_model = train_learned_model(
+            tournament_config.learned_training_games,
+            seed ^ 0x4C4541524E454455ULL);
     }
 
     TournamentSummary summary;
@@ -1702,6 +2403,195 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
             matchup.empty_library_finishes;
         summary.turn_limit_draws += matchup.turn_limit_draws;
         summary.total_turns += matchup.total_turns;
+    }
+
+    return summary;
+}
+
+std::shared_ptr<const LearnedModel>
+train_learned_model(std::size_t training_games, std::uint64_t seed) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned model training games must be positive");
+    }
+
+    std::mt19937_64 random(seed);
+    std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
+    std::vector<LearnedModel::TrainingExample> examples;
+    examples.reserve(training_games * 60);
+
+    for (std::size_t game_index = 0; game_index < training_games;
+         ++game_index) {
+        const auto first_deck =
+            static_cast<DeckId>(choose_deck(random));
+        const auto second_deck =
+            static_cast<DeckId>(choose_deck(random));
+        Game game(deck_cards(first_deck), deck_cards(second_deck),
+                  random());
+        std::vector<GameState> trace;
+        const GameResult result = game.run_with_trace(trace);
+
+        for (const auto& state : trace) {
+            for (std::size_t perspective = 0; perspective < 2;
+                 ++perspective) {
+                double target = 0.5;
+                if (result.winner >= 0) {
+                    target =
+                        result.winner ==
+                                static_cast<int>(perspective)
+                            ? 1.0
+                            : 0.0;
+                }
+                examples.emplace_back(
+                    learned_features(state, perspective), target);
+            }
+        }
+    }
+
+    auto model =
+        std::make_shared<LearnedModel>(seed ^ 0x4D4F44454CULL);
+    model->train(std::move(examples), 8, 0.015,
+                 seed ^ 0x545241494EULL);
+    return model;
+}
+
+double BotBenchmarkSummary::challenger_win_rate() const {
+    return challenger_stats.win_rate();
+}
+
+namespace {
+
+std::pair<double, double> wilson_interval_95(std::size_t wins,
+                                             std::size_t games) {
+    if (games == 0) {
+        return {0.0, 0.0};
+    }
+    constexpr double z = 1.959963984540054;
+    constexpr double z_squared = z * z;
+    const double count = static_cast<double>(games);
+    const double proportion = static_cast<double>(wins) / count;
+    const double denominator = 1.0 + z_squared / count;
+    const double center =
+        (proportion + z_squared / (2.0 * count)) / denominator;
+    const double margin =
+        z * std::sqrt((proportion * (1.0 - proportion) +
+                       z_squared / (4.0 * count)) /
+                      count) /
+        denominator;
+    return {
+        100.0 * std::max(0.0, center - margin),
+        100.0 * std::min(1.0, center + margin),
+    };
+}
+
+} // namespace
+
+double BotBenchmarkSummary::confidence_low_95() const {
+    return wilson_interval_95(challenger_stats.wins,
+                              challenger_stats.games)
+        .first;
+}
+
+double BotBenchmarkSummary::confidence_high_95() const {
+    return wilson_interval_95(challenger_stats.wins,
+                              challenger_stats.games)
+        .second;
+}
+
+bool BotBenchmarkSummary::challenger_is_better_95() const {
+    return confidence_low_95() > 50.0;
+}
+
+BotBenchmarkSummary
+run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
+                  std::uint64_t seed, BotConfig challenger,
+                  BotConfig baseline, GameConfig game_config) {
+    if (repetitions_per_deck_pairing == 0) {
+        throw std::invalid_argument(
+            "benchmark repetitions must be positive");
+    }
+    if (challenger.kind == baseline.kind &&
+        challenger.rollouts_per_action ==
+            baseline.rollouts_per_action) {
+        throw std::invalid_argument(
+            "benchmark bots must use different policies or rollout counts");
+    }
+    const bool uses_learned =
+        challenger.kind == BotKind::Learned ||
+        baseline.kind == BotKind::Learned;
+    if (uses_learned && !game_config.learned_model) {
+        const std::size_t training_games = std::max(
+            challenger.kind == BotKind::Learned
+                ? challenger.training_games
+                : std::size_t{0},
+            baseline.kind == BotKind::Learned
+                ? baseline.training_games
+                : std::size_t{0});
+        game_config.learned_model = train_learned_model(
+            training_games, seed ^ 0x42454E43484E4EULL);
+    }
+
+    BotBenchmarkSummary summary = {
+        .challenger = challenger,
+        .baseline = baseline,
+        .repetitions_per_deck_pairing =
+            repetitions_per_deck_pairing,
+    };
+    std::mt19937_64 seed_generator(seed);
+
+    for (std::size_t first_deck = 0; first_deck < 4; ++first_deck) {
+        for (std::size_t second_deck = first_deck;
+             second_deck < 4; ++second_deck) {
+            const auto first_id =
+                static_cast<DeckId>(first_deck);
+            const auto second_id =
+                static_cast<DeckId>(second_deck);
+            const auto first_cards = deck_cards(first_id);
+            const auto second_cards = deck_cards(second_id);
+
+            for (std::size_t repetition = 0;
+                 repetition < repetitions_per_deck_pairing;
+                 ++repetition) {
+                const std::uint64_t game_seed = seed_generator();
+                for (std::size_t assignment = 0; assignment < 2;
+                     ++assignment) {
+                    const std::size_t challenger_player = assignment;
+                    const std::size_t baseline_player =
+                        opponent_of(challenger_player);
+                    const std::size_t challenger_deck =
+                        challenger_player == 0 ? first_deck
+                                               : second_deck;
+                    const std::size_t baseline_deck =
+                        baseline_player == 0 ? first_deck
+                                            : second_deck;
+
+                    for (std::size_t starting_player = 0;
+                         starting_player < 2; ++starting_player) {
+                        GameConfig current_config = game_config;
+                        current_config.starting_player =
+                            starting_player;
+                        current_config.bots[challenger_player] =
+                            challenger;
+                        current_config.bots[baseline_player] = baseline;
+
+                        Game game(first_cards, second_cards, game_seed,
+                                  current_config);
+                        const GameResult result = game.run();
+                        ++summary.total_games;
+                        record_bot_result(summary.challenger_stats,
+                                          result, challenger_player);
+                        record_bot_result(summary.baseline_stats, result,
+                                          baseline_player);
+                        record_deck_result(
+                            summary.challenger_decks[challenger_deck],
+                            result, challenger_player);
+                        record_deck_result(
+                            summary.baseline_decks[baseline_deck], result,
+                            baseline_player);
+                    }
+                }
+            }
+        }
     }
 
     return summary;

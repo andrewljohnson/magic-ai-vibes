@@ -13,7 +13,7 @@ early-Magic exception: Millstone debuted in *Antiquities* and Moat debuted in
 *Legends*.
 
 The default command runs 100 games per matchup (600 games total) with Random,
-Monte Carlo, and Deep Monte Carlo bots:
+Monte Carlo, Deep Monte Carlo, Strategic, and Learned Value bots:
 
 ```sh
 make run
@@ -24,21 +24,22 @@ For reproducible or larger runs:
 ```sh
 make
 ./build/alpha-sim --games 100 --seed 42 --bots mixed \
-  --rollouts 2 --deep-rollouts 8
+  --rollouts 2 --deep-rollouts 8 --train-games 200
 ```
 
-`--bots` accepts `mixed`, `random`, `monte-carlo`, or `deep-monte-carlo`.
-`--rollouts` and `--deep-rollouts` control the sampled continuations per legal
-action. Mixed mode uses a nine-game rotation containing every same-policy
-pairing and both seat orders for every cross-policy pairing.
+`--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
+`strategic`, or `learned`. `--rollouts` and `--deep-rollouts` control sampled
+continuations; `--train-games` controls Learned Value's random self-play
+dataset. Mixed mode uses a 25-game rotation containing all ordered policy
+pairings, including mirrors.
 
 Each run prints:
 
 - Per-deck records, play/draw splits, ending life, card, spell, damage, and mill
   statistics
-- A per-deck ranking showing the win-rate lift from both Monte Carlo depths
+- A per-deck ranking showing the win-rate lift from every stronger policy
 - Per-bot records, decision counts, and rollout counts
-- Direct records for all three cross-policy bot matchups
+- Direct records for all ten cross-policy bot matchups
 - Overall game length and finish reasons
 
 Run the test suite:
@@ -88,10 +89,51 @@ hidden information. The candidate action and existing stack resolve, then the
 rest of the game is played by random bots from the following turn. The real
 game still uses normal alternating priority and LIFO stack resolution.
 
-Combat declarations remain the shared random sub-policy in this first Monte
-Carlo MVP: legal attackers, blockers, and multi-block damage order are chosen
-randomly. The Monte Carlo bot currently controls land plays, spell casting,
-targets, responses, activated abilities, and passing priority.
+Strategic is deliberately simpler and cheaper than Monte Carlo. It uses
+card-aware rules to play lands first, avoid self-targeting, Bolt useful targets,
+counter opposing spells, mill the opponent, preserve Counterspell mana, and
+pass priority to resolve its own stack objects. It also chooses favorable
+attacks, blocks, and damage order. The other three policies retain the shared
+random combat sub-policy.
+
+Learned Value contains no card-name or card-ID rules. A dependency-free
+22-input, 16-hidden-unit neural network is trained from random self-play game
+outcomes. Its features are generic quantities only: life, library and hand
+sizes, mana, creature counts and aggregate power/toughness, other permanent
+counts, stack state, and whose turn it is. During play it scores legal
+successor states with the network. For combat it samples legal attack and block
+candidates and keeps the one with the highest learned value.
+
+This is AlphaGo-inspired, not a full AlphaGo implementation: it is a learned
+value function plus shallow candidate search, without a policy network,
+PUCT/MCTS tree, or iterative neural self-play yet.
+
+## Bot benchmark harness
+
+Use the paired harness to decide whether a challenger is actually stronger:
+
+```sh
+make benchmark
+make benchmark-deep
+make benchmark-learned
+
+./build/alpha-sim --benchmark --games 20 --seed 424242 \
+  --challenger strategic --baseline monte-carlo --rollouts 2
+
+./build/alpha-sim --benchmark --games 20 --seed 424242 \
+  --challenger strategic --baseline deep-monte-carlo --deep-rollouts 8
+
+./build/alpha-sim --benchmark --games 20 --seed 424242 \
+  --challenger learned --baseline monte-carlo \
+  --rollouts 2 --train-games 200
+```
+
+For every repetition, it covers all ten unordered deck pairings, including
+mirrors; swaps which policy pilots each deck; forces both play/draw positions;
+and reuses seeds across paired games to reduce shuffle noise. `--games 20`
+therefore runs 800 games. It reports per-deck records, rollout cost, a Wilson
+95% confidence interval, and passes only when the challenger's lower bound is
+above 50%.
 
 There are no mulligans, sideboards, concessions, or draw effects yet. A
 500-individual-turn safety limit is included, though these decks normally end
@@ -116,13 +158,23 @@ every pairing inside a 45–55% win-rate band.
 ## Mixed-bot baseline
 
 At 100 games per matchup with seed `424242`, two standard rollouts, and eight
-deep rollouts, the 600-game mixed run completed in about 9 seconds on the
-development machine. Aggregate seat-game win rates were 33.3% Random, 55.5%
-Monte Carlo, and 61.3% Deep Monte Carlo. Deep beat standard Monte Carlo 76–56
-head-to-head.
+deep rollouts, the five-policy 600-game mixed run completed in about 5.6
+seconds on the development machine, including 200 self-play training games.
+Aggregate seat-game win rates were 21.7% Random, 44.2% Monte Carlo, 51.7% Deep
+Monte Carlo, 68.8% Strategic, and 63.8% Learned Value.
 
-The output ranked White as the biggest beneficiary of deeper search: its
-Random win rate was 41.4%, standard Monte Carlo was 97.0% (+55.6 points), and
-Deep Monte Carlo was 99.0% (+57.6 points). The lists remain balanced under the
-original random policy; stronger policies expose a separate deck-balance
+The output ranked Blue as the biggest beneficiary of deeper Monte Carlo search:
+its Random win rate was 11.7%, standard Monte Carlo was 38.3% (+26.7 points),
+and Deep Monte Carlo was 60.0% (+48.3 points). The lists remain balanced under
+the original random policy; stronger policies expose a separate deck-balance
 problem for the next tuning pass.
+
+In the controlled 800-game harness, Strategic beat standard Monte Carlo
+618–182 (77.2%, 95% CI 74.2–80.0%) while using no rollouts. Against Deep Monte
+Carlo it won 563–237 (70.4%, 95% CI 67.1–73.4%); Deep averaged about 620
+rollout continuations per game.
+
+Learned Value beat standard Monte Carlo 644–156 (80.5%, 95% CI 77.6–83.1%)
+and Deep Monte Carlo 575–225 (71.9%, 95% CI 68.7–74.9%). Against the
+card-aware Strategic bot it went 390–410 (48.8%, 95% CI 45.3–52.2%), an
+inconclusive result close to parity.

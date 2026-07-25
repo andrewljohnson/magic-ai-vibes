@@ -7,7 +7,7 @@ ENGINE_SOURCE := src/game.cpp
 SIMULATOR := $(BUILD_DIR)/alpha-sim
 TEST_RUNNER := $(BUILD_DIR)/alpha-tests
 
-.PHONY: all test run clean
+.PHONY: all test benchmark benchmark-deep benchmark-learned run clean
 
 all: $(SIMULATOR)
 
@@ -23,6 +23,15 @@ $(TEST_RUNNER): $(ENGINE_SOURCE) tests/test_game.cpp include/alpha/game.hpp | $(
 test: $(TEST_RUNNER) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
+
+benchmark: $(SIMULATOR)
+	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger strategic --baseline monte-carlo --rollouts 2
+
+benchmark-deep: $(SIMULATOR)
+	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger strategic --baseline deep-monte-carlo --deep-rollouts 8
+
+benchmark-learned: $(SIMULATOR)
+	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger learned --baseline monte-carlo --rollouts 2 --train-games 200
 
 run: $(SIMULATOR)
 	./$(SIMULATOR)

@@ -39,7 +39,10 @@ void print_help(std::string_view executable) {
     std::cout
         << "Usage: " << executable
         << " [--games N] [--seed N] [--bots MODE] [--rollouts N]"
-           " [--deep-rollouts N]\n\n"
+           " [--deep-rollouts N] [--train-games N]\n"
+        << "       " << executable
+        << " --benchmark [--games N] [--challenger BOT]"
+           " [--baseline BOT]\n\n"
         << "Simulates an early-Magic round robin with legal bot play.\n"
         << "  Green: 18 Forest, 9 Grizzly Bears, 12 Ironroot Treefolk, "
            "1 Tsunami\n"
@@ -49,13 +52,40 @@ void print_help(std::string_view executable) {
         << "Options:\n"
         << "  --games N       Games per matchup (default: 100)\n"
         << "  --seed N        Reproducible random seed (default: random)\n"
-        << "  --bots MODE     mixed, random, monte-carlo, or "
-           "deep-monte-carlo (default: mixed)\n"
+        << "  --bots MODE     mixed, random, monte-carlo, "
+           "deep-monte-carlo, strategic, or learned (default: mixed)\n"
         << "  --rollouts N    Monte Carlo continuations per legal action "
            "(default: 2)\n"
         << "  --deep-rollouts N  Deep Monte Carlo continuations per "
            "legal action (default: 8)\n"
+        << "  --train-games N  Random self-play games for Learned Value "
+           "(default: 200)\n"
+        << "  --benchmark     Run the paired bot-strength harness\n"
+        << "  --challenger BOT  Benchmark challenger "
+           "(default: strategic)\n"
+        << "  --baseline BOT    Benchmark baseline "
+           "(default: monte-carlo)\n"
         << "  --help          Show this help\n";
+}
+
+alpha::BotKind parse_bot_kind(std::string_view value) {
+    if (value == "random") {
+        return alpha::BotKind::Random;
+    }
+    if (value == "monte-carlo" || value == "mc") {
+        return alpha::BotKind::MonteCarlo;
+    }
+    if (value == "deep-monte-carlo" || value == "deep-mc") {
+        return alpha::BotKind::DeepMonteCarlo;
+    }
+    if (value == "strategic") {
+        return alpha::BotKind::Strategic;
+    }
+    if (value == "learned" || value == "learned-value") {
+        return alpha::BotKind::Learned;
+    }
+    throw std::invalid_argument("invalid bot name: " +
+                                std::string(value));
 }
 
 alpha::BotField parse_bot_field(std::string_view value) {
@@ -71,9 +101,15 @@ alpha::BotField parse_bot_field(std::string_view value) {
     if (value == "deep-monte-carlo" || value == "deep-mc") {
         return alpha::BotField::DeepMonteCarlo;
     }
+    if (value == "strategic") {
+        return alpha::BotField::Strategic;
+    }
+    if (value == "learned" || value == "learned-value") {
+        return alpha::BotField::Learned;
+    }
     throw std::invalid_argument(
         "invalid value for --bots (use mixed, random, monte-carlo, "
-        "or deep-monte-carlo)");
+        "deep-monte-carlo, strategic, or learned)");
 }
 
 std::string_view bot_field_name(alpha::BotField field) {
@@ -84,8 +120,13 @@ std::string_view bot_field_name(alpha::BotField field) {
         return "Monte Carlo only";
     case alpha::BotField::DeepMonteCarlo:
         return "Deep Monte Carlo only";
+    case alpha::BotField::Strategic:
+        return "Strategic only";
+    case alpha::BotField::Learned:
+        return "Learned Value only";
     case alpha::BotField::Mixed:
-        return "mixed Random, Monte Carlo, and Deep Monte Carlo";
+        return "mixed Random, Monte Carlo, Deep Monte Carlo, "
+               "Strategic, and Learned Value";
     }
     return "unknown";
 }
@@ -145,6 +186,10 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
         static_cast<std::size_t>(alpha::BotKind::MonteCarlo);
     const auto deep_index =
         static_cast<std::size_t>(alpha::BotKind::DeepMonteCarlo);
+    const auto strategic_index =
+        static_cast<std::size_t>(alpha::BotKind::Strategic);
+    const auto learned_index =
+        static_cast<std::size_t>(alpha::BotKind::Learned);
     const bool has_deep_comparison =
         result.bots[random_index].games > 0 &&
         result.bots[deep_index].games > 0;
@@ -152,7 +197,7 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
         result.bots[random_index].games > 0 &&
         result.bots[monte_carlo_index].games > 0;
 
-    std::cout << "\nMonte Carlo benefit by deck\n";
+    std::cout << "\nBot benefit by deck\n";
     if (!has_deep_comparison && !has_monte_carlo_comparison) {
         std::cout << "  Not available; use --bots mixed to compare "
                      "policies.\n";
@@ -208,7 +253,120 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
             print_delta(deep.win_rate() - random.win_rate());
             std::cout << ", " << deep.games << " games)";
         }
+
+        const auto& strategic =
+            result.deck_bots[deck_index][strategic_index];
+        if (strategic.games > 0) {
+            std::cout << ", Strategic " << strategic.win_rate()
+                      << "% (";
+            print_delta(strategic.win_rate() - random.win_rate());
+            std::cout << ", " << strategic.games << " games)";
+        }
+
+        const auto& learned =
+            result.deck_bots[deck_index][learned_index];
+        if (learned.games > 0) {
+            std::cout << ", Learned " << learned.win_rate() << "% (";
+            print_delta(learned.win_rate() - random.win_rate());
+            std::cout << ", " << learned.games << " games)";
+        }
         std::cout << '\n';
+    }
+}
+
+alpha::BotConfig bot_config(alpha::BotKind kind, std::size_t rollouts,
+                            std::size_t deep_rollouts,
+                            std::size_t training_games) {
+    switch (kind) {
+    case alpha::BotKind::Random:
+    case alpha::BotKind::Strategic:
+        return {
+            .kind = kind,
+            .rollouts_per_action = 1,
+        };
+    case alpha::BotKind::Learned:
+        return {
+            .kind = kind,
+            .rollouts_per_action = 1,
+            .training_games = training_games,
+        };
+    case alpha::BotKind::MonteCarlo:
+        return {
+            .kind = kind,
+            .rollouts_per_action = rollouts,
+        };
+    case alpha::BotKind::DeepMonteCarlo:
+        return {
+            .kind = kind,
+            .rollouts_per_action = deep_rollouts,
+        };
+    }
+    throw std::invalid_argument("unknown bot kind");
+}
+
+void print_benchmark(const alpha::BotBenchmarkSummary& result,
+                     std::uint64_t seed) {
+    std::cout << std::fixed << std::setprecision(1)
+              << "Early Magic Bot Benchmark\n"
+              << "Seed: " << seed << '\n'
+              << "Challenger: "
+              << alpha::bot_name(result.challenger.kind) << '\n'
+              << "Baseline: " << alpha::bot_name(result.baseline.kind)
+              << '\n';
+    if (result.challenger.kind == alpha::BotKind::Learned ||
+        result.baseline.kind == alpha::BotKind::Learned) {
+        const std::size_t training_games =
+            result.challenger.kind == alpha::BotKind::Learned
+                ? result.challenger.training_games
+                : result.baseline.training_games;
+        std::cout << "Learned self-play training games: "
+                  << training_games << '\n';
+    }
+    std::cout
+              << "Repetitions per unordered deck pairing: "
+              << result.repetitions_per_deck_pairing << '\n'
+              << "Total paired games: " << result.total_games
+              << "\n\nOverall\n"
+              << "  Challenger record: "
+              << result.challenger_stats.wins << '-'
+              << result.challenger_stats.losses << '-'
+              << result.challenger_stats.draws << " ("
+              << result.challenger_win_rate() << "% wins)\n"
+              << "  Approximate 95% confidence interval: "
+              << result.confidence_low_95() << "% to "
+              << result.confidence_high_95() << "%\n"
+              << "  Verdict: ";
+    if (result.challenger_is_better_95()) {
+        std::cout << "PASS — challenger is better at 95% confidence\n";
+    } else if (result.confidence_high_95() < 50.0) {
+        std::cout << "FAIL — baseline is better at 95% confidence\n";
+    } else {
+        std::cout << "INCONCLUSIVE — run more repetitions\n";
+    }
+
+    std::cout << "\nEfficiency\n"
+              << "  Challenger: "
+              << result.challenger_stats.average_decisions()
+              << " decisions/game, "
+              << result.challenger_stats.average_rollouts()
+              << " rollouts/game\n"
+              << "  Baseline: "
+              << result.baseline_stats.average_decisions()
+              << " decisions/game, "
+              << result.baseline_stats.average_rollouts()
+              << " rollouts/game\n"
+              << "\nBy challenger deck\n";
+    for (std::size_t deck = 0;
+         deck < result.challenger_decks.size(); ++deck) {
+        const auto id = static_cast<alpha::DeckId>(deck);
+        const auto& challenger = result.challenger_decks[deck];
+        const auto& baseline = result.baseline_decks[deck];
+        std::cout << "  " << alpha::deck_name(id) << ": challenger "
+                  << challenger.win_rate() << "% (" << challenger.wins
+                  << '-' << challenger.losses << '-' << challenger.draws
+                  << "), baseline " << baseline.win_rate() << "% ("
+                  << baseline.wins << '-' << baseline.losses << '-'
+                  << baseline.draws << ")\n";
     }
 }
 
@@ -221,6 +379,10 @@ int main(int argc, char** argv) {
         alpha::BotField bot_field = alpha::BotField::Mixed;
         std::size_t rollouts = 2;
         std::size_t deep_rollouts = 8;
+        std::size_t training_games = 200;
+        bool benchmark = false;
+        alpha::BotKind challenger = alpha::BotKind::Strategic;
+        alpha::BotKind baseline = alpha::BotKind::MonteCarlo;
 
         for (int argument = 1; argument < argc; ++argument) {
             const std::string_view option = argv[argument];
@@ -228,9 +390,16 @@ int main(int argc, char** argv) {
                 print_help(argv[0]);
                 return 0;
             }
+            if (option == "--benchmark") {
+                benchmark = true;
+                continue;
+            }
             if (option != "--games" && option != "--seed" &&
                 option != "--bots" && option != "--rollouts" &&
-                option != "--deep-rollouts") {
+                option != "--deep-rollouts" &&
+                option != "--train-games" &&
+                option != "--challenger" &&
+                option != "--baseline") {
                 throw std::invalid_argument("unknown option: " +
                                             std::string(option));
             }
@@ -240,6 +409,16 @@ int main(int argc, char** argv) {
             }
             if (option == "--bots") {
                 bot_field = parse_bot_field(argv[argument]);
+                continue;
+            }
+            if (option == "--challenger" ||
+                option == "--baseline") {
+                const auto kind = parse_bot_kind(argv[argument]);
+                if (option == "--challenger") {
+                    challenger = kind;
+                } else {
+                    baseline = kind;
+                }
                 continue;
             }
 
@@ -258,13 +437,30 @@ int main(int argc, char** argv) {
                         "--rollouts must be greater than zero");
                 }
                 rollouts = static_cast<std::size_t>(value);
-            } else {
+            } else if (option == "--deep-rollouts") {
                 if (value == 0) {
                     throw std::invalid_argument(
                         "--deep-rollouts must be greater than zero");
                 }
                 deep_rollouts = static_cast<std::size_t>(value);
+            } else {
+                if (value == 0) {
+                    throw std::invalid_argument(
+                        "--train-games must be greater than zero");
+                }
+                training_games = static_cast<std::size_t>(value);
             }
+        }
+
+        if (benchmark) {
+            const auto result = alpha::run_bot_benchmark(
+                games, seed,
+                bot_config(challenger, rollouts, deep_rollouts,
+                           training_games),
+                bot_config(baseline, rollouts, deep_rollouts,
+                           training_games));
+            print_benchmark(result, seed);
+            return result.challenger_is_better_95() ? 0 : 1;
         }
 
         const alpha::TournamentSummary result =
@@ -272,7 +468,8 @@ int main(int argc, char** argv) {
                 games, seed, {},
                 {.bot_field = bot_field,
                  .monte_carlo_rollouts = rollouts,
-                 .deep_monte_carlo_rollouts = deep_rollouts});
+                 .deep_monte_carlo_rollouts = deep_rollouts,
+                 .learned_training_games = training_games});
 
         std::cout << std::fixed << std::setprecision(1)
                   << "Early Magic Bot Simulator\n"
@@ -288,6 +485,11 @@ int main(int argc, char** argv) {
             std::cout
                 << "Deep Monte Carlo rollouts per legal action: "
                 << deep_rollouts << '\n';
+        }
+        if (bot_field == alpha::BotField::Mixed ||
+            bot_field == alpha::BotField::Learned) {
+            std::cout << "Learned Value self-play training games: "
+                      << training_games << '\n';
         }
         std::cout
                   << "Games per matchup: " << result.games_per_matchup

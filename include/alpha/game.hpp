@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string_view>
@@ -221,14 +222,21 @@ enum class BotKind : std::uint8_t {
     Random,
     MonteCarlo,
     DeepMonteCarlo,
+    Strategic,
+    Learned,
 };
 
-inline constexpr std::size_t kBotKindCount = 3;
+inline constexpr std::size_t kBotKindCount = 5;
+inline constexpr std::size_t kBotMatchupCount =
+    kBotKindCount * (kBotKindCount - 1) / 2;
+
+class LearnedModel;
 
 struct BotConfig {
     BotKind kind = BotKind::Random;
     // Complete random continuations sampled for every legal action.
     std::size_t rollouts_per_action = 2;
+    std::size_t training_games = 200;
 };
 
 struct GameResult {
@@ -249,6 +257,7 @@ struct GameConfig {
     std::size_t max_turns = 500;
     std::optional<std::size_t> starting_player;
     std::array<BotConfig, 2> bots = {BotConfig{}, BotConfig{}};
+    std::shared_ptr<const LearnedModel> learned_model;
 };
 
 class Game {
@@ -258,6 +267,7 @@ class Game {
          GameConfig config = {});
 
     GameResult run();
+    GameResult run_with_trace(std::vector<GameState>& trace);
     const GameState& state() const;
 
   private:
@@ -265,10 +275,18 @@ class Game {
     bool draw_card(std::size_t player);
     std::optional<GameResult>
     play_priority_window(bool sorcery_actions);
-    std::optional<GameResult> play_random_combat();
+    std::optional<GameResult> play_combat();
     PriorityAction
     choose_priority_action(const std::vector<PriorityAction>& actions,
                            std::size_t player, bool sorcery_actions);
+    PriorityAction
+    choose_strategic_action(const std::vector<PriorityAction>& actions,
+                            std::size_t player);
+    PriorityAction
+    choose_learned_action(const std::vector<PriorityAction>& actions,
+                          std::size_t player, bool sorcery_actions);
+    double strategic_action_score(const PriorityAction& action,
+                                  std::size_t player) const;
     double rollout_action(const PriorityAction& action,
                           std::size_t player, bool sorcery_actions,
                           std::uint64_t seed) const;
@@ -281,6 +299,7 @@ class Game {
     GameConfig config_;
     GameState state_;
     std::optional<GameResult> setup_result_;
+    std::vector<GameState>* trace_ = nullptr;
 };
 
 struct DeckSimulationStats {
@@ -345,7 +364,7 @@ struct SimulationSummary {
     std::array<std::array<DeckSimulationStats, kBotKindCount>, 2>
         deck_bots;
     std::array<BotSimulationStats, kBotKindCount> bots;
-    std::array<BotMatchupStats, 3> bot_matchups;
+    std::array<BotMatchupStats, kBotMatchupCount> bot_matchups;
     std::size_t draws = 0;
     std::size_t life_total_finishes = 0;
     std::size_t empty_library_finishes = 0;
@@ -369,6 +388,8 @@ enum class BotField : std::uint8_t {
     Random,
     MonteCarlo,
     DeepMonteCarlo,
+    Strategic,
+    Learned,
     Mixed,
 };
 
@@ -376,6 +397,7 @@ struct TournamentConfig {
     BotField bot_field = BotField::Random;
     std::size_t monte_carlo_rollouts = 2;
     std::size_t deep_monte_carlo_rollouts = 8;
+    std::size_t learned_training_games = 200;
 };
 
 struct MatchupSummary {
@@ -391,7 +413,7 @@ struct TournamentSummary {
     std::array<std::array<DeckSimulationStats, kBotKindCount>, 4>
         deck_bots;
     std::array<BotSimulationStats, kBotKindCount> bots;
-    std::array<BotMatchupStats, 3> bot_matchups;
+    std::array<BotMatchupStats, kBotMatchupCount> bot_matchups;
     std::array<MatchupSummary, 6> matchups;
     std::size_t draws = 0;
     std::size_t life_total_finishes = 0;
@@ -409,5 +431,29 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
                                  std::uint64_t seed,
                                  GameConfig game_config = {},
                                  TournamentConfig tournament_config = {});
+
+struct BotBenchmarkSummary {
+    BotConfig challenger;
+    BotConfig baseline;
+    std::size_t repetitions_per_deck_pairing = 0;
+    std::size_t total_games = 0;
+    BotSimulationStats challenger_stats;
+    BotSimulationStats baseline_stats;
+    std::array<DeckSimulationStats, 4> challenger_decks;
+    std::array<DeckSimulationStats, 4> baseline_decks;
+
+    double challenger_win_rate() const;
+    double confidence_low_95() const;
+    double confidence_high_95() const;
+    bool challenger_is_better_95() const;
+};
+
+BotBenchmarkSummary
+run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
+                  std::uint64_t seed, BotConfig challenger,
+                  BotConfig baseline, GameConfig game_config = {});
+
+std::shared_ptr<const LearnedModel>
+train_learned_model(std::size_t training_games, std::uint64_t seed);
 
 } // namespace alpha
