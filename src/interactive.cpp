@@ -6,8 +6,11 @@
 #include <cctype>
 #include <cstddef>
 #include <istream>
+#include <numeric>
 #include <optional>
 #include <ostream>
+#include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -16,6 +19,25 @@
 
 namespace old_school {
 namespace {
+
+constexpr std::size_t kTerminalWidth = 120;
+constexpr std::size_t kBoxContentWidth = kTerminalWidth - 4;
+constexpr std::size_t kStackColumnWidth = 58;
+constexpr std::size_t kWideTerminalWidth =
+    kTerminalWidth + 2 + kStackColumnWidth;
+
+struct BoxStyle {
+    char corner = '+';
+    char side = '|';
+    char horizontal = '-';
+};
+
+constexpr BoxStyle kNormalBox;
+constexpr BoxStyle kBoldBox{
+    .corner = '#',
+    .side = '#',
+    .horizontal = '=',
+};
 
 class InteractiveQuit : public std::exception {
   public:
@@ -54,6 +76,16 @@ std::string lowercase(std::string_view text) {
         result.begin(), result.end(), result.begin(),
         [](unsigned char character) {
             return static_cast<char>(std::tolower(character));
+        });
+    return result;
+}
+
+std::string uppercase(std::string_view text) {
+    std::string result(text);
+    std::transform(
+        result.begin(), result.end(), result.begin(),
+        [](unsigned char character) {
+            return static_cast<char>(std::toupper(character));
         });
     return result;
 }
@@ -234,123 +266,671 @@ void print_card_list(std::ostream& output,
     }
 }
 
-void print_lands(std::ostream& output,
-                 const std::vector<LandPermanent>& lands) {
-    if (lands.empty()) {
-        output << "(none)";
-        return;
+template <typename Renderer>
+std::string render_text(Renderer renderer) {
+    std::ostringstream rendered;
+    renderer(rendered);
+    return rendered.str();
+}
+
+std::vector<std::string> wrap_text(std::string text,
+                                   std::size_t width) {
+    std::vector<std::string> lines;
+    std::string_view remaining = trim(text);
+    if (remaining.empty()) {
+        return {""};
     }
-    for (std::size_t index = 0; index < lands.size(); ++index) {
-        if (index != 0) {
-            output << ", ";
+    while (remaining.size() > width) {
+        std::size_t split = remaining.rfind(' ', width);
+        if (split == std::string_view::npos || split == 0) {
+            split = width;
         }
-        output << card_definition(lands[index].card).name
-               << (lands[index].tapped ? " [tapped]"
-                                       : " [untapped]");
+        lines.emplace_back(trim(remaining.substr(0, split)));
+        remaining.remove_prefix(split);
+        remaining = trim(remaining);
+    }
+    lines.emplace_back(remaining);
+    return lines;
+}
+
+void print_log_line(std::ostream& output,
+                    std::string message) {
+    const auto lines =
+        wrap_text(std::move(message), kTerminalWidth - 2);
+    for (std::size_t line = 0; line < lines.size(); ++line) {
+        output << (line == 0 ? "" : "  ")
+               << lines[line] << '\n';
     }
 }
 
-void print_creatures(std::ostream& output,
-                     const std::vector<CreaturePermanent>& creatures) {
-    if (creatures.empty()) {
-        output << "(none)";
+void print_box_border(std::ostream& output,
+                      std::string_view title = {},
+                      BoxStyle style = kNormalBox) {
+    std::string inside(
+        kTerminalWidth - 2, style.horizontal);
+    if (!title.empty()) {
+        const std::string label = " " + std::string(title) + " ";
+        if (label.size() > inside.size() - 2) {
+            throw std::logic_error("interactive box title is too long");
+        }
+        inside.replace(2, label.size(), label);
+    }
+    output << style.corner << inside << style.corner
+           << '\n';
+}
+
+void print_box_row(std::ostream& output, std::string_view label,
+                   const std::string& value,
+                   std::size_t label_width = 22,
+                   BoxStyle style = kNormalBox) {
+    std::string prefix;
+    if (!label.empty()) {
+        prefix = std::string(label) + ": ";
+    }
+    if (prefix.size() > label_width) {
+        throw std::logic_error("interactive row label is too long");
+    }
+    prefix.resize(label_width, ' ');
+    const std::size_t value_width =
+        kBoxContentWidth - label_width;
+    const auto lines = wrap_text(value, value_width);
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        std::string content =
+            (index == 0 ? prefix
+                        : std::string(label_width, ' ')) +
+            lines[index];
+        content.resize(kBoxContentWidth, ' ');
+        output << style.side << ' ' << content << ' '
+               << style.side << '\n';
+    }
+}
+
+struct CardTile {
+    std::size_t width = 0;
+    std::vector<std::string> lines;
+};
+
+std::string fit_tile_text(std::string text,
+                          std::size_t width) {
+    if (text.size() > width) {
+        if (width == 0) {
+            return {};
+        }
+        text.resize(width - 1);
+        text += '~';
+    }
+    text.resize(width, ' ');
+    return text;
+}
+
+std::string tile_border(std::size_t width) {
+    return "+" + std::string(width - 2, '-') + "+";
+}
+
+std::array<std::string, 2>
+two_tile_lines(std::string text, std::size_t width) {
+    const auto wrapped = wrap_text(std::move(text), width);
+    if (wrapped.size() > 2) {
+        throw std::logic_error(
+            "interactive card field needs more than two lines");
+    }
+    return {
+        wrapped.empty() ? "" : wrapped[0],
+        wrapped.size() > 1 ? wrapped[1] : "",
+    };
+}
+
+CardTile make_hand_tile(CardId card, std::size_t copies) {
+    constexpr std::size_t width = 17;
+    constexpr std::size_t inside = width - 2;
+    const auto name = two_tile_lines(
+        std::string(card_definition(card).name), inside);
+    const std::string count =
+        copies == 1 ? ""
+                    : "x" + std::to_string(copies);
+    return {
+        .width = width,
+        .lines = {
+            "/" + std::string(inside, '-') + "\\",
+            "|" + fit_tile_text(name[0], inside) + "|",
+            "|" + fit_tile_text(name[1], inside) + "|",
+            "|" + fit_tile_text(count, inside) + "|",
+            "\\" + std::string(inside, '_') + "/",
+        },
+    };
+}
+
+CardTile make_upright_card(std::string name,
+                           std::string detail,
+                           std::string status) {
+    constexpr std::size_t width = 17;
+    constexpr std::size_t inside = width - 2;
+    const auto name_lines =
+        two_tile_lines(std::move(name), inside);
+    const auto status_lines =
+        two_tile_lines(std::move(status), inside);
+    return {
+        .width = width,
+        .lines = {
+            tile_border(width),
+            "|" + fit_tile_text(name_lines[0], inside) + "|",
+            "|" + fit_tile_text(name_lines[1], inside) + "|",
+            "|" + fit_tile_text(std::move(detail), inside) + "|",
+            "|" + fit_tile_text(status_lines[0], inside) + "|",
+            "|" + fit_tile_text(status_lines[1], inside) + "|",
+            tile_border(width),
+        },
+    };
+}
+
+CardTile make_tapped_card(std::string name,
+                          std::string detail,
+                          std::string status) {
+    constexpr std::size_t width = 25;
+    constexpr std::size_t inside = width - 2;
+    std::string tap_line = "<<< TAPPED >>>";
+    if (!status.empty() && status != "READY") {
+        tap_line += " " + status;
+    }
+    return {
+        .width = width,
+        .lines = {
+            tile_border(width),
+            "|" + fit_tile_text(std::move(name), inside) + "|",
+            "|" + fit_tile_text(std::move(detail), inside) + "|",
+            "|" + fit_tile_text(std::move(tap_line), inside) + "|",
+            "|" + fit_tile_text(std::move(status), inside) + "|",
+            tile_border(width),
+        },
+    };
+}
+
+CardTile make_zone_tile(std::string name, std::size_t count,
+                        std::string detail) {
+    constexpr std::size_t width = 27;
+    constexpr std::size_t inside = width - 2;
+    return {
+        .width = width,
+        .lines = {
+            tile_border(width),
+            "|" + fit_tile_text(std::move(name), inside) + "|",
+            "|" + fit_tile_text(
+                      std::to_string(count) +
+                          (count == 1 ? " CARD" : " CARDS"),
+                      inside) +
+                "|",
+            "|" + fit_tile_text(std::move(detail), inside) + "|",
+            tile_border(width),
+        },
+    };
+}
+
+CardTile make_stack_tile(
+    const PlayerObservation& observation,
+    const StackObject& object, std::size_t position) {
+    constexpr std::size_t width = 53;
+    constexpr std::size_t inside = width - 2;
+    const auto description =
+        wrap_text(stack_object_name(observation, object), inside);
+    return {
+        .width = width,
+        .lines = {
+            tile_border(width),
+            "|" + fit_tile_text(
+                      "STACK #" + std::to_string(position) +
+                          (position == 0 ? " | TOP" : ""),
+                      inside) +
+                "|",
+            "|" + fit_tile_text(description.front(), inside) + "|",
+            "|" + fit_tile_text(
+                      description.size() > 1 ? description[1] : "",
+                      inside) +
+                "|",
+            tile_border(width),
+        },
+    };
+}
+
+void print_box_content(std::ostream& output,
+                       std::string content,
+                       BoxStyle style = kNormalBox) {
+    if (content.size() > kBoxContentWidth) {
+        throw std::logic_error(
+            "interactive content exceeds terminal width");
+    }
+    content.resize(kBoxContentWidth, ' ');
+    output << style.side << ' ' << content << ' '
+           << style.side << '\n';
+}
+
+void print_section_title(std::ostream& output,
+                         std::string_view title,
+                         BoxStyle style = kNormalBox) {
+    const std::string label = "[ " + std::string(title) + " ]";
+    const std::size_t left =
+        (kBoxContentWidth - label.size()) / 2;
+    print_box_content(
+        output, std::string(left, ' ') + label, style);
+}
+
+void print_tiles(std::ostream& output,
+                 const std::vector<CardTile>& tiles,
+                 BoxStyle style = kNormalBox) {
+    if (tiles.empty()) {
         return;
     }
-    for (std::size_t index = 0; index < creatures.size(); ++index) {
-        if (index != 0) {
-            output << ", ";
+
+    std::vector<std::vector<CardTile>> rows(1);
+    std::size_t row_width = 0;
+    for (const auto& tile : tiles) {
+        const std::size_t required =
+            tile.width + (rows.back().empty() ? 0 : 1);
+        if (!rows.back().empty() &&
+            row_width + required > kBoxContentWidth) {
+            rows.emplace_back();
+            row_width = 0;
         }
-        const auto& creature = creatures[index];
-        const auto& definition = card_definition(creature.card);
-        output << definition.name << " #" << creature.id << ' '
-               << definition.power +
-                      creature.temporary_power_bonus
-               << '/'
-               << definition.toughness +
-                      creature.temporary_toughness_bonus;
-        if (creature.tapped) {
-            output << " [tapped]";
+        if (tile.width > kBoxContentWidth) {
+            throw std::logic_error(
+                "interactive tile exceeds terminal width");
         }
+        row_width += tile.width +
+                     (rows.back().empty() ? 0 : 1);
+        rows.back().push_back(tile);
+    }
+
+    for (const auto& row : rows) {
+        const std::size_t width =
+            std::accumulate(
+                row.begin(), row.end(), std::size_t{0},
+                [](std::size_t total, const CardTile& tile) {
+                    return total + tile.width;
+                }) +
+            row.size() - 1;
+        const std::size_t height =
+            std::max_element(
+                row.begin(), row.end(),
+                [](const CardTile& left, const CardTile& right) {
+                    return left.lines.size() <
+                           right.lines.size();
+                })
+                ->lines.size();
+        const std::size_t left =
+            (kBoxContentWidth - width) / 2;
+        for (std::size_t line = 0; line < height; ++line) {
+            std::string content(left, ' ');
+            for (std::size_t tile_index = 0;
+                 tile_index < row.size(); ++tile_index) {
+                if (tile_index != 0) {
+                    content += ' ';
+                }
+                const auto& tile = row[tile_index];
+                const std::size_t top =
+                    (height - tile.lines.size()) / 2;
+                if (line < top ||
+                    line >= top + tile.lines.size()) {
+                    content += std::string(tile.width, ' ');
+                } else {
+                    content += tile.lines[line - top];
+                }
+            }
+            print_box_content(
+                output, std::move(content), style);
+        }
+    }
+}
+
+std::vector<CardTile>
+hand_tiles(const std::vector<CardId>& hand) {
+    std::array<std::size_t, kCardCount> counts{};
+    for (const CardId card : hand) {
+        ++counts[static_cast<std::size_t>(card)];
+    }
+    std::vector<CardTile> tiles;
+    for (std::size_t card = 0; card < counts.size(); ++card) {
+        if (counts[card] != 0) {
+            tiles.push_back(make_hand_tile(
+                static_cast<CardId>(card), counts[card]));
+        }
+    }
+    return tiles;
+}
+
+void append_status(std::string& status,
+                   const std::string& item) {
+    if (!status.empty()) {
+        status += ' ';
+    }
+    status += item;
+}
+
+std::vector<CardTile> creature_tiles(
+    const std::vector<CreaturePermanent>& creatures) {
+    std::vector<CardTile> tiles;
+    tiles.reserve(creatures.size());
+    for (const auto& creature : creatures) {
+        const auto& definition =
+            card_definition(creature.card);
+        const std::string detail =
+            "#" + std::to_string(creature.id) + " " +
+            std::to_string(
+                definition.power +
+                creature.temporary_power_bonus) +
+            "/" +
+            std::to_string(
+                definition.toughness +
+                creature.temporary_toughness_bonus);
+        std::string status;
         if (creature.summoning_sick) {
-            output << " [summoning sick]";
+            append_status(status, "SICK");
         }
         if (creature.damage != 0) {
-            output << " [damage " << creature.damage << ']';
+            append_status(
+                status,
+                "DMG " + std::to_string(creature.damage));
         }
         if (creature.temporary_power_bonus != 0 ||
             creature.temporary_toughness_bonus != 0) {
-            output << " [temporary "
-                   << (creature.temporary_power_bonus >= 0 ? "+" : "")
-                   << creature.temporary_power_bonus << '/'
-                   << (creature.temporary_toughness_bonus >= 0 ? "+" : "")
-                   << creature.temporary_toughness_bonus << ']';
+            append_status(
+                status,
+                "TEMP " +
+                    std::to_string(
+                        creature.temporary_power_bonus) +
+                    "/" +
+                    std::to_string(
+                        creature.temporary_toughness_bonus));
         }
+        if (status.empty()) {
+            status = "READY";
+        }
+        tiles.push_back(
+            creature.tapped
+                ? make_tapped_card(
+                      std::string(definition.name), detail,
+                      status)
+                : make_upright_card(
+                      std::string(definition.name), detail,
+                      status));
+    }
+    return tiles;
+}
+
+std::vector<CardTile> land_tiles(
+    const std::vector<LandPermanent>& lands) {
+    std::vector<CardTile> tiles;
+    tiles.reserve(lands.size());
+    for (const auto& land : lands) {
+        const std::string name(
+            card_definition(land.card).name);
+        tiles.push_back(
+            land.tapped
+                ? make_tapped_card(name, "LAND", "")
+                : make_upright_card(
+                      name, "LAND", ""));
+    }
+    return tiles;
+}
+
+std::vector<CardTile> other_permanent_tiles(
+    const PublicPlayerState& state) {
+    std::vector<CardTile> tiles;
+    tiles.reserve(
+        state.artifacts.size() +
+        state.enchantments.size());
+    for (const auto& artifact : state.artifacts) {
+        const std::string name(
+            card_definition(artifact.card).name);
+        const std::string detail =
+            "#" + std::to_string(artifact.id) + " ARTIFACT";
+        tiles.push_back(
+            artifact.tapped
+                ? make_tapped_card(name, detail, "READY")
+                : make_upright_card(
+                      name, detail, "READY"));
+    }
+    for (const CardId enchantment : state.enchantments) {
+        tiles.push_back(make_upright_card(
+            std::string(card_definition(enchantment).name),
+            "ENCHANTMENT", "IN PLAY"));
+    }
+    return tiles;
+}
+
+void print_hand(std::ostream& output,
+                const PlayerObservation& observation,
+                std::size_t player, BoxStyle style) {
+    const bool own_hand = player == observation.observer;
+    const bool revealed =
+        observation.revealed_opponent_hand.has_value();
+    const std::size_t hand_size =
+        observation.players[player].hand_size;
+    print_section_title(
+        output,
+        (own_hand
+             ? "YOUR HAND"
+             : (revealed ? "HAND (DEBUG REVEAL)"
+                         : "HIDDEN HAND")) +
+            std::string(" | ") +
+            std::to_string(hand_size) +
+            (hand_size == 1 ? " CARD" : " CARDS"),
+        style);
+    if (own_hand) {
+        print_tiles(
+            output, hand_tiles(observation.hand), style);
+    } else if (revealed) {
+        print_tiles(
+            output,
+            hand_tiles(
+                *observation.revealed_opponent_hand),
+            style);
+    } else {
+        print_tiles(
+            output,
+            {make_zone_tile(
+                "HIDDEN HAND",
+                observation.players[player].hand_size,
+                "IDENTITIES HIDDEN")},
+            style);
     }
 }
 
-void print_artifacts(std::ostream& output,
-                     const std::vector<ArtifactPermanent>& artifacts) {
-    if (artifacts.empty()) {
-        output << "(none)";
+void print_zones(std::ostream& output,
+                 const PublicPlayerState& state,
+                 BoxStyle style) {
+    const auto top_card = [](const std::vector<CardId>& cards) {
+        return cards.empty()
+                   ? std::string("EMPTY")
+                   : "TOP: " +
+                         std::string(
+                             card_definition(cards.back()).name);
+    };
+    print_section_title(output, "ZONES", style);
+    print_tiles(
+        output,
+        {
+            make_zone_tile(
+                "LIBRARY", state.library_size,
+                "ORDER HIDDEN"),
+            make_zone_tile(
+                "GRAVEYARD", state.graveyard.size(),
+                state.graveyard.empty()
+                    ? ""
+                    : top_card(state.graveyard)),
+            make_zone_tile(
+                "EXILE", state.exile.size(),
+                state.exile.empty()
+                    ? ""
+                    : top_card(state.exile)),
+        },
+        style);
+    if (!state.graveyard.empty()) {
+        print_box_row(
+            output, "GRAVEYARD CARDS",
+            render_text([&](std::ostream& stream) {
+                print_card_list(stream, state.graveyard);
+            }),
+            22, style);
+    }
+    if (!state.exile.empty()) {
+        print_box_row(
+            output, "EXILE CARDS",
+            render_text([&](std::ostream& stream) {
+                print_card_list(stream, state.exile);
+            }),
+            22, style);
+    }
+}
+
+void print_battlefield_section(
+    std::ostream& output, std::string_view title,
+    const std::vector<CardTile>& tiles, BoxStyle style) {
+    if (tiles.empty()) {
         return;
     }
-    for (std::size_t index = 0; index < artifacts.size(); ++index) {
-        if (index != 0) {
-            output << ", ";
-        }
-        output << card_definition(artifacts[index].card).name
-               << " #" << artifacts[index].id;
-        if (artifacts[index].tapped) {
-            output << " [tapped]";
-        }
-    }
+    print_section_title(output, title, style);
+    print_tiles(output, tiles, style);
 }
 
 void print_player(std::ostream& output,
                   const PlayerObservation& observation,
                   std::size_t player) {
     const auto& state = observation.players[player];
-    output << (player == observation.observer ? "You" : "Learned")
-           << " — life " << state.life
-           << ", library " << state.library_size
-           << ", hand ";
-    if (player == observation.observer) {
-        output << state.hand_size << ": ";
-        print_card_list(output, observation.hand);
-    } else {
-        output << state.hand_size << " cards (hidden)";
+    std::ostringstream title;
+    title << (player == observation.observer ? "YOU" : "LEARNED")
+          << " | LIFE " << state.life;
+    if (player == observation.active_player) {
+        title << " | ACTIVE";
     }
-    output << "\n  Lands: ";
-    print_lands(output, state.lands);
-    output << "\n  Creatures: ";
-    print_creatures(output, state.creatures);
-    output << "\n  Artifacts: ";
-    print_artifacts(output, state.artifacts);
-    output << "\n  Enchantments: ";
-    print_card_list(output, state.enchantments);
-    output << "\n  Graveyard: ";
-    print_card_list(output, state.graveyard);
-    output << "\n  Exile: ";
-    print_card_list(output, state.exile);
-    output << '\n';
+    const BoxStyle style =
+        player == observation.observer ? kBoldBox
+                                       : kNormalBox;
+    print_box_border(output, title.str(), style);
+
+    const auto creatures = creature_tiles(state.creatures);
+    const auto lands = land_tiles(state.lands);
+    auto permanents = creatures;
+    const auto other = other_permanent_tiles(state);
+    permanents.insert(
+        permanents.end(), other.begin(), other.end());
+    if (player != observation.observer) {
+        print_hand(output, observation, player, style);
+        print_zones(output, state, style);
+        print_battlefield_section(
+            output, "LANDS", lands, style);
+        print_battlefield_section(
+            output, "PERMANENTS", permanents, style);
+    } else {
+        print_battlefield_section(
+            output, "PERMANENTS", permanents, style);
+        print_battlefield_section(
+            output, "LANDS", lands, style);
+        print_zones(output, state, style);
+        print_hand(
+            output, observation, player, style);
+    }
+    print_box_border(output, {}, style);
+}
+
+std::vector<std::string>
+rendered_lines(const std::string& rendered) {
+    std::vector<std::string> lines;
+    std::istringstream input(rendered);
+    std::string line;
+    while (std::getline(input, line)) {
+        lines.push_back(std::move(line));
+    }
+    return lines;
+}
+
+std::string stack_column_border(std::string_view title = {}) {
+    std::string inside(kStackColumnWidth - 2, '-');
+    if (!title.empty()) {
+        const std::string label = " " + std::string(title) + " ";
+        inside.replace(2, label.size(), label);
+    }
+    return "+" + inside + "+";
+}
+
+std::vector<std::string> stack_column_lines(
+    const PlayerObservation& observation) {
+    std::vector<std::string> lines = {
+        stack_column_border("STACK | TOP FIRST"),
+    };
+    std::size_t position = 0;
+    for (auto object = observation.stack.rbegin();
+         object != observation.stack.rend(); ++object) {
+        const CardTile tile = make_stack_tile(
+            observation, *object, position++);
+        const std::size_t content_width =
+            kStackColumnWidth - 4;
+        const std::size_t left =
+            (content_width - tile.width) / 2;
+        for (const auto& tile_line : tile.lines) {
+            std::string content(left, ' ');
+            content += tile_line;
+            content.resize(content_width, ' ');
+            lines.push_back("| " + content + " |");
+        }
+    }
+    lines.push_back(stack_column_border());
+    return lines;
 }
 
 void print_state(std::ostream& output,
                  const PlayerObservation& observation) {
-    output << "\nState\n";
-    print_player(output, observation, observation.observer);
-    print_player(output, observation, 1 - observation.observer);
-    output << "Stack (top first): ";
+    std::ostringstream board;
+    std::ostringstream title;
+    title << "BOARD | TURN " << observation.turn_number;
+    print_box_border(board, title.str());
+    print_player(
+        board, observation, 1 - observation.observer);
+    print_player(board, observation, observation.observer);
+
+    output << '\n';
     if (observation.stack.empty()) {
-        output << "(empty)\n";
+        output << board.str();
         return;
     }
-    output << '\n';
-    for (auto object = observation.stack.rbegin();
-         object != observation.stack.rend(); ++object) {
-        output << "  " << stack_object_name(observation, *object)
-               << '\n';
+
+    auto board_lines = rendered_lines(board.str());
+    auto stack_lines = stack_column_lines(observation);
+    const std::size_t height =
+        std::max(board_lines.size(), stack_lines.size());
+    for (std::size_t line = 0; line < height; ++line) {
+        std::string left =
+            line < board_lines.size() ? board_lines[line] : "";
+        if (left.size() > kTerminalWidth) {
+            throw std::logic_error(
+                "interactive board exceeds base width");
+        }
+        left.resize(kTerminalWidth, ' ');
+        std::string right =
+            line < stack_lines.size() ? stack_lines[line] : "";
+        if (right.size() > kStackColumnWidth) {
+            throw std::logic_error(
+                "interactive stack exceeds column width");
+        }
+        right.resize(kStackColumnWidth, ' ');
+        const std::string wide =
+            left + "  " + right;
+        if (wide.size() != kWideTerminalWidth) {
+            throw std::logic_error(
+                "interactive wide board has invalid width");
+        }
+        output << wide << '\n';
     }
+}
+
+void print_choice_box(
+    std::ostream& output, std::string_view title,
+    const std::vector<std::string>& choices) {
+    print_box_border(output, title);
+    for (std::size_t index = 0; index < choices.size(); ++index) {
+        print_box_row(
+            output, "[" + std::to_string(index) + "]",
+            choices[index], 7);
+    }
+    print_box_border(output);
 }
 
 class TerminalSession {
@@ -393,6 +973,7 @@ class TerminalSession {
                        const GameEvent& event) {
                     observe(observation, event);
                 },
+            .reveal_opponent_hand = true,
         };
     }
 
@@ -454,13 +1035,15 @@ class TerminalSession {
         const PlayerObservation& observation, TurnPhase phase,
         const std::vector<PriorityAction>& actions) {
         render_decision_state(observation);
-        output_ << "\n" << phase_name(phase)
-                << " — you have priority\nActions\n";
-        for (std::size_t index = 0; index < actions.size(); ++index) {
-            output_ << "  " << index << ". "
-                    << action_name(observation, actions[index])
-                    << '\n';
+        std::vector<std::string> choices;
+        choices.reserve(actions.size());
+        for (const auto& action : actions) {
+            choices.push_back(action_name(observation, action));
         }
+        print_choice_box(
+            output_,
+            uppercase(phase_name(phase)) + " | YOUR PRIORITY",
+            choices);
         return read_index("choice> ", actions.size() - 1);
     }
 
@@ -469,15 +1052,16 @@ class TerminalSession {
         const std::vector<PermanentId>& legal_attackers) {
         render_decision_state(observation);
         if (legal_attackers.empty()) {
-            output_ << "You have no legal attackers.\n";
+            output_ << "[ATTACK] You have no legal attackers.\n";
             return {};
         }
-        output_ << "\nDeclare attackers\n";
         std::vector<PermanentId> selected;
         for (const PermanentId attacker : legal_attackers) {
-            output_ << "  " << creature_name(
-                observation, attacker, false)
-                    << "\n  0. Stay home\n  1. Attack\n";
+            print_choice_box(
+                output_,
+                "DECLARE ATTACKER | " +
+                    creature_name(observation, attacker, false),
+                {"Stay home", "Attack"});
             if (read_index("choice> ", 1) == 1) {
                 selected.push_back(attacker);
             }
@@ -491,35 +1075,38 @@ class TerminalSession {
         const std::vector<PermanentId>& attackers,
         const std::vector<LegalBlockerChoice>& blockers) {
         render_decision_state(observation);
-        output_ << "\nChoose blockers against: ";
+        std::ostringstream incoming;
+        incoming << "[BLOCK] Incoming attackers: ";
         for (std::size_t index = 0; index < attackers.size(); ++index) {
             if (index != 0) {
-                output_ << ", ";
+                incoming << ", ";
             }
-            output_ << creature_name(
+            incoming << creature_name(
                 observation, attackers[index], false);
         }
-        output_ << '\n';
+        print_log_line(output_, incoming.str());
         if (blockers.empty()) {
-            output_ << "You have no legal blockers.\n";
+            output_ << "[BLOCK] You have no legal blockers.\n";
             return {};
         }
 
         std::vector<std::pair<PermanentId, PermanentId>> selected;
         for (const auto& blocker : blockers) {
-            output_ << "\nBlock with "
-                    << creature_name(
-                           observation, blocker.blocker, false)
-                    << "\n  0. Do not block\n";
+            std::vector<std::string> choices = {"Do not block"};
             for (std::size_t index = 0;
                  index < blocker.legal_attackers.size(); ++index) {
-                output_ << "  " << index + 1 << ". Block "
-                        << creature_name(
-                               observation,
-                               blocker.legal_attackers[index],
-                               false)
-                        << '\n';
+                choices.push_back(
+                    "Block " +
+                    creature_name(
+                        observation,
+                        blocker.legal_attackers[index], false));
             }
+            print_choice_box(
+                output_,
+                "ASSIGN BLOCKER | " +
+                    creature_name(
+                        observation, blocker.blocker, false),
+                choices);
             const std::size_t chosen = read_index(
                 "choice> ", blocker.legal_attackers.size());
             if (chosen != 0) {
@@ -535,20 +1122,23 @@ class TerminalSession {
         const PlayerObservation& observation, PermanentId attacker,
         const std::vector<PermanentId>& blockers) {
         render_decision_state(observation);
-        output_ << "\nChoose damage order for "
+        output_ << "[ORDER] Choose first damage recipient for "
                 << creature_name(observation, attacker, false)
-                << " (first creature receives damage first)\n";
+                << ".\n";
         std::vector<PermanentId> remaining = blockers;
         std::vector<PermanentId> ordered;
         ordered.reserve(blockers.size());
         while (!remaining.empty()) {
+            std::vector<std::string> choices;
+            choices.reserve(remaining.size());
             for (std::size_t index = 0;
                  index < remaining.size(); ++index) {
-                output_ << "  " << index << ". "
-                        << creature_name(
-                               observation, remaining[index], false)
-                        << '\n';
+                choices.push_back(creature_name(
+                    observation, remaining[index], false));
             }
+            print_choice_box(
+                output_, "COMBAT DAMAGE ORDER | FIRST TO LAST",
+                choices);
             const std::size_t chosen =
                 read_index("choice> ", remaining.size() - 1);
             ordered.push_back(remaining[chosen]);
@@ -563,12 +1153,13 @@ class TerminalSession {
                  const GameEvent& event) {
         switch (event.kind) {
         case GameEventKind::TurnStarted:
-            output_ << "\n=== Turn " << observation.turn_number
-                    << " — "
-                    << (event.player == observation.observer
-                            ? "your turn"
-                            : "Learned's turn")
-                    << " ===\n";
+            output_ << '\n';
+            print_box_border(
+                output_,
+                "TURN " + std::to_string(observation.turn_number) +
+                    (event.player == observation.observer
+                         ? " | YOUR TURN"
+                         : " | LEARNED'S TURN"));
             print_state(output_, observation);
             last_rendered_ = observation;
             return;
@@ -576,69 +1167,87 @@ class TerminalSession {
             if (event.priority_action.has_value() &&
                 event.priority_action->kind !=
                     PriorityActionKind::Pass) {
-                output_ << player_name(observation, event.player)
-                        << ": "
-                        << action_name(
-                               observation,
-                               *event.priority_action)
-                        << '\n';
+                print_log_line(
+                    output_,
+                    "[ACTION] " +
+                        player_name(observation, event.player) +
+                        ": " +
+                        action_name(
+                            observation,
+                            *event.priority_action));
+                if (!observation.stack.empty()) {
+                    print_state(output_, observation);
+                    last_rendered_ = observation;
+                }
             }
             return;
         case GameEventKind::StackObjectResolved:
-            output_ << "Resolved: "
-                    << stack_object_name(
-                           observation, *event.stack_object)
-                    << '\n';
+            print_log_line(
+                output_,
+                "[RESOLVE] " +
+                    stack_object_name(
+                        observation, *event.stack_object));
             return;
-        case GameEventKind::AttackersDeclared:
+        case GameEventKind::AttackersDeclared: {
             if (event.attackers.empty()) {
                 if (event.player != observation.observer) {
-                    output_ << "Learned declares no attackers.\n";
+                    output_
+                        << "[ATTACK] Learned declares no attackers.\n";
                 }
                 return;
             }
-            output_ << player_name(observation, event.player)
-                    << (event.player == observation.observer
-                            ? " declare attackers: "
-                            : " declares attackers: ");
+            std::ostringstream attack_log;
+            attack_log
+                << "[ATTACK] "
+                << player_name(observation, event.player)
+                << (event.player == observation.observer
+                        ? " declare attackers: "
+                        : " declares attackers: ");
             for (std::size_t index = 0;
                  index < event.attackers.size(); ++index) {
                 if (index != 0) {
-                    output_ << ", ";
+                    attack_log << ", ";
                 }
-                output_ << creature_name(
+                attack_log << creature_name(
                     observation, event.attackers[index], false);
             }
-            output_ << '\n';
+            print_log_line(output_, attack_log.str());
             return;
-        case GameEventKind::BlockersDeclared:
+        }
+        case GameEventKind::BlockersDeclared: {
             if (event.blocks.empty()) {
-                output_ << player_name(observation, event.player)
+                output_ << "[BLOCK] "
+                        << player_name(observation, event.player)
                         << (event.player == observation.observer
                                 ? " declare no blockers.\n"
                                 : " declares no blockers.\n");
                 return;
             }
-            output_ << player_name(observation, event.player)
-                    << (event.player == observation.observer
-                            ? " declare blockers: "
-                            : " declares blockers: ");
+            std::ostringstream block_log;
+            block_log
+                << "[BLOCK] "
+                << player_name(observation, event.player)
+                << (event.player == observation.observer
+                        ? " declare blockers: "
+                        : " declares blockers: ");
             for (std::size_t index = 0;
                  index < event.blocks.size(); ++index) {
                 if (index != 0) {
-                    output_ << ", ";
+                    block_log << ", ";
                 }
-                output_ << creature_name(
-                               observation,
-                               event.blocks[index].second, false)
-                        << " blocks "
-                        << creature_name(
-                               observation,
-                               event.blocks[index].first, false);
+                block_log
+                    << creature_name(
+                           observation,
+                           event.blocks[index].second, false)
+                    << " blocks "
+                    << creature_name(
+                           observation,
+                           event.blocks[index].first, false);
             }
-            output_ << '\n';
+            print_log_line(output_, block_log.str());
             return;
-        case GameEventKind::DamageOrderChosen:
+        }
+        case GameEventKind::DamageOrderChosen: {
             for (std::size_t index = 0;
                  index < event.blocks.size();) {
                 const PermanentId attacker =
@@ -649,26 +1258,29 @@ class TerminalSession {
                     ++end;
                 }
                 if (end - index > 1) {
-                    output_ << "Damage order for "
-                            << creature_name(
-                                   observation, attacker, false)
-                            << ": ";
+                    std::ostringstream order_log;
+                    order_log
+                        << "[ORDER] Damage order for "
+                        << creature_name(
+                               observation, attacker, false)
+                        << ": ";
                     for (std::size_t blocker = index;
                          blocker < end; ++blocker) {
                         if (blocker != index) {
-                            output_ << ", ";
+                            order_log << ", ";
                         }
-                        output_ << creature_name(
+                        order_log << creature_name(
                             observation,
                             event.blocks[blocker].second, false);
                     }
-                    output_ << '\n';
+                    print_log_line(output_, order_log.str());
                 }
                 index = end;
             }
             return;
+        }
         case GameEventKind::CombatResolved:
-            output_ << "Combat resolves.\n";
+            output_ << "[COMBAT] Combat resolves.\n";
             return;
         }
         throw std::logic_error("unknown interactive game event");
@@ -679,11 +1291,41 @@ class TerminalSession {
     std::optional<PlayerObservation> last_rendered_;
 };
 
+std::vector<CardId> interactive_deck(DeckId deck) {
+    switch (deck) {
+    case DeckId::Green:
+        return green_deck();
+    case DeckId::Red:
+        return red_deck();
+    case DeckId::Blue:
+        return blue_deck();
+    case DeckId::White:
+        return white_control_deck();
+    case DeckId::RUAggro:
+        return ru_aggro_deck();
+    }
+    throw std::out_of_range("unknown interactive deck");
+}
+
 } // namespace
+
+InteractiveMatchup choose_interactive_matchup(std::uint64_t seed) {
+    std::mt19937_64 random(
+        seed ^ 0xA17E4AC7D3C5B921ULL);
+    const std::size_t human = random() % kDeckCount;
+    const std::size_t learned =
+        (human + 1 + random() % (kDeckCount - 1)) %
+        kDeckCount;
+    return {
+        .human_deck = static_cast<DeckId>(human),
+        .learned_deck = static_cast<DeckId>(learned),
+    };
+}
 
 InteractiveMatchResult run_interactive_match(
     std::istream& input, std::ostream& output, std::uint64_t seed,
-    std::shared_ptr<const LearnedModel> learned_model) {
+    std::shared_ptr<const LearnedModel> learned_model,
+    InteractiveMatchup matchup) {
     if (!learned_model) {
         throw std::invalid_argument(
             "interactive match requires a frozen Learned model");
@@ -704,10 +1346,14 @@ InteractiveMatchResult run_interactive_match(
     config.learned_model = learned_model;
     config.human_controllers[0] = terminal.controller();
 
-    Game game(ru_aggro_deck(), ru_aggro_deck(), seed, config);
+    Game game(
+        interactive_deck(matchup.human_deck),
+        interactive_deck(matchup.learned_deck), seed, config);
     try {
         const GameResult result = game.run();
-        const auto observation = observe_game_state(game.state(), 0);
+        auto observation = observe_game_state(game.state(), 0);
+        observation.revealed_opponent_hand =
+            game.state().players[1].hand;
         terminal.print_final(observation, result);
         return {
             .abandoned = false,

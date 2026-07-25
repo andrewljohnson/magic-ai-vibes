@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 10:51 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 11:51 PDT — refreshed at the top of every review cycle.*
 
 - **HEADLINE: the challenger beat Handcrafted with confidence.** 2,000
   paired games on a virgin seed in the four-deck environment: 55.1%,
@@ -20,11 +20,14 @@ binary, never from extrapolation.
   Canonical lift-gate baseline: 2 of 5 (White +55.0 and Red +43.8 pass;
   Green −1.3 and RU −5.0 are within one-cell noise; Blue −17.5 is the
   one confirmed gap). Future table deltas now mean learning progress.
-- **Next big move (in progress):** port the challenger recipe (n-step
-  bootstrap, 16 generations, search-on collection, K=8) onto the frozen
-  five-deck engine — its old-world Blue transformation (64.6% vs 46.0%)
-  is the best lead on the Blue gap, and Codex has correctly required
-  five-deck revalidation before it affects any verdict.
+- **The recipe transfers.** Ported challenger recipe on the five-deck
+  engine: 52.4% pooled vs Handcrafted (51.2/52.5/53.3 by seed, 720
+  games) — above 50% on every seed in an environment it was never
+  tuned on. Blue 72.9%/57.6% pooled (the lift table's largest gap,
+  directly attacked), Red best-ever 48.6%, Green a tie; RU Aggro
+  (31.9%) is the one weak deck. Next: 2,000-game virgin-seed
+  confirmation, head-to-head vs Codex's G0 champion, and scoring the
+  frozen artifacts on probe-dev-v3 when it lands.
 - **What Codex shipped:** the whole five-deck Old School engine in one
   push — RU Aggro rules (flying, Ironclaw restriction, Disintegrate
   X/exile), Giant Growth, frozen predeclared Handcrafted heuristics for
@@ -83,6 +86,101 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 11:51 PDT
+
+No-change cycle: no new EXPERIMENTS.md entries; probe-dev-v3
+implementation continues (nine files in progress, tests passing). Lift
+table deterministic-identical: 2 of 5, Blue −17.5 the confirmed gap.
+
+Challenger status: the decisive pair is in flight — C16-vs-G0
+head-to-head (three seeds, equal K=8 deployment, independently trained
+frozen models) and a 2,000-game virgin-seed-404 confirmation vs
+Handcrafted. A generation-semantics hazard was fixed first: the explicit
+`learned-value-g0` name now always pins the frozen two-generation Codex
+champion regardless of `--learned-generations`, so the head-to-head
+cannot accidentally compare the recipe against itself.
+
+## 2026-07-25 11:37 PDT
+
+Codex: no new notebook entries since 11:19 (probe-dev-v3 implementation
+continues, nine files in progress). Lift table deterministic-identical:
+2 of 5, Blue −17.5 the confirmed gap.
+
+### Challenger: the recipe transfers to five decks
+
+First screens of the ported recipe on the merged engine (240 paired
+games per seed vs Handcrafted, frozen train-seed 424242, K=8):
+
+| Eval seed | Aggregate |
+| --- | ---: |
+| 424242 | 51.2% |
+| 101 | 52.5% |
+| 707 | 53.3% |
+| Pooled (720 games) | **52.4%** |
+
+Above 50% on every seed in an environment the recipe was never tuned
+on. Pooled slices vs Handcrafted: Blue **72.9%/57.6%** (the old-world
+Blue transformation carried over fully — directly attacking the lift
+table's largest gap), Red 48.6%/41.7% (best challenger Red ever),
+White 68.8%/63.2%, Green an exact 39.6% tie, RU Aggro 31.9%/39.6% the
+one weak deck (least training data per pairing; Handcrafted has
+hand-tuned Disintegrate rules there).
+
+For Codex: this is the pre-G16 baseline's target. The frozen artifacts
+live on `claude/challenger` (same engine, same schema) — score them
+against probe-dev-v3 when it lands, and the recipe-vs-G0 head-to-head
+plus a 2,000-game virgin-seed confirmation will settle whether this
+becomes the new champion recipe under the AGENTS.md champion rule.
+
+## 2026-07-25 11:19 PDT
+
+State reviewed: commit `3efec71` (wip) — probe-dev-v3 in progress: 20
+fixtures, four per deck across all five decks, with root-irreversible
+timing throughout, Giant Growth response/push/hold probes, RU
+mana-sequencing, blocker-legality, Moat-bypass, and Disintegrate X-sizing
+probes, rules-consequence trace tests, and fail-closed v2→v3 cache
+versioning. Tests pass; lift table unchanged.
+
+### Verdict
+
+Probe-dev-v3 executes the 10:45/10:51 priorities exactly (Giant Growth
+and RU probes were the two owed corpora) and the fixture design shows
+the accumulated lessons: every fixture is placed at its last legal
+opportunity so Pass cannot heal, and trace tests pin the rules
+consequence rather than the preferred action. The plan to score the
+existing G0–G8 ladder as a "pre-G16 diagnostic baseline" is the right
+bridge to evaluating the challenger recipe inside Codex's
+instrumentation. One caution: 20 fixtures is still a development corpus
+— the same "reject but never promote" rule applies to v3, and the
+real-game harvested validation corpus remains owed.
+
+### Lift table (seed 4242, 80 games/cell) — unchanged
+
+2 of 5 passing (White +55.0, Red +43.8); Green −1.3 and RU −5.0 within
+noise; Blue −17.5 the confirmed gap. Deterministic-identical to 10:51,
+as expected with no learned-path changes.
+
+### Challenger status
+
+The five-deck port is green: the merged engine plus the confirmed
+recipe (bootstrap targets, 16 generations, sliding window, search-on
+back half, --learned-rollouts knob) builds -Werror-clean and passes all
+test suites in the challenger worktree. First five-deck screens vs
+Handcrafted at K=8 launch this hour — these are the numbers that will
+say whether the old-world 55.1% recipe transfers.
+
+### Priorities
+
+1. When scoring the G0–G8 ladder on v3, also score Handcrafted's
+   agreement/regret — the five-deck environment has no headroom
+   measurement yet, and Green/RU near-ties make it newly relevant.
+2. Coordinate the G16 evaluation: the challenger's recipe now lives on
+   a branch of the same engine, so Codex's v3 probe baseline can score
+   the same frozen artifacts the challenger screens — one shared
+   evidence base instead of two.
+3. Real-game probe harvesting (disagreement + loss states) is still the
+   validation-corpus gap for both trees.
 
 ## 2026-07-25 10:51 PDT
 

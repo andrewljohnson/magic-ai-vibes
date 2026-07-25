@@ -178,8 +178,8 @@ void print_help(std::string_view executable) {
            "(default: 800)\n"
         << "  --train-seed N   Learned model seed, independent of --seed "
            "(default: 424242)\n"
-        << "  --interactive   Play one RU Aggro mirror against frozen "
-           "Learned Value\n"
+        << "  --interactive   Play a seeded random five-deck matchup "
+           "against frozen Learned Value\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
            "(default: handcrafted; learned generations: "
@@ -1897,19 +1897,28 @@ int main(int argc, char** argv) {
                 "or probe route that selects Value G8 Late-Mix50");
         }
         if (interactive) {
+            const auto matchup =
+                old_school::choose_interactive_matchup(seed);
             std::cout
                 << "Old School Magic Interactive\n"
-                << "Match: Human RU Aggro vs Learned Value RU Aggro\n"
+                << "Match: Human "
+                << old_school::deck_name(matchup.human_deck)
+                << " vs Learned Value "
+                << old_school::deck_name(matchup.learned_deck) << '\n'
                 << "Game seed: " << seed << '\n'
                 << "Training seed: " << training_seed << '\n'
                 << "Type q at any prompt to abandon the game.\n"
+                << "Board layout: 120 columns, expanding to 180 for "
+                   "the stack rail; opponent hand is shown for "
+                   "inspection only.\n"
                 << "MVP timing note: there is no priority window after "
                    "attackers or blockers are declared.\n";
             const auto learned_model =
                 train_value_g0_with_progress(
                     training_games, training_seed);
             old_school::run_interactive_match(
-                std::cin, std::cout, seed, learned_model);
+                std::cin, std::cout, seed, learned_model,
+                matchup);
             return 0;
         }
         if (score_probes) {

@@ -3013,3 +3013,78 @@ Predeclared engineering gates:
 No offline policy score will be used to tune these fixtures. After the gates
 pass, generate one frozen v3 reference cache and score the existing G0–G8
 ladder once to establish the pre-G16 diagnostic baseline.
+
+### Manual interactive burn-sequencing observation
+
+Recorded after reading the 2026-07-25 11:37 independent review. This is a
+qualitative user observation, not a benchmark result and not evidence for a
+card-specific Learned rule.
+
+During manual interactive play, the user observed Learned cast Lightning Bolt
+at the player's face instead of retaining it for a future creature. The exact
+game seed and decision state were not recorded in the notebook, so this
+particular instance is not yet a reproducible fixture. It suggests a
+falsifiable failure mode: short-horizon value/search may over-rank immediate
+player damage relative to the delayed option value of holding removal. The
+reviewer's separately measured five-deck G16 transfer result makes RU Aggro
+the weakest challenger slice at 31.9%, which raises the priority of this clue
+but does not prove the cause.
+
+The user also observed Learned cast Disintegrate with X=0. That action is
+legally correct but spends red mana and has no game effect in this engine, so
+it is a sharper generic action-ranking failure than the context-dependent
+Bolt observation. The v3 RU X-sizing fixture already enumerates every legal
+opponent-targeted X from zero through three and can measure whether deeper
+search and later generations rank the no-effect branch below Pass without
+adding card-specific policy knowledge.
+
+Next research step: harvest real Red and RU priority states where Learned's
+top action is Bolt-to-player and legal alternatives include Bolt-to-creature
+or Pass/hold, plus RU states where it selects X=0 Disintegrate. Preserve the
+state and hidden-information-safe determinization, label every legal action
+with the deep common-world reference, and report the face/creature/hold and
+X-sizing rankings and regret. Do not encode a Lightning-Bolt- or
+Disintegrate-specific preference in Learned.
+
+### Five-deck probe-dev-v3 engineering result
+
+Recorded after reading the 2026-07-25 11:51 independent review. The review
+reiterates that this 20-fixture development corpus may reject a candidate but
+cannot promote one; that limitation is accepted and unchanged.
+
+The hard-cut v3 engineering hypothesis passed:
+
+- the corpus contains exactly 20 unique fixtures and exactly four for each of
+  Green, Red, Blue, White, and RU Aggro;
+- all candidate sets are complete and legal, exact original-deck card
+  conservation holds, hidden repartitioning is invariant, and the public
+  states have sufficient visible mana/history support;
+- trace tests cover Giant Growth save/push/hold, the retimed irreversible Red
+  and White roots, RU colored-land development, Ironclaw blocking, Flying Men
+  through Moat, and Disintegrate X sizing;
+- zero-pass healing regressions explicitly close the affected Red and White
+  priority windows;
+- metric/report arrays cover all five decks, the v3 cache/schema names are a
+  clean break, and a v2 cache is rejected.
+
+Exact verification on the final integrated source:
+
+```sh
+make test-probes
+make test
+```
+
+Results: 18 probe-corpus tests across 20 fixtures, 11 probe-metric tests, 13
+probe-runner tests, 82 engine/bot tests, 6 learned-iteration tests, the full
+CLI lifecycle suite, and a representative simulation all pass under strict
+C++20 `-Wall -Wextra -Wpedantic -Werror`. The integrated source also compiled
+under AddressSanitizer and UndefinedBehaviorSanitizer; the engine suite,
+probe-runner suite, and interactive normal/active-stack smokes reported zero
+findings.
+
+Decision: accept probe-dev-v3 as development instrumentation. No v3 reference
+cache or policy score has been generated yet, so this is not a Learned
+strength result. The next measurement remains one frozen v3 label cache,
+G0-G8 plus Handcrafted diagnostic scoring, and then the five-deck G16 artifact
+comparison. A separately harvested real-game validation corpus is still
+required for any promotion claim.

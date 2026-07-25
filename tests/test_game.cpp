@@ -1,4 +1,5 @@
 #include "old_school/game.hpp"
+#include "old_school/interactive.hpp"
 #include "old_school/learned_iteration.hpp"
 
 #include <algorithm>
@@ -4599,6 +4600,7 @@ TEST(interactive_observation_hides_both_libraries_and_opponent_hand) {
 
     CHECK(observed == repeated);
     CHECK(observed.hand == state.players[0].hand);
+    CHECK(!observed.revealed_opponent_hand.has_value());
     CHECK(observed.players[0].hand_size == 2);
     CHECK(observed.players[0].library_size == 2);
     CHECK(observed.players[1].hand_size == 2);
@@ -4614,6 +4616,71 @@ TEST(interactive_observation_hides_both_libraries_and_opponent_hand) {
         rejected = true;
     }
     CHECK(rejected);
+}
+
+TEST(interactive_matchup_selection_is_seeded_nonmirror_and_complete) {
+    std::array<std::array<bool, old_school::kDeckCount>,
+               old_school::kDeckCount>
+        seen{};
+    for (std::uint64_t seed = 0; seed < 4096; ++seed) {
+        const auto matchup =
+            old_school::choose_interactive_matchup(seed);
+        CHECK(matchup ==
+              old_school::choose_interactive_matchup(seed));
+        const std::size_t human =
+            static_cast<std::size_t>(matchup.human_deck);
+        const std::size_t learned =
+            static_cast<std::size_t>(matchup.learned_deck);
+        CHECK(human < old_school::kDeckCount);
+        CHECK(learned < old_school::kDeckCount);
+        CHECK(human != learned);
+        seen[human][learned] = true;
+    }
+    for (std::size_t human = 0;
+         human < old_school::kDeckCount; ++human) {
+        for (std::size_t learned = 0;
+             learned < old_school::kDeckCount; ++learned) {
+            CHECK(seen[human][learned] ==
+                  (human != learned));
+        }
+    }
+}
+
+TEST(human_debug_reveal_is_opt_in_and_controller_only) {
+    const auto deck = two_card_deck(
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt);
+    bool saw_revealed_hand = false;
+    old_school::Game* game_under_test = nullptr;
+    auto controller = developing_human_controller();
+    controller.reveal_opponent_hand = true;
+    controller.choose_priority_action =
+        [&saw_revealed_hand, &game_under_test](
+            const old_school::PlayerObservation& observation,
+            old_school::TurnPhase,
+            const std::vector<old_school::PriorityAction>&) {
+            CHECK(game_under_test != nullptr);
+            CHECK(observation.revealed_opponent_hand.has_value());
+            CHECK(observation.revealed_opponent_hand->size() ==
+                  observation.players[1].hand_size);
+            CHECK(!observation.revealed_opponent_hand->empty());
+            CHECK(*observation.revealed_opponent_hand ==
+                  game_under_test->state().players[1].hand);
+            saw_revealed_hand = true;
+            return std::size_t{0};
+        };
+
+    old_school::GameConfig config;
+    config.max_turns = 1;
+    config.starting_player = 0;
+    config.human_controllers[0] = std::move(controller);
+    old_school::Game game(deck, deck, 0xD38B6A11ULL, config);
+    game_under_test = &game;
+    static_cast<void>(game.run());
+
+    CHECK(saw_revealed_hand);
+    CHECK(!old_school::observe_game_state(game.state(), 0)
+               .revealed_opponent_hand.has_value());
 }
 
 TEST(scripted_human_game_is_deterministic_and_observes_public_stack) {

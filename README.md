@@ -35,7 +35,8 @@ make
   --train-seed 424242
 ```
 
-Play an RU Aggro mirror against the frozen Learned Value bot:
+Play a random matchup from the five-deck field against the frozen Learned
+Value bot:
 
 ```sh
 ./build/old-school-sim --interactive
@@ -45,13 +46,24 @@ Play an RU Aggro mirror against the frozen Learned Value bot:
   --train-games 100 --train-seed 424242
 ```
 
-Interactive mode shows your hand and every public zone, but only the size of
-the Learned opponent's hidden hand and library. Every legal priority, attack,
-block, and combat-damage-order choice is presented as a numbered menu; enter
-`q` at any prompt to abandon the game. It uses the same rules and current
-Learned Value policy as simulation mode. The MVP timing limitation still
-applies interactively: there is no priority window after attackers or blockers
-are declared.
+Omit `--seed` for a fresh deck pairing on every invocation; provide it to
+reproduce both the ordered non-mirror pairing and game shuffles. Interactive
+mode uses a 120-column tabletop
+layout with Learned's battlefield above yours. While occupied, the stack
+appears in a 58-column right rail and expands the display to 180 columns.
+Nonland permanents are individual card rectangles in one shared row, tapped
+cards turn into wider sideways rectangles, Library/Graveyard/Exile are
+counted zone rectangles, and each hand is a row of angled mini-cards grouped
+by identity. Empty battlefield sections are omitted. The terminal shows the
+Learned opponent's hand so you can inspect
+why it may be choosing an action. That opponent-hand reveal is terminal-only
+debugging information: the Learned model still receives only the hand size
+and never receives the card identities. Library identities and order remain
+hidden. Every legal priority, attack, block, and combat-damage-order choice is
+presented as a numbered menu; enter `q` at any prompt to abandon the game. It
+uses the same rules and current Learned Value policy as simulation mode. The
+MVP timing limitation still applies interactively: there is no priority
+window after attackers or blockers are declared.
 
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
 `handcrafted`, `learned`/`learned-value`, or `learned-actor`. The default

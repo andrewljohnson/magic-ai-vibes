@@ -248,7 +248,8 @@ enum class TurnPhase : std::uint8_t {
 
 // A perspective-safe snapshot for an interactive player. Public zones contain
 // card identities; hidden zones expose counts only. The observer's own hand is
-// the sole hidden zone whose card identities are present.
+// the sole hidden zone whose card identities are present unless a human
+// controller explicitly opts into the debug-only opponent-hand reveal below.
 struct PublicPlayerState {
     int life = 20;
     std::size_t library_size = 0;
@@ -268,6 +269,10 @@ struct PlayerObservation {
     std::size_t observer = 0;
     std::array<PublicPlayerState, 2> players;
     std::vector<CardId> hand;
+    // Populated only for an opted-in human debug controller. Learned policies
+    // never consume PlayerObservation and observe_game_state() leaves this
+    // empty, preserving the normal hidden-information boundary.
+    std::optional<std::vector<CardId>> revealed_opponent_hand;
     std::vector<StackObject> stack;
     std::size_t active_player = 0;
     std::size_t starting_player = 0;
@@ -340,6 +345,10 @@ struct HumanController {
     // after public state changes (or at the declaration point for passes).
     std::function<void(const PlayerObservation&, const GameEvent&)>
         observe;
+    // Interactive inspection aid. This affects only this human controller's
+    // callbacks; bot observations, training features, and rollouts stay
+    // hidden-information safe.
+    bool reveal_opponent_hand = false;
 };
 
 enum class PriorityPassResult : std::uint8_t {
@@ -716,6 +725,8 @@ class Game {
     GameResult make_result(int winner, EndReason reason) const;
     const HumanController*
     human_controller(std::size_t player) const;
+    PlayerObservation
+    human_observation(std::size_t player) const;
     bool has_human_observer() const;
     void notify_human_observers(const GameEvent& event) const;
 

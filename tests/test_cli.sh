@@ -99,17 +99,69 @@ if [ "$cli_status" -ne 0 ]; then
 fi
 case $cli_output in
     *"Old School Magic Interactive"*\
-"Match: Human RU Aggro vs Learned Value RU Aggro"*\
+"Match: Human Red vs Learned Value RU Aggro"*\
 "Game seed: 1"*\
 "Training seed: 424242"*\
-"cards (hidden)"*\
+"Board layout: 120 columns"*\
+"HAND (DEBUG REVEAL)"*\
+"|GRAVEYARD"*\
+"#== YOU"*\
+"YOUR HAND"*\
 "Game abandoned."*) ;;
     *)
-        printf 'interactive banner or hidden-state rendering missing\n%s\n' \
+        printf 'interactive banner or opponent-hand reveal missing\n%s\n' \
             "$cli_output" >&2
         exit 1
         ;;
 esac
+case $cli_output in
+    *"(none)"*|*"|EMPTY"*|*"STACK | TOP FIRST"*)
+        printf 'interactive empty zones were rendered noisily\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+interactive_width=$(
+    printf '%s\n' "$cli_output" |
+        awk '{ if (length($0) > maximum) maximum = length($0) }
+             END { print maximum }'
+)
+if [ "$interactive_width" -ne 120 ]; then
+    printf 'interactive layout width was %s, expected 120\n%s\n' \
+        "$interactive_width" "$cli_output" >&2
+    exit 1
+fi
+
+interactive_tap_input=$(printf '1\n1\nq')
+run_cli_input "$interactive_tap_input" --interactive --seed 1 \
+    --train-games 1 --train-seed 424242
+if [ "$cli_status" -ne 0 ]; then
+    printf 'interactive tapped-card rendering failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"STACK | TOP FIRST"*"STACK #0 | TOP"*\
+"<<< TAPPED >>>"*\
+"|GRAVEYARD"*"|1 CARD"*\
+"GRAVEYARD CARDS:"*"Lightning Bolt"*\
+"Game abandoned."*) ;;
+    *)
+        printf 'interactive tapped card or graveyard tile missing\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+interactive_stack_width=$(
+    printf '%s\n' "$cli_output" |
+        awk '{ if (length($0) > maximum) maximum = length($0) }
+             END { print maximum }'
+)
+if [ "$interactive_stack_width" -ne 180 ]; then
+    printf 'interactive stack width was %s, expected 180\n%s\n' \
+        "$interactive_stack_width" "$cli_output" >&2
+    exit 1
+fi
 
 set +e
 cli_output=$(

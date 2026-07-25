@@ -5519,6 +5519,7 @@ PlayerObservation observe_game_state(const GameState& state,
         .observer = observer,
         .players = {},
         .hand = state.players[observer].hand,
+        .revealed_opponent_hand = std::nullopt,
         .stack = state.stack,
         .active_player = state.active_player,
         .starting_player = state.starting_player,
@@ -5601,6 +5602,19 @@ Game::human_controller(std::size_t player) const {
     return &*config_.human_controllers[player];
 }
 
+PlayerObservation
+Game::human_observation(std::size_t player) const {
+    PlayerObservation observation =
+        observe_game_state(state_, player);
+    const auto* controller = human_controller(player);
+    if (controller != nullptr &&
+        controller->reveal_opponent_hand) {
+        observation.revealed_opponent_hand =
+            state_.players[1 - player].hand;
+    }
+    return observation;
+}
+
 bool Game::has_human_observer() const {
     return std::any_of(
         config_.human_controllers.begin(),
@@ -5616,8 +5630,7 @@ void Game::notify_human_observers(const GameEvent& event) const {
          player < config_.human_controllers.size(); ++player) {
         const auto* controller = human_controller(player);
         if (controller != nullptr && controller->observe) {
-            controller->observe(
-                observe_game_state(state_, player), event);
+            controller->observe(human_observation(player), event);
         }
     }
 }
@@ -5713,6 +5726,7 @@ std::optional<GameResult>
 Game::continue_priority_window(bool sorcery_actions,
                                TurnPhase phase,
                                PriorityState priority) {
+    const bool notify_observers = has_human_observer();
     while (true) {
         const auto actions =
             legal_priority_actions(state_, priority.player,
@@ -5723,14 +5737,17 @@ Game::continue_priority_window(bool sorcery_actions,
                                    priority.consecutive_passes);
 
         if (action.kind == PriorityActionKind::Pass) {
-            notify_human_observers({
-                .kind = GameEventKind::PriorityActionSelected,
-                .player = priority.player,
-                .phase = phase,
-                .priority_action = action,
-            });
+            if (notify_observers) {
+                notify_human_observers({
+                    .kind =
+                        GameEventKind::PriorityActionSelected,
+                    .player = priority.player,
+                    .phase = phase,
+                    .priority_action = action,
+                });
+            }
             const std::optional<StackObject> resolving =
-                state_.stack.empty()
+                !notify_observers || state_.stack.empty()
                     ? std::nullopt
                     : std::optional<StackObject>(
                           state_.stack.back());
@@ -5742,16 +5759,18 @@ Game::continue_priority_window(bool sorcery_actions,
             if (pass == PriorityPassResult::WindowEnded) {
                 return std::nullopt;
             }
-            if (!resolving.has_value()) {
-                throw std::logic_error(
-                    "stack resolved without a stack object");
+            if (notify_observers) {
+                if (!resolving.has_value()) {
+                    throw std::logic_error(
+                        "stack resolved without a stack object");
+                }
+                notify_human_observers({
+                    .kind = GameEventKind::StackObjectResolved,
+                    .player = resolving->controller,
+                    .phase = phase,
+                    .stack_object = resolving,
+                });
             }
-            notify_human_observers({
-                .kind = GameEventKind::StackObjectResolved,
-                .player = resolving->controller,
-                .phase = phase,
-                .stack_object = resolving,
-            });
             if (const auto result = life_total_result();
                 result.has_value()) {
                 return result;
@@ -5763,12 +5782,15 @@ Game::continue_priority_window(bool sorcery_actions,
                                    sorcery_actions)) {
             throw std::logic_error("bot policy selected an illegal action");
         }
-        notify_human_observers({
-            .kind = GameEventKind::PriorityActionSelected,
-            .player = priority.player,
-            .phase = phase,
-            .priority_action = action,
-        });
+        if (notify_observers) {
+            notify_human_observers({
+                .kind =
+                    GameEventKind::PriorityActionSelected,
+                .player = priority.player,
+                .phase = phase,
+                .priority_action = action,
+            });
+        }
         // The player who acted receives priority again.
         priority.consecutive_passes = 0;
     }
@@ -5802,7 +5824,7 @@ PriorityAction Game::choose_priority_action(
         controller != nullptr) {
         const std::size_t chosen =
             controller->choose_priority_action(
-                observe_game_state(state_, player), phase,
+                human_observation(player), phase,
                 actions);
         if (chosen >= actions.size()) {
             throw std::invalid_argument(
@@ -6880,7 +6902,7 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
             }
         }
         attackers = human_attacker->choose_attackers(
-            observe_game_state(state_, state_.active_player),
+            human_observation(state_.active_player),
             legal_attackers);
         std::unordered_set<PermanentId> selected;
         for (const PermanentId attacker : attackers) {
@@ -7113,7 +7135,7 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         }
         const auto selected =
             human_defender->choose_blockers(
-                observe_game_state(state_, defending_player),
+                human_observation(defending_player),
                 attackers, choices);
         std::unordered_set<PermanentId> assigned_blockers;
         for (const auto& [attacker, blocker] : selected) {
@@ -7323,8 +7345,7 @@ std::optional<GameResult> Game::play_combat_with_attackers(
             blockers.size() > 1) {
             const std::vector<PermanentId> ordered =
                 damage_order_controller->choose_damage_order(
-                    observe_game_state(
-                        state_, state_.active_player),
+                    human_observation(state_.active_player),
                     attacker, blockers);
             std::unordered_set<PermanentId> remaining(
                 blockers.begin(), blockers.end());
@@ -7453,11 +7474,13 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
                 static_cast<int>(opponent_of(state_.active_player)),
                 EndReason::EmptyLibrary);
         }
-        notify_human_observers({
-            .kind = GameEventKind::TurnStarted,
-            .player = state_.active_player,
-            .phase = TurnPhase::FirstMain,
-        });
+        if (has_human_observer()) {
+            notify_human_observers({
+                .kind = GameEventKind::TurnStarted,
+                .player = state_.active_player,
+                .phase = TurnPhase::FirstMain,
+            });
+        }
         if (trace_ != nullptr) {
             trace_->push_back(state_);
         }
