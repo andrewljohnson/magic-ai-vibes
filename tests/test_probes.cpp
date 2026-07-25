@@ -1,4 +1,4 @@
-#include "alpha/probes.hpp"
+#include "old_school/probes.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,12 +14,12 @@
 
 namespace {
 
-using alpha::CardId;
-using alpha::DeckId;
-using alpha::PriorityAction;
-using alpha::probes::Category;
-using alpha::probes::DecisionProbe;
-using alpha::probes::Validation;
+using old_school::CardId;
+using old_school::DeckId;
+using old_school::PriorityAction;
+using old_school::probes::Category;
+using old_school::probes::DecisionProbe;
+using old_school::probes::Validation;
 
 class TestRunner {
   public:
@@ -82,7 +82,7 @@ std::string validation_errors(const Validation& validation) {
 
 void test_corpus_shape_and_candidate_schema() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     expect(probes.size() == 16,
            "probe-dev-v1 must contain exactly 16 fixtures");
 
@@ -112,10 +112,10 @@ void test_corpus_shape_and_candidate_schema() {
 
 void test_every_probe_passes_each_validation_dimension() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     for (const DecisionProbe& probe : probes) {
         const Validation validation =
-            alpha::probes::validate_probe(probe);
+            old_school::probes::validate_probe(probe);
         if (!validation.ok()) {
             throw std::runtime_error(
                 probe.stable_id + ": " +
@@ -130,68 +130,107 @@ void test_every_probe_passes_each_validation_dimension() {
         expect(validation.hidden_clone_invariant,
                "hidden clone invariance was not checked");
     }
-    expect(alpha::probes::validate_probe_dev_v1(probes).empty(),
+    expect(old_school::probes::validate_probe_dev_v1(probes).empty(),
            "valid corpus failed aggregate validation");
 }
 
 void test_card_conservation_rejects_missing_physical_card() {
     std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     DecisionProbe probe =
         find_probe(probes, Category::GreenDevelop);
     expect(!probe.state.players[0].library.empty(),
            "test fixture unexpectedly has an empty library");
     probe.state.players[0].library.pop_back();
     const Validation validation =
-        alpha::probes::validate_probe(probe);
+        old_school::probes::validate_probe(probe);
     expect(!validation.exact_card_conservation,
            "missing physical card was accepted");
 }
 
+void test_exile_is_a_conserved_public_zone() {
+    std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v1();
+    DecisionProbe probe =
+        find_probe(probes, Category::GreenDevelop);
+    expect(!probe.state.players[0].library.empty(),
+           "test fixture unexpectedly has an empty library");
+    const CardId exiled = probe.state.players[0].library.back();
+    probe.state.players[0].library.pop_back();
+    probe.state.players[0].exile.push_back(exiled);
+
+    const Validation validation =
+        old_school::probes::validate_probe(probe);
+    expect(validation.ok(),
+           "moving a physical card to public exile broke validation");
+}
+
+void test_ru_probe_is_rejected_until_ru_corpus_exists() {
+    std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v1();
+    DecisionProbe probe =
+        find_probe(probes, Category::GreenDevelop);
+    probe.root_deck = DeckId::RUAggro;
+
+    const Validation validation =
+        old_school::probes::validate_probe(probe);
+    expect(!validation.exact_card_conservation,
+           "RU probe was accepted by the four-deck corpus");
+    expect(
+        std::any_of(
+            validation.errors.begin(), validation.errors.end(),
+            [](const std::string& error) {
+                return error.find(
+                           "RU Aggro decision probes have not been authored") !=
+                       std::string::npos;
+            }),
+        "RU rejection did not explain that its probes are not authored");
+}
+
 void test_priority_validation_rejects_illegal_or_incomplete_set() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     DecisionProbe probe =
         find_probe(probes, Category::GreenDevelop);
     probe.candidates[1].action =
         PriorityAction::cast_creature(CardId::IronrootTreefolk);
     const Validation validation =
-        alpha::probes::validate_probe(probe);
+        old_school::probes::validate_probe(probe);
     expect(!validation.candidates_legal_and_complete,
            "unpayable Treefolk replaced a legal action");
 }
 
 void test_attack_reachability_rejects_sickness_and_moat() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     DecisionProbe sick =
         find_probe(probes, Category::GreenFavorableAttack);
     sick.state.players[0].creatures[0].summoning_sick = true;
-    expect(!alpha::probes::validate_probe(sick).reachable_state,
+    expect(!old_school::probes::validate_probe(sick).reachable_state,
            "summoning-sick binary attacker was accepted");
 
     DecisionProbe moated =
         find_probe(probes, Category::GreenFavorableAttack);
     moated.state.players[1].enchantments.push_back(CardId::Moat);
-    expect(!alpha::probes::validate_probe(moated).reachable_state,
+    expect(!old_school::probes::validate_probe(moated).reachable_state,
            "nonflying binary attacker was accepted through Moat");
 }
 
 void test_hidden_zone_clones_are_observation_invariant() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     for (std::size_t index = 0; index < probes.size(); ++index) {
         expect(
-            alpha::probes::hidden_clone_is_determinization_invariant(
+            old_school::probes::hidden_clone_is_determinization_invariant(
                 probes[index],
-                alpha::probes::kProbeValidationSeed + index),
+                old_school::probes::kProbeValidationSeed + index),
             "hidden repartition changed sampled information set");
     }
 }
 
 void test_red_damaged_threat_fixture_is_reachable() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     const DecisionProbe& probe =
         find_probe(probes, Category::RedFinishDamagedThreat);
     const auto& root = probe.state.players[probe.root_player];
@@ -205,7 +244,7 @@ void test_red_damaged_threat_fixture_is_reachable() {
            "R3 must expose two Mountains");
     expect(std::count_if(
                root.lands.begin(), root.lands.end(),
-               [](const alpha::LandPermanent& land) {
+               [](const old_school::LandPermanent& land) {
                    return land.tapped;
                }) == 1,
            "R3 must leave one Mountain after the first Bolt");
@@ -214,13 +253,13 @@ void test_red_damaged_threat_fixture_is_reachable() {
                    CardId::WaterElemental &&
                opponent.creatures[0].damage == 3,
            "R3 must retain a live Water Elemental with 3 damage");
-    expect(alpha::probes::validate_probe(probe).reachable_state,
+    expect(old_school::probes::validate_probe(probe).reachable_state,
            "corrected R3 fixture failed reachability validation");
 }
 
 void test_counter_war_lists_every_legal_spell_target() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     const DecisionProbe& probe =
         find_probe(probes, Category::BlueCounterWar);
     expect(probe.state.stack.size() == 2,
@@ -228,7 +267,7 @@ void test_counter_war_lists_every_legal_spell_target() {
     expect(probe.consecutive_passes == 1,
            "counter-war responder must act after the caster passes");
     const Validation validation =
-        alpha::probes::validate_probe(probe);
+        old_school::probes::validate_probe(probe);
     expect(validation.candidates_legal_and_complete,
            "counter-war omitted a targetable stack spell");
     expect(probe.candidates.size() == 3,
@@ -237,7 +276,7 @@ void test_counter_war_lists_every_legal_spell_target() {
 
 void test_response_windows_record_the_casters_pass() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     constexpr std::array<Category, 5> kResponseCategories = {
         Category::RedStackRace,
         Category::BlueCounterExpensiveSpell,
@@ -259,17 +298,17 @@ void test_response_windows_record_the_casters_pass() {
 
 void test_corpus_rejects_duplicate_stable_id_and_category() {
     std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v1();
     probes[1].stable_id = probes[0].stable_id;
     probes[1].category = probes[0].category;
-    expect(!alpha::probes::validate_probe_dev_v1(probes).empty(),
+    expect(!old_school::probes::validate_probe_dev_v1(probes).empty(),
            "duplicate stable ID/category was accepted");
 }
 
 void test_v2_plan_probes_are_root_irreversible() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v2();
-    expect(alpha::probes::validate_probe_dev_v2(probes).empty(),
+        old_school::probes::make_probe_dev_v2();
+    expect(old_school::probes::validate_probe_dev_v2(probes).empty(),
            "probe-dev-v2 failed aggregate validation");
     for (const DecisionProbe& probe : probes) {
         expect(probe.stable_id.ends_with(".v2"),
@@ -278,35 +317,35 @@ void test_v2_plan_probes_are_root_irreversible() {
 
     const DecisionProbe& green =
         find_probe(probes, Category::GreenDevelop);
-    expect(green.phase == alpha::TurnPhase::SecondMain,
+    expect(green.phase == old_school::TurnPhase::SecondMain,
            "Green develop Pass can still heal in a later main phase");
     expect(std::all_of(
                green.state.players[1].lands.begin(),
                green.state.players[1].lands.end(),
-               [](const alpha::LandPermanent& land) {
+               [](const old_school::LandPermanent& land) {
                    return land.tapped;
                }),
            "Green opponent can reopen the final priority window");
 
     const DecisionProbe& red =
         find_probe(probes, Category::RedFaceLethal);
-    expect(red.phase == alpha::TurnPhase::SecondMain,
+    expect(red.phase == old_school::TurnPhase::SecondMain,
            "Red lethal Pass can still heal in a later main phase");
-    alpha::GameState pass_state = red.state;
-    alpha::PriorityState pass_priority_state{
+    old_school::GameState pass_state = red.state;
+    old_school::PriorityState pass_priority_state{
         .player = red.root_player,
         .consecutive_passes = red.consecutive_passes,
     };
-    expect(alpha::pass_priority(pass_state, pass_priority_state) ==
-               alpha::PriorityPassResult::Passed,
+    expect(old_school::pass_priority(pass_state, pass_priority_state) ==
+               old_school::PriorityPassResult::Passed,
            "first Red Pass did not yield priority");
-    const auto opponent_actions = alpha::legal_priority_actions(
+    const auto opponent_actions = old_school::legal_priority_actions(
         pass_state, pass_priority_state.player, true);
     expect(opponent_actions ==
                std::vector<PriorityAction>{PriorityAction::pass()},
            "tapped-out opponent can reopen the Red branch");
-    expect(alpha::pass_priority(pass_state, pass_priority_state) ==
-               alpha::PriorityPassResult::WindowEnded,
+    expect(old_school::pass_priority(pass_state, pass_priority_state) ==
+               old_school::PriorityPassResult::WindowEnded,
            "Red Pass did not end the final main-phase window");
     expect(pass_state.players[0].hand ==
                std::vector<CardId>{CardId::LightningBolt},
@@ -318,7 +357,7 @@ void test_v2_plan_probes_are_root_irreversible() {
                std::all_of(
                    emergency.state.players[1].creatures.begin(),
                    emergency.state.players[1].creatures.end(),
-                   [](const alpha::CreaturePermanent& creature) {
+                   [](const old_school::CreaturePermanent& creature) {
                        return creature.card ==
                                   CardId::FireElemental &&
                               !creature.summoning_sick;
@@ -328,62 +367,62 @@ void test_v2_plan_probes_are_root_irreversible() {
 
 void test_v2_lethal_priority_branches_apply_exactly() {
     const std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v2();
+        old_school::probes::make_probe_dev_v2();
 
     const DecisionProbe& red =
         find_probe(probes, Category::RedFaceLethal);
-    alpha::GameState bolt_state = red.state;
+    old_school::GameState bolt_state = red.state;
     const auto& bolt_action =
         std::get<PriorityAction>(red.candidates[2].action);
-    expect(alpha::apply_priority_action(
+    expect(old_school::apply_priority_action(
                bolt_state, red.root_player, bolt_action, true),
            "Red lethal Bolt candidate failed to apply");
-    alpha::PriorityState bolt_priority{
+    old_school::PriorityState bolt_priority{
         .player = red.root_player,
         .consecutive_passes = 0,
     };
-    expect(alpha::pass_priority(bolt_state, bolt_priority) ==
-               alpha::PriorityPassResult::Passed &&
-               alpha::pass_priority(bolt_state, bolt_priority) ==
-                   alpha::PriorityPassResult::StackObjectResolved,
+    expect(old_school::pass_priority(bolt_state, bolt_priority) ==
+               old_school::PriorityPassResult::Passed &&
+               old_school::pass_priority(bolt_state, bolt_priority) ==
+                   old_school::PriorityPassResult::StackObjectResolved,
            "Red lethal Bolt did not resolve after two passes");
     expect(bolt_state.players[1].life == 0,
            "Red lethal Bolt did not produce its terminal branch");
 
     const DecisionProbe& blue =
         find_probe(probes, Category::BlueCounterLethal);
-    alpha::GameState blue_pass = blue.state;
-    alpha::PriorityState blue_pass_priority{
+    old_school::GameState blue_pass = blue.state;
+    old_school::PriorityState blue_pass_priority{
         .player = blue.root_player,
         .consecutive_passes = blue.consecutive_passes,
     };
-    expect(alpha::pass_priority(
+    expect(old_school::pass_priority(
                blue_pass, blue_pass_priority) ==
-               alpha::PriorityPassResult::StackObjectResolved,
+               old_school::PriorityPassResult::StackObjectResolved,
            "Blue Pass did not resolve the pending lethal Bolt");
     expect(blue_pass.players[0].life == 0,
            "Blue Pass was not an immediate terminal loss");
 
-    alpha::GameState blue_counter = blue.state;
+    old_school::GameState blue_counter = blue.state;
     const auto& counter_action =
         std::get<PriorityAction>(blue.candidates[1].action);
-    expect(alpha::apply_priority_action(
+    expect(old_school::apply_priority_action(
                blue_counter, blue.root_player, counter_action, false),
            "Blue Counterspell candidate failed to apply");
     expect(blue_counter.stack.size() == 2 &&
                blue_counter.stack.back().card ==
                    CardId::Counterspell,
            "Counterspell was not placed above the lethal Bolt");
-    alpha::PriorityState counter_priority{
+    old_school::PriorityState counter_priority{
         .player = blue.root_player,
         .consecutive_passes = 0,
     };
-    expect(alpha::pass_priority(
+    expect(old_school::pass_priority(
                blue_counter, counter_priority) ==
-               alpha::PriorityPassResult::Passed &&
-               alpha::pass_priority(
+               old_school::PriorityPassResult::Passed &&
+               old_school::pass_priority(
                    blue_counter, counter_priority) ==
-                   alpha::PriorityPassResult::StackObjectResolved,
+                   old_school::PriorityPassResult::StackObjectResolved,
            "Counterspell did not resolve after two passes");
     expect(blue_counter.stack.empty() &&
                blue_counter.players[0].life == 3,
@@ -410,6 +449,10 @@ int main() {
                test_every_probe_passes_each_validation_dimension);
     runner.run("exact physical conservation",
                test_card_conservation_rejects_missing_physical_card);
+    runner.run("public exile conservation",
+               test_exile_is_a_conserved_public_zone);
+    runner.run("RU corpus is explicitly absent",
+               test_ru_probe_is_rejected_until_ru_corpus_exists);
     runner.run("priority legality and completeness",
                test_priority_validation_rejects_illegal_or_incomplete_set);
     runner.run("attack legality and Moat",

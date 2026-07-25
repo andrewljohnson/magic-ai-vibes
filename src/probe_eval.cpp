@@ -1,4 +1,4 @@
-#include "alpha/probe_eval.hpp"
+#include "old_school/probe_eval.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace alpha::probe_eval {
+namespace old_school::probe_eval {
 namespace {
 
 constexpr double kSchemaTolerance = 1.0e-10;
@@ -52,8 +52,11 @@ std::size_t deck_index(DeckId deck) {
         return 2;
     case DeckId::White:
         return 3;
+    case DeckId::RUAggro:
+        throw std::invalid_argument(
+            "RU Aggro decision probes have not been authored");
     }
-    throw std::invalid_argument("root_deck is outside the four-deck corpus");
+    throw std::invalid_argument("root_deck is outside the probe corpus");
 }
 
 std::string unordered_pair_key(std::string_view first,
@@ -726,4 +729,4 @@ CandidateQFitSummary evaluate_candidate_q_fit(
     return summary;
 }
 
-} // namespace alpha::probe_eval
+} // namespace old_school::probe_eval

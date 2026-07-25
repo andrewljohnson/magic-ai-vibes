@@ -1,6 +1,6 @@
 #pragma once
 
-#include "alpha/game.hpp"
+#include "old_school/game.hpp"
 
 #include <array>
 #include <cstddef>
@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace alpha::probe_eval {
+namespace old_school::probe_eval {
 
 inline constexpr double kStablePairMinimumDelta = 0.03;
 inline constexpr double kReferenceBestMinimumTolerance = 0.01;
@@ -106,6 +106,8 @@ struct ProbeMetricSummary {
     double critic_log_loss = 0.0;
     double critic_bias = 0.0;
     double critic_ece = 0.0;
+    // The current fixed dev corpus covers Green, Red, Blue, and White.
+    // Evaluation rejects RU Aggro until its probes are authored.
     std::array<DeckProbeMetrics, 4> by_deck{};
 };
 
@@ -120,6 +122,7 @@ struct CandidateQFitSummary {
     std::size_t candidate_count = 0;
     double mae = 0.0;
     double rmse = 0.0;
+    // Green, Red, Blue, and White only; see ProbeMetricSummary.
     std::array<DeckCandidateQFitMetrics, 4> by_deck{};
 };
 
@@ -159,4 +162,4 @@ CandidateQFitSummary evaluate_candidate_q_fit(
     const std::vector<ProbeLabel>& labels,
     const std::vector<ProbePrediction>& q_predictions);
 
-} // namespace alpha::probe_eval
+} // namespace old_school::probe_eval

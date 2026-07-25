@@ -1,4 +1,4 @@
-#include "alpha/probe_eval.hpp"
+#include "old_school/probe_eval.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -14,13 +14,13 @@
 
 namespace {
 
-using alpha::DeckId;
-using alpha::probe_eval::CandidateLabel;
-using alpha::probe_eval::CandidateSamples;
-using alpha::probe_eval::PairLabel;
-using alpha::probe_eval::PolicyScore;
-using alpha::probe_eval::ProbeLabel;
-using alpha::probe_eval::ProbePrediction;
+using old_school::DeckId;
+using old_school::probe_eval::CandidateLabel;
+using old_school::probe_eval::CandidateSamples;
+using old_school::probe_eval::PairLabel;
+using old_school::probe_eval::PolicyScore;
+using old_school::probe_eval::ProbeLabel;
+using old_school::probe_eval::ProbePrediction;
 
 class TestRunner {
   public:
@@ -94,7 +94,7 @@ ProbeLabel simple_label(std::string id, DeckId deck,
 }
 
 void test_label_construction_uses_paired_statistics() {
-    const ProbeLabel label = alpha::probe_eval::make_probe_label(
+    const ProbeLabel label = old_school::probe_eval::make_probe_label(
         "paired", DeckId::Green,
         {CandidateSamples{"a", {0.9, 0.7, 0.8, 0.8}},
          CandidateSamples{"b", {0.6, 0.6, 0.7, 0.7}},
@@ -137,7 +137,7 @@ void test_uniform_argmax_ties_and_metric_formulas() {
     };
 
     const auto summary =
-        alpha::probe_eval::evaluate_probe_predictions(
+        old_school::probe_eval::evaluate_probe_predictions(
             {label}, {prediction});
     expect_near(summary.top1_expected_agreement, 2.0 / 3.0,
                 1.0e-12, "uniform argmax expected agreement");
@@ -169,7 +169,7 @@ void test_critic_metrics_use_selected_suboptimal_action_value() {
     };
 
     const auto summary =
-        alpha::probe_eval::evaluate_probe_predictions(
+        old_school::probe_eval::evaluate_probe_predictions(
             {label}, {prediction});
     expect_near(summary.mean_regret, 0.6, 1.0e-12,
                 "regret must retain the maximum-Q reference");
@@ -202,7 +202,7 @@ void test_explicit_deployed_tie_selection_is_not_averaged() {
     };
 
     const auto summary =
-        alpha::probe_eval::evaluate_probe_predictions(
+        old_school::probe_eval::evaluate_probe_predictions(
             {label}, {prediction});
     expect_near(summary.top1_expected_agreement, 0.0, 1.0e-12,
                 "deterministic deployed tie was averaged");
@@ -217,7 +217,7 @@ void test_explicit_deployed_tie_selection_is_not_averaged() {
     invalid.policy_scores[1].score = 3.0;
     expect_invalid(
         [&]() {
-            alpha::probe_eval::validate_probe_predictions(
+            old_school::probe_eval::validate_probe_predictions(
                 {label}, {invalid});
         },
         "non-argmax deployed selection was accepted");
@@ -248,7 +248,7 @@ void test_stability_filter_uses_effect_and_paired_ci() {
     };
 
     const auto summary =
-        alpha::probe_eval::evaluate_probe_predictions(
+        old_school::probe_eval::evaluate_probe_predictions(
             {label}, {prediction});
     expect(summary.stable_pair_count == 2,
            "only effect-sized pairs with CI excluding zero are stable");
@@ -273,7 +273,7 @@ void test_deck_grouping_and_pooled_calibration() {
     };
 
     const auto summary =
-        alpha::probe_eval::evaluate_probe_predictions(
+        old_school::probe_eval::evaluate_probe_predictions(
             labels, predictions);
     expect(summary.probe_count == 2,
            "pooled probe count");
@@ -333,10 +333,10 @@ void test_candidate_q_fit_is_keyed_and_uses_known_errors() {
     };
 
     const auto summary =
-        alpha::probe_eval::evaluate_candidate_q_fit(
+        old_school::probe_eval::evaluate_candidate_q_fit(
             {green, red}, {red_prediction, green_prediction});
     const auto reordered =
-        alpha::probe_eval::evaluate_candidate_q_fit(
+        old_school::probe_eval::evaluate_candidate_q_fit(
             {red, green},
             {green_prediction_ordered, red_prediction_ordered});
 
@@ -389,7 +389,7 @@ void test_log_loss_clamps_zero_and_one_predictions() {
         1.0,
     };
     const auto summary =
-        alpha::probe_eval::evaluate_probe_predictions(
+        old_school::probe_eval::evaluate_probe_predictions(
             {label}, {prediction});
     expect(std::isfinite(summary.critic_log_loss),
            "boundary log loss must be finite");
@@ -403,7 +403,7 @@ void test_invalid_label_schemas_are_rejected() {
     missing_pair.pairs.clear();
     expect_invalid(
         [&]() {
-            alpha::probe_eval::validate_probe_label(missing_pair);
+            old_school::probe_eval::validate_probe_label(missing_pair);
         },
         "missing pair schema was accepted");
 
@@ -412,7 +412,7 @@ void test_invalid_label_schemas_are_rejected() {
     wrong_delta.pairs[0].delta_q = 0.2;
     expect_invalid(
         [&]() {
-            alpha::probe_eval::validate_probe_label(wrong_delta);
+            old_school::probe_eval::validate_probe_label(wrong_delta);
         },
         "inconsistent pair delta was accepted");
 
@@ -421,7 +421,7 @@ void test_invalid_label_schemas_are_rejected() {
     duplicate_best.reference_best_set = {"a", "a"};
     expect_invalid(
         [&]() {
-            alpha::probe_eval::validate_probe_label(duplicate_best);
+            old_school::probe_eval::validate_probe_label(duplicate_best);
         },
         "duplicate best-set key was accepted");
 
@@ -429,7 +429,7 @@ void test_invalid_label_schemas_are_rejected() {
         simple_label("same", DeckId::Green, 0.7, 0.4);
     expect_invalid(
         [&]() {
-            alpha::probe_eval::validate_probe_labels(
+            old_school::probe_eval::validate_probe_labels(
                 {duplicate_id, duplicate_id});
         },
         "duplicate stable IDs were accepted");
@@ -440,7 +440,7 @@ void test_invalid_predictions_and_samples_are_rejected() {
         simple_label("prediction", DeckId::Blue, 0.7, 0.4);
     expect_invalid(
         [&]() {
-            alpha::probe_eval::evaluate_probe_predictions(
+            old_school::probe_eval::evaluate_probe_predictions(
                 {label},
                 {ProbePrediction{
                     "prediction",
@@ -451,7 +451,7 @@ void test_invalid_predictions_and_samples_are_rejected() {
         "duplicate prediction keys were accepted");
     expect_invalid(
         [&]() {
-            alpha::probe_eval::evaluate_probe_predictions(
+            old_school::probe_eval::evaluate_probe_predictions(
                 {label},
                 {ProbePrediction{
                     "prediction",
@@ -462,7 +462,7 @@ void test_invalid_predictions_and_samples_are_rejected() {
         "nonfinite critic value was accepted");
     expect_invalid(
         []() {
-            (void)alpha::probe_eval::make_probe_label(
+            (void)old_school::probe_eval::make_probe_label(
                 "unaligned", DeckId::Green,
                 {CandidateSamples{"a", {0.2, 0.3}},
                  CandidateSamples{"b", {0.4}}});
@@ -470,7 +470,7 @@ void test_invalid_predictions_and_samples_are_rejected() {
         "unaligned paired samples were accepted");
     expect_invalid(
         []() {
-            (void)alpha::probe_eval::make_probe_label(
+            (void)old_school::probe_eval::make_probe_label(
                 "range", DeckId::Green,
                 {CandidateSamples{"a", {0.2, 1.1}},
                  CandidateSamples{"b", {0.4, 0.5}}});
@@ -478,7 +478,7 @@ void test_invalid_predictions_and_samples_are_rejected() {
         "out-of-range Q sample was accepted");
     expect_invalid(
         [&]() {
-            (void)alpha::probe_eval::evaluate_candidate_q_fit(
+            (void)old_school::probe_eval::evaluate_candidate_q_fit(
                 {label},
                 {ProbePrediction{
                     "prediction",
@@ -487,6 +487,17 @@ void test_invalid_predictions_and_samples_are_rejected() {
                     0.7}});
         },
         "out-of-range candidate-Q score was accepted");
+}
+
+void test_ru_metrics_reject_missing_probe_corpus() {
+    expect_invalid(
+        []() {
+            (void)old_school::probe_eval::make_probe_label(
+                "ru.not-authored", DeckId::RUAggro,
+                {CandidateSamples{"a", {0.2, 0.3}},
+                 CandidateSamples{"b", {0.4, 0.5}}});
+        },
+        "RU metrics silently treated the four-deck probes as complete");
 }
 
 } // namespace
@@ -513,5 +524,7 @@ int main() {
                test_invalid_label_schemas_are_rejected);
     runner.run("invalid predictions and samples",
                test_invalid_predictions_and_samples_are_rejected);
+    runner.run("RU corpus is required before RU metrics",
+               test_ru_metrics_reject_missing_probe_corpus);
     return runner.finish();
 }

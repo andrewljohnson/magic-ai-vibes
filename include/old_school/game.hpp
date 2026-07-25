@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace alpha {
+namespace old_school {
 
 enum class CardId : std::uint8_t {
     Forest,
@@ -27,7 +27,16 @@ enum class CardId : std::uint8_t {
     Plains,
     Millstone,
     Moat,
+    FlyingMen,
+    IronclawOrcs,
+    GrayOgre,
+    HillGiant,
+    Disintegrate,
+    GiantGrowth,
 };
+
+inline constexpr std::size_t kCardCount =
+    static_cast<std::size_t>(CardId::GiantGrowth) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -55,14 +64,17 @@ struct CardDefinition {
     int toughness = 0;
     int effect_damage = 0;
     bool flying = false;
+    // Zero means the creature has no power-based blocking restriction.
+    int cannot_block_power_at_least = 0;
 };
 
 const CardDefinition& card_definition(CardId card);
 
-std::vector<CardId> green_alpha_deck();
-std::vector<CardId> red_alpha_deck();
-std::vector<CardId> blue_alpha_deck();
+std::vector<CardId> green_deck();
+std::vector<CardId> red_deck();
+std::vector<CardId> blue_deck();
 std::vector<CardId> white_control_deck();
+std::vector<CardId> ru_aggro_deck();
 
 using PermanentId = std::uint64_t;
 
@@ -77,6 +89,9 @@ struct CreaturePermanent {
     bool tapped = false;
     bool summoning_sick = true;
     int damage = 0;
+    int temporary_power_bonus = 0;
+    int temporary_toughness_bonus = 0;
+    bool exile_on_death_this_turn = false;
 };
 
 struct ArtifactPermanent {
@@ -90,6 +105,7 @@ struct PlayerState {
     std::vector<CardId> library;
     std::vector<CardId> hand;
     std::vector<CardId> graveyard;
+    std::vector<CardId> exile;
     std::vector<LandPermanent> lands;
     std::vector<CreaturePermanent> creatures;
     std::vector<ArtifactPermanent> artifacts;
@@ -133,6 +149,7 @@ struct StackObject {
     std::size_t controller;
     std::optional<Target> target;
     std::optional<StackObjectId> spell_target;
+    int x_value = 0;
 };
 
 struct GameState {
@@ -164,6 +181,8 @@ enum class PriorityActionKind : std::uint8_t {
     CastArtifact,
     CastEnchantment,
     CastLightningBolt,
+    CastDisintegrate,
+    CastGiantGrowth,
     CastCounterspell,
     ActivateMillstone,
 };
@@ -174,6 +193,7 @@ struct PriorityAction {
     std::optional<Target> target;
     std::optional<StackObjectId> spell_target;
     std::optional<PermanentId> source_permanent;
+    int x_value = 0;
 
     static PriorityAction pass();
     static PriorityAction play_land(CardId land);
@@ -182,6 +202,9 @@ struct PriorityAction {
     static PriorityAction cast_artifact(CardId artifact);
     static PriorityAction cast_enchantment(CardId enchantment);
     static PriorityAction cast_lightning_bolt(Target bolt_target);
+    static PriorityAction cast_disintegrate(int x_value,
+                                            Target disintegrate_target);
+    static PriorityAction cast_giant_growth(Target growth_target);
     static PriorityAction cast_counterspell(StackObjectId target_spell);
     static PriorityAction activate_millstone(PermanentId millstone,
                                              Target mill_target);
@@ -426,7 +449,8 @@ double learned_critic_value(
 // policy. These scores must never be used as Learned labels or training data.
 std::vector<double> handcrafted_priority_scores(
     const GameState& state, std::size_t player,
-    const std::vector<PriorityAction>& candidates);
+    const std::vector<PriorityAction>& candidates,
+    TurnPhase phase = TurnPhase::FirstMain);
 std::array<double, 2> handcrafted_binary_attack_scores(
     const GameState& state, std::size_t attacking_player,
     const std::vector<PermanentId>& selected_attackers,
@@ -518,7 +542,8 @@ class Game {
         LearnedSearchConfig config);
     friend std::vector<double> handcrafted_priority_scores(
         const GameState& state, std::size_t player,
-        const std::vector<PriorityAction>& candidates);
+        const std::vector<PriorityAction>& candidates,
+        TurnPhase phase);
     friend LearnedActorGenerationAttackDiagnostic
     diagnose_learned_actor_generation_attack(
         const GameState& state,
@@ -571,9 +596,10 @@ class Game {
     learned_model_for(std::size_t player) const;
     PriorityAction
     choose_handcrafted_action(const std::vector<PriorityAction>& actions,
-                              std::size_t player);
+                              std::size_t player, TurnPhase phase);
     double handcrafted_action_score(const PriorityAction& action,
-                                    std::size_t player) const;
+                                    std::size_t player,
+                                    TurnPhase phase) const;
     double rollout_action(const PriorityAction& action,
                           std::size_t player, bool sorcery_actions,
                           std::uint64_t seed) const;
@@ -669,7 +695,12 @@ enum class DeckId : std::uint8_t {
     Red,
     Blue,
     White,
+    RUAggro,
 };
+
+inline constexpr std::size_t kDeckCount = 5;
+inline constexpr std::size_t kDistinctDeckPairingCount =
+    kDeckCount * (kDeckCount - 1) / 2;
 
 enum class BotField : std::uint8_t {
     Random,
@@ -700,12 +731,13 @@ struct TournamentSummary {
     std::size_t total_games = 0;
     std::uint64_t learned_training_seed =
         kDefaultLearnedTrainingSeed;
-    std::array<DeckSimulationStats, 4> decks;
-    std::array<std::array<DeckSimulationStats, kBotKindCount>, 4>
+    std::array<DeckSimulationStats, kDeckCount> decks;
+    std::array<std::array<DeckSimulationStats, kBotKindCount>,
+               kDeckCount>
         deck_bots;
     std::array<BotSimulationStats, kBotKindCount> bots;
     std::array<BotMatchupStats, kBotMatchupCount> bot_matchups;
-    std::array<MatchupSummary, 6> matchups;
+    std::array<MatchupSummary, kDistinctDeckPairingCount> matchups;
     std::size_t draws = 0;
     std::size_t life_total_finishes = 0;
     std::size_t empty_library_finishes = 0;
@@ -725,7 +757,7 @@ struct DeckLiftComparison {
 };
 
 struct LearnedDeckLiftSummary {
-    std::array<DeckLiftComparison, 4> decks;
+    std::array<DeckLiftComparison, kDeckCount> decks;
 
     bool complete() const;
     bool learned_is_best_on_every_deck() const;
@@ -752,8 +784,8 @@ struct BotBenchmarkSummary {
     std::size_t total_games = 0;
     BotSimulationStats challenger_stats;
     BotSimulationStats baseline_stats;
-    std::array<DeckSimulationStats, 4> challenger_decks;
-    std::array<DeckSimulationStats, 4> baseline_decks;
+    std::array<DeckSimulationStats, kDeckCount> challenger_decks;
+    std::array<DeckSimulationStats, kDeckCount> baseline_decks;
 
     double challenger_win_rate() const;
     double confidence_low_95() const;
@@ -1080,7 +1112,7 @@ struct DeckEvolutionConfig {
 struct EvolvedDeck {
     std::vector<CardId> cards;
     DeckSimulationStats total;
-    std::array<DeckSimulationStats, 4> by_opponent;
+    std::array<DeckSimulationStats, kDeckCount> by_opponent;
 };
 
 struct DeckEvolutionSummary {
@@ -1092,4 +1124,4 @@ DeckEvolutionSummary
 evolve_deck(DeckEvolutionConfig config, std::uint64_t seed,
             GameConfig game_config = {});
 
-} // namespace alpha
+} // namespace old_school

@@ -1,5 +1,5 @@
-#include "alpha/game.hpp"
-#include "alpha/learned_iteration.hpp"
+#include "old_school/game.hpp"
+#include "old_school/learned_iteration.hpp"
 
 #include <algorithm>
 #include <array>
@@ -53,31 +53,31 @@ struct RegisterTest {
         }                                                                     \
     } while (false)
 
-std::size_t count_card(const std::vector<alpha::CardId>& cards,
-                       alpha::CardId card) {
+std::size_t count_card(const std::vector<old_school::CardId>& cards,
+                       old_school::CardId card) {
     return static_cast<std::size_t>(std::count(cards.begin(), cards.end(),
                                                card));
 }
 
-bool has_action(const std::vector<alpha::PriorityAction>& actions,
-                const alpha::PriorityAction& wanted) {
+bool has_action(const std::vector<old_school::PriorityAction>& actions,
+                const old_school::PriorityAction& wanted) {
     return std::find(actions.begin(), actions.end(), wanted) != actions.end();
 }
 
-alpha::CreaturePermanent bear(alpha::PermanentId id,
+old_school::CreaturePermanent bear(old_school::PermanentId id,
                               bool summoning_sick = false,
                               bool tapped = false) {
     return {
         .id = id,
-        .card = alpha::CardId::GrizzlyBears,
+        .card = old_school::CardId::GrizzlyBears,
         .tapped = tapped,
         .summoning_sick = summoning_sick,
         .damage = 0,
     };
 }
 
-alpha::CreaturePermanent creature(alpha::PermanentId id,
-                                  alpha::CardId card,
+old_school::CreaturePermanent creature(old_school::PermanentId id,
+                                  old_school::CardId card,
                                   bool summoning_sick = false) {
     return {
         .id = id,
@@ -88,8 +88,8 @@ alpha::CreaturePermanent creature(alpha::PermanentId id,
     };
 }
 
-void remove_fixture_card(std::vector<alpha::CardId>& cards,
-                         alpha::CardId card) {
+void remove_fixture_card(std::vector<old_school::CardId>& cards,
+                         old_school::CardId card) {
     const auto position = std::find(cards.begin(), cards.end(), card);
     if (position == cards.end()) {
         throw std::runtime_error("fixture card is missing from deck");
@@ -98,16 +98,16 @@ void remove_fixture_card(std::vector<alpha::CardId>& cards,
 }
 
 struct DeterminizationFixture {
-    alpha::GameState state;
-    std::array<std::vector<alpha::CardId>, 2> decks;
+    old_school::GameState state;
+    std::array<std::vector<old_school::CardId>, 2> decks;
 };
 
 DeterminizationFixture determinization_fixture() {
     DeterminizationFixture fixture{
         .state = {},
         .decks = {
-            alpha::white_control_deck(),
-            alpha::blue_alpha_deck(),
+            old_school::white_control_deck(),
+            old_school::blue_deck(),
         },
     };
     auto& state = fixture.state;
@@ -115,64 +115,68 @@ DeterminizationFixture determinization_fixture() {
     state.turn_number = 9;
 
     state.players[0].hand = {
-        alpha::CardId::Plains,
-        alpha::CardId::Moat,
-        alpha::CardId::Plains,
+        old_school::CardId::Plains,
+        old_school::CardId::Moat,
+        old_school::CardId::Plains,
     };
-    state.players[0].graveyard = {alpha::CardId::Moat};
+    state.players[0].graveyard = {old_school::CardId::Moat};
+    state.players[0].exile = {old_school::CardId::Moat};
     state.players[0].lands = {
-        {.card = alpha::CardId::Plains, .tapped = true},
+        {.card = old_school::CardId::Plains, .tapped = true},
     };
     state.players[0].artifacts = {
-        {.id = 41, .card = alpha::CardId::Millstone, .tapped = true},
+        {.id = 41, .card = old_school::CardId::Millstone, .tapped = true},
     };
 
     state.players[1].graveyard = {
-        alpha::CardId::Counterspell,
-        alpha::CardId::Island,
+        old_school::CardId::Counterspell,
+        old_school::CardId::Island,
     };
+    state.players[1].exile = {old_school::CardId::Island};
     state.players[1].lands = {
-        {.card = alpha::CardId::Island, .tapped = true},
+        {.card = old_school::CardId::Island, .tapped = true},
     };
     state.players[1].creatures = {
-        creature(51, alpha::CardId::WaterElemental),
+        creature(51, old_school::CardId::WaterElemental),
     };
 
     state.stack = {
         {
-            .kind = alpha::StackObjectKind::Spell,
+            .kind = old_school::StackObjectKind::Spell,
             .id = 70,
-            .card = alpha::CardId::WaterElemental,
+            .card = old_school::CardId::WaterElemental,
             .controller = 1,
             .target = std::nullopt,
             .spell_target = std::nullopt,
         },
         {
-            .kind = alpha::StackObjectKind::ActivatedAbility,
+            .kind = old_school::StackObjectKind::ActivatedAbility,
             .id = 71,
-            .card = alpha::CardId::Millstone,
+            .card = old_school::CardId::Millstone,
             .controller = 0,
-            .target = alpha::Target::player_target(1),
+            .target = old_school::Target::player_target(1),
             .spell_target = std::nullopt,
         },
     };
 
     auto observer_library = fixture.decks[0];
-    for (const alpha::CardId card : state.players[0].hand) {
+    for (const old_school::CardId card : state.players[0].hand) {
         remove_fixture_card(observer_library, card);
     }
-    remove_fixture_card(observer_library, alpha::CardId::Moat);
-    remove_fixture_card(observer_library, alpha::CardId::Plains);
-    remove_fixture_card(observer_library, alpha::CardId::Millstone);
+    remove_fixture_card(observer_library, old_school::CardId::Moat);
+    remove_fixture_card(observer_library, old_school::CardId::Moat);
+    remove_fixture_card(observer_library, old_school::CardId::Plains);
+    remove_fixture_card(observer_library, old_school::CardId::Millstone);
     state.players[0].library = std::move(observer_library);
 
     auto opponent_hidden = fixture.decks[1];
-    remove_fixture_card(opponent_hidden, alpha::CardId::Counterspell);
-    remove_fixture_card(opponent_hidden, alpha::CardId::Island);
-    remove_fixture_card(opponent_hidden, alpha::CardId::Island);
-    remove_fixture_card(opponent_hidden, alpha::CardId::WaterElemental);
+    remove_fixture_card(opponent_hidden, old_school::CardId::Counterspell);
+    remove_fixture_card(opponent_hidden, old_school::CardId::Island);
+    remove_fixture_card(opponent_hidden, old_school::CardId::Island);
+    remove_fixture_card(opponent_hidden, old_school::CardId::Island);
+    remove_fixture_card(opponent_hidden, old_school::CardId::WaterElemental);
     // A spell stack object is another physical Water Elemental.
-    remove_fixture_card(opponent_hidden, alpha::CardId::WaterElemental);
+    remove_fixture_card(opponent_hidden, old_school::CardId::WaterElemental);
     constexpr std::size_t kOpponentHandSize = 5;
     state.players[1].hand.assign(
         opponent_hidden.begin(),
@@ -185,9 +189,9 @@ DeterminizationFixture determinization_fixture() {
     return fixture;
 }
 
-std::vector<alpha::CardId>
-physical_cards(const alpha::GameState& state, std::size_t player) {
-    std::vector<alpha::CardId> cards;
+std::vector<old_school::CardId>
+physical_cards(const old_school::GameState& state, std::size_t player) {
+    std::vector<old_school::CardId> cards;
     const auto& player_state = state.players[player];
     cards.insert(cards.end(), player_state.library.begin(),
                  player_state.library.end());
@@ -195,6 +199,8 @@ physical_cards(const alpha::GameState& state, std::size_t player) {
                  player_state.hand.end());
     cards.insert(cards.end(), player_state.graveyard.begin(),
                  player_state.graveyard.end());
+    cards.insert(cards.end(), player_state.exile.begin(),
+                 player_state.exile.end());
     for (const auto& land : player_state.lands) {
         cards.push_back(land.card);
     }
@@ -208,7 +214,7 @@ physical_cards(const alpha::GameState& state, std::size_t player) {
                  player_state.enchantments.end());
     for (const auto& object : state.stack) {
         if (object.controller == player &&
-            object.kind == alpha::StackObjectKind::Spell) {
+            object.kind == old_school::StackObjectKind::Spell) {
             cards.push_back(object.card);
         }
     }
@@ -216,33 +222,33 @@ physical_cards(const alpha::GameState& state, std::size_t player) {
     return cards;
 }
 
-std::shared_ptr<const alpha::LearnedModel> small_actor_model() {
+std::shared_ptr<const old_school::LearnedModel> small_actor_model() {
     static const auto model =
-        alpha::train_learned_actor_model(1, 0xAC70E7A1ULL);
+        old_school::train_learned_actor_model(1, 0xAC70E7A1ULL);
     return model;
 }
 
-std::shared_ptr<const alpha::LearnedModel> small_value_model() {
+std::shared_ptr<const old_school::LearnedModel> small_value_model() {
     static const auto model =
-        alpha::train_learned_value_champion(1, 0xC4A6E7A1ULL);
+        old_school::train_learned_value_champion(1, 0xC4A6E7A1ULL);
     return model;
 }
 
-const alpha::LearnedValueG8Result& small_value_g8() {
+const old_school::LearnedValueG8Result& small_value_g8() {
     static const auto result =
-        alpha::train_learned_value_g8(1, 0x68A11EADULL);
+        old_school::train_learned_value_g8(1, 0x68A11EADULL);
     return result;
 }
 
-const alpha::LearnedValueG8Result& small_value_g8_eight_games() {
+const old_school::LearnedValueG8Result& small_value_g8_eight_games() {
     static const auto result =
-        alpha::train_learned_value_g8(8, 0x68A15050ULL);
+        old_school::train_learned_value_g8(8, 0x68A15050ULL);
     return result;
 }
 
-const alpha::LearnedValueG8Result& small_value_g8_mix50() {
+const old_school::LearnedValueG8Result& small_value_g8_mix50() {
     static const auto result =
-        alpha::train_learned_value_g8_mix50(
+        old_school::train_learned_value_g8_mix50(
             8, 0x68A15050ULL);
     return result;
 }
@@ -281,9 +287,9 @@ bool throws_with_text(
     return false;
 }
 
-alpha::GameState hidden_repartition(
-    const alpha::GameState& state, std::size_t observer) {
-    alpha::GameState changed = state;
+old_school::GameState hidden_repartition(
+    const old_school::GameState& state, std::size_t observer) {
+    old_school::GameState changed = state;
     std::reverse(changed.players[observer].library.begin(),
                  changed.players[observer].library.end());
     const std::size_t opponent = 1 - observer;
@@ -292,7 +298,7 @@ alpha::GameState hidden_repartition(
     if (!hand.empty() && !library.empty()) {
         const auto different = std::find_if(
             library.begin(), library.end(),
-            [&](alpha::CardId card) {
+            [&](old_school::CardId card) {
                 return card != hand.front();
             });
         if (different != library.end()) {
@@ -305,15 +311,15 @@ alpha::GameState hidden_repartition(
 }
 
 DeterminizationFixture attack_evaluation_fixture(
-    alpha::CardId blocker_card) {
+    old_school::CardId blocker_card) {
     const bool red_blocker =
-        blocker_card == alpha::CardId::FireElemental;
+        blocker_card == old_school::CardId::FireElemental;
     DeterminizationFixture fixture{
         .state = {},
         .decks = {
-            alpha::green_alpha_deck(),
-            red_blocker ? alpha::red_alpha_deck()
-                        : alpha::green_alpha_deck(),
+            old_school::green_deck(),
+            red_blocker ? old_school::red_deck()
+                        : old_school::green_deck(),
         },
     };
     auto& state = fixture.state;
@@ -322,17 +328,17 @@ DeterminizationFixture attack_evaluation_fixture(
     state.turn_number = 11;
     state.players[0].land_played_this_turn = true;
     state.players[0].lands.assign(
-        5, alpha::LandPermanent{
-               .card = alpha::CardId::Forest,
+        5, old_school::LandPermanent{
+               .card = old_school::CardId::Forest,
                .tapped = false,
            });
     state.players[0].creatures = {
-        creature(1, alpha::CardId::IronrootTreefolk),
+        creature(1, old_school::CardId::IronrootTreefolk),
     };
     state.players[1].lands.assign(
-        5, alpha::LandPermanent{
-               .card = red_blocker ? alpha::CardId::Mountain
-                                   : alpha::CardId::Forest,
+        5, old_school::LandPermanent{
+               .card = red_blocker ? old_school::CardId::Mountain
+                                   : old_school::CardId::Forest,
                .tapped = false,
            });
     state.players[1].creatures = {
@@ -341,7 +347,7 @@ DeterminizationFixture attack_evaluation_fixture(
 
     for (std::size_t player = 0; player < fixture.decks.size();
          ++player) {
-        std::vector<alpha::CardId> hidden = fixture.decks[player];
+        std::vector<old_school::CardId> hidden = fixture.decks[player];
         for (const auto& land : state.players[player].lands) {
             remove_fixture_card(hidden, land.card);
         }
@@ -359,125 +365,219 @@ DeterminizationFixture attack_evaluation_fixture(
     return fixture;
 }
 
-TEST(alpha_card_definitions_are_complete) {
-    const auto& forest = alpha::card_definition(alpha::CardId::Forest);
+TEST(old_school_card_definitions_are_complete) {
+    const auto& forest = old_school::card_definition(old_school::CardId::Forest);
     CHECK(forest.name == "Forest");
-    CHECK(forest.type == alpha::CardType::Land);
+    CHECK(forest.type == old_school::CardType::Land);
 
-    const auto& mountain = alpha::card_definition(alpha::CardId::Mountain);
+    const auto& mountain = old_school::card_definition(old_school::CardId::Mountain);
     CHECK(mountain.name == "Mountain");
-    CHECK(mountain.type == alpha::CardType::Land);
+    CHECK(mountain.type == old_school::CardType::Land);
 
     const auto& bears =
-        alpha::card_definition(alpha::CardId::GrizzlyBears);
+        old_school::card_definition(old_school::CardId::GrizzlyBears);
     CHECK(bears.name == "Grizzly Bears");
-    CHECK(bears.type == alpha::CardType::Creature);
+    CHECK(bears.type == old_school::CardType::Creature);
     CHECK(bears.cost.generic == 1);
     CHECK(bears.cost.green == 1);
     CHECK(bears.power == 2);
     CHECK(bears.toughness == 2);
 
     const auto& bolt =
-        alpha::card_definition(alpha::CardId::LightningBolt);
+        old_school::card_definition(old_school::CardId::LightningBolt);
     CHECK(bolt.name == "Lightning Bolt");
-    CHECK(bolt.type == alpha::CardType::Instant);
+    CHECK(bolt.type == old_school::CardType::Instant);
     CHECK(bolt.cost.red == 1);
     CHECK(bolt.effect_damage == 3);
 
     const auto& treefolk =
-        alpha::card_definition(alpha::CardId::IronrootTreefolk);
+        old_school::card_definition(old_school::CardId::IronrootTreefolk);
     CHECK(treefolk.name == "Ironroot Treefolk");
-    CHECK(treefolk.type == alpha::CardType::Creature);
+    CHECK(treefolk.type == old_school::CardType::Creature);
     CHECK(treefolk.cost.generic == 4);
     CHECK(treefolk.cost.green == 1);
     CHECK(treefolk.power == 3);
     CHECK(treefolk.toughness == 5);
 
     const auto& elemental =
-        alpha::card_definition(alpha::CardId::FireElemental);
+        old_school::card_definition(old_school::CardId::FireElemental);
     CHECK(elemental.name == "Fire Elemental");
-    CHECK(elemental.type == alpha::CardType::Creature);
+    CHECK(elemental.type == old_school::CardType::Creature);
     CHECK(elemental.cost.generic == 3);
     CHECK(elemental.cost.red == 2);
     CHECK(elemental.power == 5);
     CHECK(elemental.toughness == 4);
 
-    const auto& island = alpha::card_definition(alpha::CardId::Island);
+    const auto& island = old_school::card_definition(old_school::CardId::Island);
     CHECK(island.name == "Island");
-    CHECK(island.type == alpha::CardType::Land);
+    CHECK(island.type == old_school::CardType::Land);
 
     const auto& counterspell =
-        alpha::card_definition(alpha::CardId::Counterspell);
+        old_school::card_definition(old_school::CardId::Counterspell);
     CHECK(counterspell.name == "Counterspell");
-    CHECK(counterspell.type == alpha::CardType::Instant);
+    CHECK(counterspell.type == old_school::CardType::Instant);
     CHECK(counterspell.cost.blue == 2);
 
     const auto& water =
-        alpha::card_definition(alpha::CardId::WaterElemental);
+        old_school::card_definition(old_school::CardId::WaterElemental);
     CHECK(water.name == "Water Elemental");
-    CHECK(water.type == alpha::CardType::Creature);
+    CHECK(water.type == old_school::CardType::Creature);
     CHECK(water.cost.generic == 3);
     CHECK(water.cost.blue == 2);
     CHECK(water.power == 5);
     CHECK(water.toughness == 4);
 
     const auto& tsunami =
-        alpha::card_definition(alpha::CardId::Tsunami);
+        old_school::card_definition(old_school::CardId::Tsunami);
     CHECK(tsunami.name == "Tsunami");
-    CHECK(tsunami.type == alpha::CardType::Sorcery);
+    CHECK(tsunami.type == old_school::CardType::Sorcery);
     CHECK(tsunami.cost.generic == 3);
     CHECK(tsunami.cost.green == 1);
 
-    const auto& plains = alpha::card_definition(alpha::CardId::Plains);
+    const auto& plains = old_school::card_definition(old_school::CardId::Plains);
     CHECK(plains.name == "Plains");
-    CHECK(plains.type == alpha::CardType::Land);
+    CHECK(plains.type == old_school::CardType::Land);
 
     const auto& millstone =
-        alpha::card_definition(alpha::CardId::Millstone);
+        old_school::card_definition(old_school::CardId::Millstone);
     CHECK(millstone.name == "Millstone");
-    CHECK(millstone.type == alpha::CardType::Artifact);
+    CHECK(millstone.type == old_school::CardType::Artifact);
     CHECK(millstone.cost.generic == 2);
 
-    const auto& moat = alpha::card_definition(alpha::CardId::Moat);
+    const auto& moat = old_school::card_definition(old_school::CardId::Moat);
     CHECK(moat.name == "Moat");
-    CHECK(moat.type == alpha::CardType::Enchantment);
+    CHECK(moat.type == old_school::CardType::Enchantment);
     CHECK(moat.cost.generic == 2);
     CHECK(moat.cost.white == 2);
+
+    const auto& flying_men =
+        old_school::card_definition(old_school::CardId::FlyingMen);
+    CHECK(flying_men.name == "Flying Men");
+    CHECK(flying_men.type == old_school::CardType::Creature);
+    CHECK(flying_men.cost.generic == 0);
+    CHECK(flying_men.cost.green == 0);
+    CHECK(flying_men.cost.red == 0);
+    CHECK(flying_men.cost.blue == 1);
+    CHECK(flying_men.cost.white == 0);
+    CHECK(flying_men.power == 1);
+    CHECK(flying_men.toughness == 1);
+    CHECK(flying_men.flying);
+    CHECK(flying_men.cannot_block_power_at_least == 0);
+
+    const auto& ironclaw =
+        old_school::card_definition(old_school::CardId::IronclawOrcs);
+    CHECK(ironclaw.name == "Ironclaw Orcs");
+    CHECK(ironclaw.type == old_school::CardType::Creature);
+    CHECK(ironclaw.cost.generic == 1);
+    CHECK(ironclaw.cost.green == 0);
+    CHECK(ironclaw.cost.red == 1);
+    CHECK(ironclaw.cost.blue == 0);
+    CHECK(ironclaw.cost.white == 0);
+    CHECK(ironclaw.power == 2);
+    CHECK(ironclaw.toughness == 2);
+    CHECK(!ironclaw.flying);
+    CHECK(ironclaw.cannot_block_power_at_least == 2);
+
+    const auto& gray_ogre =
+        old_school::card_definition(old_school::CardId::GrayOgre);
+    CHECK(gray_ogre.name == "Gray Ogre");
+    CHECK(gray_ogre.type == old_school::CardType::Creature);
+    CHECK(gray_ogre.cost.generic == 2);
+    CHECK(gray_ogre.cost.green == 0);
+    CHECK(gray_ogre.cost.red == 1);
+    CHECK(gray_ogre.cost.blue == 0);
+    CHECK(gray_ogre.cost.white == 0);
+    CHECK(gray_ogre.power == 2);
+    CHECK(gray_ogre.toughness == 2);
+    CHECK(!gray_ogre.flying);
+    CHECK(gray_ogre.cannot_block_power_at_least == 0);
+
+    const auto& hill_giant =
+        old_school::card_definition(old_school::CardId::HillGiant);
+    CHECK(hill_giant.name == "Hill Giant");
+    CHECK(hill_giant.type == old_school::CardType::Creature);
+    CHECK(hill_giant.cost.generic == 3);
+    CHECK(hill_giant.cost.green == 0);
+    CHECK(hill_giant.cost.red == 1);
+    CHECK(hill_giant.cost.blue == 0);
+    CHECK(hill_giant.cost.white == 0);
+    CHECK(hill_giant.power == 3);
+    CHECK(hill_giant.toughness == 3);
+    CHECK(!hill_giant.flying);
+    CHECK(hill_giant.cannot_block_power_at_least == 0);
+
+    const auto& disintegrate =
+        old_school::card_definition(old_school::CardId::Disintegrate);
+    CHECK(disintegrate.name == "Disintegrate");
+    CHECK(disintegrate.type == old_school::CardType::Sorcery);
+    CHECK(disintegrate.cost.generic == 0);
+    CHECK(disintegrate.cost.green == 0);
+    CHECK(disintegrate.cost.red == 1);
+    CHECK(disintegrate.cost.blue == 0);
+    CHECK(disintegrate.cost.white == 0);
+    CHECK(disintegrate.power == 0);
+    CHECK(disintegrate.toughness == 0);
+    CHECK(disintegrate.effect_damage == 0);
+
+    const auto& giant_growth =
+        old_school::card_definition(old_school::CardId::GiantGrowth);
+    CHECK(giant_growth.name == "Giant Growth");
+    CHECK(giant_growth.type == old_school::CardType::Instant);
+    CHECK(giant_growth.cost.generic == 0);
+    CHECK(giant_growth.cost.green == 1);
+    CHECK(giant_growth.cost.red == 0);
+    CHECK(giant_growth.cost.blue == 0);
+    CHECK(giant_growth.cost.white == 0);
+    CHECK(giant_growth.power == 0);
+    CHECK(giant_growth.toughness == 0);
+    CHECK(giant_growth.effect_damage == 0);
 }
 
 TEST(starting_decks_have_the_requested_cards) {
-    const auto green_deck = alpha::green_alpha_deck();
+    const auto green_deck = old_school::green_deck();
     CHECK(green_deck.size() == 40);
-    CHECK(count_card(green_deck, alpha::CardId::Forest) == 18);
-    CHECK(count_card(green_deck, alpha::CardId::GrizzlyBears) == 9);
-    CHECK(count_card(green_deck, alpha::CardId::IronrootTreefolk) == 12);
-    CHECK(count_card(green_deck, alpha::CardId::Tsunami) == 1);
+    CHECK(count_card(green_deck, old_school::CardId::Forest) == 18);
+    CHECK(count_card(green_deck, old_school::CardId::GrizzlyBears) == 9);
+    CHECK(count_card(green_deck, old_school::CardId::IronrootTreefolk) == 8);
+    CHECK(count_card(green_deck, old_school::CardId::GiantGrowth) == 4);
+    CHECK(count_card(green_deck, old_school::CardId::Tsunami) == 1);
 
-    const auto red_deck = alpha::red_alpha_deck();
+    const auto red_deck = old_school::red_deck();
     CHECK(red_deck.size() == 40);
-    CHECK(count_card(red_deck, alpha::CardId::Mountain) == 18);
-    CHECK(count_card(red_deck, alpha::CardId::LightningBolt) == 10);
-    CHECK(count_card(red_deck, alpha::CardId::FireElemental) == 12);
+    CHECK(count_card(red_deck, old_school::CardId::Mountain) == 18);
+    CHECK(count_card(red_deck, old_school::CardId::LightningBolt) == 10);
+    CHECK(count_card(red_deck, old_school::CardId::FireElemental) == 12);
 
-    const auto blue_deck = alpha::blue_alpha_deck();
+    const auto blue_deck = old_school::blue_deck();
     CHECK(blue_deck.size() == 40);
-    CHECK(count_card(blue_deck, alpha::CardId::Island) == 18);
-    CHECK(count_card(blue_deck, alpha::CardId::Counterspell) == 14);
-    CHECK(count_card(blue_deck, alpha::CardId::WaterElemental) == 8);
+    CHECK(count_card(blue_deck, old_school::CardId::Island) == 18);
+    CHECK(count_card(blue_deck, old_school::CardId::Counterspell) == 14);
+    CHECK(count_card(blue_deck, old_school::CardId::WaterElemental) == 8);
 
-    const auto white_deck = alpha::white_control_deck();
+    const auto white_deck = old_school::white_control_deck();
     CHECK(white_deck.size() == 40);
-    CHECK(count_card(white_deck, alpha::CardId::Plains) == 22);
-    CHECK(count_card(white_deck, alpha::CardId::Millstone) == 3);
-    CHECK(count_card(white_deck, alpha::CardId::Moat) == 15);
+    CHECK(count_card(white_deck, old_school::CardId::Plains) == 22);
+    CHECK(count_card(white_deck, old_school::CardId::Millstone) == 3);
+    CHECK(count_card(white_deck, old_school::CardId::Moat) == 15);
+
+    const auto ru_deck = old_school::ru_aggro_deck();
+    CHECK(ru_deck.size() == 40);
+    CHECK(count_card(ru_deck, old_school::CardId::Mountain) == 13);
+    CHECK(count_card(ru_deck, old_school::CardId::Island) == 4);
+    CHECK(count_card(ru_deck, old_school::CardId::FlyingMen) == 3);
+    CHECK(count_card(ru_deck, old_school::CardId::IronclawOrcs) == 5);
+    CHECK(count_card(ru_deck, old_school::CardId::GrayOgre) == 2);
+    CHECK(count_card(ru_deck, old_school::CardId::HillGiant) == 8);
+    CHECK(count_card(ru_deck, old_school::CardId::LightningBolt) == 3);
+    CHECK(count_card(ru_deck, old_school::CardId::Disintegrate) == 2);
 }
 
 TEST(determinization_is_reproducible_and_preserves_observer_hand) {
     const auto fixture = determinization_fixture();
     constexpr std::uint64_t kSeed = 0xD37E2A11ULL;
-    const auto first = alpha::sample_determinization(
+    const auto first = old_school::sample_determinization(
         fixture.state, fixture.decks, 0, kSeed);
-    const auto repeated = alpha::sample_determinization(
+    const auto repeated = old_school::sample_determinization(
         fixture.state, fixture.decks, 0, kSeed);
 
     CHECK(first.players[0].hand == fixture.state.players[0].hand);
@@ -490,12 +590,14 @@ TEST(determinization_is_reproducible_and_preserves_observer_hand) {
           fixture.state.players[1].hand.size());
     CHECK(first.players[1].library.size() ==
           fixture.state.players[1].library.size());
+    CHECK(first.players[0].exile == fixture.state.players[0].exile);
+    CHECK(first.players[1].exile == fixture.state.players[1].exile);
     CHECK(first.stack.size() == fixture.state.stack.size());
     CHECK(first.stack[0].id == fixture.state.stack[0].id);
     CHECK(first.stack[1].kind ==
-          alpha::StackObjectKind::ActivatedAbility);
+          old_school::StackObjectKind::ActivatedAbility);
 
-    const auto other_observer = alpha::sample_determinization(
+    const auto other_observer = old_school::sample_determinization(
         fixture.state, fixture.decks, 1, kSeed);
     CHECK(other_observer.players[1].hand ==
           fixture.state.players[1].hand);
@@ -512,7 +614,7 @@ TEST(determinization_does_not_consult_hidden_cards) {
     const auto different_card = std::find_if(
         altered.players[1].library.begin(),
         altered.players[1].library.end(),
-        [&](alpha::CardId card) {
+        [&](old_school::CardId card) {
             return card != altered.players[1].hand.front();
         });
     CHECK(different_card != altered.players[1].library.end());
@@ -523,9 +625,9 @@ TEST(determinization_does_not_consult_hidden_cards) {
                  altered.players[1].library.end());
 
     constexpr std::uint64_t kSeed = 0x1AF05E7ULL;
-    const auto original_sample = alpha::sample_determinization(
+    const auto original_sample = old_school::sample_determinization(
         fixture.state, fixture.decks, 0, kSeed);
-    const auto altered_sample = alpha::sample_determinization(
+    const auto altered_sample = old_school::sample_determinization(
         altered, fixture.decks, 0, kSeed);
     CHECK(original_sample.players[0].library ==
           altered_sample.players[0].library);
@@ -537,7 +639,7 @@ TEST(determinization_does_not_consult_hidden_cards) {
 
 TEST(determinization_conserves_spells_but_not_ability_objects) {
     const auto fixture = determinization_fixture();
-    const auto sampled = alpha::sample_determinization(
+    const auto sampled = old_school::sample_determinization(
         fixture.state, fixture.decks, 0, 0xC0A53A7EULL);
 
     for (std::size_t player = 0; player < fixture.decks.size();
@@ -549,21 +651,21 @@ TEST(determinization_conserves_spells_but_not_ability_objects) {
               fixture.decks[player].size());
     }
     CHECK(count_card(physical_cards(sampled, 0),
-                     alpha::CardId::Millstone) ==
-          count_card(fixture.decks[0], alpha::CardId::Millstone));
+                     old_school::CardId::Millstone) ==
+          count_card(fixture.decks[0], old_school::CardId::Millstone));
     CHECK(count_card(physical_cards(sampled, 1),
-                     alpha::CardId::WaterElemental) ==
+                     old_school::CardId::WaterElemental) ==
           count_card(fixture.decks[1],
-                     alpha::CardId::WaterElemental));
+                     old_school::CardId::WaterElemental));
 }
 
 TEST(determinization_varies_by_seed_and_rejects_invalid_public_state) {
     const auto fixture = determinization_fixture();
-    const auto baseline = alpha::sample_determinization(
+    const auto baseline = old_school::sample_determinization(
         fixture.state, fixture.decks, 0, 0x5EEDULL);
     bool found_variation = false;
     for (std::uint64_t seed = 1; seed <= 16; ++seed) {
-        const auto candidate = alpha::sample_determinization(
+        const auto candidate = old_school::sample_determinization(
             fixture.state, fixture.decks, 0, seed);
         found_variation =
             found_variation ||
@@ -576,10 +678,10 @@ TEST(determinization_varies_by_seed_and_rejects_invalid_public_state) {
     CHECK(found_variation);
 
     auto invalid = fixture.state;
-    invalid.players[1].graveyard.push_back(alpha::CardId::Forest);
+    invalid.players[1].graveyard.push_back(old_school::CardId::Forest);
     bool rejected = false;
     try {
-        static_cast<void>(alpha::sample_determinization(
+        static_cast<void>(old_school::sample_determinization(
             invalid, fixture.decks, 0, 0xBADULL));
     } catch (const std::invalid_argument&) {
         rejected = true;
@@ -590,48 +692,153 @@ TEST(determinization_varies_by_seed_and_rejects_invalid_public_state) {
 TEST(learned_observation_excludes_opponent_hidden_card_identities) {
     const auto fixture = determinization_fixture();
     const auto baseline =
-        alpha::learned_observation(fixture.state, 0);
+        old_school::learned_observation(fixture.state, 0);
 
     auto changed_hidden = fixture.state;
     std::fill(changed_hidden.players[1].hand.begin(),
               changed_hidden.players[1].hand.end(),
-              alpha::CardId::LightningBolt);
+              old_school::CardId::LightningBolt);
     std::fill(changed_hidden.players[1].library.begin(),
               changed_hidden.players[1].library.end(),
-              alpha::CardId::Forest);
-    CHECK(alpha::learned_observation(changed_hidden, 0) == baseline);
+              old_school::CardId::Forest);
+    CHECK(old_school::learned_observation(changed_hidden, 0) == baseline);
 
     auto changed_own_hand = fixture.state;
     changed_own_hand.players[0].hand[0] =
-        alpha::CardId::LightningBolt;
-    CHECK(alpha::learned_observation(changed_own_hand, 0) != baseline);
+        old_school::CardId::LightningBolt;
+    CHECK(old_school::learned_observation(changed_own_hand, 0) != baseline);
 
     auto changed_public_zone = fixture.state;
     changed_public_zone.players[1].graveyard[0] =
-        alpha::CardId::LightningBolt;
-    CHECK(alpha::learned_observation(changed_public_zone, 0) !=
+        old_school::CardId::LightningBolt;
+    CHECK(old_school::learned_observation(changed_public_zone, 0) !=
           baseline);
+}
+
+TEST(learned_features_encode_old_school_public_state_and_action_x) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.turn_number = 6;
+    state.players[0].hand = {
+        old_school::CardId::Disintegrate,
+        old_school::CardId::GiantGrowth,
+    };
+    state.players[0].library = {
+        old_school::CardId::Mountain,
+        old_school::CardId::Island,
+    };
+    state.players[0].creatures = {
+        creature(10, old_school::CardId::GrizzlyBears),
+    };
+    state.players[1].hand = {
+        old_school::CardId::Counterspell,
+        old_school::CardId::LightningBolt,
+    };
+    state.players[1].library = {
+        old_school::CardId::Island,
+        old_school::CardId::Mountain,
+    };
+    state.players[1].creatures = {
+        creature(20, old_school::CardId::HillGiant),
+    };
+
+    const auto baseline_observation =
+        old_school::learned_observation(state, 0);
+    const auto baseline_policy =
+        old_school::learned_priority_policy_features(
+            state, 0, old_school::PriorityAction::pass(), true,
+            old_school::TurnPhase::FirstMain, 0);
+
+    auto exile_changed = state;
+    exile_changed.players[1].exile.push_back(
+        old_school::CardId::FlyingMen);
+    CHECK(old_school::learned_observation(exile_changed, 0) !=
+          baseline_observation);
+    CHECK(old_school::learned_priority_policy_features(
+              exile_changed, 0, old_school::PriorityAction::pass(), true,
+              old_school::TurnPhase::FirstMain, 0) != baseline_policy);
+
+    auto bonus_changed = state;
+    bonus_changed.players[0].creatures[0].temporary_power_bonus = 3;
+    bonus_changed.players[0].creatures[0].temporary_toughness_bonus = 3;
+    CHECK(old_school::learned_observation(bonus_changed, 0) !=
+          baseline_observation);
+    CHECK(old_school::learned_priority_policy_features(
+              bonus_changed, 0, old_school::PriorityAction::pass(), true,
+              old_school::TurnPhase::FirstMain, 0) != baseline_policy);
+
+    auto stack_x_one = state;
+    stack_x_one.stack.push_back({
+        .kind = old_school::StackObjectKind::Spell,
+        .id = 30,
+        .card = old_school::CardId::Disintegrate,
+        .controller = 1,
+        .target = old_school::Target::player_target(0),
+        .spell_target = std::nullopt,
+        .x_value = 1,
+    });
+    auto stack_x_four = stack_x_one;
+    stack_x_four.stack[0].x_value = 4;
+    CHECK(old_school::learned_observation(stack_x_one, 0) !=
+          old_school::learned_observation(stack_x_four, 0));
+    CHECK(old_school::learned_priority_policy_features(
+              stack_x_one, 0, old_school::PriorityAction::pass(), false,
+              old_school::TurnPhase::BeginCombat, 0) !=
+          old_school::learned_priority_policy_features(
+              stack_x_four, 0, old_school::PriorityAction::pass(), false,
+              old_school::TurnPhase::BeginCombat, 0));
+
+    const auto disintegrate_one =
+        old_school::PriorityAction::cast_disintegrate(
+            1, old_school::Target::player_target(1));
+    const auto disintegrate_four =
+        old_school::PriorityAction::cast_disintegrate(
+            4, old_school::Target::player_target(1));
+    CHECK(old_school::learned_priority_policy_features(
+              state, 0, disintegrate_one, true,
+              old_school::TurnPhase::FirstMain, 0) !=
+          old_school::learned_priority_policy_features(
+              state, 0, disintegrate_four, true,
+              old_school::TurnPhase::FirstMain, 0));
+
+    auto hidden_changed = state;
+    hidden_changed.players[1].hand = {
+        old_school::CardId::Forest,
+        old_school::CardId::Moat,
+    };
+    hidden_changed.players[1].library = {
+        old_school::CardId::GiantGrowth,
+        old_school::CardId::Tsunami,
+    };
+    CHECK(old_school::learned_observation(hidden_changed, 0) ==
+          baseline_observation);
+    CHECK(old_school::learned_priority_policy_features(
+              hidden_changed, 0, disintegrate_four, true,
+              old_school::TurnPhase::FirstMain, 0) ==
+          old_school::learned_priority_policy_features(
+              state, 0, disintegrate_four, true,
+              old_school::TurnPhase::FirstMain, 0));
 }
 
 TEST(learned_priority_policy_encodes_phase_and_pass_context) {
     const auto fixture = determinization_fixture();
-    const auto pass = alpha::PriorityAction::pass();
+    const auto pass = old_school::PriorityAction::pass();
     const auto beginning_of_combat =
-        alpha::learned_priority_policy_features(
+        old_school::learned_priority_policy_features(
             fixture.state, 0, pass, false,
-            alpha::TurnPhase::BeginCombat, 0);
+            old_school::TurnPhase::BeginCombat, 0);
     const auto first_main =
-        alpha::learned_priority_policy_features(
+        old_school::learned_priority_policy_features(
             fixture.state, 0, pass, true,
-            alpha::TurnPhase::FirstMain, 0);
+            old_school::TurnPhase::FirstMain, 0);
     const auto second_main =
-        alpha::learned_priority_policy_features(
+        old_school::learned_priority_policy_features(
             fixture.state, 0, pass, true,
-            alpha::TurnPhase::SecondMain, 0);
+            old_school::TurnPhase::SecondMain, 0);
     const auto resolving_pass =
-        alpha::learned_priority_policy_features(
+        old_school::learned_priority_policy_features(
             fixture.state, 0, pass, false,
-            alpha::TurnPhase::BeginCombat, 1);
+            old_school::TurnPhase::BeginCombat, 1);
     CHECK(beginning_of_combat != first_main);
     CHECK(first_main != second_main);
     CHECK(beginning_of_combat != resolving_pass);
@@ -639,19 +846,19 @@ TEST(learned_priority_policy_encodes_phase_and_pass_context) {
     auto changed_hidden = fixture.state;
     std::fill(changed_hidden.players[1].hand.begin(),
               changed_hidden.players[1].hand.end(),
-              alpha::CardId::LightningBolt);
+              old_school::CardId::LightningBolt);
     std::fill(changed_hidden.players[1].library.begin(),
               changed_hidden.players[1].library.end(),
-              alpha::CardId::Forest);
-    CHECK(alpha::learned_priority_policy_features(
+              old_school::CardId::Forest);
+    CHECK(old_school::learned_priority_policy_features(
               changed_hidden, 0, pass, false,
-              alpha::TurnPhase::BeginCombat, 1) ==
+              old_school::TurnPhase::BeginCombat, 1) ==
           resolving_pass);
 }
 
 TEST(learned_soft_priority_target_is_smoothed_and_ordered) {
     const auto targets =
-        alpha::learned_soft_priority_target({0.2, 0.4, 0.4});
+        old_school::learned_soft_priority_target({0.2, 0.4, 0.4});
     CHECK(targets.size() == 3);
     CHECK(std::abs(targets[0] + targets[1] + targets[2] - 1.0) <
           1.0e-12);
@@ -660,27 +867,27 @@ TEST(learned_soft_priority_target_is_smoothed_and_ordered) {
     CHECK(std::abs(targets[1] - targets[2]) < 1.0e-12);
 
     const auto uniform =
-        alpha::learned_soft_priority_target({0.5, 0.5, 0.5});
+        old_school::learned_soft_priority_target({0.5, 0.5, 0.5});
     CHECK(uniform.size() == 3);
     for (const double target : uniform) {
         CHECK(std::abs(target - 1.0 / 3.0) < 1.0e-12);
     }
-    CHECK(alpha::learned_soft_priority_target({}).empty());
+    CHECK(old_school::learned_soft_priority_target({}).empty());
 }
 
 TEST(learned_defaults_to_value_search_champion) {
-    const alpha::BotConfig learned = {
-        .kind = alpha::BotKind::Learned,
+    const old_school::BotConfig learned = {
+        .kind = old_school::BotKind::Learned,
     };
     CHECK(learned.learned_variant ==
-          alpha::LearnedVariant::ValueSearchChampion);
-    CHECK(alpha::bot_config_name(learned) == "Learned Value");
+          old_school::LearnedVariant::ValueSearchChampion);
+    CHECK(old_school::bot_config_name(learned) == "Learned Value");
 
-    const alpha::BotConfig actor = {
-        .kind = alpha::BotKind::Learned,
-        .learned_variant = alpha::LearnedVariant::UnifiedActor,
+    const old_school::BotConfig actor = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant = old_school::LearnedVariant::UnifiedActor,
     };
-    CHECK(alpha::bot_config_name(actor) == "Learned Actor");
+    CHECK(old_school::bot_config_name(actor) == "Learned Actor");
 }
 
 TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
@@ -690,30 +897,30 @@ TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
     fixture.state.players[0].artifacts[0].tapped = false;
     fixture.state.players[0].lands[0].tapped = false;
     fixture.state.players[0].lands.push_back(
-        {.card = alpha::CardId::Plains, .tapped = false});
+        {.card = old_school::CardId::Plains, .tapped = false});
     remove_fixture_card(
         fixture.state.players[0].library,
-        alpha::CardId::Plains);
+        old_school::CardId::Plains);
     // Make phase continuation observably different: the First Main path has
     // a guaranteed lethal combat, while Second Main has already passed it.
     remove_fixture_card(
-        fixture.decks[0], alpha::CardId::Moat);
-    fixture.decks[0].push_back(alpha::CardId::GrizzlyBears);
+        fixture.decks[0], old_school::CardId::Moat);
+    fixture.decks[0].push_back(old_school::CardId::GrizzlyBears);
     remove_fixture_card(
         fixture.state.players[0].library,
-        alpha::CardId::Moat);
+        old_school::CardId::Moat);
     fixture.state.players[0].creatures.push_back(bear(91));
     fixture.state.players[1].creatures[0].tapped = true;
     fixture.state.players[1].life = 2;
     const auto model =
-        alpha::train_learned_value_champion(1, 0xC4A6A10ULL);
+        old_school::train_learned_value_champion(1, 0xC4A6A10ULL);
 
     constexpr std::size_t kRollouts = 2;
     constexpr std::uint64_t kEvaluationSeed = 0x1F05AFEULL;
     const auto first_main =
-        alpha::diagnose_learned_value_priority(
+        old_school::diagnose_learned_value_priority(
             fixture.state, fixture.decks, 0, true,
-            alpha::TurnPhase::FirstMain, 1, model, kRollouts,
+            old_school::TurnPhase::FirstMain, 1, model, kRollouts,
             kEvaluationSeed);
 
     auto hidden_variant = fixture.state;
@@ -727,9 +934,9 @@ TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
                   hidden_variant.players[1].library.front());
     }
     const auto hidden_repeated =
-        alpha::diagnose_learned_value_priority(
+        old_school::diagnose_learned_value_priority(
             hidden_variant, fixture.decks, 0, true,
-            alpha::TurnPhase::FirstMain, 1, model, kRollouts,
+            old_school::TurnPhase::FirstMain, 1, model, kRollouts,
             kEvaluationSeed);
 
     CHECK(first_main.actions == hidden_repeated.actions);
@@ -743,37 +950,37 @@ TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
         [](double score) { return std::isfinite(score); }));
 
     const auto second_main =
-        alpha::diagnose_learned_value_priority(
+        old_school::diagnose_learned_value_priority(
             fixture.state, fixture.decks, 0, true,
-            alpha::TurnPhase::SecondMain, 1, model, kRollouts,
+            old_school::TurnPhase::SecondMain, 1, model, kRollouts,
             kEvaluationSeed);
     CHECK(second_main.actions == first_main.actions);
     CHECK(second_main.scores != first_main.scores);
 }
 
 TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
-    const alpha::GameState state =
-        alpha::white_lock_plan_diagnostic_state();
-    const std::array<std::vector<alpha::CardId>, 2> decks = {
-        alpha::white_control_deck(),
-        alpha::red_alpha_deck(),
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
     };
     const auto actions =
-        alpha::legal_priority_actions(state, 0, true);
+        old_school::legal_priority_actions(state, 0, true);
     CHECK(actions.size() == 4);
-    const alpha::LearnedSearchConfig config = {
+    const old_school::LearnedSearchConfig config = {
         .seed = 0xC0110A5EULL,
         .worlds = 2,
         .rollouts_per_world = 2,
         .horizon_turns = 0,
         .continuation_variant =
-            alpha::LearnedVariant::UnifiedActor,
+            old_school::LearnedVariant::UnifiedActor,
         .blend_shallow_prior = false,
     };
     const auto model = small_actor_model();
     const auto baseline =
-        alpha::learned_priority_action_samples(
-            state, decks, 0, true, alpha::TurnPhase::FirstMain,
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true, old_school::TurnPhase::FirstMain,
             0, actions, model, config);
     CHECK(baseline.sampled_worlds == 2);
     CHECK(baseline.rollout_evaluations == actions.size() * 4);
@@ -788,34 +995,34 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
             }));
     }
 
-    const alpha::GameState hidden =
+    const old_school::GameState hidden =
         hidden_repartition(state, 0);
     const auto repeated =
-        alpha::learned_priority_action_samples(
-            hidden, decks, 0, true, alpha::TurnPhase::FirstMain,
+        old_school::learned_priority_action_samples(
+            hidden, decks, 0, true, old_school::TurnPhase::FirstMain,
             0, actions, model, config);
     CHECK(repeated.q_samples == baseline.q_samples);
     const auto logits =
-        alpha::learned_actor_priority_logits(
-            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+        old_school::learned_actor_priority_logits(
+            state, 0, true, old_school::TurnPhase::FirstMain, 0,
             actions, model);
     CHECK(logits.size() == actions.size());
     CHECK(std::all_of(
         logits.begin(), logits.end(),
         [](double value) { return std::isfinite(value); }));
-    CHECK(alpha::learned_actor_priority_logits(
-              hidden, 0, true, alpha::TurnPhase::FirstMain, 0,
+    CHECK(old_school::learned_actor_priority_logits(
+              hidden, 0, true, old_school::TurnPhase::FirstMain, 0,
               actions, model) == logits);
     const double critic =
-        alpha::learned_critic_value(state, 0, model);
+        old_school::learned_critic_value(state, 0, model);
     CHECK(critic > 0.0 && critic < 1.0);
-    CHECK(alpha::learned_critic_value(hidden, 0, model) == critic);
+    CHECK(old_school::learned_critic_value(hidden, 0, model) == critic);
 
     auto reordered_actions = actions;
     std::reverse(reordered_actions.begin(), reordered_actions.end());
     const auto reordered =
-        alpha::learned_priority_action_samples(
-            state, decks, 0, true, alpha::TurnPhase::FirstMain,
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true, old_school::TurnPhase::FirstMain,
             0, reordered_actions, model, config);
     for (std::size_t index = 0; index < actions.size(); ++index) {
         CHECK(reordered.q_samples[index] ==
@@ -825,11 +1032,11 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
     bool rejected_illegal = false;
     try {
         static_cast<void>(
-            alpha::learned_priority_action_samples(
+            old_school::learned_priority_action_samples(
                 state, decks, 0, true,
-                alpha::TurnPhase::FirstMain, 0,
-                {alpha::PriorityAction::cast_sorcery(
-                    alpha::CardId::Tsunami)},
+                old_school::TurnPhase::FirstMain, 0,
+                {old_school::PriorityAction::cast_sorcery(
+                    old_school::CardId::Tsunami)},
                 model, config));
     } catch (const std::invalid_argument&) {
         rejected_illegal = true;
@@ -840,11 +1047,11 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
 TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
     const auto actor = small_actor_model();
     const auto repeated =
-        alpha::train_learned_actor_model(1, 0xAC70E7A1ULL);
+        old_school::train_learned_actor_model(1, 0xAC70E7A1ULL);
     const auto changed =
-        alpha::train_learned_actor_model(1, 0xAC70E7A2ULL);
+        old_school::train_learned_actor_model(1, 0xAC70E7A2ULL);
     const std::string fingerprint =
-        alpha::learned_model_fingerprint(actor);
+        old_school::learned_model_fingerprint(actor);
     CHECK(fingerprint.size() == 64);
     CHECK(std::all_of(
         fingerprint.begin(), fingerprint.end(),
@@ -852,63 +1059,67 @@ TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
             return (character >= '0' && character <= '9') ||
                    (character >= 'a' && character <= 'f');
         }));
-    CHECK(alpha::learned_model_fingerprint(repeated) == fingerprint);
-    CHECK(alpha::learned_model_fingerprint(changed) != fingerprint);
-    CHECK(alpha::learned_model_fingerprint(small_value_model()) !=
+    CHECK(old_school::learned_model_fingerprint(repeated) == fingerprint);
+    CHECK(old_school::learned_model_fingerprint(changed) != fingerprint);
+    CHECK(old_school::learned_model_fingerprint(small_value_model()) !=
           fingerprint);
 
     bool rejected_null = false;
     try {
         static_cast<void>(
-            alpha::learned_model_fingerprint(nullptr));
+            old_school::learned_model_fingerprint(nullptr));
     } catch (const std::invalid_argument&) {
         rejected_null = true;
     }
     CHECK(rejected_null);
 }
 
-TEST(legacy_value_trainer_keeps_its_fixed_seed_fingerprint) {
-    const auto legacy =
-        alpha::train_learned_value_champion(1, 424242);
+TEST(value_trainer_is_seeded_deterministic_in_the_old_school_schema) {
+    const auto model =
+        old_school::train_learned_value_champion(1, 424242);
     const auto repeated =
-        alpha::train_learned_value_champion(1, 424242);
-    CHECK(alpha::learned_model_fingerprint(legacy) ==
-          "f43617f58d2f03394eec79e2a9c6964339c93a00d9d0d663e157056df3b1eb11");
-    CHECK(alpha::learned_model_fingerprint(repeated) ==
-          alpha::learned_model_fingerprint(legacy));
+        old_school::train_learned_value_champion(1, 424242);
+    const auto changed =
+        old_school::train_learned_value_champion(1, 424243);
+    const auto fingerprint =
+        old_school::learned_model_fingerprint(model);
+    CHECK(fingerprint.size() == 64);
+    CHECK(old_school::learned_model_fingerprint(repeated) ==
+          fingerprint);
+    CHECK(old_school::learned_model_fingerprint(changed) != fingerprint);
 
-    const alpha::GameState state =
-        alpha::white_lock_plan_diagnostic_state();
-    CHECK(alpha::learned_critic_value(state, 0, repeated) ==
-          alpha::learned_critic_value(state, 0, legacy));
-    CHECK(alpha::learned_critic_value(state, 1, repeated) ==
-          alpha::learned_critic_value(state, 1, legacy));
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    CHECK(old_school::learned_critic_value(state, 0, repeated) ==
+          old_school::learned_critic_value(state, 0, model));
+    CHECK(old_school::learned_critic_value(state, 1, repeated) ==
+          old_school::learned_critic_value(state, 1, model));
 }
 
 TEST(learned_value_update_deep_clones_without_mutating_parent) {
     const auto parent = small_value_model();
-    const alpha::GameState state =
-        alpha::white_lock_plan_diagnostic_state();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
     const std::string parent_fingerprint =
-        alpha::learned_model_fingerprint(parent);
+        old_school::learned_model_fingerprint(parent);
     const double parent_value =
-        alpha::learned_critic_value(state, 0, parent);
+        old_school::learned_critic_value(state, 0, parent);
 
     const auto frozen_clone =
-        alpha::update_learned_value_model(
+        old_school::update_learned_value_model(
             parent, {}, {});
     CHECK(frozen_clone.get() != parent.get());
-    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+    CHECK(old_school::learned_model_fingerprint(frozen_clone) ==
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(
+    CHECK(old_school::learned_critic_value(
               state, 0, frozen_clone) == parent_value);
 
     const auto candidate =
-        alpha::update_learned_value_model(
+        old_school::update_learned_value_model(
             frozen_clone,
             {{
                 .features =
-                    alpha::learned_observation(state, 0),
+                    old_school::learned_observation(state, 0),
                 .target = parent_value < 0.5 ? 1.0 : 0.0,
             }},
             {
@@ -917,15 +1128,15 @@ TEST(learned_value_update_deep_clones_without_mutating_parent) {
                 .root_seed = 0xC1171CULL,
                 .member_training_tag = 0x5E1F0000ULL,
             });
-    CHECK(alpha::learned_model_fingerprint(candidate) !=
+    CHECK(old_school::learned_model_fingerprint(candidate) !=
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(
+    CHECK(old_school::learned_critic_value(
               state, 0, candidate) != parent_value);
-    CHECK(alpha::learned_model_fingerprint(parent) ==
+    CHECK(old_school::learned_model_fingerprint(parent) ==
           parent_fingerprint);
-    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+    CHECK(old_school::learned_model_fingerprint(frozen_clone) ==
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(state, 0, parent) ==
+    CHECK(old_school::learned_critic_value(state, 0, parent) ==
           parent_value);
 
     const auto rejects_invalid =
@@ -939,21 +1150,21 @@ TEST(learned_value_update_deep_clones_without_mutating_parent) {
         };
     CHECK(rejects_invalid([] {
         static_cast<void>(
-            alpha::update_learned_value_model(
+            old_school::update_learned_value_model(
                 nullptr, {}, {}));
     }));
     CHECK(rejects_invalid([] {
         static_cast<void>(
-            alpha::update_learned_value_model(
+            old_school::update_learned_value_model(
                 small_actor_model(), {}, {}));
     }));
 
     auto malformed_features =
-        alpha::learned_observation(state, 0);
+        old_school::learned_observation(state, 0);
     malformed_features.pop_back();
     CHECK(rejects_invalid([&] {
         static_cast<void>(
-            alpha::update_learned_value_model(
+            old_school::update_learned_value_model(
                 parent,
                 {{
                     .features = malformed_features,
@@ -963,22 +1174,22 @@ TEST(learned_value_update_deep_clones_without_mutating_parent) {
     }));
     CHECK(rejects_invalid([&] {
         static_cast<void>(
-            alpha::update_learned_value_model(
+            old_school::update_learned_value_model(
                 parent,
                 {{
                     .features =
-                        alpha::learned_observation(state, 0),
+                        old_school::learned_observation(state, 0),
                     .target = 1.01,
                 }},
                 {}));
     }));
     CHECK(rejects_invalid([&] {
         static_cast<void>(
-            alpha::update_learned_value_model(
+            old_school::update_learned_value_model(
                 parent,
                 {{
                     .features =
-                        alpha::learned_observation(state, 0),
+                        old_school::learned_observation(state, 0),
                     .target = 0.5,
                 }},
                 {
@@ -988,11 +1199,11 @@ TEST(learned_value_update_deep_clones_without_mutating_parent) {
     }));
     CHECK(rejects_invalid([&] {
         static_cast<void>(
-            alpha::update_learned_value_model(
+            old_school::update_learned_value_model(
                 parent,
                 {{
                     .features =
-                        alpha::learned_observation(state, 0),
+                        old_school::learned_observation(state, 0),
                     .target = 0.5,
                 }},
                 {
@@ -1008,21 +1219,21 @@ TEST(learned_value_g8_has_immutable_replay_and_search_checkpoints) {
     const auto& result = small_value_g8();
     CHECK(result.model);
     CHECK(result.checkpoints.size() ==
-          alpha::kLearnedValueG8Generations + 1);
+          old_school::kLearnedValueG8Generations + 1);
     CHECK(result.report.generations.size() ==
-          alpha::kLearnedValueG8Generations);
+          old_school::kLearnedValueG8Generations);
     CHECK(result.model == result.checkpoints.back());
     CHECK(result.report.recipe ==
-          alpha::LearnedValueG8Recipe::
+          old_school::LearnedValueG8Recipe::
               CanonicalAllSearchLate);
     CHECK(result.report.training_games == 1);
     CHECK(result.report.root_seed == 0x68A11EADULL);
     CHECK(result.report.base_examples > 0);
     CHECK(result.report.base_fingerprint ==
-          alpha::learned_model_fingerprint(
+          old_school::learned_model_fingerprint(
               result.checkpoints.front()));
     CHECK(result.report.final_fingerprint ==
-          alpha::learned_model_fingerprint(result.model));
+          old_school::learned_model_fingerprint(result.model));
 
     constexpr std::array<std::size_t, 8>
         expected_replay_occupancy = {
@@ -1033,7 +1244,7 @@ TEST(learned_value_g8_has_immutable_replay_and_search_checkpoints) {
         result.checkpoints.size());
     for (const auto& checkpoint : result.checkpoints) {
         checkpoint_fingerprints.push_back(
-            alpha::learned_model_fingerprint(checkpoint));
+            old_school::learned_model_fingerprint(checkpoint));
     }
     for (std::size_t index = 0;
          index < result.report.generations.size();
@@ -1078,7 +1289,7 @@ TEST(learned_value_g8_has_immutable_replay_and_search_checkpoints) {
     // when it was the parent or candidate of a later update.
     for (std::size_t index = 0;
          index < result.checkpoints.size(); ++index) {
-        CHECK(alpha::learned_model_fingerprint(
+        CHECK(old_school::learned_model_fingerprint(
                   result.checkpoints[index]) ==
               checkpoint_fingerprints[index]);
     }
@@ -1087,23 +1298,23 @@ TEST(learned_value_g8_has_immutable_replay_and_search_checkpoints) {
 TEST(learned_value_g8_is_deterministic_seeded_and_hidden_safe) {
     const auto& first = small_value_g8();
     const auto repeated =
-        alpha::train_learned_value_g8(
+        old_school::train_learned_value_g8(
             1, 0x68A11EADULL);
     const auto changed =
-        alpha::train_learned_value_g8(
+        old_school::train_learned_value_g8(
             1, 0x68A11EAEULL);
     CHECK(repeated.report == first.report);
     CHECK(repeated.checkpoints.size() ==
           first.checkpoints.size());
     for (std::size_t index = 0;
          index < first.checkpoints.size(); ++index) {
-        CHECK(alpha::learned_model_fingerprint(
+        CHECK(old_school::learned_model_fingerprint(
                   repeated.checkpoints[index]) ==
-              alpha::learned_model_fingerprint(
+              old_school::learned_model_fingerprint(
                   first.checkpoints[index]));
     }
-    CHECK(alpha::learned_model_fingerprint(changed.model) !=
-          alpha::learned_model_fingerprint(first.model));
+    CHECK(old_school::learned_model_fingerprint(changed.model) !=
+          old_school::learned_model_fingerprint(first.model));
 
     const auto fixture = determinization_fixture();
     const auto hidden =
@@ -1111,9 +1322,9 @@ TEST(learned_value_g8_is_deterministic_seeded_and_hidden_safe) {
     CHECK(physical_cards(hidden, 1) ==
           physical_cards(fixture.state, 1));
     for (const auto& checkpoint : first.checkpoints) {
-        CHECK(alpha::learned_critic_value(
+        CHECK(old_school::learned_critic_value(
                   fixture.state, 0, checkpoint) ==
-              alpha::learned_critic_value(
+              old_school::learned_critic_value(
                   hidden, 0, checkpoint));
     }
 }
@@ -1122,7 +1333,7 @@ TEST(learned_value_g8_mix50_is_single_axis_deterministic_and_hidden_safe) {
     CHECK(throws_with_text(
         [] {
             static_cast<void>(
-                alpha::train_learned_value_g8_mix50(
+                old_school::train_learned_value_g8_mix50(
                     1, 0x68A15050ULL));
         },
         "even"));
@@ -1130,31 +1341,31 @@ TEST(learned_value_g8_mix50_is_single_axis_deterministic_and_hidden_safe) {
     const auto& canonical = small_value_g8_eight_games();
     const auto& mix50 = small_value_g8_mix50();
     CHECK(canonical.report.recipe ==
-          alpha::LearnedValueG8Recipe::
+          old_school::LearnedValueG8Recipe::
               CanonicalAllSearchLate);
     CHECK(mix50.report.recipe ==
-          alpha::LearnedValueG8Recipe::LateMix50);
+          old_school::LearnedValueG8Recipe::LateMix50);
     CHECK(mix50.checkpoints.size() ==
-          alpha::kLearnedValueG8Generations + 1);
+          old_school::kLearnedValueG8Generations + 1);
     CHECK(mix50.report.generations.size() ==
-          alpha::kLearnedValueG8Generations);
+          old_school::kLearnedValueG8Generations);
 
     std::vector<std::string> frozen_fingerprints;
     frozen_fingerprints.reserve(mix50.checkpoints.size());
     for (const auto& checkpoint : mix50.checkpoints) {
         frozen_fingerprints.push_back(
-            alpha::learned_model_fingerprint(checkpoint));
+            old_school::learned_model_fingerprint(checkpoint));
     }
     for (std::size_t checkpoint = 0;
          checkpoint <= 4; ++checkpoint) {
-        CHECK(alpha::learned_model_fingerprint(
+        CHECK(old_school::learned_model_fingerprint(
                   mix50.checkpoints[checkpoint]) ==
-              alpha::learned_model_fingerprint(
+              old_school::learned_model_fingerprint(
                   canonical.checkpoints[checkpoint]));
     }
-    CHECK(alpha::learned_model_fingerprint(
+    CHECK(old_school::learned_model_fingerprint(
               mix50.checkpoints[5]) !=
-          alpha::learned_model_fingerprint(
+          old_school::learned_model_fingerprint(
               canonical.checkpoints[5]));
 
     constexpr std::array<std::size_t, 8>
@@ -1211,31 +1422,31 @@ TEST(learned_value_g8_mix50_is_single_axis_deterministic_and_hidden_safe) {
     }
 
     const auto repeated =
-        alpha::train_learned_value_g8_mix50(
+        old_school::train_learned_value_g8_mix50(
             8, 0x68A15050ULL);
     const auto changed =
-        alpha::train_learned_value_g8_mix50(
+        old_school::train_learned_value_g8_mix50(
             8, 0x68A15051ULL);
     CHECK(repeated.report == mix50.report);
     for (std::size_t index = 0;
          index < mix50.checkpoints.size(); ++index) {
-        CHECK(alpha::learned_model_fingerprint(
+        CHECK(old_school::learned_model_fingerprint(
                   repeated.checkpoints[index]) ==
               frozen_fingerprints[index]);
-        CHECK(alpha::learned_model_fingerprint(
+        CHECK(old_school::learned_model_fingerprint(
                   mix50.checkpoints[index]) ==
               frozen_fingerprints[index]);
     }
-    CHECK(alpha::learned_model_fingerprint(changed.model) !=
+    CHECK(old_school::learned_model_fingerprint(changed.model) !=
           frozen_fingerprints.back());
 
     const auto fixture = determinization_fixture();
     const auto hidden =
         hidden_repartition(fixture.state, 0);
     for (const auto& checkpoint : mix50.checkpoints) {
-        CHECK(alpha::learned_critic_value(
+        CHECK(old_school::learned_critic_value(
                   fixture.state, 0, checkpoint) ==
-              alpha::learned_critic_value(
+              old_school::learned_critic_value(
                   hidden, 0, checkpoint));
     }
 }
@@ -1255,30 +1466,30 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
     std::filesystem::remove(mix50_path);
     std::filesystem::remove(corrupt_path);
 
-    alpha::write_learned_value_g8_bundle_atomic(
+    old_school::write_learned_value_g8_bundle_atomic(
         canonical_path.string(), canonical);
-    alpha::write_learned_value_g8_mix50_bundle_atomic(
+    old_school::write_learned_value_g8_mix50_bundle_atomic(
         mix50_path.string(), mix50);
     const auto loaded =
-        alpha::load_learned_value_g8_mix50_bundle(
+        old_school::load_learned_value_g8_mix50_bundle(
             mix50_path.string(), 8, 0x68A15050ULL);
     CHECK(loaded.report == mix50.report);
     for (std::size_t index = 0;
          index < mix50.checkpoints.size(); ++index) {
-        CHECK(alpha::learned_model_fingerprint(
+        CHECK(old_school::learned_model_fingerprint(
                   loaded.checkpoints[index]) ==
-              alpha::learned_model_fingerprint(
+              old_school::learned_model_fingerprint(
                   mix50.checkpoints[index]));
     }
-    CHECK(alpha::learned_value_g8_mix50_cache_path(
+    CHECK(old_school::learned_value_g8_mix50_cache_path(
               800, 424242) ==
           "build/model-cache/"
-          "value-g8-mix50-v1-t800-s424242.bin");
+          "old-school-value-g8-mix50-v1-t800-s424242.bin");
 
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_mix50_bundle(
+                old_school::load_learned_value_g8_mix50_bundle(
                     mix50_path.string(), 12,
                     0x68A15050ULL));
         },
@@ -1286,7 +1497,7 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_mix50_bundle(
+                old_school::load_learned_value_g8_mix50_bundle(
                     mix50_path.string(), 8,
                     0x68A15051ULL));
         },
@@ -1294,7 +1505,7 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_bundle(
+                old_school::load_learned_value_g8_bundle(
                     mix50_path.string(), 8,
                     0x68A15050ULL));
         },
@@ -1302,20 +1513,20 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_mix50_bundle(
+                old_school::load_learned_value_g8_mix50_bundle(
                     canonical_path.string(), 8,
                     0x68A15050ULL));
         },
         "wrong magic"));
     CHECK(throws_with_text(
         [&] {
-            alpha::write_learned_value_g8_bundle_atomic(
+            old_school::write_learned_value_g8_bundle_atomic(
                 canonical_path.string(), mix50);
         },
         "recipe"));
     CHECK(throws_with_text(
         [&] {
-            alpha::write_learned_value_g8_mix50_bundle_atomic(
+            old_school::write_learned_value_g8_mix50_bundle_atomic(
                 mix50_path.string(), canonical);
         },
         "recipe"));
@@ -1324,7 +1535,7 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
           .raw_collection_games;
     CHECK(throws_with_text(
         [&] {
-            alpha::write_learned_value_g8_mix50_bundle_atomic(
+            old_school::write_learned_value_g8_mix50_bundle_atomic(
                 mix50_path.string(), invalid_accounting);
         },
         "collection accounting"));
@@ -1336,7 +1547,7 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_mix50_bundle(
+                old_school::load_learned_value_g8_mix50_bundle(
                     corrupt_path.string(), 8,
                     0x68A15050ULL));
         },
@@ -1344,11 +1555,11 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
 
     // Failed cross-recipe publication validated before I/O and left both
     // previously published artifacts readable.
-    CHECK(alpha::load_learned_value_g8_bundle(
+    CHECK(old_school::load_learned_value_g8_bundle(
               canonical_path.string(), 8,
               0x68A15050ULL)
               .report == canonical.report);
-    CHECK(alpha::load_learned_value_g8_mix50_bundle(
+    CHECK(old_school::load_learned_value_g8_mix50_bundle(
               mix50_path.string(), 8,
               0x68A15050ULL)
               .report == mix50.report);
@@ -1363,36 +1574,36 @@ TEST(learned_value_g8_artifact_roundtrips_every_checkpoint_bit_exact) {
     const std::filesystem::path path =
         "build/test-model-cache/value-g8-roundtrip.bin";
     std::filesystem::remove(path);
-    alpha::write_learned_value_g8_bundle_atomic(
+    old_school::write_learned_value_g8_bundle_atomic(
         path.string(), original);
     const auto loaded =
-        alpha::load_learned_value_g8_bundle(
+        old_school::load_learned_value_g8_bundle(
             path.string(), 1, 0x68A11EADULL);
 
     CHECK(loaded.report == original.report);
     CHECK(loaded.model == loaded.checkpoints.back());
     CHECK(loaded.checkpoints.size() ==
           original.checkpoints.size());
-    const std::array<alpha::GameState, 2> states = {
-        alpha::white_lock_plan_diagnostic_state(),
+    const std::array<old_school::GameState, 2> states = {
+        old_school::white_lock_plan_diagnostic_state(),
         determinization_fixture().state,
     };
     for (std::size_t checkpoint = 0;
          checkpoint < original.checkpoints.size();
          ++checkpoint) {
-        CHECK(alpha::learned_model_fingerprint(
+        CHECK(old_school::learned_model_fingerprint(
                   loaded.checkpoints[checkpoint]) ==
-              alpha::learned_model_fingerprint(
+              old_school::learned_model_fingerprint(
                   original.checkpoints[checkpoint]));
         for (const auto& state : states) {
             for (std::size_t perspective = 0;
                  perspective < 2; ++perspective) {
                 const double before =
-                    alpha::learned_critic_value(
+                    old_school::learned_critic_value(
                         state, perspective,
                         original.checkpoints[checkpoint]);
                 const double after =
-                    alpha::learned_critic_value(
+                    old_school::learned_critic_value(
                         state, perspective,
                         loaded.checkpoints[checkpoint]);
                 CHECK(std::bit_cast<std::uint64_t>(after) ==
@@ -1400,29 +1611,29 @@ TEST(learned_value_g8_artifact_roundtrips_every_checkpoint_bit_exact) {
             }
         }
     }
-    CHECK(alpha::learned_value_g8_cache_path(800, 424242) ==
-          "build/model-cache/value-g8-v1-t800-s424242.bin");
+    CHECK(old_school::learned_value_g8_cache_path(800, 424242) ==
+          "build/model-cache/old-school-value-g8-v1-t800-s424242.bin");
     std::filesystem::remove(path);
 }
 
 TEST(learned_value_g8_generation_selector_maps_exact_checkpoint) {
     const auto& bundle = small_value_g8();
     const auto g3 =
-        alpha::learned_value_g8_generation_checkpoint(bundle, 3);
+        old_school::learned_value_g8_generation_checkpoint(bundle, 3);
     CHECK(g3 == bundle.checkpoints[3]);
-    CHECK(alpha::learned_model_fingerprint(g3) ==
+    CHECK(old_school::learned_model_fingerprint(g3) ==
           bundle.report.generations[2].candidate_fingerprint);
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::learned_value_g8_generation_checkpoint(
+                old_school::learned_value_g8_generation_checkpoint(
                     bundle, 0));
         },
         "between one and eight"));
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::learned_value_g8_generation_checkpoint(
+                old_school::learned_value_g8_generation_checkpoint(
                     bundle, 9));
         },
         "between one and eight"));
@@ -1444,20 +1655,20 @@ TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
     std::filesystem::remove(corrupt);
     std::filesystem::remove(truncated);
     std::filesystem::remove(trailing);
-    alpha::write_learned_value_g8_bundle_atomic(
+    old_school::write_learned_value_g8_bundle_atomic(
         good.string(), original);
 
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_bundle(
+                old_school::load_learned_value_g8_bundle(
                     good.string(), 2, 0x68A11EADULL));
         },
         "training_games mismatch"));
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_bundle(
+                old_school::load_learned_value_g8_bundle(
                     good.string(), 1, 0x68A11EAEULL));
         },
         "training seed mismatch"));
@@ -1467,14 +1678,14 @@ TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
     embedded_nul_path += ".not-the-same-file";
     CHECK(throws_with_text(
         [&] {
-            alpha::write_learned_value_g8_bundle_atomic(
+            old_school::write_learned_value_g8_bundle_atomic(
                 embedded_nul_path, original);
         },
         "embedded NUL"));
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_bundle(
+                old_school::load_learned_value_g8_bundle(
                     embedded_nul_path, 1,
                     0x68A11EADULL));
         },
@@ -1488,7 +1699,7 @@ TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_bundle(
+                old_school::load_learned_value_g8_bundle(
                     corrupt.string(), 1, 0x68A11EADULL));
         },
         "checksum"));
@@ -1499,7 +1710,7 @@ TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_bundle(
+                old_school::load_learned_value_g8_bundle(
                     truncated.string(), 1,
                     0x68A11EADULL));
         },
@@ -1511,7 +1722,7 @@ TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
     CHECK(throws_with_text(
         [&] {
             static_cast<void>(
-                alpha::load_learned_value_g8_bundle(
+                old_school::load_learned_value_g8_bundle(
                     trailing.string(), 1,
                     0x68A11EADULL));
         },
@@ -1522,12 +1733,12 @@ TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
         std::string(64, '0');
     CHECK(throws_with_text(
         [&] {
-            alpha::write_learned_value_g8_bundle_atomic(
+            old_school::write_learned_value_g8_bundle_atomic(
                 good.string(), invalid);
         },
         "final_fingerprint"));
     const auto still_good =
-        alpha::load_learned_value_g8_bundle(
+        old_school::load_learned_value_g8_bundle(
             good.string(), 1, 0x68A11EADULL);
     CHECK(still_good.report == original.report);
 
@@ -1539,50 +1750,50 @@ TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
 
 TEST(learned_actor_updates_deep_clone_critic_and_policy_without_mutating_parent) {
     const auto parent = small_actor_model();
-    const alpha::GameState state =
-        alpha::white_lock_plan_diagnostic_state();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
     const auto actions =
-        alpha::legal_priority_actions(state, 0, true);
+        old_school::legal_priority_actions(state, 0, true);
     CHECK(actions.size() >= 2);
 
     const std::string parent_fingerprint =
-        alpha::learned_model_fingerprint(parent);
+        old_school::learned_model_fingerprint(parent);
     const double parent_critic =
-        alpha::learned_critic_value(state, 0, parent);
+        old_school::learned_critic_value(state, 0, parent);
     const auto parent_logits =
-        alpha::learned_actor_priority_logits(
-            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+        old_school::learned_actor_priority_logits(
+            state, 0, true, old_school::TurnPhase::FirstMain, 0,
             actions, parent);
 
     std::vector<std::vector<double>> policy_options;
     policy_options.reserve(actions.size());
     for (const auto& action : actions) {
         policy_options.push_back(
-            alpha::learned_priority_policy_features(
+            old_school::learned_priority_policy_features(
                 state, 0, action, true,
-                alpha::TurnPhase::FirstMain, 0));
+                old_school::TurnPhase::FirstMain, 0));
     }
 
     // Even a no-op update is a recursive clone, but its serialized content
     // and both prediction paths are initially bit-identical.
     const auto frozen_clone =
-        alpha::update_learned_actor_model(parent, {}, {}, {});
+        old_school::update_learned_actor_model(parent, {}, {}, {});
     CHECK(frozen_clone.get() != parent.get());
-    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+    CHECK(old_school::learned_model_fingerprint(frozen_clone) ==
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(state, 0, frozen_clone) ==
+    CHECK(old_school::learned_critic_value(state, 0, frozen_clone) ==
           parent_critic);
-    CHECK(alpha::learned_actor_priority_logits(
-              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+    CHECK(old_school::learned_actor_priority_logits(
+              state, 0, true, old_school::TurnPhase::FirstMain, 0,
               actions, frozen_clone) == parent_logits);
 
     const double critic_target =
         parent_critic < 0.5 ? 1.0 : 0.0;
     const auto critic_candidate =
-        alpha::update_learned_actor_model(
+        old_school::update_learned_actor_model(
             frozen_clone,
             {{
-                .features = alpha::learned_observation(state, 0),
+                .features = old_school::learned_observation(state, 0),
                 .target = critic_target,
             }},
             {},
@@ -1594,12 +1805,12 @@ TEST(learned_actor_updates_deep_clone_critic_and_policy_without_mutating_parent)
                 .policy_learning_rate = 0.001,
                 .policy_seed = 0x5011C9ULL,
             });
-    CHECK(alpha::learned_model_fingerprint(critic_candidate) !=
+    CHECK(old_school::learned_model_fingerprint(critic_candidate) !=
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(
+    CHECK(old_school::learned_critic_value(
               state, 0, critic_candidate) != parent_critic);
-    CHECK(alpha::learned_actor_priority_logits(
-              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+    CHECK(old_school::learned_actor_priority_logits(
+              state, 0, true, old_school::TurnPhase::FirstMain, 0,
               actions, critic_candidate) == parent_logits);
 
     std::vector<double> soft_target(actions.size(), 0.0);
@@ -1609,13 +1820,13 @@ TEST(learned_actor_updates_deep_clone_critic_and_policy_without_mutating_parent)
                                  parent_logits.begin());
     soft_target[target_option] = 1.0;
     const auto policy_candidate =
-        alpha::update_learned_actor_model(
+        old_school::update_learned_actor_model(
             frozen_clone, {},
             {{
                 .options = policy_options,
                 .target_probabilities = soft_target,
                 .decision_kind =
-                    alpha::LearnedPolicyDecisionKind::Priority,
+                    old_school::LearnedPolicyDecisionKind::Priority,
                 .weight = 1.0,
             }},
             {
@@ -1626,46 +1837,46 @@ TEST(learned_actor_updates_deep_clone_critic_and_policy_without_mutating_parent)
                 .policy_learning_rate = 0.01,
                 .policy_seed = 0x5011C9ULL,
             });
-    CHECK(alpha::learned_model_fingerprint(policy_candidate) !=
+    CHECK(old_school::learned_model_fingerprint(policy_candidate) !=
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(
+    CHECK(old_school::learned_critic_value(
               state, 0, policy_candidate) == parent_critic);
-    CHECK(alpha::learned_actor_priority_logits(
-              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+    CHECK(old_school::learned_actor_priority_logits(
+              state, 0, true, old_school::TurnPhase::FirstMain, 0,
               actions, policy_candidate) != parent_logits);
 
     // Neither the original publication nor the no-op cloned publication was
     // aliased by either mutable training candidate.
-    CHECK(alpha::learned_model_fingerprint(parent) ==
+    CHECK(old_school::learned_model_fingerprint(parent) ==
           parent_fingerprint);
-    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+    CHECK(old_school::learned_model_fingerprint(frozen_clone) ==
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(state, 0, parent) ==
+    CHECK(old_school::learned_critic_value(state, 0, parent) ==
           parent_critic);
-    CHECK(alpha::learned_actor_priority_logits(
-              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+    CHECK(old_school::learned_actor_priority_logits(
+              state, 0, true, old_school::TurnPhase::FirstMain, 0,
           actions, parent) == parent_logits);
 }
 
 TEST(learned_actor_fit_diagnostics_show_synthetic_loss_reduction) {
     const auto parent = small_actor_model();
-    const alpha::GameState state =
-        alpha::white_lock_plan_diagnostic_state();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
     const auto actions =
-        alpha::legal_priority_actions(state, 0, true);
+        old_school::legal_priority_actions(state, 0, true);
     CHECK(actions.size() >= 2);
 
     std::vector<std::vector<double>> options;
     options.reserve(actions.size());
     for (const auto& action : actions) {
         options.push_back(
-            alpha::learned_priority_policy_features(
+            old_school::learned_priority_policy_features(
                 state, 0, action, true,
-                alpha::TurnPhase::FirstMain, 0));
+                old_school::TurnPhase::FirstMain, 0));
     }
     const auto parent_logits =
-        alpha::learned_actor_priority_logits(
-            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+        old_school::learned_actor_priority_logits(
+            state, 0, true, old_school::TurnPhase::FirstMain, 0,
             actions, parent);
     const std::size_t disfavored_priority =
         static_cast<std::size_t>(std::min_element(
@@ -1676,41 +1887,41 @@ TEST(learned_actor_fit_diagnostics_show_synthetic_loss_reduction) {
     std::vector<double> attack_target(actions.size(), 0.0);
     attack_target[0] = 1.0;
 
-    const std::vector<alpha::LearnedCriticTrainingExample>
+    const std::vector<old_school::LearnedCriticTrainingExample>
         critic_examples = {{
-            .features = alpha::learned_observation(state, 0),
+            .features = old_school::learned_observation(state, 0),
             .target =
-                alpha::learned_critic_value(state, 0, parent) <
+                old_school::learned_critic_value(state, 0, parent) <
                         0.5
                     ? 1.0
                     : 0.0,
         }};
-    const std::vector<alpha::LearnedPolicyTrainingExample>
+    const std::vector<old_school::LearnedPolicyTrainingExample>
         policy_examples = {
             {
                 .options = options,
                 .target_probabilities = priority_target,
                 .decision_kind =
-                    alpha::LearnedPolicyDecisionKind::Priority,
+                    old_school::LearnedPolicyDecisionKind::Priority,
                 .weight = 0.25,
             },
             {
                 .options = options,
                 .target_probabilities = priority_target,
                 .decision_kind =
-                    alpha::LearnedPolicyDecisionKind::Priority,
+                    old_school::LearnedPolicyDecisionKind::Priority,
                 .weight = 0.75,
             },
             {
                 .options = options,
                 .target_probabilities = attack_target,
                 .decision_kind =
-                    alpha::LearnedPolicyDecisionKind::Attack,
+                    old_school::LearnedPolicyDecisionKind::Attack,
                 .weight = 2.0,
             },
         };
     const auto candidate =
-        alpha::update_learned_actor_model(
+        old_school::update_learned_actor_model(
             parent, critic_examples, policy_examples,
             {
                 .critic_epochs = 4,
@@ -1720,7 +1931,7 @@ TEST(learned_actor_fit_diagnostics_show_synthetic_loss_reduction) {
                 .policy_learning_rate = 0.005,
                 .policy_seed = 0xF175011C9ULL,
             });
-    const auto fit = alpha::diagnose_learned_actor_fit(
+    const auto fit = old_school::diagnose_learned_actor_fit(
         parent, candidate, critic_examples, policy_examples);
 
     CHECK(fit.priority.example_count == 2);
@@ -1764,31 +1975,31 @@ TEST(learned_actor_fit_diagnostics_show_synthetic_loss_reduction) {
 
 TEST(learned_actor_fit_diagnostics_match_exact_tie_semantics) {
     const auto model = small_actor_model();
-    const alpha::GameState state =
-        alpha::white_lock_plan_diagnostic_state();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
     const auto actions =
-        alpha::legal_priority_actions(state, 0, true);
+        old_school::legal_priority_actions(state, 0, true);
     CHECK(actions.size() >= 2);
 
     std::vector<std::vector<double>> options;
     options.reserve(actions.size());
     for (const auto& action : actions) {
         options.push_back(
-            alpha::learned_priority_policy_features(
+            old_school::learned_priority_policy_features(
                 state, 0, action, true,
-                alpha::TurnPhase::FirstMain, 0));
+                old_school::TurnPhase::FirstMain, 0));
     }
 
-    const std::vector<alpha::LearnedPolicyTrainingExample>
+    const std::vector<old_school::LearnedPolicyTrainingExample>
         tied_model_examples = {{
             .options = {options[0], options[0]},
             .target_probabilities = {1.0, 0.0},
             .decision_kind =
-                alpha::LearnedPolicyDecisionKind::Priority,
+                old_school::LearnedPolicyDecisionKind::Priority,
             .weight = 3.0,
         }};
     const auto tied_model_fit =
-        alpha::diagnose_learned_actor_fit(
+        old_school::diagnose_learned_actor_fit(
             model, model, {}, tied_model_examples);
     CHECK(std::abs(
               tied_model_fit.priority
@@ -1804,8 +2015,8 @@ TEST(learned_actor_fit_diagnostics_match_exact_tie_semantics) {
     CHECK(tied_model_fit.priority.changed_argmax_weight == 0.0);
 
     const auto logits =
-        alpha::learned_actor_priority_logits(
-            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+        old_school::learned_actor_priority_logits(
+            state, 0, true, old_school::TurnPhase::FirstMain, 0,
             actions, model);
     std::size_t first = 0;
     std::size_t second = 0;
@@ -1823,16 +2034,16 @@ TEST(learned_actor_fit_diagnostics_match_exact_tie_semantics) {
         }
     }
     CHECK(found_unequal_logits);
-    const std::vector<alpha::LearnedPolicyTrainingExample>
+    const std::vector<old_school::LearnedPolicyTrainingExample>
         tied_teacher_examples = {{
             .options = {options[first], options[second]},
             .target_probabilities = {0.5, 0.5},
             .decision_kind =
-                alpha::LearnedPolicyDecisionKind::Priority,
+                old_school::LearnedPolicyDecisionKind::Priority,
             .weight = 1.0,
         }};
     const auto tied_teacher_fit =
-        alpha::diagnose_learned_actor_fit(
+        old_school::diagnose_learned_actor_fit(
             model, model, {}, tied_teacher_examples);
     CHECK(tied_teacher_fit.priority
               .parent_expected_top_one_agreement == 1.0);
@@ -1846,7 +2057,7 @@ TEST(learned_actor_fit_diagnostics_match_exact_tie_semantics) {
 }
 
 TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
-    const alpha::LearnedActorGenerationConfig defaults;
+    const old_school::LearnedActorGenerationConfig defaults;
     CHECK(defaults.search_worlds == 8);
     CHECK(defaults.rollouts_per_world == 1);
     CHECK(defaults.horizon_turns == 0);
@@ -1858,21 +2069,21 @@ TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
     CHECK(defaults.policy_learning_rate == 0.001);
 
     const auto parent = small_actor_model();
-    const alpha::GameState state =
-        alpha::white_lock_plan_diagnostic_state();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
     const auto actions =
-        alpha::legal_priority_actions(state, 0, true);
+        old_school::legal_priority_actions(state, 0, true);
     const std::string parent_fingerprint =
-        alpha::learned_model_fingerprint(parent);
+        old_school::learned_model_fingerprint(parent);
     const double parent_critic =
-        alpha::learned_critic_value(state, 0, parent);
+        old_school::learned_critic_value(state, 0, parent);
     const auto parent_logits =
-        alpha::learned_actor_priority_logits(
-            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+        old_school::learned_actor_priority_logits(
+            state, 0, true, old_school::TurnPhase::FirstMain, 0,
             actions, parent);
 
     constexpr std::uint64_t kRootSeed = 0x617E2A710ULL;
-    const alpha::LearnedActorGenerationConfig fast = {
+    const old_school::LearnedActorGenerationConfig fast = {
         .search_worlds = 1,
         .rollouts_per_world = 1,
         .horizon_turns = 0,
@@ -1885,19 +2096,19 @@ TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
         .generation = 1,
     };
     const auto first =
-        alpha::train_learned_actor_generation(
+        old_school::train_learned_actor_generation(
             parent, kRootSeed, fast);
     const auto expected =
-        alpha::learned_iteration::balanced_schedule(
+        old_school::learned_iteration::balanced_schedule(
             kRootSeed, fast.generation);
 
     CHECK(first.model);
     CHECK(first.report.games.size() == expected.size());
-    CHECK(first.report.games.size() == 24);
+    CHECK(first.report.games.size() == 40);
     CHECK(first.report.parent_fingerprint ==
           parent_fingerprint);
     CHECK(first.report.candidate_fingerprint ==
-          alpha::learned_model_fingerprint(first.model));
+          old_school::learned_model_fingerprint(first.model));
     CHECK(first.report.candidate_fingerprint !=
           parent_fingerprint);
     CHECK(first.report.replay_generations == 1);
@@ -2030,35 +2241,35 @@ TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
     CHECK(first.report.fit.attack.changed_argmax_examples <=
           first.report.fit.attack.example_count);
 
-    CHECK(alpha::learned_model_fingerprint(parent) ==
+    CHECK(old_school::learned_model_fingerprint(parent) ==
           parent_fingerprint);
-    CHECK(alpha::learned_critic_value(state, 0, parent) ==
+    CHECK(old_school::learned_critic_value(state, 0, parent) ==
           parent_critic);
-    CHECK(alpha::learned_actor_priority_logits(
-              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+    CHECK(old_school::learned_actor_priority_logits(
+              state, 0, true, old_school::TurnPhase::FirstMain, 0,
               actions, parent) == parent_logits);
 
     const auto repeated =
-        alpha::train_learned_actor_generation(
+        old_school::train_learned_actor_generation(
             parent, kRootSeed, fast);
     CHECK(repeated.model.get() != first.model.get());
     CHECK(repeated.report == first.report);
-    CHECK(alpha::learned_model_fingerprint(repeated.model) ==
-          alpha::learned_model_fingerprint(first.model));
-    CHECK(alpha::learned_model_fingerprint(parent) ==
+    CHECK(old_school::learned_model_fingerprint(repeated.model) ==
+          old_school::learned_model_fingerprint(first.model));
+    CHECK(old_school::learned_model_fingerprint(parent) ==
           parent_fingerprint);
 }
 
 TEST(learned_actor_generation_attack_search_controls_real_lethal_combat) {
     auto fixture =
-        attack_evaluation_fixture(alpha::CardId::GrizzlyBears);
+        attack_evaluation_fixture(old_school::CardId::GrizzlyBears);
     fixture.state.players[1].library.push_back(
-        alpha::CardId::GrizzlyBears);
+        old_school::CardId::GrizzlyBears);
     fixture.state.players[1].creatures.clear();
     fixture.state.players[1].life = 3;
 
     const auto diagnostic =
-        alpha::diagnose_learned_actor_generation_attack(
+        old_school::diagnose_learned_actor_generation_attack(
             fixture.state, fixture.decks, small_actor_model(),
             {
                 .seed = 0xA77AC6ULL,
@@ -2066,7 +2277,7 @@ TEST(learned_actor_generation_attack_search_controls_real_lethal_combat) {
                 .rollouts_per_world = 1,
                 .horizon_turns = 0,
                 .continuation_variant =
-                    alpha::LearnedVariant::UnifiedActor,
+                    old_school::LearnedVariant::UnifiedActor,
                 .blend_shallow_prior = false,
             });
     CHECK(diagnostic.searched_roots == 1);
@@ -2075,68 +2286,68 @@ TEST(learned_actor_generation_attack_search_controls_real_lethal_combat) {
     CHECK(diagnostic.terminal_result.has_value());
     CHECK(diagnostic.terminal_result->winner == 0);
     CHECK(diagnostic.terminal_result->reason ==
-          alpha::EndReason::LifeTotal);
+          old_school::EndReason::LifeTotal);
     CHECK(diagnostic.final_state.players[1].life == 0);
     CHECK(diagnostic.final_state.players[0].creatures[0].tapped);
 }
 
 TEST(learned_actor_generation_priority_search_applies_real_counterspell) {
-    const std::array<std::vector<alpha::CardId>, 2> decks = {
-        alpha::blue_alpha_deck(),
-        alpha::red_alpha_deck(),
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::blue_deck(),
+        old_school::red_deck(),
     };
-    alpha::GameState state;
+    old_school::GameState state;
     state.active_player = 1;
     state.starting_player = 1;
     state.turn_number = 8;
     state.next_stack_object_id = 2;
     state.players[0].life = 3;
     state.players[0].hand = {
-        alpha::CardId::Counterspell,
+        old_school::CardId::Counterspell,
     };
     state.players[0].lands = {
-        {.card = alpha::CardId::Island, .tapped = false},
-        {.card = alpha::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
     };
     state.players[0].library = decks[0];
     remove_fixture_card(
-        state.players[0].library, alpha::CardId::Counterspell);
+        state.players[0].library, old_school::CardId::Counterspell);
     remove_fixture_card(
-        state.players[0].library, alpha::CardId::Island);
+        state.players[0].library, old_school::CardId::Island);
     remove_fixture_card(
-        state.players[0].library, alpha::CardId::Island);
+        state.players[0].library, old_school::CardId::Island);
 
     state.players[1].lands = {
-        {.card = alpha::CardId::Mountain, .tapped = true},
+        {.card = old_school::CardId::Mountain, .tapped = true},
     };
     state.players[1].library = decks[1];
     remove_fixture_card(
-        state.players[1].library, alpha::CardId::Mountain);
+        state.players[1].library, old_school::CardId::Mountain);
     remove_fixture_card(
-        state.players[1].library, alpha::CardId::LightningBolt);
+        state.players[1].library, old_school::CardId::LightningBolt);
     state.stack = {
         {
-            .kind = alpha::StackObjectKind::Spell,
+            .kind = old_school::StackObjectKind::Spell,
             .id = 1,
-            .card = alpha::CardId::LightningBolt,
+            .card = old_school::CardId::LightningBolt,
             .controller = 1,
-            .target = alpha::Target::player_target(0),
+            .target = old_school::Target::player_target(0),
             .spell_target = std::nullopt,
         },
     };
 
     const auto actions =
-        alpha::legal_priority_actions(state, 0, true);
+        old_school::legal_priority_actions(state, 0, true);
     CHECK(actions.size() == 2);
     CHECK(std::find(
               actions.begin(), actions.end(),
-              alpha::PriorityAction::cast_counterspell(1)) !=
+              old_school::PriorityAction::cast_counterspell(1)) !=
           actions.end());
 
     const auto diagnostic =
-        alpha::diagnose_learned_actor_generation_priority(
+        old_school::diagnose_learned_actor_generation_priority(
             state, decks, 0, true,
-            alpha::TurnPhase::SecondMain, 1,
+            old_school::TurnPhase::SecondMain, 1,
             small_actor_model(),
             {
                 .seed = 0xC0A17E5EEDULL,
@@ -2144,14 +2355,14 @@ TEST(learned_actor_generation_priority_search_applies_real_counterspell) {
                 .rollouts_per_world = 1,
                 .horizon_turns = 0,
                 .continuation_variant =
-                    alpha::LearnedVariant::UnifiedActor,
+                    old_school::LearnedVariant::UnifiedActor,
                 .blend_shallow_prior = false,
             });
 
     CHECK(diagnostic.searched_roots == 1);
     CHECK(diagnostic.rollout_evaluations == 4);
     CHECK(diagnostic.selected_action ==
-          alpha::PriorityAction::cast_counterspell(1));
+          old_school::PriorityAction::cast_counterspell(1));
     CHECK(diagnostic.transition_applied);
     CHECK(!diagnostic.pass_result.has_value());
     CHECK(!diagnostic.terminal_result.has_value());
@@ -2160,82 +2371,82 @@ TEST(learned_actor_generation_priority_search_applies_real_counterspell) {
     CHECK(std::all_of(
         diagnostic.final_state.players[0].lands.begin(),
         diagnostic.final_state.players[0].lands.end(),
-        [](const alpha::LandPermanent& land) {
+        [](const old_school::LandPermanent& land) {
             return land.tapped;
         }));
     CHECK(diagnostic.final_state.stack.size() == 2);
     CHECK(diagnostic.final_state.stack[0].card ==
-          alpha::CardId::LightningBolt);
+          old_school::CardId::LightningBolt);
     CHECK(diagnostic.final_state.stack[1].card ==
-          alpha::CardId::Counterspell);
+          old_school::CardId::Counterspell);
     CHECK(diagnostic.final_state.stack[1].controller == 0);
     CHECK(diagnostic.final_state.stack[1].spell_target ==
-          std::optional<alpha::StackObjectId>{1});
+          std::optional<old_school::StackObjectId>{1});
     CHECK(diagnostic.final_state.next_stack_object_id == 3);
     CHECK(diagnostic.final_state.stats[0].spells_cast == 1);
 }
 
 TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
-    const std::array<std::vector<alpha::CardId>, 2> decks = {
-        alpha::red_alpha_deck(),
-        alpha::red_alpha_deck(),
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::red_deck(),
+        old_school::red_deck(),
     };
-    alpha::GameState state;
+    old_school::GameState state;
     state.active_player = 1;
     state.starting_player = 1;
     state.turn_number = 10;
     state.players[0].life = 3;
     state.players[0].library = decks[0];
     state.players[1].lands = {
-        {.card = alpha::CardId::Mountain, .tapped = true},
+        {.card = old_school::CardId::Mountain, .tapped = true},
     };
     state.stack = {
         {
-            .kind = alpha::StackObjectKind::Spell,
+            .kind = old_school::StackObjectKind::Spell,
             .id = 1,
-            .card = alpha::CardId::LightningBolt,
+            .card = old_school::CardId::LightningBolt,
             .controller = 1,
-            .target = alpha::Target::player_target(0),
+            .target = old_school::Target::player_target(0),
             .spell_target = std::nullopt,
         },
     };
     state.next_stack_object_id = 2;
     state.players[1].library = decks[1];
     remove_fixture_card(
-        state.players[1].library, alpha::CardId::Mountain);
+        state.players[1].library, old_school::CardId::Mountain);
     remove_fixture_card(
-        state.players[1].library, alpha::CardId::LightningBolt);
-    const std::vector<alpha::PriorityAction> actions = {
-        alpha::PriorityAction::pass(),
+        state.players[1].library, old_school::CardId::LightningBolt);
+    const std::vector<old_school::PriorityAction> actions = {
+        old_school::PriorityAction::pass(),
     };
-    const alpha::LearnedSearchConfig actor_config = {
+    const old_school::LearnedSearchConfig actor_config = {
         .seed = 0x57ACCA55ULL,
         .worlds = 2,
         .rollouts_per_world = 2,
         .horizon_turns = 0,
         .continuation_variant =
-            alpha::LearnedVariant::UnifiedActor,
+            old_school::LearnedVariant::UnifiedActor,
         .blend_shallow_prior = false,
     };
     const auto actor_samples =
-        alpha::learned_priority_action_samples(
+        old_school::learned_priority_action_samples(
             state, decks, 0, false,
-            alpha::TurnPhase::BeginCombat, 1, actions,
+            old_school::TurnPhase::BeginCombat, 1, actions,
             small_actor_model(), actor_config);
     CHECK(actor_samples.rollout_evaluations == 4);
     CHECK(actor_samples.q_samples.size() == 1);
     CHECK(actor_samples.q_samples[0] ==
           std::vector<double>({0.0, 0.0, 0.0, 0.0}));
 
-    alpha::LearnedSearchConfig value_config = actor_config;
+    old_school::LearnedSearchConfig value_config = actor_config;
     value_config.worlds = 1;
     value_config.rollouts_per_world = 1;
     value_config.continuation_variant =
-        alpha::LearnedVariant::ValueSearchChampion;
+        old_school::LearnedVariant::ValueSearchChampion;
     const auto value_samples =
-        alpha::learned_priority_action_samples(
+        old_school::learned_priority_action_samples(
             state, decks, 0, false,
-            alpha::TurnPhase::BeginCombat, 1, actions,
+            old_school::TurnPhase::BeginCombat, 1, actions,
             small_value_model(), value_config);
     CHECK(value_samples.q_samples ==
           std::vector<std::vector<double>>({{0.0}}));
@@ -2243,9 +2454,9 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
     bool rejected_mismatch = false;
     try {
         static_cast<void>(
-            alpha::learned_priority_action_samples(
+            old_school::learned_priority_action_samples(
                 state, decks, 0, false,
-                alpha::TurnPhase::BeginCombat, 1, actions,
+                old_school::TurnPhase::BeginCombat, 1, actions,
                 small_actor_model(), value_config));
     } catch (const std::invalid_argument&) {
         rejected_mismatch = true;
@@ -2253,48 +2464,48 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
     CHECK(rejected_mismatch);
 
     bool rejected_unbounded = false;
-    alpha::LearnedSearchConfig unbounded = actor_config;
+    old_school::LearnedSearchConfig unbounded = actor_config;
     unbounded.horizon_turns = 129;
     try {
         static_cast<void>(
-            alpha::learned_priority_action_samples(
+            old_school::learned_priority_action_samples(
                 state, decks, 0, false,
-                alpha::TurnPhase::BeginCombat, 1, actions,
+                old_school::TurnPhase::BeginCombat, 1, actions,
                 small_actor_model(), unbounded));
     } catch (const std::invalid_argument&) {
         rejected_unbounded = true;
     }
     CHECK(rejected_unbounded);
 
-    alpha::GameState boundary;
+    old_school::GameState boundary;
     boundary.active_player = 0;
     boundary.starting_player = 0;
     boundary.turn_number = 1;
     boundary.players[0].graveyard = decks[0];
     boundary.players[1].library = {
-        alpha::CardId::Mountain,
+        old_school::CardId::Mountain,
     };
     boundary.players[1].graveyard = decks[1];
     remove_fixture_card(
         boundary.players[1].graveyard,
-        alpha::CardId::Mountain);
-    alpha::LearnedSearchConfig horizon_zero = actor_config;
+        old_school::CardId::Mountain);
+    old_school::LearnedSearchConfig horizon_zero = actor_config;
     horizon_zero.worlds = 1;
     horizon_zero.rollouts_per_world = 1;
     const double h0 =
-        alpha::learned_priority_action_samples(
+        old_school::learned_priority_action_samples(
             boundary, decks, 0, true,
-            alpha::TurnPhase::SecondMain, 1, actions,
+            old_school::TurnPhase::SecondMain, 1, actions,
             small_actor_model(), horizon_zero)
             .q_samples[0][0];
     CHECK(h0 > 0.0 && h0 < 1.0);
 
-    alpha::LearnedSearchConfig horizon_one = horizon_zero;
+    old_school::LearnedSearchConfig horizon_one = horizon_zero;
     horizon_one.horizon_turns = 1;
     const double h1 =
-        alpha::learned_priority_action_samples(
+        old_school::learned_priority_action_samples(
             boundary, decks, 0, true,
-            alpha::TurnPhase::SecondMain, 1, actions,
+            old_school::TurnPhase::SecondMain, 1, actions,
             small_actor_model(), horizon_one)
             .q_samples[0][0];
     // H1 bootstraps after turn two cleanup. Preparing turn three here would
@@ -2306,9 +2517,9 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
         empty_next_library.players[1].library.back());
     empty_next_library.players[1].library.clear();
     const double deck_out =
-        alpha::learned_priority_action_samples(
+        old_school::learned_priority_action_samples(
             empty_next_library, decks, 0, true,
-            alpha::TurnPhase::SecondMain, 1, actions,
+            old_school::TurnPhase::SecondMain, 1, actions,
             small_actor_model(), horizon_zero)
             .q_samples[0][0];
     CHECK(deck_out == 1.0);
@@ -2316,18 +2527,18 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
 
 TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
     const DeterminizationFixture fixture =
-        attack_evaluation_fixture(alpha::CardId::GrizzlyBears);
-    const alpha::LearnedSearchConfig actor_config = {
+        attack_evaluation_fixture(old_school::CardId::GrizzlyBears);
+    const old_school::LearnedSearchConfig actor_config = {
         .seed = 0xA77AC5EEDULL,
         .worlds = 2,
         .rollouts_per_world = 2,
         .horizon_turns = 0,
         .continuation_variant =
-            alpha::LearnedVariant::UnifiedActor,
+            old_school::LearnedVariant::UnifiedActor,
         .blend_shallow_prior = false,
     };
     const auto baseline =
-        alpha::learned_binary_attack_samples(
+        old_school::learned_binary_attack_samples(
             fixture.state, fixture.decks, 0, {}, 1, {},
             small_actor_model(), actor_config);
     CHECK(baseline.sampled_worlds == 2);
@@ -2344,23 +2555,23 @@ TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
     }
     const auto hidden =
         hidden_repartition(fixture.state, 0);
-    CHECK(alpha::learned_binary_attack_samples(
+    CHECK(old_school::learned_binary_attack_samples(
               hidden, fixture.decks, 0, {}, 1, {},
               small_actor_model(), actor_config)
               .q_samples == baseline.q_samples);
     const auto logits =
-        alpha::learned_actor_binary_attack_logits(
+        old_school::learned_actor_binary_attack_logits(
             fixture.state, 0, {}, 1, {}, small_actor_model());
     CHECK(std::isfinite(logits[0]));
     CHECK(std::isfinite(logits[1]));
 
-    alpha::LearnedSearchConfig value_config = actor_config;
+    old_school::LearnedSearchConfig value_config = actor_config;
     value_config.worlds = 1;
     value_config.rollouts_per_world = 1;
     value_config.continuation_variant =
-        alpha::LearnedVariant::ValueSearchChampion;
+        old_school::LearnedVariant::ValueSearchChampion;
     const auto value_samples =
-        alpha::learned_binary_attack_samples(
+        old_school::learned_binary_attack_samples(
             fixture.state, fixture.decks, 0, {}, 1, {},
             small_value_model(), value_config);
     CHECK(value_samples.q_samples.size() == 2);
@@ -2368,11 +2579,11 @@ TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
     CHECK(value_samples.q_samples[1].size() == 1);
 
     auto moated = fixture.state;
-    moated.players[1].enchantments.push_back(alpha::CardId::Moat);
+    moated.players[1].enchantments.push_back(old_school::CardId::Moat);
     bool rejected_moat = false;
     try {
         static_cast<void>(
-            alpha::learned_binary_attack_samples(
+            old_school::learned_binary_attack_samples(
                 moated, fixture.decks, 0, {}, 1, {},
                 small_actor_model(), actor_config));
     } catch (const std::invalid_argument&) {
@@ -2382,18 +2593,18 @@ TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
 }
 
 TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
-    const std::vector<std::vector<alpha::PermanentId>> candidates = {
+    const std::vector<std::vector<old_school::PermanentId>> candidates = {
         {},
         {1},
     };
     constexpr std::uint64_t seed = 0xB10C5C0EULL;
-    for (const alpha::CardId blocker : {
-             alpha::CardId::GrizzlyBears,
-             alpha::CardId::FireElemental,
+    for (const old_school::CardId blocker : {
+             old_school::CardId::GrizzlyBears,
+             old_school::CardId::FireElemental,
          }) {
         const auto fixture = attack_evaluation_fixture(blocker);
         const auto scored =
-            alpha::learned_value_attack_set_scores(
+            old_school::learned_value_attack_set_scores(
                 fixture.state, 0, candidates,
                 small_value_model(), seed);
         CHECK(scored.scores.size() == candidates.size());
@@ -2414,7 +2625,7 @@ TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
         CHECK(scored.selected_candidate == deployed_argmax);
 
         const auto hidden =
-            alpha::learned_value_attack_set_scores(
+            old_school::learned_value_attack_set_scores(
                 hidden_repartition(fixture.state, 0), 0,
                 candidates, small_value_model(), seed);
         CHECK(hidden.scores == scored.scores);
@@ -2425,9 +2636,9 @@ TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
     bool rejected_actor = false;
     try {
         static_cast<void>(
-            alpha::learned_value_attack_set_scores(
+            old_school::learned_value_attack_set_scores(
                 attack_evaluation_fixture(
-                    alpha::CardId::GrizzlyBears)
+                    old_school::CardId::GrizzlyBears)
                     .state,
                 0, candidates, small_actor_model(), seed));
     } catch (const std::invalid_argument&) {
@@ -2437,25 +2648,25 @@ TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
 }
 
 TEST(handcrafted_diagnostic_scores_match_deployed_preferences) {
-    alpha::GameState priority_state;
+    old_school::GameState priority_state;
     priority_state.active_player = 0;
     priority_state.players[0].hand = {
-        alpha::CardId::LightningBolt,
+        old_school::CardId::LightningBolt,
     };
     priority_state.players[0].lands = {
-        {.card = alpha::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
     };
     priority_state.players[1].life = 3;
     const auto actions =
-        alpha::legal_priority_actions(priority_state, 0, true);
+        old_school::legal_priority_actions(priority_state, 0, true);
     const auto scores =
-        alpha::handcrafted_priority_scores(
+        old_school::handcrafted_priority_scores(
             priority_state, 0, actions);
     const auto lethal =
         std::find(
             actions.begin(), actions.end(),
-            alpha::PriorityAction::cast_lightning_bolt(
-                alpha::Target::player_target(1)));
+            old_school::PriorityAction::cast_lightning_bolt(
+                old_school::Target::player_target(1)));
     CHECK(lethal != actions.end());
     const std::size_t lethal_index =
         static_cast<std::size_t>(
@@ -2464,19 +2675,143 @@ TEST(handcrafted_diagnostic_scores_match_deployed_preferences) {
           *std::max_element(scores.begin(), scores.end()));
 
     const auto favorable =
-        attack_evaluation_fixture(alpha::CardId::GrizzlyBears);
-    CHECK((alpha::handcrafted_binary_attack_scores(
+        attack_evaluation_fixture(old_school::CardId::GrizzlyBears);
+    CHECK((old_school::handcrafted_binary_attack_scores(
                favorable.state, 0, {}, 1, {}) ==
            std::array<double, 2>({0.0, 1.0})));
     const auto unfavorable =
-        attack_evaluation_fixture(alpha::CardId::FireElemental);
-    CHECK((alpha::handcrafted_binary_attack_scores(
+        attack_evaluation_fixture(old_school::CardId::FireElemental);
+    CHECK((old_school::handcrafted_binary_attack_scores(
                unfavorable.state, 0, {}, 1, {}) ==
            std::array<double, 2>({1.0, 0.0})));
+
+    old_school::GameState evasion;
+    evasion.active_player = 0;
+    evasion.players[0].creatures = {
+        creature(1, old_school::CardId::FlyingMen),
+    };
+    evasion.players[1].creatures = {bear(2)};
+    CHECK((old_school::handcrafted_binary_attack_scores(
+               evasion, 0, {}, 1, {}) ==
+           std::array<double, 2>({0.0, 1.0})));
+}
+
+TEST(handcrafted_old_school_spell_scores_follow_the_declared_policy) {
+    old_school::GameState burn;
+    burn.active_player = 0;
+    burn.players[0].creatures = {bear(1)};
+    burn.players[1].life = 5;
+    burn.players[1].creatures = {
+        creature(2, old_school::CardId::HillGiant),
+    };
+    const std::vector<old_school::PriorityAction> burn_actions = {
+        old_school::PriorityAction::cast_disintegrate(
+            2, old_school::Target::player_target(0)),
+        old_school::PriorityAction::cast_disintegrate(
+            2, old_school::Target::creature_target(0, 1)),
+        old_school::PriorityAction::cast_disintegrate(
+            5, old_school::Target::player_target(1)),
+        old_school::PriorityAction::cast_disintegrate(
+            2, old_school::Target::player_target(1)),
+        old_school::PriorityAction::cast_disintegrate(
+            3, old_school::Target::creature_target(1, 2)),
+        old_school::PriorityAction::cast_disintegrate(
+            2, old_school::Target::creature_target(1, 2)),
+    };
+    const auto burn_scores =
+        old_school::handcrafted_priority_scores(
+            burn, 0, burn_actions);
+    CHECK(burn_scores.size() == burn_actions.size());
+    CHECK(burn_scores[0] == -10'000.0);
+    CHECK(burn_scores[1] == -10'000.0);
+    CHECK(burn_scores[2] == 10'000.0);
+    CHECK(burn_scores[3] == 1'150.0);
+    CHECK(burn_scores[4] == 2'550.0);
+    CHECK(burn_scores[5] == 500.0);
+
+    const auto zero_x_scores =
+        old_school::handcrafted_priority_scores(
+            burn, 0,
+            {
+                old_school::PriorityAction::pass(),
+                old_school::PriorityAction::cast_disintegrate(
+                    0, old_school::Target::player_target(1)),
+            });
+    CHECK(zero_x_scores[0] == -10.0);
+    CHECK(zero_x_scores[1] == -100.0);
+
+    old_school::GameState growth;
+    growth.active_player = 1;
+    growth.players[0].creatures = {bear(11)};
+    growth.players[1].creatures = {
+        creature(12, old_school::CardId::GrayOgre),
+    };
+    growth.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 20,
+            .card = old_school::CardId::LightningBolt,
+            .controller = 1,
+            .target = old_school::Target::creature_target(0, 11),
+            .spell_target = std::nullopt,
+        },
+    };
+    const std::vector<old_school::PriorityAction> growth_actions = {
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 11)),
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(1, 12)),
+    };
+    const auto growth_scores =
+        old_school::handcrafted_priority_scores(
+            growth, 0, growth_actions);
+    CHECK(growth_scores[0] == 9'000.0);
+    CHECK(growth_scores[1] == -10'000.0);
+
+    growth.stack.clear();
+    growth.active_player = 0;
+    growth.players[1].life = 5;
+    const auto held_growth =
+        old_school::handcrafted_priority_scores(
+            growth, 0, {growth_actions[0]});
+    CHECK(held_growth[0] == -100.0);
+    const auto lethal_growth =
+        old_school::handcrafted_priority_scores(
+            growth, 0, {growth_actions[0]},
+            old_school::TurnPhase::BeginCombat);
+    CHECK(lethal_growth[0] == 9'500.0);
+
+    growth.players[0].creatures.push_back(bear(13, true));
+    const auto sick_growth =
+        old_school::handcrafted_priority_scores(
+            growth, 0,
+            {old_school::PriorityAction::cast_giant_growth(
+                old_school::Target::creature_target(0, 13))},
+            old_school::TurnPhase::BeginCombat);
+    CHECK(sick_growth[0] == -100.0);
+
+    old_school::GameState lands;
+    lands.active_player = 0;
+    lands.players[0].hand = {
+        old_school::CardId::Mountain,
+        old_school::CardId::Island,
+        old_school::CardId::FlyingMen,
+        old_school::CardId::IronclawOrcs,
+    };
+    const auto land_scores =
+        old_school::handcrafted_priority_scores(
+            lands, 0,
+            {
+                old_school::PriorityAction::play_land(
+                    old_school::CardId::Mountain),
+                old_school::PriorityAction::play_land(
+                    old_school::CardId::Island),
+            });
+    CHECK(land_scores[1] > land_scores[0]);
 }
 
 TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
-    const auto state = alpha::white_lock_plan_diagnostic_state();
+    const auto state = old_school::white_lock_plan_diagnostic_state();
     CHECK(state.active_player == 0);
     CHECK(state.stack.empty());
     CHECK(state.players[0].land_played_this_turn);
@@ -2484,47 +2819,47 @@ TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
     CHECK(std::all_of(
         state.players[0].lands.begin(),
         state.players[0].lands.end(),
-        [](const alpha::LandPermanent& land) {
-            return land.card == alpha::CardId::Plains &&
+        [](const old_school::LandPermanent& land) {
+            return land.card == old_school::CardId::Plains &&
                    !land.tapped;
         }));
     CHECK(state.players[0].artifacts.size() == 1);
     CHECK(state.players[0].artifacts[0].card ==
-          alpha::CardId::Millstone);
+          old_school::CardId::Millstone);
     CHECK(!state.players[0].artifacts[0].tapped);
     CHECK(count_card(
               state.players[0].enchantments,
-              alpha::CardId::Moat) == 1);
+              old_school::CardId::Moat) == 1);
     CHECK(count_card(
               state.players[0].hand,
-              alpha::CardId::Moat) == 7);
+              old_school::CardId::Moat) == 7);
 
     CHECK(state.players[1].creatures.size() == 1);
     const auto& attacker = state.players[1].creatures[0];
-    CHECK(attacker.card == alpha::CardId::FireElemental);
+    CHECK(attacker.card == old_school::CardId::FireElemental);
     CHECK(!attacker.tapped);
     CHECK(!attacker.summoning_sick);
-    CHECK(!alpha::card_definition(attacker.card).flying);
+    CHECK(!old_school::card_definition(attacker.card).flying);
 
     const auto actions =
-        alpha::legal_priority_actions(state, 0, true);
+        old_school::legal_priority_actions(state, 0, true);
     CHECK(actions.size() == 4);
     CHECK(has_action(
         actions,
-        alpha::PriorityAction::cast_enchantment(
-            alpha::CardId::Moat)));
+        old_school::PriorityAction::cast_enchantment(
+            old_school::CardId::Moat)));
     CHECK(has_action(
         actions,
-        alpha::PriorityAction::activate_millstone(
+        old_school::PriorityAction::activate_millstone(
             state.players[0].artifacts[0].id,
-            alpha::Target::player_target(1))));
+            old_school::Target::player_target(1))));
 
-    const std::array<std::vector<alpha::CardId>, 2> decks = {
-        alpha::white_control_deck(),
-        alpha::red_alpha_deck(),
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
     };
     const auto sampled =
-        alpha::sample_determinization(state, decks, 0, 0x10C4ULL);
+        old_school::sample_determinization(state, decks, 0, 0x10C4ULL);
     for (std::size_t player = 0; player < decks.size(); ++player) {
         auto expected = decks[player];
         std::sort(expected.begin(), expected.end());
@@ -2532,514 +2867,1054 @@ TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
     }
 
     auto attempted_combat = state;
-    CHECK(!alpha::resolve_combat(
+    CHECK(!old_school::resolve_combat(
         attempted_combat, 1, {attacker.id}, {}));
 }
 
 TEST(basic_lands_can_be_played_once_per_turn) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::Forest,
-                             alpha::CardId::Mountain,
-                             alpha::CardId::Island,
-                             alpha::CardId::Plains};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::Forest,
+                             old_school::CardId::Mountain,
+                             old_school::CardId::Island,
+                             old_school::CardId::Plains};
 
-    auto actions = alpha::legal_priority_actions(state, 0, true);
+    auto actions = old_school::legal_priority_actions(state, 0, true);
     CHECK(has_action(actions,
-                     alpha::PriorityAction::play_land(alpha::CardId::Forest)));
+                     old_school::PriorityAction::play_land(old_school::CardId::Forest)));
     CHECK(has_action(actions,
-                     alpha::PriorityAction::play_land(alpha::CardId::Mountain)));
+                     old_school::PriorityAction::play_land(old_school::CardId::Mountain)));
     CHECK(has_action(actions,
-                     alpha::PriorityAction::play_land(alpha::CardId::Island)));
+                     old_school::PriorityAction::play_land(old_school::CardId::Island)));
     CHECK(has_action(actions,
-                     alpha::PriorityAction::play_land(alpha::CardId::Plains)));
-    CHECK(alpha::apply_priority_action(
-        state, 0, alpha::PriorityAction::play_land(alpha::CardId::Forest),
+                     old_school::PriorityAction::play_land(old_school::CardId::Plains)));
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::play_land(old_school::CardId::Forest),
         true));
     CHECK(state.players[0].lands.size() == 1);
-    CHECK(state.players[0].lands[0].card == alpha::CardId::Forest);
+    CHECK(state.players[0].lands[0].card == old_school::CardId::Forest);
 
-    CHECK(!alpha::apply_priority_action(
-        state, 0, alpha::PriorityAction::play_land(alpha::CardId::Mountain),
+    CHECK(!old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::play_land(old_school::CardId::Mountain),
         true));
-    alpha::begin_turn(state, 0);
-    CHECK(alpha::apply_priority_action(
-        state, 0, alpha::PriorityAction::play_land(alpha::CardId::Mountain),
+    old_school::begin_turn(state, 0);
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::play_land(old_school::CardId::Mountain),
         true));
-    CHECK(state.players[0].lands[1].card == alpha::CardId::Mountain);
-    alpha::begin_turn(state, 0);
-    CHECK(alpha::apply_priority_action(
-        state, 0, alpha::PriorityAction::play_land(alpha::CardId::Island),
+    CHECK(state.players[0].lands[1].card == old_school::CardId::Mountain);
+    old_school::begin_turn(state, 0);
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::play_land(old_school::CardId::Island),
         true));
-    CHECK(state.players[0].lands[2].card == alpha::CardId::Island);
-    alpha::begin_turn(state, 0);
-    CHECK(alpha::apply_priority_action(
-        state, 0, alpha::PriorityAction::play_land(alpha::CardId::Plains),
+    CHECK(state.players[0].lands[2].card == old_school::CardId::Island);
+    old_school::begin_turn(state, 0);
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::play_land(old_school::CardId::Plains),
         true));
-    CHECK(state.players[0].lands[3].card == alpha::CardId::Plains);
+    CHECK(state.players[0].lands[3].card == old_school::CardId::Plains);
 }
 
 TEST(grizzly_bears_costs_one_and_a_green_and_has_summoning_sickness) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::GrizzlyBears};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::GrizzlyBears};
     state.players[0].lands = {
-        {.card = alpha::CardId::Forest, .tapped = false},
-        {.card = alpha::CardId::Forest, .tapped = false},
+        {.card = old_school::CardId::Forest, .tapped = false},
+        {.card = old_school::CardId::Forest, .tapped = false},
     };
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_creature(alpha::CardId::GrizzlyBears),
+        old_school::PriorityAction::cast_creature(old_school::CardId::GrizzlyBears),
         true));
     CHECK(state.players[0].hand.empty());
     CHECK(state.players[0].creatures.empty());
     CHECK(state.stack.size() == 1);
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[0].creatures.size() == 1);
     CHECK(state.players[0].creatures[0].summoning_sick);
     CHECK(state.players[0].lands[0].tapped);
     CHECK(state.players[0].lands[1].tapped);
 
     const auto bear_id = state.players[0].creatures[0].id;
-    CHECK(!alpha::resolve_combat(state, 0, {bear_id}, {}));
-    alpha::begin_turn(state, 0);
-    CHECK(alpha::resolve_combat(state, 0, {bear_id}, {}));
+    CHECK(!old_school::resolve_combat(state, 0, {bear_id}, {}));
+    old_school::begin_turn(state, 0);
+    CHECK(old_school::resolve_combat(state, 0, {bear_id}, {}));
     CHECK(state.players[1].life == 18);
 }
 
 TEST(grizzly_bears_requires_green_mana) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::GrizzlyBears};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::GrizzlyBears};
     state.players[0].lands = {
-        {.card = alpha::CardId::Mountain, .tapped = false},
-        {.card = alpha::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
     };
-    CHECK(!has_action(alpha::legal_priority_actions(state, 0, true),
-                      alpha::PriorityAction::cast_creature(
-                          alpha::CardId::GrizzlyBears)));
+    CHECK(!has_action(old_school::legal_priority_actions(state, 0, true),
+                      old_school::PriorityAction::cast_creature(
+                          old_school::CardId::GrizzlyBears)));
 }
 
 TEST(ironroot_treefolk_costs_four_and_a_green) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::IronrootTreefolk};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::IronrootTreefolk};
     state.players[0].lands = {
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
     };
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_creature(
-            alpha::CardId::IronrootTreefolk),
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::IronrootTreefolk),
         true));
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[0].creatures.size() == 1);
     CHECK(state.players[0].creatures[0].card ==
-          alpha::CardId::IronrootTreefolk);
+          old_school::CardId::IronrootTreefolk);
     CHECK(std::all_of(state.players[0].lands.begin(),
                       state.players[0].lands.end(),
-                      [](const alpha::LandPermanent& land) {
+                      [](const old_school::LandPermanent& land) {
                           return land.tapped;
                       }));
 }
 
 TEST(fire_elemental_requires_two_red_mana) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::FireElemental};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::FireElemental};
     state.players[0].lands = {
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Mountain},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Mountain},
     };
     CHECK(!has_action(
-        alpha::legal_priority_actions(state, 0, true),
-        alpha::PriorityAction::cast_creature(alpha::CardId::FireElemental)));
+        old_school::legal_priority_actions(state, 0, true),
+        old_school::PriorityAction::cast_creature(old_school::CardId::FireElemental)));
 
-    state.players[0].lands[1].card = alpha::CardId::Mountain;
-    CHECK(alpha::apply_priority_action(
+    state.players[0].lands[1].card = old_school::CardId::Mountain;
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_creature(alpha::CardId::FireElemental),
+        old_school::PriorityAction::cast_creature(old_school::CardId::FireElemental),
         true));
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[0].creatures[0].card ==
-          alpha::CardId::FireElemental);
+          old_school::CardId::FireElemental);
 }
 
 TEST(fire_elemental_defeats_ironroot_treefolk_in_combat) {
-    alpha::GameState state;
+    old_school::GameState state;
     state.players[0].creatures = {
-        creature(1, alpha::CardId::FireElemental)};
+        creature(1, old_school::CardId::FireElemental)};
     state.players[1].creatures = {
-        creature(2, alpha::CardId::IronrootTreefolk)};
+        creature(2, old_school::CardId::IronrootTreefolk)};
 
-    CHECK(alpha::resolve_combat(state, 0, {1}, {{1, 2}}));
+    CHECK(old_school::resolve_combat(state, 0, {1}, {{1, 2}}));
     CHECK(state.players[0].creatures.size() == 1);
     CHECK(state.players[1].creatures.empty());
 }
 
 TEST(attacking_player_controls_multi_block_damage_order) {
     const auto combat_state = [] {
-        alpha::GameState state;
+        old_school::GameState state;
         state.players[0].creatures = {
-            creature(1, alpha::CardId::FireElemental)};
+            creature(1, old_school::CardId::FireElemental)};
         state.players[1].creatures = {
             bear(2),
-            creature(3, alpha::CardId::IronrootTreefolk),
+            creature(3, old_school::CardId::IronrootTreefolk),
         };
         return state;
     };
 
     auto bears_first = combat_state();
-    CHECK(alpha::resolve_combat(
+    CHECK(old_school::resolve_combat(
         bears_first, 0, {1}, {{1, 2}, {1, 3}}));
     CHECK(bears_first.players[0].creatures.empty());
     CHECK(bears_first.players[1].creatures.size() == 1);
     CHECK(bears_first.players[1].creatures[0].card ==
-          alpha::CardId::IronrootTreefolk);
+          old_school::CardId::IronrootTreefolk);
     CHECK(count_card(bears_first.players[1].graveyard,
-                     alpha::CardId::GrizzlyBears) == 1);
+                     old_school::CardId::GrizzlyBears) == 1);
 
     auto treefolk_first = combat_state();
-    CHECK(alpha::resolve_combat(
+    CHECK(old_school::resolve_combat(
         treefolk_first, 0, {1}, {{1, 3}, {1, 2}}));
     CHECK(treefolk_first.players[0].creatures.empty());
     CHECK(treefolk_first.players[1].creatures.size() == 1);
     CHECK(treefolk_first.players[1].creatures[0].card ==
-          alpha::CardId::GrizzlyBears);
+          old_school::CardId::GrizzlyBears);
     CHECK(count_card(treefolk_first.players[1].graveyard,
-                     alpha::CardId::IronrootTreefolk) == 1);
+                     old_school::CardId::IronrootTreefolk) == 1);
 }
 
 TEST(water_elemental_requires_two_blue_mana) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::WaterElemental};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::WaterElemental};
     state.players[0].lands = {
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
     };
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_creature(
-            alpha::CardId::WaterElemental),
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::WaterElemental),
         true));
     CHECK(state.stack.size() == 1);
     CHECK(state.players[0].creatures.empty());
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[0].creatures.size() == 1);
     CHECK(state.players[0].creatures[0].card ==
-          alpha::CardId::WaterElemental);
+          old_school::CardId::WaterElemental);
+}
+
+TEST(new_old_school_creatures_cast_with_exact_mana) {
+    const auto check_cast =
+        [](old_school::CardId card,
+           std::vector<old_school::LandPermanent> exact_lands) {
+            old_school::GameState short_state;
+            short_state.players[0].hand = {card};
+            short_state.players[0].lands = exact_lands;
+            short_state.players[0].lands.pop_back();
+            CHECK(!has_action(
+                old_school::legal_priority_actions(short_state, 0, true),
+                old_school::PriorityAction::cast_creature(card)));
+
+            old_school::GameState state;
+            state.players[0].hand = {card};
+            state.players[0].lands = std::move(exact_lands);
+            CHECK(old_school::apply_priority_action(
+                state, 0, old_school::PriorityAction::cast_creature(card),
+                true));
+            CHECK(std::all_of(
+                state.players[0].lands.begin(),
+                state.players[0].lands.end(),
+                [](const old_school::LandPermanent& land) {
+                    return land.tapped;
+                }));
+            CHECK(old_school::resolve_top_of_stack(state));
+            CHECK(state.players[0].creatures.size() == 1);
+            CHECK(state.players[0].creatures[0].card == card);
+        };
+
+    check_cast(
+        old_school::CardId::FlyingMen,
+        {{.card = old_school::CardId::Island}});
+    check_cast(
+        old_school::CardId::IronclawOrcs,
+        {{.card = old_school::CardId::Mountain},
+         {.card = old_school::CardId::Island}});
+    check_cast(
+        old_school::CardId::GrayOgre,
+        {{.card = old_school::CardId::Mountain},
+         {.card = old_school::CardId::Island},
+         {.card = old_school::CardId::Island}});
+    check_cast(
+        old_school::CardId::HillGiant,
+        {{.card = old_school::CardId::Mountain},
+         {.card = old_school::CardId::Island},
+         {.card = old_school::CardId::Island},
+         {.card = old_school::CardId::Island}});
 }
 
 TEST(lightning_bolt_can_damage_either_player) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::LightningBolt};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::LightningBolt};
     state.players[0].lands = {
-        {.card = alpha::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
     };
-    const auto actions = alpha::legal_priority_actions(state, 0, true);
+    const auto actions = old_school::legal_priority_actions(state, 0, true);
     CHECK(has_action(
-        actions, alpha::PriorityAction::cast_lightning_bolt(
-                     alpha::Target::player_target(0))));
+        actions, old_school::PriorityAction::cast_lightning_bolt(
+                     old_school::Target::player_target(0))));
     CHECK(has_action(
-        actions, alpha::PriorityAction::cast_lightning_bolt(
-                     alpha::Target::player_target(1))));
+        actions, old_school::PriorityAction::cast_lightning_bolt(
+                     old_school::Target::player_target(1))));
 
-    CHECK(alpha::apply_priority_action(
-        state, 0, alpha::PriorityAction::cast_lightning_bolt(
-                      alpha::Target::player_target(1)),
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::cast_lightning_bolt(
+                      old_school::Target::player_target(1)),
         true));
     CHECK(state.players[1].life == 20);
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[1].life == 17);
     CHECK(state.players[0].lands[0].tapped);
     CHECK(count_card(state.players[0].graveyard,
-                     alpha::CardId::LightningBolt) == 1);
+                     old_school::CardId::LightningBolt) == 1);
 }
 
 TEST(lightning_bolt_kills_a_grizzly_bears) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::LightningBolt};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::LightningBolt};
     state.players[0].lands = {
-        {.card = alpha::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
     };
     state.players[1].creatures = {bear(42)};
 
-    const auto action = alpha::PriorityAction::cast_lightning_bolt(
-        alpha::Target::creature_target(1, 42));
-    CHECK(has_action(alpha::legal_priority_actions(state, 0, true), action));
-    CHECK(alpha::apply_priority_action(state, 0, action, true));
-    CHECK(alpha::resolve_top_of_stack(state));
+    const auto action = old_school::PriorityAction::cast_lightning_bolt(
+        old_school::Target::creature_target(1, 42));
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true), action));
+    CHECK(old_school::apply_priority_action(state, 0, action, true));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[1].creatures.empty());
     CHECK(count_card(state.players[1].graveyard,
-                     alpha::CardId::GrizzlyBears) == 1);
+                     old_school::CardId::GrizzlyBears) == 1);
 }
 
 TEST(lightning_bolt_does_not_kill_an_ironroot_treefolk) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::LightningBolt};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::LightningBolt};
     state.players[0].lands = {
-        {.card = alpha::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
     };
     state.players[1].creatures = {
-        creature(42, alpha::CardId::IronrootTreefolk)};
+        creature(42, old_school::CardId::IronrootTreefolk)};
 
-    const auto action = alpha::PriorityAction::cast_lightning_bolt(
-        alpha::Target::creature_target(1, 42));
-    CHECK(alpha::apply_priority_action(state, 0, action, true));
-    CHECK(alpha::resolve_top_of_stack(state));
+    const auto action = old_school::PriorityAction::cast_lightning_bolt(
+        old_school::Target::creature_target(1, 42));
+    CHECK(old_school::apply_priority_action(state, 0, action, true));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[1].creatures.size() == 1);
     CHECK(state.players[1].creatures[0].damage == 3);
 
-    alpha::cleanup_turn(state);
+    old_school::cleanup_turn(state);
     CHECK(state.players[1].creatures[0].damage == 0);
 }
 
-TEST(two_consecutive_passes_resolve_the_stack_then_end_the_window) {
-    alpha::GameState state;
+TEST(disintegrate_enumerates_every_affordable_x_and_target_at_sorcery_speed) {
+    old_school::GameState state;
     state.active_player = 0;
-    state.players[0].hand = {alpha::CardId::LightningBolt};
+    state.players[0].hand = {old_school::CardId::Disintegrate};
     state.players[0].lands = {
-        {.card = alpha::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Island},
     };
-    CHECK(alpha::apply_priority_action(
+    state.players[0].creatures = {bear(1)};
+    state.players[1].creatures = {
+        creature(2, old_school::CardId::HillGiant),
+    };
+
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    const std::array<old_school::Target, 4> targets = {
+        old_school::Target::player_target(0),
+        old_school::Target::creature_target(0, 1),
+        old_school::Target::player_target(1),
+        old_school::Target::creature_target(1, 2),
+    };
+    for (int x_value = 0; x_value <= 2; ++x_value) {
+        for (const auto& target : targets) {
+            CHECK(has_action(
+                actions,
+                old_school::PriorityAction::cast_disintegrate(
+                    x_value, target)));
+        }
+    }
+    CHECK(std::count_if(
+              actions.begin(), actions.end(),
+              [](const old_school::PriorityAction& action) {
+                  return action.kind ==
+                         old_school::PriorityActionKind::CastDisintegrate;
+              }) == 12);
+    for (const auto& target : targets) {
+        CHECK(!has_action(
+            actions,
+            old_school::PriorityAction::cast_disintegrate(3, target)));
+    }
+    const auto instant_actions =
+        old_school::legal_priority_actions(state, 0, false);
+    CHECK(std::none_of(
+        instant_actions.begin(), instant_actions.end(),
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                   old_school::PriorityActionKind::CastDisintegrate;
+        }));
+
+    auto occupied_stack = state;
+    occupied_stack.stack.push_back({
+        .kind = old_school::StackObjectKind::Spell,
+        .id = 90,
+        .card = old_school::CardId::LightningBolt,
+        .controller = 1,
+        .target = old_school::Target::player_target(0),
+        .spell_target = std::nullopt,
+    });
+    const auto occupied_actions =
+        old_school::legal_priority_actions(occupied_stack, 0, true);
+    CHECK(std::none_of(
+        occupied_actions.begin(), occupied_actions.end(),
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                   old_school::PriorityActionKind::CastDisintegrate;
+        }));
+
+    state.players[1].hand = {old_school::CardId::Disintegrate};
+    state.players[1].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+    const auto inactive_actions =
+        old_school::legal_priority_actions(state, 1, true);
+    CHECK(std::none_of(
+        inactive_actions.begin(), inactive_actions.end(),
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                   old_school::PriorityActionKind::CastDisintegrate;
+        }));
+
+    const auto cast = old_school::PriorityAction::cast_disintegrate(
+        2, old_school::Target::player_target(1));
+    CHECK(old_school::apply_priority_action(state, 0, cast, true));
+    CHECK(state.players[0].hand.empty());
+    CHECK(std::all_of(
+        state.players[0].lands.begin(),
+        state.players[0].lands.end(),
+        [](const old_school::LandPermanent& land) {
+            return land.tapped;
+        }));
+    CHECK(state.stack.size() == 1);
+    CHECK(state.stack.back().card == old_school::CardId::Disintegrate);
+    CHECK(state.stack.back().target ==
+          old_school::Target::player_target(1));
+    CHECK(state.stack.back().x_value == 2);
+    CHECK(state.players[1].life == 20);
+    CHECK(old_school::resolve_top_of_stack(state));
+    CHECK(state.players[1].life == 18);
+    CHECK(state.stats[0].damage_to_opponent == 2);
+    CHECK(count_card(
+              state.players[0].graveyard,
+              old_school::CardId::Disintegrate) == 1);
+}
+
+TEST(disintegrate_x_zero_spends_only_red_and_deals_no_damage) {
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::Disintegrate};
+    state.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Island},
+    };
+    state.players[1].creatures = {bear(7)};
+    const auto cast = old_school::PriorityAction::cast_disintegrate(
+        0, old_school::Target::creature_target(1, 7));
+    CHECK(old_school::apply_priority_action(state, 0, cast, true));
+    CHECK(state.players[0].lands[0].tapped);
+    CHECK(!state.players[0].lands[1].tapped);
+    CHECK(state.stack.back().x_value == 0);
+    CHECK(old_school::resolve_top_of_stack(state));
+    CHECK(state.players[1].creatures.size() == 1);
+    CHECK(state.players[1].creatures[0].damage == 0);
+    CHECK(!state.players[1].creatures[0].exile_on_death_this_turn);
+}
+
+TEST(disintegrate_is_counterable_and_fizzles_on_a_missing_target) {
+    old_school::GameState countered;
+    countered.players[0].hand = {old_school::CardId::Disintegrate};
+    countered.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+    };
+    countered.players[1].hand = {old_school::CardId::Counterspell};
+    countered.players[1].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+    };
+    CHECK(old_school::apply_priority_action(
+        countered, 0,
+        old_school::PriorityAction::cast_disintegrate(
+            2, old_school::Target::player_target(1)),
+        true));
+    const auto disintegrate_id = countered.stack.back().id;
+    const auto counter =
+        old_school::PriorityAction::cast_counterspell(disintegrate_id);
+    CHECK(has_action(
+        old_school::legal_priority_actions(countered, 1, false),
+        counter));
+    CHECK(old_school::apply_priority_action(
+        countered, 1, counter, false));
+    CHECK(old_school::resolve_top_of_stack(countered));
+    CHECK(countered.stack.empty());
+    CHECK(countered.players[1].life == 20);
+    CHECK(count_card(
+              countered.players[0].graveyard,
+              old_school::CardId::Disintegrate) == 1);
+    CHECK(count_card(
+              countered.players[1].graveyard,
+              old_school::CardId::Counterspell) == 1);
+    CHECK(countered.stats[1].spells_countered == 1);
+
+    old_school::GameState fizzled;
+    fizzled.players[0].hand = {old_school::CardId::Disintegrate};
+    fizzled.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+    };
+    fizzled.players[1].creatures = {bear(17)};
+    CHECK(old_school::apply_priority_action(
+        fizzled, 0,
+        old_school::PriorityAction::cast_disintegrate(
+            1, old_school::Target::creature_target(1, 17)),
+        true));
+    fizzled.players[1].graveyard.push_back(
+        fizzled.players[1].creatures[0].card);
+    fizzled.players[1].creatures.clear();
+    CHECK(old_school::resolve_top_of_stack(fizzled));
+    CHECK(fizzled.players[1].exile.empty());
+    CHECK(count_card(
+              fizzled.players[0].graveyard,
+              old_school::CardId::Disintegrate) == 1);
+}
+
+TEST(disintegrate_exiles_immediate_and_later_same_turn_deaths) {
+    old_school::GameState immediate;
+    immediate.players[0].hand = {old_school::CardId::Disintegrate};
+    immediate.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+    };
+    immediate.players[1].creatures = {bear(8)};
+    CHECK(old_school::apply_priority_action(
+        immediate, 0,
+        old_school::PriorityAction::cast_disintegrate(
+            2, old_school::Target::creature_target(1, 8)),
+        true));
+    CHECK(old_school::resolve_top_of_stack(immediate));
+    CHECK(immediate.players[1].creatures.empty());
+    CHECK(immediate.players[1].graveyard.empty());
+    CHECK((immediate.players[1].exile ==
+           std::vector<old_school::CardId>{
+               old_school::CardId::GrizzlyBears}));
+
+    old_school::GameState later;
+    later.players[0].hand = {old_school::CardId::Disintegrate};
+    later.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+    };
+    later.players[1].hand = {old_school::CardId::LightningBolt};
+    later.players[1].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+    later.players[1].creatures = {
+        creature(18, old_school::CardId::IronrootTreefolk),
+    };
+    CHECK(old_school::apply_priority_action(
+        later, 0,
+        old_school::PriorityAction::cast_disintegrate(
+            2, old_school::Target::creature_target(1, 18)),
+        true));
+    CHECK(old_school::resolve_top_of_stack(later));
+    CHECK(later.players[1].creatures.size() == 1);
+    CHECK(later.players[1].creatures[0].damage == 2);
+    CHECK(later.players[1].creatures[0].exile_on_death_this_turn);
+    CHECK(old_school::apply_priority_action(
+        later, 1,
+        old_school::PriorityAction::cast_lightning_bolt(
+            old_school::Target::creature_target(1, 18)),
+        false));
+    CHECK(old_school::resolve_top_of_stack(later));
+    CHECK(later.players[1].creatures.empty());
+    CHECK(count_card(
+              later.players[1].exile,
+              old_school::CardId::IronrootTreefolk) == 1);
+    CHECK(count_card(
+              later.players[1].graveyard,
+              old_school::CardId::IronrootTreefolk) == 0);
+
+    old_school::GameState cleaned;
+    cleaned.players[0].hand = {old_school::CardId::Disintegrate};
+    cleaned.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+    };
+    cleaned.players[1].creatures = {
+        creature(28, old_school::CardId::IronrootTreefolk),
+    };
+    CHECK(old_school::apply_priority_action(
+        cleaned, 0,
+        old_school::PriorityAction::cast_disintegrate(
+            1, old_school::Target::creature_target(1, 28)),
+        true));
+    CHECK(old_school::resolve_top_of_stack(cleaned));
+    CHECK(cleaned.players[1].creatures[0].damage == 1);
+    CHECK(cleaned.players[1].creatures[0].exile_on_death_this_turn);
+    old_school::cleanup_turn(cleaned);
+    CHECK(cleaned.players[1].creatures[0].damage == 0);
+    CHECK(!cleaned.players[1].creatures[0].exile_on_death_this_turn);
+}
+
+TEST(two_consecutive_passes_resolve_the_stack_then_end_the_window) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.players[0].hand = {old_school::CardId::LightningBolt};
+    state.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_lightning_bolt(
-            alpha::Target::player_target(1)),
+        old_school::PriorityAction::cast_lightning_bolt(
+            old_school::Target::player_target(1)),
         true));
 
-    alpha::PriorityState priority = {
+    old_school::PriorityState priority = {
         .player = 0,
         .consecutive_passes = 0,
     };
-    CHECK(alpha::pass_priority(state, priority) ==
-          alpha::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
     CHECK(priority.player == 1);
     CHECK(state.stack.size() == 1);
     CHECK(state.players[1].life == 20);
 
-    CHECK(alpha::pass_priority(state, priority) ==
-          alpha::PriorityPassResult::StackObjectResolved);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
     CHECK(priority.player == state.active_player);
     CHECK(priority.consecutive_passes == 0);
     CHECK(state.stack.empty());
     CHECK(state.players[1].life == 17);
 
-    CHECK(alpha::pass_priority(state, priority) ==
-          alpha::PriorityPassResult::Passed);
-    CHECK(alpha::pass_priority(state, priority) ==
-          alpha::PriorityPassResult::WindowEnded);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::WindowEnded);
 }
 
 TEST(counterspell_counters_a_creature_spell_on_the_stack) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::GrizzlyBears};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::GrizzlyBears};
     state.players[0].lands = {
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
     };
-    state.players[1].hand = {alpha::CardId::Counterspell};
+    state.players[1].hand = {old_school::CardId::Counterspell};
     state.players[1].lands = {
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
     };
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_creature(
-            alpha::CardId::GrizzlyBears),
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::GrizzlyBears),
         true));
     const auto bear_spell = state.stack.back().id;
     const auto counter =
-        alpha::PriorityAction::cast_counterspell(bear_spell);
+        old_school::PriorityAction::cast_counterspell(bear_spell);
     CHECK(has_action(
-        alpha::legal_priority_actions(state, 1, false), counter));
-    CHECK(alpha::apply_priority_action(state, 1, counter, false));
+        old_school::legal_priority_actions(state, 1, false), counter));
+    CHECK(old_school::apply_priority_action(state, 1, counter, false));
     CHECK(state.stack.size() == 2);
 
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.stack.empty());
     CHECK(state.players[0].creatures.empty());
     CHECK(count_card(state.players[0].graveyard,
-                     alpha::CardId::GrizzlyBears) == 1);
+                     old_school::CardId::GrizzlyBears) == 1);
     CHECK(count_card(state.players[1].graveyard,
-                     alpha::CardId::Counterspell) == 1);
+                     old_school::CardId::Counterspell) == 1);
     CHECK(state.stats[1].spells_countered == 1);
 }
 
 TEST(countering_a_counterspell_leaves_the_original_spell_to_resolve) {
-    alpha::GameState state;
+    old_school::GameState state;
     state.players[0].hand = {
-        alpha::CardId::LightningBolt,
-        alpha::CardId::Counterspell,
+        old_school::CardId::LightningBolt,
+        old_school::CardId::Counterspell,
     };
     state.players[0].lands = {
-        {.card = alpha::CardId::Mountain},
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
     };
-    state.players[1].hand = {alpha::CardId::Counterspell};
+    state.players[1].hand = {old_school::CardId::Counterspell};
     state.players[1].lands = {
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
     };
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_lightning_bolt(
-            alpha::Target::player_target(1)),
+        old_school::PriorityAction::cast_lightning_bolt(
+            old_school::Target::player_target(1)),
         true));
     const auto bolt_spell = state.stack.back().id;
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 1,
-        alpha::PriorityAction::cast_counterspell(bolt_spell), false));
+        old_school::PriorityAction::cast_counterspell(bolt_spell), false));
     const auto first_counterspell = state.stack.back().id;
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_counterspell(first_counterspell),
+        old_school::PriorityAction::cast_counterspell(first_counterspell),
         false));
 
     CHECK(state.stack.size() == 3);
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.stack.size() == 1);
-    CHECK(state.stack.back().card == alpha::CardId::LightningBolt);
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(state.stack.back().card == old_school::CardId::LightningBolt);
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.stack.empty());
     CHECK(state.players[1].life == 17);
     CHECK(state.stats[0].spells_countered == 1);
     CHECK(state.stats[1].spells_countered == 0);
 }
 
-TEST(tsunami_uses_the_stack_and_destroys_all_islands) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::Tsunami};
+TEST(giant_growth_is_an_instant_that_can_save_a_bear_from_bolt) {
+    old_school::GameState state;
+    state.active_player = 1;
+    state.players[0].hand = {old_school::CardId::GiantGrowth};
     state.players[0].lands = {
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
-        {.card = alpha::CardId::Forest},
+        {.card = old_school::CardId::Forest},
     };
+    state.players[0].creatures = {bear(31)};
+    state.players[1].hand = {old_school::CardId::LightningBolt};
     state.players[1].lands = {
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Mountain},
-        {.card = alpha::CardId::Island},
+        {.card = old_school::CardId::Mountain},
+    };
+    state.players[1].creatures = {
+        creature(32, old_school::CardId::HillGiant),
     };
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
+        state, 1,
+        old_school::PriorityAction::cast_lightning_bolt(
+            old_school::Target::creature_target(0, 31)),
+        false));
+    const auto growth_on_bear =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 31));
+    const auto growth_on_opponent =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(1, 32));
+    const auto response_actions =
+        old_school::legal_priority_actions(state, 0, false);
+    CHECK(has_action(response_actions, growth_on_bear));
+    CHECK(has_action(response_actions, growth_on_opponent));
+    CHECK(old_school::apply_priority_action(
+        state, 0, growth_on_bear, false));
+    CHECK(state.players[0].lands[0].tapped);
+    CHECK(state.stack.size() == 2);
+    CHECK(state.stack.back().card == old_school::CardId::GiantGrowth);
+    CHECK(old_school::resolve_top_of_stack(state));
+    CHECK(state.players[0].creatures[0].temporary_power_bonus == 3);
+    CHECK(state.players[0].creatures[0].temporary_toughness_bonus == 3);
+    CHECK(old_school::resolve_top_of_stack(state));
+    CHECK(state.players[0].creatures.size() == 1);
+    CHECK(state.players[0].creatures[0].damage == 3);
+    CHECK(count_card(
+              state.players[0].graveyard,
+              old_school::CardId::GiantGrowth) == 1);
+    CHECK(count_card(
+              state.players[1].graveyard,
+              old_school::CardId::LightningBolt) == 1);
+
+    old_school::cleanup_turn(state);
+    CHECK(state.players[0].creatures[0].damage == 0);
+    CHECK(state.players[0].creatures[0].temporary_power_bonus == 0);
+    CHECK(state.players[0].creatures[0].temporary_toughness_bonus == 0);
+
+    old_school::GameState wrong_mana;
+    wrong_mana.players[0].hand = {old_school::CardId::GiantGrowth};
+    wrong_mana.players[0].lands = {
+        {.card = old_school::CardId::Island},
+    };
+    wrong_mana.players[0].creatures = {bear(33)};
+    CHECK(!has_action(
+        old_school::legal_priority_actions(wrong_mana, 0, false),
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 33))));
+}
+
+TEST(giant_growth_is_counterable_and_fizzles_on_a_dead_creature) {
+    old_school::GameState countered;
+    countered.players[0].hand = {old_school::CardId::GiantGrowth};
+    countered.players[0].lands = {
+        {.card = old_school::CardId::Forest},
+    };
+    countered.players[0].creatures = {bear(41)};
+    countered.players[1].hand = {old_school::CardId::Counterspell};
+    countered.players[1].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+    };
+    CHECK(old_school::apply_priority_action(
+        countered, 0,
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 41)),
+        false));
+    const auto growth_id = countered.stack.back().id;
+    CHECK(old_school::apply_priority_action(
+        countered, 1,
+        old_school::PriorityAction::cast_counterspell(growth_id),
+        false));
+    CHECK(old_school::resolve_top_of_stack(countered));
+    CHECK(countered.stack.empty());
+    CHECK(countered.players[0].creatures[0].temporary_power_bonus == 0);
+    CHECK(countered.players[0].creatures[0].temporary_toughness_bonus == 0);
+    CHECK(count_card(
+              countered.players[0].graveyard,
+              old_school::CardId::GiantGrowth) == 1);
+
+    old_school::GameState fizzled;
+    fizzled.players[0].hand = {old_school::CardId::GiantGrowth};
+    fizzled.players[0].lands = {
+        {.card = old_school::CardId::Forest},
+    };
+    fizzled.players[0].creatures = {bear(51)};
+    fizzled.players[1].hand = {old_school::CardId::LightningBolt};
+    fizzled.players[1].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+    CHECK(old_school::apply_priority_action(
+        fizzled, 0,
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 51)),
+        false));
+    CHECK(old_school::apply_priority_action(
+        fizzled, 1,
+        old_school::PriorityAction::cast_lightning_bolt(
+            old_school::Target::creature_target(0, 51)),
+        false));
+    CHECK(old_school::resolve_top_of_stack(fizzled));
+    CHECK(fizzled.players[0].creatures.empty());
+    CHECK(old_school::resolve_top_of_stack(fizzled));
+    CHECK(fizzled.stack.empty());
+    CHECK(count_card(
+              fizzled.players[0].graveyard,
+              old_school::CardId::GiantGrowth) == 1);
+    CHECK(count_card(
+              fizzled.players[0].graveyard,
+              old_school::CardId::GrizzlyBears) == 1);
+}
+
+TEST(giant_growth_changes_combat_damage_and_expires_at_cleanup) {
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::GiantGrowth};
+    state.players[0].lands = {
+        {.card = old_school::CardId::Forest},
+    };
+    state.players[0].creatures = {bear(61)};
+    state.players[1].creatures = {
+        creature(62, old_school::CardId::HillGiant),
+    };
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_sorcery(alpha::CardId::Tsunami),
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 61)),
+        false));
+    CHECK(old_school::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_combat(state, 0, {61}, {{61, 62}}));
+    CHECK(state.players[0].creatures.size() == 1);
+    CHECK(state.players[0].creatures[0].damage == 3);
+    CHECK(state.players[0].creatures[0].temporary_power_bonus == 3);
+    CHECK(state.players[1].creatures.empty());
+    CHECK(count_card(
+              state.players[1].graveyard,
+              old_school::CardId::HillGiant) == 1);
+    old_school::cleanup_turn(state);
+    CHECK(state.players[0].creatures[0].damage == 0);
+    CHECK(state.players[0].creatures[0].temporary_power_bonus == 0);
+    CHECK(state.players[0].creatures[0].temporary_toughness_bonus == 0);
+}
+
+TEST(tsunami_uses_the_stack_and_destroys_all_islands) {
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::Tsunami};
+    state.players[0].lands = {
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+    };
+    state.players[1].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Island},
+    };
+
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_sorcery(old_school::CardId::Tsunami),
         true));
     CHECK(state.stack.size() == 1);
     CHECK(state.players[1].lands.size() == 3);
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[1].lands.size() == 1);
-    CHECK(state.players[1].lands[0].card == alpha::CardId::Mountain);
+    CHECK(state.players[1].lands[0].card == old_school::CardId::Mountain);
     CHECK(count_card(state.players[1].graveyard,
-                     alpha::CardId::Island) == 2);
+                     old_school::CardId::Island) == 2);
     CHECK(count_card(state.players[0].graveyard,
-                     alpha::CardId::Tsunami) == 1);
+                     old_school::CardId::Tsunami) == 1);
 }
 
 TEST(millstone_spell_and_activated_ability_use_the_stack) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::Millstone};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::Millstone};
     state.players[0].lands = {
-        {.card = alpha::CardId::Plains},
-        {.card = alpha::CardId::Plains},
-        {.card = alpha::CardId::Plains},
-        {.card = alpha::CardId::Plains},
+        {.card = old_school::CardId::Plains},
+        {.card = old_school::CardId::Plains},
+        {.card = old_school::CardId::Plains},
+        {.card = old_school::CardId::Plains},
     };
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_artifact(alpha::CardId::Millstone),
+        old_school::PriorityAction::cast_artifact(old_school::CardId::Millstone),
         true));
     CHECK(state.players[0].artifacts.empty());
     CHECK(state.stack.size() == 1);
-    CHECK(state.stack.back().kind == alpha::StackObjectKind::Spell);
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(state.stack.back().kind == old_school::StackObjectKind::Spell);
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[0].artifacts.size() == 1);
 
-    alpha::begin_turn(state, 0);
+    old_school::begin_turn(state, 0);
     state.players[1].library = {
-        alpha::CardId::Forest,
-        alpha::CardId::GrizzlyBears,
-        alpha::CardId::Mountain,
+        old_school::CardId::Forest,
+        old_school::CardId::GrizzlyBears,
+        old_school::CardId::Mountain,
     };
-    state.players[1].hand = {alpha::CardId::Counterspell};
+    state.players[1].hand = {old_school::CardId::Counterspell};
     state.players[1].lands = {
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
     };
 
     const auto millstone_id = state.players[0].artifacts[0].id;
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::activate_millstone(
-            millstone_id, alpha::Target::player_target(1)),
+        old_school::PriorityAction::activate_millstone(
+            millstone_id, old_school::Target::player_target(1)),
         false));
     CHECK(state.players[0].artifacts[0].tapped);
     CHECK(state.stack.size() == 1);
     CHECK(state.stack.back().kind ==
-          alpha::StackObjectKind::ActivatedAbility);
+          old_school::StackObjectKind::ActivatedAbility);
     CHECK(state.players[1].library.size() == 3);
 
     const auto counter_ability =
-        alpha::PriorityAction::cast_counterspell(state.stack.back().id);
+        old_school::PriorityAction::cast_counterspell(state.stack.back().id);
     CHECK(!has_action(
-        alpha::legal_priority_actions(state, 1, false),
+        old_school::legal_priority_actions(state, 1, false),
         counter_ability));
 
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[1].library.size() == 1);
     CHECK(state.players[1].graveyard.size() == 2);
     CHECK(state.stats[0].cards_milled == 2);
 }
 
 TEST(moat_is_a_counterable_spell_and_stops_ground_attackers) {
-    alpha::GameState state;
-    state.players[0].hand = {alpha::CardId::Moat};
+    old_school::GameState state;
+    state.players[0].hand = {old_school::CardId::Moat};
     state.players[0].lands = {
-        {.card = alpha::CardId::Plains},
-        {.card = alpha::CardId::Plains},
-        {.card = alpha::CardId::Plains},
-        {.card = alpha::CardId::Plains},
+        {.card = old_school::CardId::Plains},
+        {.card = old_school::CardId::Plains},
+        {.card = old_school::CardId::Plains},
+        {.card = old_school::CardId::Plains},
     };
-    state.players[1].hand = {alpha::CardId::Counterspell};
+    state.players[1].hand = {old_school::CardId::Counterspell};
     state.players[1].lands = {
-        {.card = alpha::CardId::Island},
-        {.card = alpha::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
     };
     state.players[1].creatures = {bear(99)};
 
-    CHECK(alpha::apply_priority_action(
+    CHECK(old_school::apply_priority_action(
         state, 0,
-        alpha::PriorityAction::cast_enchantment(alpha::CardId::Moat),
+        old_school::PriorityAction::cast_enchantment(old_school::CardId::Moat),
         true));
     CHECK(state.players[0].enchantments.empty());
     const auto moat_spell = state.stack.back().id;
     CHECK(has_action(
-        alpha::legal_priority_actions(state, 1, false),
-        alpha::PriorityAction::cast_counterspell(moat_spell)));
+        old_school::legal_priority_actions(state, 1, false),
+        old_school::PriorityAction::cast_counterspell(moat_spell)));
 
-    CHECK(alpha::resolve_top_of_stack(state));
+    CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[0].enchantments.size() == 1);
-    CHECK(state.players[0].enchantments[0] == alpha::CardId::Moat);
-    CHECK(!alpha::resolve_combat(state, 1, {99}, {}));
+    CHECK(state.players[0].enchantments[0] == old_school::CardId::Moat);
+    CHECK(!old_school::resolve_combat(state, 1, {99}, {}));
+}
+
+TEST(flying_and_ironclaw_block_restrictions_are_enforced_without_mutation) {
+    old_school::GameState moat;
+    moat.players[1].enchantments = {old_school::CardId::Moat};
+    moat.players[0].creatures = {
+        creature(1, old_school::CardId::FlyingMen),
+        bear(2),
+    };
+    CHECK(old_school::resolve_combat(moat, 0, {1}, {}));
+    CHECK(moat.players[1].life == 19);
+    CHECK(moat.players[0].creatures[0].tapped);
+
+    const int life_before_ground_attack = moat.players[1].life;
+    CHECK(!old_school::resolve_combat(moat, 0, {2}, {}));
+    CHECK(moat.players[1].life == life_before_ground_attack);
+    CHECK(!moat.players[0].creatures[1].tapped);
+    CHECK(moat.players[0].creatures[1].damage == 0);
+    CHECK(moat.players[0].graveyard.empty());
+
+    old_school::GameState illegal_flying_block;
+    illegal_flying_block.players[0].creatures = {
+        creature(11, old_school::CardId::FlyingMen),
+    };
+    illegal_flying_block.players[1].creatures = {bear(12)};
+    CHECK(!old_school::resolve_combat(
+        illegal_flying_block, 0, {11}, {{11, 12}}));
+    CHECK(!illegal_flying_block.players[0].creatures[0].tapped);
+    CHECK(illegal_flying_block.players[0].creatures[0].damage == 0);
+    CHECK(illegal_flying_block.players[1].creatures[0].damage == 0);
+    CHECK(illegal_flying_block.players[0].graveyard.empty());
+    CHECK(illegal_flying_block.players[1].graveyard.empty());
+    CHECK(illegal_flying_block.players[1].life == 20);
+
+    old_school::GameState legal_flying_block;
+    legal_flying_block.players[0].creatures = {
+        creature(21, old_school::CardId::FlyingMen),
+    };
+    legal_flying_block.players[1].creatures = {
+        creature(22, old_school::CardId::FlyingMen),
+    };
+    CHECK(old_school::resolve_combat(
+        legal_flying_block, 0, {21}, {{21, 22}}));
+    CHECK(legal_flying_block.players[0].creatures.empty());
+    CHECK(legal_flying_block.players[1].creatures.empty());
+
+    old_school::GameState illegal_ironclaw_block;
+    illegal_ironclaw_block.players[0].creatures = {bear(31)};
+    illegal_ironclaw_block.players[1].creatures = {
+        creature(32, old_school::CardId::IronclawOrcs),
+    };
+    CHECK(!old_school::resolve_combat(
+        illegal_ironclaw_block, 0, {31}, {{31, 32}}));
+    CHECK(!illegal_ironclaw_block.players[0].creatures[0].tapped);
+    CHECK(illegal_ironclaw_block.players[0].creatures[0].damage == 0);
+    CHECK(illegal_ironclaw_block.players[1].creatures[0].damage == 0);
+    CHECK(illegal_ironclaw_block.players[0].graveyard.empty());
+    CHECK(illegal_ironclaw_block.players[1].graveyard.empty());
+    CHECK(illegal_ironclaw_block.players[1].life == 20);
+
+    old_school::GameState ordinary_block;
+    ordinary_block.players[0].creatures = {bear(41)};
+    ordinary_block.players[1].creatures = {
+        creature(42, old_school::CardId::GrayOgre),
+    };
+    CHECK(old_school::resolve_combat(
+        ordinary_block, 0, {41}, {{41, 42}}));
+    CHECK(ordinary_block.players[0].creatures.empty());
+    CHECK(ordinary_block.players[1].creatures.empty());
 }
 
 TEST(grizzly_bears_trade_in_combat) {
-    alpha::GameState state;
+    old_school::GameState state;
     state.players[0].creatures = {bear(1)};
     state.players[1].creatures = {bear(2)};
-    CHECK(alpha::resolve_combat(state, 0, {1}, {{1, 2}}));
+    CHECK(old_school::resolve_combat(state, 0, {1}, {{1, 2}}));
     CHECK(state.players[0].creatures.empty());
     CHECK(state.players[1].creatures.empty());
     CHECK(state.players[0].life == 20);
@@ -3047,14 +3922,14 @@ TEST(grizzly_bears_trade_in_combat) {
 }
 
 TEST(tapped_creatures_cannot_block) {
-    alpha::GameState state;
+    old_school::GameState state;
     state.players[0].creatures = {bear(1)};
     state.players[1].creatures = {bear(2, false, true)};
-    CHECK(!alpha::resolve_combat(state, 0, {1}, {{1, 2}}));
+    CHECK(!old_school::resolve_combat(state, 0, {1}, {{1, 2}}));
 }
 
 TEST(one_hundred_seeded_games_complete) {
-    const auto result = alpha::run_simulation(100, 0xA11FAULL);
+    const auto result = old_school::run_simulation(100, 0xA11FAULL);
     CHECK(result.games == 100);
     CHECK(result.decks[0].games == 100);
     CHECK(result.decks[1].games == 100);
@@ -3088,11 +3963,28 @@ TEST(one_hundred_seeded_games_complete) {
     CHECK(result.turn_limit_draws == 0);
 }
 
-TEST(four_deck_tournament_runs_every_pairing) {
-    const auto result = alpha::run_tournament(100, 0xC0FFEEULL);
+TEST(five_deck_tournament_runs_all_ten_pairings) {
+    const auto result = old_school::run_tournament(100, 0xC0FFEEULL);
     CHECK(result.games_per_matchup == 100);
-    CHECK(result.total_games == 600);
-    for (const auto& matchup : result.matchups) {
+    CHECK(result.total_games == 1000);
+    const std::array<std::pair<old_school::DeckId, old_school::DeckId>, 10>
+        expected_pairings = {{
+            {old_school::DeckId::Green, old_school::DeckId::Red},
+            {old_school::DeckId::Green, old_school::DeckId::Blue},
+            {old_school::DeckId::Green, old_school::DeckId::White},
+            {old_school::DeckId::Green, old_school::DeckId::RUAggro},
+            {old_school::DeckId::Red, old_school::DeckId::Blue},
+            {old_school::DeckId::Red, old_school::DeckId::White},
+            {old_school::DeckId::Red, old_school::DeckId::RUAggro},
+            {old_school::DeckId::Blue, old_school::DeckId::White},
+            {old_school::DeckId::Blue, old_school::DeckId::RUAggro},
+            {old_school::DeckId::White, old_school::DeckId::RUAggro},
+        }};
+    for (std::size_t index = 0;
+         index < result.matchups.size(); ++index) {
+        const auto& matchup = result.matchups[index];
+        CHECK(matchup.first_deck == expected_pairings[index].first);
+        CHECK(matchup.second_deck == expected_pairings[index].second);
         CHECK(matchup.result.games == 100);
         CHECK(matchup.result.decks[0].wins +
                   matchup.result.decks[1].wins +
@@ -3100,29 +3992,29 @@ TEST(four_deck_tournament_runs_every_pairing) {
               100);
     }
     for (const auto& deck : result.decks) {
-        CHECK(deck.games == 300);
-        CHECK(deck.wins + deck.losses + deck.draws == 300);
+        CHECK(deck.games == 400);
+        CHECK(deck.wins + deck.losses + deck.draws == 400);
     }
     CHECK(result.decks[static_cast<std::size_t>(
-              alpha::DeckId::Blue)]
+              old_school::DeckId::Blue)]
               .total_spells_countered >
           0);
     CHECK(result.decks[static_cast<std::size_t>(
-              alpha::DeckId::White)]
+              old_school::DeckId::White)]
               .total_cards_milled >
           0);
     CHECK(result.life_total_finishes + result.empty_library_finishes +
               result.turn_limit_draws ==
-          600);
+          1000);
 }
 
 TEST(random_bot_records_decisions_without_monte_carlo_rollouts) {
-    const auto result = alpha::run_simulation(20, 0xBAD5EEDULL);
+    const auto result = old_school::run_simulation(20, 0xBAD5EEDULL);
     const auto& random =
-        result.bots[static_cast<std::size_t>(alpha::BotKind::Random)];
+        result.bots[static_cast<std::size_t>(old_school::BotKind::Random)];
     const auto& monte_carlo =
         result.bots[static_cast<std::size_t>(
-            alpha::BotKind::MonteCarlo)];
+            old_school::BotKind::MonteCarlo)];
 
     CHECK(random.games == 40);
     CHECK(random.wins + random.losses + random.draws == 40);
@@ -3132,23 +4024,23 @@ TEST(random_bot_records_decisions_without_monte_carlo_rollouts) {
 }
 
 TEST(monte_carlo_bot_runs_complete_random_continuations) {
-    alpha::GameConfig config;
+    old_school::GameConfig config;
     config.bots[0] = {
-        .kind = alpha::BotKind::MonteCarlo,
+        .kind = old_school::BotKind::MonteCarlo,
         .rollouts_per_action = 2,
     };
     config.bots[1] = {
-        .kind = alpha::BotKind::Random,
+        .kind = old_school::BotKind::Random,
         .rollouts_per_action = 2,
     };
 
     const auto result =
-        alpha::run_simulation(5, 0xC001D00DULL, config);
+        old_school::run_simulation(5, 0xC001D00DULL, config);
     const auto& random =
-        result.bots[static_cast<std::size_t>(alpha::BotKind::Random)];
+        result.bots[static_cast<std::size_t>(old_school::BotKind::Random)];
     const auto& monte_carlo =
         result.bots[static_cast<std::size_t>(
-            alpha::BotKind::MonteCarlo)];
+            old_school::BotKind::MonteCarlo)];
 
     CHECK(random.games == 5);
     CHECK(monte_carlo.games == 5);
@@ -3160,35 +4052,35 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 }
 
 TEST(mixed_tournament_rotates_all_five_bot_kinds) {
-    const alpha::TournamentConfig bots = {
-        .bot_field = alpha::BotField::Mixed,
+    const old_school::TournamentConfig bots = {
+        .bot_field = old_school::BotField::Mixed,
         .monte_carlo_rollouts = 1,
         .deep_monte_carlo_rollouts = 4,
         .learned_training_games = 20,
     };
     const auto result =
-        alpha::run_tournament(25, 0xDEC1DEULL, {}, bots);
+        old_school::run_tournament(25, 0xDEC1DEULL, {}, bots);
     const auto& random =
-        result.bots[static_cast<std::size_t>(alpha::BotKind::Random)];
+        result.bots[static_cast<std::size_t>(old_school::BotKind::Random)];
     const auto& monte_carlo =
         result.bots[static_cast<std::size_t>(
-            alpha::BotKind::MonteCarlo)];
+            old_school::BotKind::MonteCarlo)];
     const auto& deep_monte_carlo =
         result.bots[static_cast<std::size_t>(
-            alpha::BotKind::DeepMonteCarlo)];
+            old_school::BotKind::DeepMonteCarlo)];
     const auto& handcrafted =
         result.bots[static_cast<std::size_t>(
-            alpha::BotKind::Handcrafted)];
+            old_school::BotKind::Handcrafted)];
     const auto& learned =
         result.bots[static_cast<std::size_t>(
-            alpha::BotKind::Learned)];
+            old_school::BotKind::Learned)];
 
-    CHECK(result.total_games == 150);
-    CHECK(random.games == 60);
-    CHECK(monte_carlo.games == 60);
-    CHECK(deep_monte_carlo.games == 60);
-    CHECK(handcrafted.games == 60);
-    CHECK(learned.games == 60);
+    CHECK(result.total_games == 250);
+    CHECK(random.games == 100);
+    CHECK(monte_carlo.games == 100);
+    CHECK(deep_monte_carlo.games == 100);
+    CHECK(handcrafted.games == 100);
+    CHECK(learned.games == 100);
     CHECK(random.wins + random.losses + random.draws == random.games);
     CHECK(monte_carlo.wins + monte_carlo.losses +
               monte_carlo.draws ==
@@ -3213,7 +4105,7 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     CHECK(learned.total_decisions > 0);
     CHECK(learned.total_rollouts > 0);
     for (const auto& matchup : result.bot_matchups) {
-        CHECK(matchup.games == 12);
+        CHECK(matchup.games == 20);
         CHECK(matchup.first_wins + matchup.second_wins +
                   matchup.draws ==
               matchup.games);
@@ -3221,7 +4113,7 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     for (std::size_t deck = 0; deck < result.decks.size(); ++deck) {
         std::size_t deck_bot_games = 0;
         for (const auto& deck_bot : result.deck_bots[deck]) {
-            CHECK(deck_bot.games == 15);
+            CHECK(deck_bot.games == 20);
             CHECK(deck_bot.wins + deck_bot.losses + deck_bot.draws ==
                   deck_bot.games);
             deck_bot_games += deck_bot.games;
@@ -3230,34 +4122,34 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     }
 
     const auto repeated =
-        alpha::run_tournament(25, 0xDEC1DEULL, {}, bots);
+        old_school::run_tournament(25, 0xDEC1DEULL, {}, bots);
     CHECK(repeated.bots[static_cast<std::size_t>(
-              alpha::BotKind::Random)]
+              old_school::BotKind::Random)]
               .wins == random.wins);
     CHECK(repeated.bots[static_cast<std::size_t>(
-              alpha::BotKind::MonteCarlo)]
+              old_school::BotKind::MonteCarlo)]
               .wins == monte_carlo.wins);
     CHECK(repeated.bots[static_cast<std::size_t>(
-              alpha::BotKind::MonteCarlo)]
+              old_school::BotKind::MonteCarlo)]
               .total_rollouts == monte_carlo.total_rollouts);
     CHECK(repeated.bots[static_cast<std::size_t>(
-              alpha::BotKind::DeepMonteCarlo)]
+              old_school::BotKind::DeepMonteCarlo)]
               .total_rollouts ==
           deep_monte_carlo.total_rollouts);
     CHECK(repeated.bots[static_cast<std::size_t>(
-              alpha::BotKind::Handcrafted)]
+              old_school::BotKind::Handcrafted)]
               .wins == handcrafted.wins);
     CHECK(repeated.bots[static_cast<std::size_t>(
-              alpha::BotKind::Learned)]
+              old_school::BotKind::Learned)]
               .wins == learned.wins);
     CHECK(repeated.bot_matchups.back().second_wins ==
           result.bot_matchups.back().second_wins);
 }
 
 TEST(learned_deck_lift_gate_requires_every_policy_and_allows_ties) {
-    alpha::TournamentSummary summary;
+    old_school::TournamentSummary summary;
     const auto set_record =
-        [&](alpha::DeckId deck, alpha::BotKind bot,
+        [&](old_school::DeckId deck, old_school::BotKind bot,
             std::size_t wins) {
             auto& stats =
                 summary.deck_bots[static_cast<std::size_t>(deck)]
@@ -3269,76 +4161,80 @@ TEST(learned_deck_lift_gate_requires_every_policy_and_allows_ties) {
 
     for (std::size_t deck = 0;
          deck < summary.deck_bots.size(); ++deck) {
-        const auto id = static_cast<alpha::DeckId>(deck);
-        set_record(id, alpha::BotKind::Random, 20);
-        set_record(id, alpha::BotKind::MonteCarlo, 40);
-        set_record(id, alpha::BotKind::DeepMonteCarlo, 50);
-        set_record(id, alpha::BotKind::Handcrafted, 60);
-        set_record(id, alpha::BotKind::Learned, 61);
+        const auto id = static_cast<old_school::DeckId>(deck);
+        set_record(id, old_school::BotKind::Random, 20);
+        set_record(id, old_school::BotKind::MonteCarlo, 40);
+        set_record(id, old_school::BotKind::DeepMonteCarlo, 50);
+        set_record(id, old_school::BotKind::Handcrafted, 60);
+        set_record(id, old_school::BotKind::Learned, 61);
     }
-    set_record(alpha::DeckId::Red, alpha::BotKind::Learned, 60);
+    set_record(old_school::DeckId::Red, old_school::BotKind::Learned, 60);
 
     const auto passing =
-        alpha::compare_learned_deck_lifts(summary);
+        old_school::compare_learned_deck_lifts(summary);
+    CHECK(passing.decks.size() == 5);
     CHECK(passing.complete());
     CHECK(passing.learned_is_best_on_every_deck());
+    CHECK(passing.decks[static_cast<std::size_t>(
+              old_school::DeckId::RUAggro)]
+              .available);
     const auto& red =
-        passing.decks[static_cast<std::size_t>(alpha::DeckId::Red)];
+        passing.decks[static_cast<std::size_t>(old_school::DeckId::Red)];
     CHECK(red.learned_lift == red.best_other_lift);
     CHECK(red.learned_is_best);
-    CHECK(red.best_other == alpha::BotKind::Handcrafted);
+    CHECK(red.best_other == old_school::BotKind::Handcrafted);
 
-    set_record(alpha::DeckId::Blue, alpha::BotKind::Learned, 59);
+    set_record(old_school::DeckId::Blue, old_school::BotKind::Learned, 59);
     const auto losing =
-        alpha::compare_learned_deck_lifts(summary);
+        old_school::compare_learned_deck_lifts(summary);
     CHECK(losing.complete());
     CHECK(!losing.learned_is_best_on_every_deck());
     CHECK(!losing.decks[static_cast<std::size_t>(
-               alpha::DeckId::Blue)]
+               old_school::DeckId::Blue)]
                .learned_is_best);
 
     auto& missing =
         summary.deck_bots[static_cast<std::size_t>(
-                              alpha::DeckId::White)]
+                              old_school::DeckId::RUAggro)]
                          [static_cast<std::size_t>(
-                              alpha::BotKind::MonteCarlo)];
+                              old_school::BotKind::MonteCarlo)];
     missing = {};
     const auto incomplete =
-        alpha::compare_learned_deck_lifts(summary);
+        old_school::compare_learned_deck_lifts(summary);
     CHECK(!incomplete.complete());
     CHECK(!incomplete.learned_is_best_on_every_deck());
     CHECK(!incomplete.decks[static_cast<std::size_t>(
-                   alpha::DeckId::White)]
+                   old_school::DeckId::RUAggro)]
                    .available);
 }
 
 TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
-    const alpha::BotConfig challenger = {
-        .kind = alpha::BotKind::Handcrafted,
+    const old_school::BotConfig challenger = {
+        .kind = old_school::BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
-    const alpha::BotConfig baseline = {
-        .kind = alpha::BotKind::Random,
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::Random,
         .rollouts_per_action = 1,
     };
-    const auto result = alpha::run_bot_benchmark(
+    const auto result = old_school::run_bot_benchmark(
         2, 0xB07B07ULL, challenger, baseline);
 
-    CHECK(result.total_games == 80);
-    CHECK(result.challenger_stats.games == 80);
-    CHECK(result.baseline_stats.games == 80);
+    CHECK(result.total_games == 120);
+    CHECK(result.challenger_stats.games == 120);
+    CHECK(result.baseline_stats.games == 120);
     CHECK(result.challenger_stats.wins +
               result.challenger_stats.losses +
               result.challenger_stats.draws ==
-          80);
+          120);
     for (std::size_t deck = 0;
          deck < result.challenger_decks.size(); ++deck) {
-        CHECK(result.challenger_decks[deck].games == 20);
-        CHECK(result.baseline_decks[deck].games == 20);
-        CHECK(result.challenger_decks[deck].on_play_games == 10);
-        CHECK(result.challenger_decks[deck].on_draw_games == 10);
-        CHECK(result.baseline_decks[deck].on_play_games == 10);
-        CHECK(result.baseline_decks[deck].on_draw_games == 10);
+        CHECK(result.challenger_decks[deck].games == 24);
+        CHECK(result.baseline_decks[deck].games == 24);
+        CHECK(result.challenger_decks[deck].on_play_games == 12);
+        CHECK(result.challenger_decks[deck].on_draw_games == 12);
+        CHECK(result.baseline_decks[deck].on_play_games == 12);
+        CHECK(result.baseline_decks[deck].on_draw_games == 12);
     }
     CHECK(result.confidence_low_95() >= 0.0);
     CHECK(result.confidence_high_95() <= 100.0);
@@ -3350,28 +4246,28 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
 
 TEST(benchmark_training_seed_is_independent_and_model_is_reusable) {
     constexpr std::uint64_t kTrainingSeed = 707;
-    const alpha::BotConfig learned = {
-        .kind = alpha::BotKind::Learned,
+    const old_school::BotConfig learned = {
+        .kind = old_school::BotKind::Learned,
         .rollouts_per_action = 0,
         .training_games = 1,
     };
-    const alpha::BotConfig random = {
-        .kind = alpha::BotKind::Random,
+    const old_school::BotConfig random = {
+        .kind = old_school::BotKind::Random,
         .rollouts_per_action = 1,
     };
-    alpha::GameConfig shared_config;
+    old_school::GameConfig shared_config;
     CHECK(shared_config.learned_training_seed ==
-          alpha::kDefaultLearnedTrainingSeed);
+          old_school::kDefaultLearnedTrainingSeed);
     shared_config.learned_training_seed = kTrainingSeed;
     shared_config.learned_model =
-        alpha::train_learned_model(1, kTrainingSeed);
+        old_school::train_learned_model(1, kTrainingSeed);
 
-    const auto first = alpha::run_bot_benchmark(
+    const auto first = old_school::run_bot_benchmark(
         1, 101, learned, random, shared_config);
-    const auto repeated = alpha::run_bot_benchmark(
+    const auto repeated = old_school::run_bot_benchmark(
         1, 101, learned, random, shared_config);
     const auto other_evaluation_seed =
-        alpha::run_bot_benchmark(
+        old_school::run_bot_benchmark(
             1, 424242, learned, random, shared_config);
 
     CHECK(first.learned_training_seed == kTrainingSeed);
@@ -3389,32 +4285,32 @@ TEST(benchmark_training_seed_is_independent_and_model_is_reusable) {
 TEST(actor_and_value_champion_use_distinct_frozen_models_in_benchmark) {
     constexpr std::uint64_t kTrainingSeed = 424242;
     const auto actor_model =
-        alpha::train_learned_actor_model(1, kTrainingSeed);
+        old_school::train_learned_actor_model(1, kTrainingSeed);
 
-    const alpha::BotConfig actor = {
-        .kind = alpha::BotKind::Learned,
-        .learned_variant = alpha::LearnedVariant::UnifiedActor,
+    const old_school::BotConfig actor = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant = old_school::LearnedVariant::UnifiedActor,
         .rollouts_per_action = 0,
         .training_games = 1,
         .learned_model = actor_model,
     };
-    const alpha::BotConfig champion = {
-        .kind = alpha::BotKind::Learned,
+    const old_school::BotConfig champion = {
+        .kind = old_school::BotKind::Learned,
         .learned_variant =
-            alpha::LearnedVariant::ValueSearchChampion,
+            old_school::LearnedVariant::ValueSearchChampion,
         .rollouts_per_action = 1,
         .training_games = 1,
     };
-    alpha::GameConfig config;
+    old_school::GameConfig config;
     config.learned_training_seed = kTrainingSeed;
     // A global Actor fallback must not be silently reused for the Champion.
     config.learned_model = actor_model;
-    const auto result = alpha::run_bot_benchmark(
+    const auto result = old_school::run_bot_benchmark(
         1, 0xAC70C4A6ULL, actor, champion, config);
 
-    CHECK(result.total_games == 40);
-    CHECK(result.challenger_stats.games == 40);
-    CHECK(result.baseline_stats.games == 40);
+    CHECK(result.total_games == 60);
+    CHECK(result.challenger_stats.games == 60);
+    CHECK(result.baseline_stats.games == 60);
     CHECK(result.challenger.learned_model == actor_model);
     CHECK(result.baseline.learned_model);
     CHECK(result.baseline.learned_model != actor_model);
@@ -3422,36 +4318,36 @@ TEST(actor_and_value_champion_use_distinct_frozen_models_in_benchmark) {
     CHECK(result.baseline_stats.total_rollouts > 0);
     for (std::size_t deck = 0;
          deck < result.challenger_decks.size(); ++deck) {
-        CHECK(result.challenger_decks[deck].games == 10);
-        CHECK(result.baseline_decks[deck].games == 10);
+        CHECK(result.challenger_decks[deck].games == 12);
+        CHECK(result.baseline_decks[deck].games == 12);
     }
 
     const auto next_actor_model =
-        alpha::train_learned_actor_model(
+        old_school::train_learned_actor_model(
             1, kTrainingSeed + 1);
-    alpha::BotConfig next_actor = actor;
+    old_school::BotConfig next_actor = actor;
     next_actor.learned_model = next_actor_model;
-    const auto generations = alpha::run_bot_benchmark(
+    const auto generations = old_school::run_bot_benchmark(
         1, 0x6E6E5EEDULL, next_actor, actor);
-    CHECK(generations.total_games == 40);
+    CHECK(generations.total_games == 60);
     CHECK(generations.challenger.learned_model ==
           next_actor_model);
     CHECK(generations.baseline.learned_model == actor_model);
 }
 
 TEST(handcrafted_bot_beats_monte_carlo_in_seeded_benchmark) {
-    const alpha::BotConfig challenger = {
-        .kind = alpha::BotKind::Handcrafted,
+    const old_school::BotConfig challenger = {
+        .kind = old_school::BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
-    const alpha::BotConfig baseline = {
-        .kind = alpha::BotKind::MonteCarlo,
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::MonteCarlo,
         .rollouts_per_action = 2,
     };
-    const auto result = alpha::run_bot_benchmark(
+    const auto result = old_school::run_bot_benchmark(
         5, 424242, challenger, baseline);
 
-    CHECK(result.total_games == 200);
+    CHECK(result.total_games == 300);
     CHECK(result.challenger_win_rate() > 60.0);
     CHECK(result.challenger_is_better_95());
     CHECK(result.challenger_stats.total_rollouts == 0);
@@ -3459,18 +4355,18 @@ TEST(handcrafted_bot_beats_monte_carlo_in_seeded_benchmark) {
 }
 
 TEST(handcrafted_bot_beats_deep_monte_carlo_in_seeded_benchmark) {
-    const alpha::BotConfig challenger = {
-        .kind = alpha::BotKind::Handcrafted,
+    const old_school::BotConfig challenger = {
+        .kind = old_school::BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
-    const alpha::BotConfig baseline = {
-        .kind = alpha::BotKind::DeepMonteCarlo,
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::DeepMonteCarlo,
         .rollouts_per_action = 8,
     };
-    const auto result = alpha::run_bot_benchmark(
+    const auto result = old_school::run_bot_benchmark(
         2, 424242, challenger, baseline);
 
-    CHECK(result.total_games == 80);
+    CHECK(result.total_games == 120);
     CHECK(result.challenger_is_better_95());
     CHECK(result.challenger_stats.total_rollouts == 0);
     CHECK(result.baseline_stats.average_rollouts() > 500.0);
@@ -3478,22 +4374,22 @@ TEST(handcrafted_bot_beats_deep_monte_carlo_in_seeded_benchmark) {
 
 TEST(learned_policy_bot_beats_monte_carlo_without_rollouts_or_handcrafted_values) {
     const auto actor_model =
-        alpha::train_learned_actor_model(200, 424242);
-    const alpha::BotConfig challenger = {
-        .kind = alpha::BotKind::Learned,
-        .learned_variant = alpha::LearnedVariant::UnifiedActor,
+        old_school::train_learned_actor_model(200, 424242);
+    const old_school::BotConfig challenger = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant = old_school::LearnedVariant::UnifiedActor,
         .rollouts_per_action = 0,
         .training_games = 200,
         .learned_model = actor_model,
     };
-    const alpha::BotConfig baseline = {
-        .kind = alpha::BotKind::MonteCarlo,
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::MonteCarlo,
         .rollouts_per_action = 2,
     };
-    const auto result = alpha::run_bot_benchmark(
+    const auto result = old_school::run_bot_benchmark(
         5, 424242, challenger, baseline);
 
-    CHECK(result.total_games == 200);
+    CHECK(result.total_games == 300);
     CHECK(result.challenger_win_rate() > 70.0);
     CHECK(result.challenger_is_better_95());
     CHECK(result.challenger_stats.total_rollouts == 0);
@@ -3501,31 +4397,44 @@ TEST(learned_policy_bot_beats_monte_carlo_without_rollouts_or_handcrafted_values
 }
 
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
-    const alpha::DeckEvolutionConfig config = {
+    const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 4,
+        .population = 5,
         .repetitions_per_opponent = 1,
         .pilot =
             {
-                .kind = alpha::BotKind::Handcrafted,
+                .kind = old_school::BotKind::Handcrafted,
                 .rollouts_per_action = 1,
             },
     };
-    const auto first = alpha::evolve_deck(config, 0xE701EULL);
-    const auto repeated = alpha::evolve_deck(config, 0xE701EULL);
+    const auto first = old_school::evolve_deck(config, 0xE701EULL);
+    const auto repeated = old_school::evolve_deck(config, 0xE701EULL);
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.total.games == 16);
+    CHECK(first.best.by_opponent.size() == 5);
+    CHECK(first.best.total.games == 20);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          16);
+          20);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
-    for (const alpha::CardId card : first.best.cards) {
-        CHECK(static_cast<std::size_t>(card) <=
-              static_cast<std::size_t>(alpha::CardId::Moat));
+    std::vector<old_school::CardId> metagame_pool;
+    for (auto deck : {
+             old_school::green_deck(),
+             old_school::red_deck(),
+             old_school::blue_deck(),
+             old_school::white_control_deck(),
+             old_school::ru_aggro_deck(),
+         }) {
+        metagame_pool.insert(
+            metagame_pool.end(), deck.begin(), deck.end());
+    }
+    for (const old_school::CardId card : first.best.cards) {
+        CHECK(std::find(
+                  metagame_pool.begin(), metagame_pool.end(),
+                  card) != metagame_pool.end());
     }
     CHECK(first.best.cards == repeated.best.cards);
     CHECK(first.best.total.wins == repeated.best.total.wins);
@@ -3533,13 +4442,35 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
           repeated.generation_best_win_rates);
 }
 
-TEST(all_six_pairings_have_a_balanced_seeded_matchup) {
-    const auto result = alpha::run_tournament(10000, 424242);
+TEST(all_ten_pairings_complete_a_seeded_smoke_run) {
+    const auto result = old_school::run_tournament(10, 424242);
+    CHECK(result.total_games == 100);
+    CHECK(result.matchups.size() == 10);
     for (const auto& matchup : result.matchups) {
-        CHECK(matchup.result.decks[0].win_rate() >= 45.0);
-        CHECK(matchup.result.decks[0].win_rate() <= 55.0);
-        CHECK(matchup.result.decks[1].win_rate() >= 45.0);
-        CHECK(matchup.result.decks[1].win_rate() <= 55.0);
+        CHECK(matchup.result.games == 10);
+        CHECK(matchup.result.decks[0].wins +
+                  matchup.result.decks[1].wins +
+                  matchup.result.draws ==
+              10);
+    }
+    for (const auto& deck : result.decks) {
+        CHECK(deck.games == 40);
+    }
+}
+
+TEST(five_deck_random_balance_stays_within_the_declared_band) {
+    const auto result = old_school::run_tournament(30'000, 303);
+    CHECK(result.total_games == 300'000);
+    for (const auto& matchup : result.matchups) {
+        CHECK(matchup.result.draws == 0);
+        const double first_rate =
+            matchup.result.decks[0].win_rate();
+        const double second_rate =
+            matchup.result.decks[1].win_rate();
+        CHECK(first_rate >= 30.0);
+        CHECK(first_rate <= 70.0);
+        CHECK(second_rate >= 30.0);
+        CHECK(second_rate <= 70.0);
     }
 }
 

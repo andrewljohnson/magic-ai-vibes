@@ -13,9 +13,13 @@ yourself.
 
 ## Project goal
 
-Build a fast, deterministic early-Magic engine and a sequence of increasingly
-strong bots. Preserve correct game rules and credible bot evaluation while
-keeping the implementation small enough to understand and extend.
+Build a fast, deterministic Old School Magic engine and a sequence of
+increasingly strong bots. Preserve correct game rules and credible bot
+evaluation while keeping the implementation small enough to understand and
+extend.
+
+Green, Red, Blue, White, and RU Aggro form the learned-policy environment and
+acceptance gate. Every Learned-is-king verdict must include all five decks.
 
 ## Required workflow
 
@@ -57,6 +61,8 @@ keeping the implementation small enough to understand and extend.
 - Compare trained generations against frozen previous generations or a
   champion league. Touch Handcrafted only at milestones, not as training data
   or a per-step tuning oracle.
+- Keep training, paired evaluation, mixed-field lift reporting, and confidence
+  gates deck-balanced across all five metagame decks.
 
 ## Learned Value isolation
 
@@ -81,7 +87,7 @@ Learned Value is the clean learned-policy research bot.
 
 ## Definition of a stronger Learned Value bot
 
-For the current four-deck environment, acceptance requires:
+For the five-deck Old School environment, acceptance requires:
 
 - more than 50% direct wins against Handcrafted in aggregate;
 - a Wilson 95% lower confidence bound above 50% in the final pooled paired
@@ -89,7 +95,7 @@ For the current four-deck environment, acceptance requires:
 - more direct wins than Handcrafted for every Learned challenger deck in the
   pooled results;
 - the largest mixed-field win-rate lift over Random for Learned on Green,
-  Red, Blue, and White in the seeded stability run;
+  Red, Blue, White, and RU Aggro in the seeded stability run;
 - no losing validation seed in aggregate;
 - all unit/integration tests and sanitizer checks passing.
 
@@ -101,7 +107,7 @@ Common commands:
 make
 make test
 make stability
-./build/alpha-sim --benchmark --games 20 --seed 424242 \
+./build/old-school-sim --benchmark --games 20 --seed 424242 \
   --challenger learned --baseline handcrafted --train-games 800
 ```
 

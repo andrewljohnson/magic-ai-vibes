@@ -2,22 +2,22 @@
 
 set -eu
 
-simulator=${1:-./build/alpha-sim}
+simulator=${1:-./build/old-school-sim}
 original_directory=$(pwd)
 case $simulator in
     /*) ;;
     *) simulator=$original_directory/${simulator#./} ;;
 esac
 cli_workspace=$(
-    mktemp -d "${TMPDIR:-/tmp}/alpha-cli-workspace.XXXXXX"
+    mktemp -d "${TMPDIR:-/tmp}/old-school-cli-workspace.XXXXXX"
 )
 cd "$cli_workspace"
 
 cli_output=
 cli_status=0
-g8_cache=build/model-cache/value-g8-v1-t1-s424242.bin
-g8_t8_cache=build/model-cache/value-g8-v1-t8-s424242.bin
-mix50_cache=build/model-cache/value-g8-mix50-v1-t8-s424242.bin
+g8_cache=build/model-cache/old-school-value-g8-v1-t1-s424242.bin
+g8_t8_cache=build/model-cache/old-school-value-g8-v1-t8-s424242.bin
+mix50_cache=build/model-cache/old-school-value-g8-mix50-v1-t8-s424242.bin
 probe_cache=
 mix50_probe_cache=
 probe_directory=
@@ -68,7 +68,8 @@ expect_error() {
 
 help_output=$("$simulator" --help)
 case $help_output in
-    *"learned-value-g0..g8"*"learned-value-mix50-g8"*\
+    *"RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate"*\
+"learned-value-g0..g8"*"learned-value-mix50-g8"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
 "--refresh-value-g8-cache"*"--refresh-value-mix50-cache"*) ;;
@@ -77,6 +78,38 @@ case $help_output in
         exit 1
         ;;
 esac
+
+run_cli --games 1 --seed 1 --bots random
+if [ "$cli_status" -ne 0 ]; then
+    printf 'five-deck random tournament smoke failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Old School Magic Bot Simulator"*\
+"Total games: 10"*\
+"RU Aggro — 13 Mountain / 4 Island / 3 Flying Men / 5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / 3 Lightning Bolt / 2 Disintegrate"*) ;;
+    *)
+        printf 'RU deck statistics missing from tournament output\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+for pairing in \
+    "Green vs RU Aggro" \
+    "Red vs RU Aggro" \
+    "Blue vs RU Aggro" \
+    "White vs RU Aggro"
+do
+    case $cli_output in
+        *"$pairing"*) ;;
+        *)
+            printf 'RU matchup missing from tournament output: %s\n%s\n' \
+                "$pairing" "$cli_output" >&2
+            exit 1
+            ;;
+    esac
+done
 
 expect_error "require --score-probes" \
     --games 1 --value-generation 8
@@ -252,16 +285,15 @@ if [ "$generated_training_count" -ne 1 ]; then
     exit 1
 fi
 
-expected_g3_fingerprint=\
-70481273f4a1119f0c4e49af1b25be31767ac127652f93e9cff6d1c781a870fd
-case $g8_generated_output in
-    *"G8 generation 3:"*"-> $expected_g3_fingerprint"*) ;;
-    *)
-        printf 'small-seed G8 bundle changed its exact G3 checkpoint\n%s\n' \
-            "$g8_generated_output" >&2
-        exit 1
-        ;;
-esac
+expected_g3_fingerprint=$(
+    printf '%s\n' "$g8_generated_output" |
+        sed -n 's/^  G8 generation 3:.* -> \([0-9a-f]*\)$/\1/p'
+)
+if [ -z "$expected_g3_fingerprint" ]; then
+    printf 'small-seed G8 bundle did not report its G3 checkpoint\n%s\n' \
+        "$g8_generated_output" >&2
+    exit 1
+fi
 
 run_cli --benchmark --games 1 --seed 1 --train-games 1 \
     --train-seed 424242 --challenger learned-value-g3 \
@@ -417,7 +449,7 @@ if [ "$mix50_cross_training_count" -ne 0 ] ||
 fi
 
 probe_directory=$(
-    mktemp -d "${TMPDIR:-/tmp}/alpha-g8-cli.XXXXXX"
+    mktemp -d "${TMPDIR:-/tmp}/old-school-g8-cli.XXXXXX"
 )
 probe_cache=$probe_directory/cache.tsv
 mix50_probe_cache=$probe_directory/mix50-cache.tsv

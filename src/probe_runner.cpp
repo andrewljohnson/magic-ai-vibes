@@ -1,4 +1,4 @@
-#include "alpha/probe_runner.hpp"
+#include "old_school/probe_runner.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,7 +25,7 @@
 #include <variant>
 #include <vector>
 
-namespace alpha::probe_runner {
+namespace old_school::probe_runner {
 namespace {
 
 constexpr std::uint64_t kFnvOffsetBasis = 14695981039346656037ULL;
@@ -37,6 +37,8 @@ constexpr std::size_t kProductionValueHorizon = 4;
 constexpr std::size_t kMaximumReferenceWorlds = 4096;
 constexpr std::size_t kMaximumReferenceHorizon = 128;
 constexpr std::size_t kMaximumReferenceRollouts = 256;
+constexpr std::string_view kProbeCacheMagic =
+    "# old-school-probe-label-cache-v1";
 
 class Fnv1a {
   public:
@@ -111,6 +113,7 @@ void hash_priority_action(Fnv1a& hash,
     if (action.source_permanent.has_value()) {
         hash.unsigned_integer(*action.source_permanent);
     }
+    hash.signed_integer(action.x_value);
 }
 
 void hash_card_vector(Fnv1a& hash,
@@ -126,6 +129,7 @@ void hash_public_player(Fnv1a& hash,
                         const PlayerState& player) {
     hash.signed_integer(player.life);
     hash_card_vector(hash, player.graveyard);
+    hash_card_vector(hash, player.exile);
 
     hash.unsigned_integer(player.lands.size());
     for (const LandPermanent& land : player.lands) {
@@ -142,6 +146,9 @@ void hash_public_player(Fnv1a& hash,
         hash.boolean(creature.tapped);
         hash.boolean(creature.summoning_sick);
         hash.signed_integer(creature.damage);
+        hash.signed_integer(creature.temporary_power_bonus);
+        hash.signed_integer(creature.temporary_toughness_bonus);
+        hash.boolean(creature.exile_on_death_this_turn);
     }
 
     hash.unsigned_integer(player.artifacts.size());
@@ -216,15 +223,14 @@ void hash_probe(Fnv1a& hash,
         if (object.spell_target.has_value()) {
             hash.unsigned_integer(*object.spell_target);
         }
+        hash.signed_integer(object.x_value);
     }
 
     hash.unsigned_integer(probe.original_decks.size());
     for (const std::vector<CardId>& deck : probe.original_decks) {
         // Decklists are known rules inputs. Hash their multisets in enum
         // order, never the shuffled library order in the state.
-        constexpr std::size_t card_count =
-            static_cast<std::size_t>(CardId::Moat) + 1;
-        std::array<std::size_t, card_count> counts{};
+        std::array<std::size_t, kCardCount> counts{};
         for (const CardId card : deck) {
             ++counts[static_cast<std::size_t>(card)];
         }
@@ -342,15 +348,24 @@ void validate_text_field(std::string_view value,
 }
 
 std::string deck_token(DeckId deck) {
+    if (deck == DeckId::RUAggro) {
+        throw std::invalid_argument(
+            "RU Aggro decision probes have not been authored");
+    }
     return std::string(deck_name(deck));
 }
 
 DeckId parse_deck_token(std::string_view token) {
-    for (std::size_t deck = 0; deck < 4; ++deck) {
-        const auto id = static_cast<DeckId>(deck);
+    constexpr std::array<DeckId, 4> kProbeDecks = {
+        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White};
+    for (const DeckId id : kProbeDecks) {
         if (token == deck_name(id)) {
             return id;
         }
+    }
+    if (token == deck_name(DeckId::RUAggro)) {
+        throw std::invalid_argument(
+            "probe cache contains RU Aggro before RU probes exist");
     }
     throw std::invalid_argument(
         "probe cache has an invalid deck token");
@@ -440,7 +455,7 @@ std::string read_meta_value(std::istream& input,
 ProbeCacheMetadata read_metadata(std::istream& input) {
     const std::string magic =
         read_required_line(input, "cache magic");
-    if (magic != "# alpha-probe-label-cache-v2") {
+    if (magic != kProbeCacheMagic) {
         throw std::invalid_argument(
             "probe cache has an unknown magic header");
     }
@@ -588,7 +603,7 @@ void write_cache_contents(
     const std::vector<probes::DecisionProbe>& corpus,
     const std::vector<ProbeReferenceSamples>& samples) {
     output.imbue(std::locale::classic());
-    output << "# alpha-probe-label-cache-v2\n"
+    output << kProbeCacheMagic << '\n'
            << "meta\tschema\t" << metadata.schema << '\n'
            << "meta\talgorithm\t" << metadata.algorithm << '\n'
            << "meta\tsemantic_revision\t"
@@ -764,7 +779,7 @@ std::vector<double> handcrafted_scores(
     if (probe.decision_kind == probes::DecisionKind::Priority) {
         return handcrafted_priority_scores(
             probe.state, probe.root_player,
-            priority_candidates(probe));
+            priority_candidates(probe), probe.phase);
     }
     const PermanentId subject = binary_attack_subject(probe);
     const std::array<double, 2> scores =
@@ -2324,8 +2339,9 @@ std::string format_probe_score_report(
     output.imbue(std::locale::classic());
     output << std::fixed << std::setprecision(4)
            << "\nProbe Dev-v2 Offline Score\n"
-           << "WARNING: diagnostic only, 4 positions/deck; this "
-              "cannot establish playing strength or a champion.\n"
+           << "WARNING: diagnostic only, 4 positions each for "
+              "Green/Red/Blue/White; RU Aggro is not represented. "
+              "This cannot establish playing strength or a champion.\n"
            << "Reference: Actor-mirror common worlds, K="
            << report.metadata.worlds << ", H="
            << report.metadata.horizon_turns << ", rollouts/world="
@@ -2587,4 +2603,4 @@ std::string format_probe_score_report(
     return output.str();
 }
 
-} // namespace alpha::probe_runner
+} // namespace old_school::probe_runner

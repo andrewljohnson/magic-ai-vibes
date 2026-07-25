@@ -1,5 +1,5 @@
-#include "alpha/game.hpp"
-#include "alpha/probe_runner.hpp"
+#include "old_school/game.hpp"
+#include "old_school/probe_runner.hpp"
 
 #include <algorithm>
 #include <array>
@@ -150,12 +150,15 @@ void print_help(std::string_view executable) {
         << "       " << executable
         << " --evolve-deck [--generations N] [--population N] "
            "[--games N]\n\n"
-        << "Simulates an early-Magic round robin with legal bot play.\n"
-        << "  Green: 18 Forest, 9 Grizzly Bears, 12 Ironroot Treefolk, "
-           "1 Tsunami\n"
+        << "Simulates an Old School Magic round robin with legal bot play.\n"
+        << "  Green: 18 Forest, 9 Grizzly Bears, 8 Ironroot Treefolk, "
+           "4 Giant Growth, 1 Tsunami\n"
         << "  Red: 18 Mountain, 10 Lightning Bolt, 12 Fire Elemental\n"
         << "  Blue: 18 Island, 14 Counterspell, 8 Water Elemental\n"
-        << "  White: 22 Plains, 3 Millstone, 15 Moat\n\n"
+        << "  White: 22 Plains, 3 Millstone, 15 Moat\n"
+        << "  RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, "
+           "5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, "
+           "3 Lightning Bolt, 2 Disintegrate\n\n"
         << "Options:\n"
         << "  --games N       Games per matchup (default: 100)\n"
         << "  --seed N        Reproducible random seed (default: random)\n"
@@ -203,7 +206,7 @@ void print_help(std::string_view executable) {
         << "  --actor-policy-rate X  G1 policy-fit learning rate "
            "(default: 0.001; requires a selected Actor G1)\n"
         << "  --probe-cache PATH  Deterministic label cache "
-           "(default: data/probe-dev-v2.labels.tsv)\n"
+           "(default: data/old-school-probe-dev-v2.labels.tsv)\n"
         << "  --refresh-probe-cache  Regenerate matching probe labels "
            "atomically\n"
         << "  --refresh-value-g8-cache  Retrain and atomically replace "
@@ -221,35 +224,35 @@ void print_help(std::string_view executable) {
 }
 
 struct BotSelection {
-    alpha::BotKind kind = alpha::BotKind::Random;
-    alpha::LearnedVariant learned_variant =
-        alpha::LearnedVariant::ValueSearchChampion;
-    alpha::LearnedValueG8Recipe value_recipe =
-        alpha::LearnedValueG8Recipe::CanonicalAllSearchLate;
+    old_school::BotKind kind = old_school::BotKind::Random;
+    old_school::LearnedVariant learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    old_school::LearnedValueG8Recipe value_recipe =
+        old_school::LearnedValueG8Recipe::CanonicalAllSearchLate;
     std::size_t value_generation = 0;
     std::size_t actor_generation = 0;
 };
 
 BotSelection parse_bot(std::string_view value) {
     if (value == "random") {
-        return {.kind = alpha::BotKind::Random};
+        return {.kind = old_school::BotKind::Random};
     }
     if (value == "monte-carlo" || value == "mc") {
-        return {.kind = alpha::BotKind::MonteCarlo};
+        return {.kind = old_school::BotKind::MonteCarlo};
     }
     if (value == "deep-monte-carlo" || value == "deep-mc") {
-        return {.kind = alpha::BotKind::DeepMonteCarlo};
+        return {.kind = old_school::BotKind::DeepMonteCarlo};
     }
     if (value == "handcrafted" || value == "handcoded" ||
         value == "strategic") {
-        return {.kind = alpha::BotKind::Handcrafted};
+        return {.kind = old_school::BotKind::Handcrafted};
     }
     if (value == "learned" || value == "learned-value" ||
         value == "learned-value-g0") {
         return {
-            .kind = alpha::BotKind::Learned,
+            .kind = old_school::BotKind::Learned,
             .learned_variant =
-                alpha::LearnedVariant::ValueSearchChampion,
+                old_school::LearnedVariant::ValueSearchChampion,
             .value_generation = 0,
         };
     }
@@ -259,37 +262,37 @@ BotSelection parse_bot(std::string_view value) {
         value.size() == value_generation_prefix.size() + 1 &&
         value.back() >= '0' && value.back() <= '8') {
         return {
-            .kind = alpha::BotKind::Learned,
+            .kind = old_school::BotKind::Learned,
             .learned_variant =
-                alpha::LearnedVariant::ValueSearchChampion,
+                old_school::LearnedVariant::ValueSearchChampion,
             .value_generation =
                 static_cast<std::size_t>(value.back() - '0'),
         };
     }
     if (value == "learned-value-mix50-g8") {
         return {
-            .kind = alpha::BotKind::Learned,
+            .kind = old_school::BotKind::Learned,
             .learned_variant =
-                alpha::LearnedVariant::ValueSearchChampion,
+                old_school::LearnedVariant::ValueSearchChampion,
             .value_recipe =
-                alpha::LearnedValueG8Recipe::LateMix50,
+                old_school::LearnedValueG8Recipe::LateMix50,
             .value_generation = 8,
         };
     }
     if (value == "learned-actor" || value == "actor" ||
         value == "learned-actor-g0") {
         return {
-            .kind = alpha::BotKind::Learned,
+            .kind = old_school::BotKind::Learned,
             .learned_variant =
-                alpha::LearnedVariant::UnifiedActor,
+                old_school::LearnedVariant::UnifiedActor,
             .actor_generation = 0,
         };
     }
     if (value == "learned-actor-g1") {
         return {
-            .kind = alpha::BotKind::Learned,
+            .kind = old_school::BotKind::Learned,
             .learned_variant =
-                alpha::LearnedVariant::UnifiedActor,
+                old_school::LearnedVariant::UnifiedActor,
             .actor_generation = 1,
         };
     }
@@ -298,40 +301,40 @@ BotSelection parse_bot(std::string_view value) {
 }
 
 struct BotFieldSelection {
-    alpha::BotField field = alpha::BotField::Mixed;
-    alpha::LearnedVariant learned_variant =
-        alpha::LearnedVariant::ValueSearchChampion;
+    old_school::BotField field = old_school::BotField::Mixed;
+    old_school::LearnedVariant learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
 };
 
 BotFieldSelection parse_bot_field(std::string_view value) {
     if (value == "mixed") {
-        return {.field = alpha::BotField::Mixed};
+        return {.field = old_school::BotField::Mixed};
     }
     if (value == "random") {
-        return {.field = alpha::BotField::Random};
+        return {.field = old_school::BotField::Random};
     }
     if (value == "monte-carlo" || value == "mc") {
-        return {.field = alpha::BotField::MonteCarlo};
+        return {.field = old_school::BotField::MonteCarlo};
     }
     if (value == "deep-monte-carlo" || value == "deep-mc") {
-        return {.field = alpha::BotField::DeepMonteCarlo};
+        return {.field = old_school::BotField::DeepMonteCarlo};
     }
     if (value == "handcrafted" || value == "handcoded" ||
         value == "strategic") {
-        return {.field = alpha::BotField::Handcrafted};
+        return {.field = old_school::BotField::Handcrafted};
     }
     if (value == "learned" || value == "learned-value") {
         return {
-            .field = alpha::BotField::Learned,
+            .field = old_school::BotField::Learned,
             .learned_variant =
-                alpha::LearnedVariant::ValueSearchChampion,
+                old_school::LearnedVariant::ValueSearchChampion,
         };
     }
     if (value == "learned-actor" || value == "actor") {
         return {
-            .field = alpha::BotField::Learned,
+            .field = old_school::BotField::Learned,
             .learned_variant =
-                alpha::LearnedVariant::UnifiedActor,
+                old_school::LearnedVariant::UnifiedActor,
         };
     }
     throw std::invalid_argument(
@@ -341,23 +344,23 @@ BotFieldSelection parse_bot_field(std::string_view value) {
 }
 
 std::string_view bot_field_name(
-    alpha::BotField field,
-    alpha::LearnedVariant learned_variant) {
+    old_school::BotField field,
+    old_school::LearnedVariant learned_variant) {
     switch (field) {
-    case alpha::BotField::Random:
+    case old_school::BotField::Random:
         return "random only";
-    case alpha::BotField::MonteCarlo:
+    case old_school::BotField::MonteCarlo:
         return "Monte Carlo only";
-    case alpha::BotField::DeepMonteCarlo:
+    case old_school::BotField::DeepMonteCarlo:
         return "Deep Monte Carlo only";
-    case alpha::BotField::Handcrafted:
+    case old_school::BotField::Handcrafted:
         return "Handcrafted Policy only";
-    case alpha::BotField::Learned:
+    case old_school::BotField::Learned:
         return learned_variant ==
-                       alpha::LearnedVariant::UnifiedActor
+                       old_school::LearnedVariant::UnifiedActor
                    ? "Learned Unified Actor only"
                    : "Learned Value Search Champion only";
-    case alpha::BotField::Mixed:
+    case old_school::BotField::Mixed:
         return "mixed Random, Monte Carlo, Deep Monte Carlo, "
                "Handcrafted Policy, and Learned Value Search Champion";
     }
@@ -365,7 +368,7 @@ std::string_view bot_field_name(
 }
 
 void print_deck_stats(std::string_view label,
-                      const alpha::DeckSimulationStats& stats) {
+                      const old_school::DeckSimulationStats& stats) {
     std::cout << label << '\n'
               << "  Record: " << stats.wins << '-' << stats.losses << '-'
               << stats.draws << " (" << stats.win_rate() << "% wins)\n"
@@ -387,7 +390,7 @@ void print_deck_stats(std::string_view label,
 }
 
 void print_bot_stats(std::string_view label,
-                     const alpha::BotSimulationStats& stats) {
+                     const old_school::BotSimulationStats& stats) {
     std::cout << label << '\n'
               << "  Record: " << stats.wins << '-' << stats.losses << '-'
               << stats.draws << " across " << stats.games
@@ -407,22 +410,22 @@ void print_delta(double delta) {
     std::cout << delta << " pp";
 }
 
-void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
+void print_deck_bot_benefit(const old_school::TournamentSummary& result) {
     struct Benefit {
-        alpha::DeckId deck;
+        old_school::DeckId deck;
         double ranking_delta;
     };
 
     const auto random_index =
-        static_cast<std::size_t>(alpha::BotKind::Random);
+        static_cast<std::size_t>(old_school::BotKind::Random);
     const auto monte_carlo_index =
-        static_cast<std::size_t>(alpha::BotKind::MonteCarlo);
+        static_cast<std::size_t>(old_school::BotKind::MonteCarlo);
     const auto deep_index =
-        static_cast<std::size_t>(alpha::BotKind::DeepMonteCarlo);
+        static_cast<std::size_t>(old_school::BotKind::DeepMonteCarlo);
     const auto handcrafted_index =
-        static_cast<std::size_t>(alpha::BotKind::Handcrafted);
+        static_cast<std::size_t>(old_school::BotKind::Handcrafted);
     const auto learned_index =
-        static_cast<std::size_t>(alpha::BotKind::Learned);
+        static_cast<std::size_t>(old_school::BotKind::Learned);
     const bool has_deep_comparison =
         result.bots[random_index].games > 0 &&
         result.bots[deep_index].games > 0;
@@ -433,7 +436,7 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
         result.bots[random_index].games > 0 &&
         result.bots[monte_carlo_index].games > 0;
     const auto learned_lift =
-        alpha::compare_learned_deck_lifts(result);
+        old_school::compare_learned_deck_lifts(result);
 
     std::cout << "\nBot benefit by deck\n";
     if (!has_learned_comparison && !has_deep_comparison &&
@@ -456,7 +459,7 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
             continue;
         }
         benefits.push_back({
-            .deck = static_cast<alpha::DeckId>(deck),
+            .deck = static_cast<old_school::DeckId>(deck),
             .ranking_delta =
                 comparison.win_rate() - random.win_rate(),
         });
@@ -477,7 +480,7 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
             static_cast<std::size_t>(benefits[rank].deck);
         const auto& random = result.deck_bots[deck_index][random_index];
         std::cout << "  " << rank + 1 << ". "
-                  << alpha::deck_name(benefits[rank].deck)
+                  << old_school::deck_name(benefits[rank].deck)
                   << ": Random " << random.win_rate() << "% ("
                   << random.games << " games)";
 
@@ -522,7 +525,7 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
         std::cout << '\n';
     }
     if (has_learned_comparison) {
-        std::cout << "  Learned per-deck lift gate: "
+        std::cout << "  Learned per-deck lift gate (all five decks): "
                   << (learned_lift.learned_is_best_on_every_deck()
                           ? "PASS"
                           : "FAIL");
@@ -533,79 +536,79 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
     }
 }
 
-alpha::BotConfig bot_config(BotSelection selection,
+old_school::BotConfig bot_config(BotSelection selection,
                             std::size_t rollouts,
                             std::size_t deep_rollouts,
                             std::size_t training_games) {
-    alpha::BotConfig config;
+    old_school::BotConfig config;
     config.kind = selection.kind;
     config.learned_variant = selection.learned_variant;
     config.training_games = training_games;
     switch (selection.kind) {
-    case alpha::BotKind::Random:
-    case alpha::BotKind::Handcrafted:
+    case old_school::BotKind::Random:
+    case old_school::BotKind::Handcrafted:
         config.rollouts_per_action = 1;
         return config;
-    case alpha::BotKind::Learned:
+    case old_school::BotKind::Learned:
         config.rollouts_per_action = 2;
         return config;
-    case alpha::BotKind::MonteCarlo:
+    case old_school::BotKind::MonteCarlo:
         config.rollouts_per_action = rollouts;
         return config;
-    case alpha::BotKind::DeepMonteCarlo:
+    case old_school::BotKind::DeepMonteCarlo:
         config.rollouts_per_action = deep_rollouts;
         return config;
     }
     throw std::invalid_argument("unknown bot kind");
 }
 
-alpha::BotConfig bot_config(alpha::BotKind kind,
+old_school::BotConfig bot_config(old_school::BotKind kind,
                             std::size_t rollouts,
                             std::size_t deep_rollouts,
                             std::size_t training_games) {
     return bot_config(
         {.kind = kind,
          .learned_variant =
-             alpha::LearnedVariant::ValueSearchChampion},
+             old_school::LearnedVariant::ValueSearchChampion},
         rollouts, deep_rollouts, training_games);
 }
 
-std::shared_ptr<const alpha::LearnedModel>
-train_frozen_learned_model(alpha::LearnedVariant variant,
+std::shared_ptr<const old_school::LearnedModel>
+train_frozen_learned_model(old_school::LearnedVariant variant,
                            std::size_t training_games,
                            std::uint64_t training_seed) {
-    if (variant == alpha::LearnedVariant::UnifiedActor) {
-        return alpha::train_learned_actor_model(
+    if (variant == old_school::LearnedVariant::UnifiedActor) {
+        return old_school::train_learned_actor_model(
             training_games, training_seed);
     }
-    return alpha::train_learned_value_champion(
+    return old_school::train_learned_value_champion(
         training_games, training_seed);
 }
 
-std::shared_ptr<const alpha::LearnedModel>
+std::shared_ptr<const old_school::LearnedModel>
 train_value_g0_with_progress(std::size_t training_games,
                              std::uint64_t training_seed) {
     std::cout << "Training frozen Value G0 (seed " << training_seed
               << ", " << training_games << " games)..."
               << std::flush;
     const auto started = std::chrono::steady_clock::now();
-    auto model = alpha::train_learned_value_champion(
+    auto model = old_school::train_learned_value_champion(
         training_games, training_seed);
     const std::chrono::duration<double> elapsed =
         std::chrono::steady_clock::now() - started;
     std::cout << " done (" << std::fixed << std::setprecision(2)
               << elapsed.count() << "s)\n"
               << "  Value G0 fingerprint: "
-              << alpha::learned_model_fingerprint(model) << '\n';
+              << old_school::learned_model_fingerprint(model) << '\n';
     return model;
 }
 
-alpha::LearnedValueG8Result
+old_school::LearnedValueG8Result
 train_value_g8_with_progress(std::size_t training_games,
                              std::uint64_t training_seed,
                              bool refresh_cache) {
     const std::string cache_path =
-        alpha::learned_value_g8_cache_path(
+        old_school::learned_value_g8_cache_path(
             training_games, training_seed);
     std::error_code exists_error;
     const bool cache_exists =
@@ -616,7 +619,7 @@ train_value_g8_with_progress(std::size_t training_games,
             cache_path + "': " + exists_error.message());
     }
 
-    alpha::LearnedValueG8Result result;
+    old_school::LearnedValueG8Result result;
     const auto started = std::chrono::steady_clock::now();
     if (cache_exists && !refresh_cache) {
         std::cout << "Loading immutable Value G8 artifact (seed "
@@ -624,7 +627,7 @@ train_value_g8_with_progress(std::size_t training_games,
                   << " initial games) from " << cache_path
                   << "..." << std::flush;
         try {
-            result = alpha::load_learned_value_g8_bundle(
+            result = old_school::load_learned_value_g8_bundle(
                 cache_path, training_games, training_seed);
         } catch (const std::exception& error) {
             throw std::runtime_error(
@@ -638,9 +641,9 @@ train_value_g8_with_progress(std::size_t training_games,
                   << training_seed << ", " << training_games
                   << " initial games, 8 generations)..."
                   << std::flush;
-        result = alpha::train_learned_value_g8(
+        result = old_school::train_learned_value_g8(
             training_games, training_seed);
-        alpha::write_learned_value_g8_bundle_atomic(
+        old_school::write_learned_value_g8_bundle_atomic(
             cache_path, result);
     }
     const std::chrono::duration<double> elapsed =
@@ -681,12 +684,12 @@ train_value_g8_with_progress(std::size_t training_games,
     return result;
 }
 
-alpha::LearnedValueG8Result
+old_school::LearnedValueG8Result
 train_value_g8_mix50_with_progress(std::size_t training_games,
                                    std::uint64_t training_seed,
                                    bool refresh_cache) {
     const std::string cache_path =
-        alpha::learned_value_g8_mix50_cache_path(
+        old_school::learned_value_g8_mix50_cache_path(
             training_games, training_seed);
     std::error_code exists_error;
     const bool cache_exists =
@@ -697,7 +700,7 @@ train_value_g8_mix50_with_progress(std::size_t training_games,
             cache_path + "': " + exists_error.message());
     }
 
-    alpha::LearnedValueG8Result result;
+    old_school::LearnedValueG8Result result;
     const auto started = std::chrono::steady_clock::now();
     if (cache_exists && !refresh_cache) {
         std::cout
@@ -706,7 +709,7 @@ train_value_g8_mix50_with_progress(std::size_t training_games,
             << " initial games) from " << cache_path
             << "..." << std::flush;
         try {
-            result = alpha::load_learned_value_g8_mix50_bundle(
+            result = old_school::load_learned_value_g8_mix50_bundle(
                 cache_path, training_games, training_seed);
         } catch (const std::exception& error) {
             throw std::runtime_error(
@@ -721,13 +724,13 @@ train_value_g8_mix50_with_progress(std::size_t training_games,
             << training_seed << ", " << training_games
             << " initial games, 8 generations)..."
             << std::flush;
-        result = alpha::train_learned_value_g8_mix50(
+        result = old_school::train_learned_value_g8_mix50(
             training_games, training_seed);
-        alpha::write_learned_value_g8_mix50_bundle_atomic(
+        old_school::write_learned_value_g8_mix50_bundle_atomic(
             cache_path, result);
     }
     if (result.report.recipe !=
-        alpha::LearnedValueG8Recipe::LateMix50) {
+        old_school::LearnedValueG8Recipe::LateMix50) {
         throw std::runtime_error(
             "Value G8 Late-Mix50 route returned a canonical recipe");
     }
@@ -780,29 +783,29 @@ train_value_g8_mix50_with_progress(std::size_t training_games,
     return result;
 }
 
-std::shared_ptr<const alpha::LearnedModel>
+std::shared_ptr<const old_school::LearnedModel>
 train_actor_g0_with_progress(std::size_t training_games,
                              std::uint64_t training_seed) {
     std::cout << "Training frozen Actor G0 (seed " << training_seed
               << ", " << training_games << " games)..."
               << std::flush;
     const auto started = std::chrono::steady_clock::now();
-    auto model = alpha::train_learned_actor_model(
+    auto model = old_school::train_learned_actor_model(
         training_games, training_seed);
     const std::chrono::duration<double> elapsed =
         std::chrono::steady_clock::now() - started;
     std::cout << " done (" << std::fixed << std::setprecision(2)
               << elapsed.count() << "s)\n"
               << "  G0 fingerprint: "
-              << alpha::learned_model_fingerprint(model) << '\n';
+              << old_school::learned_model_fingerprint(model) << '\n';
     return model;
 }
 
-alpha::LearnedActorGenerationResult
+old_school::LearnedActorGenerationResult
 train_actor_g1_with_progress(
-    std::shared_ptr<const alpha::LearnedModel> actor_g0,
+    std::shared_ptr<const old_school::LearnedModel> actor_g0,
     std::uint64_t training_seed,
-    alpha::LearnedActorGenerationConfig config) {
+    old_school::LearnedActorGenerationConfig config) {
     std::cout << "Training Actor G1 from frozen G0 "
                  "(24 balanced games, K="
               << config.search_worlds << "/H="
@@ -813,14 +816,14 @@ train_actor_g1_with_progress(
               << format_real(config.policy_learning_rate) << ")..."
               << std::flush;
     const auto started = std::chrono::steady_clock::now();
-    auto result = alpha::train_learned_actor_generation(
+    auto result = old_school::train_learned_actor_generation(
         std::move(actor_g0), training_seed, config);
     const std::chrono::duration<double> elapsed =
         std::chrono::steady_clock::now() - started;
     const auto& report = result.report;
     const auto print_policy_fit =
         [](std::string_view label,
-           const alpha::LearnedPolicyFitDiagnostics& fit) {
+           const old_school::LearnedPolicyFitDiagnostics& fit) {
             std::cout
                 << "  " << label << " fit: "
                 << fit.example_count << " examples, weight "
@@ -880,24 +883,29 @@ train_actor_g1_with_progress(
 }
 
 std::string white_plan_action_name(
-    const alpha::PriorityAction& action) {
+    const old_school::PriorityAction& action) {
     switch (action.kind) {
-    case alpha::PriorityActionKind::Pass:
+    case old_school::PriorityActionKind::Pass:
         return "Pass";
-    case alpha::PriorityActionKind::PlayLand:
+    case old_school::PriorityActionKind::PlayLand:
         return "Play " +
-               std::string(alpha::card_definition(action.card).name);
-    case alpha::PriorityActionKind::CastCreature:
-    case alpha::PriorityActionKind::CastSorcery:
-    case alpha::PriorityActionKind::CastArtifact:
-    case alpha::PriorityActionKind::CastEnchantment:
+               std::string(old_school::card_definition(action.card).name);
+    case old_school::PriorityActionKind::CastCreature:
+    case old_school::PriorityActionKind::CastSorcery:
+    case old_school::PriorityActionKind::CastArtifact:
+    case old_school::PriorityActionKind::CastEnchantment:
         return "Cast " +
-               std::string(alpha::card_definition(action.card).name);
-    case alpha::PriorityActionKind::CastLightningBolt:
+               std::string(old_school::card_definition(action.card).name);
+    case old_school::PriorityActionKind::CastLightningBolt:
         return "Cast Lightning Bolt";
-    case alpha::PriorityActionKind::CastCounterspell:
+    case old_school::PriorityActionKind::CastDisintegrate:
+        return "Cast Disintegrate for X=" +
+               std::to_string(action.x_value);
+    case old_school::PriorityActionKind::CastGiantGrowth:
+        return "Cast Giant Growth";
+    case old_school::PriorityActionKind::CastCounterspell:
         return "Cast Counterspell";
-    case alpha::PriorityActionKind::ActivateMillstone:
+    case old_school::PriorityActionKind::ActivateMillstone:
         if (action.target.has_value() &&
             action.target->player == 1) {
             return "Activate Millstone targeting opponent";
@@ -908,7 +916,7 @@ std::string white_plan_action_name(
 }
 
 void print_white_plan_diagnostic(
-    const alpha::WhitePlanTeacherDiagnostic& result,
+    const old_school::WhitePlanTeacherDiagnostic& result,
     std::uint64_t evaluation_seed, std::uint64_t training_seed,
     std::size_t training_games) {
     const auto annotated_name =
@@ -929,8 +937,8 @@ void print_white_plan_diagnostic(
               << "Evaluation seed: " << evaluation_seed << '\n'
               << "Training seed: " << training_seed << '\n'
               << "Model: "
-              << alpha::learned_variant_name(
-                     alpha::LearnedVariant::UnifiedActor)
+              << old_school::learned_variant_name(
+                     old_school::LearnedVariant::UnifiedActor)
               << '\n'
               << "Learned training games: " << training_games << '\n'
               << "Fixture: White first main, four untapped Plains, "
@@ -1006,20 +1014,20 @@ void print_white_plan_diagnostic(
               << '\n';
 }
 
-void print_benchmark(const alpha::BotBenchmarkSummary& result,
+void print_benchmark(const old_school::BotBenchmarkSummary& result,
                      std::uint64_t evaluation_seed,
                      std::string challenger_name = {},
                      std::string baseline_name = {}) {
     if (challenger_name.empty()) {
         challenger_name =
-            alpha::bot_config_name(result.challenger);
+            old_school::bot_config_name(result.challenger);
     }
     if (baseline_name.empty()) {
         baseline_name =
-            alpha::bot_config_name(result.baseline);
+            old_school::bot_config_name(result.baseline);
     }
     std::cout << std::fixed << std::setprecision(1)
-              << "Early Magic Bot Benchmark\n"
+              << "Old School Magic Bot Benchmark\n"
               << "Evaluation seed: " << evaluation_seed << '\n'
               << "Training seed: "
               << result.learned_training_seed << '\n'
@@ -1028,14 +1036,14 @@ void print_benchmark(const alpha::BotBenchmarkSummary& result,
               << "Baseline: "
               << baseline_name
               << '\n';
-    if (result.challenger.kind == alpha::BotKind::Learned) {
+    if (result.challenger.kind == old_school::BotKind::Learned) {
         std::cout << "Challenger frozen model: "
                   << challenger_name
                   << ", seed " << result.learned_training_seed
                   << ", " << result.challenger.training_games
                   << " training games\n";
     }
-    if (result.baseline.kind == alpha::BotKind::Learned) {
+    if (result.baseline.kind == old_school::BotKind::Learned) {
         std::cout << "Baseline frozen model: "
                   << baseline_name
                   << ", seed " << result.learned_training_seed
@@ -1057,7 +1065,13 @@ void print_benchmark(const alpha::BotBenchmarkSummary& result,
               << result.confidence_high_95() << "%\n"
               << "  Verdict: ";
     if (result.challenger_is_better_95()) {
-        std::cout << "PASS — challenger is better at 95% confidence\n";
+        std::cout
+            << "PASS — aggregate lower bound exceeds 50% and "
+               "challenger wins on all five decks\n";
+    } else if (result.confidence_low_95() > 50.0) {
+        std::cout
+            << "FAIL — aggregate confidence passes, but challenger "
+               "does not win on every deck\n";
     } else if (result.confidence_high_95() < 50.0) {
         std::cout << "FAIL — baseline is better at 95% confidence\n";
     } else {
@@ -1078,10 +1092,10 @@ void print_benchmark(const alpha::BotBenchmarkSummary& result,
               << "\nBy challenger deck\n";
     for (std::size_t deck = 0;
          deck < result.challenger_decks.size(); ++deck) {
-        const auto id = static_cast<alpha::DeckId>(deck);
+        const auto id = static_cast<old_school::DeckId>(deck);
         const auto& challenger = result.challenger_decks[deck];
         const auto& baseline = result.baseline_decks[deck];
-        std::cout << "  " << alpha::deck_name(id) << ": challenger "
+        std::cout << "  " << old_school::deck_name(id) << ": challenger "
                   << challenger.win_rate() << "% (" << challenger.wins
                   << '-' << challenger.losses << '-' << challenger.draws
                   << "), baseline " << baseline.win_rate() << "% ("
@@ -1106,16 +1120,16 @@ bool run_stability_panel(std::size_t runs,
                          std::size_t rollouts,
                          std::size_t deep_rollouts,
                          std::size_t training_games) {
-    constexpr std::array<alpha::BotKind, 4> baseline_kinds = {
-        alpha::BotKind::Random,
-        alpha::BotKind::MonteCarlo,
-        alpha::BotKind::DeepMonteCarlo,
-        alpha::BotKind::Handcrafted,
+    constexpr std::array<old_school::BotKind, 4> baseline_kinds = {
+        old_school::BotKind::Random,
+        old_school::BotKind::MonteCarlo,
+        old_school::BotKind::DeepMonteCarlo,
+        old_school::BotKind::Handcrafted,
     };
-    alpha::BotConfig learned_config =
-        bot_config(alpha::BotKind::Learned, rollouts,
+    old_school::BotConfig learned_config =
+        bot_config(old_school::BotKind::Learned, rollouts,
                    deep_rollouts, training_games);
-    std::array<alpha::BotBenchmarkSummary, baseline_kinds.size()>
+    std::array<old_school::BotBenchmarkSummary, baseline_kinds.size()>
         pooled;
     std::array<std::size_t, baseline_kinds.size()> seed_wins{};
     for (std::size_t baseline = 0; baseline < pooled.size();
@@ -1127,8 +1141,8 @@ bool run_stability_panel(std::size_t runs,
         pooled[baseline].learned_training_seed =
             training_seed;
     }
-    const auto merge_bot = [](alpha::BotSimulationStats& destination,
-                              const alpha::BotSimulationStats& source) {
+    const auto merge_bot = [](old_school::BotSimulationStats& destination,
+                              const old_school::BotSimulationStats& source) {
         destination.games += source.games;
         destination.wins += source.wins;
         destination.losses += source.losses;
@@ -1136,8 +1150,8 @@ bool run_stability_panel(std::size_t runs,
         destination.total_decisions += source.total_decisions;
         destination.total_rollouts += source.total_rollouts;
     };
-    const auto merge_deck = [](alpha::DeckSimulationStats& destination,
-                               const alpha::DeckSimulationStats& source) {
+    const auto merge_deck = [](old_school::DeckSimulationStats& destination,
+                               const old_school::DeckSimulationStats& source) {
         destination.games += source.games;
         destination.wins += source.wins;
         destination.losses += source.losses;
@@ -1148,21 +1162,21 @@ bool run_stability_panel(std::size_t runs,
         destination.on_draw_wins += source.on_draw_wins;
     };
     constexpr std::size_t mixed_policy_matrix_games =
-        alpha::kBotKindCount * alpha::kBotKindCount;
+        old_school::kBotKindCount * old_school::kBotKindCount;
     const std::size_t mixed_target_games =
         20 * repetitions_per_deck_pairing;
     const std::size_t mixed_games_per_matchup =
         ((mixed_target_games + mixed_policy_matrix_games - 1) /
          mixed_policy_matrix_games) *
         mixed_policy_matrix_games;
-    alpha::TournamentConfig mixed_config;
-    mixed_config.bot_field = alpha::BotField::Mixed;
+    old_school::TournamentConfig mixed_config;
+    mixed_config.bot_field = old_school::BotField::Mixed;
     mixed_config.monte_carlo_rollouts = rollouts;
     mixed_config.deep_monte_carlo_rollouts = deep_rollouts;
     mixed_config.learned_training_games = training_games;
     mixed_config.learned_variant =
-        alpha::LearnedVariant::ValueSearchChampion;
-    alpha::TournamentSummary pooled_mixed;
+        old_school::LearnedVariant::ValueSearchChampion;
+    old_school::TournamentSummary pooled_mixed;
     std::size_t mixed_seed_lift_passes = 0;
     std::size_t all_policy_seed_wins = 0;
 
@@ -1180,10 +1194,10 @@ bool run_stability_panel(std::size_t runs,
               << training_games
               << "\nTraining fixed model..." << std::flush;
 
-    alpha::GameConfig shared_config;
+    old_school::GameConfig shared_config;
     shared_config.learned_training_seed = training_seed;
     shared_config.learned_model =
-        alpha::train_learned_value_champion(
+        old_school::train_learned_value_champion(
             training_games, training_seed);
     learned_config.learned_model = shared_config.learned_model;
     for (auto& result : pooled) {
@@ -1200,7 +1214,7 @@ bool run_stability_panel(std::size_t runs,
                   << ":\n";
         for (std::size_t baseline = 0;
              baseline < baseline_kinds.size(); ++baseline) {
-            const auto result = alpha::run_bot_benchmark(
+            const auto result = old_school::run_bot_benchmark(
                 repetitions_per_deck_pairing, evaluation_seed,
                 learned_config, pooled[baseline].baseline,
                 shared_config);
@@ -1223,25 +1237,25 @@ bool run_stability_panel(std::size_t runs,
                            result.baseline_decks[deck]);
             }
             std::cout << "    vs "
-                      << alpha::bot_name(baseline_kinds[baseline])
+                      << old_school::bot_name(baseline_kinds[baseline])
                       << ": " << result.challenger_stats.wins << '-'
                       << result.baseline_stats.wins << '-'
                       << result.challenger_stats.draws << " ("
                       << result.challenger_win_rate() << "%)"
                       << (learned_won ? " PASS\n" : " FAIL\n");
         }
-        const auto mixed = alpha::run_tournament(
+        const auto mixed = old_school::run_tournament(
             mixed_games_per_matchup, evaluation_seed,
             shared_config,
             mixed_config);
         const auto seed_lift =
-            alpha::compare_learned_deck_lifts(mixed);
+            old_school::compare_learned_deck_lifts(mixed);
         const bool seed_lift_pass =
             seed_lift.learned_is_best_on_every_deck();
         mixed_seed_lift_passes += seed_lift_pass ? 1 : 0;
         std::cout << "    mixed-field lift:";
         for (const auto& deck : seed_lift.decks) {
-            std::cout << ' ' << alpha::deck_name(deck.deck) << '='
+            std::cout << ' ' << old_school::deck_name(deck.deck) << '='
                       << (deck.available
                               ? (deck.learned_is_best ? "PASS"
                                                      : "FAIL")
@@ -1269,7 +1283,7 @@ bool run_stability_panel(std::size_t runs,
             result.challenger_is_better_95();
         bool every_deck_won = true;
         std::cout << "  vs "
-                  << alpha::bot_name(baseline_kinds[baseline])
+                  << old_school::bot_name(baseline_kinds[baseline])
                   << ": " << result.challenger_stats.wins << '-'
                   << result.baseline_stats.wins << '-'
                   << result.challenger_stats.draws << " ("
@@ -1279,13 +1293,13 @@ bool run_stability_panel(std::size_t runs,
                   << result.confidence_high_95() << "%)\n";
         for (std::size_t deck = 0;
              deck < result.challenger_decks.size(); ++deck) {
-            const auto id = static_cast<alpha::DeckId>(deck);
+            const auto id = static_cast<old_school::DeckId>(deck);
             const auto& learned =
                 result.challenger_decks[deck];
             const auto& other = result.baseline_decks[deck];
             const bool deck_won = learned.wins > other.wins;
             every_deck_won = every_deck_won && deck_won;
-            std::cout << "    " << alpha::deck_name(id) << ": "
+            std::cout << "    " << old_school::deck_name(id) << ": "
                       << learned.wins << " vs " << other.wins
                       << (deck_won ? " PASS\n" : " FAIL\n");
         }
@@ -1303,12 +1317,12 @@ bool run_stability_panel(std::size_t runs,
                   << '\n';
     }
     const auto pooled_lift =
-        alpha::compare_learned_deck_lifts(pooled_mixed);
+        old_school::compare_learned_deck_lifts(pooled_mixed);
     const bool mixed_lift_pass =
         pooled_lift.learned_is_best_on_every_deck();
     std::cout << "\nPooled mixed-field lift over Random\n";
     for (const auto& deck : pooled_lift.decks) {
-        std::cout << "  " << alpha::deck_name(deck.deck) << ": ";
+        std::cout << "  " << old_school::deck_name(deck.deck) << ": ";
         if (!deck.available) {
             std::cout << "N/A FAIL\n";
             continue;
@@ -1316,7 +1330,7 @@ bool run_stability_panel(std::size_t runs,
         std::cout << "Learned ";
         print_delta(deck.learned_lift);
         std::cout << ", best other "
-                  << alpha::bot_name(deck.best_other) << ' ';
+                  << old_school::bot_name(deck.best_other) << ' ';
         print_delta(deck.best_other_lift);
         std::cout << ' '
                   << (deck.learned_is_best ? "PASS\n" : "FAIL\n");
@@ -1345,10 +1359,10 @@ void run_variance_study(
         707,
     };
     auto learned = bot_config(
-        alpha::BotKind::Learned, rollouts,
+        old_school::BotKind::Learned, rollouts,
         deep_rollouts, training_games);
     const auto handcrafted = bot_config(
-        alpha::BotKind::Handcrafted, rollouts,
+        old_school::BotKind::Handcrafted, rollouts,
         deep_rollouts, training_games);
     std::array<std::array<double, seeds.size()>, seeds.size()>
         win_rates{};
@@ -1356,9 +1370,9 @@ void run_variance_study(
     std::cout << std::fixed << std::setprecision(1)
               << "Learned Training/Evaluation Seed Variance Study\n"
               << "Challenger: "
-              << alpha::bot_config_name(learned) << '\n'
+              << old_school::bot_config_name(learned) << '\n'
               << "Baseline: "
-              << alpha::bot_name(alpha::BotKind::Handcrafted)
+              << old_school::bot_name(old_school::BotKind::Handcrafted)
               << '\n'
               << "Training seeds: 424242, 101, 707\n"
               << "Evaluation seeds: 424242, 101, 707\n"
@@ -1369,18 +1383,18 @@ void run_variance_study(
 
     for (std::size_t training = 0; training < seeds.size();
          ++training) {
-        alpha::GameConfig shared_config;
+        old_school::GameConfig shared_config;
         shared_config.learned_training_seed = seeds[training];
         std::cout << "Training seed " << seeds[training]
                   << "..." << std::flush;
         shared_config.learned_model =
-            alpha::train_learned_value_champion(
+            old_school::train_learned_value_champion(
                 training_games, seeds[training]);
         learned.learned_model = shared_config.learned_model;
         std::cout << " done\n";
         for (std::size_t evaluation = 0;
              evaluation < seeds.size(); ++evaluation) {
-            const auto result = alpha::run_bot_benchmark(
+            const auto result = old_school::run_bot_benchmark(
                 repetitions_per_deck_pairing,
                 seeds[evaluation], learned, handcrafted,
                 shared_config);
@@ -1467,10 +1481,10 @@ void run_variance_study(
               << '\n';
 }
 
-void print_evolution(const alpha::DeckEvolutionSummary& result,
+void print_evolution(const old_school::DeckEvolutionSummary& result,
                      std::uint64_t seed) {
     std::cout << std::fixed << std::setprecision(1)
-              << "Early Magic Deck Evolution\n"
+              << "Old School Magic Deck Evolution\n"
               << "Seed: " << seed << "\n\nGeneration best fitness\n";
     for (std::size_t generation = 0;
          generation < result.generation_best_win_rates.size();
@@ -1480,10 +1494,8 @@ void print_evolution(const alpha::DeckEvolutionSummary& result,
                   << "%\n";
     }
 
-    constexpr std::size_t card_count =
-        static_cast<std::size_t>(alpha::CardId::Moat) + 1;
-    std::array<std::size_t, card_count> counts{};
-    for (const alpha::CardId card : result.best.cards) {
+    std::array<std::size_t, old_school::kCardCount> counts{};
+    for (const old_school::CardId card : result.best.cards) {
         ++counts[static_cast<std::size_t>(card)];
     }
     std::cout << "\nBest 40-card deck\n";
@@ -1491,9 +1503,9 @@ void print_evolution(const alpha::DeckEvolutionSummary& result,
         if (counts[card] == 0) {
             continue;
         }
-        const auto id = static_cast<alpha::CardId>(card);
+        const auto id = static_cast<old_school::CardId>(card);
         std::cout << "  " << counts[card] << " "
-                  << alpha::card_definition(id).name << '\n';
+                  << old_school::card_definition(id).name << '\n';
     }
     std::cout << "\nFitness: " << result.best.total.win_rate()
               << "% (" << result.best.total.wins << '-'
@@ -1502,9 +1514,9 @@ void print_evolution(const alpha::DeckEvolutionSummary& result,
               << "By metagame opponent\n";
     for (std::size_t opponent = 0;
          opponent < result.best.by_opponent.size(); ++opponent) {
-        const auto id = static_cast<alpha::DeckId>(opponent);
+        const auto id = static_cast<old_school::DeckId>(opponent);
         const auto& stats = result.best.by_opponent[opponent];
-        std::cout << "  " << alpha::deck_name(id) << ": "
+        std::cout << "  " << old_school::deck_name(id) << ": "
                   << stats.win_rate() << "% (" << stats.wins << '-'
                   << stats.losses << '-' << stats.draws << ")\n";
     }
@@ -1516,14 +1528,14 @@ int main(int argc, char** argv) {
     try {
         std::size_t games = 100;
         std::uint64_t seed = random_seed();
-        alpha::BotField bot_field = alpha::BotField::Mixed;
-        alpha::LearnedVariant bot_field_learned_variant =
-            alpha::LearnedVariant::ValueSearchChampion;
+        old_school::BotField bot_field = old_school::BotField::Mixed;
+        old_school::LearnedVariant bot_field_learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion;
         std::size_t rollouts = 2;
         std::size_t deep_rollouts = 8;
         std::size_t training_games = 800;
         std::uint64_t training_seed =
-            alpha::kDefaultLearnedTrainingSeed;
+            old_school::kDefaultLearnedTrainingSeed;
         bool games_were_set = false;
         bool benchmark = false;
         bool stability = false;
@@ -1540,20 +1552,20 @@ int main(int argc, char** argv) {
         std::size_t probe_horizon = 12;
         std::size_t actor_generation = 0;
         std::size_t value_generation = 0;
-        alpha::LearnedValueG8Recipe value_recipe =
-            alpha::LearnedValueG8Recipe::CanonicalAllSearchLate;
-        alpha::LearnedActorGenerationConfig
+        old_school::LearnedValueG8Recipe value_recipe =
+            old_school::LearnedValueG8Recipe::CanonicalAllSearchLate;
+        old_school::LearnedActorGenerationConfig
             actor_generation_config;
         std::string probe_cache =
-            "data/probe-dev-v2.labels.tsv";
+            "data/old-school-probe-dev-v2.labels.tsv";
         std::size_t stability_runs = 8;
         std::size_t generations = 10;
         std::size_t population = 16;
         BotSelection challenger = {
-            .kind = alpha::BotKind::Handcrafted,
+            .kind = old_school::BotKind::Handcrafted,
         };
         BotSelection baseline = {
-            .kind = alpha::BotKind::MonteCarlo,
+            .kind = old_school::BotKind::MonteCarlo,
         };
 
         for (int argument = 1; argument < argc; ++argument) {
@@ -1656,11 +1668,11 @@ int main(int argc, char** argv) {
                 const std::string_view recipe = argv[argument];
                 if (recipe == "canonical") {
                     value_recipe =
-                        alpha::LearnedValueG8Recipe::
+                        old_school::LearnedValueG8Recipe::
                             CanonicalAllSearchLate;
                 } else if (recipe == "mix50") {
                     value_recipe =
-                        alpha::LearnedValueG8Recipe::LateMix50;
+                        old_school::LearnedValueG8Recipe::LateMix50;
                 } else {
                     throw std::invalid_argument(
                         "--value-recipe must be canonical or mix50");
@@ -1712,9 +1724,10 @@ int main(int argc, char** argv) {
                 }
                 generations = static_cast<std::size_t>(value);
             } else if (option == "--population") {
-                if (value < 4) {
+                if (value < static_cast<long long>(
+                                old_school::kDeckCount)) {
                     throw std::invalid_argument(
-                        "--population must be at least four");
+                        "--population must be at least five");
                 }
                 population = static_cast<std::size_t>(value);
             } else if (option == "--probe-worlds") {
@@ -1780,7 +1793,7 @@ int main(int argc, char** argv) {
         }
         if (score_probes &&
             value_recipe ==
-                alpha::LearnedValueG8Recipe::LateMix50 &&
+                old_school::LearnedValueG8Recipe::LateMix50 &&
             value_generation != 8) {
             throw std::invalid_argument(
                 "--value-recipe mix50 requires "
@@ -1788,9 +1801,9 @@ int main(int argc, char** argv) {
         }
         const auto selects_actor_g1 =
             [](const BotSelection& selection) {
-                return selection.kind == alpha::BotKind::Learned &&
+                return selection.kind == old_school::BotKind::Learned &&
                        selection.learned_variant ==
-                           alpha::LearnedVariant::UnifiedActor &&
+                           old_school::LearnedVariant::UnifiedActor &&
                        selection.actor_generation == 1;
             };
         const bool actor_g1_will_be_trained =
@@ -1807,31 +1820,31 @@ int main(int argc, char** argv) {
         const auto selects_canonical_value_bundle_checkpoint =
             [](const BotSelection& selection) {
                 return selection.kind ==
-                           alpha::BotKind::Learned &&
+                           old_school::BotKind::Learned &&
                        selection.learned_variant ==
-                           alpha::LearnedVariant::
+                           old_school::LearnedVariant::
                                ValueSearchChampion &&
                        selection.value_recipe ==
-                           alpha::LearnedValueG8Recipe::
+                           old_school::LearnedValueG8Recipe::
                                CanonicalAllSearchLate &&
                        selection.value_generation > 0;
             };
         const auto selects_mix50_value_bundle =
             [](const BotSelection& selection) {
                 return selection.kind ==
-                           alpha::BotKind::Learned &&
+                           old_school::BotKind::Learned &&
                        selection.learned_variant ==
-                           alpha::LearnedVariant::
+                           old_school::LearnedVariant::
                                ValueSearchChampion &&
                        selection.value_recipe ==
-                           alpha::LearnedValueG8Recipe::
+                           old_school::LearnedValueG8Recipe::
                                LateMix50 &&
                        selection.value_generation == 8;
             };
         const bool value_g8_will_be_used =
             (score_probes && value_generation == 8 &&
              value_recipe ==
-                 alpha::LearnedValueG8Recipe::
+                 old_school::LearnedValueG8Recipe::
                      CanonicalAllSearchLate) ||
             (benchmark &&
              (selects_canonical_value_bundle_checkpoint(
@@ -1841,7 +1854,7 @@ int main(int argc, char** argv) {
         const bool value_mix50_will_be_used =
             (score_probes && value_generation == 8 &&
              value_recipe ==
-                 alpha::LearnedValueG8Recipe::LateMix50) ||
+                 old_school::LearnedValueG8Recipe::LateMix50) ||
             (benchmark &&
              (selects_mix50_value_bundle(challenger) ||
               selects_mix50_value_bundle(baseline)));
@@ -1858,7 +1871,7 @@ int main(int argc, char** argv) {
                 "or probe route that selects Value G8 Late-Mix50");
         }
         if (score_probes) {
-            const alpha::probe_runner::ProbeScoreConfig config{
+            const old_school::probe_runner::ProbeScoreConfig config{
                 .training_games = training_games,
                 .training_seed = training_seed,
                 .reference_worlds = probe_worlds,
@@ -1882,12 +1895,12 @@ int main(int argc, char** argv) {
                 train_value_g0_with_progress(
                     training_games, training_seed);
             std::vector<
-                alpha::probe_runner::NamedValueScoringModel>
+                old_school::probe_runner::NamedValueScoringModel>
                 scoring_value_models;
             if (value_generation == 8) {
                 const bool mix50 =
                     value_recipe ==
-                    alpha::LearnedValueG8Recipe::LateMix50;
+                    old_school::LearnedValueG8Recipe::LateMix50;
                 const auto value_g8 =
                     mix50
                         ? train_value_g8_mix50_with_progress(
@@ -1897,7 +1910,7 @@ int main(int argc, char** argv) {
                               training_games, training_seed,
                               refresh_value_g8_cache);
                 if (value_g8.checkpoints.size() !=
-                    alpha::kLearnedValueG8Generations + 1) {
+                    old_school::kLearnedValueG8Generations + 1) {
                     throw std::runtime_error(
                         std::string(
                             mix50 ? "Value G8 Late-Mix50"
@@ -1928,7 +1941,7 @@ int main(int argc, char** argv) {
                 }
             }
             const auto report =
-                alpha::probe_runner::
+                old_school::probe_runner::
                     score_probe_dev_v2_with_candidates(
                         config, std::cout,
                         {
@@ -1944,16 +1957,16 @@ int main(int argc, char** argv) {
                                 std::move(scoring_value_models),
                         });
             std::cout
-                << alpha::probe_runner::format_probe_score_report(
+                << old_school::probe_runner::format_probe_score_report(
                        report);
             return 0;
         }
         if (diagnose_white_plan) {
             const auto model =
-                alpha::train_learned_actor_model(
+                old_school::train_learned_actor_model(
                     training_games, training_seed);
             const auto result =
-                alpha::diagnose_white_lock_plan_teacher(model, seed);
+                old_school::diagnose_white_lock_plan_teacher(model, seed);
             print_white_plan_diagnostic(
                 result, seed, training_seed, training_games);
             return 0;
@@ -1965,25 +1978,25 @@ int main(int argc, char** argv) {
             auto baseline_config =
                 bot_config(baseline, rollouts, deep_rollouts,
                            training_games);
-            alpha::GameConfig shared_config;
+            old_school::GameConfig shared_config;
             shared_config.learned_training_seed = training_seed;
-            std::shared_ptr<const alpha::LearnedModel>
+            std::shared_ptr<const old_school::LearnedModel>
                 frozen_value_g0;
-            alpha::LearnedValueG8Result frozen_value_bundle;
-            alpha::LearnedValueG8Result
+            old_school::LearnedValueG8Result frozen_value_bundle;
+            old_school::LearnedValueG8Result
                 frozen_value_mix50_bundle;
-            std::shared_ptr<const alpha::LearnedModel>
+            std::shared_ptr<const old_school::LearnedModel>
                 frozen_actor_g0;
-            std::shared_ptr<const alpha::LearnedModel>
+            std::shared_ptr<const old_school::LearnedModel>
                 frozen_actor_g1;
             const auto resolve_frozen_model =
                 [&](const BotSelection& selection)
-                -> std::shared_ptr<const alpha::LearnedModel> {
+                -> std::shared_ptr<const old_school::LearnedModel> {
                 if (selection.learned_variant ==
-                    alpha::LearnedVariant::
+                    old_school::LearnedVariant::
                         ValueSearchChampion) {
                     if (selection.value_recipe ==
-                        alpha::LearnedValueG8Recipe::
+                        old_school::LearnedValueG8Recipe::
                             LateMix50) {
                         if (selection.value_generation != 8) {
                             throw std::logic_error(
@@ -1999,14 +2012,14 @@ int main(int argc, char** argv) {
                                     refresh_value_mix50_cache);
                         }
                         const auto checkpoint =
-                            alpha::
+                            old_school::
                                 learned_value_g8_generation_checkpoint(
                                     frozen_value_mix50_bundle,
                                     selection.value_generation);
                         std::cout
                             << "  Selected Value Mix50 G8 "
                                "fingerprint: "
-                            << alpha::learned_model_fingerprint(
+                            << old_school::learned_model_fingerprint(
                                    checkpoint)
                             << '\n';
                         return checkpoint;
@@ -2020,7 +2033,7 @@ int main(int argc, char** argv) {
                         return frozen_value_g0;
                     }
                     if (selection.value_generation >
-                        alpha::kLearnedValueG8Generations) {
+                        old_school::kLearnedValueG8Generations) {
                         throw std::logic_error(
                             "unsupported Value generation");
                     }
@@ -2031,7 +2044,7 @@ int main(int argc, char** argv) {
                                 refresh_value_g8_cache);
                     }
                     const auto checkpoint =
-                        alpha::
+                        old_school::
                             learned_value_g8_generation_checkpoint(
                                 frozen_value_bundle,
                                 selection.value_generation);
@@ -2039,7 +2052,7 @@ int main(int argc, char** argv) {
                         << "  Selected Value G"
                         << selection.value_generation
                         << " fingerprint: "
-                        << alpha::learned_model_fingerprint(
+                        << old_school::learned_model_fingerprint(
                                checkpoint)
                         << '\n';
                     return checkpoint;
@@ -2069,7 +2082,7 @@ int main(int argc, char** argv) {
                         return false;
                     }
                     if (left.learned_variant ==
-                        alpha::LearnedVariant::UnifiedActor) {
+                        old_school::LearnedVariant::UnifiedActor) {
                         return left.actor_generation ==
                                right.actor_generation;
                     }
@@ -2079,16 +2092,16 @@ int main(int argc, char** argv) {
                            right.value_generation;
                 };
             if (challenger_config.kind ==
-                alpha::BotKind::Learned) {
+                old_school::BotKind::Learned) {
                 challenger_config.learned_model =
                     resolve_frozen_model(challenger);
                 shared_config.learned_model =
                     challenger_config.learned_model;
             }
             if (baseline_config.kind ==
-                alpha::BotKind::Learned) {
+                old_school::BotKind::Learned) {
                 if (challenger_config.kind ==
-                        alpha::BotKind::Learned &&
+                        old_school::BotKind::Learned &&
                     selections_share_model(challenger, baseline)) {
                     baseline_config.learned_model =
                         challenger_config.learned_model;
@@ -2101,16 +2114,16 @@ int main(int argc, char** argv) {
                         baseline_config.learned_model;
                 }
             }
-            const auto result = alpha::run_bot_benchmark(
+            const auto result = old_school::run_bot_benchmark(
                 games, seed, challenger_config,
                 baseline_config, shared_config);
             const auto benchmark_name =
                 [](const BotSelection& selection,
-                   const alpha::BotConfig& config) {
+                   const old_school::BotConfig& config) {
                     if (selection.kind ==
-                            alpha::BotKind::Learned) {
+                            old_school::BotKind::Learned) {
                         if (selection.learned_variant ==
-                            alpha::LearnedVariant::
+                            old_school::LearnedVariant::
                                 UnifiedActor) {
                             return std::string(
                                        "Learned Actor G") +
@@ -2118,7 +2131,7 @@ int main(int argc, char** argv) {
                                        selection.actor_generation);
                         }
                         if (selection.value_recipe ==
-                            alpha::LearnedValueG8Recipe::
+                            old_school::LearnedValueG8Recipe::
                                 LateMix50) {
                             return std::string(
                                 "Learned Value Mix50 G8");
@@ -2127,7 +2140,7 @@ int main(int argc, char** argv) {
                                std::to_string(
                                    selection.value_generation);
                     }
-                    return alpha::bot_config_name(config);
+                    return old_school::bot_config_name(config);
                 };
             print_benchmark(
                 result, seed,
@@ -2152,17 +2165,17 @@ int main(int argc, char** argv) {
         if (evolve) {
             const std::size_t repetitions =
                 games_were_set ? games : 4;
-            alpha::GameConfig evolution_game_config;
+            old_school::GameConfig evolution_game_config;
             evolution_game_config.learned_training_seed =
                 training_seed;
-            const auto result = alpha::evolve_deck(
+            const auto result = old_school::evolve_deck(
                 {
                     .generations = generations,
                     .population = population,
                     .repetitions_per_opponent = repetitions,
                     .pilot =
                         {
-                            .kind = alpha::BotKind::Handcrafted,
+                            .kind = old_school::BotKind::Handcrafted,
                             .rollouts_per_action = 1,
                         },
                 },
@@ -2171,14 +2184,14 @@ int main(int argc, char** argv) {
             return 0;
         }
 
-        alpha::GameConfig tournament_game_config;
+        old_school::GameConfig tournament_game_config;
         tournament_game_config.learned_training_seed =
             training_seed;
-        if (bot_field == alpha::BotField::Mixed ||
-            bot_field == alpha::BotField::Learned) {
+        if (bot_field == old_school::BotField::Mixed ||
+            bot_field == old_school::BotField::Learned) {
             const auto model_variant =
-                bot_field == alpha::BotField::Mixed
-                    ? alpha::LearnedVariant::
+                bot_field == old_school::BotField::Mixed
+                    ? old_school::LearnedVariant::
                           ValueSearchChampion
                     : bot_field_learned_variant;
             tournament_game_config.learned_model =
@@ -2186,7 +2199,7 @@ int main(int argc, char** argv) {
                     model_variant, training_games,
                     training_seed);
         }
-        alpha::TournamentConfig tournament_config;
+        old_school::TournamentConfig tournament_config;
         tournament_config.bot_field = bot_field;
         tournament_config.monte_carlo_rollouts = rollouts;
         tournament_config.deep_monte_carlo_rollouts =
@@ -2194,16 +2207,16 @@ int main(int argc, char** argv) {
         tournament_config.learned_training_games =
             training_games;
         tournament_config.learned_variant =
-            bot_field == alpha::BotField::Mixed
-                ? alpha::LearnedVariant::ValueSearchChampion
+            bot_field == old_school::BotField::Mixed
+                ? old_school::LearnedVariant::ValueSearchChampion
                 : bot_field_learned_variant;
-        const alpha::TournamentSummary result =
-            alpha::run_tournament(
+        const old_school::TournamentSummary result =
+            old_school::run_tournament(
                 games, seed, tournament_game_config,
                 tournament_config);
 
         std::cout << std::fixed << std::setprecision(1)
-                  << "Early Magic Bot Simulator\n"
+                  << "Old School Magic Bot Simulator\n"
                   << "Evaluation seed: " << seed << '\n'
                   << "Training seed: " << training_seed << '\n'
                   << "Bot field: "
@@ -2211,26 +2224,26 @@ int main(int argc, char** argv) {
                          bot_field,
                          bot_field_learned_variant)
                   << '\n';
-        if (bot_field == alpha::BotField::Mixed ||
-            bot_field == alpha::BotField::MonteCarlo) {
+        if (bot_field == old_school::BotField::Mixed ||
+            bot_field == old_school::BotField::MonteCarlo) {
             std::cout << "Monte Carlo rollouts per legal action: "
                       << rollouts << '\n';
         }
-        if (bot_field == alpha::BotField::Mixed ||
-            bot_field == alpha::BotField::DeepMonteCarlo) {
+        if (bot_field == old_school::BotField::Mixed ||
+            bot_field == old_school::BotField::DeepMonteCarlo) {
             std::cout
                 << "Deep Monte Carlo rollouts per legal action: "
                 << deep_rollouts << '\n';
         }
-        if (bot_field == alpha::BotField::Mixed ||
-            bot_field == alpha::BotField::Learned) {
+        if (bot_field == old_school::BotField::Mixed ||
+            bot_field == old_school::BotField::Learned) {
             const auto model_variant =
-                bot_field == alpha::BotField::Mixed
-                    ? alpha::LearnedVariant::
+                bot_field == old_school::BotField::Mixed
+                    ? old_school::LearnedVariant::
                           ValueSearchChampion
                     : bot_field_learned_variant;
             std::cout << "Frozen learned model: "
-                      << alpha::learned_variant_name(
+                      << old_school::learned_variant_name(
                              model_variant)
                       << ", seed " << training_seed << ", "
                       << training_games << " training games\n";
@@ -2244,9 +2257,9 @@ int main(int argc, char** argv) {
         for (const auto& matchup : result.matchups) {
             const auto& first = matchup.result.decks[0];
             const auto& second = matchup.result.decks[1];
-            std::cout << "  " << alpha::deck_name(matchup.first_deck)
+            std::cout << "  " << old_school::deck_name(matchup.first_deck)
                       << " vs "
-                      << alpha::deck_name(matchup.second_deck) << ": "
+                      << old_school::deck_name(matchup.second_deck) << ": "
                       << first.wins << '-' << second.wins << '-'
                       << matchup.result.draws << " ("
                       << first.win_rate() << "% / "
@@ -2255,10 +2268,10 @@ int main(int argc, char** argv) {
 
         std::cout << "\nDeck statistics\n";
         for (std::size_t deck = 0; deck < result.decks.size(); ++deck) {
-            const auto id = static_cast<alpha::DeckId>(deck);
+            const auto id = static_cast<old_school::DeckId>(deck);
             const std::string label =
-                std::string(alpha::deck_name(id)) + " — " +
-                std::string(alpha::deck_list(id));
+                std::string(old_school::deck_name(id)) + " — " +
+                std::string(old_school::deck_list(id));
             print_deck_stats(label, result.decks[deck]);
             if (deck + 1 != result.decks.size()) {
                 std::cout << '\n';
@@ -2276,21 +2289,21 @@ int main(int argc, char** argv) {
             if (printed_bot) {
                 std::cout << '\n';
             }
-            const auto kind = static_cast<alpha::BotKind>(bot);
-            if (kind == alpha::BotKind::Learned) {
+            const auto kind = static_cast<old_school::BotKind>(bot);
+            if (kind == old_school::BotKind::Learned) {
                 const auto learned_display = bot_config(
-                    {.kind = alpha::BotKind::Learned,
+                    {.kind = old_school::BotKind::Learned,
                      .learned_variant =
-                         bot_field == alpha::BotField::Mixed
-                             ? alpha::LearnedVariant::
+                         bot_field == old_school::BotField::Mixed
+                             ? old_school::LearnedVariant::
                                    ValueSearchChampion
                              : bot_field_learned_variant},
                     rollouts, deep_rollouts, training_games);
                 print_bot_stats(
-                    alpha::bot_config_name(learned_display),
+                    old_school::bot_config_name(learned_display),
                     result.bots[bot]);
             } else {
-                print_bot_stats(alpha::bot_name(kind),
+                print_bot_stats(old_school::bot_name(kind),
                                 result.bots[bot]);
             }
             printed_bot = true;
@@ -2304,8 +2317,8 @@ int main(int argc, char** argv) {
                 std::cout << "\nDirect bot matchups\n";
                 printed_matchup = true;
             }
-            std::cout << "  " << alpha::bot_name(matchup.first_bot)
-                      << " vs " << alpha::bot_name(matchup.second_bot)
+            std::cout << "  " << old_school::bot_name(matchup.first_bot)
+                      << " vs " << old_school::bot_name(matchup.second_bot)
                       << ": " << matchup.first_wins << '-'
                       << matchup.second_wins << '-' << matchup.draws
                       << " across " << matchup.games << " games ("

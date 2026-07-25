@@ -1,4 +1,4 @@
-#include "alpha/learned_iteration.hpp"
+#include "old_school/learned_iteration.hpp"
 
 #include <array>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace alpha::learned_iteration {
+namespace old_school::learned_iteration {
 namespace {
 
 std::uint64_t mix_seed(std::uint64_t value) noexcept {
@@ -54,9 +54,13 @@ balanced_schedule(std::uint64_t root_seed,
             {DeckId::Green, DeckId::Red},
             {DeckId::Green, DeckId::Blue},
             {DeckId::Green, DeckId::White},
+            {DeckId::Green, DeckId::RUAggro},
             {DeckId::Red, DeckId::Blue},
             {DeckId::Red, DeckId::White},
+            {DeckId::Red, DeckId::RUAggro},
             {DeckId::Blue, DeckId::White},
+            {DeckId::Blue, DeckId::RUAggro},
+            {DeckId::White, DeckId::RUAggro},
         }};
 
     std::array<ScheduledGame, kBalancedScheduleGames> games;
@@ -170,4 +174,4 @@ std::vector<double> four_state_bootstrap_targets(
     return targets;
 }
 
-} // namespace alpha::learned_iteration
+} // namespace old_school::learned_iteration

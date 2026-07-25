@@ -1,6 +1,6 @@
 #pragma once
 
-#include "alpha/game.hpp"
+#include "old_school/game.hpp"
 
 #include <array>
 #include <cstdint>
@@ -9,10 +9,12 @@
 #include <variant>
 #include <vector>
 
-namespace alpha::probes {
+namespace old_school::probes {
 
-inline constexpr std::string_view kProbeDevV1 = "probe-dev-v1";
-inline constexpr std::string_view kProbeDevV2 = "probe-dev-v2";
+inline constexpr std::string_view kProbeDevV1 =
+    "old-school-probe-dev-v1";
+inline constexpr std::string_view kProbeDevV2 =
+    "old-school-probe-dev-v2";
 inline constexpr std::uint64_t kProbeValidationSeed = 0x50524F42455631ULL;
 
 enum class DecisionKind : std::uint8_t {
@@ -81,13 +83,16 @@ struct Validation {
     bool ok() const;
 };
 
-// Constructs the fixed, eval-only 16-position development corpus. Nothing in
-// the runtime policy or training path imports this module.
+// Constructs the fixed, eval-only 16-position Green/Red/Blue/White
+// development corpus. RU Aggro is rejected until dedicated probes are
+// authored. Nothing in the runtime policy or training path imports this
+// module.
 std::vector<DecisionProbe> make_probe_dev_v1();
 
 // Revision of the development corpus whose plan probes make the root choice
-// irreversible within the current turn. V1 is retained so its cached
-// experimental results remain reproducible.
+// irreversible within the current turn. V1 remains only as the source fixture
+// definition used to construct V2; Old School caches use a new hard-cut
+// identity.
 std::vector<DecisionProbe> make_probe_dev_v2();
 
 Validation validate_probe(
@@ -110,4 +115,4 @@ std::vector<std::string> validate_probe_dev_v2(
 bool hidden_clone_is_determinization_invariant(
     const DecisionProbe& probe, std::uint64_t seed);
 
-} // namespace alpha::probes
+} // namespace old_school::probes

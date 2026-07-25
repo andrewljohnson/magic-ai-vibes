@@ -1,5 +1,5 @@
-#include "alpha/game.hpp"
-#include "alpha/learned_iteration.hpp"
+#include "old_school/game.hpp"
+#include "old_school/learned_iteration.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -25,10 +25,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-namespace alpha {
+namespace old_school {
 
-constexpr std::size_t kLearnedCardCount =
-    static_cast<std::size_t>(CardId::Moat) + 1;
+constexpr std::size_t kLearnedCardCount = kCardCount;
 
 class ModelFingerprintHash {
   public:
@@ -104,18 +103,18 @@ void add_model_fingerprint_value(
 namespace {
 
 constexpr std::array<std::uint8_t, 8> kValueG8ArtifactMagic = {
-    'M', 'T', 'G', 'V', 'G', '8', 'B', '1',
+    'O', 'S', 'M', 'V', 'G', '8', 'B', '1',
 };
 constexpr std::uint32_t kValueG8ArtifactSchema = 1;
 constexpr std::string_view kValueG8RecipeId =
-    "alpha.learned-value-g8.bootstrap-replay-k1h4.v1";
+    "old-school.learned-value-g8.bootstrap-replay-k1h4.v1";
 constexpr std::array<std::uint8_t, 8>
     kValueG8Mix50ArtifactMagic = {
-        'M', 'T', 'G', 'V', 'M', '5', 'B', '1',
+        'O', 'S', 'M', 'V', 'M', '5', 'B', '1',
     };
 constexpr std::uint32_t kValueG8Mix50ArtifactSchema = 1;
 constexpr std::string_view kValueG8Mix50RecipeId =
-    "alpha.learned-value-g8.bootstrap-replay-k1h4."
+    "old-school.learned-value-g8.bootstrap-replay-k1h4."
     "late-mix50.v1";
 constexpr std::size_t kMaximumValueG8ArtifactBytes =
     64U * 1024U * 1024U;
@@ -529,8 +528,8 @@ void write_value_g8_file_atomic(
 
 class LearnedModel {
   public:
-    static constexpr std::size_t kScalarFeatureCount = 22;
-    static constexpr std::size_t kCardPlanes = 14;
+    static constexpr std::size_t kScalarFeatureCount = 38;
+    static constexpr std::size_t kCardPlanes = 24;
     static constexpr std::size_t kFeatureCount =
         kScalarFeatureCount + kCardPlanes * kLearnedCardCount;
     static constexpr std::size_t kHiddenCount = 16;
@@ -538,7 +537,7 @@ class LearnedModel {
     static constexpr std::size_t kPolicyPhaseCount = 7;
     static constexpr std::size_t kPolicyVerbCount = 8;
     static constexpr std::size_t kPolicyCardPlanes = 6;
-    static constexpr std::size_t kPolicyScalarCount = 36;
+    static constexpr std::size_t kPolicyScalarCount = 44;
     static constexpr std::size_t kPolicyFeatureCount =
         kFeatureCount + kPolicyDecisionCount + kPolicyPhaseCount +
         kPolicyVerbCount + kPolicyCardPlanes * kLearnedCardCount +
@@ -1383,14 +1382,14 @@ update_learned_value_model_encoded(
 
 std::string learned_value_g8_cache_path(
     std::size_t training_games, std::uint64_t seed) {
-    return "build/model-cache/value-g8-v1-t" +
+    return "build/model-cache/old-school-value-g8-v1-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
 }
 
 std::string learned_value_g8_mix50_cache_path(
     std::size_t training_games, std::uint64_t seed) {
-    return "build/model-cache/value-g8-mix50-v1-t" +
+    return "build/model-cache/old-school-value-g8-mix50-v1-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
 }
@@ -2842,7 +2841,7 @@ class LearnedPolicyRecorder {
 
 namespace {
 
-constexpr std::array<CardDefinition, 13> kCardDefinitions = {{
+constexpr std::array<CardDefinition, 19> kCardDefinitions = {{
     {CardId::Forest, "Forest", CardType::Land, {}, 0, 0, 0},
     {CardId::Mountain, "Mountain", CardType::Land, {}, 0, 0, 0},
     {CardId::GrizzlyBears,
@@ -2914,13 +2913,62 @@ constexpr std::array<CardDefinition, 13> kCardDefinitions = {{
      0,
      0,
      0},
+    {CardId::FlyingMen,
+     "Flying Men",
+     CardType::Creature,
+     {.generic = 0, .blue = 1},
+     1,
+     1,
+     0,
+     true},
+    {CardId::IronclawOrcs,
+     "Ironclaw Orcs",
+     CardType::Creature,
+     {.generic = 1, .red = 1},
+     2,
+     2,
+     0,
+     false,
+     2},
+    {CardId::GrayOgre,
+     "Gray Ogre",
+     CardType::Creature,
+     {.generic = 2, .red = 1},
+     2,
+     2,
+     0},
+    {CardId::HillGiant,
+     "Hill Giant",
+     CardType::Creature,
+     {.generic = 3, .red = 1},
+     3,
+     3,
+     0},
+    {CardId::Disintegrate,
+     "Disintegrate",
+     CardType::Sorcery,
+     {.generic = 0, .red = 1},
+     0,
+     0,
+     0},
+    {CardId::GiantGrowth,
+     "Giant Growth",
+     CardType::Instant,
+     {.generic = 0, .green = 1},
+     0,
+     0,
+     0},
 }};
 
-constexpr std::array<CardId, 4> kCreatureCards = {
+constexpr std::array<CardId, 8> kCreatureCards = {
     CardId::GrizzlyBears,
     CardId::IronrootTreefolk,
     CardId::FireElemental,
     CardId::WaterElemental,
+    CardId::FlyingMen,
+    CardId::IronclawOrcs,
+    CardId::GrayOgre,
+    CardId::HillGiant,
 };
 
 constexpr std::array<CardId, 1> kSorceryCards = {
@@ -2936,6 +2984,10 @@ constexpr std::array<CardId, 1> kEnchantmentCards = {
 };
 
 constexpr ManaCost kMillstoneActivationCost = {.generic = 2};
+
+ManaCost disintegrate_cost(int x_value) {
+    return {.generic = x_value, .red = 1};
+}
 
 bool has_card(const std::vector<CardId>& cards, CardId wanted) {
     return std::find(cards.begin(), cards.end(), wanted) != cards.end();
@@ -2986,6 +3038,9 @@ void subtract_public_cards(CardCounts& remaining,
     for (const CardId card : player.graveyard) {
         subtract_card(remaining, card);
     }
+    for (const CardId card : player.exile) {
+        subtract_card(remaining, card);
+    }
     for (const auto& land : player.lands) {
         subtract_card(remaining, land.card);
     }
@@ -3020,6 +3075,9 @@ CardCounts physical_card_counts(const GameState& state,
         add_card(counts, card);
     }
     for (const CardId card : player_state.graveyard) {
+        add_card(counts, card);
+    }
+    for (const CardId card : player_state.exile) {
         add_card(counts, card);
     }
     for (const auto& land : player_state.lands) {
@@ -3124,6 +3182,26 @@ CreaturePermanent* find_creature(PlayerState& player, PermanentId id) {
     return position == player.creatures.end() ? nullptr : &*position;
 }
 
+const CreaturePermanent* find_creature(
+    const PlayerState& player, PermanentId id) {
+    const auto position = std::find_if(
+        player.creatures.begin(), player.creatures.end(),
+        [id](const CreaturePermanent& creature) {
+            return creature.id == id;
+        });
+    return position == player.creatures.end() ? nullptr : &*position;
+}
+
+int creature_power(const CreaturePermanent& creature) {
+    return card_definition(creature.card).power +
+           creature.temporary_power_bonus;
+}
+
+int creature_toughness(const CreaturePermanent& creature) {
+    return card_definition(creature.card).toughness +
+           creature.temporary_toughness_bonus;
+}
+
 ArtifactPermanent* find_artifact(PlayerState& player, PermanentId id) {
     const auto position = std::find_if(
         player.artifacts.begin(), player.artifacts.end(),
@@ -3147,6 +3225,64 @@ bool can_attack_through_moat(const GameState& state,
                              const CreaturePermanent& creature) {
     return !moat_on_battlefield(state) ||
            card_definition(creature.card).flying;
+}
+
+bool can_block_creature(const CreaturePermanent& attacker,
+                        const CreaturePermanent& blocker) {
+    const auto& attacker_definition =
+        card_definition(attacker.card);
+    const auto& blocker_definition =
+        card_definition(blocker.card);
+    if (attacker_definition.flying && !blocker_definition.flying) {
+        return false;
+    }
+    return blocker_definition.cannot_block_power_at_least == 0 ||
+           creature_power(attacker) <
+               blocker_definition.cannot_block_power_at_least;
+}
+
+bool handcrafted_favorable_attack(
+    const CreaturePermanent& attacker,
+    const PlayerState& defending_state) {
+    bool has_legal_blocker = false;
+    for (const auto& blocker : defending_state.creatures) {
+        if (blocker.tapped ||
+            !can_block_creature(attacker, blocker)) {
+            continue;
+        }
+        has_legal_blocker = true;
+        if (creature_power(attacker) >=
+            creature_toughness(blocker)) {
+            return true;
+        }
+    }
+    return !has_legal_blocker;
+}
+
+std::vector<PermanentId> legal_attackers_for_blocker(
+    const GameState& state, std::size_t attacking_player,
+    PermanentId blocker_id,
+    const std::vector<PermanentId>& attackers) {
+    const std::size_t defending_player = 1 - attacking_player;
+    const auto* blocker = find_creature(
+        state.players[defending_player], blocker_id);
+    if (blocker == nullptr) {
+        throw std::logic_error(
+            "block decision references a missing blocker");
+    }
+    std::vector<PermanentId> legal_attackers;
+    for (const PermanentId attacker_id : attackers) {
+        const auto* attacker = find_creature(
+            state.players[attacking_player], attacker_id);
+        if (attacker == nullptr) {
+            throw std::logic_error(
+                "block decision references a missing attacker");
+        }
+        if (can_block_creature(*attacker, *blocker)) {
+            legal_attackers.push_back(attacker_id);
+        }
+    }
+    return legal_attackers;
 }
 
 std::vector<std::vector<PermanentId>>
@@ -3194,17 +3330,25 @@ learned_value_attack_candidates(
 
 std::vector<std::vector<std::pair<PermanentId, PermanentId>>>
 learned_value_block_candidates(
+    const GameState& state, std::size_t attacking_player,
     const std::vector<PermanentId>& attackers,
     const std::vector<PermanentId>& available_blockers,
     std::mt19937_64& random, std::size_t exhaustive_limit,
     int random_samples) {
     using Block = std::pair<PermanentId, PermanentId>;
     std::vector<std::vector<Block>> candidates;
-    const std::size_t choices = attackers.size() + 1;
+    std::vector<std::vector<PermanentId>> choices_by_blocker;
+    choices_by_blocker.reserve(available_blockers.size());
+    for (const PermanentId blocker_id : available_blockers) {
+        choices_by_blocker.push_back(
+            legal_attackers_for_blocker(
+                state, attacking_player, blocker_id, attackers));
+    }
+
     std::size_t combinations = 1;
-    bool exhaustive = !attackers.empty();
-    for (std::size_t blocker = 0;
-         blocker < available_blockers.size(); ++blocker) {
+    bool exhaustive = true;
+    for (const auto& legal_attackers : choices_by_blocker) {
+        const std::size_t choices = legal_attackers.size() + 1;
         if (combinations > exhaustive_limit / choices) {
             exhaustive = false;
             break;
@@ -3217,12 +3361,19 @@ learned_value_block_candidates(
              ++encoding) {
             std::size_t remaining = encoding;
             std::vector<Block> candidate;
-            for (const PermanentId blocker : available_blockers) {
+            for (std::size_t blocker_index = 0;
+                 blocker_index < available_blockers.size();
+                 ++blocker_index) {
+                const auto& legal_attackers =
+                    choices_by_blocker[blocker_index];
+                const std::size_t choices =
+                    legal_attackers.size() + 1;
                 const std::size_t choice = remaining % choices;
                 remaining /= choices;
                 if (choice != 0) {
-                    candidate.emplace_back(attackers[choice - 1],
-                                           blocker);
+                    candidate.emplace_back(
+                        legal_attackers[choice - 1],
+                        available_blockers[blocker_index]);
                 }
             }
             candidates.push_back(std::move(candidate));
@@ -3233,20 +3384,34 @@ learned_value_block_candidates(
     candidates.push_back({});
     for (const PermanentId attacker : attackers) {
         std::vector<Block> all_on_attacker;
-        for (const PermanentId blocker : available_blockers) {
-            all_on_attacker.emplace_back(attacker, blocker);
+        for (std::size_t blocker_index = 0;
+             blocker_index < available_blockers.size();
+             ++blocker_index) {
+            const auto& legal_attackers =
+                choices_by_blocker[blocker_index];
+            if (std::find(legal_attackers.begin(),
+                          legal_attackers.end(),
+                          attacker) != legal_attackers.end()) {
+                all_on_attacker.emplace_back(
+                    attacker, available_blockers[blocker_index]);
+            }
         }
         candidates.push_back(std::move(all_on_attacker));
     }
     for (int sample = 0; sample < random_samples; ++sample) {
         std::vector<Block> candidate;
-        std::uniform_int_distribution<std::size_t> choose_block(
-            0, attackers.size());
-        for (const PermanentId blocker : available_blockers) {
+        for (std::size_t blocker_index = 0;
+             blocker_index < available_blockers.size();
+             ++blocker_index) {
+            const auto& legal_attackers =
+                choices_by_blocker[blocker_index];
+            std::uniform_int_distribution<std::size_t> choose_block(
+                0, legal_attackers.size());
             const std::size_t choice = choose_block(random);
             if (choice != 0) {
-                candidate.emplace_back(attackers[choice - 1],
-                                       blocker);
+                candidate.emplace_back(
+                    legal_attackers[choice - 1],
+                    available_blockers[blocker_index]);
             }
         }
         std::shuffle(candidate.begin(), candidate.end(), random);
@@ -3258,9 +3423,12 @@ learned_value_block_candidates(
 void remove_dead_creatures(PlayerState& player) {
     auto creature = player.creatures.begin();
     while (creature != player.creatures.end()) {
-        const auto& definition = card_definition(creature->card);
-        if (creature->damage >= definition.toughness) {
-            player.graveyard.push_back(creature->card);
+        if (creature->damage >= creature_toughness(*creature)) {
+            auto& destination =
+                creature->exile_on_death_this_turn
+                    ? player.exile
+                    : player.graveyard;
+            destination.push_back(creature->card);
             creature = player.creatures.erase(creature);
         } else {
             ++creature;
@@ -3301,6 +3469,17 @@ double handcrafted_card_value(CardId card) {
         return 1'100.0;
     case CardId::Moat:
         return 1'300.0;
+    case CardId::FlyingMen:
+        return 350.0;
+    case CardId::IronclawOrcs:
+    case CardId::GrayOgre:
+        return 400.0;
+    case CardId::HillGiant:
+        return 550.0;
+    case CardId::Disintegrate:
+        return 900.0;
+    case CardId::GiantGrowth:
+        return 650.0;
     }
     return 0.0;
 }
@@ -3318,7 +3497,7 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     const auto total_power = [](const PlayerState& player) {
         int total = 0;
         for (const auto& creature : player.creatures) {
-            total += card_definition(creature.card).power;
+            total += creature_power(creature);
         }
         return total;
     };
@@ -3326,8 +3505,7 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
         int total = 0;
         for (const auto& creature : player.creatures) {
             total += std::max(
-                0, card_definition(creature.card).toughness -
-                       creature.damage);
+                0, creature_toughness(creature) - creature.damage);
         }
         return total;
     };
@@ -3335,7 +3513,7 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
         int total = 0;
         for (const auto& creature : player.creatures) {
             if (!creature.tapped && !creature.summoning_sick) {
-                total += card_definition(creature.card).power;
+                total += creature_power(creature);
             }
         }
         return total;
@@ -3343,9 +3521,49 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     const auto permanent_count = [](const PlayerState& player) {
         return player.artifacts.size() + player.enchantments.size();
     };
+    const auto flying_count = [](const PlayerState& player) {
+        return std::count_if(
+            player.creatures.begin(), player.creatures.end(),
+            [](const CreaturePermanent& creature) {
+                return card_definition(creature.card).flying;
+            });
+    };
+    const auto exile_marked_count = [](const PlayerState& player) {
+        return std::count_if(
+            player.creatures.begin(), player.creatures.end(),
+            [](const CreaturePermanent& creature) {
+                return creature.exile_on_death_this_turn;
+            });
+    };
     int stack_advantage = 0;
+    // Player, creature, and spell targets are each split by whether the
+    // target belongs to the observing player or the opponent.
+    std::array<int, 6> own_stack_target_kinds{};
+    std::array<int, 6> enemy_stack_target_kinds{};
     for (const auto& object : state.stack) {
         stack_advantage += object.controller == perspective ? 1 : -1;
+        auto& target_kinds =
+            object.controller == perspective
+                ? own_stack_target_kinds
+                : enemy_stack_target_kinds;
+        if (object.spell_target.has_value()) {
+            const auto target = std::find_if(
+                state.stack.begin(), state.stack.end(),
+                [&](const StackObject& candidate) {
+                    return candidate.id ==
+                           *object.spell_target;
+                });
+            const bool targets_self =
+                target != state.stack.end() &&
+                target->controller == perspective;
+            ++target_kinds[4 + (targets_self ? 0 : 1)];
+        } else if (object.target.has_value()) {
+            const std::size_t kind =
+                object.target->creature.has_value() ? 2 : 0;
+            const bool targets_self =
+                object.target->player == perspective;
+            ++target_kinds[kind + (targets_self ? 0 : 1)];
+        }
     }
     LearnedModel::FeatureVector features = {
         static_cast<double>(self.life) / 20.0,
@@ -3373,6 +3591,22 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
             (state.active_player == perspective ? 0.25 : -0.25) +
             std::min(1.0, static_cast<double>(state.turn_number) / 80.0) *
                 0.1,
+        static_cast<double>(flying_count(self)) / 10.0,
+        static_cast<double>(flying_count(enemy)) / 10.0,
+        static_cast<double>(exile_marked_count(self)) / 10.0,
+        static_cast<double>(exile_marked_count(enemy)) / 10.0,
+        static_cast<double>(own_stack_target_kinds[0]) / 5.0,
+        static_cast<double>(own_stack_target_kinds[1]) / 5.0,
+        static_cast<double>(own_stack_target_kinds[2]) / 5.0,
+        static_cast<double>(own_stack_target_kinds[3]) / 5.0,
+        static_cast<double>(own_stack_target_kinds[4]) / 5.0,
+        static_cast<double>(own_stack_target_kinds[5]) / 5.0,
+        static_cast<double>(enemy_stack_target_kinds[0]) / 5.0,
+        static_cast<double>(enemy_stack_target_kinds[1]) / 5.0,
+        static_cast<double>(enemy_stack_target_kinds[2]) / 5.0,
+        static_cast<double>(enemy_stack_target_kinds[3]) / 5.0,
+        static_cast<double>(enemy_stack_target_kinds[4]) / 5.0,
+        static_cast<double>(enemy_stack_target_kinds[5]) / 5.0,
     };
 
     using CardPlane = std::array<double, kLearnedCardCount>;
@@ -3386,10 +3620,20 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     CardPlane enemy_summoning_sick{};
     CardPlane own_creature_damage{};
     CardPlane enemy_creature_damage{};
+    CardPlane own_temporary_power{};
+    CardPlane enemy_temporary_power{};
+    CardPlane own_temporary_toughness{};
+    CardPlane enemy_temporary_toughness{};
     CardPlane own_graveyard{};
     CardPlane enemy_graveyard{};
+    CardPlane own_exile{};
+    CardPlane enemy_exile{};
     CardPlane own_stack{};
     CardPlane enemy_stack{};
+    CardPlane own_stack_x{};
+    CardPlane enemy_stack_x{};
+    CardPlane own_stack_target{};
+    CardPlane enemy_stack_target{};
     const auto card_index = [](CardId card) {
         return static_cast<std::size_t>(card);
     };
@@ -3402,7 +3646,9 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     const auto add_battlefield =
         [&](const PlayerState& player, CardPlane& battlefield,
             CardPlane& tapped, CardPlane& summoning_sick,
-            CardPlane& creature_damage) {
+            CardPlane& creature_damage,
+            CardPlane& temporary_power,
+            CardPlane& temporary_toughness) {
             for (const auto& land : player.lands) {
                 ++battlefield[card_index(land.card)];
                 if (land.tapped) {
@@ -3419,6 +3665,12 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
                 }
                 creature_damage[card_index(creature.card)] +=
                     static_cast<double>(creature.damage);
+                temporary_power[card_index(creature.card)] +=
+                    static_cast<double>(
+                        creature.temporary_power_bonus);
+                temporary_toughness[card_index(creature.card)] +=
+                    static_cast<double>(
+                        creature.temporary_toughness_bonus);
             }
             for (const auto& artifact : player.artifacts) {
                 ++battlefield[card_index(artifact.card)];
@@ -3431,19 +3683,57 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
             }
         };
     add_battlefield(self, own_battlefield, own_tapped,
-                    own_summoning_sick, own_creature_damage);
+                    own_summoning_sick, own_creature_damage,
+                    own_temporary_power,
+                    own_temporary_toughness);
     add_battlefield(enemy, enemy_battlefield, enemy_tapped,
-                    enemy_summoning_sick, enemy_creature_damage);
+                    enemy_summoning_sick, enemy_creature_damage,
+                    enemy_temporary_power,
+                    enemy_temporary_toughness);
     for (const CardId card : self.graveyard) {
         ++own_graveyard[card_index(card)];
     }
     for (const CardId card : enemy.graveyard) {
         ++enemy_graveyard[card_index(card)];
     }
+    for (const CardId card : self.exile) {
+        ++own_exile[card_index(card)];
+    }
+    for (const CardId card : enemy.exile) {
+        ++enemy_exile[card_index(card)];
+    }
     for (const auto& object : state.stack) {
         auto& plane =
             object.controller == perspective ? own_stack : enemy_stack;
         ++plane[card_index(object.card)];
+        auto& x_plane = object.controller == perspective
+                            ? own_stack_x
+                            : enemy_stack_x;
+        x_plane[card_index(object.card)] +=
+            static_cast<double>(object.x_value);
+        auto& target_plane =
+            object.controller == perspective
+                ? own_stack_target
+                : enemy_stack_target;
+        if (object.target.has_value() &&
+            object.target->creature.has_value()) {
+            const auto* creature = find_creature(
+                state.players[object.target->player],
+                *object.target->creature);
+            if (creature != nullptr) {
+                ++target_plane[card_index(creature->card)];
+            }
+        } else if (object.spell_target.has_value()) {
+            const auto target = std::find_if(
+                state.stack.begin(), state.stack.end(),
+                [&](const StackObject& candidate) {
+                    return candidate.id ==
+                           *object.spell_target;
+                });
+            if (target != state.stack.end()) {
+                ++target_plane[card_index(target->card)];
+            }
+        }
     }
 
     std::size_t feature = LearnedModel::kScalarFeatureCount;
@@ -3463,10 +3753,20 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     append_plane(enemy_summoning_sick, 10.0);
     append_plane(own_creature_damage, 10.0);
     append_plane(enemy_creature_damage, 10.0);
+    append_plane(own_temporary_power, 10.0);
+    append_plane(enemy_temporary_power, 10.0);
+    append_plane(own_temporary_toughness, 10.0);
+    append_plane(enemy_temporary_toughness, 10.0);
     append_plane(own_graveyard, 20.0);
     append_plane(enemy_graveyard, 20.0);
+    append_plane(own_exile, 20.0);
+    append_plane(enemy_exile, 20.0);
     append_plane(own_stack, 5.0);
     append_plane(enemy_stack, 5.0);
+    append_plane(own_stack_x, 10.0);
+    append_plane(enemy_stack_x, 10.0);
+    append_plane(own_stack_target, 5.0);
+    append_plane(enemy_stack_target, 5.0);
     return features;
 }
 
@@ -3529,7 +3829,8 @@ LearnedValueAttackSetScores score_learned_value_attack_sets(
         // refactor: label parity depends on preserving this exact behavior.
         const auto block_candidates =
             learned_value_block_candidates(
-                candidate, available_blockers, random, 64, 48);
+                state, attacking_player, candidate,
+                available_blockers, random, 64, 48);
         double total_score = 0.0;
         for (const auto& sampled_blocks : block_candidates) {
             GameState successor = state;
@@ -3593,6 +3894,10 @@ struct LearnedPolicyObject {
     int damage = 0;
     bool tapped = false;
     bool summoning_sick = false;
+    bool flying = false;
+    int cannot_block_power_at_least = 0;
+    int x_value = 0;
+    bool exile_on_death_this_turn = false;
 };
 
 struct LearnedPolicyOption {
@@ -3622,6 +3927,9 @@ LearnedPolicyObject policy_card_object(CardId card) {
         .card = card,
         .power = definition.power,
         .toughness = definition.toughness,
+        .flying = definition.flying,
+        .cannot_block_power_at_least =
+            definition.cannot_block_power_at_least,
     };
 }
 
@@ -3630,11 +3938,16 @@ policy_creature_object(const CreaturePermanent& creature) {
     const auto& definition = card_definition(creature.card);
     return {
         .card = creature.card,
-        .power = definition.power,
-        .toughness = definition.toughness,
+        .power = creature_power(creature),
+        .toughness = creature_toughness(creature),
         .damage = creature.damage,
         .tapped = creature.tapped,
         .summoning_sick = creature.summoning_sick,
+        .flying = definition.flying,
+        .cannot_block_power_at_least =
+            definition.cannot_block_power_at_least,
+        .exile_on_death_this_turn =
+            creature.exile_on_death_this_turn,
     };
 }
 
@@ -3711,9 +4024,9 @@ LearnedModel::PolicyFeatureVector learned_policy_features(
         scalars[scalar++] =
             static_cast<double>(definition.cost.white) / 5.0;
         scalars[scalar++] =
-            static_cast<double>(definition.power) / 10.0;
+            static_cast<double>(option.source.power) / 10.0;
         scalars[scalar++] =
-            static_cast<double>(definition.toughness) / 10.0;
+            static_cast<double>(option.source.toughness) / 10.0;
         scalars[scalar++] =
             static_cast<double>(definition.effect_damage) / 10.0;
     } else {
@@ -3724,6 +4037,15 @@ LearnedModel::PolicyFeatureVector learned_policy_features(
     scalars[scalar++] = option.source.tapped ? 1.0 : 0.0;
     scalars[scalar++] =
         option.source.summoning_sick ? 1.0 : 0.0;
+    scalars[scalar++] = option.source.flying ? 1.0 : 0.0;
+    scalars[scalar++] =
+        static_cast<double>(
+            option.source.cannot_block_power_at_least) /
+        10.0;
+    scalars[scalar++] =
+        static_cast<double>(option.source.x_value) / 10.0;
+    scalars[scalar++] =
+        option.source.exile_on_death_this_turn ? 1.0 : 0.0;
 
     scalars[scalar +
             static_cast<std::size_t>(option.target_relation)] = 1.0;
@@ -3737,6 +4059,15 @@ LearnedModel::PolicyFeatureVector learned_policy_features(
     scalars[scalar++] = option.target.tapped ? 1.0 : 0.0;
     scalars[scalar++] =
         option.target.summoning_sick ? 1.0 : 0.0;
+    scalars[scalar++] = option.target.flying ? 1.0 : 0.0;
+    scalars[scalar++] =
+        static_cast<double>(
+            option.target.cannot_block_power_at_least) /
+        10.0;
+    scalars[scalar++] =
+        static_cast<double>(option.target.x_value) / 10.0;
+    scalars[scalar++] =
+        option.target.exile_on_death_this_turn ? 1.0 : 0.0;
     scalars[scalar++] = option.remaining_options / 10.0;
     scalars[scalar++] = option.chosen_count / 10.0;
     scalars[scalar++] = option.assigned_to_target_count / 10.0;
@@ -4053,11 +4384,14 @@ LearnedPolicyOption priority_policy_option(
     case PriorityActionKind::CastArtifact:
     case PriorityActionKind::CastEnchantment:
     case PriorityActionKind::CastLightningBolt:
+    case PriorityActionKind::CastDisintegrate:
+    case PriorityActionKind::CastGiantGrowth:
     case PriorityActionKind::CastCounterspell:
         option.verb = LearnedPolicyVerb::Cast;
         break;
     }
     option.source = policy_card_object(action.card);
+    option.source.x_value = action.x_value;
 
     if (action.target.has_value()) {
         const Target& target = *action.target;
@@ -4086,6 +4420,7 @@ LearnedPolicyOption priority_policy_option(
         if (stack_object != state.stack.end()) {
             option.target =
                 policy_card_object(stack_object->card);
+            option.target.x_value = stack_object->x_value;
             option.target_relation =
                 stack_object->controller == player
                     ? LearnedTargetRelation::StackSelf
@@ -4120,8 +4455,7 @@ void add_policy_creature(
             "Learned policy context references a missing creature");
     }
     ++plane[static_cast<std::size_t>(creature->card)];
-    total_power +=
-        static_cast<double>(card_definition(creature->card).power);
+    total_power += static_cast<double>(creature_power(*creature));
 }
 
 std::vector<LearnedPolicyOption> attack_policy_options(
@@ -4288,22 +4622,23 @@ const CardDefinition& card_definition(CardId card) {
     return kCardDefinitions[index];
 }
 
-std::vector<CardId> green_alpha_deck() {
+std::vector<CardId> green_deck() {
     std::vector<CardId> deck(18, CardId::Forest);
     deck.insert(deck.end(), 9, CardId::GrizzlyBears);
-    deck.insert(deck.end(), 12, CardId::IronrootTreefolk);
+    deck.insert(deck.end(), 8, CardId::IronrootTreefolk);
+    deck.insert(deck.end(), 4, CardId::GiantGrowth);
     deck.insert(deck.end(), 1, CardId::Tsunami);
     return deck;
 }
 
-std::vector<CardId> red_alpha_deck() {
+std::vector<CardId> red_deck() {
     std::vector<CardId> deck(18, CardId::Mountain);
     deck.insert(deck.end(), 10, CardId::LightningBolt);
     deck.insert(deck.end(), 12, CardId::FireElemental);
     return deck;
 }
 
-std::vector<CardId> blue_alpha_deck() {
+std::vector<CardId> blue_deck() {
     std::vector<CardId> deck(18, CardId::Island);
     deck.insert(deck.end(), 14, CardId::Counterspell);
     deck.insert(deck.end(), 8, CardId::WaterElemental);
@@ -4314,6 +4649,18 @@ std::vector<CardId> white_control_deck() {
     std::vector<CardId> deck(22, CardId::Plains);
     deck.insert(deck.end(), 3, CardId::Millstone);
     deck.insert(deck.end(), 15, CardId::Moat);
+    return deck;
+}
+
+std::vector<CardId> ru_aggro_deck() {
+    std::vector<CardId> deck(13, CardId::Mountain);
+    deck.insert(deck.end(), 4, CardId::Island);
+    deck.insert(deck.end(), 3, CardId::FlyingMen);
+    deck.insert(deck.end(), 5, CardId::IronclawOrcs);
+    deck.insert(deck.end(), 2, CardId::GrayOgre);
+    deck.insert(deck.end(), 8, CardId::HillGiant);
+    deck.insert(deck.end(), 3, CardId::LightningBolt);
+    deck.insert(deck.end(), 2, CardId::Disintegrate);
     return deck;
 }
 
@@ -4479,6 +4826,25 @@ PriorityAction PriorityAction::cast_lightning_bolt(Target bolt_target) {
             .target = bolt_target};
 }
 
+PriorityAction PriorityAction::cast_disintegrate(
+    int x_value, Target disintegrate_target) {
+    return {
+        .kind = PriorityActionKind::CastDisintegrate,
+        .card = CardId::Disintegrate,
+        .target = disintegrate_target,
+        .x_value = x_value,
+    };
+}
+
+PriorityAction PriorityAction::cast_giant_growth(
+    Target growth_target) {
+    return {
+        .kind = PriorityActionKind::CastGiantGrowth,
+        .card = CardId::GiantGrowth,
+        .target = growth_target,
+    };
+}
+
 PriorityAction
 PriorityAction::cast_counterspell(StackObjectId target_spell) {
     return {
@@ -4557,6 +4923,31 @@ legal_priority_actions(const GameState& state, std::size_t player,
                     PriorityAction::cast_enchantment(enchantment));
             }
         }
+        if (has_card(player_state.hand, CardId::Disintegrate)) {
+            for (int x_value = 0;
+                 x_value <=
+                     static_cast<int>(player_state.lands.size()) &&
+                 can_pay(player_state,
+                         disintegrate_cost(x_value));
+                 ++x_value) {
+                for (std::size_t controller = 0;
+                     controller < state.players.size();
+                     ++controller) {
+                    actions.push_back(
+                        PriorityAction::cast_disintegrate(
+                            x_value,
+                            Target::player_target(controller)));
+                    for (const auto& creature :
+                         state.players[controller].creatures) {
+                        actions.push_back(
+                            PriorityAction::cast_disintegrate(
+                                x_value,
+                                Target::creature_target(
+                                    controller, creature.id)));
+                    }
+                }
+            }
+        }
     }
 
     const auto& bolt = card_definition(CardId::LightningBolt);
@@ -4569,6 +4960,22 @@ legal_priority_actions(const GameState& state, std::size_t player,
             for (const auto& creature : state.players[controller].creatures) {
                 actions.push_back(PriorityAction::cast_lightning_bolt(
                     Target::creature_target(controller, creature.id)));
+            }
+        }
+    }
+
+    const auto& giant_growth =
+        card_definition(CardId::GiantGrowth);
+    if (has_card(player_state.hand, CardId::GiantGrowth) &&
+        can_pay(player_state, giant_growth.cost)) {
+        for (std::size_t controller = 0;
+             controller < state.players.size(); ++controller) {
+            for (const auto& creature :
+                 state.players[controller].creatures) {
+                actions.push_back(
+                    PriorityAction::cast_giant_growth(
+                        Target::creature_target(
+                            controller, creature.id)));
             }
         }
     }
@@ -4719,6 +5126,52 @@ bool apply_priority_action(GameState& state, std::size_t player,
         return true;
     }
 
+    case PriorityActionKind::CastDisintegrate: {
+        if (!action.target.has_value() || action.x_value < 0) {
+            return false;
+        }
+        if (!pay_mana(
+                player_state,
+                disintegrate_cost(action.x_value)) ||
+            !remove_card(
+                player_state.hand, CardId::Disintegrate)) {
+            return false;
+        }
+        state.stack.push_back({
+            .id = state.next_stack_object_id++,
+            .card = CardId::Disintegrate,
+            .controller = player,
+            .target = action.target,
+            .spell_target = std::nullopt,
+            .x_value = action.x_value,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::CastGiantGrowth: {
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        const auto& definition =
+            card_definition(CardId::GiantGrowth);
+        if (!pay_mana(player_state, definition.cost) ||
+            !remove_card(
+                player_state.hand, CardId::GiantGrowth)) {
+            return false;
+        }
+        state.stack.push_back({
+            .id = state.next_stack_object_id++,
+            .card = CardId::GiantGrowth,
+            .controller = player,
+            .target = action.target,
+            .spell_target = std::nullopt,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
     case PriorityActionKind::CastCounterspell: {
         const auto& definition = card_definition(CardId::Counterspell);
         if (!action.spell_target.has_value() ||
@@ -4839,6 +5292,50 @@ bool resolve_top_of_stack(GameState& state) {
         return true;
     }
 
+    if (spell.card == CardId::GiantGrowth) {
+        if (spell.target.has_value() &&
+            spell.target->creature.has_value()) {
+            auto* creature = find_creature(
+                state.players[spell.target->player],
+                *spell.target->creature);
+            if (creature != nullptr) {
+                creature->temporary_power_bonus += 3;
+                creature->temporary_toughness_bonus += 3;
+            }
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
+    if (spell.card == CardId::Disintegrate) {
+        if (spell.target.has_value()) {
+            const Target& target = *spell.target;
+            if (target.creature.has_value()) {
+                auto* creature = find_creature(
+                    state.players[target.player],
+                    *target.creature);
+                if (creature != nullptr) {
+                    if (spell.x_value > 0) {
+                        creature->exile_on_death_this_turn = true;
+                    }
+                    creature->damage += spell.x_value;
+                    remove_dead_creatures(
+                        state.players[target.player]);
+                }
+            } else {
+                state.players[target.player].life -= spell.x_value;
+                if (target.player ==
+                    opponent_of(spell.controller)) {
+                    state.stats[spell.controller]
+                        .damage_to_opponent +=
+                        static_cast<std::size_t>(spell.x_value);
+                }
+            }
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
     if (spell.card == CardId::Counterspell) {
         if (spell.spell_target.has_value()) {
             const auto target = std::find_if(
@@ -4926,9 +5423,13 @@ bool resolve_combat(
         if (!attacker_ids.contains(attacker_id)) {
             return false;
         }
+        const auto* attacker =
+            find_creature(state.players[attacking_player], attacker_id);
         const auto* blocker =
             find_creature(state.players[defending_player], blocker_id);
         if (blocker == nullptr || blocker->tapped ||
+            attacker == nullptr ||
+            !can_block_creature(*attacker, *blocker) ||
             !blocker_ids.insert(blocker_id).second) {
             return false;
         }
@@ -4944,14 +5445,14 @@ bool resolve_combat(
         auto* attacker =
             find_creature(state.players[attacking_player], attacker_id);
         attacker->tapped = true;
-        const auto& attacker_definition = card_definition(attacker->card);
+        const int attacker_power = creature_power(*attacker);
         const auto blocker_group = blockers_by_attacker.find(attacker_id);
 
         if (blocker_group == blockers_by_attacker.end()) {
             state.players[defending_player].life -=
-                attacker_definition.power;
+                attacker_power;
             state.stats[attacking_player].damage_to_opponent +=
-                static_cast<std::size_t>(attacker_definition.power);
+                static_cast<std::size_t>(attacker_power);
             continue;
         }
 
@@ -4959,16 +5460,16 @@ bool resolve_combat(
         for (const PermanentId blocker_id : blocker_group->second) {
             const auto* blocker =
                 find_creature(state.players[defending_player], blocker_id);
-            attacker_damage += card_definition(blocker->card).power;
+            attacker_damage += creature_power(*blocker);
         }
         attacker->damage += attacker_damage;
 
-        int damage_remaining = attacker_definition.power;
+        int damage_remaining = attacker_power;
         for (const PermanentId blocker_id : blocker_group->second) {
             auto* blocker =
                 find_creature(state.players[defending_player], blocker_id);
             const int lethal_damage =
-                std::max(0, card_definition(blocker->card).toughness -
+                std::max(0, creature_toughness(*blocker) -
                                 blocker->damage);
             const int assigned_damage =
                 std::min(damage_remaining, lethal_damage);
@@ -5001,6 +5502,9 @@ void cleanup_turn(GameState& state) {
     for (auto& player : state.players) {
         for (auto& creature : player.creatures) {
             creature.damage = 0;
+            creature.temporary_power_bonus = 0;
+            creature.temporary_toughness_bonus = 0;
+            creature.exile_on_death_this_turn = false;
         }
     }
 }
@@ -5208,7 +5712,7 @@ PriorityAction Game::choose_priority_action(
         return actions[chosen];
     }
     if (bot.kind == BotKind::Handcrafted) {
-        return choose_handcrafted_action(actions, player);
+        return choose_handcrafted_action(actions, player, phase);
     }
     if (bot.kind == BotKind::Learned) {
         if (bot.learned_variant == LearnedVariant::UnifiedActor) {
@@ -5864,11 +6368,13 @@ double Game::learned_value_search_action_score(
 }
 
 PriorityAction Game::choose_handcrafted_action(
-    const std::vector<PriorityAction>& actions, std::size_t player) {
+    const std::vector<PriorityAction>& actions, std::size_t player,
+    TurnPhase phase) {
     std::vector<double> scores;
     scores.reserve(actions.size());
     for (const auto& action : actions) {
-        scores.push_back(handcrafted_action_score(action, player));
+        scores.push_back(
+            handcrafted_action_score(action, player, phase));
     }
 
     const double best_score =
@@ -5885,7 +6391,8 @@ PriorityAction Game::choose_handcrafted_action(
 }
 
 double Game::handcrafted_action_score(const PriorityAction& action,
-                                      std::size_t player) const {
+                                      std::size_t player,
+                                      TurnPhase phase) const {
     const auto& player_state = state_.players[player];
     const std::size_t opponent = opponent_of(player);
     const auto& opponent_state = state_.players[opponent];
@@ -5899,7 +6406,46 @@ double Game::handcrafted_action_score(const PriorityAction& action,
         return state_.stack.empty() ? -10.0 : 0.0;
 
     case PriorityActionKind::PlayLand:
-        return 4'000.0;
+        {
+            PlayerState with_land = player_state;
+            with_land.lands.push_back({
+                .card = action.card,
+                .tapped = false,
+            });
+            double score = 4'000.0;
+            for (const CardId card : player_state.hand) {
+                const auto& definition = card_definition(card);
+                if (definition.type == CardType::Land) {
+                    continue;
+                }
+                if (!can_pay(player_state, definition.cost) &&
+                    can_pay(with_land, definition.cost)) {
+                    score +=
+                        500.0 + handcrafted_card_value(card);
+                }
+
+                int matching_symbols = 0;
+                switch (action.card) {
+                case CardId::Forest:
+                    matching_symbols = definition.cost.green;
+                    break;
+                case CardId::Mountain:
+                    matching_symbols = definition.cost.red;
+                    break;
+                case CardId::Island:
+                    matching_symbols = definition.cost.blue;
+                    break;
+                case CardId::Plains:
+                    matching_symbols = definition.cost.white;
+                    break;
+                default:
+                    break;
+                }
+                score += 25.0 *
+                         static_cast<double>(matching_symbols);
+            }
+            return score;
+        }
 
     case PriorityActionKind::CastCreature: {
         double score = 1'200.0 + handcrafted_card_value(action.card);
@@ -5967,13 +6513,138 @@ double Game::handcrafted_action_score(const PriorityAction& action,
             if (target == opponent_state.creatures.end()) {
                 return -10'000.0;
             }
-            const auto& definition = card_definition(target->card);
             const bool lethal =
                 target->damage + card_definition(CardId::LightningBolt)
                                      .effect_damage >=
-                definition.toughness;
+                creature_toughness(*target);
             return (lethal ? 2'000.0 : 500.0) +
                    handcrafted_card_value(target->card);
+        }
+
+    case PriorityActionKind::CastDisintegrate:
+        if (!action.target.has_value() ||
+            action.target->player == player) {
+            return -10'000.0;
+        }
+        if (action.x_value == 0) {
+            return -100.0;
+        }
+        if (!action.target->creature.has_value()) {
+            if (opponent_state.life <= action.x_value) {
+                return 10'000.0;
+            }
+            return 700.0 +
+                   150.0 * static_cast<double>(action.x_value) +
+                   10.0 *
+                       static_cast<double>(20 - opponent_state.life);
+        } else {
+            const auto target = std::find_if(
+                opponent_state.creatures.begin(),
+                opponent_state.creatures.end(),
+                [&](const CreaturePermanent& creature) {
+                    return creature.id ==
+                           *action.target->creature;
+                });
+            if (target == opponent_state.creatures.end()) {
+                return -10'000.0;
+            }
+            const bool lethal =
+                target->damage + action.x_value >=
+                creature_toughness(*target);
+            if (lethal) {
+                return 2'000.0 +
+                       handcrafted_card_value(target->card);
+            }
+            return 300.0 +
+                   100.0 * static_cast<double>(action.x_value);
+        }
+
+    case PriorityActionKind::CastGiantGrowth:
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value() ||
+            action.target->player != player) {
+            return -10'000.0;
+        }
+        {
+            const auto target = std::find_if(
+                player_state.creatures.begin(),
+                player_state.creatures.end(),
+                [&](const CreaturePermanent& creature) {
+                    return creature.id ==
+                           *action.target->creature;
+                });
+            if (target == player_state.creatures.end()) {
+                return -10'000.0;
+            }
+
+            if (!state_.stack.empty()) {
+                const auto& pending = state_.stack.back();
+                if (pending.controller == opponent &&
+                    pending.target.has_value() &&
+                    pending.target->player == player &&
+                    pending.target->creature ==
+                        action.target->creature) {
+                    int pending_damage = 0;
+                    if (pending.card == CardId::LightningBolt) {
+                        pending_damage =
+                            card_definition(CardId::LightningBolt)
+                                .effect_damage;
+                    } else if (
+                        pending.card == CardId::Disintegrate) {
+                        pending_damage = pending.x_value;
+                    }
+                    const int damage_after_resolution =
+                        target->damage + pending_damage;
+                    if (damage_after_resolution >=
+                            creature_toughness(*target) &&
+                        damage_after_resolution <
+                            creature_toughness(*target) + 3) {
+                        return 9'000.0;
+                    }
+                }
+            }
+
+            if (state_.active_player == player) {
+                int available_power = 0;
+                for (const auto& creature :
+                     player_state.creatures) {
+                    if (!creature.tapped &&
+                        !creature.summoning_sick &&
+                        can_attack_through_moat(
+                            state_, creature)) {
+                        available_power +=
+                            creature_power(creature);
+                    }
+                }
+                const bool target_can_attack =
+                    !target->tapped &&
+                    !target->summoning_sick &&
+                    can_attack_through_moat(state_, *target);
+                if (phase == TurnPhase::BeginCombat &&
+                    target_can_attack &&
+                    available_power <
+                        opponent_state.life &&
+                    available_power + 3 >=
+                        opponent_state.life) {
+                    return 9'500.0;
+                }
+            }
+
+            const bool target_can_attack =
+                state_.active_player == player &&
+                phase == TurnPhase::BeginCombat &&
+                !target->tapped &&
+                !target->summoning_sick &&
+                can_attack_through_moat(state_, *target);
+            if (!target_can_attack) {
+                return -100.0;
+            }
+            return 1'200.0 +
+                   100.0 *
+                       static_cast<double>(
+                           creature_power(*target)) +
+                   200.0 *
+                       static_cast<double>(target->damage);
         }
 
     case PriorityActionKind::CastCounterspell: {
@@ -6088,27 +6759,16 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
             if (!creature.tapped && !creature.summoning_sick &&
                 can_attack_through_moat(state_, creature)) {
                 legal_attackers.push_back(&creature);
-                total_power += card_definition(creature.card).power;
+                total_power += creature_power(creature);
             }
         }
 
         const bool attack_for_lethal =
             total_power >= defending_state.life;
         for (const auto* creature : legal_attackers) {
-            bool favorable_attack = defending_state.creatures.empty();
-            const auto& attacker = card_definition(creature->card);
-            for (const auto& blocker : defending_state.creatures) {
-                if (blocker.tapped) {
-                    continue;
-                }
-                const auto& blocker_definition =
-                    card_definition(blocker.card);
-                if (attacker.power >= blocker_definition.toughness) {
-                    favorable_attack = true;
-                    break;
-                }
-            }
-            if (attack_for_lethal || favorable_attack) {
+            if (attack_for_lethal ||
+                handcrafted_favorable_attack(
+                    *creature, defending_state)) {
                 attackers.push_back(creature->id);
             }
         }
@@ -6295,23 +6955,21 @@ std::optional<GameResult> Game::play_combat_with_attackers(
                           find_creature(attacking_state, left);
                       const auto* right_creature =
                           find_creature(attacking_state, right);
-                      return card_definition(left_creature->card).power >
-                             card_definition(right_creature->card).power;
+                      return creature_power(*left_creature) >
+                             creature_power(*right_creature);
                   });
 
         int incoming_power = 0;
         for (const PermanentId attacker_id : attackers) {
             const auto* attacker =
                 find_creature(attacking_state, attacker_id);
-            incoming_power += card_definition(attacker->card).power;
+            incoming_power += creature_power(*attacker);
         }
         const bool must_block = incoming_power >= defending_state.life;
 
         for (const PermanentId attacker_id : ordered_attackers) {
             const auto* attacker =
                 find_creature(attacking_state, attacker_id);
-            const auto& attacker_definition =
-                card_definition(attacker->card);
             auto best_blocker = unassigned.end();
             double best_score = must_block ? 1.0 : 0.0;
 
@@ -6319,16 +6977,19 @@ std::optional<GameResult> Game::play_combat_with_attackers(
                  blocker != unassigned.end(); ++blocker) {
                 const auto* blocker_creature =
                     find_creature(defending_state, *blocker);
-                const auto& blocker_definition =
-                    card_definition(blocker_creature->card);
+                if (!can_block_creature(
+                        *attacker, *blocker_creature)) {
+                    continue;
+                }
                 const bool kills_attacker =
-                    blocker_definition.power >=
-                    attacker_definition.toughness;
+                    creature_power(*blocker_creature) >=
+                    creature_toughness(*attacker);
                 const bool survives =
-                    blocker_definition.toughness >
-                    attacker_definition.power;
+                    creature_toughness(*blocker_creature) >
+                    creature_power(*attacker);
                 double score =
-                    20.0 * static_cast<double>(attacker_definition.power);
+                    20.0 *
+                    static_cast<double>(creature_power(*attacker));
                 if (kills_attacker) {
                     score += 1'000.0 +
                              handcrafted_card_value(attacker->card);
@@ -6353,8 +7014,8 @@ std::optional<GameResult> Game::play_combat_with_attackers(
     } else if (learned_value_defender) {
         const auto candidates =
             learned_value_block_candidates(
-                attackers, available_blockers, random_, 512,
-                96);
+                state_, state_.active_player, attackers,
+                available_blockers, random_, 512, 96);
         double best_score =
             -std::numeric_limits<double>::infinity();
         std::vector<std::pair<PermanentId, PermanentId>>
@@ -6393,9 +7054,13 @@ std::optional<GameResult> Game::play_combat_with_attackers(
     } else if (learned_actor_defender) {
         for (std::size_t index = 0;
              index < available_blockers.size(); ++index) {
+            const auto legal_attackers =
+                legal_attackers_for_blocker(
+                    state_, state_.active_player,
+                    available_blockers[index], attackers);
             const auto options = block_policy_options(
                 state_, state_.active_player,
-                available_blockers[index], attackers,
+                available_blockers[index], legal_attackers,
                 blockers_by_attacker,
                 available_blockers.size() - index);
             const std::size_t chosen =
@@ -6403,7 +7068,8 @@ std::optional<GameResult> Game::play_combat_with_attackers(
                     state_, config_, options, defending_player,
                     random_);
             if (chosen != 0) {
-                blockers_by_attacker[attackers[chosen - 1]]
+                blockers_by_attacker[
+                    legal_attackers[chosen - 1]]
                     .push_back(available_blockers[index]);
             }
         }
@@ -6412,24 +7078,30 @@ std::optional<GameResult> Game::play_combat_with_attackers(
                      available_blockers.end(), random_);
         for (std::size_t index = 0;
              index < available_blockers.size(); ++index) {
+            const auto legal_attackers =
+                legal_attackers_for_blocker(
+                    state_, state_.active_player,
+                    available_blockers[index], attackers);
             // Zero means no block; other values select an attacker. Multiple
             // blockers may legally select the same attacker.
             std::uniform_int_distribution<std::size_t> choose_block(
-                0, attackers.size());
+                0, legal_attackers.size());
             const std::size_t choice = choose_block(random_);
             if (config_.learned_policy_recorder) {
                 record_uniform_policy_option(
                     state_, config_,
                     block_policy_options(
                         state_, state_.active_player,
-                        available_blockers[index], attackers,
+                        available_blockers[index],
+                        legal_attackers,
                         blockers_by_attacker,
                         available_blockers.size() - index),
                     defending_player, choice);
             }
             if (choice != 0) {
-                blockers_by_attacker[attackers[choice - 1]].push_back(
-                    available_blockers[index]);
+                blockers_by_attacker[
+                    legal_attackers[choice - 1]]
+                    .push_back(available_blockers[index]);
             }
         }
     }
@@ -6447,10 +7119,8 @@ std::optional<GameResult> Game::play_combat_with_attackers(
                               find_creature(defending_state, left);
                           const auto* right_creature =
                               find_creature(defending_state, right);
-                          return card_definition(left_creature->card)
-                                     .toughness <
-                                 card_definition(right_creature->card)
-                                     .toughness;
+                          return creature_toughness(*left_creature) <
+                                 creature_toughness(*right_creature);
                       });
         } else if (learned_actor_attacker) {
             const std::vector<PermanentId> all_blockers = blockers;
@@ -6938,13 +7608,15 @@ SimulationSummary run_matchup(const std::vector<CardId>& first_deck,
 std::vector<CardId> deck_cards(DeckId deck) {
     switch (deck) {
     case DeckId::Green:
-        return green_alpha_deck();
+        return green_deck();
     case DeckId::Red:
-        return red_alpha_deck();
+        return red_deck();
     case DeckId::Blue:
-        return blue_alpha_deck();
+        return blue_deck();
     case DeckId::White:
         return white_control_deck();
+    case DeckId::RUAggro:
+        return ru_aggro_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -6996,7 +7668,7 @@ void merge_bot_matchup_stats(BotMatchupStats& destination,
 
 SimulationSummary run_simulation(std::size_t games, std::uint64_t seed,
                                  GameConfig game_config) {
-    return run_matchup(green_alpha_deck(), red_alpha_deck(), games, seed,
+    return run_matchup(green_deck(), red_deck(), games, seed,
                        game_config);
 }
 
@@ -7010,6 +7682,8 @@ std::string_view deck_name(DeckId deck) {
         return "Blue";
     case DeckId::White:
         return "White";
+    case DeckId::RUAggro:
+        return "RU Aggro";
     }
     return "Unknown";
 }
@@ -7017,14 +7691,18 @@ std::string_view deck_name(DeckId deck) {
 std::string_view deck_list(DeckId deck) {
     switch (deck) {
     case DeckId::Green:
-        return "18 Forest / 9 Grizzly Bears / 12 Ironroot Treefolk / "
-               "1 Tsunami";
+        return "18 Forest / 9 Grizzly Bears / 8 Ironroot Treefolk / "
+               "4 Giant Growth / 1 Tsunami";
     case DeckId::Red:
         return "18 Mountain / 10 Lightning Bolt / 12 Fire Elemental";
     case DeckId::Blue:
         return "18 Island / 14 Counterspell / 8 Water Elemental";
     case DeckId::White:
         return "22 Plains / 3 Millstone / 15 Moat";
+    case DeckId::RUAggro:
+        return "13 Mountain / 4 Island / 3 Flying Men / "
+               "5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / "
+               "3 Lightning Bolt / 2 Disintegrate";
     }
     return "Unknown";
 }
@@ -7197,13 +7875,19 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
         game_config.learned_training_seed;
     summary.bot_matchups = empty_bot_matchups();
 
-    constexpr std::array<std::pair<DeckId, DeckId>, 6> pairings = {{
+    constexpr std::array<std::pair<DeckId, DeckId>,
+                         kDistinctDeckPairingCount>
+        pairings = {{
         {DeckId::Green, DeckId::Red},
         {DeckId::Green, DeckId::Blue},
         {DeckId::Green, DeckId::White},
+        {DeckId::Green, DeckId::RUAggro},
         {DeckId::Red, DeckId::Blue},
         {DeckId::Red, DeckId::White},
+        {DeckId::Red, DeckId::RUAggro},
         {DeckId::Blue, DeckId::White},
+        {DeckId::Blue, DeckId::RUAggro},
+        {DeckId::White, DeckId::RUAggro},
     }};
     std::mt19937_64 seed_generator(seed);
 
@@ -7516,7 +8200,8 @@ LearnedValueAttackSetScores learned_value_attack_set_scores(
 
 std::vector<double> handcrafted_priority_scores(
     const GameState& state, std::size_t player,
-    const std::vector<PriorityAction>& candidates) {
+    const std::vector<PriorityAction>& candidates,
+    TurnPhase phase) {
     if (player >= state.players.size()) {
         throw std::out_of_range(
             "Handcrafted priority player must be 0 or 1");
@@ -7541,7 +8226,8 @@ std::vector<double> handcrafted_priority_scores(
     scores.reserve(candidates.size());
     for (const PriorityAction& candidate : candidates) {
         scores.push_back(
-            evaluator.handcrafted_action_score(candidate, player));
+            evaluator.handcrafted_action_score(
+                candidate, player, phase));
     }
     return scores;
 }
@@ -7566,24 +8252,14 @@ std::array<double, 2> handcrafted_binary_attack_scores(
     for (const PermanentId attacker : legal) {
         const auto* creature =
             find_creature_for_policy(attacking_state, attacker);
-        total_power += card_definition(creature->card).power;
+        total_power += creature_power(*creature);
     }
-    bool favorable_attack = defending_state.creatures.empty();
     const auto* subject_creature =
         find_creature_for_policy(attacking_state, subject);
-    const auto& subject_definition =
-        card_definition(subject_creature->card);
-    for (const CreaturePermanent& blocker :
-         defending_state.creatures) {
-        if (!blocker.tapped &&
-            subject_definition.power >=
-                card_definition(blocker.card).toughness) {
-            favorable_attack = true;
-            break;
-        }
-    }
     const bool include =
-        total_power >= defending_state.life || favorable_attack;
+        total_power >= defending_state.life ||
+        handcrafted_favorable_attack(
+            *subject_creature, defending_state);
     return include ? std::array<double, 2>{0.0, 1.0}
                    : std::array<double, 2>{1.0, 0.0};
 }
@@ -7631,7 +8307,8 @@ train_learned_actor_model(std::size_t training_games,
     }
 
     std::mt19937_64 random(seed);
-    std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
+    std::uniform_int_distribution<std::size_t> choose_deck(
+        0, kDeckCount - 1);
     const auto choose_distinct_decks = [&] {
         const std::size_t first = choose_deck(random);
         std::size_t second = choose_deck(random);
@@ -8187,7 +8864,8 @@ train_learned_value_champion(std::size_t training_games,
     }
 
     std::mt19937_64 random(seed);
-    std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
+    std::uniform_int_distribution<std::size_t> choose_deck(
+        0, kDeckCount - 1);
     const auto choose_distinct_decks = [&] {
         const std::size_t first = choose_deck(random);
         std::size_t second = choose_deck(random);
@@ -8351,7 +9029,8 @@ static LearnedValueG8Result train_learned_value_g8_recipe(
     }
 
     std::mt19937_64 random(seed);
-    std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
+    std::uniform_int_distribution<std::size_t> choose_deck(
+        0, kDeckCount - 1);
     const auto choose_distinct_decks = [&] {
         const std::size_t first = choose_deck(random);
         std::size_t second = choose_deck(random);
@@ -9430,7 +10109,7 @@ WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
         },
     };
     Game evaluator(
-        white_control_deck(), red_alpha_deck(),
+        white_control_deck(), red_deck(),
         seed ^ 0x444941474E4F5354ULL, config);
     evaluator.state_ = diagnostic.state;
 
@@ -9603,7 +10282,19 @@ double BotBenchmarkSummary::confidence_high_95() const {
 }
 
 bool BotBenchmarkSummary::challenger_is_better_95() const {
-    return confidence_low_95() > 50.0;
+    if (confidence_low_95() <= 50.0) {
+        return false;
+    }
+    for (std::size_t deck = 0;
+         deck < challenger_decks.size(); ++deck) {
+        if (challenger_decks[deck].games == 0 ||
+            baseline_decks[deck].games == 0 ||
+            challenger_decks[deck].wins <=
+                baseline_decks[deck].wins) {
+            return false;
+        }
+    }
+    return true;
 }
 
 BotBenchmarkSummary
@@ -9687,10 +10378,14 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         std::uint64_t seed;
     };
     std::vector<BenchmarkTask> tasks;
-    tasks.reserve(repetitions_per_deck_pairing * 40);
-    for (std::size_t first_deck = 0; first_deck < 4; ++first_deck) {
+    const std::size_t benchmark_pairings =
+        kDeckCount * (kDeckCount + 1) / 2;
+    tasks.reserve(repetitions_per_deck_pairing *
+                  benchmark_pairings * 4);
+    for (std::size_t first_deck = 0;
+         first_deck < kDeckCount; ++first_deck) {
         for (std::size_t second_deck = first_deck;
-             second_deck < 4; ++second_deck) {
+             second_deck < kDeckCount; ++second_deck) {
             for (std::size_t repetition = 0;
                  repetition < repetitions_per_deck_pairing;
                  ++repetition) {
@@ -9725,11 +10420,12 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         }
     }
 
-    const std::array<std::vector<CardId>, 4> decks = {
+    const std::array<std::vector<CardId>, kDeckCount> decks = {
         deck_cards(DeckId::Green),
         deck_cards(DeckId::Red),
         deck_cards(DeckId::Blue),
         deck_cards(DeckId::White),
+        deck_cards(DeckId::RUAggro),
     };
     std::vector<GameResult> results(tasks.size());
     std::atomic_size_t next_task = 0;
@@ -9790,9 +10486,9 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         throw std::invalid_argument(
             "deck evolution generations must be positive");
     }
-    if (config.population < 4) {
+    if (config.population < kDeckCount) {
         throw std::invalid_argument(
-            "deck evolution population must be at least four");
+            "deck evolution population must be at least five");
     }
     if (config.repetitions_per_opponent == 0) {
         throw std::invalid_argument(
@@ -9812,11 +10508,12 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
     }
     game_config.bots = {config.pilot, config.pilot};
 
-    const std::array<std::vector<CardId>, 4> metagame = {
+    const std::array<std::vector<CardId>, kDeckCount> metagame = {
         deck_cards(DeckId::Green),
         deck_cards(DeckId::Red),
         deck_cards(DeckId::Blue),
         deck_cards(DeckId::White),
+        deck_cards(DeckId::RUAggro),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kLearnedCardCount> seen_cards{};
@@ -9988,4 +10685,4 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
     return summary;
 }
 
-} // namespace alpha
+} // namespace old_school

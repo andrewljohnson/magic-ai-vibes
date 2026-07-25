@@ -2606,3 +2606,353 @@ stability; if raw G5 retains G4's action quality, then the response to search
 share is nonlinear and only then is a smaller searched fraction justified.
 The exact artifact/CLI recipe and numerical gate will be preregistered before
 implementation or execution.
+
+## 2026-07-25: Old School Magic scope expansion (declared before results)
+
+The user explicitly broadened the project from Alpha-only to **Old School
+Magic**, so Arabian Nights cards such as Flying Men are now in scope. This is
+an intentional environment/model-schema boundary, not a tuning result. All
+Alpha-era experiments above remain historical evidence at commit `1f02b63`
+and must not be rewritten.
+
+The first new deck is a 40-card blue-red aggro curve:
+
+- 10 Mountain;
+- 8 Island;
+- 4 Flying Men;
+- 4 Ironclaw Orcs;
+- 4 Gray Ogre;
+- 3 Hill Giant;
+- 4 Lightning Bolt; and
+- 3 Disintegrate.
+
+The user also requested Giant Growth in Green. Its superseding 40-card list is
+18 Forest, 9 Grizzly Bears, 8 Ironroot Treefolk, 4 Giant Growth, and 1
+Tsunami. Giant Growth is `G`, instant, targets a creature, and gives +3/+3
+until cleanup. The bonus is public, uses the stack, is counterable, changes
+combat/lethal-damage calculations, and disappears with marked damage during
+cleanup.
+
+This gives the learner repeated one-, two-, three-, and four-mana development
+choices plus a variable-X mana sink. It also adds real flying/block legality,
+colored-land sequencing, instant versus sorcery timing, damage targeting, and
+stack/counterplay without introducing a Handcrafted teacher.
+
+Rules contract before implementation:
+
+- Flying Men is `U`, 1/1, flying.
+- Ironclaw Orcs is `1R`, 2/2, and cannot block a creature with power 2 or
+  greater.
+- Gray Ogre is `2R`, 2/2.
+- Hill Giant is `3R`, 3/3.
+- Disintegrate is `XR`, sorcery, targets a creature or player, and deals X
+  damage. A creature it damages cannot regenerate that turn and is exiled if
+  it dies that turn. Regeneration has no implementation yet, so the
+  no-regeneration clause is presently vacuous; exile-on-death is observable
+  and must be implemented.
+- Flying attackers can be blocked only by flying creatures in the current
+  card pool. Moat continues to permit flying attackers.
+
+Engineering gates:
+
+1. every new card has an exact definition/cost/stat test;
+2. Disintegrate enumerates every affordable X/target legal action, is
+   sorcery-speed, uses the stack, is counterable, spends exactly `X + R`,
+   damages players/creatures, and exiles a creature that dies later in the
+   same turn;
+3. flying and Ironclaw blocking restrictions are enforced by legal bot
+   choices, sampled search candidates, and final combat validation;
+4. determinization/card conservation include the public exile zone;
+5. the learned observation includes own/opponent exile and all new public
+   card identities while still excluding opponent hand identities;
+6. the RU deck is exactly 40 cards with the declared counts and completes
+   seeded random and learned games;
+7. strict tests, CLI integration, ASan, and UBSan pass.
+
+Adding card identities and a public zone changes the learned feature
+dimensions. Therefore old model artifacts must never be silently interpreted
+under the new schema. Bump the artifact/cache schema/path (or provide an
+explicit, tested migration); fail closed on old dimensions. No pre-expansion
+fingerprint is expected to remain identical in the new binary.
+
+The user subsequently made the transition policy explicit: there is no
+requirement to preserve old executable aliases, card IDs, namespaces,
+fingerprints, label caches, or deterministic seed streams. Prefer the simpler
+clean Old School representation, invalidate prior artifacts, and compare new
+models only within the new environment.
+
+The user then promoted RU Aggro from an additive diagnostic to the fifth full
+metagame deck. Superseding the earlier diagnostic boundary above, all new
+Learned training schedules, paired benchmarks, mixed-field lift verdicts,
+stability panels, and deck evolution must be balanced across Green, Red, Blue,
+White, and RU Aggro. “Learned is king” now means it passes on all five decks.
+Historical four-deck measurements remain notebook history but cannot establish
+strength in the new environment.
+
+Before any comparative five-deck output, freeze the Handcrafted Policy's new
+card heuristics so RU is not evaluated against an accidentally inert baseline:
+
+- Flying Men: 350;
+- Ironclaw Orcs and Gray Ogre: 400 each;
+- Hill Giant: 550; and
+- Disintegrate: 900 when another spell evaluates it as a target.
+- Giant Growth: 650 when another spell evaluates it as a target.
+
+For casting Disintegrate, Handcrafted must reject its own player and own
+creatures; score lethal damage to the opponent at 10,000; otherwise score
+opponent-player damage as `700 + 150*X + 10*(20-life)`; score lethal damage to
+an opposing creature as `2,000 + target-card-value`; and score nonlethal
+creature damage as `300 + 100*X`. These are fixed integration baselines, not
+tuned evidence. Any later change is a bot experiment and must be separately
+declared.
+
+Handcrafted casts Giant Growth only on its own creatures. It scores a response
+that prevents otherwise-lethal pending damage at 9,000, a pump that makes the
+active player's available attack power lethal at 9,500, and other legal
+targets as `1,200 + 100*effective-power + 200*marked-damage`. Opposing
+creatures score -10,000. These rules are likewise frozen integration
+baselines, not strength evidence.
+
+Do not make a bot-strength claim from the engine integration. After all rules
+and schema gates pass, preregister a frozen five-deck
+generation-to-generation benchmark before running it.
+
+### Five-deck engine, balance, and Handcrafted integration check
+
+Declared before the working tree's local verification runs. This is an
+engine/deck-policy integration check, not a Learned-strength experiment and
+cannot promote a Learned model.
+
+Hypotheses and gates:
+
+1. The strict build, all 121 current unit/integration tests, CLI lifecycle,
+   and ASan/UBSan checks pass with the Old School schema.
+2. A 30,000-game-per-matchup Random round robin at seed `424242` completes
+   all ten pairings. "Somewhat balanced" means each deck's decisive-game win
+   share in every pairing is between 40% and 60%; draws are reported
+   separately. If a pairing misses, adjust only deck counts, preserve all
+   user-requested cards and 40-card deck sizes, then validate a candidate on
+   the separate seed `707`.
+3. Handcrafted beats two-rollout Monte Carlo under the fully balanced
+   five-deck paired harness at seed `424242`: aggregate Wilson 95% lower
+   bound above 50%, and strictly more wins for Handcrafted on each of Green,
+   Red, Blue, White, and RU Aggro. Its exact Giant Growth/Disintegrate scores
+   remain the previously frozen integration rules above.
+4. The seeded default mixed run prints every one of the ten matchups, full
+   statistics for all five decks including RU Aggro and Green's four Giant
+   Growths, and an explicit five-deck Learned lift gate. This output is a
+   descriptive single-seed report, never a Learned-is-king verdict.
+
+Planned commands:
+
+```sh
+make test
+./build/old-school-sim --games 30000 --seed 424242 --bots random
+./build/old-school-sim --benchmark --games 5 --seed 424242 \
+  --challenger handcrafted --baseline monte-carlo --rollouts 2
+make run
+```
+
+The 09:47 independent review requested the all-raw G5 causal experiment before
+the feature/schema migration. The user explicitly superseded that sequence by
+requesting a clean Old School break with no compatibility requirement, so the
+old-schema raw-G5 run is intentionally not being attempted in this tree. Its
+unrun declaration remains historical; any analogous experiment must be
+preregistered against a fresh five-deck artifact.
+
+### Handcrafted RU/Giant Growth policy repair
+
+Declared after a read-only audit and before changing or comparatively running
+Handcrafted. The frozen card-value constants and high-level Giant Growth /
+Disintegrate formulas above remain unchanged; this repair removes four
+unambiguously wasteful edge cases:
+
+- treat an attacker with no legal blockers as favorable, so Flying Men attacks
+  into ground-only boards;
+- score Disintegrate with `X=0` below Pass because regeneration is not
+  implemented and it has no effect in this engine;
+- pass the current priority phase into Handcrafted scoring, hold Giant Growth
+  outside the active player's Begin Combat unless it saves a creature from a
+  pending Bolt/Disintegrate, and require the lethal-pump target itself to be
+  untapped, nonsick, and Moat-legal;
+- break Mountain/Island land ties with a generic "newly castable cards plus
+  colored demand in hand" score so RU develops its curve intentionally.
+
+The Giant Growth fallback remains a precombat pump because the current MVP
+does not open priority after attacker or blocker declaration. That limitation
+will be stated directly rather than claiming full post-block combat-trick
+timing. Adding those windows requires retaining declared combat state through
+information-set search and is a separate rules milestone.
+
+Required regressions: Flying Men attacks through a Bear-only defense in both
+the deployed and diagnostic Handcrafted paths; X=0 loses to Pass; Growth saves
+a Bolt target, pumps only a real lethal attacker, and is otherwise held until
+own Begin Combat; the land scorer chooses a color that unlocks a spell. The
+already-declared five-deck Handcrafted-versus-Monte-Carlo run is the integration
+gate; no numerical tuning will be performed against that result.
+
+The predeclared Random balance run may expose a policy-dependent conflict:
+uniform Random frequently aims burn at itself and uniformly samples every
+Disintegrate X/target combination, so optimizing only that matrix can reward
+removing the tactical cards that make RU useful for learning. If the Random
+40–60 gate fails, measure the unchanged lists in a 30,000-game-per-matchup
+Handcrafted round robin at the same seed before editing counts:
+
+```sh
+./build/old-school-sim --games 30000 --seed 424242 --bots handcrafted
+```
+
+Prefer a count-only candidate that improves the worst pairing under both
+policies while retaining at least three Flying Men, three Lightning Bolts,
+two Disintegrates, and a visible one-through-four/X curve. Do not accept a
+nominally balanced Random list that collapses the requested tactical content
+to singleton cards. Validate any count change at Random seed `707` and with an
+unchanged Handcrafted policy; otherwise keep the richer list and report the
+policy-dependent imbalance directly.
+
+Count-candidate C1 was selected by a bounded 1,800-list Random development
+search (600 games against each incumbent deck, seed family rooted at
+`424242`) under those content floors. Its RU list is 13 Mountain, 4 Island,
+3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt,
+and 2 Disintegrate. The small development estimate for RU against
+Green/Red/Blue/White was 34.0%/50.3%/34.7%/59.7%, improving the original
+17.8%/43.0%/26.0%/64.6% pattern but still missing the 40% floor against
+Green and Blue.
+
+C1 therefore also makes two deliberately small incumbent power reductions:
+Green becomes 20 Forest, 8 Bears, 7 Treefolk, 4 Giant Growth, 1 Tsunami;
+Blue becomes 20 Island, 12 Counterspell, 8 Water Elemental. Red and White
+remain unchanged. Hypothesis: on the untouched Random validation seed `707`,
+all ten pairings fall inside the original 40–60 gate. Reject C1 if any misses;
+do not adjust it against seed `707`.
+
+If C1 fails, a separate C2 may operationalize the user's deliberately softer
+"somewhat balanced" request without pretending the 40–60 gate passed. C2
+restores Green and Blue to their pre-C1 Old School counts and retains only
+C1's richer RU count change. The bounded constrained search indicates that
+the requested minimum tactical content cannot reach 40% against both Green
+and Blue; lists that do so remove those cards to singletons.
+
+C2's separately predeclared descriptive gate is therefore every Random
+pairing between 30% and 70% on development seed `202`, followed by the same
+gate on untouched seed `303`. This does not replace or pass the stricter
+40–60 experiment: C1 remains rejected if it misses. C2 is accepted only as a
+material "somewhat balanced while still strategically rich" improvement if
+both new seeds pass, RU's worst pairing is at least ten points better than
+the original 17.8% floor, and the Handcrafted five-deck integration gate
+still passes without further heuristic changes.
+
+### Five-deck integration results
+
+The initial exact Random balance command completed 300,000 games in 2.53
+seconds:
+
+```sh
+./build/old-school-sim --games 30000 --seed 424242 --bots random
+```
+
+The original RU list scored 17.8% against Green, 43.0% against Red, 26.0%
+against Blue, and 64.6% against White. Green/Red/Blue/White remained in the
+44.5–57.0% range. Decision: the preregistered 40–60 hypothesis failed badly
+for RU. A bounded 1,800-list search confirmed that meeting it with RU counts
+alone rewards singleton Flying Men/Bolt/Disintegrate lists; those were
+rejected as contrary to the requested strategically rich environment.
+
+The unchanged-deck Handcrafted diagnostic also demonstrated that "deck
+balance" is policy-dependent:
+
+```sh
+./build/old-school-sim --games 30000 --seed 424242 --bots handcrafted
+```
+
+Its ten pairing rates ranged from Green's 1.3% against White to White's 98.7%;
+the original RU list was 34.1%/42.7%/18.6%/83.7% against
+Green/Red/Blue/White. This was measurement only. Handcrafted exploits hard
+locks and Counterspell far more consistently than Random, so no count-only
+five-deck list can be near 50% under both policies without removing the
+strategic distinctions the learner is meant to face.
+
+C1 was then validated exactly as declared:
+
+```sh
+./build/old-school-sim --games 30000 --seed 707 --bots random
+```
+
+Four pairings missed 40–60: Green/Blue was 38.4%/61.6%, Green/RU was
+67.0%/33.0%, Blue/RU was 69.0%/31.0%, and White/RU was 37.9%/62.1%.
+Decision: reject C1 under its original strict gate; do not describe it as a
+40–60-balanced environment.
+
+C2 restored the proven Green/Blue counts and kept only the richer RU count
+repair. Its two separately declared 300,000-game runs were:
+
+```sh
+./build/old-school-sim --games 30000 --seed 202 --bots random
+./build/old-school-sim --games 30000 --seed 303 --bots random
+```
+
+- Seed 202: all ten pairings were 31.6–68.4%.
+- Untouched seed 303: all ten pairings were 31.8–68.2%.
+- RU was 31.6%/49.6%/34.1%/61.4% against
+  Green/Red/Blue/White at seed 202 and
+  31.8%/49.4%/34.0%/61.8% at seed 303.
+
+Decision: accept C2 only for the explicitly softer "somewhat balanced while
+strategically rich" requirement. It improves RU's worst Random matchup by
+14 points while retaining three Flying Men, three Bolts, two Disintegrates,
+and a one/two/three/four/X curve. The strict 40–60 experiment remains a
+recorded failure. A deterministic 30,000-game seed-303 regression now enforces
+the declared 30–70 band.
+
+The Handcrafted repair regressions pass. They cover no-legal-blocker Flying
+Men attacks through a Bear board, no-effect `X=0` Disintegrate losing to Pass,
+Bolt-saving Giant Growth, lethal-pump target eligibility, holding Growth
+outside own Begin Combat, and colored land sequencing. Final integration:
+
+```sh
+./build/old-school-sim --benchmark --games 5 --seed 424242 \
+  --challenger handcrafted --baseline monte-carlo --rollouts 2
+```
+
+Handcrafted won 253–47 (84.3%, 95% interval 79.8–88.0%) and passed every
+challenger-deck slice: Green 50–10, Red 53–7, Blue 51–9, White 54–6, and
+RU Aggro 45–15. This confirms the requested new-card baseline works; it is
+not a Learned-strength result.
+
+Final seeded user-facing report:
+
+```sh
+make run
+```
+
+`make run` now fixes evaluation seed `4242`, ran 1,000 mixed-field games in
+22.42 seconds, printed all ten matchups and all five full deck/stat rows, and
+reported the all-five lift gate. Learned was 66.2% overall versus
+Handcrafted's 70.0%. Per-deck lift passed White and Red, but failed RU,
+Green, and Blue: **2/5, overall gate FAIL**. This is the correct current
+verdict; no Learned-is-king claim is made. RU still lacks held-out probes, and
+Giant Growth tactical probes are also owed before the next learning change.
+
+Strict verification after the final source/deck state:
+
+- `make test`: 78 engine tests, 6 learned-iteration tests, 14 probe tests over
+  16 fixtures, 11 probe-metric tests, 13 probe-runner tests, CLI lifecycle,
+  and representative simulation all pass (122 C++ tests total).
+- strict C++20 build is clean under
+  `-Wall -Wextra -Wpedantic -Werror`.
+- Apple clang 17 ASan/UBSan verification compiled the engine and probe-runner
+  suites at `-O1 -g` with the same strict warnings plus
+  `-fsanitize=address,undefined -fno-omit-frame-pointer`. With
+  `ASAN_OPTIONS=halt_on_error=1` and `UBSAN_OPTIONS=halt_on_error=1`, the
+  engine passed 78/78 and the probe runner passed 13/13 with zero sanitizer
+  findings. The binaries lived in a dedicated temporary directory that was
+  removed after the run.
+
+The newest independent review visible before recording these conclusions is
+still timestamped 10:12. Its 45–55 regression-guard and 3/5 mixed-lift
+statements describe a stale pre-repair count set and are not supported by the
+current exact runs. The current source intentionally carries the honest 30–70
+guard and 2/5 lift result above. Its separate finding that a 16-generation,
+K=8 challenger crossed 50% in the old four-deck environment is promising, but
+must be ported and revalidated across all five decks before it can affect the
+current verdict.

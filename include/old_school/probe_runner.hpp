@@ -1,7 +1,7 @@
 #pragma once
 
-#include "alpha/probe_eval.hpp"
-#include "alpha/probes.hpp"
+#include "old_school/probe_eval.hpp"
+#include "old_school/probes.hpp"
 
 #include <array>
 #include <cstddef>
@@ -14,14 +14,14 @@
 #include <string_view>
 #include <vector>
 
-namespace alpha::probe_runner {
+namespace old_school::probe_runner {
 
 inline constexpr std::string_view kProbeCacheSchema =
-    "alpha-probe-label-cache-v2";
+    "old-school-probe-label-cache-v1";
 inline constexpr std::string_view kProbeReferenceAlgorithm =
     "actor-mirror-common-world-v2";
 inline constexpr std::string_view kProbeSemanticRevision =
-    "probe-score-semantics-v3";
+    "old-school-probe-score-semantics-v1";
 inline constexpr std::uint64_t kProbeReferenceSeed =
     0x50524F4245524546ULL;
 inline constexpr std::uint64_t kProbeProductionPolicySeed =
@@ -34,7 +34,7 @@ struct ProbeScoreConfig {
     std::size_t reference_horizon_turns = 12;
     std::size_t reference_rollouts_per_world = 1;
     std::filesystem::path cache_path =
-        "data/probe-dev-v2.labels.tsv";
+        "data/old-school-probe-dev-v2.labels.tsv";
     bool refresh_cache = false;
 };
 
@@ -99,6 +99,7 @@ struct ReferenceSensitivitySummary {
     std::size_t actor_stable_pair_count = 0;
     std::size_t point_sign_reversal_count = 0;
     std::size_t dual_stable_reversal_count = 0;
+    // Green, Red, Blue, and White; RU Aggro has no dev probes yet.
     std::array<DeckReferenceSensitivity, 4> by_deck{};
     std::vector<ReferenceSensitivityFlag> flags;
 };
@@ -121,6 +122,7 @@ struct DeckLowMarginSummary {
 
 struct LowMarginSummary {
     std::size_t pair_count = 0;
+    // Green, Red, Blue, and White; RU Aggro has no dev probes yet.
     std::array<DeckLowMarginSummary, 4> by_deck{};
     std::vector<LowMarginBestPair> pairs;
 };
@@ -277,4 +279,4 @@ ProbeScoreReport score_probe_dev_v2_with_models(
 std::string format_probe_score_report(
     const ProbeScoreReport& report);
 
-} // namespace alpha::probe_runner
+} // namespace old_school::probe_runner

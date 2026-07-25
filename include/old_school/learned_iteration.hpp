@@ -1,6 +1,6 @@
 #pragma once
 
-#include "alpha/game.hpp"
+#include "old_school/game.hpp"
 
 #include <array>
 #include <cstddef>
@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace alpha::learned_iteration {
+namespace old_school::learned_iteration {
 
 // Every stochastic part of an iteration receives a seed derived from its
 // semantic domain and stable indices. Adding work in one domain therefore
@@ -34,7 +34,9 @@ std::uint64_t derive_seed(
     std::uint64_t generation, std::uint64_t index,
     std::uint64_t subindex = 0) noexcept;
 
-inline constexpr std::size_t kBalancedPairings = 6;
+inline constexpr std::size_t kBalancedDeckCount = kDeckCount;
+inline constexpr std::size_t kBalancedPairings =
+    kBalancedDeckCount * (kBalancedDeckCount - 1) / 2;
 inline constexpr std::size_t kBalancedGamesPerPairing = 4;
 inline constexpr std::size_t kBalancedScheduleGames =
     kBalancedPairings * kBalancedGamesPerPairing;
@@ -52,8 +54,8 @@ struct ScheduledGame {
     bool operator==(const ScheduledGame&) const = default;
 };
 
-// One block contains each unordered deck pair in both seat orientations and
-// with each seat starting once: 6 * 2 * 2 = 24 games.
+// One block contains each of the ten unordered five-deck pairs in both seat
+// orientations and with each seat starting once: 10 * 2 * 2 = 40 games.
 std::array<ScheduledGame, kBalancedScheduleGames>
 balanced_schedule(std::uint64_t root_seed, std::uint64_t generation,
                   std::uint64_t block_index = 0);
@@ -170,4 +172,4 @@ class ReplayWindow {
     std::deque<Generation> generations_;
 };
 
-} // namespace alpha::learned_iteration
+} // namespace old_school::learned_iteration

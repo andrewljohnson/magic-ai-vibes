@@ -1,4 +1,4 @@
-#include "alpha/learned_iteration.hpp"
+#include "old_school/learned_iteration.hpp"
 
 #include <algorithm>
 #include <array>
@@ -19,8 +19,8 @@
 
 namespace {
 
-namespace iteration = alpha::learned_iteration;
-using alpha::DeckId;
+namespace iteration = old_school::learned_iteration;
+using old_school::DeckId;
 
 class TestRunner {
   public:
@@ -85,13 +85,18 @@ void test_schedule_is_exactly_balanced() {
         iteration::balanced_schedule(424242, 3, 7);
     expect(
         games.size() == iteration::kBalancedScheduleGames,
-        "schedule must contain exactly 24 games");
+        "schedule must contain exactly 40 games");
 
-    std::array<std::size_t, 4> appearances{};
-    std::array<std::size_t, 4> seat_zero{};
-    std::array<std::size_t, 4> seat_one{};
-    std::array<std::size_t, 4> starts{};
-    std::array<std::size_t, 4> draws{};
+    std::array<std::size_t, iteration::kBalancedDeckCount>
+        appearances{};
+    std::array<std::size_t, iteration::kBalancedDeckCount>
+        seat_zero{};
+    std::array<std::size_t, iteration::kBalancedDeckCount>
+        seat_one{};
+    std::array<std::size_t, iteration::kBalancedDeckCount>
+        starts{};
+    std::array<std::size_t, iteration::kBalancedDeckCount>
+        draws{};
     std::array<std::size_t,
                iteration::kBalancedPairings>
         pairing_games{};
@@ -101,9 +106,13 @@ void test_schedule_is_exactly_balanced() {
             {DeckId::Green, DeckId::Red},
             {DeckId::Green, DeckId::Blue},
             {DeckId::Green, DeckId::White},
+            {DeckId::Green, DeckId::RUAggro},
             {DeckId::Red, DeckId::Blue},
             {DeckId::Red, DeckId::White},
+            {DeckId::Red, DeckId::RUAggro},
             {DeckId::Blue, DeckId::White},
+            {DeckId::Blue, DeckId::RUAggro},
+            {DeckId::White, DeckId::RUAggro},
         }};
     std::set<std::pair<DeckId, DeckId>>
         unordered_pairings;
@@ -145,6 +154,9 @@ void test_schedule_is_exactly_balanced() {
             const std::size_t deck =
                 static_cast<std::size_t>(
                     game.seat_decks[seat]);
+            expect(
+                deck < iteration::kBalancedDeckCount,
+                "scheduled deck must belong to the five-deck environment");
             ++appearances[deck];
             if (seat == 0) {
                 ++seat_zero[deck];
@@ -176,14 +188,15 @@ void test_schedule_is_exactly_balanced() {
     expect(
         unordered_pairings.size() ==
             iteration::kBalancedPairings,
-        "schedule must contain all six unordered deck pairs");
-    for (std::size_t deck = 0; deck < 4; ++deck) {
-        expect(appearances[deck] == 12,
-               "each deck needs twelve appearances");
-        expect(seat_zero[deck] == 6 &&
-                   seat_one[deck] == 6,
+        "schedule must contain all ten unordered deck pairs");
+    for (std::size_t deck = 0;
+         deck < iteration::kBalancedDeckCount; ++deck) {
+        expect(appearances[deck] == 16,
+               "each deck needs sixteen appearances");
+        expect(seat_zero[deck] == 8 &&
+                   seat_one[deck] == 8,
                "each deck must be seat-balanced");
-        expect(starts[deck] == 6 && draws[deck] == 6,
+        expect(starts[deck] == 8 && draws[deck] == 8,
                "each deck must be play/draw balanced");
     }
 }
@@ -572,7 +585,7 @@ void test_replay_window_evicts_without_consuming() {
 int main() {
     TestRunner runner;
     runner.run(
-        "balanced 24-game schedule",
+        "balanced 40-game five-deck schedule",
         test_schedule_is_exactly_balanced);
     runner.run(
         "indexed independent seed domains",

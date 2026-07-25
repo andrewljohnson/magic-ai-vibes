@@ -1,4 +1,4 @@
-#include "alpha/probes.hpp"
+#include "old_school/probes.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,26 +9,28 @@
 #include <unordered_set>
 #include <utility>
 
-namespace alpha::probes {
+namespace old_school::probes {
 namespace {
 
 constexpr std::size_t kPlayerCount = 2;
-constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::Moat) + 1;
+constexpr std::size_t kProbeCardCount = kCardCount;
 constexpr std::size_t kCategoryCount =
     static_cast<std::size_t>(Category::WhiteAvoidRedundantMoat) + 1;
-using CardCounts = std::array<std::size_t, kCardCount>;
+using CardCounts = std::array<std::size_t, kProbeCardCount>;
 
 std::vector<CardId> deck_for(DeckId deck) {
     switch (deck) {
     case DeckId::Green:
-        return green_alpha_deck();
+        return green_deck();
     case DeckId::Red:
-        return red_alpha_deck();
+        return red_deck();
     case DeckId::Blue:
-        return blue_alpha_deck();
+        return blue_deck();
     case DeckId::White:
         return white_control_deck();
+    case DeckId::RUAggro:
+        throw std::invalid_argument(
+            "RU Aggro decision probes have not been authored");
     }
     throw std::invalid_argument("unknown probe deck");
 }
@@ -61,6 +63,9 @@ void subtract_card(CardCounts& counts, CardId card) {
 void subtract_public_zones(CardCounts& counts,
                            const PlayerState& player) {
     for (const CardId card : player.graveyard) {
+        subtract_card(counts, card);
+    }
+    for (const CardId card : player.exile) {
         subtract_card(counts, card);
     }
     for (const LandPermanent& land : player.lands) {
@@ -735,6 +740,9 @@ bool exact_card_conservation(const DecisionProbe& probe,
             for (const CardId card : state.graveyard) {
                 add(card);
             }
+            for (const CardId card : state.exile) {
+                add(card);
+            }
             for (const LandPermanent& permanent : state.lands) {
                 add(permanent.card);
             }
@@ -946,7 +954,11 @@ bool reachable_state(const DecisionProbe& probe,
                     card_definition(permanent.card);
                 if (definition.type != CardType::Creature ||
                     permanent.damage < 0 ||
-                    permanent.damage >= definition.toughness) {
+                    permanent.temporary_power_bonus < 0 ||
+                    permanent.temporary_toughness_bonus < 0 ||
+                    permanent.damage >=
+                        definition.toughness +
+                            permanent.temporary_toughness_bonus) {
                     errors.push_back(
                         "creature zone contains a dead or invalid creature");
                     valid = false;
@@ -988,6 +1000,14 @@ bool reachable_state(const DecisionProbe& probe,
                 !stack_ids.insert(object.id).second) {
                 errors.push_back(
                     "stack object has an invalid controller or ID");
+                valid = false;
+            }
+            if (object.x_value < 0 ||
+                (object.x_value != 0 &&
+                 (object.kind != StackObjectKind::Spell ||
+                  object.card != CardId::Disintegrate))) {
+                errors.push_back(
+                    "stack object has an invalid public X value");
                 valid = false;
             }
             if (object.kind == StackObjectKind::Spell &&
@@ -1337,4 +1357,4 @@ std::vector<std::string> validate_probe_dev_v2(
     return errors;
 }
 
-} // namespace alpha::probes
+} // namespace old_school::probes

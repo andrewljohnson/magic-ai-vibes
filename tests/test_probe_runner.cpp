@@ -1,4 +1,4 @@
-#include "alpha/probe_runner.hpp"
+#include "old_school/probe_runner.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <sstream>
@@ -19,16 +20,16 @@
 
 namespace {
 
-using alpha::DeckId;
-using alpha::LearnedActionSamples;
-using alpha::probe_eval::DeckProbeMetrics;
-using alpha::probe_runner::PolicyProbeReport;
-using alpha::probe_runner::ProbeCacheStatus;
-using alpha::probe_runner::ProbeReferenceSamples;
-using alpha::probe_runner::ProbeScoreConfig;
-using alpha::probe_runner::ProbeScoreReport;
-using alpha::probes::DecisionKind;
-using alpha::probes::DecisionProbe;
+using old_school::DeckId;
+using old_school::LearnedActionSamples;
+using old_school::probe_eval::DeckProbeMetrics;
+using old_school::probe_runner::PolicyProbeReport;
+using old_school::probe_runner::ProbeCacheStatus;
+using old_school::probe_runner::ProbeReferenceSamples;
+using old_school::probe_runner::ProbeScoreConfig;
+using old_school::probe_runner::ProbeScoreReport;
+using old_school::probes::DecisionKind;
+using old_school::probes::DecisionProbe;
 
 class TestRunner {
   public:
@@ -131,7 +132,7 @@ std::vector<ProbeReferenceSamples> synthetic_samples(
         for (std::size_t candidate = 0;
              candidate < probes[probe_index].candidates.size();
              ++candidate) {
-            alpha::probe_eval::CandidateSamples values;
+            old_school::probe_eval::CandidateSamples values;
             values.key =
                 probes[probe_index].candidates[candidate].descriptor;
             for (std::size_t sample = 0;
@@ -150,36 +151,116 @@ std::vector<ProbeReferenceSamples> synthetic_samples(
 
 void test_seed_and_fingerprint_ignore_iteration_order() {
     std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v2();
+        old_school::probes::make_probe_dev_v2();
     const std::string first_fingerprint =
-        alpha::probe_runner::corpus_information_set_fingerprint(
+        old_school::probe_runner::corpus_information_set_fingerprint(
             probes);
     const std::uint64_t first_seed =
-        alpha::probe_runner::reference_seed_for_probe(
-            alpha::probes::kProbeDevV2,
+        old_school::probe_runner::reference_seed_for_probe(
+            old_school::probes::kProbeDevV2,
             probes.front().stable_id);
     const std::uint64_t second_seed =
-        alpha::probe_runner::reference_seed_for_probe(
-            alpha::probes::kProbeDevV2,
+        old_school::probe_runner::reference_seed_for_probe(
+            old_school::probes::kProbeDevV2,
             probes[1].stable_id);
-    expect(first_seed == 0xFED079E792FFB92DULL,
+    expect(first_seed == 0x8A710A31F17F94F1ULL,
            "stable FNV-1a seed derivation changed");
     std::reverse(probes.begin(), probes.end());
     expect(
-        alpha::probe_runner::corpus_information_set_fingerprint(
+        old_school::probe_runner::corpus_information_set_fingerprint(
             probes) == first_fingerprint,
         "corpus fingerprint depends on iteration order");
     expect(
-        alpha::probe_runner::reference_seed_for_probe(
-            alpha::probes::kProbeDevV2,
+        old_school::probe_runner::reference_seed_for_probe(
+            old_school::probes::kProbeDevV2,
             probes.back().stable_id) == first_seed,
         "probe seed depends on iteration order");
     expect(first_seed != second_seed,
            "distinct probe IDs received the same test seed");
 }
 
+void test_old_school_fingerprint_covers_new_public_state() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v2();
+    const std::string baseline =
+        old_school::probe_runner::corpus_information_set_fingerprint(
+            probes);
+    const auto expect_changed =
+        [&baseline](const std::vector<DecisionProbe>& changed,
+                    std::string_view message) {
+            expect(
+                old_school::probe_runner::
+                    corpus_information_set_fingerprint(changed) !=
+                    baseline,
+                message);
+        };
+
+    std::vector<DecisionProbe> exile = probes;
+    expect(!exile.front().state.players[0].library.empty(),
+           "fixture has no card available for exile test");
+    const auto exiled =
+        exile.front().state.players[0].library.back();
+    exile.front().state.players[0].library.pop_back();
+    exile.front().state.players[0].exile.push_back(exiled);
+    expect_changed(exile, "public exile did not change fingerprint");
+
+    std::vector<DecisionProbe> marker = probes;
+    auto creature_probe = std::find_if(
+        marker.begin(), marker.end(),
+        [](const DecisionProbe& probe) {
+            return !probe.state.players[0].creatures.empty() ||
+                   !probe.state.players[1].creatures.empty();
+        });
+    expect(creature_probe != marker.end(),
+           "fixture has no creature for exile-marker test");
+    auto& creature_player =
+        !creature_probe->state.players[0].creatures.empty()
+            ? creature_probe->state.players[0]
+            : creature_probe->state.players[1];
+    creature_player.creatures.front().exile_on_death_this_turn = true;
+    expect_changed(
+        marker, "transient Disintegrate marker did not change fingerprint");
+
+    std::vector<DecisionProbe> growth = probes;
+    auto growth_probe = std::find_if(
+        growth.begin(), growth.end(),
+        [](const DecisionProbe& probe) {
+            return !probe.state.players[0].creatures.empty() ||
+                   !probe.state.players[1].creatures.empty();
+        });
+    expect(growth_probe != growth.end(),
+           "fixture has no creature for temporary-bonus test");
+    auto& growth_player =
+        !growth_probe->state.players[0].creatures.empty()
+            ? growth_probe->state.players[0]
+            : growth_probe->state.players[1];
+    growth_player.creatures.front().temporary_power_bonus = 3;
+    growth_player.creatures.front().temporary_toughness_bonus = 3;
+    expect_changed(
+        growth, "temporary Giant Growth bonus did not change fingerprint");
+
+    std::vector<DecisionProbe> stack_x = probes;
+    auto stack_probe = std::find_if(
+        stack_x.begin(), stack_x.end(),
+        [](const DecisionProbe& probe) {
+            return !probe.state.stack.empty();
+        });
+    expect(stack_probe != stack_x.end(),
+           "fixture has no stack object for public-X test");
+    stack_probe->state.stack.front().x_value = 3;
+    expect_changed(stack_x, "public stack X did not change fingerprint");
+
+    std::vector<DecisionProbe> action_x = probes;
+    auto* priority = std::get_if<old_school::PriorityAction>(
+        &action_x.front().candidates.front().action);
+    expect(priority != nullptr,
+           "fixture has no priority action for public-X test");
+    priority->x_value = 2;
+    expect_changed(action_x, "candidate action X did not change fingerprint");
+}
+
 void test_candidate_mapping_is_descriptor_safe() {
-    const auto probes = alpha::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v2();
     const DecisionProbe& priority =
         first_probe_of_kind(probes, DecisionKind::Priority);
     LearnedActionSamples priority_rows;
@@ -189,7 +270,7 @@ void test_candidate_mapping_is_descriptor_safe() {
             {0.1 * static_cast<double>(candidate + 1), 0.5});
     }
     const auto priority_mapped =
-        alpha::probe_runner::map_candidate_samples(
+        old_school::probe_runner::map_candidate_samples(
             priority, priority_rows);
     expect(priority_mapped.size() == priority.candidates.size(),
            "priority mapping lost candidates");
@@ -208,12 +289,12 @@ void test_candidate_mapping_is_descriptor_safe() {
     const LearnedActionSamples attack_rows{
         {{0.2, 0.3}, {0.8, 0.9}}};
     const auto attack_mapped =
-        alpha::probe_runner::map_candidate_samples(
+        old_school::probe_runner::map_candidate_samples(
             attack, attack_rows);
     for (std::size_t candidate = 0;
          candidate < attack.candidates.size(); ++candidate) {
         const auto& decision =
-            std::get<alpha::probes::BinaryAttackDecision>(
+            std::get<old_school::probes::BinaryAttackDecision>(
                 attack.candidates[candidate].action);
         expect(
             attack_mapped[candidate].q_samples ==
@@ -223,23 +304,23 @@ void test_candidate_mapping_is_descriptor_safe() {
 }
 
 void test_reference_resource_bounds_reject_early() {
-    const auto probes = alpha::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v2();
     ProbeScoreConfig config;
     config.reference_worlds = 4097;
     (void)expect_invalid(
         [&]() {
-            (void)alpha::probe_runner::make_probe_cache_metadata(
+            (void)old_school::probe_runner::make_probe_cache_metadata(
                 config, probes, "model");
         },
         "oversized world budget was accepted");
     config.reference_worlds = 2;
     config.reference_horizon_turns = 0;
-    (void)alpha::probe_runner::make_probe_cache_metadata(
+    (void)old_school::probe_runner::make_probe_cache_metadata(
         config, probes, "model");
     config.reference_horizon_turns = 129;
     (void)expect_invalid(
         [&]() {
-            (void)alpha::probe_runner::make_probe_cache_metadata(
+            (void)old_school::probe_runner::make_probe_cache_metadata(
                 config, probes, "model");
         },
         "oversized horizon was accepted");
@@ -247,14 +328,14 @@ void test_reference_resource_bounds_reject_early() {
     config.reference_rollouts_per_world = 257;
     (void)expect_invalid(
         [&]() {
-            (void)alpha::probe_runner::make_probe_cache_metadata(
+            (void)old_school::probe_runner::make_probe_cache_metadata(
                 config, probes, "model");
         },
         "oversized rollout budget was accepted");
 }
 
 void test_cache_roundtrip_and_stale_rejection() {
-    const auto probes = alpha::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v2();
     ProbeScoreConfig config;
     config.training_games = 7;
     config.training_seed = 12345;
@@ -262,15 +343,40 @@ void test_cache_roundtrip_and_stale_rejection() {
     config.reference_horizon_turns = 1;
     config.reference_rollouts_per_world = 1;
     const auto metadata =
-        alpha::probe_runner::make_probe_cache_metadata(
+        old_school::probe_runner::make_probe_cache_metadata(
             config, probes, "synthetic-model-fingerprint-v1");
+    expect(
+        metadata.schema ==
+            "old-school-probe-label-cache-v1",
+        "cache metadata did not use the Old School hard-cut schema");
+    expect(
+        metadata.corpus_id ==
+            "old-school-probe-dev-v2",
+        "cache metadata retained the pre-Old-School corpus identity");
+    expect(
+        metadata.semantic_revision ==
+            "old-school-probe-score-semantics-v1",
+        "cache metadata retained the pre-Old-School semantics identity");
+    expect(
+        ProbeScoreConfig{}.cache_path ==
+            std::filesystem::path(
+                "data/old-school-probe-dev-v2.labels.tsv"),
+        "default cache path can collide with the legacy cache");
     const auto samples = synthetic_samples(probes, 2);
     TemporaryDirectory directory;
     const auto path = directory.path() / "nested" / "labels.tsv";
-    alpha::probe_runner::write_probe_label_cache_atomic(
+    old_school::probe_runner::write_probe_label_cache_atomic(
         path, metadata, probes, samples);
     expect(std::filesystem::exists(path),
            "atomic cache writer did not publish target");
+    {
+        std::ifstream cache(path);
+        std::string magic;
+        std::getline(cache, magic);
+        expect(
+            magic == "# old-school-probe-label-cache-v1",
+            "cache writer emitted the legacy magic header");
+    }
     const std::string temporary_prefix =
         path.filename().string() + ".tmp.";
     for (const auto& entry :
@@ -283,7 +389,7 @@ void test_cache_roundtrip_and_stale_rejection() {
     }
 
     const auto labels =
-        alpha::probe_runner::load_probe_label_cache(
+        old_school::probe_runner::load_probe_label_cache(
             path, metadata, probes);
     expect(labels.size() == probes.size(),
            "cache roundtrip changed probe count");
@@ -294,7 +400,7 @@ void test_cache_roundtrip_and_stale_rejection() {
     ++stale.training_seed;
     const std::string error = expect_invalid(
         [&]() {
-            (void)alpha::probe_runner::load_probe_label_cache(
+            (void)old_school::probe_runner::load_probe_label_cache(
                 path, stale, probes);
         },
         "stale cache metadata was accepted");
@@ -307,7 +413,7 @@ void test_cache_roundtrip_and_stale_rejection() {
         "different-model-fingerprint";
     const std::string model_error = expect_invalid(
         [&]() {
-            (void)alpha::probe_runner::load_probe_label_cache(
+            (void)old_school::probe_runner::load_probe_label_cache(
                 path, stale, probes);
         },
         "cache from a different exact model was accepted");
@@ -319,38 +425,54 @@ void test_cache_roundtrip_and_stale_rejection() {
     stale.semantic_revision = "old-semantics";
     const std::string semantics_error = expect_invalid(
         [&]() {
-            (void)alpha::probe_runner::load_probe_label_cache(
+            (void)old_school::probe_runner::load_probe_label_cache(
                 path, stale, probes);
         },
         "cache from a different scoring revision was accepted");
     expect(semantics_error.find("semantic_revision") !=
                std::string::npos,
            "semantic-revision mismatch was not identified");
+
+    const auto legacy_path =
+        directory.path() / "legacy-alpha-cache.tsv";
+    {
+        std::ofstream legacy(legacy_path);
+        legacy << "# alpha-probe-label-cache-v2\n";
+    }
+    const std::string legacy_error = expect_invalid(
+        [&]() {
+            (void)old_school::probe_runner::load_probe_label_cache(
+                legacy_path, metadata, probes);
+        },
+        "legacy Alpha cache magic was accepted");
+    expect(legacy_error.find("unknown magic header") !=
+               std::string::npos,
+           "legacy cache rejection did not identify its magic");
 }
 
 void test_hidden_clone_preserves_information_set() {
     std::vector<DecisionProbe> probes =
-        alpha::probes::make_probe_dev_v2();
+        old_school::probes::make_probe_dev_v2();
     DecisionProbe clone_probe = probes.front();
     clone_probe.state =
-        alpha::probe_runner::hidden_repartition_clone(
+        old_school::probe_runner::hidden_repartition_clone(
             probes.front());
     std::vector<DecisionProbe> clone_corpus = probes;
     clone_corpus.front() = clone_probe;
 
     expect(
-        alpha::probe_runner::corpus_information_set_fingerprint(
+        old_school::probe_runner::corpus_information_set_fingerprint(
             probes) ==
-            alpha::probe_runner::corpus_information_set_fingerprint(
+            old_school::probe_runner::corpus_information_set_fingerprint(
                 clone_corpus),
         "opponent hidden repartition changed corpus fingerprint");
-    expect(alpha::probes::hidden_clone_is_determinization_invariant(
+    expect(old_school::probes::hidden_clone_is_determinization_invariant(
                probes.front(), 99123),
            "probe clone changed fixed-seed determinization");
 }
 
 void test_tiny_reference_is_hidden_clone_invariant() {
-    const auto probes = alpha::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v2();
     ProbeScoreConfig config;
     config.training_games = 1;
     config.training_seed = 777;
@@ -358,10 +480,10 @@ void test_tiny_reference_is_hidden_clone_invariant() {
     config.reference_horizon_turns = 1;
     config.reference_rollouts_per_world = 1;
     const auto model =
-        alpha::train_learned_actor_model(
+        old_school::train_learned_actor_model(
             config.training_games, config.training_seed);
     const auto samples =
-        alpha::probe_runner::generate_probe_reference_samples(
+        old_school::probe_runner::generate_probe_reference_samples(
             probes.front(), model, config);
     expect(samples.stable_id == probes.front().stable_id,
            "tiny reference returned wrong probe ID");
@@ -375,34 +497,34 @@ void test_tiny_reference_is_hidden_clone_invariant() {
 }
 
 void test_value_attack_probe_scores_are_seed_independent() {
-    const auto probes = alpha::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v2();
     const auto value_model =
-        alpha::train_learned_value_champion(1, 778);
+        old_school::train_learned_value_champion(1, 778);
     for (const DecisionProbe& probe : probes) {
         if (probe.decision_kind != DecisionKind::Attack) {
             continue;
         }
-        std::vector<std::vector<alpha::PermanentId>> attack_sets;
+        std::vector<std::vector<old_school::PermanentId>> attack_sets;
         for (const auto& candidate : probe.candidates) {
             const auto& decision =
-                std::get<alpha::probes::BinaryAttackDecision>(
+                std::get<old_school::probes::BinaryAttackDecision>(
                     candidate.action);
             attack_sets.push_back(
                 decision.include
-                    ? std::vector<alpha::PermanentId>{
+                    ? std::vector<old_school::PermanentId>{
                           decision.attacker}
-                    : std::vector<alpha::PermanentId>{});
+                    : std::vector<old_school::PermanentId>{});
         }
         const std::uint64_t deployed_seed =
-            alpha::probe_runner::reference_seed_for_probe(
-                alpha::probes::kProbeDevV2, probe.stable_id,
-                alpha::probe_runner::kProbeProductionPolicySeed);
+            old_school::probe_runner::reference_seed_for_probe(
+                old_school::probes::kProbeDevV2, probe.stable_id,
+                old_school::probe_runner::kProbeProductionPolicySeed);
         const auto first =
-            alpha::learned_value_attack_set_scores(
+            old_school::learned_value_attack_set_scores(
                 probe.state, probe.root_player, attack_sets,
                 value_model, deployed_seed);
         const auto second =
-            alpha::learned_value_attack_set_scores(
+            old_school::learned_value_attack_set_scores(
                 probe.state, probe.root_player, attack_sets,
                 value_model, deployed_seed + 1);
         expect(first.scores == second.scores &&
@@ -414,19 +536,19 @@ void test_value_attack_probe_scores_are_seed_independent() {
 }
 
 void test_value_decision_detail_respects_ties_and_selectors() {
-    const auto label = alpha::probe_eval::make_probe_label(
+    const auto label = old_school::probe_eval::make_probe_label(
         "red.synthetic-selection", DeckId::Red,
         {
             {"best", {0.8, 0.8}},
             {"other", {0.4, 0.4}},
         });
-    const alpha::probe_eval::ProbePrediction uniform_tie{
+    const old_school::probe_eval::ProbePrediction uniform_tie{
         "red.synthetic-selection",
         {{"other", 1.0}, {"best", 1.0}},
         0.7,
     };
     const auto uniform_detail =
-        alpha::probe_runner::make_value_probe_decision_detail(
+        old_school::probe_runner::make_value_probe_decision_detail(
             label, uniform_tie);
     expect(
         uniform_detail.selected_keys ==
@@ -442,14 +564,14 @@ void test_value_decision_detail_respects_ties_and_selectors() {
             std::abs(uniform_detail.critic_error - 0.1) < 1.0e-12,
         "uniform tie detail did not use expected selected-action Q");
 
-    const alpha::probe_eval::ProbePrediction deterministic_tie{
+    const old_school::probe_eval::ProbePrediction deterministic_tie{
         "red.synthetic-selection",
         {{"best", 1.0}, {"other", 1.0}},
         0.5,
         "other",
     };
     const auto deterministic_detail =
-        alpha::probe_runner::make_value_probe_decision_detail(
+        old_school::probe_runner::make_value_probe_decision_detail(
             label, deterministic_tie, &uniform_detail,
             &uniform_detail);
     expect(
@@ -469,7 +591,7 @@ void test_value_decision_detail_respects_ties_and_selectors() {
         "deterministic detail did not use its selected candidate");
 
     const auto persistent_detail =
-        alpha::probe_runner::make_value_probe_decision_detail(
+        old_school::probe_runner::make_value_probe_decision_detail(
             label, deterministic_tie, &uniform_detail,
             &deterministic_detail);
     expect(
@@ -480,7 +602,7 @@ void test_value_decision_detail_respects_ties_and_selectors() {
 }
 
 void test_low_margin_summary_is_actionable() {
-    const auto label = alpha::probe_eval::make_probe_label(
+    const auto label = old_school::probe_eval::make_probe_label(
         "green.low-margin", DeckId::Green,
         {
             {"best", {0.60, 0.60, 0.60, 0.60}},
@@ -488,7 +610,7 @@ void test_low_margin_summary_is_actionable() {
             {"far", {0.20, 0.20, 0.20, 0.20}},
         });
     const auto summary =
-        alpha::probe_runner::summarize_low_margin_best_pairs(
+        old_school::probe_runner::summarize_low_margin_best_pairs(
             {label});
     expect(summary.pair_count == 1 &&
                summary.by_deck[0].pair_count == 1,
@@ -504,18 +626,19 @@ void test_report_contains_required_schema_and_caveats() {
     ProbeScoreReport report;
     report.metadata = {
         .schema =
-            std::string(alpha::probe_runner::kProbeCacheSchema),
+            std::string(old_school::probe_runner::kProbeCacheSchema),
         .algorithm =
-            std::string(alpha::probe_runner::
+            std::string(old_school::probe_runner::
                             kProbeReferenceAlgorithm),
         .semantic_revision =
-            std::string(alpha::probe_runner::
+            std::string(old_school::probe_runner::
                             kProbeSemanticRevision),
-        .corpus_id = "probe-dev-v2",
+        .corpus_id =
+            std::string(old_school::probes::kProbeDevV2),
         .reference_seed =
-            alpha::probe_runner::kProbeReferenceSeed,
+            old_school::probe_runner::kProbeReferenceSeed,
         .production_policy_seed =
-            alpha::probe_runner::kProbeProductionPolicySeed,
+            old_school::probe_runner::kProbeProductionPolicySeed,
         .training_seed = 424242,
         .training_games = 800,
         .worlds = 128,
@@ -532,7 +655,7 @@ void test_report_contains_required_schema_and_caveats() {
     report.scoring_actor_model_fingerprint =
         "actor-candidate-fingerprint";
     report.value_model_fingerprint = "value-model-fingerprint";
-    alpha::probe_eval::ProbeMetricSummary metrics;
+    old_school::probe_eval::ProbeMetricSummary metrics;
     metrics.probe_count = 16;
     metrics.stable_pair_count = 9;
     metrics.top1_expected_agreement = 0.75;
@@ -565,7 +688,7 @@ void test_report_contains_required_schema_and_caveats() {
         PolicyProbeReport{"Value-continuation deep cross-check",
                           "deep", metrics, true, std::nullopt},
     };
-    alpha::probe_eval::CandidateQFitSummary q_fit;
+    old_school::probe_eval::CandidateQFitSummary q_fit;
     q_fit.candidate_count = 32;
     q_fit.mae = 0.03;
     q_fit.rmse = 0.04;
@@ -620,15 +743,17 @@ void test_report_contains_required_schema_and_caveats() {
     });
 
     const std::string output =
-        alpha::probe_runner::format_probe_score_report(report);
+        old_school::probe_runner::format_probe_score_report(report);
     expect(output.find("actor-model-fingerprint") !=
                    std::string::npos &&
                output.find("actor-candidate-fingerprint") !=
                    std::string::npos,
            "report did not distinguish reference and scoring Actor models");
     expect(output.find(
-               "diagnostic only, 4 positions/deck") !=
-               std::string::npos,
+               "diagnostic only, 4 positions each for "
+               "Green/Red/Blue/White") != std::string::npos &&
+               output.find("RU Aggro is not represented") !=
+                   std::string::npos,
            "report omitted small-corpus warning");
     expect(output.find("top1") != std::string::npos &&
                output.find("stable pairs") !=
@@ -697,18 +822,19 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
     ProbeScoreReport report;
     report.metadata = {
         .schema =
-            std::string(alpha::probe_runner::kProbeCacheSchema),
+            std::string(old_school::probe_runner::kProbeCacheSchema),
         .algorithm =
-            std::string(alpha::probe_runner::
+            std::string(old_school::probe_runner::
                             kProbeReferenceAlgorithm),
         .semantic_revision =
-            std::string(alpha::probe_runner::
+            std::string(old_school::probe_runner::
                             kProbeSemanticRevision),
-        .corpus_id = "probe-dev-v2",
+        .corpus_id =
+            std::string(old_school::probes::kProbeDevV2),
         .reference_seed =
-            alpha::probe_runner::kProbeReferenceSeed,
+            old_school::probe_runner::kProbeReferenceSeed,
         .production_policy_seed =
-            alpha::probe_runner::kProbeProductionPolicySeed,
+            old_school::probe_runner::kProbeProductionPolicySeed,
         .training_seed = 424242,
         .training_games = 800,
         .worlds = 8,
@@ -720,7 +846,7 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
     };
     report.scoring_actor_model_fingerprint = "actor-scoring";
     report.value_model_fingerprint = "value-g0-fingerprint";
-    alpha::probe_eval::ProbeMetricSummary metrics;
+    old_school::probe_eval::ProbeMetricSummary metrics;
     metrics.probe_count = 1;
     metrics.top1_expected_agreement = 0.5;
     metrics.mean_regret = 0.2;
@@ -800,7 +926,7 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
     }
 
     const std::string output =
-        alpha::probe_runner::format_probe_score_report(report);
+        old_school::probe_runner::format_probe_score_report(report);
     const std::size_t g0 = output.find("value-g0-fingerprint");
     const std::size_t g1 = output.find("value-g1-fingerprint");
     const std::size_t g2 = output.find("value-g2-fingerprint");
@@ -852,11 +978,11 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
 void test_candidate_scoring_reuses_reference_owned_cache() {
     TemporaryDirectory directory;
     const auto reference =
-        alpha::train_learned_actor_model(1, 0xA11CEULL);
+        old_school::train_learned_actor_model(1, 0xA11CEULL);
     const auto candidate =
-        alpha::train_learned_actor_model(1, 0xB0BULL);
-    expect(alpha::learned_model_fingerprint(reference) !=
-               alpha::learned_model_fingerprint(candidate),
+        old_school::train_learned_actor_model(1, 0xB0BULL);
+    expect(old_school::learned_model_fingerprint(reference) !=
+               old_school::learned_model_fingerprint(candidate),
            "tiny candidate model unexpectedly aliases reference content");
 
     const ProbeScoreConfig config{
@@ -870,10 +996,10 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
     };
     std::ostringstream progress;
     const ProbeScoreReport generated =
-        alpha::probe_runner::score_probe_dev_v2_with_models(
+        old_school::probe_runner::score_probe_dev_v2_with_models(
             config, progress, reference, reference, "Actor G0");
     const ProbeScoreReport loaded =
-        alpha::probe_runner::score_probe_dev_v2_with_models(
+        old_school::probe_runner::score_probe_dev_v2_with_models(
             config, progress, reference, candidate, "Actor G1");
 
     expect(generated.cache_status == ProbeCacheStatus::Generated &&
@@ -881,12 +1007,12 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
            "candidate-only change regenerated reference-owned labels");
     expect(generated.metadata == loaded.metadata &&
                generated.metadata.reference_model_fingerprint ==
-                   alpha::learned_model_fingerprint(reference),
+                   old_school::learned_model_fingerprint(reference),
            "candidate-only change altered reference cache identity");
     expect(generated.scoring_actor_model_fingerprint ==
                    generated.metadata.reference_model_fingerprint &&
                loaded.scoring_actor_model_fingerprint ==
-                   alpha::learned_model_fingerprint(candidate),
+                   old_school::learned_model_fingerprint(candidate),
            "report did not bind the actual scoring Actor");
     expect(generated.policies.front().name == "Actor G0 raw head" &&
                loaded.policies.front().name == "Actor G1 raw head",
@@ -897,7 +1023,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
 
     const std::string null_error = expect_invalid(
         [&] {
-            alpha::probe_runner::score_probe_dev_v2_with_models(
+            old_school::probe_runner::score_probe_dev_v2_with_models(
                 config, progress, nullptr, candidate, "Actor G1");
         },
         "null reference Actor was accepted");
@@ -906,7 +1032,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
            "null model error was not actionable");
     const std::string name_error = expect_invalid(
         [&] {
-            alpha::probe_runner::score_probe_dev_v2_with_models(
+            old_school::probe_runner::score_probe_dev_v2_with_models(
                 config, progress, reference, candidate,
                 "Actor\tG1");
         },
@@ -916,17 +1042,17 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
            "unsafe candidate name error was not actionable");
 
     const auto reference_value =
-        alpha::train_learned_value_champion(
+        old_school::train_learned_value_champion(
             1, 0xA11CEULL);
     const auto scoring_value =
-        alpha::train_learned_value_champion(
+        old_school::train_learned_value_champion(
             1, 0xB0BULL);
     expect(
-        alpha::learned_model_fingerprint(reference_value) !=
-            alpha::learned_model_fingerprint(scoring_value),
+        old_school::learned_model_fingerprint(reference_value) !=
+            old_school::learned_model_fingerprint(scoring_value),
         "tiny Value candidate unexpectedly aliases reference content");
     const ProbeScoreReport value_loaded =
-        alpha::probe_runner::score_probe_dev_v2_with_candidates(
+        old_school::probe_runner::score_probe_dev_v2_with_candidates(
             config, progress,
             {
                 .reference_actor_model = reference,
@@ -944,9 +1070,9 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
         "Value candidate changed Actor-owned cache identity");
     expect(
         value_loaded.value_model_fingerprint ==
-                alpha::learned_model_fingerprint(reference_value) &&
+                old_school::learned_model_fingerprint(reference_value) &&
             value_loaded.scoring_value_model_fingerprint ==
-                alpha::learned_model_fingerprint(scoring_value),
+                old_school::learned_model_fingerprint(scoring_value),
         "report did not bind reference and scoring Value models");
     expect(
         value_loaded.policies.size() == 6 &&
@@ -962,7 +1088,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 "Value G0-continuation deep cross-check",
         "Value candidate/reference policy rows were mislabeled");
     const std::string value_output =
-        alpha::probe_runner::format_probe_score_report(
+        old_school::probe_runner::format_probe_score_report(
             value_loaded);
     expect(
         value_output.find("Reference Value model fingerprint") !=
@@ -974,13 +1100,13 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
         "formatted report did not distinguish the Value candidate");
 
     const auto second_scoring_value =
-        alpha::train_learned_value_champion(
+        old_school::train_learned_value_champion(
             1, 0xC0DEULL);
     const auto third_scoring_value =
-        alpha::train_learned_value_champion(
+        old_school::train_learned_value_champion(
             1, 0xD00DULL);
     const ProbeScoreReport checkpoint_loaded =
-        alpha::probe_runner::score_probe_dev_v2_with_candidates(
+        old_school::probe_runner::score_probe_dev_v2_with_candidates(
             config, progress,
             {
                 .reference_actor_model = reference,
@@ -1004,7 +1130,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
         checkpoint_loaded.cache_status == ProbeCacheStatus::Loaded &&
             checkpoint_loaded.metadata == generated.metadata &&
             checkpoint_loaded.metadata.reference_model_fingerprint ==
-                alpha::learned_model_fingerprint(reference),
+                old_school::learned_model_fingerprint(reference),
         "multiple Value checkpoints changed Actor cache identity");
     expect(
         checkpoint_loaded.reference_sensitivity
@@ -1040,16 +1166,16 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 "Value Mix50 G8",
         "Value checkpoint rows did not preserve exact caller order");
     const std::array<std::string, 10> expected_fingerprints{
-        alpha::learned_model_fingerprint(reference_value),
-        alpha::learned_model_fingerprint(scoring_value),
-        alpha::learned_model_fingerprint(second_scoring_value),
-        alpha::learned_model_fingerprint(third_scoring_value),
-        alpha::learned_model_fingerprint(scoring_value),
-        alpha::learned_model_fingerprint(second_scoring_value),
-        alpha::learned_model_fingerprint(third_scoring_value),
-        alpha::learned_model_fingerprint(scoring_value),
-        alpha::learned_model_fingerprint(second_scoring_value),
-        alpha::learned_model_fingerprint(third_scoring_value),
+        old_school::learned_model_fingerprint(reference_value),
+        old_school::learned_model_fingerprint(scoring_value),
+        old_school::learned_model_fingerprint(second_scoring_value),
+        old_school::learned_model_fingerprint(third_scoring_value),
+        old_school::learned_model_fingerprint(scoring_value),
+        old_school::learned_model_fingerprint(second_scoring_value),
+        old_school::learned_model_fingerprint(third_scoring_value),
+        old_school::learned_model_fingerprint(scoring_value),
+        old_school::learned_model_fingerprint(second_scoring_value),
+        old_school::learned_model_fingerprint(third_scoring_value),
     };
     for (std::size_t checkpoint = 0;
          checkpoint < checkpoint_loaded.value_checkpoints.size();
@@ -1069,7 +1195,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             "Value checkpoint details are not in stable-ID order");
     }
     const std::string checkpoint_output =
-        alpha::probe_runner::format_probe_score_report(
+        old_school::probe_runner::format_probe_score_report(
             checkpoint_loaded);
     expect(
         checkpoint_output.find(
@@ -1112,7 +1238,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 std::string::npos,
         "multi-checkpoint output expanded compact rows into full views");
     expect(
-        alpha::probe_runner::format_probe_score_report(generated)
+        old_school::probe_runner::format_probe_score_report(generated)
                 .find("Value checkpoint transitions (compact)") ==
             std::string::npos,
         "legacy five-view output gained a checkpoint section");
@@ -1124,6 +1250,8 @@ int main() {
     TestRunner runner;
     runner.run("stable seed and corpus fingerprint",
                test_seed_and_fingerprint_ignore_iteration_order);
+    runner.run("Old School public-state fingerprint",
+               test_old_school_fingerprint_covers_new_public_state);
     runner.run("candidate descriptor mapping",
                test_candidate_mapping_is_descriptor_safe);
     runner.run("reference resource bounds",
