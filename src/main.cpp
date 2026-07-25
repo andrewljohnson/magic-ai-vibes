@@ -196,7 +196,9 @@ void print_help(std::string_view executable) {
            " [--learned-rollouts N]"
            " [--value-continuation-epsilon X]"
            " [--learned-generations N]"
-           " [--challenger learned-value-context-cN]"
+           " [--challenger learned-value-context-cN|"
+           "learned-value-dense-masked-cN|"
+           "learned-value-dense-context-cN]"
            " [--actor-generation 0|1] [--value-generation 0|8]"
            " [--value-recipe canonical|mix50]"
            " [--probe-cache PATH]"
@@ -255,10 +257,13 @@ void print_help(std::string_view executable) {
            "(default: handcrafted; learned generations: "
            "learned-value-g0..g8, learned-value-cN, "
            "learned-value-context-cN, "
+           "learned-value-dense-masked-cN, "
+           "learned-value-dense-context-cN, "
            "learned-value-mix50-g8, "
            "learned-actor-g0/g1); under --score-probes, "
-           "learned-value-context-cN adds S1 after matching S0 "
-           "selected by --learned-generations N\n"
+           "the context-ablation tokens add their ordered cells "
+           "after matching S0 selected by "
+           "--learned-generations N\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
         << "  --stability     Validate Learned against all policies across "
@@ -294,7 +299,8 @@ void print_help(std::string_view executable) {
         << "  --refresh-probe-cache  Regenerate matching probe labels "
            "atomically\n"
         << "  --refresh-value-challenger-cache  Retrain and atomically "
-           "replace every selected state-only or context Value C<N> "
+           "replace every selected state-only, sparse-context, or "
+           "dense-context Value C<N> "
            "artifact\n"
         << "  --refresh-value-g8-cache  Retrain and atomically replace "
            "the selected canonical Value G8 artifact\n"
@@ -318,6 +324,8 @@ struct BotSelection {
         LegacyG0,
         Challenger,
         ContextChallenger,
+        DenseMaskedChallenger,
+        DenseContextChallenger,
         Canonical,
         Mix50,
     };
@@ -331,6 +339,27 @@ struct BotSelection {
     std::size_t value_generation = 0;
     std::size_t actor_generation = 0;
 };
+
+bool parse_positive_generation_token(
+    std::string_view value, std::string_view prefix,
+    std::size_t& generation) {
+    if (!value.starts_with(prefix)) {
+        return false;
+    }
+    const std::string_view suffix = value.substr(prefix.size());
+    std::uint64_t parsed = 0;
+    const auto result =
+        std::from_chars(suffix.data(),
+                        suffix.data() + suffix.size(), parsed);
+    if (result.ec != std::errc{} ||
+        result.ptr != suffix.data() + suffix.size() ||
+        parsed == 0 ||
+        parsed > std::numeric_limits<std::size_t>::max()) {
+        return false;
+    }
+    generation = static_cast<std::size_t>(parsed);
+    return true;
+}
 
 BotSelection parse_bot(std::string_view value) {
     if (value == "random") {
@@ -355,58 +384,53 @@ BotSelection parse_bot(std::string_view value) {
             .value_generation = 0,
         };
     }
-    constexpr std::string_view context_challenger_generation_prefix =
-        "learned-value-context-c";
-    if (value.starts_with(context_challenger_generation_prefix)) {
-        const std::string_view suffix =
-            value.substr(
-                context_challenger_generation_prefix.size());
-        std::uint64_t generation = 0;
-        const auto result =
-            std::from_chars(suffix.data(),
-                            suffix.data() + suffix.size(),
-                            generation);
-        if (result.ec == std::errc{} &&
-            result.ptr == suffix.data() + suffix.size() &&
-            generation > 0 &&
-            generation <=
-                std::numeric_limits<std::size_t>::max()) {
-            return {
-                .kind = old_school::BotKind::Learned,
-                .learned_variant =
-                    old_school::LearnedVariant::ValueSearchChampion,
-                .value_family =
-                    BotSelection::ValueFamily::ContextChallenger,
-                .value_generation =
-                    static_cast<std::size_t>(generation),
-            };
-        }
+    std::size_t challenger_generation = 0;
+    if (parse_positive_generation_token(
+            value, "learned-value-dense-masked-c",
+            challenger_generation)) {
+        return {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .value_family =
+                BotSelection::ValueFamily::DenseMaskedChallenger,
+            .value_generation = challenger_generation,
+        };
     }
-    constexpr std::string_view challenger_generation_prefix =
-        "learned-value-c";
-    if (value.starts_with(challenger_generation_prefix)) {
-        const std::string_view suffix =
-            value.substr(challenger_generation_prefix.size());
-        std::uint64_t generation = 0;
-        const auto result =
-            std::from_chars(suffix.data(),
-                            suffix.data() + suffix.size(),
-                            generation);
-        if (result.ec == std::errc{} &&
-            result.ptr == suffix.data() + suffix.size() &&
-            generation > 0 &&
-            generation <=
-                std::numeric_limits<std::size_t>::max()) {
-            return {
-                .kind = old_school::BotKind::Learned,
-                .learned_variant =
-                    old_school::LearnedVariant::ValueSearchChampion,
-                .value_family =
-                    BotSelection::ValueFamily::Challenger,
-                .value_generation =
-                    static_cast<std::size_t>(generation),
-            };
-        }
+    if (parse_positive_generation_token(
+            value, "learned-value-dense-context-c",
+            challenger_generation)) {
+        return {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .value_family =
+                BotSelection::ValueFamily::DenseContextChallenger,
+            .value_generation = challenger_generation,
+        };
+    }
+    if (parse_positive_generation_token(
+            value, "learned-value-context-c",
+            challenger_generation)) {
+        return {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .value_family =
+                BotSelection::ValueFamily::ContextChallenger,
+            .value_generation = challenger_generation,
+        };
+    }
+    if (parse_positive_generation_token(
+            value, "learned-value-c", challenger_generation)) {
+        return {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .value_family =
+                BotSelection::ValueFamily::Challenger,
+            .value_generation = challenger_generation,
+        };
     }
     constexpr std::string_view value_generation_prefix =
         "learned-value-g";
@@ -761,6 +785,14 @@ train_value_context_challenger_with_progress(
     std::size_t training_games,
     std::uint64_t training_seed,
     std::size_t generations,
+    bool refresh_cache);
+
+std::shared_ptr<const old_school::LearnedModel>
+train_value_dense_context_challenger_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed,
+    std::size_t generations,
+    old_school::LearnedValueDenseContextTreatment treatment,
     bool refresh_cache);
 
 std::shared_ptr<const old_school::LearnedModel>
