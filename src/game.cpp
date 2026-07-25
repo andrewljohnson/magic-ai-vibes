@@ -19,7 +19,7 @@ class LearnedModel {
     static constexpr std::size_t kCardPlanes = 13;
     static constexpr std::size_t kFeatureCount =
         kScalarFeatureCount + kCardPlanes * kLearnedCardCount;
-    static constexpr std::size_t kHiddenCount = 32;
+    static constexpr std::size_t kHiddenCount = 16;
     using FeatureVector = std::array<double, kFeatureCount>;
     using TrainingExample = std::pair<FeatureVector, double>;
 
@@ -42,25 +42,42 @@ class LearnedModel {
         for (std::size_t index = 0; index < hidden.size(); ++index) {
             output += output_weights_[index] * hidden[index];
         }
+        for (std::size_t feature = 0; feature < features.size();
+             ++feature) {
+            output +=
+                direct_output_weights_[feature] * features[feature];
+        }
         return 1.0 / (1.0 + std::exp(-output));
     }
 
-    void train(std::vector<TrainingExample> examples,
+    void train(const std::vector<TrainingExample>& examples,
                std::size_t epochs, double learning_rate,
                std::uint64_t seed) {
         std::mt19937_64 random(seed);
+        std::vector<std::size_t> order(examples.size());
+        for (std::size_t index = 0; index < order.size(); ++index) {
+            order[index] = index;
+        }
         for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
-            std::shuffle(examples.begin(), examples.end(), random);
+            std::shuffle(order.begin(), order.end(), random);
             const double rate =
                 learning_rate /
                 (1.0 + 0.15 * static_cast<double>(epoch));
-            for (const auto& [features, target] : examples) {
+            for (const std::size_t example_index : order) {
+                const auto& [features, target] =
+                    examples[example_index];
                 const auto hidden = hidden_values(features);
                 double output_sum = output_bias_;
                 for (std::size_t index = 0; index < hidden.size();
                      ++index) {
                     output_sum +=
                         output_weights_[index] * hidden[index];
+                }
+                for (std::size_t feature = 0;
+                     feature < features.size(); ++feature) {
+                    output_sum +=
+                        direct_output_weights_[feature] *
+                        features[feature];
                 }
                 const double output =
                     1.0 / (1.0 + std::exp(-output_sum));
@@ -72,6 +89,11 @@ class LearnedModel {
                      hidden_index < kHiddenCount; ++hidden_index) {
                     output_weights_[hidden_index] -=
                         rate * output_error * hidden[hidden_index];
+                }
+                for (std::size_t feature = 0;
+                     feature < features.size(); ++feature) {
+                    direct_output_weights_[feature] -=
+                        rate * output_error * features[feature];
                 }
                 output_bias_ -= rate * output_error;
 
@@ -114,6 +136,7 @@ class LearnedModel {
         input_weights_{};
     std::array<double, kHiddenCount> hidden_biases_{};
     std::array<double, kHiddenCount> output_weights_{};
+    std::array<double, kFeatureCount> direct_output_weights_{};
     double output_bias_ = 0.0;
 };
 
@@ -1425,6 +1448,15 @@ PriorityAction Game::choose_priority_action(
         return choose_handcrafted_action(actions, player);
     }
     if (bot.kind == BotKind::Learned) {
+        if (bot.exploration_rate > 0.0) {
+            std::bernoulli_distribution explore(
+                bot.exploration_rate);
+            if (explore(random_)) {
+                std::uniform_int_distribution<std::size_t>
+                    choose_action(0, actions.size() - 1);
+                return actions[choose_action(random_)];
+            }
+        }
         return choose_learned_action(actions, player,
                                      sorcery_actions);
     }
@@ -1860,8 +1892,7 @@ std::optional<GameResult> Game::play_combat() {
                     return blockers;
                 }(),
                 random_, 64, 48);
-            double worst_score =
-                std::numeric_limits<double>::infinity();
+            double total_score = 0.0;
             for (const auto& sampled_blocks : block_candidates) {
                 GameState successor = state_;
                 if (!resolve_combat(successor, state_.active_player,
@@ -1880,10 +1911,13 @@ std::optional<GameResult> Game::play_combat() {
                         learned_features(successor,
                                          state_.active_player));
                 }
-                worst_score = std::min(worst_score, sample_score);
+                total_score += sample_score;
             }
-            if (worst_score > best_score) {
-                best_score = worst_score;
+            const double expected_score =
+                total_score /
+                static_cast<double>(block_candidates.size());
+            if (expected_score > best_score) {
+                best_score = expected_score;
                 attackers = candidate;
             }
         }
@@ -2716,10 +2750,14 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
                 BotConfig{
                     .kind = BotKind::Learned,
                     .rollouts_per_action = 0,
+                    .exploration_rate =
+                        generation == 0 ? 0.10 : 0.05,
                 },
                 BotConfig{
                     .kind = BotKind::Learned,
                     .rollouts_per_action = 0,
+                    .exploration_rate =
+                        generation == 0 ? 0.10 : 0.05,
                 },
             };
             const auto first_deck =

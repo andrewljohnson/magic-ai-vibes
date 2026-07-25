@@ -374,7 +374,14 @@ void print_benchmark(const alpha::BotBenchmarkSummary& result,
                   << '-' << challenger.losses << '-' << challenger.draws
                   << "), baseline " << baseline.win_rate() << "% ("
                   << baseline.wins << '-' << baseline.losses << '-'
-                  << baseline.draws << ")\n";
+                  << baseline.draws << ")\n"
+                  << "    Average spells/damage/life: challenger "
+                  << challenger.average_spells_cast() << '/'
+                  << challenger.average_damage_to_opponent() << '/'
+                  << challenger.average_ending_life() << ", baseline "
+                  << baseline.average_spells_cast() << '/'
+                  << baseline.average_damage_to_opponent() << '/'
+                  << baseline.average_ending_life() << '\n';
     }
 }
 
@@ -384,13 +391,25 @@ bool run_stability_panel(std::size_t runs,
                          std::size_t rollouts,
                          std::size_t deep_rollouts,
                          std::size_t training_games) {
-    alpha::BotBenchmarkSummary pooled;
-    pooled.challenger =
+    constexpr std::array<alpha::BotKind, 4> baseline_kinds = {
+        alpha::BotKind::Random,
+        alpha::BotKind::MonteCarlo,
+        alpha::BotKind::DeepMonteCarlo,
+        alpha::BotKind::Handcrafted,
+    };
+    const alpha::BotConfig learned_config =
         bot_config(alpha::BotKind::Learned, rollouts,
                    deep_rollouts, training_games);
-    pooled.baseline =
-        bot_config(alpha::BotKind::Handcrafted, rollouts,
-                   deep_rollouts, training_games);
+    std::array<alpha::BotBenchmarkSummary, baseline_kinds.size()>
+        pooled;
+    std::array<std::size_t, baseline_kinds.size()> seed_wins{};
+    for (std::size_t baseline = 0; baseline < pooled.size();
+         ++baseline) {
+        pooled[baseline].challenger = learned_config;
+        pooled[baseline].baseline =
+            bot_config(baseline_kinds[baseline], rollouts,
+                       deep_rollouts, training_games);
+    }
     const auto merge_bot = [](alpha::BotSimulationStats& destination,
                               const alpha::BotSimulationStats& source) {
         destination.games += source.games;
@@ -411,10 +430,10 @@ bool run_stability_panel(std::size_t runs,
         destination.on_draw_games += source.on_draw_games;
         destination.on_draw_wins += source.on_draw_wins;
     };
-    std::size_t stable_runs = 0;
+    std::size_t all_policy_seed_wins = 0;
 
     std::cout << std::fixed << std::setprecision(1)
-              << "Learned Value vs Handcrafted Policy Stability Panel\n"
+              << "Learned Value All-Policy Stability Panel\n"
               << "Runs: " << runs << '\n'
               << "Repetitions per unordered deck pairing per run: "
               << repetitions_per_deck_pairing
@@ -425,64 +444,94 @@ bool run_stability_panel(std::size_t runs,
     for (std::size_t run = 0; run < runs; ++run) {
         const std::uint64_t seed =
             base_seed + 101ULL * static_cast<std::uint64_t>(run + 1);
-        const auto result = alpha::run_bot_benchmark(
-            repetitions_per_deck_pairing, seed, pooled.challenger,
-            pooled.baseline);
-
-        const bool learned_won =
-            result.challenger_stats.wins >
-            result.baseline_stats.wins;
-        stable_runs += learned_won ? 1 : 0;
-        pooled.total_games += result.total_games;
-        merge_bot(pooled.challenger_stats,
-                  result.challenger_stats);
-        merge_bot(pooled.baseline_stats, result.baseline_stats);
-        for (std::size_t deck = 0;
-             deck < pooled.challenger_decks.size(); ++deck) {
-            merge_deck(pooled.challenger_decks[deck],
-                       result.challenger_decks[deck]);
-            merge_deck(pooled.baseline_decks[deck],
-                       result.baseline_decks[deck]);
+        alpha::GameConfig shared_config;
+        shared_config.learned_model = alpha::train_learned_model(
+            training_games, seed ^ 0x42454E43484E4EULL);
+        bool seed_pass = true;
+        std::cout << "  Seed " << seed << ":\n";
+        for (std::size_t baseline = 0;
+             baseline < baseline_kinds.size(); ++baseline) {
+            const auto result = alpha::run_bot_benchmark(
+                repetitions_per_deck_pairing, seed,
+                learned_config, pooled[baseline].baseline,
+                shared_config);
+            const bool learned_won =
+                result.challenger_stats.wins >
+                result.baseline_stats.wins;
+            seed_wins[baseline] += learned_won ? 1 : 0;
+            seed_pass = seed_pass && learned_won;
+            pooled[baseline].total_games += result.total_games;
+            merge_bot(pooled[baseline].challenger_stats,
+                      result.challenger_stats);
+            merge_bot(pooled[baseline].baseline_stats,
+                      result.baseline_stats);
+            for (std::size_t deck = 0;
+                 deck < result.challenger_decks.size(); ++deck) {
+                merge_deck(
+                    pooled[baseline].challenger_decks[deck],
+                    result.challenger_decks[deck]);
+                merge_deck(pooled[baseline].baseline_decks[deck],
+                           result.baseline_decks[deck]);
+            }
+            std::cout << "    vs "
+                      << alpha::bot_name(baseline_kinds[baseline])
+                      << ": " << result.challenger_stats.wins << '-'
+                      << result.baseline_stats.wins << '-'
+                      << result.challenger_stats.draws << " ("
+                      << result.challenger_win_rate() << "%)"
+                      << (learned_won ? " PASS\n" : " FAIL\n");
         }
+        all_policy_seed_wins += seed_pass ? 1 : 0;
+    }
 
-        std::cout << "  Seed " << seed << ": "
-                  << result.challenger_stats.wins << '-'
+    bool every_policy_passed = true;
+    std::cout << "\nPooled results\n";
+    for (std::size_t baseline = 0;
+         baseline < baseline_kinds.size(); ++baseline) {
+        const auto& result = pooled[baseline];
+        const bool confidence_pass =
+            result.challenger_is_better_95();
+        bool every_deck_won = true;
+        std::cout << "  vs "
+                  << alpha::bot_name(baseline_kinds[baseline])
+                  << ": " << result.challenger_stats.wins << '-'
                   << result.baseline_stats.wins << '-'
                   << result.challenger_stats.draws << " ("
-                  << result.challenger_win_rate() << "% Learned)"
-                  << (learned_won ? "  PASS\n" : "  FAIL\n");
+                  << result.challenger_win_rate()
+                  << "%, 95% interval "
+                  << result.confidence_low_95() << "% to "
+                  << result.confidence_high_95() << "%)\n";
+        for (std::size_t deck = 0;
+             deck < result.challenger_decks.size(); ++deck) {
+            const auto id = static_cast<alpha::DeckId>(deck);
+            const auto& learned =
+                result.challenger_decks[deck];
+            const auto& other = result.baseline_decks[deck];
+            const bool deck_won = learned.wins > other.wins;
+            every_deck_won = every_deck_won && deck_won;
+            std::cout << "    " << alpha::deck_name(id) << ": "
+                      << learned.wins << " vs " << other.wins
+                      << (deck_won ? " PASS\n" : " FAIL\n");
+        }
+        const bool policy_pass =
+            seed_wins[baseline] == runs && confidence_pass &&
+            every_deck_won;
+        every_policy_passed =
+            every_policy_passed && policy_pass;
+        std::cout << "    Seeds " << seed_wins[baseline] << '/'
+                  << runs << ", confidence "
+                  << (confidence_pass ? "PASS" : "FAIL")
+                  << ", decks "
+                  << (every_deck_won ? "PASS" : "FAIL")
+                  << " => " << (policy_pass ? "PASS" : "FAIL")
+                  << '\n';
     }
-
-    std::cout << "\nPooled result\n"
-              << "  Record: " << pooled.challenger_stats.wins << '-'
-              << pooled.baseline_stats.wins << '-'
-              << pooled.challenger_stats.draws << " ("
-              << pooled.challenger_win_rate() << "% Learned)\n"
-              << "  95% interval: " << pooled.confidence_low_95()
-              << "% to " << pooled.confidence_high_95() << "%\n"
-              << "  By Learned deck\n";
-    bool every_deck_won = true;
-    for (std::size_t deck = 0;
-         deck < pooled.challenger_decks.size(); ++deck) {
-        const auto id = static_cast<alpha::DeckId>(deck);
-        const auto& learned = pooled.challenger_decks[deck];
-        const auto& handcrafted = pooled.baseline_decks[deck];
-        const bool deck_won = learned.wins > handcrafted.wins;
-        every_deck_won = every_deck_won && deck_won;
-        std::cout << "    " << alpha::deck_name(id) << ": "
-                  << learned.wins << " Learned wins vs "
-                  << handcrafted.wins << " Handcrafted wins"
-                  << (deck_won ? "  PASS\n" : "  FAIL\n");
-    }
-    const bool confidence_pass =
-        pooled.challenger_is_better_95();
     const bool passed =
-        stable_runs == runs && every_deck_won && confidence_pass;
-    std::cout << "\nStability verdict: " << stable_runs << '/' << runs
-              << " seeds won; confidence "
-              << (confidence_pass ? "PASS" : "FAIL")
-              << "; every deck " << (every_deck_won ? "PASS" : "FAIL")
-              << "\nOverall: " << (passed ? "PASS" : "FAIL") << '\n';
+        all_policy_seed_wins == runs && every_policy_passed;
+    std::cout << "\nAll-policy seed verdict: "
+              << all_policy_seed_wins << '/' << runs
+              << "\nOverall: " << (passed ? "PASS" : "FAIL")
+              << '\n';
     return passed;
 }
 

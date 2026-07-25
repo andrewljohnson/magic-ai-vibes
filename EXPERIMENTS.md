@@ -146,6 +146,160 @@ This changes data collection only and remains mirror-only/card-agnostic.
 
 Status: implementation complete; development screen not yet run.
 
+First development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 106-94 (53.0%).
+- Learned/Handcrafted by challenger deck: Green 38%/26%, Red 40%/44%,
+  Blue 66%/54%, White 68%/64%.
+- Red spell rate rose from 7.9 to 9.1 per game and now matches Handcrafted's
+  9.0; damage is nearly equal at 14.7/14.8.
+- Runtime: 27.57 seconds.
+- Decision: promising behavior change, not accepted because the small Red
+  slice still trails. Advance to the 800-game development benchmark.
+
+Full development benchmark:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 20 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 452-348 (56.5%), 95% interval 53.0%-59.9%.
+- Learned/Handcrafted by challenger deck: Green 42.5%/23.0%,
+  Red 41.0%/36.5%, Blue 67.0%/51.0%, White 75.5%/63.5%.
+- Runtime: 90.98 seconds for training plus 800 paired games.
+- Decision: passes the development Handcrafted gate for aggregate confidence
+  and all four deck slices. Advance to the all-policy, multi-seed panel.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 105-95 (52.5%).
+- Learned/Handcrafted by challenger deck: Green 34%/20%, Red 38%/46%,
+  Blue 66%/58%, White 72%/66%.
+- Runtime: 37.55 seconds.
+- Decision: rejected and reverted. Search-guided self-play cost ten seconds
+  and did not close the Red gap.
+
+### Four deployed rollouts per action
+
+Hypothesis: the zone-aware value model and stack-faithful continuation may
+benefit from more independent determinizations even though the older,
+stack-skipping model plateaued. Raise only deployed search from two to four
+rollouts; training remains unchanged.
+
+Status: implementation in progress.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 107-93 (53.5%).
+- Learned/Handcrafted by challenger deck: Green 36%/26%, Red 40%/46%,
+  Blue 64%/52%, White 74%/62%.
+- Learned work doubled from 158 to 320 rollouts/game and runtime rose from
+  27.6 to 48.8 seconds.
+- Decision: rejected and reverted to two rollouts. Extra determinizations did
+  not improve Red.
+
+### Exploratory fitted self-play
+
+Hypothesis: greedy fitted self-play narrows its state/action distribution and
+  reinforces early pass/cast errors. During training only, choose a uniformly
+  random legal priority action 10% of the time in generation one and 5% in
+  generation two. Deployment remains deterministic apart from search
+  determinization. This is analogous to self-play exploration, not an
+  external teacher.
+
+Status: implementation complete; development screen not yet run.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 106-94 (53.0%), 95% interval 46.1%-59.8%.
+- Learned/Handcrafted by challenger deck: Green 32%/24%, Red 40%/46%,
+  Blue 70%/56%, White 70%/62%.
+- Red diagnostics: Learned cast 7.9 spells and dealt 14.5 damage/game;
+  Handcrafted cast 9.2 and dealt 15.7.
+- Runtime: 27.64 seconds. More assertive attacks shortened games enough to
+  make this faster as well as slightly stronger for Red.
+- Decision: keep expected-value attack search, but strict strength still
+  fails on Red.
+
+### Search-guided fitted self-play
+
+Hypothesis: training self-play uses a zero-rollout policy while deployment
+uses two rollouts. Add 100 games (for the 800-game default) of one-rollout
+Learned-vs-Learned play after the two cheap fitted generations, then train on
+the combined replay. This is a self-generated policy-improvement curriculum.
+
+Status: implementation complete; development screen not yet run.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 107-93 (53.5%), 95% interval 46.6%-60.3%.
+- Learned/Handcrafted by challenger deck: Green 42%/20%, Red 36%/48%,
+  Blue 68%/52%, White 68%/66%.
+- Runtime: 50.65 seconds, down from roughly 90 seconds for the first
+  zone-aware architecture.
+- Decision: keep the speed changes and learned sparse path, but do not accept
+  strength. Red still fails.
+
+### Expected-value neural attack search
+
+Hypothesis: maximizing the worst sampled block makes the attacker excessively
+conservative when value estimates are imperfect. Keep enumerated/sampled legal
+attack and block candidates, but rank attacks by mean learned value across
+blocks. Defender choice remains value-maximizing.
+
+Status: implementation complete; development screen not yet run.
+
+Development screen:
+
+```sh
+./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 104-96 (52.0%), 95% interval 45.1%-58.8%.
+- Learned/Handcrafted by challenger deck: Green 36%/26%, Red 38%/42%,
+  Blue 72%/54%, White 62%/70%.
+- Runtime was roughly 90 seconds including build/training and the 200-game
+  benchmark.
+- Decision: keep the correct information boundary, but do not accept this
+  architecture. Red and White fail and training is too slow.
+
+### Sparse linear value path and cheaper training
+
+Hypothesis: per-card zone counts are sparse and should not have to propagate
+through a larger nonlinear layer to learn a basic value. Add a trainable
+linear skip path from every feature to the value logit, return the hidden
+layer to 16 units, and shuffle replay indices rather than copying full
+191-value examples on each training call.
+
+Status: implementation complete; development screen not yet run.
+
 Development screen:
 
 ```sh

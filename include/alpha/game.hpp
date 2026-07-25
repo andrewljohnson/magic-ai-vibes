@@ -236,6 +236,7 @@ struct BotConfig {
     BotKind kind = BotKind::Random;
     // Complete random continuations sampled for every legal action.
     std::size_t rollouts_per_action = 2;
+    double exploration_rate = 0.0;
     std::size_t training_games = 800;
 };
 
