@@ -1112,6 +1112,99 @@ std::vector<DecisionProbe> make_probe_dev_v1() {
     return probes;
 }
 
+std::vector<DecisionProbe> make_probe_dev_v2() {
+    std::vector<DecisionProbe> probes = make_probe_dev_v1();
+    for (DecisionProbe& probe : probes) {
+        const auto expose_creature =
+            [&probe](std::size_t player, CardId card,
+                     PermanentId id) {
+                PlayerState& state = probe.state.players[player];
+                auto found = std::find(
+                    state.library.begin(), state.library.end(),
+                    card);
+                if (found != state.library.end()) {
+                    state.library.erase(found);
+                } else {
+                    found = std::find(
+                        state.hand.begin(), state.hand.end(), card);
+                    if (found == state.hand.end()) {
+                        throw std::logic_error(
+                            "probe-dev-v2 cannot expose missing creature");
+                    }
+                    state.hand.erase(found);
+                }
+                state.creatures.push_back(
+                    creature(id, card, false, false));
+                probe.state.next_permanent_id =
+                    std::max(probe.state.next_permanent_id, id + 1);
+            };
+        const std::size_t suffix = probe.stable_id.rfind(".v1");
+        if (suffix == std::string::npos ||
+            suffix + 3 != probe.stable_id.size()) {
+            throw std::logic_error(
+                "probe-dev-v1 contains an unversioned stable ID");
+        }
+        probe.stable_id.replace(suffix, 3, ".v2");
+
+        switch (probe.category) {
+        case Category::GreenDevelop:
+            // Passing in the second main with the opponent tapped out ends
+            // the turn, so the Actor cannot heal the branch by casting the
+            // same creature in a later priority window.
+            probe.phase = TurnPhase::SecondMain;
+            for (LandPermanent& land :
+                 probe.state.players[1].lands) {
+                land.tapped = true;
+            }
+            // A Bear cast now is a blocker next turn; waiting exposes a
+            // real tempo cost instead of two branches that inevitably
+            // reconverge.
+            probe.state.players[0].life = 5;
+            expose_creature(
+                1, CardId::FireElemental,
+                probe.state.next_permanent_id);
+            break;
+        case Category::RedFaceLethal:
+            // "Pass" now means decline the lethal Bolt this turn.
+            probe.phase = TurnPhase::SecondMain;
+            // Waiting gives the visible Water Elemental a lethal attack
+            // before Red receives another main phase.
+            probe.state.players[0].life = 5;
+            break;
+        case Category::BlueCounterLethal:
+            // Countering now exposes a concrete winning continuation rather
+            // than a branch whose correct defense is eventually scored as
+            // the same terminal loss at long horizons.
+            probe.state.players[1].life = 5;
+            expose_creature(
+                0, CardId::WaterElemental,
+                probe.state.next_permanent_id);
+            break;
+        case Category::WhiteEmergencyMoat:
+            // The attacker must actually threaten this combat. V1
+            // accidentally marked it summoning-sick, making Moat optional
+            // until a later turn.
+            if (probe.state.players[1].creatures.size() != 1) {
+                throw std::logic_error(
+                    "emergency-Moat fixture lost its attacker");
+            }
+            probe.state.players[1]
+                .creatures.front()
+                .summoning_sick = false;
+            break;
+        case Category::WhiteEstablishMillstone:
+        case Category::WhiteAvoidRedundantMoat:
+            // These are "develop now versus wait a turn" probes. Ending the
+            // second-main window makes the wait branch root-irreversible.
+            probe.phase = TurnPhase::SecondMain;
+            break;
+        default:
+            break;
+        }
+    }
+    return probes;
+}
+
 bool hidden_clone_is_determinization_invariant(
     const DecisionProbe& probe, std::uint64_t seed) {
     if (probe.root_player >= kPlayerCount) {
@@ -1218,6 +1311,27 @@ std::vector<std::string> validate_probe_dev_v1(
         if (count != 4) {
             errors.push_back(
                 "probe-dev-v1 requires four probes per root deck");
+        }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_probe_dev_v2(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed) {
+    std::vector<std::string> errors =
+        validate_probe_dev_v1(probes, hidden_seed);
+    for (std::string& error : errors) {
+        const std::string old_name = "probe-dev-v1";
+        const std::size_t position = error.find(old_name);
+        if (position != std::string::npos) {
+            error.replace(position, old_name.size(), "probe-dev-v2");
+        }
+    }
+    for (const DecisionProbe& probe : probes) {
+        if (!probe.stable_id.ends_with(".v2")) {
+            errors.push_back(
+                "probe-dev-v2 stable IDs must end in .v2");
         }
     }
     return errors;

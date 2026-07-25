@@ -266,6 +266,140 @@ void test_corpus_rejects_duplicate_stable_id_and_category() {
            "duplicate stable ID/category was accepted");
 }
 
+void test_v2_plan_probes_are_root_irreversible() {
+    const std::vector<DecisionProbe> probes =
+        alpha::probes::make_probe_dev_v2();
+    expect(alpha::probes::validate_probe_dev_v2(probes).empty(),
+           "probe-dev-v2 failed aggregate validation");
+    for (const DecisionProbe& probe : probes) {
+        expect(probe.stable_id.ends_with(".v2"),
+               "probe-dev-v2 retained a v1 stable ID");
+    }
+
+    const DecisionProbe& green =
+        find_probe(probes, Category::GreenDevelop);
+    expect(green.phase == alpha::TurnPhase::SecondMain,
+           "Green develop Pass can still heal in a later main phase");
+    expect(std::all_of(
+               green.state.players[1].lands.begin(),
+               green.state.players[1].lands.end(),
+               [](const alpha::LandPermanent& land) {
+                   return land.tapped;
+               }),
+           "Green opponent can reopen the final priority window");
+
+    const DecisionProbe& red =
+        find_probe(probes, Category::RedFaceLethal);
+    expect(red.phase == alpha::TurnPhase::SecondMain,
+           "Red lethal Pass can still heal in a later main phase");
+    alpha::GameState pass_state = red.state;
+    alpha::PriorityState pass_priority_state{
+        .player = red.root_player,
+        .consecutive_passes = red.consecutive_passes,
+    };
+    expect(alpha::pass_priority(pass_state, pass_priority_state) ==
+               alpha::PriorityPassResult::Passed,
+           "first Red Pass did not yield priority");
+    const auto opponent_actions = alpha::legal_priority_actions(
+        pass_state, pass_priority_state.player, true);
+    expect(opponent_actions ==
+               std::vector<PriorityAction>{PriorityAction::pass()},
+           "tapped-out opponent can reopen the Red branch");
+    expect(alpha::pass_priority(pass_state, pass_priority_state) ==
+               alpha::PriorityPassResult::WindowEnded,
+           "Red Pass did not end the final main-phase window");
+    expect(pass_state.players[0].hand ==
+               std::vector<CardId>{CardId::LightningBolt},
+           "Red Pass branch unexpectedly spent the Bolt");
+
+    const DecisionProbe& emergency =
+        find_probe(probes, Category::WhiteEmergencyMoat);
+    expect(emergency.state.players[1].creatures.size() == 1 &&
+               std::all_of(
+                   emergency.state.players[1].creatures.begin(),
+                   emergency.state.players[1].creatures.end(),
+                   [](const alpha::CreaturePermanent& creature) {
+                       return creature.card ==
+                                  CardId::FireElemental &&
+                              !creature.summoning_sick;
+                   }),
+           "emergency-Moat attacker is not an immediate threat");
+}
+
+void test_v2_lethal_priority_branches_apply_exactly() {
+    const std::vector<DecisionProbe> probes =
+        alpha::probes::make_probe_dev_v2();
+
+    const DecisionProbe& red =
+        find_probe(probes, Category::RedFaceLethal);
+    alpha::GameState bolt_state = red.state;
+    const auto& bolt_action =
+        std::get<PriorityAction>(red.candidates[2].action);
+    expect(alpha::apply_priority_action(
+               bolt_state, red.root_player, bolt_action, true),
+           "Red lethal Bolt candidate failed to apply");
+    alpha::PriorityState bolt_priority{
+        .player = red.root_player,
+        .consecutive_passes = 0,
+    };
+    expect(alpha::pass_priority(bolt_state, bolt_priority) ==
+               alpha::PriorityPassResult::Passed &&
+               alpha::pass_priority(bolt_state, bolt_priority) ==
+                   alpha::PriorityPassResult::StackObjectResolved,
+           "Red lethal Bolt did not resolve after two passes");
+    expect(bolt_state.players[1].life == 0,
+           "Red lethal Bolt did not produce its terminal branch");
+
+    const DecisionProbe& blue =
+        find_probe(probes, Category::BlueCounterLethal);
+    alpha::GameState blue_pass = blue.state;
+    alpha::PriorityState blue_pass_priority{
+        .player = blue.root_player,
+        .consecutive_passes = blue.consecutive_passes,
+    };
+    expect(alpha::pass_priority(
+               blue_pass, blue_pass_priority) ==
+               alpha::PriorityPassResult::StackObjectResolved,
+           "Blue Pass did not resolve the pending lethal Bolt");
+    expect(blue_pass.players[0].life == 0,
+           "Blue Pass was not an immediate terminal loss");
+
+    alpha::GameState blue_counter = blue.state;
+    const auto& counter_action =
+        std::get<PriorityAction>(blue.candidates[1].action);
+    expect(alpha::apply_priority_action(
+               blue_counter, blue.root_player, counter_action, false),
+           "Blue Counterspell candidate failed to apply");
+    expect(blue_counter.stack.size() == 2 &&
+               blue_counter.stack.back().card ==
+                   CardId::Counterspell,
+           "Counterspell was not placed above the lethal Bolt");
+    alpha::PriorityState counter_priority{
+        .player = blue.root_player,
+        .consecutive_passes = 0,
+    };
+    expect(alpha::pass_priority(
+               blue_counter, counter_priority) ==
+               alpha::PriorityPassResult::Passed &&
+               alpha::pass_priority(
+                   blue_counter, counter_priority) ==
+                   alpha::PriorityPassResult::StackObjectResolved,
+           "Counterspell did not resolve after two passes");
+    expect(blue_counter.stack.empty() &&
+               blue_counter.players[0].life == 3,
+           "Counterspell failed to remove the lethal Bolt");
+    expect(std::count(
+               blue_counter.players[0].graveyard.begin(),
+               blue_counter.players[0].graveyard.end(),
+               CardId::Counterspell) == 1 &&
+               std::count(
+                   blue_counter.players[1].graveyard.begin(),
+                   blue_counter.players[1].graveyard.end(),
+                   CardId::LightningBolt) == 1 &&
+               blue_counter.stats[0].spells_countered == 1,
+           "Counterspell resolution did not preserve stack accounting");
+}
+
 } // namespace
 
 int main() {
@@ -290,5 +424,9 @@ int main() {
                test_response_windows_record_the_casters_pass);
     runner.run("unique stable IDs and categories",
                test_corpus_rejects_duplicate_stable_id_and_category);
+    runner.run("v2 root-irreversible plans",
+               test_v2_plan_probes_are_root_irreversible);
+    runner.run("v2 lethal branch traces",
+               test_v2_lethal_priority_branches_apply_exactly);
     return runner.finish();
 }

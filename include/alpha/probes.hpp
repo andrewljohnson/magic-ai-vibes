@@ -12,6 +12,7 @@
 namespace alpha::probes {
 
 inline constexpr std::string_view kProbeDevV1 = "probe-dev-v1";
+inline constexpr std::string_view kProbeDevV2 = "probe-dev-v2";
 inline constexpr std::uint64_t kProbeValidationSeed = 0x50524F42455631ULL;
 
 enum class DecisionKind : std::uint8_t {
@@ -84,6 +85,11 @@ struct Validation {
 // the runtime policy or training path imports this module.
 std::vector<DecisionProbe> make_probe_dev_v1();
 
+// Revision of the development corpus whose plan probes make the root choice
+// irreversible within the current turn. V1 is retained so its cached
+// experimental results remain reproducible.
+std::vector<DecisionProbe> make_probe_dev_v2();
+
 Validation validate_probe(
     const DecisionProbe& probe,
     std::uint64_t hidden_seed = kProbeValidationSeed);
@@ -91,6 +97,10 @@ Validation validate_probe(
 // Includes per-probe validation plus corpus-level checks such as stable-ID and
 // category uniqueness and four probes per root deck.
 std::vector<std::string> validate_probe_dev_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed = kProbeValidationSeed);
+
+std::vector<std::string> validate_probe_dev_v2(
     const std::vector<DecisionProbe>& probes,
     std::uint64_t hidden_seed = kProbeValidationSeed);
 

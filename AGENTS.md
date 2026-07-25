@@ -1,5 +1,16 @@
 # AGENTS.md
 
+## Independent review log
+
+`REVIEW.md` is maintained by a separate reviewing agent and receives new
+timestamped entries roughly every 30 minutes while work is active. Check its
+newest entry at every opportunity — before starting an experiment, after
+finishing one, and before recording conclusions in `EXPERIMENTS.md`. It
+contains critique plus independently generated benchmark data. Weigh it as
+review feedback; if you disagree with an entry, record why in
+`EXPERIMENTS.md` instead of silently ignoring it. Do not edit `REVIEW.md`
+yourself.
+
 ## Project goal
 
 Build a fast, deterministic early-Magic engine and a sequence of increasingly

@@ -202,6 +202,36 @@ This fixed 3x3 study trains each row model once and reuses it across all three
 evaluation-seed columns. `EXPERIMENTS.md` is the lab notebook for successful
 and failed tuning and evaluation runs.
 
+## Offline decision probes
+
+The probe CLI labels and scores a fixed 16-position development corpus without
+reading the opponent's hidden cards:
+
+```sh
+./build/alpha-sim --score-probes \
+  --probe-worlds 128 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2.labels.tsv
+```
+
+Every candidate is evaluated on the same sampled information-set worlds and
+continuation seeds. The cache is atomic and bound to the exact model,
+corpus, reference algorithm, and scoring semantics. The run also verifies
+that labels, policy scores, critics, and metrics are bit-identical after
+repartitioning hidden zones. `--refresh-probe-cache` deliberately regenerates
+a matching cache.
+
+`probe-dev-v2` keeps its plan choices root-irreversible using ordinary game
+states; deployed Pass semantics are not altered. Horizon zero completes the
+current turn, prepares the next turn, and bootstraps from the frozen critic.
+Longer horizons are available, but the experiment notebook documents cases
+where terminal-outcome saturation erases a valid tactical signal.
+
+Probe agreement, regret, candidate-Q error, and calibration are development
+diagnostics only. Four positions per deck cannot establish that a bot is
+stronger; the paired benchmark and multi-seed confidence gates remain the
+authority.
+
 There are no mulligans, sideboards, concessions, or draw effects yet. A
 500-individual-turn safety limit is included, though these decks normally end
 far earlier.
@@ -242,13 +272,13 @@ In the controlled 800-game harness, Handcrafted Policy beat standard Monte Carlo
 Carlo it won 563–237 (70.4%, 95% CI 67.1–73.4%); Deep averaged about 620
 rollout continuations per game.
 
-In the latest completed eight-seed all-policy panel, Learned beat Random
-1473–127, Monte Carlo 1289–311, and Deep Monte Carlo 1164–436, with every seed
-and deck passing. It beat Handcrafted 857–743 overall (53.6%, 95% CI
-51.1–56.0%) but did not clear the strictest stability gate: one seed lost,
-pooled Red was 138–163, and White was essentially tied at 293–292.
+That historical result predates the information-safe rollout correction and is
+not a current strength claim. With one frozen model and three independent
+evaluation seeds, the honest value-search baseline scored 43.3% (260–340)
+against Handcrafted; the unified actor was statistically tied with it. The old
+54% “champion” was inflated by hidden-information leakage, especially on
+Counterspell decisions.
 
-That limitation is intentional and visible. The next strength milestone is a
-learned action-policy head or actor-critic objective; the experiment notebook
-documents why additional scalar value tuning, rollout depth, and raw training
-volume were rejected.
+The active milestone is an iterated, information-safe search-as-teacher actor
+and critic. `EXPERIMENTS.md` records every preregistered result, including
+failed approaches and the exact gates required before any model is promoted.

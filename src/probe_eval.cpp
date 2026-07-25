@@ -32,6 +32,12 @@ struct MetricAccumulator {
     std::array<double, kCalibrationBinCount> bin_reference_sums{};
 };
 
+struct CandidateQFitAccumulator {
+    std::size_t candidate_count = 0;
+    double absolute_error_sum = 0.0;
+    double squared_error_sum = 0.0;
+};
+
 bool is_probability(double value) {
     return std::isfinite(value) && value >= 0.0 && value <= 1.0;
 }
@@ -171,6 +177,10 @@ void add_probe_metrics(MetricAccumulator& accumulator,
         if (scores.at(candidate.key) != highest_student_score) {
             continue;
         }
+        if (prediction.selected_key.has_value() &&
+            candidate.key != *prediction.selected_key) {
+            continue;
+        }
         ++student_argmax_count;
         selected_q_sum += candidate.q;
         if (std::find(label.reference_best_set.begin(),
@@ -183,9 +193,10 @@ void add_probe_metrics(MetricAccumulator& accumulator,
     accumulator.top1_agreement_sum +=
         static_cast<double>(student_reference_overlap) /
         static_cast<double>(student_argmax_count);
-    accumulator.regret_sum +=
-        label.reference_value -
+    const double selected_reference_value =
         selected_q_sum / static_cast<double>(student_argmax_count);
+    accumulator.regret_sum +=
+        label.reference_value - selected_reference_value;
 
     for (const PairLabel& pair : label.pairs) {
         if (!is_stable_pair(pair)) {
@@ -203,21 +214,23 @@ void add_probe_metrics(MetricAccumulator& accumulator,
     }
 
     const double error =
-        prediction.critic_value - label.reference_value;
+        prediction.critic_value - selected_reference_value;
     accumulator.squared_error_sum += error * error;
     accumulator.bias_sum += error;
     const double clamped_prediction =
         std::clamp(prediction.critic_value, kLogLossClamp,
                    1.0 - kLogLossClamp);
     accumulator.log_loss_sum +=
-        -label.reference_value * std::log(clamped_prediction) -
-        (1.0 - label.reference_value) *
+        -selected_reference_value *
+            std::log(clamped_prediction) -
+        (1.0 - selected_reference_value) *
             std::log(1.0 - clamped_prediction);
 
     const std::size_t bin = calibration_bin(prediction.critic_value);
     ++accumulator.bin_counts[bin];
     accumulator.bin_prediction_sums[bin] += prediction.critic_value;
-    accumulator.bin_reference_sums[bin] += label.reference_value;
+    accumulator.bin_reference_sums[bin] +=
+        selected_reference_value;
     ++accumulator.probe_count;
 }
 
@@ -289,6 +302,31 @@ void copy_pooled_metrics(const DeckProbeMetrics& pooled,
     summary.critic_log_loss = pooled.critic_log_loss;
     summary.critic_bias = pooled.critic_bias;
     summary.critic_ece = pooled.critic_ece;
+}
+
+void add_candidate_q_error(CandidateQFitAccumulator& accumulator,
+                           double predicted_q, double reference_q) {
+    const double error = predicted_q - reference_q;
+    ++accumulator.candidate_count;
+    accumulator.absolute_error_sum += std::abs(error);
+    accumulator.squared_error_sum += error * error;
+}
+
+DeckCandidateQFitMetrics finalize_candidate_q_fit(
+    const CandidateQFitAccumulator& accumulator,
+    DeckId root_deck) {
+    DeckCandidateQFitMetrics metrics;
+    metrics.root_deck = root_deck;
+    metrics.candidate_count = accumulator.candidate_count;
+    if (accumulator.candidate_count == 0) {
+        return metrics;
+    }
+    const double count =
+        static_cast<double>(accumulator.candidate_count);
+    metrics.mae = accumulator.absolute_error_sum / count;
+    metrics.rmse =
+        std::sqrt(accumulator.squared_error_sum / count);
+    return metrics;
 }
 
 } // namespace
@@ -553,6 +591,33 @@ void validate_probe_predictions(
                     "policy scores contain invalid candidate coverage");
             }
         }
+        if (prediction.selected_key.has_value()) {
+            const auto selected =
+                std::find_if(
+                    prediction.policy_scores.begin(),
+                    prediction.policy_scores.end(),
+                    [&prediction](const PolicyScore& score) {
+                        return score.key ==
+                               *prediction.selected_key;
+                    });
+            if (selected == prediction.policy_scores.end()) {
+                throw std::invalid_argument(
+                    "selected_key is not a policy candidate");
+            }
+            const double highest_score =
+                std::max_element(
+                    prediction.policy_scores.begin(),
+                    prediction.policy_scores.end(),
+                    [](const PolicyScore& left,
+                       const PolicyScore& right) {
+                        return left.score < right.score;
+                    })
+                    ->score;
+            if (selected->score != highest_score) {
+                throw std::invalid_argument(
+                    "selected_key must be an exact score argmax");
+            }
+        }
     }
 }
 
@@ -586,6 +651,77 @@ ProbeMetricSummary evaluate_probe_predictions(
     for (std::size_t deck = 0; deck < kDecks.size(); ++deck) {
         summary.by_deck[deck] =
             finalize_deck_metrics(by_deck[deck], kDecks[deck]);
+    }
+    return summary;
+}
+
+CandidateQFitSummary evaluate_candidate_q_fit(
+    const std::vector<ProbeLabel>& labels,
+    const std::vector<ProbePrediction>& q_predictions) {
+    validate_probe_predictions(labels, q_predictions);
+
+    std::unordered_map<std::string, const ProbePrediction*>
+        predictions_by_id;
+    predictions_by_id.reserve(q_predictions.size());
+    for (const ProbePrediction& prediction : q_predictions) {
+        predictions_by_id.emplace(prediction.stable_id, &prediction);
+    }
+
+    std::vector<const ProbeLabel*> sorted_labels;
+    sorted_labels.reserve(labels.size());
+    for (const ProbeLabel& label : labels) {
+        sorted_labels.push_back(&label);
+    }
+    std::sort(
+        sorted_labels.begin(), sorted_labels.end(),
+        [](const ProbeLabel* first, const ProbeLabel* second) {
+            return first->stable_id < second->stable_id;
+        });
+
+    CandidateQFitAccumulator pooled;
+    std::array<CandidateQFitAccumulator, 4> by_deck;
+    for (const ProbeLabel* label : sorted_labels) {
+        const ProbePrediction& prediction =
+            *predictions_by_id.at(label->stable_id);
+        const auto scores = policy_score_map(prediction);
+
+        std::vector<const CandidateLabel*> sorted_candidates;
+        sorted_candidates.reserve(label->candidates.size());
+        for (const CandidateLabel& candidate : label->candidates) {
+            sorted_candidates.push_back(&candidate);
+        }
+        std::sort(
+            sorted_candidates.begin(), sorted_candidates.end(),
+            [](const CandidateLabel* first,
+               const CandidateLabel* second) {
+                return first->key < second->key;
+            });
+
+        for (const CandidateLabel* candidate : sorted_candidates) {
+            const double predicted_q = scores.at(candidate->key);
+            if (!is_probability(predicted_q)) {
+                throw std::invalid_argument(
+                    "candidate-Q scores must be finite probabilities");
+            }
+            add_candidate_q_error(
+                pooled, predicted_q, candidate->q);
+            add_candidate_q_error(
+                by_deck[deck_index(label->root_deck)],
+                predicted_q, candidate->q);
+        }
+    }
+
+    CandidateQFitSummary summary;
+    const DeckCandidateQFitMetrics pooled_metrics =
+        finalize_candidate_q_fit(pooled, DeckId::Green);
+    summary.candidate_count = pooled_metrics.candidate_count;
+    summary.mae = pooled_metrics.mae;
+    summary.rmse = pooled_metrics.rmse;
+    constexpr std::array<DeckId, 4> kDecks = {
+        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White};
+    for (std::size_t deck = 0; deck < kDecks.size(); ++deck) {
+        summary.by_deck[deck] =
+            finalize_candidate_q_fit(by_deck[deck], kDecks[deck]);
     }
     return summary;
 }

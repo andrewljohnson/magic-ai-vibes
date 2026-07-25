@@ -133,7 +133,7 @@ void test_uniform_argmax_ties_and_metric_formulas() {
         "ties",
         {PolicyScore{"c", 3.0}, PolicyScore{"a", 3.0},
          PolicyScore{"b", 3.0}},
-        0.9,
+        0.7,
     };
 
     const auto summary =
@@ -145,18 +145,82 @@ void test_uniform_argmax_ties_and_metric_formulas() {
                 "student pair ties must receive half credit");
     expect_near(summary.mean_regret, 0.1, 1.0e-12,
                 "tie-averaged regret");
-    expect_near(summary.critic_brier, 0.01, 1.0e-12,
+    expect_near(summary.critic_brier, 0.0, 1.0e-12,
                 "critic Brier score");
-    expect_near(summary.critic_mse, 0.01, 1.0e-12,
+    expect_near(summary.critic_mse, 0.0, 1.0e-12,
                 "critic MSE");
     const double expected_log_loss =
-        -0.8 * std::log(0.9) - 0.2 * std::log(0.1);
+        -0.7 * std::log(0.7) - 0.3 * std::log(0.3);
     expect_near(summary.critic_log_loss, expected_log_loss,
                 1.0e-12, "soft-label log loss");
-    expect_near(summary.critic_bias, 0.1, 1.0e-12,
+    expect_near(summary.critic_bias, 0.0, 1.0e-12,
                 "critic bias");
-    expect_near(summary.critic_ece, 0.1, 1.0e-12,
+    expect_near(summary.critic_ece, 0.0, 1.0e-12,
                 "five-bin ECE");
+}
+
+void test_critic_metrics_use_selected_suboptimal_action_value() {
+    const ProbeLabel label =
+        simple_label("suboptimal", DeckId::Red, 0.9, 0.3);
+    const ProbePrediction prediction{
+        "suboptimal",
+        {PolicyScore{"a", -1.0}, PolicyScore{"b", 1.0}},
+        0.3,
+    };
+
+    const auto summary =
+        alpha::probe_eval::evaluate_probe_predictions(
+            {label}, {prediction});
+    expect_near(summary.mean_regret, 0.6, 1.0e-12,
+                "regret must retain the maximum-Q reference");
+    expect_near(summary.critic_brier, 0.0, 1.0e-12,
+                "critic Brier must target selected-action Q");
+    expect_near(summary.critic_mse, 0.0, 1.0e-12,
+                "critic MSE must target selected-action Q");
+    const double expected_log_loss =
+        -0.3 * std::log(0.3) - 0.7 * std::log(0.7);
+    expect_near(summary.critic_log_loss, expected_log_loss,
+                1.0e-12,
+                "critic log loss must target selected-action Q");
+    expect_near(summary.critic_bias, 0.0, 1.0e-12,
+                "critic bias must target selected-action Q");
+    expect_near(summary.critic_ece, 0.0, 1.0e-12,
+                "critic ECE must target selected-action Q");
+}
+
+void test_explicit_deployed_tie_selection_is_not_averaged() {
+    const ProbeLabel label =
+        simple_label("deployed-tie", DeckId::White, 0.9, 0.1);
+    const ProbePrediction prediction{
+        "deployed-tie",
+        {
+            PolicyScore{"a", 4.0},
+            PolicyScore{"b", 4.0},
+        },
+        0.1,
+        "b",
+    };
+
+    const auto summary =
+        alpha::probe_eval::evaluate_probe_predictions(
+            {label}, {prediction});
+    expect_near(summary.top1_expected_agreement, 0.0, 1.0e-12,
+                "deterministic deployed tie was averaged");
+    expect_near(summary.mean_regret, 0.8, 1.0e-12,
+                "deterministic deployed tie used averaged regret");
+    expect_near(summary.critic_brier, 0.0, 1.0e-12,
+                "critic did not use deployed-selected action Q");
+    expect_near(summary.stable_pair_agreement, 0.5, 1.0e-12,
+                "score tie ranking should remain neutral");
+
+    ProbePrediction invalid = prediction;
+    invalid.policy_scores[1].score = 3.0;
+    expect_invalid(
+        [&]() {
+            alpha::probe_eval::validate_probe_predictions(
+                {label}, {invalid});
+        },
+        "non-argmax deployed selection was accepted");
 }
 
 void test_stability_filter_uses_effect_and_paired_ci() {
@@ -223,7 +287,7 @@ void test_deck_grouping_and_pooled_calibration() {
                 "pooled regret");
     expect_near(summary.critic_mse, 0.025, 1.0e-12,
                 "pooled critic MSE");
-    expect_near(summary.critic_bias, -0.05, 1.0e-12,
+    expect_near(summary.critic_bias, 0.05, 1.0e-12,
                 "pooled critic bias");
     expect_near(summary.critic_ece, 0.15, 1.0e-12,
                 "pooled five-bin ECE");
@@ -240,6 +304,80 @@ void test_deck_grouping_and_pooled_calibration() {
     expect(summary.by_deck[3].root_deck == DeckId::White &&
                summary.by_deck[3].probe_count == 0,
            "empty White grouping");
+}
+
+void test_candidate_q_fit_is_keyed_and_uses_known_errors() {
+    const ProbeLabel green =
+        simple_label("green", DeckId::Green, 0.8, 0.4);
+    const ProbeLabel red =
+        simple_label("red", DeckId::Red, 0.6, 0.2);
+    const ProbePrediction green_prediction{
+        "green",
+        {PolicyScore{"b", 0.5}, PolicyScore{"a", 0.7}},
+        0.5,
+    };
+    const ProbePrediction red_prediction{
+        "red",
+        {PolicyScore{"b", 0.4}, PolicyScore{"a", 0.6}},
+        0.5,
+    };
+    const ProbePrediction green_prediction_ordered{
+        "green",
+        {PolicyScore{"a", 0.7}, PolicyScore{"b", 0.5}},
+        0.5,
+    };
+    const ProbePrediction red_prediction_ordered{
+        "red",
+        {PolicyScore{"a", 0.6}, PolicyScore{"b", 0.4}},
+        0.5,
+    };
+
+    const auto summary =
+        alpha::probe_eval::evaluate_candidate_q_fit(
+            {green, red}, {red_prediction, green_prediction});
+    const auto reordered =
+        alpha::probe_eval::evaluate_candidate_q_fit(
+            {red, green},
+            {green_prediction_ordered, red_prediction_ordered});
+
+    expect(summary.candidate_count == 4,
+           "pooled Q fit candidate count");
+    expect_near(summary.mae, 0.1, 1.0e-12,
+                "pooled candidate-Q MAE");
+    expect_near(summary.rmse, std::sqrt(0.015), 1.0e-12,
+                "pooled candidate-Q RMSE");
+    expect(summary.by_deck[0].candidate_count == 2 &&
+               summary.by_deck[0].root_deck == DeckId::Green,
+           "Green Q fit grouping");
+    expect_near(summary.by_deck[0].mae, 0.1, 1.0e-12,
+                "Green candidate-Q MAE");
+    expect_near(summary.by_deck[0].rmse, 0.1, 1.0e-12,
+                "Green candidate-Q RMSE");
+    expect(summary.by_deck[1].candidate_count == 2 &&
+               summary.by_deck[1].root_deck == DeckId::Red,
+           "Red Q fit grouping");
+    expect_near(summary.by_deck[1].mae, 0.1, 1.0e-12,
+                "Red candidate-Q MAE");
+    expect_near(summary.by_deck[1].rmse, std::sqrt(0.02),
+                1.0e-12, "Red candidate-Q RMSE");
+    expect(summary.by_deck[2].candidate_count == 0 &&
+               summary.by_deck[3].candidate_count == 0,
+           "empty deck Q fit grouping");
+
+    expect(summary.candidate_count == reordered.candidate_count &&
+               summary.mae == reordered.mae &&
+               summary.rmse == reordered.rmse,
+           "keyed Q fit changed with probe input order");
+    for (std::size_t deck = 0; deck < summary.by_deck.size();
+         ++deck) {
+        expect(summary.by_deck[deck].candidate_count ==
+                       reordered.by_deck[deck].candidate_count &&
+                   summary.by_deck[deck].mae ==
+                       reordered.by_deck[deck].mae &&
+                   summary.by_deck[deck].rmse ==
+                       reordered.by_deck[deck].rmse,
+               "keyed Q fit changed with candidate input order");
+    }
 }
 
 void test_log_loss_clamps_zero_and_one_predictions() {
@@ -338,6 +476,17 @@ void test_invalid_predictions_and_samples_are_rejected() {
                  CandidateSamples{"b", {0.4, 0.5}}});
         },
         "out-of-range Q sample was accepted");
+    expect_invalid(
+        [&]() {
+            (void)alpha::probe_eval::evaluate_candidate_q_fit(
+                {label},
+                {ProbePrediction{
+                    "prediction",
+                    {PolicyScore{"a", 1.1},
+                     PolicyScore{"b", 0.0}},
+                    0.7}});
+        },
+        "out-of-range candidate-Q score was accepted");
 }
 
 } // namespace
@@ -348,10 +497,16 @@ int main() {
                test_label_construction_uses_paired_statistics);
     runner.run("uniform argmax ties and formulas",
                test_uniform_argmax_ties_and_metric_formulas);
+    runner.run("critic uses selected suboptimal action",
+               test_critic_metrics_use_selected_suboptimal_action_value);
+    runner.run("explicit deployed tie selection",
+               test_explicit_deployed_tie_selection_is_not_averaged);
     runner.run("paired stability filtering",
                test_stability_filter_uses_effect_and_paired_ci);
     runner.run("deck grouping and calibration",
                test_deck_grouping_and_pooled_calibration);
+    runner.run("keyed candidate Q fit",
+               test_candidate_q_fit_is_keyed_and_uses_known_errors);
     runner.run("log-loss boundary clamp",
                test_log_loss_clamps_zero_and_one_predictions);
     runner.run("invalid label schemas",

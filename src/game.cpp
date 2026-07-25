@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -14,6 +15,77 @@ namespace alpha {
 
 constexpr std::size_t kLearnedCardCount =
     static_cast<std::size_t>(CardId::Moat) + 1;
+
+class ModelFingerprintHash {
+  public:
+    void add(std::uint64_t value) {
+        static constexpr std::array<std::uint64_t, 4> kSalt = {
+            0x9E3779B97F4A7C15ULL,
+            0xD1B54A32D192ED03ULL,
+            0x94D049BB133111EBULL,
+            0xBF58476D1CE4E5B9ULL,
+        };
+        for (std::size_t index = 0; index < state_.size(); ++index) {
+            const unsigned int rotation =
+                static_cast<unsigned int>(17 + 6 * index);
+            state_[index] = std::rotl(
+                state_[index] ^ value ^ kSalt[index], rotation);
+            state_[index] =
+                state_[index] * (kSalt[(index + 1) % kSalt.size()] | 1ULL) +
+                kSalt[(index + 2) % kSalt.size()] + count_;
+        }
+        ++count_;
+    }
+
+    std::string finish() const {
+        static constexpr char kHex[] = "0123456789abcdef";
+        std::array<std::uint64_t, 4> digest = state_;
+        for (std::size_t index = 0; index < digest.size(); ++index) {
+            digest[index] ^= count_ +
+                             0x9E3779B97F4A7C15ULL *
+                                 static_cast<std::uint64_t>(index + 1);
+            digest[index] ^= digest[index] >> 30;
+            digest[index] *= 0xBF58476D1CE4E5B9ULL;
+            digest[index] ^= digest[index] >> 27;
+            digest[index] *= 0x94D049BB133111EBULL;
+            digest[index] ^= digest[index] >> 31;
+        }
+        std::string result(64, '0');
+        for (std::size_t word = 0; word < digest.size(); ++word) {
+            for (std::size_t nibble = 0; nibble < 16; ++nibble) {
+                const unsigned int shift =
+                    static_cast<unsigned int>(60 - 4 * nibble);
+                result[word * 16 + nibble] =
+                    kHex[(digest[word] >> shift) & 0xFULL];
+            }
+        }
+        return result;
+    }
+
+  private:
+    std::array<std::uint64_t, 4> state_ = {
+        0x6A09E667F3BCC909ULL,
+        0xBB67AE8584CAA73BULL,
+        0x3C6EF372FE94F82BULL,
+        0xA54FF53A5F1D36F1ULL,
+    };
+    std::uint64_t count_ = 0;
+};
+
+void add_model_fingerprint_value(
+    ModelFingerprintHash& hash, double value) {
+    hash.add(std::bit_cast<std::uint64_t>(value));
+}
+
+template <typename Value, std::size_t Size>
+void add_model_fingerprint_value(
+    ModelFingerprintHash& hash,
+    const std::array<Value, Size>& values) {
+    hash.add(static_cast<std::uint64_t>(Size));
+    for (const Value& value : values) {
+        add_model_fingerprint_value(hash, value);
+    }
+}
 
 class LearnedModel {
   public:
@@ -419,6 +491,36 @@ class LearnedModel {
         return hidden;
     }
 
+    void append_fingerprint(ModelFingerprintHash& hash) const {
+        hash.add(0x4C4541524E45444DULL);
+        hash.add(static_cast<std::uint64_t>(variant_));
+        hash.add(static_cast<std::uint64_t>(kFeatureCount));
+        hash.add(static_cast<std::uint64_t>(kHiddenCount));
+        hash.add(static_cast<std::uint64_t>(kPolicyFeatureCount));
+        hash.add(static_cast<std::uint64_t>(kPolicyHiddenCount));
+        add_model_fingerprint_value(hash, input_weights_);
+        add_model_fingerprint_value(hash, hidden_biases_);
+        add_model_fingerprint_value(hash, output_weights_);
+        add_model_fingerprint_value(hash, direct_output_weights_);
+        add_model_fingerprint_value(hash, output_bias_);
+        add_model_fingerprint_value(hash, policy_input_weights_);
+        add_model_fingerprint_value(hash, policy_hidden_biases_);
+        add_model_fingerprint_value(hash, policy_output_weights_);
+        add_model_fingerprint_value(
+            hash, policy_direct_output_weights_);
+        add_model_fingerprint_value(hash, policy_output_bias_);
+        hash.add(static_cast<std::uint64_t>(ensemble_.size()));
+        for (const auto& member : ensemble_) {
+            hash.add(member ? 1ULL : 0ULL);
+            if (member) {
+                member->append_fingerprint(hash);
+            }
+        }
+    }
+
+    friend std::string learned_model_fingerprint(
+        std::shared_ptr<const LearnedModel> model);
+
     std::array<std::array<double, kFeatureCount>, kHiddenCount>
         input_weights_{};
     std::array<double, kHiddenCount> hidden_biases_{};
@@ -443,6 +545,21 @@ class LearnedModel {
     LearnedVariant variant_;
     std::vector<std::shared_ptr<const LearnedModel>> ensemble_;
 };
+
+std::string learned_model_fingerprint(
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model) {
+        throw std::invalid_argument(
+            "cannot fingerprint a null Learned model");
+    }
+    ModelFingerprintHash hash;
+    // Domain and schema bind the digest to this exact serialization. Bump
+    // the schema whenever field order or fingerprint semantics change.
+    hash.add(0x4D41474943414946ULL);
+    hash.add(1);
+    model->append_fingerprint(hash);
+    return hash.finish();
+}
 
 enum class LearnedDecisionKind : std::uint8_t {
     Priority,
@@ -1093,6 +1210,99 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     append_plane(own_stack, 5.0);
     append_plane(enemy_stack, 5.0);
     return features;
+}
+
+LearnedValueAttackSetScores score_learned_value_attack_sets(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<std::vector<PermanentId>>& candidates,
+    const std::shared_ptr<const LearnedModel>& model,
+    std::mt19937_64& random) {
+    if (attacking_player >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned Value attacking player must be 0 or 1");
+    }
+    if (state.active_player != attacking_player) {
+        throw std::invalid_argument(
+            "Learned Value attack scoring requires the active player");
+    }
+    if (!state.stack.empty()) {
+        throw std::invalid_argument(
+            "Learned Value attack scoring requires an empty stack");
+    }
+    if (!model ||
+        model->variant() !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Learned Value attack scoring requires a Value model");
+    }
+    if (candidates.empty()) {
+        throw std::invalid_argument(
+            "Learned Value attack scoring requires candidates");
+    }
+    for (const auto& candidate : candidates) {
+        GameState legality_check = state;
+        if (!resolve_combat(
+                legality_check, attacking_player, candidate, {})) {
+            throw std::invalid_argument(
+                "Learned Value attack set is not legal");
+        }
+    }
+
+    const std::size_t defending_player =
+        opponent_of(attacking_player);
+    std::vector<PermanentId> available_blockers;
+    for (const CreaturePermanent& creature :
+         state.players[defending_player].creatures) {
+        if (!creature.tapped) {
+            available_blockers.push_back(creature.id);
+        }
+    }
+
+    LearnedValueAttackSetScores result;
+    result.scores.reserve(candidates.size());
+    double best_score =
+        -std::numeric_limits<double>::infinity();
+    for (std::size_t candidate_index = 0;
+         candidate_index < candidates.size();
+         ++candidate_index) {
+        const auto& candidate = candidates[candidate_index];
+        // These bounds and the candidate ordering are intentionally the
+        // deployed distribution. Do not "improve" them in an evaluation
+        // refactor: label parity depends on preserving this exact behavior.
+        const auto block_candidates =
+            learned_value_block_candidates(
+                candidate, available_blockers, random, 64, 48);
+        double total_score = 0.0;
+        for (const auto& sampled_blocks : block_candidates) {
+            GameState successor = state;
+            if (!resolve_combat(
+                    successor, attacking_player, candidate,
+                    sampled_blocks)) {
+                throw std::logic_error(
+                    "Learned Value sampled illegal combat");
+            }
+            double sample_score = 0.5;
+            if (successor.players[defending_player].life <= 0) {
+                sample_score = 1.0;
+            } else if (
+                successor.players[attacking_player].life <= 0) {
+                sample_score = 0.0;
+            } else {
+                sample_score = model->predict(
+                    learned_features(successor, attacking_player));
+            }
+            total_score += sample_score;
+        }
+        const double expected_score =
+            total_score /
+            static_cast<double>(block_candidates.size());
+        result.scores.push_back(expected_score);
+        if (expected_score > best_score) {
+            best_score = expected_score;
+            result.selected_candidate = candidate_index;
+        }
+    }
+    return result;
 }
 
 enum class LearnedPolicyVerb : std::uint8_t {
@@ -2994,6 +3204,93 @@ Game::finish_turn_after_priority_phase(TurnPhase phase) {
     return std::nullopt;
 }
 
+double Game::finish_learned_evaluation_horizon(
+    std::size_t perspective, std::size_t horizon_turns) {
+    if (perspective >= state_.players.size()) {
+        throw std::out_of_range(
+            "Learned evaluation perspective must be 0 or 1");
+    }
+    const auto model = learned_model_for(perspective);
+    if (!model) {
+        throw std::logic_error(
+            "Learned evaluation has no frozen model");
+    }
+    const auto result_score =
+        [perspective](const GameResult& result) {
+            return result.winner < 0
+                       ? 0.5
+                       : (result.winner ==
+                                  static_cast<int>(perspective)
+                              ? 1.0
+                              : 0.0);
+        };
+    const auto prepare_next_turn =
+        [&]() -> std::optional<GameResult> {
+            if (state_.turn_number ==
+                std::numeric_limits<std::size_t>::max()) {
+                throw std::overflow_error(
+                    "Learned evaluation turn number overflow");
+            }
+            ++state_.turn_number;
+            state_.active_player =
+                (state_.starting_player + state_.turn_number - 1) %
+                state_.players.size();
+            begin_turn(state_, state_.active_player);
+            const bool starting_player_first_turn =
+                state_.turn_number == 1 &&
+                state_.active_player == state_.starting_player;
+            if (!starting_player_first_turn &&
+                !draw_card(state_.active_player)) {
+                return make_result(
+                    static_cast<int>(
+                        opponent_of(state_.active_player)),
+                    EndReason::EmptyLibrary);
+            }
+            return std::nullopt;
+        };
+    const auto play_prepared_turn =
+        [&]() -> std::optional<GameResult> {
+            if (const auto result = play_priority_window(
+                    true, TurnPhase::FirstMain);
+                result.has_value()) {
+                return result;
+            }
+            if (const auto result = play_combat();
+                result.has_value()) {
+                return result;
+            }
+            if (const auto result = play_priority_window(
+                    true, TurnPhase::SecondMain);
+                result.has_value()) {
+                return result;
+            }
+            cleanup_turn(state_);
+            return std::nullopt;
+        };
+
+    if (const auto result = prepare_next_turn();
+        result.has_value()) {
+        return result_score(*result);
+    }
+    if (horizon_turns == 0) {
+        return model->predict(
+            learned_features(state_, perspective));
+    }
+    for (std::size_t turn = 0; turn < horizon_turns; ++turn) {
+        if (const auto result = play_prepared_turn();
+            result.has_value()) {
+            return result_score(*result);
+        }
+        if (turn + 1 < horizon_turns) {
+            if (const auto result = prepare_next_turn();
+                result.has_value()) {
+                return result_score(*result);
+            }
+        }
+    }
+    return model->predict(learned_features(state_, perspective));
+}
+
 double Game::learned_value_search_action_score(
     const PriorityAction& action, std::size_t player,
     bool sorcery_actions, TurnPhase phase,
@@ -3346,60 +3643,17 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
                 legal_attackers.push_back(creature.id);
             }
         }
-        std::vector<PermanentId> available_blockers;
-        for (const auto& creature : defending_state.creatures) {
-            if (!creature.tapped) {
-                available_blockers.push_back(creature.id);
-            }
-        }
-
         const auto candidates =
             learned_value_attack_candidates(
                 legal_attackers, random_);
-        double best_score =
-            -std::numeric_limits<double>::infinity();
         const auto model =
             learned_model_for(state_.active_player);
-        for (const auto& candidate : candidates) {
-            const auto block_candidates =
-                learned_value_block_candidates(
-                    candidate, available_blockers, random_,
-                    64, 48);
-            double total_score = 0.0;
-            for (const auto& sampled_blocks :
-                 block_candidates) {
-                GameState successor = state_;
-                if (!resolve_combat(
-                        successor, state_.active_player,
-                        candidate, sampled_blocks)) {
-                    throw std::logic_error(
-                        "Learned Value sampled illegal combat");
-                }
-                double sample_score = 0.5;
-                if (successor.players[defending_player].life <=
-                    0) {
-                    sample_score = 1.0;
-                } else if (
-                    successor.players[state_.active_player].life <=
-                    0) {
-                    sample_score = 0.0;
-                } else {
-                    sample_score = model->predict(
-                        learned_features(
-                            successor,
-                            state_.active_player));
-                }
-                total_score += sample_score;
-            }
-            const double expected_score =
-                total_score /
-                static_cast<double>(
-                    block_candidates.size());
-            if (expected_score > best_score) {
-                best_score = expected_score;
-                attackers = candidate;
-            }
-        }
+        const auto evaluation =
+            score_learned_value_attack_sets(
+                state_, state_.active_player, candidates, model,
+                random_);
+        attackers =
+            candidates[evaluation.selected_candidate];
     } else if (learned_actor_attacker) {
         std::vector<PermanentId> legal_attackers;
         for (const auto& creature : attacking_state.creatures) {
@@ -3446,6 +3700,24 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
             }
         }
     }
+
+    return play_combat_with_attackers(std::move(attackers));
+}
+
+std::optional<GameResult> Game::play_combat_with_attackers(
+    std::vector<PermanentId> attackers) {
+    auto& attacking_state = state_.players[state_.active_player];
+    const std::size_t defending_player =
+        opponent_of(state_.active_player);
+    auto& defending_state = state_.players[defending_player];
+    const bool handcrafted_attacker =
+        config_.bots[state_.active_player].kind ==
+        BotKind::Handcrafted;
+    const bool learned_actor_attacker =
+        config_.bots[state_.active_player].kind ==
+            BotKind::Learned &&
+        config_.bots[state_.active_player].learned_variant ==
+            LearnedVariant::UnifiedActor;
 
     if (attackers.empty()) {
         return play_priority_window(false, TurnPhase::EndCombat);
@@ -4468,6 +4740,309 @@ std::vector<double> learned_priority_policy_features(
     return {features.begin(), features.end()};
 }
 
+namespace {
+
+void validate_learned_model(
+    const std::shared_ptr<const LearnedModel>& model,
+    std::optional<LearnedVariant> required_variant = std::nullopt) {
+    if (!model) {
+        throw std::invalid_argument(
+            "Learned evaluation requires a frozen model");
+    }
+    if (required_variant.has_value() &&
+        model->variant() != *required_variant) {
+        throw std::invalid_argument(
+            "Learned evaluation model does not match its variant");
+    }
+}
+
+void validate_priority_candidates(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates) {
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned priority player must be 0 or 1");
+    }
+    if (consecutive_passes < 0 || consecutive_passes > 1) {
+        throw std::out_of_range(
+            "Learned priority pass count must be zero or one");
+    }
+    const bool main_phase =
+        phase == TurnPhase::FirstMain ||
+        phase == TurnPhase::SecondMain;
+    if (main_phase != sorcery_actions) {
+        throw std::invalid_argument(
+            "priority phase and sorcery-action context disagree");
+    }
+    if (phase == TurnPhase::DeclareAttackers ||
+        phase == TurnPhase::DeclareBlockers ||
+        phase == TurnPhase::DamageOrder) {
+        throw std::invalid_argument(
+            "priority evaluation requires a supported priority phase");
+    }
+    if (candidates.empty()) {
+        throw std::invalid_argument(
+            "priority evaluation requires at least one candidate");
+    }
+
+    const auto legal =
+        legal_priority_actions(state, player, sorcery_actions);
+    std::vector<PriorityAction> seen;
+    seen.reserve(candidates.size());
+    for (const PriorityAction& candidate : candidates) {
+        if (!contains_action(legal, candidate)) {
+            throw std::invalid_argument(
+                "priority candidate is not legal in the root state");
+        }
+        if (contains_action(seen, candidate)) {
+            throw std::invalid_argument(
+                "priority candidates must be unique");
+        }
+        seen.push_back(candidate);
+    }
+}
+
+std::vector<PermanentId> legal_attackers(
+    const GameState& state, std::size_t attacking_player) {
+    if (attacking_player >= state.players.size()) {
+        throw std::out_of_range(
+            "attacking player must be 0 or 1");
+    }
+    std::vector<PermanentId> result;
+    for (const CreaturePermanent& creature :
+         state.players[attacking_player].creatures) {
+        if (!creature.tapped && !creature.summoning_sick &&
+            can_attack_through_moat(state, creature)) {
+            result.push_back(creature.id);
+        }
+    }
+    return result;
+}
+
+std::vector<PermanentId> validate_binary_attack_context(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers) {
+    if (attacking_player >= state.players.size()) {
+        throw std::out_of_range(
+            "attacking player must be 0 or 1");
+    }
+    if (state.active_player != attacking_player) {
+        throw std::invalid_argument(
+            "binary attack evaluation requires the active player");
+    }
+    if (!state.stack.empty()) {
+        throw std::invalid_argument(
+            "binary attack evaluation requires an empty stack");
+    }
+
+    const std::vector<PermanentId> legal =
+        legal_attackers(state, attacking_player);
+    const auto subject_position =
+        std::find(legal.begin(), legal.end(), subject);
+    if (subject_position == legal.end()) {
+        throw std::invalid_argument(
+            "binary attack subject cannot legally attack");
+    }
+    const std::size_t subject_index =
+        static_cast<std::size_t>(
+            std::distance(legal.begin(), subject_position));
+
+    std::unordered_set<PermanentId> supplied;
+    std::size_t prior_position = 0;
+    bool have_prior_position = false;
+    for (const PermanentId selected : selected_attackers) {
+        const auto position =
+            std::find(legal.begin(), subject_position, selected);
+        if (position == subject_position ||
+            !supplied.insert(selected).second) {
+            throw std::invalid_argument(
+                "selected attackers must be a unique legal prefix");
+        }
+        const std::size_t index =
+            static_cast<std::size_t>(
+                std::distance(legal.begin(), position));
+        if (have_prior_position && index <= prior_position) {
+            throw std::invalid_argument(
+                "selected attackers are outside deployed order");
+        }
+        prior_position = index;
+        have_prior_position = true;
+    }
+    if (!supplied.insert(subject).second) {
+        throw std::invalid_argument(
+            "binary attack subject appears in the selected prefix");
+    }
+
+    const std::vector<PermanentId> expected_remaining(
+        legal.begin() +
+            static_cast<std::ptrdiff_t>(subject_index + 1),
+        legal.end());
+    if (remaining_attackers != expected_remaining) {
+        throw std::invalid_argument(
+            "remaining attackers must be the complete deployed suffix");
+    }
+    for (const PermanentId remaining : remaining_attackers) {
+        if (!supplied.insert(remaining).second) {
+            throw std::invalid_argument(
+                "binary attack context contains a duplicate creature");
+        }
+    }
+    return legal;
+}
+
+} // namespace
+
+std::vector<double> learned_actor_priority_logits(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::UnifiedActor);
+    validate_priority_candidates(
+        state, player, sorcery_actions, phase,
+        consecutive_passes, candidates);
+    const auto encoded = encode_learned_policy_options(
+        state, player,
+        priority_policy_options(
+            state, player, candidates, sorcery_actions,
+            phase, consecutive_passes));
+    std::vector<double> logits;
+    logits.reserve(encoded.size());
+    for (const auto& option : encoded) {
+        logits.push_back(model->policy_logit(
+            option,
+            static_cast<std::size_t>(
+                LearnedDecisionKind::Priority)));
+    }
+    return logits;
+}
+
+std::array<double, 2> learned_actor_binary_attack_logits(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::UnifiedActor);
+    validate_binary_attack_context(
+        state, attacking_player, selected_attackers, subject,
+        remaining_attackers);
+    const auto encoded = encode_learned_policy_options(
+        state, attacking_player,
+        attack_policy_options(
+            state, attacking_player, subject,
+            selected_attackers, remaining_attackers.size() + 1));
+    return {
+        model->policy_logit(
+            encoded[0],
+            static_cast<std::size_t>(
+                LearnedDecisionKind::Attack)),
+        model->policy_logit(
+            encoded[1],
+            static_cast<std::size_t>(
+                LearnedDecisionKind::Attack)),
+    };
+}
+
+double learned_critic_value(
+    const GameState& state, std::size_t perspective,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(model);
+    if (perspective >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned critic perspective must be 0 or 1");
+    }
+    return model->predict(learned_features(state, perspective));
+}
+
+LearnedValueAttackSetScores learned_value_attack_set_scores(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<std::vector<PermanentId>>& candidates,
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed) {
+    std::mt19937_64 random(seed);
+    return score_learned_value_attack_sets(
+        state, attacking_player, candidates, model, random);
+}
+
+std::vector<double> handcrafted_priority_scores(
+    const GameState& state, std::size_t player,
+    const std::vector<PriorityAction>& candidates) {
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "Handcrafted priority player must be 0 or 1");
+    }
+    if (candidates.empty()) {
+        throw std::invalid_argument(
+            "Handcrafted priority scoring requires candidates");
+    }
+    std::vector<PriorityAction> seen;
+    seen.reserve(candidates.size());
+    for (const PriorityAction& candidate : candidates) {
+        if (contains_action(seen, candidate)) {
+            throw std::invalid_argument(
+                "Handcrafted priority candidates must be unique");
+        }
+        seen.push_back(candidate);
+    }
+
+    Game evaluator({}, {}, 0);
+    evaluator.state_ = state;
+    std::vector<double> scores;
+    scores.reserve(candidates.size());
+    for (const PriorityAction& candidate : candidates) {
+        scores.push_back(
+            evaluator.handcrafted_action_score(candidate, player));
+    }
+    return scores;
+}
+
+std::array<double, 2> handcrafted_binary_attack_scores(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers) {
+    const std::vector<PermanentId> legal =
+        validate_binary_attack_context(
+            state, attacking_player, selected_attackers, subject,
+            remaining_attackers);
+    const std::size_t defending_player =
+        opponent_of(attacking_player);
+    const PlayerState& attacking_state =
+        state.players[attacking_player];
+    const PlayerState& defending_state =
+        state.players[defending_player];
+
+    int total_power = 0;
+    for (const PermanentId attacker : legal) {
+        const auto* creature =
+            find_creature_for_policy(attacking_state, attacker);
+        total_power += card_definition(creature->card).power;
+    }
+    bool favorable_attack = defending_state.creatures.empty();
+    const auto* subject_creature =
+        find_creature_for_policy(attacking_state, subject);
+    const auto& subject_definition =
+        card_definition(subject_creature->card);
+    for (const CreaturePermanent& blocker :
+         defending_state.creatures) {
+        if (!blocker.tapped &&
+            subject_definition.power >=
+                card_definition(blocker.card).toughness) {
+            favorable_attack = true;
+            break;
+        }
+    }
+    const bool include =
+        total_power >= defending_state.life || favorable_attack;
+    return include ? std::array<double, 2>{0.0, 1.0}
+                   : std::array<double, 2>{1.0, 0.0};
+}
+
 std::vector<double>
 learned_soft_priority_target(const std::vector<double>& scores) {
     if (scores.empty()) {
@@ -4893,6 +5468,406 @@ train_learned_value_champion(std::size_t training_games,
 std::shared_ptr<const LearnedModel>
 train_learned_model(std::size_t training_games, std::uint64_t seed) {
     return train_learned_value_champion(training_games, seed);
+}
+
+namespace {
+
+constexpr std::size_t kMaximumEvaluationWorlds = 4096;
+constexpr std::size_t kMaximumEvaluationRolloutsPerWorld = 256;
+constexpr std::size_t kMaximumEvaluationHorizonTurns = 128;
+
+std::uint64_t mix_search_seed(std::uint64_t value) {
+    value += 0x9E3779B97F4A7C15ULL;
+    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27)) * 0x94D049BB133111EBULL;
+    return value ^ (value >> 31);
+}
+
+std::uint64_t indexed_search_seed(
+    std::uint64_t seed, std::uint64_t domain,
+    std::size_t first, std::size_t second = 0) {
+    return mix_search_seed(
+        seed ^ mix_search_seed(domain) ^
+        mix_search_seed(static_cast<std::uint64_t>(first)) ^
+        mix_search_seed(
+            static_cast<std::uint64_t>(second) ^
+            0xD1B54A32D192ED03ULL));
+}
+
+void validate_search_config(
+    const LearnedSearchConfig& config,
+    const std::shared_ptr<const LearnedModel>& model) {
+    validate_learned_model(model, config.continuation_variant);
+    if (config.worlds == 0 ||
+        config.worlds > kMaximumEvaluationWorlds) {
+        throw std::invalid_argument(
+            "Learned search worlds must be in [1, 4096]");
+    }
+    if (config.rollouts_per_world == 0 ||
+        config.rollouts_per_world >
+            kMaximumEvaluationRolloutsPerWorld) {
+        throw std::invalid_argument(
+            "Learned search rollouts per world must be in [1, 256]");
+    }
+    if (config.horizon_turns >
+        kMaximumEvaluationHorizonTurns) {
+        throw std::invalid_argument(
+            "Learned search horizon must be at most 128 turns");
+    }
+}
+
+std::size_t checked_rollout_evaluations(
+    std::size_t candidate_count,
+    const LearnedSearchConfig& config) {
+    const std::size_t maximum =
+        std::numeric_limits<std::size_t>::max();
+    if (config.worlds > maximum / config.rollouts_per_world) {
+        throw std::overflow_error(
+            "Learned search sample count overflow");
+    }
+    const std::size_t samples =
+        config.worlds * config.rollouts_per_world;
+    if (candidate_count > maximum / samples) {
+        throw std::overflow_error(
+            "Learned search evaluation count overflow");
+    }
+    return candidate_count * samples;
+}
+
+struct LearnedEvaluationWorld {
+    GameState state;
+    std::vector<std::uint64_t> continuation_seeds;
+};
+
+std::vector<LearnedEvaluationWorld> sample_evaluation_worlds(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t observer, const LearnedSearchConfig& config) {
+    std::vector<LearnedEvaluationWorld> worlds;
+    worlds.reserve(config.worlds);
+    for (std::size_t world = 0; world < config.worlds; ++world) {
+        LearnedEvaluationWorld sampled{
+            .state = sample_determinization(
+                state, original_decks, observer,
+                indexed_search_seed(
+                    config.seed, 0x574F524C44ULL, world)),
+        };
+        sampled.continuation_seeds.reserve(
+            config.rollouts_per_world);
+        for (std::size_t rollout = 0;
+             rollout < config.rollouts_per_world; ++rollout) {
+            sampled.continuation_seeds.push_back(
+                indexed_search_seed(
+                    config.seed, 0x434F4E54494E5545ULL,
+                    world, rollout));
+        }
+        worlds.push_back(std::move(sampled));
+    }
+    return worlds;
+}
+
+GameConfig learned_evaluation_game_config(
+    const std::shared_ptr<const LearnedModel>& model,
+    LearnedVariant variant) {
+    GameConfig config;
+    config.learned_model = model;
+    config.learned_search_depth = 0;
+    config.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant = variant,
+            .rollouts_per_action = 0,
+            .learned_model = model,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant = variant,
+            .rollouts_per_action = 0,
+            .learned_model = model,
+        },
+    };
+    return config;
+}
+
+double learned_result_value(
+    const GameResult& result, std::size_t perspective) {
+    if (result.winner < 0) {
+        return 0.5;
+    }
+    return result.winner == static_cast<int>(perspective)
+               ? 1.0
+               : 0.0;
+}
+
+double blend_evaluation_score(
+    double continuation, double shallow_prior,
+    bool blend_shallow_prior,
+    std::size_t continuation_sample_count) {
+    if (!blend_shallow_prior) {
+        return continuation;
+    }
+    const double continuation_weight =
+        static_cast<double>(continuation_sample_count);
+    return (shallow_prior +
+            continuation_weight * continuation) /
+           (continuation_weight + 1.0);
+}
+
+} // namespace
+
+LearnedActionSamples learned_priority_action_samples(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig config) {
+    validate_search_config(config, model);
+    validate_priority_candidates(
+        state, player, sorcery_actions, phase,
+        consecutive_passes, candidates);
+    const auto worlds = sample_evaluation_worlds(
+        state, original_decks, player, config);
+
+    Game evaluator(
+        original_decks[0], original_decks[1],
+        indexed_search_seed(
+            config.seed, 0x4556414C55415445ULL, 0),
+        learned_evaluation_game_config(
+            model, config.continuation_variant));
+    evaluator.state_ = state;
+
+    LearnedActionSamples result;
+    result.sampled_worlds = worlds.size();
+    const std::size_t expected_evaluations =
+        checked_rollout_evaluations(candidates.size(), config);
+    result.q_samples.resize(candidates.size());
+    const std::size_t samples_per_action =
+        config.worlds * config.rollouts_per_world;
+    for (auto& samples : result.q_samples) {
+        samples.reserve(samples_per_action);
+    }
+
+    for (std::size_t action_index = 0;
+         action_index < candidates.size(); ++action_index) {
+        const PriorityAction& action = candidates[action_index];
+        for (const LearnedEvaluationWorld& world : worlds) {
+            for (const std::uint64_t continuation_seed :
+                 world.continuation_seeds) {
+                Game simulation = evaluator;
+                simulation.state_ = world.state;
+                simulation.random_.seed(continuation_seed);
+                simulation.trace_ = nullptr;
+                simulation.config_.learned_policy_recorder.reset();
+                simulation.config_.learned_search_depth = 0;
+
+                const double shallow_prior =
+                    config.blend_shallow_prior
+                        ? simulation
+                              .learned_value_shallow_action_score(
+                                  action, player, sorcery_actions,
+                                  consecutive_passes, world.state)
+                        : 0.0;
+                PriorityState priority{
+                    .player = player,
+                    .consecutive_passes = consecutive_passes,
+                };
+                bool window_ended = false;
+                std::optional<GameResult> terminal;
+                if (action.kind == PriorityActionKind::Pass) {
+                    const PriorityPassResult pass =
+                        pass_priority(simulation.state_, priority);
+                    window_ended =
+                        pass == PriorityPassResult::WindowEnded;
+                    if (pass ==
+                        PriorityPassResult::StackObjectResolved) {
+                        terminal = simulation.life_total_result();
+                    }
+                } else {
+                    if (!apply_priority_action(
+                            simulation.state_, player, action,
+                            sorcery_actions)) {
+                        throw std::logic_error(
+                            "validated priority action became illegal");
+                    }
+                    priority = {
+                        .player = player,
+                        .consecutive_passes = 0,
+                    };
+                }
+
+                if (!terminal.has_value() && !window_ended) {
+                    terminal =
+                        simulation.continue_priority_window(
+                            sorcery_actions, phase, priority);
+                }
+                if (!terminal.has_value()) {
+                    terminal =
+                        simulation.finish_turn_after_priority_phase(
+                            phase);
+                }
+
+                const double continuation =
+                    terminal.has_value()
+                        ? learned_result_value(*terminal, player)
+                        : simulation
+                              .finish_learned_evaluation_horizon(
+                                  player, config.horizon_turns);
+                result.q_samples[action_index].push_back(
+                    blend_evaluation_score(
+                        continuation, shallow_prior,
+                        config.blend_shallow_prior,
+                        samples_per_action));
+                ++result.rollout_evaluations;
+            }
+        }
+    }
+    if (result.rollout_evaluations != expected_evaluations) {
+        throw std::logic_error(
+            "Learned priority evaluation accounting mismatch");
+    }
+    return result;
+}
+
+LearnedActionSamples learned_binary_attack_samples(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig config) {
+    validate_search_config(config, model);
+    validate_binary_attack_context(
+        state, attacking_player, selected_attackers, subject,
+        remaining_attackers);
+    const auto worlds = sample_evaluation_worlds(
+        state, original_decks, attacking_player, config);
+
+    Game evaluator(
+        original_decks[0], original_decks[1],
+        indexed_search_seed(
+            config.seed, 0x41545441434B4556ULL, 0),
+        learned_evaluation_game_config(
+            model, config.continuation_variant));
+    evaluator.state_ = state;
+
+    LearnedActionSamples result;
+    result.sampled_worlds = worlds.size();
+    const std::size_t expected_evaluations =
+        checked_rollout_evaluations(2, config);
+    result.q_samples.resize(2);
+    const std::size_t samples_per_action =
+        config.worlds * config.rollouts_per_world;
+    for (auto& samples : result.q_samples) {
+        samples.reserve(samples_per_action);
+    }
+
+    for (std::size_t root_choice = 0; root_choice < 2;
+         ++root_choice) {
+        for (const LearnedEvaluationWorld& world : worlds) {
+            for (const std::uint64_t continuation_seed :
+                 world.continuation_seeds) {
+                Game simulation = evaluator;
+                simulation.state_ = world.state;
+                simulation.random_.seed(continuation_seed);
+                simulation.trace_ = nullptr;
+                simulation.config_.learned_policy_recorder.reset();
+                simulation.config_.learned_search_depth = 0;
+
+                std::vector<PermanentId> attackers =
+                    selected_attackers;
+                if (root_choice == 1) {
+                    attackers.push_back(subject);
+                }
+                if (config.continuation_variant ==
+                    LearnedVariant::UnifiedActor) {
+                    for (std::size_t index = 0;
+                         index < remaining_attackers.size();
+                         ++index) {
+                        const auto options = attack_policy_options(
+                            simulation.state_, attacking_player,
+                            remaining_attackers[index], attackers,
+                            remaining_attackers.size() - index);
+                        if (choose_learned_policy_option(
+                                simulation.state_,
+                                simulation.config_, options,
+                                attacking_player,
+                                simulation.random_) == 1) {
+                            attackers.push_back(
+                                remaining_attackers[index]);
+                        }
+                    }
+                } else {
+                    const auto suffix_candidates =
+                        learned_value_attack_candidates(
+                            remaining_attackers,
+                            simulation.random_);
+                    std::vector<std::vector<PermanentId>>
+                        attack_candidates;
+                    attack_candidates.reserve(
+                        suffix_candidates.size());
+                    for (const auto& suffix : suffix_candidates) {
+                        std::vector<PermanentId> candidate =
+                            attackers;
+                        candidate.insert(
+                            candidate.end(), suffix.begin(),
+                            suffix.end());
+                        attack_candidates.push_back(
+                            std::move(candidate));
+                    }
+                    const auto evaluation =
+                        score_learned_value_attack_sets(
+                            simulation.state_, attacking_player,
+                            attack_candidates, model,
+                            simulation.random_);
+                    attackers = attack_candidates[
+                        evaluation.selected_candidate];
+                }
+
+                std::optional<GameResult> terminal =
+                    simulation.play_combat_with_attackers(
+                        std::move(attackers));
+                double shallow_prior = 0.0;
+                if (terminal.has_value()) {
+                    shallow_prior = learned_result_value(
+                        *terminal, attacking_player);
+                } else {
+                    shallow_prior = model->predict(
+                        learned_features(
+                            simulation.state_,
+                            attacking_player));
+                    terminal = simulation.play_priority_window(
+                        true, TurnPhase::SecondMain);
+                }
+                if (!terminal.has_value()) {
+                    cleanup_turn(simulation.state_);
+                }
+
+                const double continuation =
+                    terminal.has_value()
+                        ? learned_result_value(
+                              *terminal, attacking_player)
+                        : simulation
+                              .finish_learned_evaluation_horizon(
+                                  attacking_player,
+                                  config.horizon_turns);
+                result.q_samples[root_choice].push_back(
+                    blend_evaluation_score(
+                        continuation, shallow_prior,
+                        config.blend_shallow_prior,
+                        samples_per_action));
+                ++result.rollout_evaluations;
+            }
+        }
+    }
+    if (result.rollout_evaluations != expected_evaluations) {
+        throw std::logic_error(
+            "Learned attack evaluation accounting mismatch");
+    }
+    return result;
 }
 
 LearnedValuePriorityDiagnostic diagnose_learned_value_priority(

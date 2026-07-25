@@ -6,10 +6,12 @@ BUILD_DIR := build
 ENGINE_SOURCE := src/game.cpp
 PROBE_SOURCE := src/probes.cpp
 PROBE_EVAL_SOURCE := src/probe_eval.cpp
+PROBE_RUNNER_SOURCE := src/probe_runner.cpp
 SIMULATOR := $(BUILD_DIR)/alpha-sim
 TEST_RUNNER := $(BUILD_DIR)/alpha-tests
 PROBE_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-tests
 PROBE_EVAL_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-eval-tests
+PROBE_RUNNER_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-runner-tests
 
 .PHONY: all test test-probes benchmark benchmark-deep benchmark-learned stability evolve run clean
 
@@ -18,8 +20,8 @@ all: $(SIMULATOR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(SIMULATOR): $(ENGINE_SOURCE) src/main.cpp include/alpha/game.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) src/main.cpp -o $@
+$(SIMULATOR): $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp include/alpha/game.hpp include/alpha/probes.hpp include/alpha/probe_eval.hpp include/alpha/probe_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp -o $@
 
 $(TEST_RUNNER): $(ENGINE_SOURCE) tests/test_game.cpp include/alpha/game.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) tests/test_game.cpp -o $@
@@ -30,15 +32,20 @@ $(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp inc
 $(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp include/alpha/game.hpp include/alpha/probe_eval.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp -o $@
 
-test: $(TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(SIMULATOR)
+$(PROBE_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp include/alpha/game.hpp include/alpha/probes.hpp include/alpha/probe_eval.hpp include/alpha/probe_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp -o $@
+
+test: $(TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
 	./$(PROBE_EVAL_TEST_RUNNER)
+	./$(PROBE_RUNNER_TEST_RUNNER)
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
 
-test-probes: $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER)
+test-probes: $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
 	./$(PROBE_EVAL_TEST_RUNNER)
+	./$(PROBE_RUNNER_TEST_RUNNER)
 
 benchmark: $(SIMULATOR)
 	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger handcrafted --baseline monte-carlo --rollouts 2

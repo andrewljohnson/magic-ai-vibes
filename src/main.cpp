@@ -1,4 +1,5 @@
 #include "alpha/game.hpp"
+#include "alpha/probe_runner.hpp"
 
 #include <algorithm>
 #include <array>
@@ -51,6 +52,9 @@ void print_help(std::string_view executable) {
         << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
+        << " --score-probes [--probe-worlds N] [--probe-horizon N]"
+           " [--probe-cache PATH] [--refresh-probe-cache]\n"
+        << "       " << executable
         << " --evolve-deck [--generations N] [--population N] "
            "[--games N]\n\n"
         << "Simulates an early-Magic round robin with legal bot play.\n"
@@ -87,6 +91,16 @@ void print_help(std::string_view executable) {
            "rankings on a held-out White lock state\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
+        << "  --score-probes   Label/score the held-out 16-position "
+           "probe-dev-v2 development corpus\n"
+        << "  --probe-worlds N  Common worlds per reference candidate "
+           "(default: 128; minimum: 2)\n"
+        << "  --probe-horizon N  Actor-mirror reference horizon in turns "
+           "(default: 12)\n"
+        << "  --probe-cache PATH  Deterministic label cache "
+           "(default: data/probe-dev-v2.labels.tsv)\n"
+        << "  --refresh-probe-cache  Regenerate matching probe labels "
+           "atomically\n"
         << "  --evolve-deck   Evolve a 40-card deck against the current "
            "metagame\n"
         << "  --generations N  Evolution generations (default: 10)\n"
@@ -1063,6 +1077,13 @@ int main(int argc, char** argv) {
         bool evolve = false;
         bool diagnose_white_plan = false;
         bool variance_study = false;
+        bool score_probes = false;
+        bool refresh_probe_cache = false;
+        bool probe_option_used = false;
+        std::size_t probe_worlds = 128;
+        std::size_t probe_horizon = 12;
+        std::string probe_cache =
+            "data/probe-dev-v2.labels.tsv";
         std::size_t stability_runs = 8;
         std::size_t generations = 10;
         std::size_t population = 16;
@@ -1099,6 +1120,15 @@ int main(int argc, char** argv) {
                 variance_study = true;
                 continue;
             }
+            if (option == "--score-probes") {
+                score_probes = true;
+                continue;
+            }
+            if (option == "--refresh-probe-cache") {
+                refresh_probe_cache = true;
+                probe_option_used = true;
+                continue;
+            }
             if (option != "--games" && option != "--seed" &&
                 option != "--train-seed" &&
                 option != "--bots" && option != "--rollouts" &&
@@ -1108,7 +1138,10 @@ int main(int argc, char** argv) {
                 option != "--generations" &&
                 option != "--population" &&
                 option != "--challenger" &&
-                option != "--baseline") {
+                option != "--baseline" &&
+                option != "--probe-worlds" &&
+                option != "--probe-horizon" &&
+                option != "--probe-cache") {
                 throw std::invalid_argument("unknown option: " +
                                             std::string(option));
             }
@@ -1133,6 +1166,15 @@ int main(int argc, char** argv) {
                 } else {
                     baseline = selection;
                 }
+                continue;
+            }
+            if (option == "--probe-cache") {
+                probe_cache = argv[argument];
+                if (probe_cache.empty()) {
+                    throw std::invalid_argument(
+                        "--probe-cache must not be empty");
+                }
+                probe_option_used = true;
                 continue;
             }
 
@@ -1178,6 +1220,16 @@ int main(int argc, char** argv) {
                         "--population must be at least four");
                 }
                 population = static_cast<std::size_t>(value);
+            } else if (option == "--probe-worlds") {
+                if (value < 2) {
+                    throw std::invalid_argument(
+                        "--probe-worlds must be at least two");
+                }
+                probe_worlds = static_cast<std::size_t>(value);
+                probe_option_used = true;
+            } else if (option == "--probe-horizon") {
+                probe_horizon = static_cast<std::size_t>(value);
+                probe_option_used = true;
             } else {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -1190,12 +1242,36 @@ int main(int argc, char** argv) {
         if (static_cast<int>(benchmark) + static_cast<int>(stability) +
                 static_cast<int>(evolve) +
                 static_cast<int>(diagnose_white_plan) +
-                static_cast<int>(variance_study) >
+                static_cast<int>(variance_study) +
+                static_cast<int>(score_probes) >
             1) {
             throw std::invalid_argument(
                 "--benchmark, --stability, --evolve-deck, and "
-                "--diagnose-white-plan, and --variance-study cannot "
-                "be combined");
+                "--diagnose-white-plan, --variance-study, and "
+                "--score-probes cannot be combined");
+        }
+        if (probe_option_used && !score_probes) {
+            throw std::invalid_argument(
+                "--probe-worlds, --probe-horizon, --probe-cache, and "
+                "--refresh-probe-cache require --score-probes");
+        }
+        if (score_probes) {
+            const alpha::probe_runner::ProbeScoreConfig config{
+                .training_games = training_games,
+                .training_seed = training_seed,
+                .reference_worlds = probe_worlds,
+                .reference_horizon_turns = probe_horizon,
+                .reference_rollouts_per_world = 1,
+                .cache_path = probe_cache,
+                .refresh_cache = refresh_probe_cache,
+            };
+            const auto report =
+                alpha::probe_runner::score_probe_dev_v2(
+                    config, std::cout);
+            std::cout
+                << alpha::probe_runner::format_probe_score_report(
+                       report);
+            return 0;
         }
         if (diagnose_white_plan) {
             const auto model =

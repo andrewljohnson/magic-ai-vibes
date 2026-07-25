@@ -206,6 +206,96 @@ physical_cards(const alpha::GameState& state, std::size_t player) {
     return cards;
 }
 
+std::shared_ptr<const alpha::LearnedModel> small_actor_model() {
+    static const auto model =
+        alpha::train_learned_actor_model(1, 0xAC70E7A1ULL);
+    return model;
+}
+
+std::shared_ptr<const alpha::LearnedModel> small_value_model() {
+    static const auto model =
+        alpha::train_learned_value_champion(1, 0xC4A6E7A1ULL);
+    return model;
+}
+
+alpha::GameState hidden_repartition(
+    const alpha::GameState& state, std::size_t observer) {
+    alpha::GameState changed = state;
+    std::reverse(changed.players[observer].library.begin(),
+                 changed.players[observer].library.end());
+    const std::size_t opponent = 1 - observer;
+    auto& hand = changed.players[opponent].hand;
+    auto& library = changed.players[opponent].library;
+    if (!hand.empty() && !library.empty()) {
+        const auto different = std::find_if(
+            library.begin(), library.end(),
+            [&](alpha::CardId card) {
+                return card != hand.front();
+            });
+        if (different != library.end()) {
+            std::iter_swap(hand.begin(), different);
+        }
+    }
+    std::reverse(hand.begin(), hand.end());
+    std::reverse(library.begin(), library.end());
+    return changed;
+}
+
+DeterminizationFixture attack_evaluation_fixture(
+    alpha::CardId blocker_card) {
+    const bool red_blocker =
+        blocker_card == alpha::CardId::FireElemental;
+    DeterminizationFixture fixture{
+        .state = {},
+        .decks = {
+            alpha::green_alpha_deck(),
+            red_blocker ? alpha::red_alpha_deck()
+                        : alpha::green_alpha_deck(),
+        },
+    };
+    auto& state = fixture.state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 11;
+    state.players[0].land_played_this_turn = true;
+    state.players[0].lands.assign(
+        5, alpha::LandPermanent{
+               .card = alpha::CardId::Forest,
+               .tapped = false,
+           });
+    state.players[0].creatures = {
+        creature(1, alpha::CardId::IronrootTreefolk),
+    };
+    state.players[1].lands.assign(
+        5, alpha::LandPermanent{
+               .card = red_blocker ? alpha::CardId::Mountain
+                                   : alpha::CardId::Forest,
+               .tapped = false,
+           });
+    state.players[1].creatures = {
+        creature(2, blocker_card),
+    };
+
+    for (std::size_t player = 0; player < fixture.decks.size();
+         ++player) {
+        std::vector<alpha::CardId> hidden = fixture.decks[player];
+        for (const auto& land : state.players[player].lands) {
+            remove_fixture_card(hidden, land.card);
+        }
+        for (const auto& permanent :
+             state.players[player].creatures) {
+            remove_fixture_card(hidden, permanent.card);
+        }
+        if (player == 1) {
+            state.players[player].hand.assign(
+                hidden.begin(), hidden.begin() + 2);
+            hidden.erase(hidden.begin(), hidden.begin() + 2);
+        }
+        state.players[player].library = std::move(hidden);
+    }
+    return fixture;
+}
+
 TEST(alpha_card_definitions_are_complete) {
     const auto& forest = alpha::card_definition(alpha::CardId::Forest);
     CHECK(forest.name == "Forest");
@@ -596,6 +686,422 @@ TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
             kEvaluationSeed);
     CHECK(second_main.actions == first_main.actions);
     CHECK(second_main.scores != first_main.scores);
+}
+
+TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
+    const alpha::GameState state =
+        alpha::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<alpha::CardId>, 2> decks = {
+        alpha::white_control_deck(),
+        alpha::red_alpha_deck(),
+    };
+    const auto actions =
+        alpha::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() == 4);
+    const alpha::LearnedSearchConfig config = {
+        .seed = 0xC0110A5EULL,
+        .worlds = 2,
+        .rollouts_per_world = 2,
+        .horizon_turns = 0,
+        .continuation_variant =
+            alpha::LearnedVariant::UnifiedActor,
+        .blend_shallow_prior = false,
+    };
+    const auto model = small_actor_model();
+    const auto baseline =
+        alpha::learned_priority_action_samples(
+            state, decks, 0, true, alpha::TurnPhase::FirstMain,
+            0, actions, model, config);
+    CHECK(baseline.sampled_worlds == 2);
+    CHECK(baseline.rollout_evaluations == actions.size() * 4);
+    CHECK(baseline.q_samples.size() == actions.size());
+    for (const auto& samples : baseline.q_samples) {
+        CHECK(samples.size() == 4);
+        CHECK(std::all_of(
+            samples.begin(), samples.end(),
+            [](double value) {
+                return std::isfinite(value) &&
+                       value >= 0.0 && value <= 1.0;
+            }));
+    }
+
+    const alpha::GameState hidden =
+        hidden_repartition(state, 0);
+    const auto repeated =
+        alpha::learned_priority_action_samples(
+            hidden, decks, 0, true, alpha::TurnPhase::FirstMain,
+            0, actions, model, config);
+    CHECK(repeated.q_samples == baseline.q_samples);
+    const auto logits =
+        alpha::learned_actor_priority_logits(
+            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+            actions, model);
+    CHECK(logits.size() == actions.size());
+    CHECK(std::all_of(
+        logits.begin(), logits.end(),
+        [](double value) { return std::isfinite(value); }));
+    CHECK(alpha::learned_actor_priority_logits(
+              hidden, 0, true, alpha::TurnPhase::FirstMain, 0,
+              actions, model) == logits);
+    const double critic =
+        alpha::learned_critic_value(state, 0, model);
+    CHECK(critic > 0.0 && critic < 1.0);
+    CHECK(alpha::learned_critic_value(hidden, 0, model) == critic);
+
+    auto reordered_actions = actions;
+    std::reverse(reordered_actions.begin(), reordered_actions.end());
+    const auto reordered =
+        alpha::learned_priority_action_samples(
+            state, decks, 0, true, alpha::TurnPhase::FirstMain,
+            0, reordered_actions, model, config);
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        CHECK(reordered.q_samples[index] ==
+              baseline.q_samples[actions.size() - index - 1]);
+    }
+
+    bool rejected_illegal = false;
+    try {
+        static_cast<void>(
+            alpha::learned_priority_action_samples(
+                state, decks, 0, true,
+                alpha::TurnPhase::FirstMain, 0,
+                {alpha::PriorityAction::cast_sorcery(
+                    alpha::CardId::Tsunami)},
+                model, config));
+    } catch (const std::invalid_argument&) {
+        rejected_illegal = true;
+    }
+    CHECK(rejected_illegal);
+}
+
+TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
+    const auto actor = small_actor_model();
+    const auto repeated =
+        alpha::train_learned_actor_model(1, 0xAC70E7A1ULL);
+    const auto changed =
+        alpha::train_learned_actor_model(1, 0xAC70E7A2ULL);
+    const std::string fingerprint =
+        alpha::learned_model_fingerprint(actor);
+    CHECK(fingerprint.size() == 64);
+    CHECK(std::all_of(
+        fingerprint.begin(), fingerprint.end(),
+        [](char character) {
+            return (character >= '0' && character <= '9') ||
+                   (character >= 'a' && character <= 'f');
+        }));
+    CHECK(alpha::learned_model_fingerprint(repeated) == fingerprint);
+    CHECK(alpha::learned_model_fingerprint(changed) != fingerprint);
+    CHECK(alpha::learned_model_fingerprint(small_value_model()) !=
+          fingerprint);
+
+    bool rejected_null = false;
+    try {
+        static_cast<void>(
+            alpha::learned_model_fingerprint(nullptr));
+    } catch (const std::invalid_argument&) {
+        rejected_null = true;
+    }
+    CHECK(rejected_null);
+}
+
+TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
+    const std::array<std::vector<alpha::CardId>, 2> decks = {
+        alpha::red_alpha_deck(),
+        alpha::red_alpha_deck(),
+    };
+    alpha::GameState state;
+    state.active_player = 1;
+    state.starting_player = 1;
+    state.turn_number = 10;
+    state.players[0].life = 3;
+    state.players[0].library = decks[0];
+    state.players[1].lands = {
+        {.card = alpha::CardId::Mountain, .tapped = true},
+    };
+    state.stack = {
+        {
+            .kind = alpha::StackObjectKind::Spell,
+            .id = 1,
+            .card = alpha::CardId::LightningBolt,
+            .controller = 1,
+            .target = alpha::Target::player_target(0),
+            .spell_target = std::nullopt,
+        },
+    };
+    state.next_stack_object_id = 2;
+    state.players[1].library = decks[1];
+    remove_fixture_card(
+        state.players[1].library, alpha::CardId::Mountain);
+    remove_fixture_card(
+        state.players[1].library, alpha::CardId::LightningBolt);
+    const std::vector<alpha::PriorityAction> actions = {
+        alpha::PriorityAction::pass(),
+    };
+    const alpha::LearnedSearchConfig actor_config = {
+        .seed = 0x57ACCA55ULL,
+        .worlds = 2,
+        .rollouts_per_world = 2,
+        .horizon_turns = 0,
+        .continuation_variant =
+            alpha::LearnedVariant::UnifiedActor,
+        .blend_shallow_prior = false,
+    };
+    const auto actor_samples =
+        alpha::learned_priority_action_samples(
+            state, decks, 0, false,
+            alpha::TurnPhase::BeginCombat, 1, actions,
+            small_actor_model(), actor_config);
+    CHECK(actor_samples.rollout_evaluations == 4);
+    CHECK(actor_samples.q_samples.size() == 1);
+    CHECK(actor_samples.q_samples[0] ==
+          std::vector<double>({0.0, 0.0, 0.0, 0.0}));
+
+    alpha::LearnedSearchConfig value_config = actor_config;
+    value_config.worlds = 1;
+    value_config.rollouts_per_world = 1;
+    value_config.continuation_variant =
+        alpha::LearnedVariant::ValueSearchChampion;
+    const auto value_samples =
+        alpha::learned_priority_action_samples(
+            state, decks, 0, false,
+            alpha::TurnPhase::BeginCombat, 1, actions,
+            small_value_model(), value_config);
+    CHECK(value_samples.q_samples ==
+          std::vector<std::vector<double>>({{0.0}}));
+
+    bool rejected_mismatch = false;
+    try {
+        static_cast<void>(
+            alpha::learned_priority_action_samples(
+                state, decks, 0, false,
+                alpha::TurnPhase::BeginCombat, 1, actions,
+                small_actor_model(), value_config));
+    } catch (const std::invalid_argument&) {
+        rejected_mismatch = true;
+    }
+    CHECK(rejected_mismatch);
+
+    bool rejected_unbounded = false;
+    alpha::LearnedSearchConfig unbounded = actor_config;
+    unbounded.horizon_turns = 129;
+    try {
+        static_cast<void>(
+            alpha::learned_priority_action_samples(
+                state, decks, 0, false,
+                alpha::TurnPhase::BeginCombat, 1, actions,
+                small_actor_model(), unbounded));
+    } catch (const std::invalid_argument&) {
+        rejected_unbounded = true;
+    }
+    CHECK(rejected_unbounded);
+
+    alpha::GameState boundary;
+    boundary.active_player = 0;
+    boundary.starting_player = 0;
+    boundary.turn_number = 1;
+    boundary.players[0].graveyard = decks[0];
+    boundary.players[1].library = {
+        alpha::CardId::Mountain,
+    };
+    boundary.players[1].graveyard = decks[1];
+    remove_fixture_card(
+        boundary.players[1].graveyard,
+        alpha::CardId::Mountain);
+    alpha::LearnedSearchConfig horizon_zero = actor_config;
+    horizon_zero.worlds = 1;
+    horizon_zero.rollouts_per_world = 1;
+    const double h0 =
+        alpha::learned_priority_action_samples(
+            boundary, decks, 0, true,
+            alpha::TurnPhase::SecondMain, 1, actions,
+            small_actor_model(), horizon_zero)
+            .q_samples[0][0];
+    CHECK(h0 > 0.0 && h0 < 1.0);
+
+    alpha::LearnedSearchConfig horizon_one = horizon_zero;
+    horizon_one.horizon_turns = 1;
+    const double h1 =
+        alpha::learned_priority_action_samples(
+            boundary, decks, 0, true,
+            alpha::TurnPhase::SecondMain, 1, actions,
+            small_actor_model(), horizon_one)
+            .q_samples[0][0];
+    // H1 bootstraps after turn two cleanup. Preparing turn three here would
+    // make player zero draw from its empty library and return exactly zero.
+    CHECK(h1 > 0.0 && h1 < 1.0);
+
+    auto empty_next_library = boundary;
+    empty_next_library.players[1].graveyard.push_back(
+        empty_next_library.players[1].library.back());
+    empty_next_library.players[1].library.clear();
+    const double deck_out =
+        alpha::learned_priority_action_samples(
+            empty_next_library, decks, 0, true,
+            alpha::TurnPhase::SecondMain, 1, actions,
+            small_actor_model(), horizon_zero)
+            .q_samples[0][0];
+    CHECK(deck_out == 1.0);
+}
+
+TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
+    const DeterminizationFixture fixture =
+        attack_evaluation_fixture(alpha::CardId::GrizzlyBears);
+    const alpha::LearnedSearchConfig actor_config = {
+        .seed = 0xA77AC5EEDULL,
+        .worlds = 2,
+        .rollouts_per_world = 2,
+        .horizon_turns = 0,
+        .continuation_variant =
+            alpha::LearnedVariant::UnifiedActor,
+        .blend_shallow_prior = false,
+    };
+    const auto baseline =
+        alpha::learned_binary_attack_samples(
+            fixture.state, fixture.decks, 0, {}, 1, {},
+            small_actor_model(), actor_config);
+    CHECK(baseline.sampled_worlds == 2);
+    CHECK(baseline.rollout_evaluations == 8);
+    CHECK(baseline.q_samples.size() == 2);
+    for (const auto& samples : baseline.q_samples) {
+        CHECK(samples.size() == 4);
+        CHECK(std::all_of(
+            samples.begin(), samples.end(),
+            [](double value) {
+                return std::isfinite(value) &&
+                       value >= 0.0 && value <= 1.0;
+            }));
+    }
+    const auto hidden =
+        hidden_repartition(fixture.state, 0);
+    CHECK(alpha::learned_binary_attack_samples(
+              hidden, fixture.decks, 0, {}, 1, {},
+              small_actor_model(), actor_config)
+              .q_samples == baseline.q_samples);
+    const auto logits =
+        alpha::learned_actor_binary_attack_logits(
+            fixture.state, 0, {}, 1, {}, small_actor_model());
+    CHECK(std::isfinite(logits[0]));
+    CHECK(std::isfinite(logits[1]));
+
+    alpha::LearnedSearchConfig value_config = actor_config;
+    value_config.worlds = 1;
+    value_config.rollouts_per_world = 1;
+    value_config.continuation_variant =
+        alpha::LearnedVariant::ValueSearchChampion;
+    const auto value_samples =
+        alpha::learned_binary_attack_samples(
+            fixture.state, fixture.decks, 0, {}, 1, {},
+            small_value_model(), value_config);
+    CHECK(value_samples.q_samples.size() == 2);
+    CHECK(value_samples.q_samples[0].size() == 1);
+    CHECK(value_samples.q_samples[1].size() == 1);
+
+    auto moated = fixture.state;
+    moated.players[1].enchantments.push_back(alpha::CardId::Moat);
+    bool rejected_moat = false;
+    try {
+        static_cast<void>(
+            alpha::learned_binary_attack_samples(
+                moated, fixture.decks, 0, {}, 1, {},
+                small_actor_model(), actor_config));
+    } catch (const std::invalid_argument&) {
+        rejected_moat = true;
+    }
+    CHECK(rejected_moat);
+}
+
+TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
+    const std::vector<std::vector<alpha::PermanentId>> candidates = {
+        {},
+        {1},
+    };
+    constexpr std::uint64_t seed = 0xB10C5C0EULL;
+    for (const alpha::CardId blocker : {
+             alpha::CardId::GrizzlyBears,
+             alpha::CardId::FireElemental,
+         }) {
+        const auto fixture = attack_evaluation_fixture(blocker);
+        const auto scored =
+            alpha::learned_value_attack_set_scores(
+                fixture.state, 0, candidates,
+                small_value_model(), seed);
+        CHECK(scored.scores.size() == candidates.size());
+        CHECK(std::all_of(
+            scored.scores.begin(), scored.scores.end(),
+            [](double score) {
+                return std::isfinite(score) &&
+                       score >= 0.0 && score <= 1.0;
+            }));
+
+        // This is the exact strict comparison used by the deployed selector:
+        // std::max_element also retains the first candidate on a tie.
+        const std::size_t deployed_argmax =
+            static_cast<std::size_t>(std::distance(
+                scored.scores.begin(),
+                std::max_element(
+                    scored.scores.begin(), scored.scores.end())));
+        CHECK(scored.selected_candidate == deployed_argmax);
+
+        const auto hidden =
+            alpha::learned_value_attack_set_scores(
+                hidden_repartition(fixture.state, 0), 0,
+                candidates, small_value_model(), seed);
+        CHECK(hidden.scores == scored.scores);
+        CHECK(hidden.selected_candidate ==
+              scored.selected_candidate);
+    }
+
+    bool rejected_actor = false;
+    try {
+        static_cast<void>(
+            alpha::learned_value_attack_set_scores(
+                attack_evaluation_fixture(
+                    alpha::CardId::GrizzlyBears)
+                    .state,
+                0, candidates, small_actor_model(), seed));
+    } catch (const std::invalid_argument&) {
+        rejected_actor = true;
+    }
+    CHECK(rejected_actor);
+}
+
+TEST(handcrafted_diagnostic_scores_match_deployed_preferences) {
+    alpha::GameState priority_state;
+    priority_state.active_player = 0;
+    priority_state.players[0].hand = {
+        alpha::CardId::LightningBolt,
+    };
+    priority_state.players[0].lands = {
+        {.card = alpha::CardId::Mountain, .tapped = false},
+    };
+    priority_state.players[1].life = 3;
+    const auto actions =
+        alpha::legal_priority_actions(priority_state, 0, true);
+    const auto scores =
+        alpha::handcrafted_priority_scores(
+            priority_state, 0, actions);
+    const auto lethal =
+        std::find(
+            actions.begin(), actions.end(),
+            alpha::PriorityAction::cast_lightning_bolt(
+                alpha::Target::player_target(1)));
+    CHECK(lethal != actions.end());
+    const std::size_t lethal_index =
+        static_cast<std::size_t>(
+            std::distance(actions.begin(), lethal));
+    CHECK(scores[lethal_index] ==
+          *std::max_element(scores.begin(), scores.end()));
+
+    const auto favorable =
+        attack_evaluation_fixture(alpha::CardId::GrizzlyBears);
+    CHECK((alpha::handcrafted_binary_attack_scores(
+               favorable.state, 0, {}, 1, {}) ==
+           std::array<double, 2>({0.0, 1.0})));
+    const auto unfavorable =
+        attack_evaluation_fixture(alpha::CardId::FireElemental);
+    CHECK((alpha::handcrafted_binary_attack_scores(
+               unfavorable.state, 0, {}, 1, {}) ==
+           std::array<double, 2>({1.0, 0.0})));
 }
 
 TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {

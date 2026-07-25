@@ -4,7 +4,9 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace alpha::probe_eval {
@@ -34,6 +36,9 @@ struct ProbeLabel {
     std::vector<CandidateLabel> candidates;
     std::vector<PairLabel> pairs;
     std::vector<std::string> reference_best_set;
+    // Maximum candidate Q. This defines regret and the best set; critic
+    // calibration instead uses the Q of the policy's deployed-selected
+    // action.
     double reference_value = 0.0;
 };
 
@@ -43,9 +48,27 @@ struct PolicyScore {
 };
 
 struct ProbePrediction {
+    ProbePrediction() = default;
+    ProbePrediction(
+        std::string stable_id_value,
+        std::vector<PolicyScore> policy_scores_value,
+        double critic_value_value,
+        std::optional<std::string> selected_key_value =
+            std::nullopt)
+        : stable_id(std::move(stable_id_value)),
+          policy_scores(std::move(policy_scores_value)),
+          critic_value(critic_value_value),
+          selected_key(std::move(selected_key_value)) {}
+
     std::string stable_id;
     std::vector<PolicyScore> policy_scores;
+    // State value under the predicted policy. Evaluation compares it with
+    // the reference Q of that policy's deployed-selected action.
     double critic_value = 0.0;
+    // Most policies randomize exact score ties, represented by nullopt and
+    // evaluated as the uniform expectation. Deterministic deployed selectors
+    // provide the exact selected candidate key.
+    std::optional<std::string> selected_key;
 };
 
 struct CandidateSamples {
@@ -86,6 +109,20 @@ struct ProbeMetricSummary {
     std::array<DeckProbeMetrics, 4> by_deck{};
 };
 
+struct DeckCandidateQFitMetrics {
+    DeckId root_deck = DeckId::Green;
+    std::size_t candidate_count = 0;
+    double mae = 0.0;
+    double rmse = 0.0;
+};
+
+struct CandidateQFitSummary {
+    std::size_t candidate_count = 0;
+    double mae = 0.0;
+    double rmse = 0.0;
+    std::array<DeckCandidateQFitMetrics, 4> by_deck{};
+};
+
 // Builds a deterministic reference label from aligned, per-action Q samples.
 // Candidate means and standard errors use the sample variance. Every unordered
 // candidate pair receives a paired difference and paired standard error.
@@ -105,10 +142,21 @@ void validate_probe_predictions(
     const std::vector<ProbePrediction>& predictions);
 
 // Labels and predictions are matched by stable_id and candidate key, never by
-// input order. Student policy scores may be arbitrary finite logits/scores;
-// critic values and reference Q values are probabilities in [0, 1].
+// input order. Student policy scores may be arbitrary finite logits/scores.
+// Regret and best-set metrics use the maximum reference Q. Critic metrics use
+// the reference Q of the policy's deployed-selected action; multiple exact
+// top-scored actions are averaged uniformly. Critic values and reference Q
+// values are probabilities in [0, 1].
 ProbeMetricSummary evaluate_probe_predictions(
     const std::vector<ProbeLabel>& labels,
     const std::vector<ProbePrediction>& predictions);
+
+// Measures candidate-level Q fit for scorers whose policy_scores are actual
+// outcome probabilities, not logits or hand-authored rankings. Labels and
+// predictions are matched by stable_id and candidate key. The pooled and
+// per-deck summaries are candidate-weighted.
+CandidateQFitSummary evaluate_candidate_q_fit(
+    const std::vector<ProbeLabel>& labels,
+    const std::vector<ProbePrediction>& q_predictions);
 
 } // namespace alpha::probe_eval

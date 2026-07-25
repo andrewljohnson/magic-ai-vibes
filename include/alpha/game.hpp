@@ -342,6 +342,97 @@ struct LearnedValuePriorityDiagnostic {
     std::size_t rollout_evaluations = 0;
 };
 
+// Configuration for evaluation-only information-set action scoring. Worlds
+// are sampled once from the root player's observation, then every candidate
+// is evaluated with the same world and continuation-seed matrix. Nested root
+// search is always disabled inside continuations.
+struct LearnedSearchConfig {
+    std::uint64_t seed = 0;
+    std::size_t worlds = 1;
+    std::size_t rollouts_per_world = 1;
+    // Zero finishes the current turn, begins/draws the next turn, and
+    // bootstraps before priority. A positive value plays exactly that many
+    // complete future turns and bootstraps after the final cleanup.
+    std::size_t horizon_turns = 4;
+    LearnedVariant continuation_variant = LearnedVariant::UnifiedActor;
+    // Reproduces the deployed Value selector's one aggregate shallow-prior
+    // observation blended with all continuation samples.
+    bool blend_shallow_prior = false;
+};
+
+struct LearnedActionSamples {
+    // Outer order matches the caller's candidate order. Inner samples are
+    // flattened world-major, then rollout-major, and are paired across every
+    // candidate.
+    std::vector<std::vector<double>> q_samples;
+    std::size_t sampled_worlds = 0;
+    std::size_t rollout_evaluations = 0;
+};
+
+struct LearnedValueAttackSetScores {
+    std::vector<double> scores;
+    // The deployed selector retains the first candidate on an exact tie.
+    std::size_t selected_candidate = 0;
+};
+
+// Evaluation-only view of the deployed Value attack-set selector. `seed`
+// initializes the RNG exactly at the block-candidate enumeration boundary;
+// candidates are scored in caller order with the unchanged deployed
+// block-sampling distribution.
+LearnedValueAttackSetScores learned_value_attack_set_scores(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<std::vector<PermanentId>>& candidates,
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed);
+
+LearnedActionSamples learned_priority_action_samples(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig config);
+
+// Evaluates the current binary attacker decision. `selected_attackers` is the
+// already-fixed prefix and `remaining_attackers` contains the legal attackers
+// after `subject`, in their deployed decision order. The two rows are Skip
+// and Include, respectively.
+LearnedActionSamples learned_binary_attack_samples(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig config);
+
+std::vector<double> learned_actor_priority_logits(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedModel> model);
+std::array<double, 2> learned_actor_binary_attack_logits(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers,
+    std::shared_ptr<const LearnedModel> model);
+double learned_critic_value(
+    const GameState& state, std::size_t perspective,
+    std::shared_ptr<const LearnedModel> model);
+
+// Evaluation-only diagnostics for agreement with the deployed Handcrafted
+// policy. These scores must never be used as Learned labels or training data.
+std::vector<double> handcrafted_priority_scores(
+    const GameState& state, std::size_t player,
+    const std::vector<PriorityAction>& candidates);
+std::array<double, 2> handcrafted_binary_attack_scores(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers);
+
 // Evaluation-only seam used to verify information-set invariance and bounded
 // root-search accounting. It uses exactly the champion's common-world scorer.
 LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
@@ -373,6 +464,26 @@ class Game {
         int consecutive_passes,
         std::shared_ptr<const LearnedModel> model,
         std::size_t rollouts_per_action, std::uint64_t seed);
+    friend LearnedActionSamples learned_priority_action_samples(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t player, bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes,
+        const std::vector<PriorityAction>& candidates,
+        std::shared_ptr<const LearnedModel> model,
+        LearnedSearchConfig config);
+    friend LearnedActionSamples learned_binary_attack_samples(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t attacking_player,
+        const std::vector<PermanentId>& selected_attackers,
+        PermanentId subject,
+        const std::vector<PermanentId>& remaining_attackers,
+        std::shared_ptr<const LearnedModel> model,
+        LearnedSearchConfig config);
+    friend std::vector<double> handcrafted_priority_scores(
+        const GameState& state, std::size_t player,
+        const std::vector<PriorityAction>& candidates);
 
     void initialize();
     bool draw_card(std::size_t player);
@@ -383,6 +494,10 @@ class Game {
                              TurnPhase phase, PriorityState priority);
     std::optional<GameResult> play_combat();
     std::optional<GameResult> play_combat_after_beginning();
+    std::optional<GameResult> play_combat_with_attackers(
+        std::vector<PermanentId> attackers);
+    double finish_learned_evaluation_horizon(
+        std::size_t perspective, std::size_t horizon_turns);
     PriorityAction
     choose_priority_action(const std::vector<PriorityAction>& actions,
                            std::size_t player, bool sorcery_actions,
@@ -610,6 +725,10 @@ train_learned_value_champion(std::size_t training_games,
 std::shared_ptr<const LearnedModel>
 train_learned_actor_model(std::size_t training_games,
                           std::uint64_t seed);
+// Stable content fingerprint over the model variant, all critic/policy weight
+// bit patterns, and recursively serialized ensemble members.
+std::string learned_model_fingerprint(
+    std::shared_ptr<const LearnedModel> model);
 // Observation presented to Learned: own private zones plus public
 // information, never the opponent's hidden card identities.
 std::vector<double>
