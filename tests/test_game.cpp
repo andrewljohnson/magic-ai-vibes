@@ -1368,7 +1368,7 @@ TEST(value_trainer_is_seeded_deterministic_in_the_old_school_schema) {
     const auto fingerprint =
         old_school::learned_model_fingerprint(model);
     CHECK(fingerprint ==
-          "b2eec9390d1c7edc358aa27220f9f25b1c31022627a4701e9590efa669e982ba");
+          "1dde23548e5733638d5174dddd5bdd47c5b50bd4c0c4c266a0f1225ffccc0bf4");
     CHECK(old_school::learned_model_fingerprint(repeated) ==
           fingerprint);
     CHECK(old_school::learned_model_fingerprint(changed) != fingerprint);
@@ -1402,7 +1402,7 @@ TEST(value_challenger_is_explicit_deterministic_and_generation_bound) {
     CHECK(old_school::learned_model_fingerprint(generation_two) !=
           generation_one_fingerprint);
     CHECK(old_school::learned_model_fingerprint(generation_two) ==
-          "88528336069e681b4c4a54264a6fbdd4cd5d8613d6e6d2b8e46c578689adf817");
+          "573c972b69239242fb21d15615f19c99829a4bb4c48ff9a1470e6f9ee99b6e61");
 
     bool rejected_zero_generations = false;
     try {
@@ -1443,7 +1443,7 @@ TEST(value_challenger_artifact_is_versioned_bit_exact_and_fail_closed) {
     const std::string fingerprint =
         old_school::learned_model_fingerprint(original);
     CHECK(fingerprint ==
-          "88528336069e681b4c4a54264a6fbdd4cd5d8613d6e6d2b8e46c578689adf817");
+          "573c972b69239242fb21d15615f19c99829a4bb4c48ff9a1470e6f9ee99b6e61");
     CHECK(old_school::learned_model_fingerprint(loaded) ==
           fingerprint);
     CHECK(loaded_artifact.training_games() == 1);
@@ -5973,19 +5973,24 @@ TEST(all_ten_pairings_complete_a_seeded_smoke_run) {
     }
 }
 
-TEST(five_deck_random_balance_stays_within_the_declared_band) {
+TEST(five_deck_random_matrix_tracks_the_exact_current_lists) {
     const auto result = old_school::run_tournament(30'000, 303);
     CHECK(result.total_games == 300'000);
-    for (const auto& matchup : result.matchups) {
+    const std::array<double, 10> expected_first_deck_rates = {
+        62.7, 56.7, 55.0, 68.2, 48.6,
+        55.6, 42.2, 90.4, 49.5, 38.2,
+    };
+    CHECK(result.matchups.size() ==
+          expected_first_deck_rates.size());
+    for (std::size_t index = 0;
+         index < result.matchups.size(); ++index) {
+        const auto& matchup = result.matchups[index];
         CHECK(matchup.result.draws == 0);
         const double first_rate =
             matchup.result.decks[0].win_rate();
-        const double second_rate =
-            matchup.result.decks[1].win_rate();
-        CHECK(first_rate >= 30.0);
-        CHECK(first_rate <= 70.0);
-        CHECK(second_rate >= 30.0);
-        CHECK(second_rate <= 70.0);
+        CHECK(std::abs(
+                  first_rate -
+                  expected_first_deck_rates[index]) <= 1.0);
     }
 }
 

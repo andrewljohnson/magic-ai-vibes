@@ -482,12 +482,13 @@ strength claims use the paired harness, frozen models, independent evaluation
 seeds, and the full five-deck gates. Learned has not yet passed every gate.
 `EXPERIMENTS.md` records the exact current and rejected runs.
 
-The current count-balanced lists kept every Random-vs-Random pairing between
-31.6% and 68.4% over 30,000 games per matchup on seed `202`, then between
-31.8% and 68.2% on untouched seed `303`. This deliberately preserves multiple
-copies of RU's flying, burn, X-spell, and one-through-four-mana cards; the
-stricter 40–60 target was tested and rejected. The test suite reproduces the
-seed-303 30–70 guard.
+The exact current lists produce Random-vs-Random rates between 31.8% and 68.2%
+over 30,000 games per matchup on seed `303`, except for Blue versus White:
+Blue wins 90.4%. That lopsided matchup is recorded rather than hidden because
+the specified Blue power cards and exact deck counts take precedence over the
+earlier count-balanced environment. The test suite pins the full ten-matchup
+seed-303 matrix within one percentage point so future rules changes cannot
+silently rewrite this baseline.
 
 As an integration check—not a Learned-strength claim—the repaired Handcrafted
 Policy beat two-rollout Monte Carlo 253–47 in the balanced five-deck harness;

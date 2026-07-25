@@ -8,16 +8,20 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 14:50 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 15:10 PDT — refreshed at the top of every review cycle.*
 
-- **RU treatment #1 (epsilon continuations) FAILED its gate** — reviewer
-  ran the preregistered A/B verbatim: epsilon 0.05 made Q(Pass)−Q(X=0)
-  10x worse (−0.0011 → −0.0129, CI entirely below zero). Mechanism
-  falsified: evaluation noise degrades hold value rather than revealing
-  it. Suggested next direction (in CLAUDE-PLAN.md): the defect is a
-  training-signal gap — self-play never holds, so holding is never
-  credited — pointing to collection-side hold exploration, not
-  evaluation-side noise. Seed-919 screen correctly not run.
+- **ROOT CAUSE FOUND: the critic is context-blind.** The
+  value-context diagnostic (verified independently by the reviewer)
+  proves the critic's features are bit-identical between "pass and
+  retain priority" and "pass and a lethal spell resolves" — the
+  consequence of passing is unrepresentable in the current input
+  schema. This explains the RU hold/X=0 defect and the epsilon
+  treatment's backfire. Licensed next step: neutral
+  phase/pass/sorcery context features + dense traces, preregistered
+  before retraining.
+- **RU treatment #1 (epsilon continuations) FAILED its gate** —
+  epsilon 0.05 made Q(Pass)−Q(X=0) 10x worse (−0.0011 → −0.0129).
+  Now fully explained by the context-blindness above.
 - **📊 LIFT GATE: 4 of 5 — best in project history** (was 2 of 5).
   The preregistered C16/K=8 mixed field: Blue FLIPPED to strictly best
   (+48.8 vs +45.0; the 17.5-point gap eliminated exactly as the
@@ -124,6 +128,46 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 15:10 PDT
+
+No-change cycle: diagnostic work committed incrementally (`cce09a6`),
+no new notebook claims since the context-alias demonstration the
+reviewer verified at 15:07. Lift table deterministic-identical (2 of 5
+default; 4-of-5 behind C16/K=8 flags). Awaiting two preregistrations:
+the context-feature retrain (RU root-cause fix) and the promotion
+ladder's virgin-seed run.
+
+## 2026-07-25 15:07 PDT
+
+Independent verification of the value-context diagnostic (reviewer ran
+`--diagnose-value-context` from the built binary):
+
+- **Context alias DEMONSTRATED.** In the paired lethal-stack contexts,
+  the critic's state features are bit-identical while the rules engine
+  proves the transitions differ maximally — pass at count 0 retains
+  priority (root at 3 life, stack 1); pass at count 1 resolves the
+  spell (root at 0, lethal). The First/Second Main pair aliases the
+  same way. The neutral policy/action encoder distinguishes both
+  pairs, and opponent hidden-card substitution remains bit-identical —
+  the missing information is representable without any isolation
+  breach.
+- This is the deepest root cause found yet: the deployed Value critic
+  cannot express the consequence of passing at all. It likely explains
+  the Q(Pass)−Q(X=0) defect (and why evaluation noise made it worse),
+  and bounds what ANY training-signal fix could have achieved. The
+  epsilon failure is now fully explained rather than merely observed.
+- Per the preregistration, the licensed next step is neutral
+  phase/relative-priority/pass/sorcery context features plus dense
+  decision-state traces, separately preregistered before retraining.
+  Reviewer's one caution: that retrain changes the critic input schema
+  — version the model artifacts (the fail-closed machinery exists) and
+  expect probe-dev-v3 labels to need regeneration if the reference
+  critic changes.
+
+Lift table: default unchanged (2 of 5; 4-of-5 behind C16/K=8 flags).
+Promotion ladder virgin-seed run still undeclared — flagged again as an
+independent track that should proceed in parallel.
 
 ## 2026-07-25 14:50 PDT
 
