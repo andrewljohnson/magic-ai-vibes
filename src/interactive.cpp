@@ -189,7 +189,8 @@ std::string stack_object_name(
     std::string result =
         player_name(observation, object.controller) + "'s " +
         std::string(card_definition(object.card).name);
-    if (object.card == CardId::Disintegrate) {
+    if (object.card == CardId::Disintegrate ||
+        object.card == CardId::Braingeyser) {
         result += " (X=" + std::to_string(object.x_value) + ")";
     }
     if (object.target.has_value()) {
@@ -222,13 +223,16 @@ std::string action_name(const PlayerObservation& observation,
         return "Cast " + card;
     case PriorityActionKind::CastLightningBolt:
     case PriorityActionKind::CastGiantGrowth:
+    case PriorityActionKind::CastAncestralRecall:
         return "Cast " + card + " -> " +
                target_name(observation, *action.target);
     case PriorityActionKind::CastDisintegrate:
+    case PriorityActionKind::CastBraingeyser:
         return "Cast " + card + " (X=" +
                std::to_string(action.x_value) + ") -> " +
                target_name(observation, *action.target);
     case PriorityActionKind::CastCounterspell:
+    case PriorityActionKind::CastForceSpike:
         return "Cast " + card + " -> spell #" +
                std::to_string(*action.spell_target);
     case PriorityActionKind::ActivateMillstone:
@@ -800,6 +804,28 @@ void print_player(std::ostream& output,
           << " | LIFE " << state.life;
     if (player == observation.active_player) {
         title << " | ACTIVE";
+    }
+    const int floating_mana =
+        state.mana_pool.generic + state.mana_pool.green +
+        state.mana_pool.red + state.mana_pool.blue +
+        state.mana_pool.white;
+    if (floating_mana != 0) {
+        title << " | MANA";
+        const auto append_mana =
+            [&](char symbol, int amount) {
+                if (amount != 0) {
+                    title << ' ' << symbol << amount;
+                }
+            };
+        append_mana('C', state.mana_pool.generic);
+        append_mana('G', state.mana_pool.green);
+        append_mana('R', state.mana_pool.red);
+        append_mana('U', state.mana_pool.blue);
+        append_mana('W', state.mana_pool.white);
+    }
+    if (observation.extra_turns_pending[player] != 0) {
+        title << " | EXTRA TURNS "
+              << observation.extra_turns_pending[player];
     }
     const BoxStyle style =
         player == observation.observer ? kBoldBox

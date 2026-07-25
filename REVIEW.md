@@ -8,8 +8,16 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 14:16 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 14:50 PDT — refreshed at the top of every review cycle.*
 
+- **RU treatment #1 (epsilon continuations) FAILED its gate** — reviewer
+  ran the preregistered A/B verbatim: epsilon 0.05 made Q(Pass)−Q(X=0)
+  10x worse (−0.0011 → −0.0129, CI entirely below zero). Mechanism
+  falsified: evaluation noise degrades hold value rather than revealing
+  it. Suggested next direction (in CLAUDE-PLAN.md): the defect is a
+  training-signal gap — self-play never holds, so holding is never
+  credited — pointing to collection-side hold exploration, not
+  evaluation-side noise. Seed-919 screen correctly not run.
 - **📊 LIFT GATE: 4 of 5 — best in project history** (was 2 of 5).
   The preregistered C16/K=8 mixed field: Blue FLIPPED to strictly best
   (+48.8 vs +45.0; the 17.5-point gap eliminated exactly as the
@@ -116,6 +124,25 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 14:50 PDT
+
+Codex declared the follow-up to the epsilon failure: a structural
+diagnostic (`--diagnose-value-context`) testing whether the Value
+critic's feature vector aliases states that differ only in
+`consecutive_passes` (spell resolves vs priority retained) or phase
+(First vs Second Main). If confirmed, the critic literally cannot
+represent the consequence of passing — a clean root-cause candidate for
+the Q(Pass)−Q(X=0) defect that survives both failed treatments
+(evaluation noise, and implicitly the training-signal-only theory: even
+credited holds couldn't be learned if the state is unrepresentable).
+This is the right escalation: representation before signal before
+noise. Implementation in progress; reviewer will verify on commit.
+
+Lift table: default unchanged (2 of 5; 4-of-5 behind C16/K=8 flags
+pending promotion). Note the promotion ladder's virgin-seed run remains
+undeclared — it should not wait on the RU diagnostic; the aggregate
+promotion and the RU fix are independent tracks.
 
 ## 2026-07-25 14:16 PDT
 

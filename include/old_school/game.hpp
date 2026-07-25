@@ -34,10 +34,17 @@ enum class CardId : std::uint8_t {
     HillGiant,
     Disintegrate,
     GiantGrowth,
+    MoxSapphire,
+    SolRing,
+    AncestralRecall,
+    TimeWalk,
+    Braingeyser,
+    ForceSpike,
+    AirElemental,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::GiantGrowth) + 1;
+    static_cast<std::size_t>(CardId::AirElemental) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -54,6 +61,8 @@ struct ManaCost {
     int red = 0;
     int blue = 0;
     int white = 0;
+
+    bool operator==(const ManaCost&) const = default;
 };
 
 struct CardDefinition {
@@ -117,6 +126,9 @@ struct PlayerState {
     std::vector<CreaturePermanent> creatures;
     std::vector<ArtifactPermanent> artifacts;
     std::vector<CardId> enchantments;
+    // Mana abilities are implicit and do not use the stack. Unspent mana
+    // remains available through the current phase, then is cleared.
+    ManaCost mana_pool;
     bool land_played_this_turn = false;
 };
 
@@ -165,6 +177,12 @@ struct GameState {
     std::array<PlayerState, 2> players;
     std::array<PlayerGameStats, 2> stats;
     std::vector<StackObject> stack;
+    // Time Walk queues an extra turn for its controller. A queued turn is
+    // consumed only after that player's current turn finishes.
+    std::array<std::size_t, 2> extra_turns_pending = {0, 0};
+    // Drawing from an empty library is recorded during spell resolution and
+    // converted to a terminal result immediately after that object resolves.
+    std::array<bool, 2> failed_draw = {false, false};
     std::size_t active_player = 0;
     std::size_t starting_player = 0;
     std::size_t turn_number = 0;
@@ -193,6 +211,9 @@ enum class PriorityActionKind : std::uint8_t {
     CastDisintegrate,
     CastGiantGrowth,
     CastCounterspell,
+    CastAncestralRecall,
+    CastBraingeyser,
+    CastForceSpike,
     ActivateMillstone,
 };
 
@@ -215,6 +236,10 @@ struct PriorityAction {
                                             Target disintegrate_target);
     static PriorityAction cast_giant_growth(Target growth_target);
     static PriorityAction cast_counterspell(StackObjectId target_spell);
+    static PriorityAction cast_ancestral_recall(Target draw_target);
+    static PriorityAction cast_braingeyser(int x_value,
+                                           Target draw_target);
+    static PriorityAction cast_force_spike(StackObjectId target_spell);
     static PriorityAction activate_millstone(PermanentId millstone,
                                              Target mill_target);
 
@@ -229,7 +254,20 @@ legal_priority_actions(const GameState& state, std::size_t player,
 bool apply_priority_action(GameState& state, std::size_t player,
                            const PriorityAction& action,
                            bool sorcery_actions);
-bool resolve_top_of_stack(GameState& state);
+enum class ForceSpikePaymentChoice : std::uint8_t {
+    PayIfAble,
+    Decline,
+};
+
+bool resolve_top_of_stack(
+    GameState& state,
+    ForceSpikePaymentChoice force_spike_payment =
+        ForceSpikePaymentChoice::PayIfAble);
+
+// Advances only turn ownership, consuming a queued extra turn when present.
+// The caller remains responsible for incrementing turn_number and beginning
+// the turn.
+std::size_t advance_turn_player(GameState& state);
 
 struct PriorityState {
     std::size_t player = 0;
@@ -260,6 +298,7 @@ struct PublicPlayerState {
     std::vector<CreaturePermanent> creatures;
     std::vector<ArtifactPermanent> artifacts;
     std::vector<CardId> enchantments;
+    ManaCost mana_pool;
     bool land_played_this_turn = false;
 
     bool operator==(const PublicPlayerState&) const = default;
@@ -274,6 +313,7 @@ struct PlayerObservation {
     // empty, preserving the normal hidden-information boundary.
     std::optional<std::vector<CardId>> revealed_opponent_hand;
     std::vector<StackObject> stack;
+    std::array<std::size_t, 2> extra_turns_pending = {0, 0};
     std::size_t active_player = 0;
     std::size_t starting_player = 0;
     std::size_t turn_number = 0;
@@ -485,6 +525,43 @@ struct LearnedValuePriorityDiagnostic {
     std::size_t sampled_worlds = 0;
     std::size_t rollout_evaluations = 0;
 };
+
+// Structural, model-free audit of context omitted from the current Value
+// observation. This is diagnostic data only; no field is consumed by training
+// or a deployed policy.
+struct ValueContextAliasDiagnostic {
+    std::size_t root_player = 0;
+    std::size_t perspective = 0;
+
+    std::size_t stack_action_count = 0;
+    bool stack_actions_identical = false;
+    bool stack_critic_features_bit_identical = false;
+    bool stack_policy_features_different = false;
+
+    PriorityPassResult zero_pass_result =
+        PriorityPassResult::Passed;
+    std::size_t zero_pass_next_player = 0;
+    int zero_pass_next_count = 0;
+    std::size_t zero_pass_stack_size = 0;
+    int zero_pass_life = 0;
+
+    PriorityPassResult one_pass_result =
+        PriorityPassResult::Passed;
+    std::size_t one_pass_next_player = 0;
+    int one_pass_next_count = 0;
+    std::size_t one_pass_stack_size = 0;
+    int one_pass_life = 0;
+
+    std::size_t main_action_count = 0;
+    bool main_actions_identical = false;
+    bool main_critic_features_bit_identical = false;
+    bool main_policy_features_different = false;
+    bool hidden_information_bit_identical = false;
+
+    bool demonstrated() const;
+};
+
+ValueContextAliasDiagnostic diagnose_value_context_aliases();
 
 // Configuration for evaluation-only information-set action scoring. Worlds
 // are sampled once from the root player's observation, then every candidate

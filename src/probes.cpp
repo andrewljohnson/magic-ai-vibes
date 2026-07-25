@@ -28,7 +28,7 @@ constexpr std::array<Category, kProbeDevV3Count>
         Category::RedFinishDamagedThreat,
         Category::RedStackRace,
         Category::BlueCounterExpensiveSpell,
-        Category::BlueConserveCounter,
+        Category::BlueForceSpike,
         Category::BlueCounterLethal,
         Category::BlueCounterWar,
         Category::WhiteEmergencyMoat,
@@ -435,7 +435,7 @@ DecisionProbe green_growth_hold_probe() {
 }
 
 DecisionProbe red_face_lethal_probe() {
-    constexpr PermanentId kWater = 1;
+    constexpr PermanentId kAir = 1;
     DecisionProbe probe = make_base(
         "red.bolt-face-lethal.v1", Category::RedFaceLethal,
         DecisionKind::Priority, DeckId::Red, DeckId::Blue,
@@ -447,7 +447,7 @@ DecisionProbe red_face_lethal_probe() {
     probe.state.players[1].lands.assign(
         5, land(CardId::Island, true));
     probe.state.players[1].creatures = {
-        creature(kWater, CardId::WaterElemental, false, true),
+        creature(kAir, CardId::AirElemental, false, true),
     };
     probe.candidates = {
         priority_candidate("pass", PriorityAction::pass()),
@@ -460,9 +460,9 @@ DecisionProbe red_face_lethal_probe() {
             PriorityAction::cast_lightning_bolt(
                 Target::player_target(1))),
         priority_candidate(
-            "bolt-opponent-water-elemental",
+            "bolt-opponent-air-elemental",
             PriorityAction::cast_lightning_bolt(
-                Target::creature_target(1, kWater))),
+                Target::creature_target(1, kAir))),
     };
     finish_hidden_zones(probe);
     return probe;
@@ -516,9 +516,9 @@ DecisionProbe red_clear_blocker_probe() {
 }
 
 DecisionProbe red_finish_damaged_probe() {
-    constexpr PermanentId kWater = 1;
+    constexpr PermanentId kAir = 1;
     DecisionProbe probe = make_base(
-        "red.finish-damaged-water.v1",
+        "red.finish-damaged-air.v1",
         Category::RedFinishDamagedThreat, DecisionKind::Priority,
         DeckId::Red, DeckId::Blue, TurnPhase::FirstMain, 11);
     PlayerState& root = probe.state.players[0];
@@ -532,7 +532,7 @@ DecisionProbe red_finish_damaged_probe() {
     probe.state.players[1].lands.assign(
         5, land(CardId::Island, true));
     probe.state.players[1].creatures = {
-        creature(kWater, CardId::WaterElemental, false, true, 3),
+        creature(kAir, CardId::AirElemental, false, true, 3),
     };
     probe.candidates = {
         priority_candidate("pass", PriorityAction::pass()),
@@ -545,9 +545,9 @@ DecisionProbe red_finish_damaged_probe() {
             PriorityAction::cast_lightning_bolt(
                 Target::player_target(1))),
         priority_candidate(
-            "bolt-damaged-water-elemental",
+            "bolt-damaged-air-elemental",
             PriorityAction::cast_lightning_bolt(
-                Target::creature_target(1, kWater))),
+                Target::creature_target(1, kAir))),
     };
     finish_hidden_zones(probe);
     return probe;
@@ -610,29 +610,25 @@ DecisionProbe blue_counter_expensive_probe() {
     return probe;
 }
 
-DecisionProbe blue_conserve_counter_probe() {
-    constexpr PermanentId kWater = 1;
-    constexpr StackObjectId kBolt = 1;
+DecisionProbe blue_force_spike_probe() {
+    constexpr StackObjectId kGrayOgre = 1;
     DecisionProbe probe = make_base(
-        "blue.conserve-counter-on-water.v1",
-        Category::BlueConserveCounter, DecisionKind::Priority,
-        DeckId::Blue, DeckId::Red, TurnPhase::FirstMain, 10, 1);
-    probe.state.players[0].hand = {CardId::Counterspell};
-    probe.state.players[0].lands.assign(5, land(CardId::Island));
-    probe.state.players[0].creatures = {
-        creature(kWater, CardId::WaterElemental),
-    };
-    probe.state.players[1].lands = {land(CardId::Mountain, true)};
+        "blue.force-spike-tapped-out-gray-ogre.v1",
+        Category::BlueForceSpike, DecisionKind::Priority,
+        DeckId::Blue, DeckId::Red, TurnPhase::FirstMain, 6, 1);
+    probe.state.players[0].hand = {CardId::ForceSpike};
+    probe.state.players[0].lands = {land(CardId::Island)};
+    probe.state.players[1].lands.assign(
+        3, land(CardId::Mountain, true));
     probe.state.stack = {
-        spell(kBolt, CardId::LightningBolt, 1,
-              Target::creature_target(0, kWater)),
+        spell(kGrayOgre, CardId::GrayOgre, 1),
     };
     probe.consecutive_passes = 1;
     probe.candidates = {
         priority_candidate("pass", PriorityAction::pass()),
         priority_candidate(
-            "counter-lightning-bolt",
-            PriorityAction::cast_counterspell(kBolt)),
+            "force-spike-gray-ogre",
+            PriorityAction::cast_force_spike(kGrayOgre)),
     };
     finish_hidden_zones(probe);
     return probe;
@@ -664,7 +660,7 @@ DecisionProbe blue_counter_lethal_probe() {
 }
 
 DecisionProbe blue_counter_war_probe() {
-    constexpr StackObjectId kWaterSpell = 1;
+    constexpr StackObjectId kAirSpell = 1;
     constexpr StackObjectId kEnemyCounter = 2;
     DecisionProbe probe = make_base(
         "blue.counter-war.v1", Category::BlueCounterWar,
@@ -683,16 +679,16 @@ DecisionProbe blue_counter_war_probe() {
     probe.state.players[0].land_played_this_turn = true;
     probe.state.players[1].lands.assign(2, land(CardId::Island, true));
     probe.state.stack = {
-        spell(kWaterSpell, CardId::WaterElemental, 0),
+        spell(kAirSpell, CardId::AirElemental, 0),
         spell(kEnemyCounter, CardId::Counterspell, 1, std::nullopt,
-              kWaterSpell),
+              kAirSpell),
     };
     probe.consecutive_passes = 1;
     probe.candidates = {
         priority_candidate("pass", PriorityAction::pass()),
         priority_candidate(
-            "counter-own-water-elemental",
-            PriorityAction::cast_counterspell(kWaterSpell)),
+            "counter-own-air-elemental",
+            PriorityAction::cast_counterspell(kAirSpell)),
         priority_candidate(
             "counter-opponent-counterspell",
             PriorityAction::cast_counterspell(kEnemyCounter)),
@@ -762,11 +758,15 @@ DecisionProbe white_mill_before_draw_probe() {
     root.land_played_this_turn = true;
 
     PlayerState& opponent = probe.state.players[1];
-    opponent.graveyard.assign(16, CardId::Island);
+    opponent.graveyard.assign(15, CardId::Island);
     opponent.graveyard.insert(
-        opponent.graveyard.end(), 12, CardId::Counterspell);
+        opponent.graveyard.end(), 8, CardId::Counterspell);
     opponent.graveyard.insert(
-        opponent.graveyard.end(), 5, CardId::WaterElemental);
+        opponent.graveyard.end(), 4, CardId::AirElemental);
+    opponent.graveyard.insert(
+        opponent.graveyard.end(), 4, CardId::FlyingMen);
+    opponent.graveyard.insert(
+        opponent.graveyard.end(), 2, CardId::ForceSpike);
 
     probe.candidates = {
         priority_candidate("pass", PriorityAction::pass()),
@@ -1366,12 +1366,10 @@ bool reachable_state(const DecisionProbe& probe,
         errors.push_back("probe has an invalid player index");
         return false;
     }
-    if (probe.state.turn_number == 0 ||
-        (probe.state.starting_player + probe.state.turn_number - 1) %
-                kPlayerCount !=
-            probe.state.active_player) {
-        errors.push_back(
-            "turn number, starting player, and active player disagree");
+    // Time Walk means turn-number parity no longer determines the active
+    // player. The full state records active player and queued future turns.
+    if (probe.state.turn_number == 0) {
+        errors.push_back("probe turn number must be positive");
         valid = false;
     }
     if (probe.consecutive_passes < 0 ||
@@ -1587,7 +1585,7 @@ std::vector<DecisionProbe> make_probe_dev_v1() {
     probes.push_back(red_finish_damaged_probe());
     probes.push_back(red_stack_race_probe());
     probes.push_back(blue_counter_expensive_probe());
-    probes.push_back(blue_conserve_counter_probe());
+    probes.push_back(blue_force_spike_probe());
     probes.push_back(blue_counter_lethal_probe());
     probes.push_back(blue_counter_war_probe());
     probes.push_back(white_emergency_moat_probe());
@@ -1652,17 +1650,17 @@ std::vector<DecisionProbe> make_probe_dev_v2() {
         case Category::RedFaceLethal:
             // "Pass" now means decline the lethal Bolt this turn.
             probe.phase = TurnPhase::SecondMain;
-            // Waiting gives the visible Water Elemental a lethal attack
+            // Waiting gives the visible Air Elemental a lethal attack
             // before Red receives another main phase.
-            probe.state.players[0].life = 5;
+            probe.state.players[0].life = 4;
             break;
         case Category::BlueCounterLethal:
             // Countering now exposes a concrete winning continuation rather
             // than a branch whose correct defense is eventually scored as
             // the same terminal loss at long horizons.
-            probe.state.players[1].life = 5;
+            probe.state.players[1].life = 4;
             expose_creature(
-                0, CardId::WaterElemental,
+                0, CardId::AirElemental,
                 probe.state.next_permanent_id);
             break;
         case Category::WhiteEmergencyMoat:
@@ -1738,7 +1736,7 @@ std::vector<DecisionProbe> make_probe_dev_v3() {
         } else if (category ==
                    Category::RedFinishDamagedThreat) {
             // The opponent has passed in its final main phase. Passing again
-            // ends the turn and cleanup removes the Water Elemental's marked
+            // ends the turn and cleanup removes the Air Elemental's marked
             // damage, so the Bolt decision cannot heal later.
             probe.phase = TurnPhase::SecondMain;
             probe.state.active_player = 1;
@@ -1750,7 +1748,7 @@ std::vector<DecisionProbe> make_probe_dev_v3() {
 
     for (const Category category :
          {Category::BlueCounterExpensiveSpell,
-          Category::BlueConserveCounter,
+          Category::BlueForceSpike,
           Category::BlueCounterLethal, Category::BlueCounterWar,
           Category::WhiteEmergencyMoat,
           Category::WhiteEstablishMillstone,

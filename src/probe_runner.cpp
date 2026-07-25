@@ -220,6 +220,11 @@ void hash_public_player(Fnv1a& hash,
         hash.boolean(artifact.tapped);
     }
     hash_card_vector(hash, player.enchantments);
+    hash.signed_integer(player.mana_pool.generic);
+    hash.signed_integer(player.mana_pool.green);
+    hash.signed_integer(player.mana_pool.red);
+    hash.signed_integer(player.mana_pool.blue);
+    hash.signed_integer(player.mana_pool.white);
     hash.boolean(player.land_played_this_turn);
 }
 
@@ -254,6 +259,13 @@ void hash_probe(Fnv1a& hash,
     hash.unsigned_integer(state.active_player);
     hash.unsigned_integer(state.starting_player);
     hash.unsigned_integer(state.turn_number);
+    for (const std::size_t extra_turns :
+         state.extra_turns_pending) {
+        hash.unsigned_integer(extra_turns);
+    }
+    for (const bool failed_draw : state.failed_draw) {
+        hash.boolean(failed_draw);
+    }
     hash.unsigned_integer(state.next_permanent_id);
     hash.unsigned_integer(state.next_stack_object_id);
     for (std::size_t player = 0; player < state.players.size();

@@ -139,14 +139,14 @@ DeterminizationFixture determinization_fixture() {
         {.card = old_school::CardId::Island, .tapped = true},
     };
     state.players[1].creatures = {
-        creature(51, old_school::CardId::WaterElemental),
+        creature(51, old_school::CardId::AirElemental),
     };
 
     state.stack = {
         {
             .kind = old_school::StackObjectKind::Spell,
             .id = 70,
-            .card = old_school::CardId::WaterElemental,
+            .card = old_school::CardId::AirElemental,
             .controller = 1,
             .target = std::nullopt,
             .spell_target = std::nullopt,
@@ -176,9 +176,9 @@ DeterminizationFixture determinization_fixture() {
     remove_fixture_card(opponent_hidden, old_school::CardId::Island);
     remove_fixture_card(opponent_hidden, old_school::CardId::Island);
     remove_fixture_card(opponent_hidden, old_school::CardId::Island);
-    remove_fixture_card(opponent_hidden, old_school::CardId::WaterElemental);
-    // A spell stack object is another physical Water Elemental.
-    remove_fixture_card(opponent_hidden, old_school::CardId::WaterElemental);
+    remove_fixture_card(opponent_hidden, old_school::CardId::AirElemental);
+    // A spell stack object is another physical Air Elemental.
+    remove_fixture_card(opponent_hidden, old_school::CardId::AirElemental);
     constexpr std::size_t kOpponentHandSize = 5;
     state.players[1].hand.assign(
         opponent_hidden.begin(),
@@ -546,6 +546,53 @@ TEST(old_school_card_definitions_are_complete) {
     CHECK(giant_growth.power == 0);
     CHECK(giant_growth.toughness == 0);
     CHECK(giant_growth.effect_damage == 0);
+
+    const auto& mox =
+        old_school::card_definition(old_school::CardId::MoxSapphire);
+    CHECK(mox.name == "Mox Sapphire");
+    CHECK(mox.type == old_school::CardType::Artifact);
+    CHECK(mox.cost == old_school::ManaCost{});
+
+    const auto& sol_ring =
+        old_school::card_definition(old_school::CardId::SolRing);
+    CHECK(sol_ring.name == "Sol Ring");
+    CHECK(sol_ring.type == old_school::CardType::Artifact);
+    CHECK(sol_ring.cost == old_school::ManaCost{.generic = 1});
+
+    const auto& ancestral =
+        old_school::card_definition(old_school::CardId::AncestralRecall);
+    CHECK(ancestral.name == "Ancestral Recall");
+    CHECK(ancestral.type == old_school::CardType::Instant);
+    CHECK(ancestral.cost == old_school::ManaCost{.blue = 1});
+
+    const auto& time_walk =
+        old_school::card_definition(old_school::CardId::TimeWalk);
+    CHECK(time_walk.name == "Time Walk");
+    CHECK(time_walk.type == old_school::CardType::Sorcery);
+    CHECK((time_walk.cost ==
+           old_school::ManaCost{.generic = 1, .blue = 1}));
+
+    const auto& braingeyser =
+        old_school::card_definition(old_school::CardId::Braingeyser);
+    CHECK(braingeyser.name == "Braingeyser");
+    CHECK(braingeyser.type == old_school::CardType::Sorcery);
+    CHECK(braingeyser.cost == old_school::ManaCost{.blue = 2});
+
+    const auto& force_spike =
+        old_school::card_definition(old_school::CardId::ForceSpike);
+    CHECK(force_spike.name == "Force Spike");
+    CHECK(force_spike.type == old_school::CardType::Instant);
+    CHECK(force_spike.cost == old_school::ManaCost{.blue = 1});
+
+    const auto& air_elemental =
+        old_school::card_definition(old_school::CardId::AirElemental);
+    CHECK(air_elemental.name == "Air Elemental");
+    CHECK(air_elemental.type == old_school::CardType::Creature);
+    CHECK((air_elemental.cost ==
+           old_school::ManaCost{.generic = 3, .blue = 2}));
+    CHECK(air_elemental.power == 4);
+    CHECK(air_elemental.toughness == 4);
+    CHECK(air_elemental.flying);
 }
 
 TEST(starting_decks_have_the_requested_cards) {
@@ -559,15 +606,25 @@ TEST(starting_decks_have_the_requested_cards) {
 
     const auto red_deck = old_school::red_deck();
     CHECK(red_deck.size() == 40);
-    CHECK(count_card(red_deck, old_school::CardId::Mountain) == 18);
-    CHECK(count_card(red_deck, old_school::CardId::LightningBolt) == 10);
-    CHECK(count_card(red_deck, old_school::CardId::FireElemental) == 12);
+    CHECK(count_card(red_deck, old_school::CardId::Mountain) == 15);
+    CHECK(count_card(red_deck, old_school::CardId::LightningBolt) == 9);
+    CHECK(count_card(red_deck, old_school::CardId::IronclawOrcs) == 7);
+    CHECK(count_card(red_deck, old_school::CardId::GrayOgre) == 4);
+    CHECK(count_card(red_deck, old_school::CardId::HillGiant) == 3);
+    CHECK(count_card(red_deck, old_school::CardId::FireElemental) == 2);
 
     const auto blue_deck = old_school::blue_deck();
     CHECK(blue_deck.size() == 40);
-    CHECK(count_card(blue_deck, old_school::CardId::Island) == 18);
-    CHECK(count_card(blue_deck, old_school::CardId::Counterspell) == 14);
-    CHECK(count_card(blue_deck, old_school::CardId::WaterElemental) == 8);
+    CHECK(count_card(blue_deck, old_school::CardId::Island) == 15);
+    CHECK(count_card(blue_deck, old_school::CardId::MoxSapphire) == 1);
+    CHECK(count_card(blue_deck, old_school::CardId::SolRing) == 1);
+    CHECK(count_card(blue_deck, old_school::CardId::AncestralRecall) == 1);
+    CHECK(count_card(blue_deck, old_school::CardId::TimeWalk) == 1);
+    CHECK(count_card(blue_deck, old_school::CardId::Braingeyser) == 1);
+    CHECK(count_card(blue_deck, old_school::CardId::FlyingMen) == 4);
+    CHECK(count_card(blue_deck, old_school::CardId::ForceSpike) == 4);
+    CHECK(count_card(blue_deck, old_school::CardId::Counterspell) == 8);
+    CHECK(count_card(blue_deck, old_school::CardId::AirElemental) == 4);
 
     const auto white_deck = old_school::white_control_deck();
     CHECK(white_deck.size() == 40);
@@ -669,9 +726,9 @@ TEST(determinization_conserves_spells_but_not_ability_objects) {
                      old_school::CardId::Millstone) ==
           count_card(fixture.decks[0], old_school::CardId::Millstone));
     CHECK(count_card(physical_cards(sampled, 1),
-                     old_school::CardId::WaterElemental) ==
+                     old_school::CardId::AirElemental) ==
           count_card(fixture.decks[1],
-                     old_school::CardId::WaterElemental));
+                     old_school::CardId::AirElemental));
 }
 
 TEST(determinization_varies_by_seed_and_rejects_invalid_public_state) {
@@ -782,6 +839,23 @@ TEST(learned_features_encode_old_school_public_state_and_action_x) {
               bonus_changed, 0, old_school::PriorityAction::pass(), true,
               old_school::TurnPhase::FirstMain, 0) != baseline_policy);
 
+    auto mana_changed = state;
+    mana_changed.players[0].mana_pool.blue = 1;
+    CHECK(old_school::learned_observation(mana_changed, 0) !=
+          baseline_observation);
+    CHECK(old_school::learned_priority_policy_features(
+              mana_changed, 0, old_school::PriorityAction::pass(), true,
+              old_school::TurnPhase::FirstMain, 0) != baseline_policy);
+
+    auto extra_turn_changed = state;
+    extra_turn_changed.extra_turns_pending[0] = 1;
+    CHECK(old_school::learned_observation(extra_turn_changed, 0) !=
+          baseline_observation);
+    CHECK(old_school::learned_priority_policy_features(
+              extra_turn_changed, 0,
+              old_school::PriorityAction::pass(), true,
+              old_school::TurnPhase::FirstMain, 0) != baseline_policy);
+
     auto stack_x_one = state;
     stack_x_one.stack.push_back({
         .kind = old_school::StackObjectKind::Spell,
@@ -869,6 +943,39 @@ TEST(learned_priority_policy_encodes_phase_and_pass_context) {
               changed_hidden, 0, pass, false,
               old_school::TurnPhase::BeginCombat, 1) ==
           resolving_pass);
+}
+
+TEST(value_context_alias_audit_proves_missing_markov_context) {
+    const auto diagnostic =
+        old_school::diagnose_value_context_aliases();
+
+    CHECK(diagnostic.root_player == 0);
+    CHECK(diagnostic.perspective == 0);
+    CHECK(diagnostic.stack_action_count == 2);
+    CHECK(diagnostic.stack_actions_identical);
+    CHECK(diagnostic.stack_critic_features_bit_identical);
+    CHECK(diagnostic.stack_policy_features_different);
+
+    CHECK(diagnostic.zero_pass_result ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(diagnostic.zero_pass_next_player == 1);
+    CHECK(diagnostic.zero_pass_next_count == 1);
+    CHECK(diagnostic.zero_pass_stack_size == 1);
+    CHECK(diagnostic.zero_pass_life == 3);
+
+    CHECK(diagnostic.one_pass_result ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(diagnostic.one_pass_next_player == 0);
+    CHECK(diagnostic.one_pass_next_count == 0);
+    CHECK(diagnostic.one_pass_stack_size == 0);
+    CHECK(diagnostic.one_pass_life == 0);
+
+    CHECK(diagnostic.main_action_count == 2);
+    CHECK(diagnostic.main_actions_identical);
+    CHECK(diagnostic.main_critic_features_bit_identical);
+    CHECK(diagnostic.main_policy_features_different);
+    CHECK(diagnostic.hidden_information_bit_identical);
+    CHECK(diagnostic.demonstrated());
 }
 
 TEST(learned_soft_priority_target_is_smoothed_and_ordered) {
@@ -1345,7 +1452,7 @@ TEST(value_challenger_artifact_is_versioned_bit_exact_and_fail_closed) {
     CHECK(old_school::learned_value_challenger_cache_path(
               800, 424242, 16) ==
           "build/model-cache/"
-          "old-school-value-challenger-v1-c16-t800-s424242.bin");
+          "old-school-value-challenger-v2-c16-t800-s424242.bin");
 
     const std::array<old_school::GameState, 2> states = {
         old_school::white_lock_plan_diagnostic_state(),
@@ -1833,7 +1940,7 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
     CHECK(old_school::learned_value_g8_mix50_cache_path(
               800, 424242) ==
           "build/model-cache/"
-          "old-school-value-g8-mix50-v1-t800-s424242.bin");
+          "old-school-value-g8-mix50-v2-t800-s424242.bin");
 
     CHECK(throws_with_text(
         [&] {
@@ -1961,7 +2068,7 @@ TEST(learned_value_g8_artifact_roundtrips_every_checkpoint_bit_exact) {
         }
     }
     CHECK(old_school::learned_value_g8_cache_path(800, 424242) ==
-          "build/model-cache/old-school-value-g8-v1-t800-s424242.bin");
+          "build/model-cache/old-school-value-g8-v2-t800-s424242.bin");
     std::filesystem::remove(path);
 }
 
@@ -3159,6 +3266,52 @@ TEST(handcrafted_old_school_spell_scores_follow_the_declared_policy) {
     CHECK(land_scores[1] > land_scores[0]);
 }
 
+TEST(handcrafted_force_spike_prefers_live_tax_and_passes_dead_tax) {
+    const auto make_state = [](bool payer_has_mana) {
+        old_school::GameState state;
+        state.active_player = 1;
+        state.players[1].lands = {
+            {
+                .card = old_school::CardId::Mountain,
+                .tapped = !payer_has_mana,
+            },
+        };
+        state.stack = {
+            {
+                .kind = old_school::StackObjectKind::Spell,
+                .id = 77,
+                .card = old_school::CardId::AirElemental,
+                .controller = 1,
+            },
+        };
+        return state;
+    };
+    const std::vector<old_school::PriorityAction> candidates = {
+        old_school::PriorityAction::pass(),
+        old_school::PriorityAction::cast_force_spike(77),
+    };
+
+    const auto live_scores =
+        old_school::handcrafted_priority_scores(
+            make_state(false), 0, candidates);
+    CHECK(live_scores.size() == candidates.size());
+    CHECK(live_scores[1] > live_scores[0]);
+    CHECK(std::distance(
+              live_scores.begin(),
+              std::max_element(
+                  live_scores.begin(), live_scores.end())) == 1);
+
+    const auto dead_scores =
+        old_school::handcrafted_priority_scores(
+            make_state(true), 0, candidates);
+    CHECK(dead_scores.size() == candidates.size());
+    CHECK(dead_scores[1] < dead_scores[0]);
+    CHECK(std::distance(
+              dead_scores.begin(),
+              std::max_element(
+                  dead_scores.begin(), dead_scores.end())) == 0);
+}
+
 TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
     const auto state = old_school::white_lock_plan_diagnostic_state();
     CHECK(state.active_player == 0);
@@ -3469,6 +3622,492 @@ TEST(new_old_school_creatures_cast_with_exact_mana) {
          {.card = old_school::CardId::Island},
          {.card = old_school::CardId::Island},
          {.card = old_school::CardId::Island}});
+}
+
+TEST(mox_sapphire_and_sol_ring_produce_mana_and_float_excess) {
+    old_school::GameState mox_state;
+    mox_state.active_player = 0;
+    mox_state.players[0].hand = {
+        old_school::CardId::MoxSapphire,
+        old_school::CardId::FlyingMen,
+    };
+    CHECK(old_school::apply_priority_action(
+        mox_state, 0,
+        old_school::PriorityAction::cast_artifact(
+            old_school::CardId::MoxSapphire),
+        true));
+    CHECK(mox_state.players[0].lands.empty());
+    CHECK(mox_state.players[0].artifacts.empty());
+    CHECK(old_school::resolve_top_of_stack(mox_state));
+    CHECK(mox_state.players[0].artifacts.size() == 1);
+    CHECK(mox_state.players[0].artifacts[0].card ==
+          old_school::CardId::MoxSapphire);
+    CHECK(!mox_state.players[0].artifacts[0].tapped);
+
+    CHECK(old_school::apply_priority_action(
+        mox_state, 0,
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::FlyingMen),
+        true));
+    CHECK(mox_state.players[0].artifacts[0].tapped);
+    CHECK(old_school::resolve_top_of_stack(mox_state));
+    CHECK(mox_state.players[0].creatures.size() == 1);
+    CHECK(mox_state.players[0].creatures[0].card ==
+          old_school::CardId::FlyingMen);
+
+    old_school::GameState ring_state;
+    ring_state.active_player = 0;
+    ring_state.players[0].hand = {
+        old_school::CardId::SolRing,
+        old_school::CardId::Millstone,
+    };
+    ring_state.players[0].lands = {
+        {.card = old_school::CardId::Island},
+    };
+    CHECK(old_school::apply_priority_action(
+        ring_state, 0,
+        old_school::PriorityAction::cast_artifact(
+            old_school::CardId::SolRing),
+        true));
+    CHECK(ring_state.players[0].lands[0].tapped);
+    CHECK(old_school::resolve_top_of_stack(ring_state));
+    CHECK(ring_state.players[0].artifacts.size() == 1);
+    CHECK(ring_state.players[0].artifacts[0].card ==
+          old_school::CardId::SolRing);
+    CHECK(old_school::apply_priority_action(
+        ring_state, 0,
+        old_school::PriorityAction::cast_artifact(
+            old_school::CardId::Millstone),
+        true));
+    CHECK(ring_state.players[0].artifacts[0].tapped);
+    CHECK(old_school::resolve_top_of_stack(ring_state));
+    CHECK(ring_state.players[0].artifacts.size() == 2);
+
+    old_school::GameState excess_state;
+    excess_state.active_player = 0;
+    excess_state.players[0].hand = {
+        old_school::CardId::GrizzlyBears,
+    };
+    excess_state.players[0].lands = {
+        {.card = old_school::CardId::Forest},
+    };
+    excess_state.players[0].artifacts = {
+        {
+            .id = 7,
+            .card = old_school::CardId::SolRing,
+            .tapped = false,
+        },
+    };
+    CHECK(old_school::apply_priority_action(
+        excess_state, 0,
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::GrizzlyBears),
+        true));
+    CHECK(excess_state.players[0].lands[0].tapped);
+    CHECK(excess_state.players[0].artifacts[0].tapped);
+    CHECK(excess_state.players[0].mana_pool ==
+          old_school::ManaCost{.generic = 1});
+    CHECK(old_school::resolve_top_of_stack(excess_state));
+    old_school::PriorityState phase_end{
+        .player = 0,
+        .consecutive_passes = 1,
+    };
+    CHECK(old_school::pass_priority(excess_state, phase_end) ==
+          old_school::PriorityPassResult::WindowEnded);
+    CHECK(excess_state.players[0].mana_pool ==
+          old_school::ManaCost{});
+}
+
+TEST(air_elemental_needs_two_blue_mana_and_has_flying) {
+    old_school::GameState short_blue;
+    short_blue.active_player = 0;
+    short_blue.players[0].hand = {
+        old_school::CardId::AirElemental,
+    };
+    short_blue.players[0].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+    };
+    CHECK(!has_action(
+        old_school::legal_priority_actions(short_blue, 0, true),
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::AirElemental)));
+
+    old_school::GameState cast_state;
+    cast_state.active_player = 0;
+    cast_state.players[0].hand = {
+        old_school::CardId::AirElemental,
+    };
+    cast_state.players[0].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+        {.card = old_school::CardId::Mountain},
+    };
+    CHECK(old_school::apply_priority_action(
+        cast_state, 0,
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::AirElemental),
+        true));
+    CHECK(old_school::resolve_top_of_stack(cast_state));
+    CHECK(cast_state.players[0].creatures.size() == 1);
+    CHECK(cast_state.players[0].creatures[0].card ==
+          old_school::CardId::AirElemental);
+
+    old_school::GameState grounded_blocker;
+    grounded_blocker.players[0].creatures = {
+        creature(1, old_school::CardId::AirElemental),
+    };
+    grounded_blocker.players[1].creatures = {bear(2)};
+    CHECK(!old_school::resolve_combat(
+        grounded_blocker, 0, {1}, {{1, 2}}));
+
+    old_school::GameState flying_blocker;
+    flying_blocker.players[0].creatures = {
+        creature(3, old_school::CardId::AirElemental),
+    };
+    flying_blocker.players[1].creatures = {
+        creature(4, old_school::CardId::FlyingMen),
+    };
+    CHECK(old_school::resolve_combat(
+        flying_blocker, 0, {3}, {{3, 4}}));
+    CHECK(flying_blocker.players[0].creatures.size() == 1);
+    CHECK(flying_blocker.players[0].creatures[0].damage == 1);
+    CHECK(flying_blocker.players[1].creatures.empty());
+}
+
+TEST(ancestral_recall_draws_for_either_target_and_flags_failed_draw) {
+    old_school::GameState opponent_draw;
+    opponent_draw.active_player = 1;
+    opponent_draw.players[0].hand = {
+        old_school::CardId::AncestralRecall,
+    };
+    opponent_draw.players[0].lands = {
+        {.card = old_school::CardId::Island},
+    };
+    opponent_draw.players[1].library = {
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt,
+        old_school::CardId::GrayOgre,
+        old_school::CardId::HillGiant,
+    };
+    const auto target_opponent =
+        old_school::PriorityAction::cast_ancestral_recall(
+            old_school::Target::player_target(1));
+    CHECK(has_action(
+        old_school::legal_priority_actions(
+            opponent_draw, 0, false),
+        target_opponent));
+    CHECK(old_school::apply_priority_action(
+        opponent_draw, 0, target_opponent, false));
+    CHECK(old_school::resolve_top_of_stack(opponent_draw));
+    CHECK(opponent_draw.players[1].hand.size() == 3);
+    CHECK(opponent_draw.players[1].library.size() == 1);
+    CHECK(opponent_draw.stats[1].cards_drawn == 3);
+    CHECK(!opponent_draw.failed_draw[1]);
+    CHECK(count_card(
+              opponent_draw.players[0].graveyard,
+              old_school::CardId::AncestralRecall) == 1);
+
+    old_school::GameState self_decking;
+    self_decking.active_player = 1;
+    self_decking.players[0].hand = {
+        old_school::CardId::AncestralRecall,
+    };
+    self_decking.players[0].library = {
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt,
+    };
+    self_decking.players[0].lands = {
+        {.card = old_school::CardId::Island},
+    };
+    const auto target_self =
+        old_school::PriorityAction::cast_ancestral_recall(
+            old_school::Target::player_target(0));
+    CHECK(old_school::apply_priority_action(
+        self_decking, 0, target_self, false));
+    CHECK(old_school::resolve_top_of_stack(self_decking));
+    CHECK(self_decking.players[0].hand.size() == 2);
+    CHECK(self_decking.players[0].library.empty());
+    CHECK(self_decking.stats[0].cards_drawn == 2);
+    CHECK(self_decking.failed_draw[0]);
+}
+
+TEST(braingeyser_enumerates_x_zero_and_draws_the_chosen_player) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.players[0].hand = {
+        old_school::CardId::Braingeyser,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+    };
+    state.players[1].library = {
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt,
+    };
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    for (int x_value = 0; x_value <= 2; ++x_value) {
+        for (std::size_t target = 0; target < 2; ++target) {
+            CHECK(has_action(
+                actions,
+                old_school::PriorityAction::cast_braingeyser(
+                    x_value,
+                    old_school::Target::player_target(target))));
+        }
+    }
+    CHECK(!has_action(
+        actions,
+        old_school::PriorityAction::cast_braingeyser(
+            3, old_school::Target::player_target(0))));
+    CHECK(!has_action(
+        old_school::legal_priority_actions(state, 0, false),
+        old_school::PriorityAction::cast_braingeyser(
+            0, old_school::Target::player_target(1))));
+
+    auto zero_draw = state;
+    const auto zero_action =
+        old_school::PriorityAction::cast_braingeyser(
+            0, old_school::Target::player_target(1));
+    CHECK(old_school::apply_priority_action(
+        zero_draw, 0, zero_action, true));
+    CHECK(old_school::resolve_top_of_stack(zero_draw));
+    CHECK(zero_draw.players[1].hand.empty());
+    CHECK(zero_draw.players[1].library.size() == 2);
+    CHECK(zero_draw.stats[1].cards_drawn == 0);
+    CHECK(!zero_draw.failed_draw[1]);
+
+    auto opponent_decking = state;
+    opponent_decking.players[1].library = {
+        old_school::CardId::Mountain,
+    };
+    const auto draw_two =
+        old_school::PriorityAction::cast_braingeyser(
+            2, old_school::Target::player_target(1));
+    CHECK(old_school::apply_priority_action(
+        opponent_decking, 0, draw_two, true));
+    CHECK(old_school::resolve_top_of_stack(opponent_decking));
+    CHECK(opponent_decking.players[1].hand.size() == 1);
+    CHECK(opponent_decking.players[1].library.empty());
+    CHECK(opponent_decking.stats[1].cards_drawn == 1);
+    CHECK(opponent_decking.failed_draw[1]);
+}
+
+TEST(time_walk_queues_and_consumes_an_extra_turn) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.players[0].hand = {
+        old_school::CardId::TimeWalk,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+    };
+    const auto action = old_school::PriorityAction::cast_sorcery(
+        old_school::CardId::TimeWalk);
+    CHECK(has_action(
+        old_school::legal_priority_actions(state, 0, true),
+        action));
+    CHECK(!has_action(
+        old_school::legal_priority_actions(state, 0, false),
+        action));
+    CHECK(old_school::apply_priority_action(
+        state, 0, action, true));
+    CHECK(old_school::resolve_top_of_stack(state));
+    CHECK(state.extra_turns_pending[0] == 1);
+    CHECK(state.extra_turns_pending[1] == 0);
+    CHECK(count_card(
+              state.players[0].graveyard,
+              old_school::CardId::TimeWalk) == 1);
+
+    CHECK(old_school::advance_turn_player(state) == 0);
+    CHECK(state.active_player == 0);
+    CHECK(state.extra_turns_pending[0] == 0);
+    CHECK(old_school::advance_turn_player(state) == 1);
+    CHECK(state.active_player == 1);
+}
+
+TEST(force_spike_counters_only_when_the_tax_is_not_paid) {
+    const auto make_state = [](bool payer_has_mana) {
+        old_school::GameState state;
+        state.active_player = 1;
+        state.next_stack_object_id = 11;
+        state.players[0].hand = {
+            old_school::CardId::ForceSpike,
+        };
+        state.players[0].lands = {
+            {.card = old_school::CardId::Island},
+        };
+        state.players[1].lands = {
+            {
+                .card = old_school::CardId::Mountain,
+                .tapped = !payer_has_mana,
+            },
+        };
+        state.stack = {
+            {
+                .kind = old_school::StackObjectKind::Spell,
+                .id = 10,
+                .card = old_school::CardId::GrayOgre,
+                .controller = 1,
+            },
+        };
+        return state;
+    };
+    const auto action =
+        old_school::PriorityAction::cast_force_spike(10);
+
+    auto live = make_state(false);
+    CHECK(has_action(
+        old_school::legal_priority_actions(live, 0, false),
+        action));
+    CHECK(old_school::apply_priority_action(
+        live, 0, action, false));
+    CHECK(old_school::resolve_top_of_stack(live));
+    CHECK(live.stack.empty());
+    CHECK(count_card(
+              live.players[1].graveyard,
+              old_school::CardId::GrayOgre) == 1);
+    CHECK(count_card(
+              live.players[0].graveyard,
+              old_school::CardId::ForceSpike) == 1);
+    CHECK(live.stats[0].spells_countered == 1);
+
+    auto paid = make_state(true);
+    CHECK(old_school::apply_priority_action(
+        paid, 0, action, false));
+    CHECK(old_school::resolve_top_of_stack(
+        paid, old_school::ForceSpikePaymentChoice::PayIfAble));
+    CHECK(paid.stack.size() == 1);
+    CHECK(paid.stack.back().card ==
+          old_school::CardId::GrayOgre);
+    CHECK(paid.players[1].lands[0].tapped);
+    CHECK(paid.stats[0].spells_countered == 0);
+    CHECK(old_school::resolve_top_of_stack(paid));
+    CHECK(paid.players[1].creatures.size() == 1);
+    CHECK(paid.players[1].creatures[0].card ==
+          old_school::CardId::GrayOgre);
+
+    auto ring_paid = make_state(false);
+    ring_paid.players[1].artifacts = {
+        {
+            .id = 50,
+            .card = old_school::CardId::SolRing,
+        },
+    };
+    CHECK(old_school::apply_priority_action(
+        ring_paid, 0, action, false));
+    CHECK(old_school::resolve_top_of_stack(ring_paid));
+    CHECK(ring_paid.stack.size() == 1);
+    CHECK(ring_paid.players[1].artifacts[0].tapped);
+    CHECK(ring_paid.players[1].mana_pool ==
+          old_school::ManaCost{.generic = 1});
+    CHECK(ring_paid.stats[0].spells_countered == 0);
+
+    auto declined = make_state(true);
+    CHECK(old_school::apply_priority_action(
+        declined, 0, action, false));
+    CHECK(old_school::resolve_top_of_stack(
+        declined, old_school::ForceSpikePaymentChoice::Decline));
+    CHECK(declined.stack.empty());
+    CHECK(!declined.players[1].lands[0].tapped);
+    CHECK(declined.stats[0].spells_countered == 1);
+}
+
+TEST(force_spike_handles_a_missing_target_and_is_counterable) {
+    old_school::GameState missing;
+    missing.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 20,
+            .card = old_school::CardId::ForceSpike,
+            .controller = 0,
+            .spell_target = 999,
+        },
+    };
+    CHECK(old_school::resolve_top_of_stack(missing));
+    CHECK(missing.stack.empty());
+    CHECK(count_card(
+              missing.players[0].graveyard,
+              old_school::CardId::ForceSpike) == 1);
+    CHECK(missing.stats[0].spells_countered == 0);
+
+    old_school::GameState countered;
+    countered.active_player = 1;
+    countered.next_stack_object_id = 31;
+    countered.players[0].hand = {
+        old_school::CardId::ForceSpike,
+    };
+    countered.players[0].lands = {
+        {.card = old_school::CardId::Island},
+    };
+    countered.players[1].hand = {
+        old_school::CardId::Counterspell,
+    };
+    countered.players[1].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+    };
+    countered.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 30,
+            .card = old_school::CardId::GrayOgre,
+            .controller = 1,
+        },
+    };
+    CHECK(old_school::apply_priority_action(
+        countered, 0,
+        old_school::PriorityAction::cast_force_spike(30),
+        false));
+    const auto force_id = countered.stack.back().id;
+    const auto counter_force =
+        old_school::PriorityAction::cast_counterspell(force_id);
+    CHECK(has_action(
+        old_school::legal_priority_actions(
+            countered, 1, false),
+        counter_force));
+    CHECK(old_school::apply_priority_action(
+        countered, 1, counter_force, false));
+    CHECK(old_school::resolve_top_of_stack(countered));
+    CHECK(countered.stack.size() == 1);
+    CHECK(countered.stack.back().id == 30);
+    CHECK(count_card(
+              countered.players[0].graveyard,
+              old_school::CardId::ForceSpike) == 1);
+    CHECK(count_card(
+              countered.players[1].graveyard,
+              old_school::CardId::Counterspell) == 1);
+
+    old_school::GameState ability;
+    ability.players[0].hand = {
+        old_school::CardId::ForceSpike,
+    };
+    ability.players[0].lands = {
+        {.card = old_school::CardId::Island},
+    };
+    ability.stack = {
+        {
+            .kind =
+                old_school::StackObjectKind::ActivatedAbility,
+            .id = 40,
+            .card = old_school::CardId::Millstone,
+            .controller = 1,
+            .target =
+                old_school::Target::player_target(0),
+        },
+    };
+    CHECK(!has_action(
+        old_school::legal_priority_actions(ability, 0, false),
+        old_school::PriorityAction::cast_force_spike(40)));
 }
 
 TEST(lightning_bolt_can_damage_either_player) {

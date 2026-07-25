@@ -144,6 +144,7 @@ bool player_states_equal(const old_school::PlayerState& left,
            left.creatures == right.creatures &&
            left.artifacts == right.artifacts &&
            left.enchantments == right.enchantments &&
+           left.mana_pool == right.mana_pool &&
            left.land_played_this_turn ==
                right.land_played_this_turn;
 }
@@ -172,6 +173,9 @@ bool game_states_equal(const GameState& left,
         }
     }
     return left.stack == right.stack &&
+           left.extra_turns_pending ==
+               right.extra_turns_pending &&
+           left.failed_draw == right.failed_draw &&
            left.active_player == right.active_player &&
            left.starting_player == right.starting_player &&
            left.turn_number == right.turn_number &&
@@ -197,7 +201,7 @@ std::size_t expected_candidate_count(Category category) {
     case Category::GreenGrowthSaveBolt:
     case Category::GreenGrowthHold:
     case Category::BlueCounterExpensiveSpell:
-    case Category::BlueConserveCounter:
+    case Category::BlueForceSpike:
     case Category::BlueCounterLethal:
     case Category::WhiteEmergencyMoat:
     case Category::WhiteEstablishMillstone:
@@ -388,7 +392,7 @@ void test_red_last_opportunity_timing() {
                damaged.state.active_player == 1 &&
                damaged.state.turn_number == 10 &&
                damaged.consecutive_passes == 1,
-           "damaged-Water fixture is not the final cleanup opportunity");
+           "damaged-Air fixture is not the final cleanup opportunity");
     GameState pass_state = damaged.state;
     PriorityState priority{
         .player = damaged.root_player,
@@ -396,7 +400,7 @@ void test_red_last_opportunity_timing() {
     };
     expect(old_school::pass_priority(pass_state, priority) ==
                PriorityPassResult::WindowEnded,
-           "passing damaged-Water fixture did not end the turn window");
+           "passing damaged-Air fixture did not end the turn window");
 }
 
 void test_white_plan_passes_cannot_heal() {
@@ -446,14 +450,11 @@ void test_public_mana_supports_deployed_creatures() {
     expect(push.state.players[0].lands.size() >= 5,
            "visible Ironroot Treefolk has no plausible five-mana history");
 
-    for (const Category category :
-         {Category::BlueConserveCounter,
-          Category::BlueCounterLethal}) {
-        const DecisionProbe& probe = find_probe(probes, category);
-        expect(probe.state.players[0].lands.size() >= 5,
-               "visible Water Elemental has no plausible "
-               "five-mana history");
-    }
+    const DecisionProbe& counter_lethal =
+        find_probe(probes, Category::BlueCounterLethal);
+    expect(counter_lethal.state.players[0].lands.size() >= 5,
+           "visible Air Elemental has no plausible "
+           "five-mana history");
 }
 
 void test_counter_war_lists_every_legal_spell_target() {
@@ -471,6 +472,81 @@ void test_counter_war_lists_every_legal_spell_target() {
            "counter-war omitted a targetable stack spell");
 }
 
+void test_force_spike_probe_is_a_live_mana_advantage_counter() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& probe =
+        find_probe(probes, Category::BlueForceSpike);
+    expect(
+        probe.stable_id ==
+                "blue.force-spike-tapped-out-gray-ogre.v3" &&
+            probe.state.stack.size() == 1 &&
+            probe.state.stack.back().card == CardId::GrayOgre &&
+            probe.state.stack.back().controller == 1 &&
+            probe.consecutive_passes == 1,
+        "Force Spike probe lost its live opposing spell");
+    expect(
+        probe.state.players[0].hand ==
+                std::vector<CardId>{CardId::ForceSpike} &&
+            probe.state.players[0].lands.size() == 1 &&
+            !probe.state.players[0].lands.front().tapped,
+        "Force Spike probe does not expose exactly one blue mana");
+    expect(
+        probe.state.players[1].lands.size() == 3 &&
+            std::all_of(
+                probe.state.players[1].lands.begin(),
+                probe.state.players[1].lands.end(),
+                [](const old_school::LandPermanent& land) {
+                    return land.tapped;
+                }),
+        "Force Spike target controller can still pay one");
+
+    const old_school::StackObjectId gray_ogre =
+        probe.state.stack.back().id;
+    const PriorityAction force_spike =
+        PriorityAction::cast_force_spike(gray_ogre);
+    static_cast<void>(
+        find_priority_action(probe, PriorityAction::pass()));
+    static_cast<void>(
+        find_priority_action(probe, force_spike));
+
+    GameState pass_state = probe.state;
+    PriorityState pass_priority{
+        .player = probe.root_player,
+        .consecutive_passes = probe.consecutive_passes,
+    };
+    expect(
+        old_school::pass_priority(pass_state, pass_priority) ==
+                PriorityPassResult::StackObjectResolved &&
+            pass_state.stack.empty() &&
+            creature_id(pass_state, 1, CardId::GrayOgre) != 0,
+        "passing did not let the opposing Gray Ogre resolve");
+
+    GameState counter_state = probe.state;
+    expect(
+        old_school::apply_priority_action(
+            counter_state, probe.root_player, force_spike, false),
+        "live Force Spike candidate failed to cast");
+    expect(
+        counter_state.stack.size() == 2 &&
+            counter_state.players[0].lands.front().tapped,
+        "casting Force Spike did not use its blue mana");
+    resolve_cast_spell(counter_state);
+    expect(
+        counter_state.stack.empty() &&
+            counter_state.players[1].creatures.empty() &&
+            std::count(
+                counter_state.players[1].graveyard.begin(),
+                counter_state.players[1].graveyard.end(),
+                CardId::GrayOgre) == 1 &&
+            std::count(
+                counter_state.players[0].graveyard.begin(),
+                counter_state.players[0].graveyard.end(),
+                CardId::ForceSpike) == 1 &&
+            counter_state.stats[0].spells_countered == 1,
+        "Force Spike did not counter the tapped-out Gray Ogre");
+}
+
 void test_response_windows_record_the_casters_pass() {
     const std::vector<DecisionProbe> probes =
         old_school::probes::make_probe_dev_v3();
@@ -478,7 +554,7 @@ void test_response_windows_record_the_casters_pass() {
         Category::GreenGrowthSaveBolt,
         Category::RedStackRace,
         Category::BlueCounterExpensiveSpell,
-        Category::BlueConserveCounter,
+        Category::BlueForceSpike,
         Category::BlueCounterLethal,
         Category::BlueCounterWar,
     };
@@ -981,6 +1057,8 @@ int main() {
                test_public_mana_supports_deployed_creatures);
     runner.run("Counterspell stack targets",
                test_counter_war_lists_every_legal_spell_target);
+    runner.run("Force Spike live counter",
+               test_force_spike_probe_is_a_live_mana_advantage_counter);
     runner.run("response priority context",
                test_response_windows_record_the_casters_pass);
     runner.run("unique v3 stable IDs and categories",

@@ -42,7 +42,7 @@ enum class Category : std::uint8_t {
     RedFinishDamagedThreat,
     RedStackRace,
     BlueCounterExpensiveSpell,
-    BlueConserveCounter,
+    BlueForceSpike,
     BlueCounterLethal,
     BlueCounterWar,
     WhiteEmergencyMoat,

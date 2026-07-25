@@ -5,8 +5,11 @@ A dependency-free C++20 MVP for simulating a compact Old School
 
 - Green: 18 Forest, 9 Grizzly Bears, 8 Ironroot Treefolk, 4 Giant Growth,
   1 Tsunami
-- Red: 18 Mountain, 10 Lightning Bolt, 12 Fire Elemental
-- Blue: 18 Island, 14 Counterspell, 8 Water Elemental
+- Red: 15 Mountain, 9 Lightning Bolt, 7 Ironclaw Orcs, 4 Gray Ogre,
+  3 Hill Giant, 2 Fire Elemental
+- Blue: 15 Island, 1 Mox Sapphire, 1 Sol Ring, 1 Ancestral Recall,
+  1 Time Walk, 1 Braingeyser, 4 Flying Men, 4 Force Spike,
+  8 Counterspell, 4 Air Elemental
 - White: 22 Plains, 3 Millstone, 15 Moat
 - RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs,
   2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate
@@ -122,6 +125,8 @@ and do not evaluate hybrid decks far outside the value model's training data.
 - Random starting player; the starting player skips their first draw
 - Untap, draw, first main, combat, second main, and cleanup
 - One land play per turn and colored/generic mana payment
+- Mox Sapphire and Sol Ring use implicit mana abilities; unspent mana remains
+  in the pool through the current phase
 - Creature, sorcery, instant, artifact, and enchantment spells are cast onto a
   LIFO stack
 - Priority alternates between players; after two consecutive passes, the top
@@ -145,6 +150,13 @@ and do not evaluate hybrid decks far outside the value model's training data.
   creature dies that turn
 - Counterspell can target and counter any spell, including another
   Counterspell
+- Force Spike counters its target unless that spell's controller can pay one
+  mana as it resolves. The current bot MVP automatically pays when able; the
+  resolver's explicit decline path is covered by rule tests.
+- Ancestral Recall is a targeted instant that draws three, and Braingeyser is
+  a targeted `XUU` sorcery that draws X, including legal X=0
+- Time Walk queues a real extra turn after the current one; extra turns untap,
+  draw, and count against the turn limit normally
 - Tsunami is a sorcery and destroys all Islands only when it resolves
 - Millstone resolves as an artifact permanent; paying two mana and tapping it
   puts a targeted mill-two activated ability on the stack
@@ -170,7 +182,8 @@ game still uses normal alternating priority and LIFO stack resolution.
 Handcrafted Policy is deliberately simpler and cheaper than Monte Carlo. It
 uses card-aware rules to play lands first, choose useful Lightning Bolt and
 Disintegrate targets, use Giant Growth to save a creature or create lethal
-damage, counter opposing spells, mill the opponent, preserve Counterspell
+damage, deploy mana artifacts and draw spells, take extra turns, use live
+Force Spikes, counter opposing spells, mill the opponent, preserve Counterspell
 mana, and pass priority to resolve its own stack objects. It also chooses
 favorable attacks, blocks, and damage order.
 
@@ -233,7 +246,7 @@ deliberately excludes it.
 Challenger training is cached independently for every `(N, training games,
 training seed)` identity. For example, C16 at the default training settings
 uses
-`build/model-cache/old-school-value-challenger-v1-c16-t800-s424242.bin`.
+`build/model-cache/old-school-value-challenger-v2-c16-t800-s424242.bin`.
 The artifact also binds the exact challenger recipe, Old School engine/model
 schema, and final content fingerprint. The first matching interactive,
 benchmark, stability, probe, or tournament route prints `generated`; later
@@ -263,7 +276,7 @@ It retains its base checkpoint and G1 through G8, so probe runs can attribute
 the first generation where a decision changes. Because the canonical
 800-game recipe is expensive, benchmark and probe routes transparently cache
 the complete frozen bundle at
-`build/model-cache/old-school-value-g8-v1-t800-s424242.bin` (with the
+`build/model-cache/old-school-value-g8-v2-t800-s424242.bin` (with the
 requested training game count and seed in the filename). The first route
 prints `generated`;
 later matching routes print `loaded` and reproduce the exact report,
@@ -283,7 +296,7 @@ Its base and G1-G4 use the canonical recipe; in G5-G8, consecutive game pairs
 alternate raw Value and information-safe K=1/H=4 Value search, exactly 50/50
 by games. The progress report prints raw/search game and example counts
 separately. Its artifact is isolated at
-`build/model-cache/old-school-value-g8-mix50-v1-t800-s424242.bin` (parameterized by the
+`build/model-cache/old-school-value-g8-mix50-v2-t800-s424242.bin` (parameterized by the
 requested game count and seed), and `--refresh-value-mix50-cache` refreshes
 only that recipe. Canonical and Mix50 bundles are validated independently and
 cannot be substituted for one another. Model artifacts and probe caches use
@@ -457,7 +470,7 @@ RU curve, flying, blocking, and Disintegrate-X decisions. It is still too
 small to establish playing strength; the paired benchmark and multi-seed
 confidence gates remain the authority.
 
-There are no mulligans, sideboards, concessions, or draw effects yet. A
+There are no mulligans, sideboards, or concessions yet. A
 500-individual-turn safety limit is included, though these decks normally end
 far earlier.
 

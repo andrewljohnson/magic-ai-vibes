@@ -166,7 +166,7 @@ void test_seed_and_fingerprint_ignore_iteration_order() {
             old_school::probes::kProbeDevV3,
             probes[1].stable_id);
     expect(
-        first_fingerprint == "fc5950b222351bd0",
+        first_fingerprint == "d7168adf7e1aaa27",
         "frozen probe-dev-v3 information-set fingerprint changed");
     expect(first_seed == 0x89D27C5C0BC11CB5ULL,
            "stable FNV-1a seed derivation changed");
@@ -262,6 +262,21 @@ void test_old_school_fingerprint_covers_new_public_state() {
            "fixture has no priority action for public-X test");
     priority->x_value = 2;
     expect_changed(action_x, "candidate action X did not change fingerprint");
+
+    std::vector<DecisionProbe> mana_pool = probes;
+    mana_pool.front().state.players[0].mana_pool.blue = 1;
+    expect_changed(
+        mana_pool, "public floating mana did not change fingerprint");
+
+    std::vector<DecisionProbe> extra_turn = probes;
+    extra_turn.front().state.extra_turns_pending[0] = 1;
+    expect_changed(
+        extra_turn, "public queued extra turn did not change fingerprint");
+
+    std::vector<DecisionProbe> failed_draw = probes;
+    failed_draw.front().state.failed_draw[0] = true;
+    expect_changed(
+        failed_draw, "terminal failed-draw marker did not change fingerprint");
 }
 
 void test_candidate_mapping_is_descriptor_safe() {
@@ -1793,7 +1808,7 @@ void test_validation_corpus_identity_is_golden() {
         old_school::probe_runner::
                 corpus_information_set_fingerprint(
                     ProbeCorpusKind::ValidationV1, corpus) ==
-            "e181051de454c79a",
+            "9bb67ff6e8b476b2",
         "validation-v1 information-set fingerprint drifted");
     expect(corpus.size() == 1 &&
                corpus.front().harvest.has_value(),

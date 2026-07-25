@@ -186,6 +186,8 @@ void print_help(std::string_view executable) {
         << "       " << executable
         << " --diagnose-white-plan [--seed N] [--train-games N]\n"
         << "       " << executable
+        << " --diagnose-value-context\n"
+        << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
@@ -207,8 +209,12 @@ void print_help(std::string_view executable) {
         << "Simulates an Old School Magic round robin with legal bot play.\n"
         << "  Green: 18 Forest, 9 Grizzly Bears, 8 Ironroot Treefolk, "
            "4 Giant Growth, 1 Tsunami\n"
-        << "  Red: 18 Mountain, 10 Lightning Bolt, 12 Fire Elemental\n"
-        << "  Blue: 18 Island, 14 Counterspell, 8 Water Elemental\n"
+        << "  Red: 15 Mountain, 9 Lightning Bolt, 7 Ironclaw Orcs, "
+           "4 Gray Ogre, 3 Hill Giant, 2 Fire Elemental\n"
+        << "  Blue: 15 Island, 1 Mox Sapphire, 1 Sol Ring, "
+           "1 Ancestral Recall, 1 Time Walk, 1 Braingeyser, "
+           "4 Flying Men, 4 Force Spike, 8 Counterspell, "
+           "4 Air Elemental\n"
         << "  White: 22 Plains, 3 Millstone, 15 Moat\n"
         << "  RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, "
            "5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, "
@@ -254,6 +260,8 @@ void print_help(std::string_view executable) {
            "(default: 8)\n"
         << "  --diagnose-white-plan  Compare K=2 and K=64 Learned root "
            "rankings on a held-out White lock state\n"
+        << "  --diagnose-value-context  Audit phase/pass context omitted "
+           "from the current Value observation; accepts no other options\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
         << "  --score-probes   Label/score an offline decision-probe "
@@ -1097,6 +1105,74 @@ train_actor_g1_with_progress(
     return result;
 }
 
+std::string_view priority_pass_result_name(
+    old_school::PriorityPassResult result) {
+    switch (result) {
+    case old_school::PriorityPassResult::Passed:
+        return "Passed";
+    case old_school::PriorityPassResult::StackObjectResolved:
+        return "StackObjectResolved";
+    case old_school::PriorityPassResult::WindowEnded:
+        return "WindowEnded";
+    }
+    throw std::logic_error("unknown priority pass result");
+}
+
+void print_value_context_alias_diagnostic(
+    const old_school::ValueContextAliasDiagnostic& result) {
+    const auto yes_no = [](bool value) {
+        return value ? "yes" : "no";
+    };
+    std::cout
+        << "Value Context Alias Audit\n"
+        << "Structural diagnostic only; no model training or policy "
+           "changes.\n\n"
+        << "Shared lethal-stack root\n"
+        << "  Root player / perspective: "
+        << result.root_player << " / " << result.perspective << '\n'
+        << "  Legal actions in each pass context: "
+        << result.stack_action_count << '\n'
+        << "  Complete legal action sets identical: "
+        << yes_no(result.stack_actions_identical) << '\n'
+        << "  Critic state features bit-identical: "
+        << yes_no(
+               result.stack_critic_features_bit_identical)
+        << '\n'
+        << "  Neutral policy/action features differ: "
+        << yes_no(result.stack_policy_features_different)
+        << '\n'
+        << "  Pass with prior count 0: "
+        << priority_pass_result_name(result.zero_pass_result)
+        << "; next player " << result.zero_pass_next_player
+        << "; pass count " << result.zero_pass_next_count
+        << "; stack " << result.zero_pass_stack_size
+        << "; root life " << result.zero_pass_life << '\n'
+        << "  Pass with prior count 1: "
+        << priority_pass_result_name(result.one_pass_result)
+        << "; next player " << result.one_pass_next_player
+        << "; pass count " << result.one_pass_next_count
+        << "; stack " << result.one_pass_stack_size
+        << "; root life " << result.one_pass_life
+        << " (lethal)\n\n"
+        << "Shared empty-stack main-phase root\n"
+        << "  Legal actions in each phase: "
+        << result.main_action_count << '\n'
+        << "  FirstMain / SecondMain action sets identical: "
+        << yes_no(result.main_actions_identical) << '\n'
+        << "  Critic state features bit-identical: "
+        << yes_no(
+               result.main_critic_features_bit_identical)
+        << '\n'
+        << "  Neutral policy/action features differ: "
+        << yes_no(result.main_policy_features_different)
+        << '\n'
+        << "  Opponent hidden-card substitution bit-identical: "
+        << yes_no(result.hidden_information_bit_identical)
+        << "\n\nResult: context alias "
+        << (result.demonstrated() ? "demonstrated" : "not demonstrated")
+        << '\n';
+}
+
 std::string white_plan_action_name(
     const old_school::PriorityAction& action) {
     switch (action.kind) {
@@ -1120,6 +1196,13 @@ std::string white_plan_action_name(
         return "Cast Giant Growth";
     case old_school::PriorityActionKind::CastCounterspell:
         return "Cast Counterspell";
+    case old_school::PriorityActionKind::CastAncestralRecall:
+        return "Cast Ancestral Recall";
+    case old_school::PriorityActionKind::CastBraingeyser:
+        return "Cast Braingeyser for X=" +
+               std::to_string(action.x_value);
+    case old_school::PriorityActionKind::CastForceSpike:
+        return "Cast Force Spike";
     case old_school::PriorityActionKind::ActivateMillstone:
         if (action.target.has_value() &&
             action.target->player == 1) {
@@ -1790,6 +1873,7 @@ int main(int argc, char** argv) {
         bool stability = false;
         bool evolve = false;
         bool diagnose_white_plan = false;
+        bool diagnose_value_context = false;
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
@@ -1848,6 +1932,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--diagnose-white-plan") {
                 diagnose_white_plan = true;
+                continue;
+            }
+            if (option == "--diagnose-value-context") {
+                diagnose_value_context = true;
                 continue;
             }
             if (option == "--variance-study") {
@@ -2101,14 +2189,20 @@ int main(int argc, char** argv) {
                 static_cast<int>(stability) +
                 static_cast<int>(evolve) +
                 static_cast<int>(diagnose_white_plan) +
+                static_cast<int>(diagnose_value_context) +
                 static_cast<int>(variance_study) +
                 static_cast<int>(score_probes) >
             1) {
             throw std::invalid_argument(
                 "--interactive, --benchmark, --stability, "
                 "--evolve-deck, and "
-                "--diagnose-white-plan, --variance-study, and "
-                "--score-probes cannot be combined");
+                "--diagnose-white-plan, --diagnose-value-context, "
+                "--variance-study, and --score-probes cannot be "
+                "combined");
+        }
+        if (diagnose_value_context && argc != 2) {
+            throw std::invalid_argument(
+                "--diagnose-value-context accepts no other options");
         }
         if (interactive &&
             interactive_unsupported_option_used) {
@@ -2145,7 +2239,8 @@ int main(int argc, char** argv) {
                     ValueSearchChampion;
         const bool tournament_uses_any_learned =
             !interactive && !benchmark && !stability && !evolve &&
-            !diagnose_white_plan && !variance_study && !score_probes &&
+            !diagnose_white_plan && !diagnose_value_context &&
+            !variance_study && !score_probes &&
             (bot_field == old_school::BotField::Mixed ||
              bot_field == old_school::BotField::Learned);
         const bool tournament_uses_value =
@@ -2279,6 +2374,12 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--refresh-value-mix50-cache requires a benchmark "
                 "or probe route that selects Value G8 Late-Mix50");
+        }
+        if (diagnose_value_context) {
+            const auto result =
+                old_school::diagnose_value_context_aliases();
+            print_value_context_alias_diagnostic(result);
+            return result.demonstrated() ? 0 : 1;
         }
         if (interactive) {
             const auto matchup =

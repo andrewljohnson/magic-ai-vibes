@@ -3557,8 +3557,10 @@ C++20 `-Wall -Wextra -Wpedantic -Werror` builds, 88/88 engine/bot tests,
 zero default, finite `[0,1]` validation, root isolation, both continuation
 seats, fixed-seed repeatability, hidden-repartition invariance, unchanged
 world/evaluation accounting, same-model benchmark identity, challenger-only
-CLI treatment, and Actor-cache exclusion. Sanitizer verification is recorded
-separately when rerun on the final source state.
+CLI treatment, and Actor-cache exclusion. A final strict ASan/UBSan build ran
+the 88 engine tests, 17 probe-runner tests, and an epsilon-0.05 validation-v1
+smoke with zero findings; the smoke also preserved hidden-repartition
+invariance.
 
 ### C16 Counterspell probe audit (declared)
 
@@ -3628,3 +3630,41 @@ correct counter-war target. Do **not** claim general mana discipline or use
 this result for promotion. A future mana-discipline family should hold the
 information set fixed while varying incoming spell cost/public consequence
 and test monotonic action preference with more common worlds.
+
+### Markov-context alias audit (declared)
+
+Declared after rereading the newest independent review and before changing
+the Value observation or training recipe. This is a structural diagnostic,
+not a bot treatment.
+
+Hypothesis: the deployed Value critic aliases legally different decision
+states because its input is only `GameState`. In particular, hold one public
+stack state, root player, perspective, own hand, and complete legal action set
+fixed while changing only `consecutive_passes` from zero to one. The current
+critic feature vector should remain bit-identical even though choosing Pass
+has a different rules transition: the zero-pass context yields priority with
+the spell still on the stack, while the one-pass context resolves that spell.
+A lethal visible spell makes the consequence unambiguous. The already
+existing neutral policy/action encoder should distinguish the two contexts,
+showing that the missing information is representable without card-specific
+knowledge.
+
+Also hold one empty-stack state fixed across First Main and Second Main. The
+critic should again alias the contexts even though passing ends into different
+phase transitions, while the policy/action encoder should distinguish them.
+
+The diagnostic CLI is:
+
+```sh
+./build/old-school-sim --diagnose-value-context
+```
+
+Acceptance requires exact legality in both paired contexts, bit-identical
+current critic features, different encoded context features, and exact
+rules-engine evidence that the pass-count pair produces different successor
+states/results. Fixed-seed determinism, hidden-information isolation, strict
+tests, and sanitizer cleanliness remain mandatory. If the collision is not
+demonstrated, do not build a context-aware Value treatment. If demonstrated,
+the next experiment may add neutral phase/relative-priority/pass/sorcery
+context and dense decision-state traces, but must be separately
+preregistered before retraining.

@@ -15,11 +15,11 @@ cd "$cli_workspace"
 
 cli_output=
 cli_status=0
-g8_cache=build/model-cache/old-school-value-g8-v1-t1-s424242.bin
-g8_t8_cache=build/model-cache/old-school-value-g8-v1-t8-s424242.bin
-mix50_cache=build/model-cache/old-school-value-g8-mix50-v1-t8-s424242.bin
-challenger_c1_cache=build/model-cache/old-school-value-challenger-v1-c1-t1-s424242.bin
-challenger_c2_cache=build/model-cache/old-school-value-challenger-v1-c2-t1-s424242.bin
+g8_cache=build/model-cache/old-school-value-g8-v2-t1-s424242.bin
+g8_t8_cache=build/model-cache/old-school-value-g8-v2-t8-s424242.bin
+mix50_cache=build/model-cache/old-school-value-g8-mix50-v2-t8-s424242.bin
+challenger_c1_cache=build/model-cache/old-school-value-challenger-v2-c1-t1-s424242.bin
+challenger_c2_cache=build/model-cache/old-school-value-challenger-v2-c2-t1-s424242.bin
 probe_cache=
 mix50_probe_cache=
 validation_probe_cache=
@@ -87,7 +87,9 @@ expect_error() {
 
 help_output=$("$simulator" --help)
 case $help_output in
-    *"RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate"*\
+    *"Red: 15 Mountain, 9 Lightning Bolt, 7 Ironclaw Orcs, 4 Gray Ogre, 3 Hill Giant, 2 Fire Elemental"*\
+"Blue: 15 Island, 1 Mox Sapphire, 1 Sol Ring, 1 Ancestral Recall, 1 Time Walk, 1 Braingeyser, 4 Flying Men, 4 Force Spike, 8 Counterspell, 4 Air Elemental"*\
+"RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate"*\
 "--interactive"*"learned-value-g0..g8"*"learned-value-cN"*\
 "learned-value-mix50-g8"*\
 "--value-generation N"*"--value-recipe NAME"*\
@@ -126,6 +128,58 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--diagnose-value-context"*\
+"Audit phase/pass context omitted from the current Value observation"*\
+"accepts no other options"*) ;;
+    *)
+        printf 'Value context diagnostic contract missing from --help\n' \
+            >&2
+        exit 1
+        ;;
+esac
+
+run_cli --diagnose-value-context
+if [ "$cli_status" -ne 0 ]; then
+    printf 'Value context diagnostic failed\n%s\n' "$cli_output" >&2
+    exit 1
+fi
+value_context_output=$cli_output
+run_cli --diagnose-value-context
+if [ "$cli_status" -ne 0 ] ||
+    [ "$cli_output" != "$value_context_output" ]; then
+    printf 'Value context diagnostic was not deterministic\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Value Context Alias Audit"*\
+"Complete legal action sets identical: yes"*\
+"Critic state features bit-identical: yes"*\
+"Neutral policy/action features differ: yes"*\
+"Pass with prior count 0: Passed; next player 1; pass count 1; stack 1; root life 3"*\
+"Pass with prior count 1: StackObjectResolved; next player 0; pass count 0; stack 0; root life 0 (lethal)"*\
+"FirstMain / SecondMain action sets identical: yes"*\
+"Opponent hidden-card substitution bit-identical: yes"*\
+"Result: context alias demonstrated"*) ;;
+    *)
+        printf 'Value context diagnostic evidence missing\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+case $cli_output in
+    *"Training"*)
+        printf 'Value context diagnostic unexpectedly trained a model\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+expect_error "--diagnose-value-context accepts no other options" \
+    --diagnose-value-context --seed 1
+expect_error "cannot be combined" \
+    --diagnose-value-context --benchmark
 
 run_cli_input "q" --interactive --seed 1 \
     --train-games 1 --train-seed 424242
@@ -311,6 +365,8 @@ fi
 case $cli_output in
     *"Old School Magic Bot Simulator"*\
 "Total games: 10"*\
+"Red — 15 Mountain / 9 Lightning Bolt / 7 Ironclaw Orcs / 4 Gray Ogre / 3 Hill Giant / 2 Fire Elemental"*\
+"Blue — 15 Island / 1 Mox Sapphire / 1 Sol Ring / 1 Ancestral Recall / 1 Time Walk / 1 Braingeyser / 4 Flying Men / 4 Force Spike / 8 Counterspell / 4 Air Elemental"*\
 "RU Aggro — 13 Mountain / 4 Island / 3 Flying Men / 5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / 3 Lightning Bolt / 2 Disintegrate"*) ;;
     *)
         printf 'RU deck statistics missing from tournament output\n%s\n' \
