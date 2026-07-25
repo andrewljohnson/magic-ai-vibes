@@ -796,9 +796,9 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     const auto& deep_monte_carlo =
         result.bots[static_cast<std::size_t>(
             alpha::BotKind::DeepMonteCarlo)];
-    const auto& strategic =
+    const auto& handcrafted =
         result.bots[static_cast<std::size_t>(
-            alpha::BotKind::Strategic)];
+            alpha::BotKind::Handcrafted)];
     const auto& learned =
         result.bots[static_cast<std::size_t>(
             alpha::BotKind::Learned)];
@@ -807,7 +807,7 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     CHECK(random.games == 60);
     CHECK(monte_carlo.games == 60);
     CHECK(deep_monte_carlo.games == 60);
-    CHECK(strategic.games == 60);
+    CHECK(handcrafted.games == 60);
     CHECK(learned.games == 60);
     CHECK(random.wins + random.losses + random.draws == random.games);
     CHECK(monte_carlo.wins + monte_carlo.losses +
@@ -816,8 +816,9 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     CHECK(deep_monte_carlo.wins + deep_monte_carlo.losses +
               deep_monte_carlo.draws ==
           deep_monte_carlo.games);
-    CHECK(strategic.wins + strategic.losses + strategic.draws ==
-          strategic.games);
+    CHECK(handcrafted.wins + handcrafted.losses +
+              handcrafted.draws ==
+          handcrafted.games);
     CHECK(learned.wins + learned.losses + learned.draws ==
           learned.games);
     CHECK(random.total_rollouts == 0);
@@ -827,8 +828,8 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     CHECK(deep_monte_carlo.total_rollouts > 0);
     CHECK(deep_monte_carlo.average_rollouts_per_decision() >
           monte_carlo.average_rollouts_per_decision());
-    CHECK(strategic.total_decisions > 0);
-    CHECK(strategic.total_rollouts == 0);
+    CHECK(handcrafted.total_decisions > 0);
+    CHECK(handcrafted.total_rollouts == 0);
     CHECK(learned.total_decisions > 0);
     CHECK(learned.total_rollouts == 0);
     for (const auto& matchup : result.bot_matchups) {
@@ -864,8 +865,8 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
               .total_rollouts ==
           deep_monte_carlo.total_rollouts);
     CHECK(repeated.bots[static_cast<std::size_t>(
-              alpha::BotKind::Strategic)]
-              .wins == strategic.wins);
+              alpha::BotKind::Handcrafted)]
+              .wins == handcrafted.wins);
     CHECK(repeated.bots[static_cast<std::size_t>(
               alpha::BotKind::Learned)]
               .wins == learned.wins);
@@ -875,7 +876,7 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
 
 TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
     const alpha::BotConfig challenger = {
-        .kind = alpha::BotKind::Strategic,
+        .kind = alpha::BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
     const alpha::BotConfig baseline = {
@@ -909,9 +910,9 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
           result.challenger_win_rate());
 }
 
-TEST(strategic_bot_beats_monte_carlo_in_seeded_benchmark) {
+TEST(handcrafted_bot_beats_monte_carlo_in_seeded_benchmark) {
     const alpha::BotConfig challenger = {
-        .kind = alpha::BotKind::Strategic,
+        .kind = alpha::BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
     const alpha::BotConfig baseline = {
@@ -928,9 +929,9 @@ TEST(strategic_bot_beats_monte_carlo_in_seeded_benchmark) {
     CHECK(result.baseline_stats.total_rollouts > 0);
 }
 
-TEST(strategic_bot_beats_deep_monte_carlo_in_seeded_benchmark) {
+TEST(handcrafted_bot_beats_deep_monte_carlo_in_seeded_benchmark) {
     const alpha::BotConfig challenger = {
-        .kind = alpha::BotKind::Strategic,
+        .kind = alpha::BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
     const alpha::BotConfig baseline = {

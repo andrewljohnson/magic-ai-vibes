@@ -10,10 +10,16 @@
 
 namespace alpha {
 
+constexpr std::size_t kLearnedCardCount =
+    static_cast<std::size_t>(CardId::Moat) + 1;
+
 class LearnedModel {
   public:
-    static constexpr std::size_t kFeatureCount = 22;
-    static constexpr std::size_t kHiddenCount = 16;
+    static constexpr std::size_t kScalarFeatureCount = 22;
+    static constexpr std::size_t kCardPlanes = 13;
+    static constexpr std::size_t kFeatureCount =
+        kScalarFeatureCount + kCardPlanes * kLearnedCardCount;
+    static constexpr std::size_t kHiddenCount = 32;
     using FeatureVector = std::array<double, kFeatureCount>;
     using TrainingExample = std::pair<FeatureVector, double>;
 
@@ -349,7 +355,7 @@ std::size_t opponent_of(std::size_t player) {
     return 1 - player;
 }
 
-double strategic_card_value(CardId card) {
+double handcrafted_card_value(CardId card) {
     switch (card) {
     case CardId::Forest:
     case CardId::Mountain:
@@ -415,13 +421,11 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     const auto permanent_count = [](const PlayerState& player) {
         return player.artifacts.size() + player.enchantments.size();
     };
-
     int stack_advantage = 0;
     for (const auto& object : state.stack) {
         stack_advantage += object.controller == perspective ? 1 : -1;
     }
-
-    return {
+    LearnedModel::FeatureVector features = {
         static_cast<double>(self.life) / 20.0,
         static_cast<double>(enemy.life) / 20.0,
         static_cast<double>(self.library.size()) / 40.0,
@@ -448,6 +452,200 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
             std::min(1.0, static_cast<double>(state.turn_number) / 80.0) *
                 0.1,
     };
+
+    using CardPlane = std::array<double, kLearnedCardCount>;
+    CardPlane own_hand{};
+    CardPlane own_battlefield{};
+    CardPlane enemy_battlefield{};
+    CardPlane own_tapped{};
+    CardPlane enemy_tapped{};
+    CardPlane own_summoning_sick{};
+    CardPlane enemy_summoning_sick{};
+    CardPlane own_creature_damage{};
+    CardPlane enemy_creature_damage{};
+    CardPlane own_graveyard{};
+    CardPlane enemy_graveyard{};
+    CardPlane own_stack{};
+    CardPlane enemy_stack{};
+    const auto card_index = [](CardId card) {
+        return static_cast<std::size_t>(card);
+    };
+    for (const CardId card : self.hand) {
+        ++own_hand[card_index(card)];
+    }
+    const auto add_battlefield =
+        [&](const PlayerState& player, CardPlane& battlefield,
+            CardPlane& tapped, CardPlane& summoning_sick,
+            CardPlane& creature_damage) {
+            for (const auto& land : player.lands) {
+                ++battlefield[card_index(land.card)];
+                if (land.tapped) {
+                    ++tapped[card_index(land.card)];
+                }
+            }
+            for (const auto& creature : player.creatures) {
+                ++battlefield[card_index(creature.card)];
+                if (creature.tapped) {
+                    ++tapped[card_index(creature.card)];
+                }
+                if (creature.summoning_sick) {
+                    ++summoning_sick[card_index(creature.card)];
+                }
+                creature_damage[card_index(creature.card)] +=
+                    static_cast<double>(creature.damage);
+            }
+            for (const auto& artifact : player.artifacts) {
+                ++battlefield[card_index(artifact.card)];
+                if (artifact.tapped) {
+                    ++tapped[card_index(artifact.card)];
+                }
+            }
+            for (const CardId enchantment : player.enchantments) {
+                ++battlefield[card_index(enchantment)];
+            }
+        };
+    add_battlefield(self, own_battlefield, own_tapped,
+                    own_summoning_sick, own_creature_damage);
+    add_battlefield(enemy, enemy_battlefield, enemy_tapped,
+                    enemy_summoning_sick, enemy_creature_damage);
+    for (const CardId card : self.graveyard) {
+        ++own_graveyard[card_index(card)];
+    }
+    for (const CardId card : enemy.graveyard) {
+        ++enemy_graveyard[card_index(card)];
+    }
+    for (const auto& object : state.stack) {
+        auto& plane =
+            object.controller == perspective ? own_stack : enemy_stack;
+        ++plane[card_index(object.card)];
+    }
+
+    std::size_t feature = LearnedModel::kScalarFeatureCount;
+    const auto append_plane =
+        [&](const CardPlane& plane, double normalization) {
+            for (const double value : plane) {
+                features[feature++] = value / normalization;
+            }
+        };
+    append_plane(own_hand, 10.0);
+    append_plane(own_battlefield, 10.0);
+    append_plane(enemy_battlefield, 10.0);
+    append_plane(own_tapped, 10.0);
+    append_plane(enemy_tapped, 10.0);
+    append_plane(own_summoning_sick, 10.0);
+    append_plane(enemy_summoning_sick, 10.0);
+    append_plane(own_creature_damage, 10.0);
+    append_plane(enemy_creature_damage, 10.0);
+    append_plane(own_graveyard, 20.0);
+    append_plane(enemy_graveyard, 20.0);
+    append_plane(own_stack, 5.0);
+    append_plane(enemy_stack, 5.0);
+    return features;
+}
+
+std::vector<std::vector<PermanentId>> learned_attack_candidates(
+    const std::vector<PermanentId>& legal_attackers,
+    std::mt19937_64& random) {
+    constexpr std::size_t kExhaustiveLimit = 256;
+    std::vector<std::vector<PermanentId>> candidates;
+    if (legal_attackers.size() < 63 &&
+        (std::uint64_t{1} << legal_attackers.size()) <=
+            kExhaustiveLimit) {
+        const std::uint64_t combinations =
+            std::uint64_t{1} << legal_attackers.size();
+        candidates.reserve(static_cast<std::size_t>(combinations));
+        for (std::uint64_t mask = 0; mask < combinations; ++mask) {
+            std::vector<PermanentId> candidate;
+            for (std::size_t index = 0;
+                 index < legal_attackers.size(); ++index) {
+                if ((mask & (std::uint64_t{1} << index)) != 0) {
+                    candidate.push_back(legal_attackers[index]);
+                }
+            }
+            candidates.push_back(std::move(candidate));
+        }
+        return candidates;
+    }
+
+    candidates = {{}, legal_attackers};
+    for (const PermanentId attacker : legal_attackers) {
+        candidates.push_back({attacker});
+    }
+    std::uniform_int_distribution<int> include_attacker(0, 1);
+    constexpr int kRandomCandidates = 48;
+    for (int sample = 0; sample < kRandomCandidates; ++sample) {
+        std::vector<PermanentId> candidate;
+        for (const PermanentId attacker : legal_attackers) {
+            if (include_attacker(random) == 1) {
+                candidate.push_back(attacker);
+            }
+        }
+        candidates.push_back(std::move(candidate));
+    }
+    return candidates;
+}
+
+std::vector<std::vector<std::pair<PermanentId, PermanentId>>>
+learned_block_candidates(
+    const std::vector<PermanentId>& attackers,
+    const std::vector<PermanentId>& available_blockers,
+    std::mt19937_64& random, std::size_t exhaustive_limit,
+    int random_samples) {
+    using Block = std::pair<PermanentId, PermanentId>;
+    std::vector<std::vector<Block>> candidates;
+    const std::size_t choices = attackers.size() + 1;
+    std::size_t combinations = 1;
+    bool exhaustive = !attackers.empty();
+    for (std::size_t blocker = 0;
+         blocker < available_blockers.size(); ++blocker) {
+        if (combinations > exhaustive_limit / choices) {
+            exhaustive = false;
+            break;
+        }
+        combinations *= choices;
+    }
+    if (exhaustive) {
+        candidates.reserve(combinations);
+        for (std::size_t encoding = 0; encoding < combinations;
+             ++encoding) {
+            std::size_t remaining = encoding;
+            std::vector<Block> candidate;
+            for (const PermanentId blocker : available_blockers) {
+                const std::size_t choice = remaining % choices;
+                remaining /= choices;
+                if (choice != 0) {
+                    candidate.emplace_back(attackers[choice - 1],
+                                           blocker);
+                }
+            }
+            candidates.push_back(std::move(candidate));
+        }
+        return candidates;
+    }
+
+    candidates.push_back({});
+    for (const PermanentId attacker : attackers) {
+        std::vector<Block> all_on_attacker;
+        for (const PermanentId blocker : available_blockers) {
+            all_on_attacker.emplace_back(attacker, blocker);
+        }
+        candidates.push_back(std::move(all_on_attacker));
+    }
+    for (int sample = 0; sample < random_samples; ++sample) {
+        std::vector<Block> candidate;
+        std::uniform_int_distribution<std::size_t> choose_block(
+            0, attackers.size());
+        for (const PermanentId blocker : available_blockers) {
+            const std::size_t choice = choose_block(random);
+            if (choice != 0) {
+                candidate.emplace_back(attackers[choice - 1],
+                                       blocker);
+            }
+        }
+        std::shuffle(candidate.begin(), candidate.end(), random);
+        candidates.push_back(std::move(candidate));
+    }
+    return candidates;
 }
 
 } // namespace
@@ -1167,7 +1365,12 @@ Game::play_priority_window(bool sorcery_actions) {
         .player = state_.active_player,
         .consecutive_passes = 0,
     };
+    return continue_priority_window(sorcery_actions, priority);
+}
 
+std::optional<GameResult>
+Game::continue_priority_window(bool sorcery_actions,
+                               PriorityState priority) {
     while (true) {
         const auto actions =
             legal_priority_actions(state_, priority.player,
@@ -1218,8 +1421,8 @@ PriorityAction Game::choose_priority_action(
             0, actions.size() - 1);
         return actions[choose_action(random_)];
     }
-    if (bot.kind == BotKind::Strategic) {
-        return choose_strategic_action(actions, player);
+    if (bot.kind == BotKind::Handcrafted) {
+        return choose_handcrafted_action(actions, player);
     }
     if (bot.kind == BotKind::Learned) {
         return choose_learned_action(actions, player,
@@ -1292,12 +1495,24 @@ PriorityAction Game::choose_learned_action(
                 break;
             }
         }
-        scores.push_back(
+        double score =
             terminal
                 ? terminal_score
                 : config_.learned_model->predict(
-                      learned_features(successor.state_, player)));
+                      learned_features(successor.state_, player));
+        const std::size_t search_rollouts =
+            config_.bots[player].rollouts_per_action;
+        for (std::size_t rollout = 0; rollout < search_rollouts;
+             ++rollout) {
+            score += learned_rollout_action(
+                action, player, sorcery_actions, random_());
+        }
+        scores.push_back(
+            score / static_cast<double>(search_rollouts + 1));
     }
+    state_.stats[player].monte_carlo_rollouts +=
+        actions.size() *
+        config_.bots[player].rollouts_per_action;
 
     const double best_score =
         *std::max_element(scores.begin(), scores.end());
@@ -1312,12 +1527,78 @@ PriorityAction Game::choose_learned_action(
     return actions[best_actions[break_tie(random_)]];
 }
 
-PriorityAction Game::choose_strategic_action(
+double Game::learned_rollout_action(const PriorityAction& action,
+                                    std::size_t player,
+                                    bool sorcery_actions,
+                                    std::uint64_t seed) const {
+    Game rollout = *this;
+    rollout.random_.seed(seed);
+    rollout.trace_ = nullptr;
+    rollout.config_.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .rollouts_per_action = 0,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .rollouts_per_action = 0,
+        },
+    };
+
+    for (auto& player_state : rollout.state_.players) {
+        std::shuffle(player_state.library.begin(),
+                     player_state.library.end(), rollout.random_);
+    }
+    PriorityState priority;
+    if (action.kind == PriorityActionKind::Pass) {
+        priority = {
+            .player = opponent_of(player),
+            .consecutive_passes = 1,
+        };
+    } else {
+        if (!apply_priority_action(rollout.state_, player, action,
+                                   sorcery_actions)) {
+            return 0.0;
+        }
+        priority = {
+            .player = player,
+            .consecutive_passes = 0,
+        };
+    }
+    if (const auto result = rollout.continue_priority_window(
+            sorcery_actions, priority);
+        result.has_value()) {
+        return result->winner < 0
+                   ? 0.5
+                   : (result->winner == static_cast<int>(player)
+                          ? 1.0
+                          : 0.0);
+    }
+
+    cleanup_turn(rollout.state_);
+    constexpr std::size_t kSearchHorizonTurns = 4;
+    rollout.config_.max_turns =
+        std::min(rollout.config_.max_turns,
+                 rollout.state_.turn_number + kSearchHorizonTurns);
+    const GameResult result =
+        rollout.run_from_turn(rollout.state_.turn_number + 1);
+    if (result.reason != EndReason::TurnLimit) {
+        return result.winner < 0
+                   ? 0.5
+                   : (result.winner == static_cast<int>(player)
+                          ? 1.0
+                          : 0.0);
+    }
+    return rollout.config_.learned_model->predict(
+        learned_features(rollout.state_, player));
+}
+
+PriorityAction Game::choose_handcrafted_action(
     const std::vector<PriorityAction>& actions, std::size_t player) {
     std::vector<double> scores;
     scores.reserve(actions.size());
     for (const auto& action : actions) {
-        scores.push_back(strategic_action_score(action, player));
+        scores.push_back(handcrafted_action_score(action, player));
     }
 
     const double best_score =
@@ -1333,8 +1614,8 @@ PriorityAction Game::choose_strategic_action(
     return actions[best_actions[break_tie(random_)]];
 }
 
-double Game::strategic_action_score(const PriorityAction& action,
-                                    std::size_t player) const {
+double Game::handcrafted_action_score(const PriorityAction& action,
+                                      std::size_t player) const {
     const auto& player_state = state_.players[player];
     const std::size_t opponent = opponent_of(player);
     const auto& opponent_state = state_.players[opponent];
@@ -1351,7 +1632,7 @@ double Game::strategic_action_score(const PriorityAction& action,
         return 4'000.0;
 
     case PriorityActionKind::CastCreature: {
-        double score = 1'200.0 + strategic_card_value(action.card);
+        double score = 1'200.0 + handcrafted_card_value(action.card);
         const bool holding_counterspell =
             has_card(player_state.hand, CardId::Counterspell);
         const int untapped_lands = static_cast<int>(std::count_if(
@@ -1422,7 +1703,7 @@ double Game::strategic_action_score(const PriorityAction& action,
                                      .effect_damage >=
                 definition.toughness;
             return (lethal ? 2'000.0 : 500.0) +
-                   strategic_card_value(target->card);
+                   handcrafted_card_value(target->card);
         }
 
     case PriorityActionKind::CastCounterspell: {
@@ -1438,7 +1719,7 @@ double Game::strategic_action_score(const PriorityAction& action,
             target->controller == player) {
             return -10'000.0;
         }
-        return 3'000.0 + strategic_card_value(target->card);
+        return 3'000.0 + handcrafted_card_value(target->card);
     }
 
     case PriorityActionKind::ActivateMillstone:
@@ -1516,11 +1797,11 @@ std::optional<GameResult> Game::play_combat() {
     auto& defending_state = state_.players[defending_player];
 
     std::vector<PermanentId> attackers;
-    const bool strategic_attacker =
-        config_.bots[state_.active_player].kind == BotKind::Strategic;
+    const bool handcrafted_attacker =
+        config_.bots[state_.active_player].kind == BotKind::Handcrafted;
     const bool learned_attacker =
         config_.bots[state_.active_player].kind == BotKind::Learned;
-    if (strategic_attacker) {
+    if (handcrafted_attacker) {
         std::vector<const CreaturePermanent*> legal_attackers;
         int total_power = 0;
         for (const auto& creature : attacking_state.creatures) {
@@ -1560,71 +1841,49 @@ std::optional<GameResult> Game::play_combat() {
             }
         }
 
-        std::vector<std::vector<PermanentId>> candidates = {
-            {},
-            legal_attackers,
-        };
-        for (const PermanentId attacker : legal_attackers) {
-            candidates.push_back({attacker});
-        }
-        std::uniform_int_distribution<int> include_attacker(0, 1);
-        for (int sample = 0; sample < 12; ++sample) {
-            std::vector<PermanentId> candidate;
-            for (const PermanentId attacker : legal_attackers) {
-                if (include_attacker(random_) == 1) {
-                    candidate.push_back(attacker);
-                }
-            }
-            candidates.push_back(std::move(candidate));
-        }
+        const auto candidates =
+            learned_attack_candidates(legal_attackers, random_);
 
         double best_score =
             -std::numeric_limits<double>::infinity();
         for (const auto& candidate : candidates) {
-            double total_score = 0.0;
-            constexpr int kBlockSamples = 6;
-            for (int sample = 0; sample < kBlockSamples; ++sample) {
-                GameState successor = state_;
-                std::vector<std::pair<PermanentId, PermanentId>>
-                    sampled_blocks;
-                if (!candidate.empty()) {
+            const auto block_candidates = learned_block_candidates(
+                candidate,
+                [&] {
+                    std::vector<PermanentId> blockers;
                     for (const auto& blocker :
-                         successor.players[defending_player].creatures) {
-                        if (blocker.tapped) {
-                            continue;
-                        }
-                        std::uniform_int_distribution<std::size_t>
-                            choose_block(0, candidate.size());
-                        const std::size_t choice =
-                            choose_block(random_);
-                        if (choice != 0) {
-                            sampled_blocks.emplace_back(
-                                candidate[choice - 1], blocker.id);
+                         defending_state.creatures) {
+                        if (!blocker.tapped) {
+                            blockers.push_back(blocker.id);
                         }
                     }
-                    std::shuffle(sampled_blocks.begin(),
-                                 sampled_blocks.end(), random_);
-                }
+                    return blockers;
+                }(),
+                random_, 64, 48);
+            double worst_score =
+                std::numeric_limits<double>::infinity();
+            for (const auto& sampled_blocks : block_candidates) {
+                GameState successor = state_;
                 if (!resolve_combat(successor, state_.active_player,
                                     candidate, sampled_blocks)) {
                     throw std::logic_error(
                         "Learned bot sampled illegal combat");
                 }
+                double sample_score = 0.0;
                 if (successor.players[defending_player].life <= 0) {
-                    total_score += 1.0;
+                    sample_score = 1.0;
                 } else if (
                     successor.players[state_.active_player].life <= 0) {
-                    total_score += 0.0;
+                    sample_score = 0.0;
                 } else {
-                    total_score += config_.learned_model->predict(
+                    sample_score = config_.learned_model->predict(
                         learned_features(successor,
                                          state_.active_player));
                 }
+                worst_score = std::min(worst_score, sample_score);
             }
-            const double score =
-                total_score / static_cast<double>(kBlockSamples);
-            if (score > best_score) {
-                best_score = score;
+            if (worst_score > best_score) {
+                best_score = worst_score;
                 attackers = candidate;
             }
         }
@@ -1651,11 +1910,11 @@ std::optional<GameResult> Game::play_combat() {
     }
     std::unordered_map<PermanentId, std::vector<PermanentId>>
         blockers_by_attacker;
-    const bool strategic_defender =
-        config_.bots[defending_player].kind == BotKind::Strategic;
+    const bool handcrafted_defender =
+        config_.bots[defending_player].kind == BotKind::Handcrafted;
     const bool learned_defender =
         config_.bots[defending_player].kind == BotKind::Learned;
-    if (strategic_defender) {
+    if (handcrafted_defender) {
         std::vector<PermanentId> unassigned = available_blockers;
         std::vector<PermanentId> ordered_attackers = attackers;
         std::sort(ordered_attackers.begin(), ordered_attackers.end(),
@@ -1700,12 +1959,12 @@ std::optional<GameResult> Game::play_combat() {
                     20.0 * static_cast<double>(attacker_definition.power);
                 if (kills_attacker) {
                     score += 1'000.0 +
-                             strategic_card_value(attacker->card);
+                             handcrafted_card_value(attacker->card);
                 }
                 if (survives) {
                     score += 500.0;
                 } else {
-                    score -= strategic_card_value(
+                    score -= handcrafted_card_value(
                         blocker_creature->card);
                 }
                 if (score > best_score) {
@@ -1720,25 +1979,8 @@ std::optional<GameResult> Game::play_combat() {
             }
         }
     } else if (learned_defender) {
-        std::vector<std::vector<
-            std::pair<PermanentId, PermanentId>>>
-            candidates = {{}};
-        constexpr int kBlockCandidates = 32;
-        for (int sample = 0; sample < kBlockCandidates; ++sample) {
-            std::vector<std::pair<PermanentId, PermanentId>>
-                candidate;
-            for (const PermanentId blocker : available_blockers) {
-                std::uniform_int_distribution<std::size_t>
-                    choose_block(0, attackers.size());
-                const std::size_t choice = choose_block(random_);
-                if (choice != 0) {
-                    candidate.emplace_back(attackers[choice - 1],
-                                           blocker);
-                }
-            }
-            std::shuffle(candidate.begin(), candidate.end(), random_);
-            candidates.push_back(std::move(candidate));
-        }
+        const auto candidates = learned_block_candidates(
+            attackers, available_blockers, random_, 512, 96);
 
         double best_score =
             -std::numeric_limits<double>::infinity();
@@ -1787,9 +2029,10 @@ std::optional<GameResult> Game::play_combat() {
     std::vector<std::pair<PermanentId, PermanentId>> blocks;
     for (const PermanentId attacker : attackers) {
         auto& blockers = blockers_by_attacker[attacker];
-        // The attacking player chooses damage assignment order. The strategic
+        // The attacking player chooses damage assignment order. The
+        // handcrafted
         // policy orders the easiest creatures to kill first.
-        if (strategic_attacker) {
+        if (handcrafted_attacker) {
             std::sort(blockers.begin(), blockers.end(),
                       [&](PermanentId left, PermanentId right) {
                           const auto* left_creature =
@@ -2018,13 +2261,13 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
         .rollouts_per_action =
             tournament_config.deep_monte_carlo_rollouts,
     };
-    const BotConfig strategic = {
-        .kind = BotKind::Strategic,
+    const BotConfig handcrafted = {
+        .kind = BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
     const BotConfig learned = {
         .kind = BotKind::Learned,
-        .rollouts_per_action = 1,
+        .rollouts_per_action = 2,
         .training_games = tournament_config.learned_training_games,
     };
 
@@ -2038,8 +2281,8 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
     case BotField::DeepMonteCarlo:
         game_config.bots = {deep_monte_carlo, deep_monte_carlo};
         break;
-    case BotField::Strategic:
-        game_config.bots = {strategic, strategic};
+    case BotField::Handcrafted:
+        game_config.bots = {handcrafted, handcrafted};
         break;
     case BotField::Learned:
         game_config.bots = {learned, learned};
@@ -2052,7 +2295,7 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
                 random,
                 monte_carlo,
                 deep_monte_carlo,
-                strategic,
+                handcrafted,
                 learned,
             };
             const std::size_t pairing =
@@ -2289,8 +2532,8 @@ std::string_view bot_name(BotKind bot) {
         return "Monte Carlo";
     case BotKind::DeepMonteCarlo:
         return "Deep Monte Carlo";
-    case BotKind::Strategic:
-        return "Strategic";
+    case BotKind::Handcrafted:
+        return "Handcrafted Policy";
     case BotKind::Learned:
         return "Learned Value";
     }
@@ -2418,19 +2661,11 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
     std::mt19937_64 random(seed);
     std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
     std::vector<LearnedModel::TrainingExample> examples;
-    examples.reserve(training_games * 60);
-
-    for (std::size_t game_index = 0; game_index < training_games;
-         ++game_index) {
-        const auto first_deck =
-            static_cast<DeckId>(choose_deck(random));
-        const auto second_deck =
-            static_cast<DeckId>(choose_deck(random));
-        Game game(deck_cards(first_deck), deck_cards(second_deck),
-                  random());
-        std::vector<GameState> trace;
-        const GameResult result = game.run_with_trace(trace);
-
+    examples.reserve(training_games * 120);
+    const auto add_trace =
+        [&](const std::vector<GameState>& trace,
+            const GameResult& result,
+            std::vector<LearnedModel::TrainingExample>& destination) {
         for (const auto& state : trace) {
             for (std::size_t perspective = 0; perspective < 2;
                  ++perspective) {
@@ -2442,16 +2677,68 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
                             ? 1.0
                             : 0.0;
                 }
-                examples.emplace_back(
+                destination.emplace_back(
                     learned_features(state, perspective), target);
             }
         }
+    };
+
+    for (std::size_t game_index = 0; game_index < training_games;
+         ++game_index) {
+        const auto first_deck =
+            static_cast<DeckId>(choose_deck(random));
+        const auto second_deck =
+            static_cast<DeckId>(choose_deck(random));
+        Game game(deck_cards(first_deck), deck_cards(second_deck),
+                  random());
+        std::vector<GameState> trace;
+        const GameResult result = game.run_with_trace(trace);
+        add_trace(trace, result, examples);
     }
 
     auto model =
         std::make_shared<LearnedModel>(seed ^ 0x4D4F44454CULL);
-    model->train(std::move(examples), 8, 0.015,
+    model->train(examples, 8, 0.015,
                  seed ^ 0x545241494EULL);
+
+    // Two fitted self-play iterations move the value function toward states
+    // produced by its own policy while retaining the random-play replay set.
+    for (std::size_t generation = 0; generation < 2; ++generation) {
+        std::vector<LearnedModel::TrainingExample> self_play_examples;
+        const std::size_t generation_games =
+            std::max<std::size_t>(1, training_games / 2);
+        self_play_examples.reserve(generation_games * 60);
+        for (std::size_t game_index = 0;
+             game_index < generation_games; ++game_index) {
+            GameConfig config;
+            config.learned_model = model;
+            config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .rollouts_per_action = 0,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .rollouts_per_action = 0,
+                },
+            };
+            const auto first_deck =
+                static_cast<DeckId>(choose_deck(random));
+            const auto second_deck =
+                static_cast<DeckId>(choose_deck(random));
+            Game game(deck_cards(first_deck), deck_cards(second_deck),
+                      random(), config);
+            std::vector<GameState> trace;
+            const GameResult result = game.run_with_trace(trace);
+            add_trace(trace, result, self_play_examples);
+        }
+        examples.insert(examples.end(), self_play_examples.begin(),
+                        self_play_examples.end());
+        model->train(
+            examples, 3, 0.006,
+            seed ^ (0x53454C46504C4159ULL + generation));
+    }
+
     return model;
 }
 

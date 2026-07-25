@@ -222,7 +222,7 @@ enum class BotKind : std::uint8_t {
     Random,
     MonteCarlo,
     DeepMonteCarlo,
-    Strategic,
+    Handcrafted,
     Learned,
 };
 
@@ -236,7 +236,7 @@ struct BotConfig {
     BotKind kind = BotKind::Random;
     // Complete random continuations sampled for every legal action.
     std::size_t rollouts_per_action = 2;
-    std::size_t training_games = 200;
+    std::size_t training_games = 800;
 };
 
 struct GameResult {
@@ -275,18 +275,25 @@ class Game {
     bool draw_card(std::size_t player);
     std::optional<GameResult>
     play_priority_window(bool sorcery_actions);
+    std::optional<GameResult>
+    continue_priority_window(bool sorcery_actions,
+                             PriorityState priority);
     std::optional<GameResult> play_combat();
     PriorityAction
     choose_priority_action(const std::vector<PriorityAction>& actions,
                            std::size_t player, bool sorcery_actions);
     PriorityAction
-    choose_strategic_action(const std::vector<PriorityAction>& actions,
-                            std::size_t player);
+    choose_handcrafted_action(const std::vector<PriorityAction>& actions,
+                              std::size_t player);
     PriorityAction
     choose_learned_action(const std::vector<PriorityAction>& actions,
                           std::size_t player, bool sorcery_actions);
-    double strategic_action_score(const PriorityAction& action,
-                                  std::size_t player) const;
+    double learned_rollout_action(const PriorityAction& action,
+                                  std::size_t player,
+                                  bool sorcery_actions,
+                                  std::uint64_t seed) const;
+    double handcrafted_action_score(const PriorityAction& action,
+                                    std::size_t player) const;
     double rollout_action(const PriorityAction& action,
                           std::size_t player, bool sorcery_actions,
                           std::uint64_t seed) const;
@@ -388,7 +395,7 @@ enum class BotField : std::uint8_t {
     Random,
     MonteCarlo,
     DeepMonteCarlo,
-    Strategic,
+    Handcrafted,
     Learned,
     Mixed,
 };
@@ -397,7 +404,7 @@ struct TournamentConfig {
     BotField bot_field = BotField::Random;
     std::size_t monte_carlo_rollouts = 2;
     std::size_t deep_monte_carlo_rollouts = 8;
-    std::size_t learned_training_games = 200;
+    std::size_t learned_training_games = 800;
 };
 
 struct MatchupSummary {

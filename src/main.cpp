@@ -42,7 +42,9 @@ void print_help(std::string_view executable) {
            " [--deep-rollouts N] [--train-games N]\n"
         << "       " << executable
         << " --benchmark [--games N] [--challenger BOT]"
-           " [--baseline BOT]\n\n"
+           " [--baseline BOT]\n"
+        << "       " << executable
+        << " --stability [--stability-runs N] [--games N]\n\n"
         << "Simulates an early-Magic round robin with legal bot play.\n"
         << "  Green: 18 Forest, 9 Grizzly Bears, 12 Ironroot Treefolk, "
            "1 Tsunami\n"
@@ -53,18 +55,22 @@ void print_help(std::string_view executable) {
         << "  --games N       Games per matchup (default: 100)\n"
         << "  --seed N        Reproducible random seed (default: random)\n"
         << "  --bots MODE     mixed, random, monte-carlo, "
-           "deep-monte-carlo, strategic, or learned (default: mixed)\n"
+           "deep-monte-carlo, handcrafted, or learned (default: mixed)\n"
         << "  --rollouts N    Monte Carlo continuations per legal action "
            "(default: 2)\n"
         << "  --deep-rollouts N  Deep Monte Carlo continuations per "
            "legal action (default: 8)\n"
         << "  --train-games N  Random self-play games for Learned Value "
-           "(default: 200)\n"
+           "(default: 800)\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
-           "(default: strategic)\n"
+           "(default: handcrafted)\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
+        << "  --stability     Validate Learned against Handcrafted across "
+           "seed panels\n"
+        << "  --stability-runs N  Number of independent runs "
+           "(default: 8)\n"
         << "  --help          Show this help\n";
 }
 
@@ -78,8 +84,9 @@ alpha::BotKind parse_bot_kind(std::string_view value) {
     if (value == "deep-monte-carlo" || value == "deep-mc") {
         return alpha::BotKind::DeepMonteCarlo;
     }
-    if (value == "strategic") {
-        return alpha::BotKind::Strategic;
+    if (value == "handcrafted" || value == "handcoded" ||
+        value == "strategic") {
+        return alpha::BotKind::Handcrafted;
     }
     if (value == "learned" || value == "learned-value") {
         return alpha::BotKind::Learned;
@@ -101,15 +108,16 @@ alpha::BotField parse_bot_field(std::string_view value) {
     if (value == "deep-monte-carlo" || value == "deep-mc") {
         return alpha::BotField::DeepMonteCarlo;
     }
-    if (value == "strategic") {
-        return alpha::BotField::Strategic;
+    if (value == "handcrafted" || value == "handcoded" ||
+        value == "strategic") {
+        return alpha::BotField::Handcrafted;
     }
     if (value == "learned" || value == "learned-value") {
         return alpha::BotField::Learned;
     }
     throw std::invalid_argument(
         "invalid value for --bots (use mixed, random, monte-carlo, "
-        "deep-monte-carlo, strategic, or learned)");
+        "deep-monte-carlo, handcrafted, or learned)");
 }
 
 std::string_view bot_field_name(alpha::BotField field) {
@@ -120,13 +128,13 @@ std::string_view bot_field_name(alpha::BotField field) {
         return "Monte Carlo only";
     case alpha::BotField::DeepMonteCarlo:
         return "Deep Monte Carlo only";
-    case alpha::BotField::Strategic:
-        return "Strategic only";
+    case alpha::BotField::Handcrafted:
+        return "Handcrafted Policy only";
     case alpha::BotField::Learned:
         return "Learned Value only";
     case alpha::BotField::Mixed:
         return "mixed Random, Monte Carlo, Deep Monte Carlo, "
-               "Strategic, and Learned Value";
+               "Handcrafted Policy, and Learned Value";
     }
     return "unknown";
 }
@@ -186,8 +194,8 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
         static_cast<std::size_t>(alpha::BotKind::MonteCarlo);
     const auto deep_index =
         static_cast<std::size_t>(alpha::BotKind::DeepMonteCarlo);
-    const auto strategic_index =
-        static_cast<std::size_t>(alpha::BotKind::Strategic);
+    const auto handcrafted_index =
+        static_cast<std::size_t>(alpha::BotKind::Handcrafted);
     const auto learned_index =
         static_cast<std::size_t>(alpha::BotKind::Learned);
     const bool has_deep_comparison =
@@ -254,13 +262,13 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
             std::cout << ", " << deep.games << " games)";
         }
 
-        const auto& strategic =
-            result.deck_bots[deck_index][strategic_index];
-        if (strategic.games > 0) {
-            std::cout << ", Strategic " << strategic.win_rate()
+        const auto& handcrafted =
+            result.deck_bots[deck_index][handcrafted_index];
+        if (handcrafted.games > 0) {
+            std::cout << ", Handcrafted " << handcrafted.win_rate()
                       << "% (";
-            print_delta(strategic.win_rate() - random.win_rate());
-            std::cout << ", " << strategic.games << " games)";
+            print_delta(handcrafted.win_rate() - random.win_rate());
+            std::cout << ", " << handcrafted.games << " games)";
         }
 
         const auto& learned =
@@ -279,7 +287,7 @@ alpha::BotConfig bot_config(alpha::BotKind kind, std::size_t rollouts,
                             std::size_t training_games) {
     switch (kind) {
     case alpha::BotKind::Random:
-    case alpha::BotKind::Strategic:
+    case alpha::BotKind::Handcrafted:
         return {
             .kind = kind,
             .rollouts_per_action = 1,
@@ -287,7 +295,7 @@ alpha::BotConfig bot_config(alpha::BotKind kind, std::size_t rollouts,
     case alpha::BotKind::Learned:
         return {
             .kind = kind,
-            .rollouts_per_action = 1,
+            .rollouts_per_action = 2,
             .training_games = training_games,
         };
     case alpha::BotKind::MonteCarlo:
@@ -370,6 +378,114 @@ void print_benchmark(const alpha::BotBenchmarkSummary& result,
     }
 }
 
+bool run_stability_panel(std::size_t runs,
+                         std::size_t repetitions_per_deck_pairing,
+                         std::uint64_t base_seed,
+                         std::size_t rollouts,
+                         std::size_t deep_rollouts,
+                         std::size_t training_games) {
+    alpha::BotBenchmarkSummary pooled;
+    pooled.challenger =
+        bot_config(alpha::BotKind::Learned, rollouts,
+                   deep_rollouts, training_games);
+    pooled.baseline =
+        bot_config(alpha::BotKind::Handcrafted, rollouts,
+                   deep_rollouts, training_games);
+    const auto merge_bot = [](alpha::BotSimulationStats& destination,
+                              const alpha::BotSimulationStats& source) {
+        destination.games += source.games;
+        destination.wins += source.wins;
+        destination.losses += source.losses;
+        destination.draws += source.draws;
+        destination.total_decisions += source.total_decisions;
+        destination.total_rollouts += source.total_rollouts;
+    };
+    const auto merge_deck = [](alpha::DeckSimulationStats& destination,
+                               const alpha::DeckSimulationStats& source) {
+        destination.games += source.games;
+        destination.wins += source.wins;
+        destination.losses += source.losses;
+        destination.draws += source.draws;
+        destination.on_play_games += source.on_play_games;
+        destination.on_play_wins += source.on_play_wins;
+        destination.on_draw_games += source.on_draw_games;
+        destination.on_draw_wins += source.on_draw_wins;
+    };
+    std::size_t stable_runs = 0;
+
+    std::cout << std::fixed << std::setprecision(1)
+              << "Learned Value vs Handcrafted Policy Stability Panel\n"
+              << "Runs: " << runs << '\n'
+              << "Repetitions per unordered deck pairing per run: "
+              << repetitions_per_deck_pairing
+              << '\n'
+              << "Training games per independent model: "
+              << training_games << "\n\n";
+
+    for (std::size_t run = 0; run < runs; ++run) {
+        const std::uint64_t seed =
+            base_seed + 101ULL * static_cast<std::uint64_t>(run + 1);
+        const auto result = alpha::run_bot_benchmark(
+            repetitions_per_deck_pairing, seed, pooled.challenger,
+            pooled.baseline);
+
+        const bool learned_won =
+            result.challenger_stats.wins >
+            result.baseline_stats.wins;
+        stable_runs += learned_won ? 1 : 0;
+        pooled.total_games += result.total_games;
+        merge_bot(pooled.challenger_stats,
+                  result.challenger_stats);
+        merge_bot(pooled.baseline_stats, result.baseline_stats);
+        for (std::size_t deck = 0;
+             deck < pooled.challenger_decks.size(); ++deck) {
+            merge_deck(pooled.challenger_decks[deck],
+                       result.challenger_decks[deck]);
+            merge_deck(pooled.baseline_decks[deck],
+                       result.baseline_decks[deck]);
+        }
+
+        std::cout << "  Seed " << seed << ": "
+                  << result.challenger_stats.wins << '-'
+                  << result.baseline_stats.wins << '-'
+                  << result.challenger_stats.draws << " ("
+                  << result.challenger_win_rate() << "% Learned)"
+                  << (learned_won ? "  PASS\n" : "  FAIL\n");
+    }
+
+    std::cout << "\nPooled result\n"
+              << "  Record: " << pooled.challenger_stats.wins << '-'
+              << pooled.baseline_stats.wins << '-'
+              << pooled.challenger_stats.draws << " ("
+              << pooled.challenger_win_rate() << "% Learned)\n"
+              << "  95% interval: " << pooled.confidence_low_95()
+              << "% to " << pooled.confidence_high_95() << "%\n"
+              << "  By Learned deck\n";
+    bool every_deck_won = true;
+    for (std::size_t deck = 0;
+         deck < pooled.challenger_decks.size(); ++deck) {
+        const auto id = static_cast<alpha::DeckId>(deck);
+        const auto& learned = pooled.challenger_decks[deck];
+        const auto& handcrafted = pooled.baseline_decks[deck];
+        const bool deck_won = learned.wins > handcrafted.wins;
+        every_deck_won = every_deck_won && deck_won;
+        std::cout << "    " << alpha::deck_name(id) << ": "
+                  << learned.wins << " Learned wins vs "
+                  << handcrafted.wins << " Handcrafted wins"
+                  << (deck_won ? "  PASS\n" : "  FAIL\n");
+    }
+    const bool confidence_pass =
+        pooled.challenger_is_better_95();
+    const bool passed =
+        stable_runs == runs && every_deck_won && confidence_pass;
+    std::cout << "\nStability verdict: " << stable_runs << '/' << runs
+              << " seeds won; confidence "
+              << (confidence_pass ? "PASS" : "FAIL")
+              << "; every deck " << (every_deck_won ? "PASS" : "FAIL")
+              << "\nOverall: " << (passed ? "PASS" : "FAIL") << '\n';
+    return passed;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -379,9 +495,11 @@ int main(int argc, char** argv) {
         alpha::BotField bot_field = alpha::BotField::Mixed;
         std::size_t rollouts = 2;
         std::size_t deep_rollouts = 8;
-        std::size_t training_games = 200;
+        std::size_t training_games = 800;
         bool benchmark = false;
-        alpha::BotKind challenger = alpha::BotKind::Strategic;
+        bool stability = false;
+        std::size_t stability_runs = 8;
+        alpha::BotKind challenger = alpha::BotKind::Handcrafted;
         alpha::BotKind baseline = alpha::BotKind::MonteCarlo;
 
         for (int argument = 1; argument < argc; ++argument) {
@@ -394,10 +512,15 @@ int main(int argc, char** argv) {
                 benchmark = true;
                 continue;
             }
+            if (option == "--stability") {
+                stability = true;
+                continue;
+            }
             if (option != "--games" && option != "--seed" &&
                 option != "--bots" && option != "--rollouts" &&
                 option != "--deep-rollouts" &&
                 option != "--train-games" &&
+                option != "--stability-runs" &&
                 option != "--challenger" &&
                 option != "--baseline") {
                 throw std::invalid_argument("unknown option: " +
@@ -443,6 +566,12 @@ int main(int argc, char** argv) {
                         "--deep-rollouts must be greater than zero");
                 }
                 deep_rollouts = static_cast<std::size_t>(value);
+            } else if (option == "--stability-runs") {
+                if (value == 0) {
+                    throw std::invalid_argument(
+                        "--stability-runs must be greater than zero");
+                }
+                stability_runs = static_cast<std::size_t>(value);
             } else {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -452,6 +581,10 @@ int main(int argc, char** argv) {
             }
         }
 
+        if (benchmark && stability) {
+            throw std::invalid_argument(
+                "--benchmark and --stability cannot be combined");
+        }
         if (benchmark) {
             const auto result = alpha::run_bot_benchmark(
                 games, seed,
@@ -461,6 +594,13 @@ int main(int argc, char** argv) {
                            training_games));
             print_benchmark(result, seed);
             return result.challenger_is_better_95() ? 0 : 1;
+        }
+        if (stability) {
+            return run_stability_panel(
+                       stability_runs, games, seed, rollouts,
+                       deep_rollouts, training_games)
+                       ? 0
+                       : 1;
         }
 
         const alpha::TournamentSummary result =

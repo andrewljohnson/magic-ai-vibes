@@ -13,7 +13,7 @@ early-Magic exception: Millstone debuted in *Antiquities* and Moat debuted in
 *Legends*.
 
 The default command runs 100 games per matchup (600 games total) with Random,
-Monte Carlo, Deep Monte Carlo, Strategic, and Learned Value bots:
+Monte Carlo, Deep Monte Carlo, Handcrafted Policy, and Learned Value bots:
 
 ```sh
 make run
@@ -28,7 +28,7 @@ make
 ```
 
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
-`strategic`, or `learned`. `--rollouts` and `--deep-rollouts` control sampled
+`handcrafted`, or `learned`. `--rollouts` and `--deep-rollouts` control sampled
 continuations; `--train-games` controls Learned Value's random self-play
 dataset. Mixed mode uses a 25-game rotation containing all ordered policy
 pairings, including mirrors.
@@ -89,7 +89,7 @@ hidden information. The candidate action and existing stack resolve, then the
 rest of the game is played by random bots from the following turn. The real
 game still uses normal alternating priority and LIFO stack resolution.
 
-Strategic is deliberately simpler and cheaper than Monte Carlo. It uses
+Handcrafted Policy is deliberately simpler and cheaper than Monte Carlo. It uses
 card-aware rules to play lands first, avoid self-targeting, Bolt useful targets,
 counter opposing spells, mill the opponent, preserve Counterspell mana, and
 pass priority to resolve its own stack objects. It also chooses favorable
@@ -118,10 +118,10 @@ make benchmark-deep
 make benchmark-learned
 
 ./build/alpha-sim --benchmark --games 20 --seed 424242 \
-  --challenger strategic --baseline monte-carlo --rollouts 2
+  --challenger handcrafted --baseline monte-carlo --rollouts 2
 
 ./build/alpha-sim --benchmark --games 20 --seed 424242 \
-  --challenger strategic --baseline deep-monte-carlo --deep-rollouts 8
+  --challenger handcrafted --baseline deep-monte-carlo --deep-rollouts 8
 
 ./build/alpha-sim --benchmark --games 20 --seed 424242 \
   --challenger learned --baseline monte-carlo \
@@ -161,7 +161,7 @@ At 100 games per matchup with seed `424242`, two standard rollouts, and eight
 deep rollouts, the five-policy 600-game mixed run completed in about 5.6
 seconds on the development machine, including 200 self-play training games.
 Aggregate seat-game win rates were 21.7% Random, 44.2% Monte Carlo, 51.7% Deep
-Monte Carlo, 68.8% Strategic, and 63.8% Learned Value.
+Monte Carlo, 68.8% Handcrafted Policy, and 63.8% Learned Value.
 
 The output ranked Blue as the biggest beneficiary of deeper Monte Carlo search:
 its Random win rate was 11.7%, standard Monte Carlo was 38.3% (+26.7 points),
@@ -169,12 +169,12 @@ and Deep Monte Carlo was 60.0% (+48.3 points). The lists remain balanced under
 the original random policy; stronger policies expose a separate deck-balance
 problem for the next tuning pass.
 
-In the controlled 800-game harness, Strategic beat standard Monte Carlo
+In the controlled 800-game harness, Handcrafted Policy beat standard Monte Carlo
 618–182 (77.2%, 95% CI 74.2–80.0%) while using no rollouts. Against Deep Monte
 Carlo it won 563–237 (70.4%, 95% CI 67.1–73.4%); Deep averaged about 620
 rollout continuations per game.
 
 Learned Value beat standard Monte Carlo 644–156 (80.5%, 95% CI 77.6–83.1%)
 and Deep Monte Carlo 575–225 (71.9%, 95% CI 68.7–74.9%). Against the
-card-aware Strategic bot it went 390–410 (48.8%, 95% CI 45.3–52.2%), an
+card-aware Handcrafted Policy bot it went 390–410 (48.8%, 95% CI 45.3–52.2%), an
 inconclusive result close to parity.
