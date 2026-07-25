@@ -107,7 +107,7 @@ continuations. It scored 192-208 (48.0%) in a 400-game screen.
   continuations.
 - Decision: restored equal weighting of the prior and continuations.
 
-## Current experiment
+## Search and representation experiments
 
 ### Enumerated neural minimax combat
 
@@ -117,8 +117,7 @@ opponent. Enumerate small legal attack/block spaces, sample bounded candidates
 for large spaces, and use the learned value network for max/min selection.
 This uses rules-level legal move generation but no card-specific preferences.
 
-Status: implementation in progress; development screen and validation panel
-not yet run.
+Status: superseded by stack-faithful expected-value combat below.
 
 First development screen:
 
@@ -246,6 +245,136 @@ Hypothesis: training samples same-deck mirrors 25% of the time, but the
 round-robin metagame and displayed lift contain only six distinct-deck
 pairings. Sample ordered distinct deck pairs uniformly for initial random
 play and fitted Learned-vs-Learned self-play.
+
+Status: implementation complete; seeded mixed-field run pending.
+
+Seeded mixed-field result at discount 0.99:
+
+- Learned was best overall at 73.8%.
+- Green: Learned 55.0%, next-best Handcrafted 28.3%.
+- Red: Learned 65.0%, next-best Handcrafted 56.7%.
+- Blue: Learned 81.7%, next-best Handcrafted 71.7%.
+- White: Learned 93.3%, Handcrafted 95.0% (one-game miss).
+- Decision: keep discounted targets. Test a stronger 0.98 time preference
+  specifically to separate efficient dominant-deck wins.
+
+Status: discount 0.98 development run pending.
+
+Seeded mixed-field result at discount 0.98:
+
+- White became strictly best: Learned 98.3% vs Handcrafted 96.7%.
+- Green and Red remained best.
+- Blue regressed: Learned 65.0% vs Handcrafted 71.7%.
+- Decision: the stronger time target overcorrects. Test the midpoint 0.985;
+  do not continue scalar tuning if it cannot clear both Blue and White.
+
+Seeded mixed-field result at discount 0.985:
+
+- Learned was best overall at 71.2%.
+- Green, Red, and Blue were strictly best.
+- White tied Handcrafted at 93.3%.
+- Decision: retain 0.985 as the best balance so far. Direct all-policy and
+  multi-seed validation still apply; White is co-best rather than strictly
+  best in this 60-game slice.
+
+## Deck evolution
+
+### Balanced genetic-search MVP
+
+Implemented `--evolve-deck` with:
+
+- 40-card candidates using only the union of the 13 current metagame cards;
+- the four current decks as initial elites;
+- mutation/elitism across configurable generations and population;
+- common evaluation seeds for candidate fairness;
+- both candidate seats and both starting players against every metagame deck;
+- parallel candidate evaluation and per-generation/final CLI reporting.
+
+Smoke command:
+
+```sh
+./build/alpha-sim --evolve-deck --generations 3 --population 8 \
+  --games 2 --seed 12345
+```
+
+The best fitness improved 75.0% -> 81.2% -> 87.5% and produced a legal
+40-card list. Runtime was 0.14 seconds. This is an optimization-set estimate,
+not a holdout claim.
+
+## Full all-policy validation at the 0.985 candidate
+
+Eight seeds, five paired repetitions, 1,600 games per baseline:
+
+- Random: 1473-127; every seed and deck passes.
+- Monte Carlo: 1289-311; every seed and deck passes.
+- Deep Monte Carlo: 1164-436; every seed and deck passes.
+- Handcrafted: 857-743 (53.6%, CI 51.1%-56.0%); Green/Blue pass,
+  White is 293-292, Red fails 138-163, and seed 101 loses.
+- Wall time after parallelization: 204.97 seconds.
+- Decision: overall strength is confirmed, but strict stability is rejected.
+
+### Two-member learned value ensemble
+
+Hypothesis: the remaining seed/Red/White variance comes from one small
+network's initialization and fitted self-play errors. Train two independent
+networks on the same allowed random/mirror data and average their predictions
+during self-play and deployment.
+
+Status: implementation complete; targeted seed 101 and Red validation
+pending.
+
+Seed 101 screen:
+
+- Aggregate improved from the single-model panel's 48.0% to 51.5%.
+- Green and Blue passed; Red (36%/40%) and White (66%/70%) failed.
+- Runtime: 51.06 seconds for training and 200 paired games.
+- Decision: ensemble averaging helps the bad seed but does not pass the
+  strict per-deck gate.
+
+### Own-library composition plane
+
+Hypothesis: a player knows its deck composition and remaining library
+multiset, but the network receives only library size. Add per-card counts for
+the learner's own library (never order and never opponent hidden contents) so
+one shared network can condition plans on deck identity and remaining
+resources, including evolved hybrid decks.
+
+Status: implementation complete; seed 101 screen pending.
+
+Seeded mixed-field result:
+
+- Learned was best overall at 70.4%.
+- Green: Learned 50.0%, next-best Handcrafted 30.0%: pass.
+- Red: Learned 63.3%, next-best Handcrafted 60.0%: pass.
+- Blue: Learned 75.0%, next-best Handcrafted 73.3%: pass.
+- White: Learned 93.3%, Handcrafted 95.0%: fail by one game.
+- Runtime: 26.23 seconds. Extra replay states increased training cost.
+- Decision: keep targeted stack replay; it fixed the Blue lift gap. White is
+  the sole remaining mixed-field miss.
+
+### Targeted activated-ability replay
+
+Hypothesis: as with Counterspell, Millstone activation states are absent from
+turn-start replay. Record states when any activated ability is a legal
+non-pass choice, so activation timing is learned from terminal outcomes.
+
+Status: implementation complete; seeded mixed-field run pending.
+
+Seeded mixed-field results:
+
+- At 800 training games, Learned tied the best policy on White and Blue and
+  led on Green and Red.
+- Raising training to 1,200 made Blue strictly best but reduced White to
+  91.7% versus Handcrafted's 96.7%.
+- Decision: retain the 800-game default; more binary-outcome data does not
+  solve dominant-deck action quality.
+
+### Discounted terminal returns
+
+Hypothesis: White wins most cross-deck self-play, so binary `1.0` labels give
+no gradient between efficient and inefficient wins. Train toward
+`0.5 +/- 0.5 * 0.99^turns`, preserving win/loss ordering while rewarding
+faster wins and longer resistance. This adds no card knowledge.
 
 Status: implementation complete; seeded mixed-field run pending.
 
@@ -530,3 +659,102 @@ Status: implementation complete; development screen not yet run.
    choices, then compare it with the value-only action selector.
 4. Add temporal-difference targets alongside terminal outcomes, with a held-
    out calibration set to detect value collapse early.
+
+## Training-stability experiments
+
+### Stratified deck pairs and capped replay
+
+The own-library plane seed-101 screen scored 102-98 overall. Green, Blue, and
+White passed, while Red fell to 32% versus Handcrafted's 42%. No further
+feature expansion is planned.
+
+Hypothesis: random pair selection and variable-length traces overweight long
+control games plus targeted stack/activation states. Cycle through all 12
+ordered distinct-deck pairs in shuffled blocks and use at most 24 evenly
+spaced states from each game. Every sampled state still supplies both player
+perspectives.
+
+Seed-101 result:
+
+- Aggregate: 97-103 (48.5%).
+- Only Green passed; Red, Blue, and White failed.
+- Decision: rejected and reverted. Equalizing raw matchup counts and trace
+  lengths removed useful control-decision replay without fixing Red.
+
+### Stronger self-play exploration
+
+Hypothesis: bad-seed Red models consistently cast too few spells. Increase
+training-only legal-action exploration from 10%/5% to 20%/10% across the two
+fitted generations. Deployment remains unchanged.
+
+Seed-101 result:
+
+- Aggregate: 102-98 (51.0%).
+- Red remained poor at 30% versus 42%; White also failed.
+- Decision: rejected and reverted to 10%/5%. More random actions do not
+  improve the value fit.
+
+### Dual-objective value ensemble
+
+Hypothesis: train one member on `0.99^turns` (strong Blue) and the other on
+`0.98^turns` (strong Red/White tempo), then average predictions.
+
+Seed-101 result:
+
+- Aggregate: 99-101 (49.5%).
+- Blue was strong, but Red collapsed to 14% and White failed.
+- Decision: rejected and reverted. Separately optimized scalar objectives
+  create incompatible action rankings.
+
+### Larger ensemble training corpus
+
+Hypothesis: 800 games may be insufficient for two zone-aware members on the
+bad seed. Test 1,600 initial games with proportional fitted self-play before
+changing the default.
+
+Seed-101 result:
+
+- Aggregate: 101-99 (50.5%).
+- Red remained behind 32%/36%; White regressed to 62%/76%.
+- Runtime: 74.30 seconds.
+- Decision: rejected. Keep the 800-game default. More outcome data does not
+  correct the remaining action-policy weakness.
+
+## Current honest status
+
+The best clean configuration is zone-aware, mirror-only, uses a two-member
+`0.985` value ensemble, targeted stack/activation replay, 10%/5% training
+exploration, stack-faithful four-turn search, and expected-value combat.
+
+- It is decisively best overall in the seeded mixed field.
+- It beats Random, Monte Carlo, and Deep Monte Carlo for every deck across
+  all eight validation seeds.
+- It beats Handcrafted overall with a 95% lower bound above 50%.
+- The strict Handcrafted gate is not fully solved: pooled Red and one training
+  seed fail; pooled White is effectively tied.
+
+Next strength work should add a learned action-policy head or actor-critic
+objective. More rollout depth, scalar discount tuning, replay volume,
+exploration, generic feature expansion, and dual-discount ensembling have all
+been tested and rejected as solutions to this gap.
+
+### Parallel ensemble fitting
+
+The two ensemble members train on a read-only shared replay with disjoint
+weights. Fit them concurrently at initial training and after each self-play
+generation. Expected outcome totals are unchanged; only wall time should
+change.
+
+Timing check:
+
+- Seeded output totals were identical before and after parallel fitting.
+- Wall time fell from 41.34 seconds to 26.05 seconds.
+- Decision: keep.
+
+## Final verification for this pass
+
+- `make -B test`: 31/31 tests passed plus CLI smoke run.
+- AddressSanitizer + UndefinedBehaviorSanitizer: 31/31 tests passed with no
+  diagnostics.
+- Deterministic evolution smoke: three generations improved best observed
+  fitness from 75.0% to 87.5%.

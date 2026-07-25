@@ -831,7 +831,7 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
     CHECK(handcrafted.total_decisions > 0);
     CHECK(handcrafted.total_rollouts == 0);
     CHECK(learned.total_decisions > 0);
-    CHECK(learned.total_rollouts == 0);
+    CHECK(learned.total_rollouts > 0);
     for (const auto& matchup : result.bot_matchups) {
         CHECK(matchup.games == 12);
         CHECK(matchup.first_wins + matchup.second_wins +
@@ -947,7 +947,7 @@ TEST(handcrafted_bot_beats_deep_monte_carlo_in_seeded_benchmark) {
     CHECK(result.baseline_stats.average_rollouts() > 500.0);
 }
 
-TEST(learned_value_bot_beats_monte_carlo_without_card_rules) {
+TEST(learned_value_bot_beats_monte_carlo_without_handcrafted_values) {
     const alpha::BotConfig challenger = {
         .kind = alpha::BotKind::Learned,
         .rollouts_per_action = 1,
@@ -963,8 +963,41 @@ TEST(learned_value_bot_beats_monte_carlo_without_card_rules) {
     CHECK(result.total_games == 200);
     CHECK(result.challenger_win_rate() > 70.0);
     CHECK(result.challenger_is_better_95());
-    CHECK(result.challenger_stats.total_rollouts == 0);
+    CHECK(result.challenger_stats.total_rollouts > 0);
     CHECK(result.baseline_stats.total_rollouts > 0);
+}
+
+TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
+    const alpha::DeckEvolutionConfig config = {
+        .generations = 2,
+        .population = 4,
+        .repetitions_per_opponent = 1,
+        .pilot =
+            {
+                .kind = alpha::BotKind::Handcrafted,
+                .rollouts_per_action = 1,
+            },
+    };
+    const auto first = alpha::evolve_deck(config, 0xE701EULL);
+    const auto repeated = alpha::evolve_deck(config, 0xE701EULL);
+
+    CHECK(first.generation_best_win_rates.size() == 2);
+    CHECK(first.best.cards.size() == 40);
+    CHECK(first.best.total.games == 16);
+    CHECK(first.best.total.wins + first.best.total.losses +
+              first.best.total.draws ==
+          16);
+    for (const auto& matchup : first.best.by_opponent) {
+        CHECK(matchup.games == 4);
+    }
+    for (const alpha::CardId card : first.best.cards) {
+        CHECK(static_cast<std::size_t>(card) <=
+              static_cast<std::size_t>(alpha::CardId::Moat));
+    }
+    CHECK(first.best.cards == repeated.best.cards);
+    CHECK(first.best.total.wins == repeated.best.total.wins);
+    CHECK(first.generation_best_win_rates ==
+          repeated.generation_best_win_rates);
 }
 
 TEST(all_six_pairings_have_a_balanced_seeded_matchup) {

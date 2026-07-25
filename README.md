@@ -24,14 +24,15 @@ For reproducible or larger runs:
 ```sh
 make
 ./build/alpha-sim --games 100 --seed 42 --bots mixed \
-  --rollouts 2 --deep-rollouts 8 --train-games 200
+  --rollouts 2 --deep-rollouts 8 --train-games 800
 ```
 
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
 `handcrafted`, or `learned`. `--rollouts` and `--deep-rollouts` control sampled
 continuations; `--train-games` controls Learned Value's random self-play
 dataset. Mixed mode uses a 25-game rotation containing all ordered policy
-pairings, including mirrors.
+pairings, including mirrors. Games in a policy matrix use common shuffle seeds
+and balanced play/draw assignments, and independent games run in parallel.
 
 Each run prints:
 
@@ -47,6 +48,21 @@ Run the test suite:
 ```sh
 make test
 ```
+
+Evolve a new 40-card deck from the union of the current card pool:
+
+```sh
+make evolve
+
+./build/alpha-sim --evolve-deck --generations 20 \
+  --population 32 --games 8 --seed 42
+```
+
+Evolution starts from the four metagame decks, uses mutation plus elitism, and
+scores every candidate against all four decks with both deck seats and both
+starting-player assignments. `--games` is paired repetitions per opponent in
+this mode. The default pilot is Handcrafted Policy so searches stay fast and
+do not evaluate hybrid decks far outside the value model's training data.
 
 ## MVP rules implemented
 
@@ -96,17 +112,29 @@ pass priority to resolve its own stack objects. It also chooses favorable
 attacks, blocks, and damage order. The other three policies retain the shared
 random combat sub-policy.
 
-Learned Value contains no card-name or card-ID rules. A dependency-free
-22-input, 16-hidden-unit neural network is trained from random self-play game
-outcomes. Its features are generic quantities only: life, library and hand
-sizes, mana, creature counts and aggregate power/toughness, other permanent
-counts, stack state, and whose turn it is. During play it scores legal
-successor states with the network. For combat it samples legal attack and block
-candidates and keeps the one with the highest learned value.
+Learned Value contains no scripted card values or card-specific action rules.
+It is a dependency-free ensemble of two 16-hidden-unit neural networks. Inputs
+include scalar state (life, zone sizes, mana, creature power/toughness, stack,
+turn) plus neutral per-card count planes for its own library and hand and every
+public zone: both battlefields, tapped/summoning-sick/damaged permanents, both
+graveyards, and stack objects by controller. Opponent hand identities and
+library order remain hidden. A learned linear skip path helps sparse card-zone
+signals while the hidden layer learns interactions.
 
-This is AlphaGo-inspired, not a full AlphaGo implementation: it is a learned
-value function plus shallow candidate search, without a policy network,
-PUCT/MCTS tree, or iterative neural self-play yet.
+Training starts with random games, then runs two generations of
+Learned-vs-Learned fitted self-play with 10%/5% legal-action exploration.
+Terminal returns are discounted by game length, so dominant decks still learn
+to win efficiently. Counterspell choices and activated-ability states receive
+targeted replay. The two networks train concurrently and average predictions.
+
+During play, every legal action receives an immediate value plus two
+stack-faithful, four-turn Learned-vs-Learned continuations with re-randomized
+hidden libraries. Combat enumerates small legal attack/block spaces and samples
+bounded candidates for large spaces, using learned expected value throughout.
+
+This is AlphaGo-inspired, not a full AlphaGo implementation: it is an ensemble
+value function plus fitted self-play and shallow candidate search, without a
+learned policy head or PUCT/MCTS tree yet.
 
 ## Bot benchmark harness
 
@@ -125,7 +153,7 @@ make benchmark-learned
 
 ./build/alpha-sim --benchmark --games 20 --seed 424242 \
   --challenger learned --baseline monte-carlo \
-  --rollouts 2 --train-games 200
+  --rollouts 2 --train-games 800
 ```
 
 For every repetition, it covers all ten unordered deck pairings, including
@@ -134,6 +162,17 @@ and reuses seeds across paired games to reduce shuffle noise. `--games 20`
 therefore runs 800 games. It reports per-deck records, rollout cost, a Wilson
 95% confidence interval, and passes only when the challenger's lower bound is
 above 50%.
+
+Validate Learned against every other policy over independent seeds:
+
+```sh
+make stability
+```
+
+The all-policy harness trains one model per seed, reuses it against Random,
+Monte Carlo, Deep Monte Carlo, and Handcrafted Policy, and requires aggregate,
+per-seed, confidence, and per-deck gates. `EXPERIMENTS.md` is the lab notebook
+for successful and failed tuning runs.
 
 There are no mulligans, sideboards, concessions, or draw effects yet. A
 500-individual-turn safety limit is included, though these decks normally end
@@ -157,24 +196,29 @@ every pairing inside a 45–55% win-rate band.
 
 ## Mixed-bot baseline
 
-At 100 games per matchup with seed `424242`, two standard rollouts, and eight
-deep rollouts, the five-policy 600-game mixed run completed in about 5.6
-seconds on the development machine, including 200 self-play training games.
-Aggregate seat-game win rates were 21.7% Random, 44.2% Monte Carlo, 51.7% Deep
-Monte Carlo, 68.8% Handcrafted Policy, and 63.8% Learned Value.
+At 100 games per matchup with seed `424242`, 800 training games, two standard
+rollouts, and eight deep rollouts, the current five-policy 600-game run took
+about 26 seconds on the development machine. Aggregate seat-game win rates
+were 23.8% Random, 40.8% Monte Carlo, 49.2% Deep Monte Carlo, 63.3%
+Handcrafted Policy, and 72.9% Learned Value.
 
-The output ranked Blue as the biggest beneficiary of deeper Monte Carlo search:
-its Random win rate was 11.7%, standard Monte Carlo was 38.3% (+26.7 points),
-and Deep Monte Carlo was 60.0% (+48.3 points). The lists remain balanced under
-the original random policy; stronger policies expose a separate deck-balance
-problem for the next tuning pass.
+Learned produced the largest lift on Green (55.0% vs 28.3% Handcrafted), Red
+(68.3% vs 56.7%), and Blue (75.0% vs 73.3%). On the small 60-game White slice,
+Handcrafted led 95.0% to 93.3%. The controlled paired harness is the authority
+for strength claims because these mixed per-deck slices remain noisy.
 
 In the controlled 800-game harness, Handcrafted Policy beat standard Monte Carlo
 618–182 (77.2%, 95% CI 74.2–80.0%) while using no rollouts. Against Deep Monte
 Carlo it won 563–237 (70.4%, 95% CI 67.1–73.4%); Deep averaged about 620
 rollout continuations per game.
 
-Learned Value beat standard Monte Carlo 644–156 (80.5%, 95% CI 77.6–83.1%)
-and Deep Monte Carlo 575–225 (71.9%, 95% CI 68.7–74.9%). Against the
-card-aware Handcrafted Policy bot it went 390–410 (48.8%, 95% CI 45.3–52.2%), an
-inconclusive result close to parity.
+In the latest completed eight-seed all-policy panel, Learned beat Random
+1473–127, Monte Carlo 1289–311, and Deep Monte Carlo 1164–436, with every seed
+and deck passing. It beat Handcrafted 857–743 overall (53.6%, 95% CI
+51.1–56.0%) but did not clear the strictest stability gate: one seed lost,
+pooled Red was 138–163, and White was essentially tied at 293–292.
+
+That limitation is intentional and visible. The next strength milestone is a
+learned action-policy head or actor-critic objective; the experiment notebook
+documents why additional scalar value tuning, rollout depth, and raw training
+volume were rejected.

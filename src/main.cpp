@@ -45,6 +45,9 @@ void print_help(std::string_view executable) {
            " [--baseline BOT]\n"
         << "       " << executable
         << " --stability [--stability-runs N] [--games N]\n\n"
+        << "       " << executable
+        << " --evolve-deck [--generations N] [--population N] "
+           "[--games N]\n\n"
         << "Simulates an early-Magic round robin with legal bot play.\n"
         << "  Green: 18 Forest, 9 Grizzly Bears, 12 Ironroot Treefolk, "
            "1 Tsunami\n"
@@ -60,17 +63,24 @@ void print_help(std::string_view executable) {
            "(default: 2)\n"
         << "  --deep-rollouts N  Deep Monte Carlo continuations per "
            "legal action (default: 8)\n"
-        << "  --train-games N  Random self-play games for Learned Value "
+        << "  --train-games N  Random-play games for Learned Value "
            "(default: 800)\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
            "(default: handcrafted)\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
-        << "  --stability     Validate Learned against Handcrafted across "
+        << "  --stability     Validate Learned against all policies across "
            "seed panels\n"
         << "  --stability-runs N  Number of independent runs "
            "(default: 8)\n"
+        << "  --evolve-deck   Evolve a 40-card deck against the current "
+           "metagame\n"
+        << "  --generations N  Evolution generations (default: 10)\n"
+        << "  --population N   Candidate decks per generation "
+           "(default: 16)\n"
+        << "  With --evolve-deck, --games is paired repetitions per "
+           "metagame deck (default: 4).\n"
         << "  --help          Show this help\n";
 }
 
@@ -543,6 +553,49 @@ bool run_stability_panel(std::size_t runs,
     return passed;
 }
 
+void print_evolution(const alpha::DeckEvolutionSummary& result,
+                     std::uint64_t seed) {
+    std::cout << std::fixed << std::setprecision(1)
+              << "Early Magic Deck Evolution\n"
+              << "Seed: " << seed << "\n\nGeneration best fitness\n";
+    for (std::size_t generation = 0;
+         generation < result.generation_best_win_rates.size();
+         ++generation) {
+        std::cout << "  " << generation + 1 << ": "
+                  << result.generation_best_win_rates[generation]
+                  << "%\n";
+    }
+
+    constexpr std::size_t card_count =
+        static_cast<std::size_t>(alpha::CardId::Moat) + 1;
+    std::array<std::size_t, card_count> counts{};
+    for (const alpha::CardId card : result.best.cards) {
+        ++counts[static_cast<std::size_t>(card)];
+    }
+    std::cout << "\nBest 40-card deck\n";
+    for (std::size_t card = 0; card < counts.size(); ++card) {
+        if (counts[card] == 0) {
+            continue;
+        }
+        const auto id = static_cast<alpha::CardId>(card);
+        std::cout << "  " << counts[card] << " "
+                  << alpha::card_definition(id).name << '\n';
+    }
+    std::cout << "\nFitness: " << result.best.total.win_rate()
+              << "% (" << result.best.total.wins << '-'
+              << result.best.total.losses << '-'
+              << result.best.total.draws << ")\n"
+              << "By metagame opponent\n";
+    for (std::size_t opponent = 0;
+         opponent < result.best.by_opponent.size(); ++opponent) {
+        const auto id = static_cast<alpha::DeckId>(opponent);
+        const auto& stats = result.best.by_opponent[opponent];
+        std::cout << "  " << alpha::deck_name(id) << ": "
+                  << stats.win_rate() << "% (" << stats.wins << '-'
+                  << stats.losses << '-' << stats.draws << ")\n";
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -553,9 +606,13 @@ int main(int argc, char** argv) {
         std::size_t rollouts = 2;
         std::size_t deep_rollouts = 8;
         std::size_t training_games = 800;
+        bool games_were_set = false;
         bool benchmark = false;
         bool stability = false;
+        bool evolve = false;
         std::size_t stability_runs = 8;
+        std::size_t generations = 10;
+        std::size_t population = 16;
         alpha::BotKind challenger = alpha::BotKind::Handcrafted;
         alpha::BotKind baseline = alpha::BotKind::MonteCarlo;
 
@@ -573,11 +630,17 @@ int main(int argc, char** argv) {
                 stability = true;
                 continue;
             }
+            if (option == "--evolve-deck") {
+                evolve = true;
+                continue;
+            }
             if (option != "--games" && option != "--seed" &&
                 option != "--bots" && option != "--rollouts" &&
                 option != "--deep-rollouts" &&
                 option != "--train-games" &&
                 option != "--stability-runs" &&
+                option != "--generations" &&
+                option != "--population" &&
                 option != "--challenger" &&
                 option != "--baseline") {
                 throw std::invalid_argument("unknown option: " +
@@ -609,6 +672,7 @@ int main(int argc, char** argv) {
                         "--games must be greater than zero");
                 }
                 games = static_cast<std::size_t>(value);
+                games_were_set = true;
             } else if (option == "--seed") {
                 seed = value;
             } else if (option == "--rollouts") {
@@ -629,6 +693,18 @@ int main(int argc, char** argv) {
                         "--stability-runs must be greater than zero");
                 }
                 stability_runs = static_cast<std::size_t>(value);
+            } else if (option == "--generations") {
+                if (value == 0) {
+                    throw std::invalid_argument(
+                        "--generations must be greater than zero");
+                }
+                generations = static_cast<std::size_t>(value);
+            } else if (option == "--population") {
+                if (value < 4) {
+                    throw std::invalid_argument(
+                        "--population must be at least four");
+                }
+                population = static_cast<std::size_t>(value);
             } else {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -638,9 +714,12 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (benchmark && stability) {
+        if (static_cast<int>(benchmark) + static_cast<int>(stability) +
+                static_cast<int>(evolve) >
+            1) {
             throw std::invalid_argument(
-                "--benchmark and --stability cannot be combined");
+                "--benchmark, --stability, and --evolve-deck cannot be "
+                "combined");
         }
         if (benchmark) {
             const auto result = alpha::run_bot_benchmark(
@@ -658,6 +737,24 @@ int main(int argc, char** argv) {
                        deep_rollouts, training_games)
                        ? 0
                        : 1;
+        }
+        if (evolve) {
+            const std::size_t repetitions =
+                games_were_set ? games : 4;
+            const auto result = alpha::evolve_deck(
+                {
+                    .generations = generations,
+                    .population = population,
+                    .repetitions_per_opponent = repetitions,
+                    .pilot =
+                        {
+                            .kind = alpha::BotKind::Handcrafted,
+                            .rollouts_per_action = 1,
+                        },
+                },
+                seed);
+            print_evolution(result, seed);
+            return 0;
         }
 
         const alpha::TournamentSummary result =

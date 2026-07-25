@@ -18,7 +18,7 @@ constexpr std::size_t kLearnedCardCount =
 class LearnedModel {
   public:
     static constexpr std::size_t kScalarFeatureCount = 22;
-    static constexpr std::size_t kCardPlanes = 13;
+    static constexpr std::size_t kCardPlanes = 14;
     static constexpr std::size_t kFeatureCount =
         kScalarFeatureCount + kCardPlanes * kLearnedCardCount;
     static constexpr std::size_t kHiddenCount = 16;
@@ -38,7 +38,24 @@ class LearnedModel {
         }
     }
 
+    explicit LearnedModel(
+        std::vector<std::shared_ptr<const LearnedModel>> members)
+        : ensemble_(std::move(members)) {
+        if (ensemble_.empty()) {
+            throw std::invalid_argument(
+                "learned ensemble requires at least one member");
+        }
+    }
+
     double predict(const FeatureVector& features) const {
+        if (!ensemble_.empty()) {
+            double total = 0.0;
+            for (const auto& member : ensemble_) {
+                total += member->predict(features);
+            }
+            return total /
+                   static_cast<double>(ensemble_.size());
+        }
         const auto hidden = hidden_values(features);
         double output = output_bias_;
         for (std::size_t index = 0; index < hidden.size(); ++index) {
@@ -57,6 +74,10 @@ class LearnedModel {
     void train(const std::vector<TrainingExample>& examples,
                std::size_t epochs, double learning_rate,
                std::uint64_t seed) {
+        if (!ensemble_.empty()) {
+            throw std::logic_error(
+                "cannot train a composite learned ensemble");
+        }
         std::mt19937_64 random(seed);
         std::vector<std::size_t> order(examples.size());
         for (std::size_t index = 0; index < order.size(); ++index) {
@@ -152,6 +173,7 @@ class LearnedModel {
     std::array<double, kHiddenCount> output_weights_{};
     std::array<double, kFeatureCount> direct_output_weights_{};
     double output_bias_ = 0.0;
+    std::vector<std::shared_ptr<const LearnedModel>> ensemble_;
 };
 
 namespace {
@@ -491,6 +513,7 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     };
 
     using CardPlane = std::array<double, kLearnedCardCount>;
+    CardPlane own_library{};
     CardPlane own_hand{};
     CardPlane own_battlefield{};
     CardPlane enemy_battlefield{};
@@ -507,6 +530,9 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     const auto card_index = [](CardId card) {
         return static_cast<std::size_t>(card);
     };
+    for (const CardId card : self.library) {
+        ++own_library[card_index(card)];
+    }
     for (const CardId card : self.hand) {
         ++own_hand[card_index(card)];
     }
@@ -564,6 +590,7 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
                 features[feature++] = value / normalization;
             }
         };
+    append_plane(own_library, 20.0);
     append_plane(own_hand, 10.0);
     append_plane(own_battlefield, 10.0);
     append_plane(enemy_battlefield, 10.0);
@@ -1447,9 +1474,17 @@ PriorityAction Game::choose_priority_action(
     if (actions.empty()) {
         throw std::logic_error("priority window has no pass action");
     }
-    if (trace_ != nullptr && !state_.stack.empty() &&
-        actions.size() > 1) {
-        trace_->push_back(state_);
+    if (trace_ != nullptr && actions.size() > 1) {
+        const bool stack_choice = !state_.stack.empty();
+        const bool activated_ability_choice = std::any_of(
+            actions.begin(), actions.end(),
+            [](const PriorityAction& action) {
+                return action.kind ==
+                       PriorityActionKind::ActivateMillstone;
+            });
+        if (stack_choice || activated_ability_choice) {
+            trace_->push_back(state_);
+        }
     }
     if (actions.size() == 1) {
         return actions.front();
@@ -2785,11 +2820,15 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
                  ++perspective) {
                 double target = 0.5;
                 if (result.winner >= 0) {
+                    const double discounted_outcome =
+                        0.5 * std::pow(
+                                  0.985,
+                                  static_cast<double>(result.turns));
                     target =
                         result.winner ==
                                 static_cast<int>(perspective)
-                            ? 1.0
-                            : 0.0;
+                            ? 0.5 + discounted_outcome
+                            : 0.5 - discounted_outcome;
                 }
                 destination.emplace_back(
                     learned_features(state, perspective), target);
@@ -2808,10 +2847,38 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
         add_trace(trace, result, examples);
     }
 
-    auto model =
-        std::make_shared<LearnedModel>(seed ^ 0x4D4F44454CULL);
-    model->train(examples, 8, 0.015,
-                 seed ^ 0x545241494EULL);
+    constexpr std::size_t kEnsembleMembers = 2;
+    std::array<std::shared_ptr<LearnedModel>, kEnsembleMembers>
+        members;
+    for (std::size_t member = 0; member < members.size(); ++member) {
+        members[member] = std::make_shared<LearnedModel>(
+            seed ^ (0x4D4F44454C000000ULL + member));
+    }
+    {
+        std::array<std::thread, kEnsembleMembers> trainers;
+        for (std::size_t member = 0; member < members.size();
+             ++member) {
+            trainers[member] = std::thread([&, member] {
+                members[member]->train(
+                    examples, 8, 0.015,
+                    seed ^ (0x545241494E000000ULL + member));
+            });
+        }
+        for (auto& trainer : trainers) {
+            trainer.join();
+        }
+    }
+    const auto make_ensemble = [&] {
+        std::vector<std::shared_ptr<const LearnedModel>>
+            ensemble_members;
+        ensemble_members.reserve(members.size());
+        for (const auto& member : members) {
+            ensemble_members.push_back(member);
+        }
+        return std::make_shared<LearnedModel>(
+            std::move(ensemble_members));
+    };
+    std::shared_ptr<const LearnedModel> model = make_ensemble();
 
     // Two fitted self-play iterations move the value function toward states
     // produced by its own policy while retaining the random-play replay set.
@@ -2848,9 +2915,20 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
         }
         examples.insert(examples.end(), self_play_examples.begin(),
                         self_play_examples.end());
-        model->train(
-            examples, 3, 0.006,
-            seed ^ (0x53454C46504C4159ULL + generation));
+        std::array<std::thread, kEnsembleMembers> trainers;
+        for (std::size_t member = 0; member < members.size();
+             ++member) {
+            trainers[member] = std::thread([&, member] {
+                members[member]->train(
+                    examples, 3, 0.006,
+                    seed ^ (0x53454C4600000000ULL +
+                            0x100ULL * generation + member));
+            });
+        }
+        for (auto& trainer : trainers) {
+            trainer.join();
+        }
+        model = make_ensemble();
     }
 
     return model;
@@ -3043,6 +3121,211 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
             task.baseline_player);
     }
 
+    return summary;
+}
+
+DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
+                                 std::uint64_t seed,
+                                 GameConfig game_config) {
+    if (config.generations == 0) {
+        throw std::invalid_argument(
+            "deck evolution generations must be positive");
+    }
+    if (config.population < 4) {
+        throw std::invalid_argument(
+            "deck evolution population must be at least four");
+    }
+    if (config.repetitions_per_opponent == 0) {
+        throw std::invalid_argument(
+            "deck evolution repetitions must be positive");
+    }
+    if ((config.pilot.kind == BotKind::MonteCarlo ||
+         config.pilot.kind == BotKind::DeepMonteCarlo) &&
+        config.pilot.rollouts_per_action == 0) {
+        throw std::invalid_argument(
+            "deck evolution Monte Carlo rollouts must be positive");
+    }
+    if (config.pilot.kind == BotKind::Learned &&
+        !game_config.learned_model) {
+        game_config.learned_model = train_learned_model(
+            config.pilot.training_games,
+            seed ^ 0x45564F4C56454E4EULL);
+    }
+    game_config.bots = {config.pilot, config.pilot};
+
+    const std::array<std::vector<CardId>, 4> metagame = {
+        deck_cards(DeckId::Green),
+        deck_cards(DeckId::Red),
+        deck_cards(DeckId::Blue),
+        deck_cards(DeckId::White),
+    };
+    std::vector<CardId> card_pool;
+    std::array<bool, kLearnedCardCount> seen_cards{};
+    for (const auto& deck : metagame) {
+        for (const CardId card : deck) {
+            const auto index = static_cast<std::size_t>(card);
+            if (!seen_cards[index]) {
+                seen_cards[index] = true;
+                card_pool.push_back(card);
+            }
+        }
+    }
+
+    std::mt19937_64 random(seed);
+    std::uniform_int_distribution<std::size_t> choose_card(
+        0, card_pool.size() - 1);
+    const auto mutate = [&](std::vector<CardId>& deck,
+                            std::size_t mutations) {
+        std::uniform_int_distribution<std::size_t> choose_slot(
+            0, deck.size() - 1);
+        for (std::size_t mutation = 0; mutation < mutations;
+             ++mutation) {
+            deck[choose_slot(random)] = card_pool[choose_card(random)];
+        }
+    };
+
+    std::vector<std::vector<CardId>> population;
+    population.reserve(config.population);
+    for (const auto& deck : metagame) {
+        population.push_back(deck);
+    }
+    while (population.size() < config.population) {
+        std::vector<CardId> candidate =
+            metagame[population.size() % metagame.size()];
+        mutate(candidate, 1 + population.size() % 8);
+        population.push_back(std::move(candidate));
+    }
+
+    const std::uint64_t evaluation_seed =
+        seed ^ 0x4556414C55415445ULL;
+    const auto evaluate_population =
+        [&](const std::vector<std::vector<CardId>>& candidates) {
+            std::vector<EvolvedDeck> evaluations(candidates.size());
+            std::atomic_size_t next_candidate = 0;
+            const std::size_t worker_count =
+                std::min<std::size_t>(
+                    candidates.size(),
+                    std::max(
+                        1U, std::thread::hardware_concurrency()));
+            std::vector<std::thread> workers;
+            workers.reserve(worker_count);
+            for (std::size_t worker = 0; worker < worker_count;
+                 ++worker) {
+                workers.emplace_back([&] {
+                    while (true) {
+                        const std::size_t candidate_index =
+                            next_candidate.fetch_add(
+                                1, std::memory_order_relaxed);
+                        if (candidate_index >= candidates.size()) {
+                            return;
+                        }
+                        auto& evaluation =
+                            evaluations[candidate_index];
+                        evaluation.cards =
+                            candidates[candidate_index];
+                        std::mt19937_64 game_seeds(
+                            evaluation_seed);
+                        for (std::size_t opponent = 0;
+                             opponent < metagame.size(); ++opponent) {
+                            for (std::size_t repetition = 0;
+                                 repetition <
+                                 config.repetitions_per_opponent;
+                                 ++repetition) {
+                                const std::uint64_t game_seed =
+                                    game_seeds();
+                                for (std::size_t candidate_player = 0;
+                                     candidate_player < 2;
+                                     ++candidate_player) {
+                                    for (std::size_t starting_player = 0;
+                                         starting_player < 2;
+                                         ++starting_player) {
+                                        GameConfig current_config =
+                                            game_config;
+                                        current_config.starting_player =
+                                            starting_player;
+                                        const bool candidate_first =
+                                            candidate_player == 0;
+                                        Game game(
+                                            candidate_first
+                                                ? candidates[candidate_index]
+                                                : metagame[opponent],
+                                            candidate_first
+                                                ? metagame[opponent]
+                                                : candidates[candidate_index],
+                                            game_seed, current_config);
+                                        const GameResult result =
+                                            game.run();
+                                        record_deck_result(
+                                            evaluation.total, result,
+                                            candidate_player);
+                                        record_deck_result(
+                                            evaluation
+                                                .by_opponent[opponent],
+                                            result, candidate_player);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            for (auto& worker : workers) {
+                worker.join();
+            }
+            return evaluations;
+        };
+
+    DeckEvolutionSummary summary;
+    for (std::size_t generation = 0;
+         generation < config.generations; ++generation) {
+        auto evaluations = evaluate_population(population);
+        std::vector<std::size_t> order(evaluations.size());
+        for (std::size_t index = 0; index < order.size(); ++index) {
+            order[index] = index;
+        }
+        std::sort(
+            order.begin(), order.end(),
+            [&](std::size_t left, std::size_t right) {
+                const double left_rate =
+                    evaluations[left].total.win_rate();
+                const double right_rate =
+                    evaluations[right].total.win_rate();
+                if (left_rate != right_rate) {
+                    return left_rate > right_rate;
+                }
+                return evaluations[left].cards <
+                       evaluations[right].cards;
+            });
+        const EvolvedDeck& generation_best =
+            evaluations[order.front()];
+        summary.generation_best_win_rates.push_back(
+            generation_best.total.win_rate());
+        if (summary.best.cards.empty() ||
+            generation_best.total.win_rate() >
+                summary.best.total.win_rate()) {
+            summary.best = generation_best;
+        }
+
+        const std::size_t elite_count =
+            std::max<std::size_t>(2, config.population / 4);
+        std::vector<std::vector<CardId>> next_population;
+        next_population.reserve(config.population);
+        for (std::size_t elite = 0; elite < elite_count;
+             ++elite) {
+            next_population.push_back(
+                evaluations[order[elite]].cards);
+        }
+        std::uniform_int_distribution<std::size_t> choose_elite(
+            0, elite_count - 1);
+        std::uniform_int_distribution<std::size_t> mutation_count(1, 4);
+        while (next_population.size() < config.population) {
+            auto child =
+                next_population[choose_elite(random)];
+            mutate(child, mutation_count(random));
+            next_population.push_back(std::move(child));
+        }
+        population = std::move(next_population);
+    }
     return summary;
 }
 

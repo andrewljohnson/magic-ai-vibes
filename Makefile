@@ -7,7 +7,7 @@ ENGINE_SOURCE := src/game.cpp
 SIMULATOR := $(BUILD_DIR)/alpha-sim
 TEST_RUNNER := $(BUILD_DIR)/alpha-tests
 
-.PHONY: all test benchmark benchmark-deep benchmark-learned stability run clean
+.PHONY: all test benchmark benchmark-deep benchmark-learned stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -31,10 +31,13 @@ benchmark-deep: $(SIMULATOR)
 	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger handcrafted --baseline deep-monte-carlo --deep-rollouts 8
 
 benchmark-learned: $(SIMULATOR)
-	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger learned --baseline monte-carlo --rollouts 2 --train-games 800
+	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger learned --baseline handcrafted --rollouts 2 --train-games 800
 
 stability: $(SIMULATOR)
 	./$(SIMULATOR) --stability --stability-runs 8 --games 5 --seed 0 --rollouts 2 --deep-rollouts 8 --train-games 800
+
+evolve: $(SIMULATOR)
+	./$(SIMULATOR) --evolve-deck --generations 10 --population 16 --games 4
 
 run: $(SIMULATOR)
 	./$(SIMULATOR)

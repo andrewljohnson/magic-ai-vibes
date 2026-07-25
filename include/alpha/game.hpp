@@ -464,4 +464,29 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
 std::shared_ptr<const LearnedModel>
 train_learned_model(std::size_t training_games, std::uint64_t seed);
 
+struct DeckEvolutionConfig {
+    std::size_t generations = 10;
+    std::size_t population = 16;
+    std::size_t repetitions_per_opponent = 4;
+    BotConfig pilot = {
+        .kind = BotKind::Handcrafted,
+        .rollouts_per_action = 1,
+    };
+};
+
+struct EvolvedDeck {
+    std::vector<CardId> cards;
+    DeckSimulationStats total;
+    std::array<DeckSimulationStats, 4> by_opponent;
+};
+
+struct DeckEvolutionSummary {
+    EvolvedDeck best;
+    std::vector<double> generation_best_win_rates;
+};
+
+DeckEvolutionSummary
+evolve_deck(DeckEvolutionConfig config, std::uint64_t seed,
+            GameConfig game_config = {});
+
 } // namespace alpha
