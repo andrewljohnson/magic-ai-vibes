@@ -1782,6 +1782,32 @@ std::vector<DecisionProbe> make_probe_validation_v1() {
     return {harvest_ru_disintegrate_hold_probe()};
 }
 
+std::vector<DecisionProbe> make_force_spike_policy_controls_v1() {
+    DecisionProbe live = blue_force_spike_probe();
+    live.stable_id =
+        "control.blue.force-spike-live-gray-ogre.v1";
+
+    DecisionProbe payable = live;
+    payable.stable_id =
+        "control.blue.force-spike-payable-gray-ogre.v1";
+    // The live state has exactly the three tapped Mountains used to cast
+    // Gray Ogre. The natural payable control exposes one additional,
+    // untapped Mountain, moving that physical card out of Red's hidden
+    // library so conservation and declared-deck reachability remain exact.
+    auto& red_library = payable.state.players[1].library;
+    const auto mountain =
+        std::find(red_library.begin(), red_library.end(),
+                  CardId::Mountain);
+    if (mountain == red_library.end()) {
+        throw std::logic_error(
+            "Force Spike payable control has no hidden Mountain");
+    }
+    red_library.erase(mountain);
+    payable.state.players[1].lands.push_back(
+        land(CardId::Mountain));
+    return {std::move(live), std::move(payable)};
+}
+
 bool hidden_clone_is_determinization_invariant(
     const DecisionProbe& probe, std::uint64_t seed) {
     if (probe.root_player >= kPlayerCount) {
@@ -1997,6 +2023,159 @@ std::vector<std::string> validate_probe_validation_v1(
             validate_probe(probe, hidden_seed);
         for (const std::string& error : validation.errors) {
             errors.push_back(probe.stable_id + ": " + error);
+        }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_force_spike_policy_controls_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed) {
+    constexpr std::array<std::string_view, 2> kExpectedIds = {
+        "control.blue.force-spike-live-gray-ogre.v1",
+        "control.blue.force-spike-payable-gray-ogre.v1",
+    };
+    std::vector<std::string> errors;
+    if (probes.size() != kExpectedIds.size()) {
+        errors.push_back(
+            "Force Spike controls must contain exactly two probes");
+    }
+
+    const std::size_t checked =
+        std::min(probes.size(), kExpectedIds.size());
+    for (std::size_t index = 0; index < checked; ++index) {
+        const DecisionProbe& probe = probes[index];
+        if (probe.stable_id != kExpectedIds[index]) {
+            errors.push_back(
+                "Force Spike controls have an unknown or reordered "
+                "stable ID");
+        }
+        const bool shared_context =
+            probe.category == Category::BlueForceSpike &&
+            probe.decision_kind == DecisionKind::Priority &&
+            probe.root_deck == DeckId::Blue &&
+            probe.opponent_deck == DeckId::Red &&
+            probe.root_player == 0 &&
+            probe.phase == TurnPhase::FirstMain &&
+            probe.consecutive_passes == 1 &&
+            probe.state.stack.size() == 1 &&
+            probe.state.stack.back().kind ==
+                StackObjectKind::Spell &&
+            probe.state.stack.back().card == CardId::GrayOgre &&
+            probe.state.stack.back().controller == 1 &&
+            probe.state.players[0].hand ==
+                std::vector<CardId>{CardId::ForceSpike};
+        if (!shared_context) {
+            errors.push_back(
+                probe.stable_id +
+                ": Force Spike control lost its shared live-spell "
+                "decision context");
+        }
+
+        bool has_pass = false;
+        bool has_force_spike = false;
+        if (!probe.state.stack.empty()) {
+            const PriorityAction force_spike =
+                PriorityAction::cast_force_spike(
+                    probe.state.stack.back().id);
+            for (const Candidate& candidate : probe.candidates) {
+                const auto* action =
+                    std::get_if<PriorityAction>(&candidate.action);
+                if (action == nullptr) {
+                    continue;
+                }
+                has_pass =
+                    has_pass ||
+                    (candidate.descriptor == "pass" &&
+                     *action == PriorityAction::pass());
+                has_force_spike =
+                    has_force_spike ||
+                    (candidate.descriptor ==
+                         "force-spike-gray-ogre" &&
+                     *action == force_spike);
+            }
+        }
+        if (probe.candidates.size() != 2 || !has_pass ||
+            !has_force_spike) {
+            errors.push_back(
+                probe.stable_id +
+                ": Force Spike control must expose exactly Pass and "
+                "Force Spike");
+        }
+
+        const PlayerState& opponent = probe.state.players[1];
+        const std::size_t expected_lands = index == 0 ? 3 : 4;
+        const std::size_t expected_untapped = index;
+        const std::size_t untapped_mountains =
+            static_cast<std::size_t>(std::count_if(
+                opponent.lands.begin(), opponent.lands.end(),
+                [](const LandPermanent& permanent) {
+                    return permanent.card == CardId::Mountain &&
+                           !permanent.tapped;
+                }));
+        if (opponent.mana_pool != ManaCost{} ||
+            opponent.lands.size() != expected_lands ||
+            !std::all_of(
+                opponent.lands.begin(), opponent.lands.end(),
+                [](const LandPermanent& permanent) {
+                    return permanent.card == CardId::Mountain;
+                }) ||
+            untapped_mountains != expected_untapped) {
+            errors.push_back(
+                probe.stable_id +
+                ": opponent public mana sources do not match the "
+                "control");
+        }
+
+        const Validation validation =
+            validate_probe(probe, hidden_seed + index);
+        for (const std::string& error : validation.errors) {
+            errors.push_back(probe.stable_id + ": " + error);
+        }
+    }
+
+    if (probes.size() >= 2) {
+        GameState live = probes[0].state;
+        GameState payable = probes[1].state;
+        auto& payable_lands = payable.players[1].lands;
+        const auto extra_mountain = std::find_if(
+            payable_lands.begin(), payable_lands.end(),
+            [](const LandPermanent& permanent) {
+                return permanent.card == CardId::Mountain &&
+                       !permanent.tapped;
+            });
+        if (extra_mountain != payable_lands.end()) {
+            payable_lands.erase(extra_mountain);
+            payable.players[1].library.push_back(CardId::Mountain);
+        }
+        for (std::size_t player = 0; player < kPlayerCount; ++player) {
+            std::sort(live.players[player].library.begin(),
+                      live.players[player].library.end());
+            std::sort(payable.players[player].library.begin(),
+                      payable.players[player].library.end());
+        }
+        if (live != payable ||
+            probes[0].original_decks !=
+                probes[1].original_decks ||
+            probes[0].candidates.size() !=
+                probes[1].candidates.size()) {
+            errors.push_back(
+                "Force Spike controls differ by more than the "
+                "additional public Mountain");
+        } else {
+            for (std::size_t candidate = 0;
+                 candidate < probes[0].candidates.size();
+                 ++candidate) {
+                if (probes[0].candidates[candidate].descriptor !=
+                        probes[1].candidates[candidate].descriptor ||
+                    probes[0].candidates[candidate].action !=
+                        probes[1].candidates[candidate].action) {
+                    errors.push_back(
+                        "Force Spike controls changed candidate "
+                        "identity or order");
+                    break;
+                }
+            }
         }
     }
     return errors;

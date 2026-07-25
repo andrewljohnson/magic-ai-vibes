@@ -19,6 +19,8 @@ inline constexpr std::string_view kProbeValidationV1 =
     "old-school-probe-validation-v1";
 inline constexpr std::uint64_t kProbeValidationV1GameSeed =
     0x52555830484F4C44ULL;
+inline constexpr std::string_view kForceSpikePolicyControlsV1 =
+    "old-school-force-spike-policy-controls-v1";
 inline constexpr std::string_view kProbePriorityCallbackCollector =
     "Game::HumanController::choose_priority_action";
 inline constexpr std::string_view kProbeLandThenPassScript =
@@ -130,6 +132,12 @@ std::vector<DecisionProbe> make_probe_dev_v3();
 // all-five-deck strength claims.
 std::vector<DecisionProbe> make_probe_validation_v1();
 
+// Two eval-only states that differ only in whether the opposing spell's
+// controller has one public mana available for Force Spike's tax. They are
+// supplemental policy controls, not part of the balanced dev-v3 metrics or
+// any promotion-eligible corpus.
+std::vector<DecisionProbe> make_force_spike_policy_controls_v1();
+
 Validation validate_probe(
     const DecisionProbe& probe,
     std::uint64_t hidden_seed = kProbeValidationSeed);
@@ -141,6 +149,10 @@ std::vector<std::string> validate_probe_dev_v3(
     std::uint64_t hidden_seed = kProbeValidationSeed);
 
 std::vector<std::string> validate_probe_validation_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed = kProbeValidationSeed);
+
+std::vector<std::string> validate_force_spike_policy_controls_v1(
     const std::vector<DecisionProbe>& probes,
     std::uint64_t hidden_seed = kProbeValidationSeed);
 

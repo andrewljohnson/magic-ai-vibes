@@ -236,6 +236,77 @@ std::shared_ptr<const old_school::LearnedModel> small_value_model() {
     return model;
 }
 
+std::shared_ptr<const old_school::LearnedModel>
+context_sensitive_value_model() {
+    static const auto model = [] {
+        const auto contextual =
+            old_school::with_learned_decision_context(
+                small_value_model());
+        const auto state =
+            old_school::white_lock_plan_diagnostic_state();
+        const auto state_features =
+            old_school::learned_observation(state, 0);
+        std::vector<
+            old_school::LearnedContextualCriticTrainingExample>
+            examples;
+        for (std::size_t phase = 0; phase < 7; ++phase) {
+            for (std::size_t decision_player = 0;
+                 decision_player < 2; ++decision_player) {
+                for (int passes = 0; passes < 2; ++passes) {
+                    for (std::size_t sorcery = 0;
+                         sorcery < 2; ++sorcery) {
+                        const old_school::LearnedDecisionContext
+                            context = {
+                                .valid = true,
+                                .phase =
+                                    static_cast<
+                                        old_school::TurnPhase>(
+                                        phase),
+                                .decision_player =
+                                    decision_player,
+                                .consecutive_passes = passes,
+                                .sorcery_actions =
+                                    sorcery != 0,
+                            };
+                        const double target =
+                            0.1 +
+                            0.05 *
+                                static_cast<double>(phase) +
+                            0.15 *
+                                static_cast<double>(
+                                    decision_player) +
+                            0.2 *
+                                static_cast<double>(passes) +
+                            0.1 *
+                                static_cast<double>(sorcery);
+                        for (std::size_t repeat = 0;
+                             repeat < 8; ++repeat) {
+                            examples.push_back({
+                                .features = state_features,
+                                .context_features =
+                                    old_school::
+                                        learned_decision_context_features(
+                                            context, 0),
+                                .target = target,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        return old_school::
+            update_learned_contextual_value_model(
+                contextual, examples,
+                {
+                    .epochs = 14,
+                    .learning_rate = 0.012,
+                    .root_seed = 0xC07E57A11ULL,
+                    .member_training_tag = 0x1A7E6A7EULL,
+                });
+    }();
+    return model;
+}
+
 const old_school::LearnedValueChallengerArtifact&
 small_value_challenger_c2_artifact() {
     static const auto artifact =
@@ -976,6 +1047,199 @@ TEST(value_context_alias_audit_proves_missing_markov_context) {
     CHECK(diagnostic.main_policy_features_different);
     CHECK(diagnostic.hidden_information_bit_identical);
     CHECK(diagnostic.demonstrated());
+}
+
+TEST(decision_context_encoding_is_exact_and_hidden_safe) {
+    static_assert(
+        old_school::kLearnedDecisionContextFeatureCount == 13);
+    const old_school::LearnedDecisionContext pass_zero = {
+        .valid = true,
+        .phase = old_school::TurnPhase::BeginCombat,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = false,
+    };
+    auto pass_one = pass_zero;
+    pass_one.consecutive_passes = 1;
+    const old_school::LearnedDecisionContext first_main = {
+        .valid = true,
+        .phase = old_school::TurnPhase::FirstMain,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    auto second_main = first_main;
+    second_main.phase = old_school::TurnPhase::SecondMain;
+    auto response_in_first_main = first_main;
+    response_in_first_main.sorcery_actions = false;
+
+    const auto zero_features =
+        old_school::learned_decision_context_features(
+            pass_zero, 0);
+    const auto one_features =
+        old_school::learned_decision_context_features(
+            pass_one, 0);
+    const auto opponent_features =
+        old_school::learned_decision_context_features(
+            pass_zero, 1);
+    CHECK(zero_features[0] == 1.0);
+    CHECK(zero_features[1 +
+                        static_cast<std::size_t>(
+                            old_school::TurnPhase::BeginCombat)] ==
+          1.0);
+    CHECK(zero_features[8] == 1.0);
+    CHECK(zero_features[9] == 0.0);
+    CHECK(opponent_features[8] == 0.0);
+    CHECK(opponent_features[9] == 1.0);
+    CHECK(zero_features[10] == 1.0);
+    CHECK(zero_features[11] == 0.0);
+    CHECK(one_features[10] == 0.0);
+    CHECK(one_features[11] == 1.0);
+    CHECK(zero_features[12] == 0.0);
+    CHECK(zero_features != one_features);
+    CHECK(old_school::learned_decision_context_features(
+              first_main, 0) !=
+          old_school::learned_decision_context_features(
+              second_main, 0));
+    CHECK(old_school::learned_decision_context_features(
+              first_main, 0) !=
+          old_school::learned_decision_context_features(
+              response_in_first_main, 0));
+
+    old_school::LearnedDecisionContext masked;
+    masked.phase = old_school::TurnPhase::DamageOrder;
+    masked.decision_player = 999;
+    masked.consecutive_passes = 999;
+    masked.sorcery_actions = true;
+    const auto masked_features =
+        old_school::learned_decision_context_features(masked, 0);
+    CHECK(std::all_of(
+        masked_features.begin(), masked_features.end(),
+        [](double value) { return value == 0.0; }));
+
+    const auto fixture = determinization_fixture();
+    const auto hidden =
+        hidden_repartition(fixture.state, 0);
+    const auto base =
+        old_school::learned_observation(fixture.state, 0);
+    const auto contextual =
+        old_school::learned_contextual_observation(
+            fixture.state, 0, pass_one);
+    CHECK(contextual.size() ==
+          base.size() +
+              old_school::kLearnedDecisionContextFeatureCount);
+    CHECK(old_school::learned_contextual_observation(
+              hidden, 0, pass_one) == contextual);
+    CHECK(old_school::learned_contextual_observation(
+              fixture.state, 0, pass_zero) != contextual);
+}
+
+TEST(contextual_critic_zero_columns_preserve_legacy_exactly) {
+    const auto legacy = small_value_model();
+    const std::string legacy_fingerprint =
+        old_school::learned_model_fingerprint(legacy);
+    const auto contextual =
+        old_school::with_learned_decision_context(legacy);
+    const auto repeated =
+        old_school::with_learned_decision_context(legacy);
+    CHECK(old_school::learned_critic_schema(legacy) ==
+          old_school::LearnedCriticSchema::LegacyStateOnly);
+    CHECK(old_school::learned_critic_schema(contextual) ==
+          old_school::LearnedCriticSchema::DecisionContextV1);
+    CHECK(old_school::learned_model_fingerprint(legacy) ==
+          legacy_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(contextual) ==
+          old_school::learned_model_fingerprint(repeated));
+    CHECK(old_school::learned_model_fingerprint(contextual) !=
+          legacy_fingerprint);
+
+    const auto fixture = determinization_fixture();
+    const old_school::LearnedDecisionContext pass_zero = {
+        .valid = true,
+        .phase = old_school::TurnPhase::SecondMain,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    auto pass_one = pass_zero;
+    pass_one.consecutive_passes = 1;
+    for (std::size_t perspective = 0; perspective < 2;
+         ++perspective) {
+        const double legacy_value =
+            old_school::learned_critic_value(
+                fixture.state, perspective, legacy);
+        CHECK(old_school::learned_contextual_critic_value(
+                  fixture.state, perspective, pass_zero,
+                  legacy) == legacy_value);
+        CHECK(old_school::learned_contextual_critic_value(
+                  fixture.state, perspective, pass_zero,
+                  contextual) == legacy_value);
+        CHECK(old_school::learned_contextual_critic_value(
+                  fixture.state, perspective, pass_one,
+                  contextual) == legacy_value);
+    }
+}
+
+TEST(contextual_critic_training_can_fit_distinct_pass_contexts) {
+    const auto legacy = small_value_model();
+    const auto contextual =
+        old_school::with_learned_decision_context(legacy);
+    const auto fixture = determinization_fixture();
+    const old_school::LearnedDecisionContext pass_zero = {
+        .valid = true,
+        .phase = old_school::TurnPhase::BeginCombat,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = false,
+    };
+    auto pass_one = pass_zero;
+    pass_one.consecutive_passes = 1;
+    const auto state_features =
+        old_school::learned_observation(fixture.state, 0);
+    const auto pass_zero_features =
+        old_school::learned_decision_context_features(
+            pass_zero, 0);
+    const auto pass_one_features =
+        old_school::learned_decision_context_features(
+            pass_one, 0);
+    std::vector<old_school::LearnedContextualCriticTrainingExample>
+        examples;
+    for (std::size_t repeat_index = 0; repeat_index < 32;
+         ++repeat_index) {
+        examples.push_back({
+            .features = state_features,
+            .context_features = pass_zero_features,
+            .target = 0.0,
+        });
+        examples.push_back({
+            .features = state_features,
+            .context_features = pass_one_features,
+            .target = 1.0,
+        });
+    }
+    const std::string parent_fingerprint =
+        old_school::learned_model_fingerprint(contextual);
+    const auto trained =
+        old_school::update_learned_contextual_value_model(
+            contextual, examples,
+            {
+                .epochs = 12,
+                .learning_rate = 0.02,
+                .root_seed = 0xC07E570ULL,
+                .member_training_tag = 0x7A61ULL,
+            });
+    const double pass_zero_value =
+        old_school::learned_contextual_critic_value(
+            fixture.state, 0, pass_zero, trained);
+    const double pass_one_value =
+        old_school::learned_contextual_critic_value(
+            fixture.state, 0, pass_one, trained);
+    CHECK(pass_one_value > pass_zero_value);
+    CHECK(pass_one_value - pass_zero_value > 0.01);
+    CHECK(old_school::learned_model_fingerprint(trained) !=
+          parent_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(contextual) ==
+          parent_fingerprint);
 }
 
 TEST(learned_soft_priority_target_is_smoothed_and_ordered) {
@@ -3312,6 +3576,64 @@ TEST(handcrafted_force_spike_prefers_live_tax_and_passes_dead_tax) {
                   dead_scores.begin(), dead_scores.end())) == 0);
 }
 
+TEST(handcrafted_uses_live_force_spike_and_the_stack_counters_the_spell) {
+    old_school::GameState state;
+    state.active_player = 1;
+    state.next_stack_object_id = 79;
+    state.players[0].hand = {
+        old_school::CardId::ForceSpike,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island},
+    };
+    state.players[1].lands = {
+        {.card = old_school::CardId::Mountain, .tapped = true},
+        {.card = old_school::CardId::Mountain, .tapped = true},
+        {.card = old_school::CardId::Mountain, .tapped = true},
+    };
+    state.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 78,
+            .card = old_school::CardId::GrayOgre,
+            .controller = 1,
+        },
+    };
+
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, false);
+    const auto scores =
+        old_school::handcrafted_priority_scores(
+            state, 0, actions);
+    const auto chosen = static_cast<std::size_t>(
+        std::distance(
+            scores.begin(),
+            std::max_element(scores.begin(), scores.end())));
+    const auto force_spike =
+        old_school::PriorityAction::cast_force_spike(78);
+    CHECK(actions[chosen] == force_spike);
+    CHECK(old_school::apply_priority_action(
+        state, 0, actions[chosen], false));
+
+    old_school::PriorityState priority = {
+        .player = 0,
+        .consecutive_passes = 0,
+    };
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(state.stack.empty());
+    CHECK(state.players[1].creatures.empty());
+    CHECK(count_card(
+              state.players[0].graveyard,
+              old_school::CardId::ForceSpike) == 1);
+    CHECK(count_card(
+              state.players[1].graveyard,
+              old_school::CardId::GrayOgre) == 1);
+    CHECK(state.stats[0].spells_countered == 1);
+}
+
 TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
     const auto state = old_school::white_lock_plan_diagnostic_state();
     CHECK(state.active_player == 0);
@@ -5607,6 +5929,508 @@ old_school::HumanController burn_human_controller(
     return controller;
 }
 
+old_school::HumanController delayed_burn_human_controller(
+    std::size_t player, std::size_t first_burn_turn) {
+    auto controller = developing_human_controller();
+    controller.choose_priority_action =
+        [player, first_burn_turn](
+            const old_school::PlayerObservation& observation,
+            old_school::TurnPhase,
+            const std::vector<old_school::PriorityAction>& actions) {
+            const auto land = std::find_if(
+                actions.begin(), actions.end(),
+                [](const old_school::PriorityAction& action) {
+                    return action.kind ==
+                           old_school::PriorityActionKind::PlayLand;
+                });
+            if (land != actions.end()) {
+                return static_cast<std::size_t>(
+                    std::distance(actions.begin(), land));
+            }
+            if (observation.turn_number >= first_burn_turn) {
+                const auto bolt = std::find_if(
+                    actions.begin(), actions.end(),
+                    [player](
+                        const old_school::PriorityAction& action) {
+                        return action.kind ==
+                                   old_school::PriorityActionKind::
+                                       CastLightningBolt &&
+                               action.target.has_value() &&
+                               !action.target->creature.has_value() &&
+                               action.target->player == 1 - player;
+                    });
+                if (bolt != actions.end()) {
+                    return static_cast<std::size_t>(
+                        std::distance(actions.begin(), bolt));
+                }
+            }
+            return priority_action_index(
+                actions, old_school::PriorityActionKind::Pass);
+        };
+    return controller;
+}
+
+TEST(sparse_contextual_trace_has_exact_legacy_state_pushes) {
+    old_school::GameConfig config;
+    config.max_turns = 12;
+    config.starting_player = 0;
+    constexpr std::uint64_t kSeed = 0x5A2A5EULL;
+
+    std::vector<old_school::GameState> legacy_trace;
+    old_school::Game legacy_game(
+        old_school::blue_deck(),
+        old_school::white_control_deck(), kSeed, config);
+    const auto legacy_result =
+        legacy_game.run_with_trace(legacy_trace);
+
+    std::vector<old_school::LearnedDecisionTracePoint>
+        contextual_trace;
+    old_school::Game contextual_game(
+        old_school::blue_deck(),
+        old_school::white_control_deck(), kSeed, config);
+    const auto contextual_result =
+        contextual_game.run_with_learned_decision_trace(
+            contextual_trace,
+            old_school::LearnedDecisionTraceMode::Sparse);
+
+    CHECK(contextual_result == legacy_result);
+    CHECK(!legacy_trace.empty());
+    CHECK(contextual_trace.size() == legacy_trace.size());
+    for (std::size_t index = 0; index < legacy_trace.size();
+         ++index) {
+        CHECK(contextual_trace[index].state ==
+              legacy_trace[index]);
+        const auto& context = contextual_trace[index].context;
+        CHECK(context.valid);
+        CHECK(context.decision_player < 2);
+        CHECK(context.consecutive_passes >= 0);
+        CHECK(context.consecutive_passes <= 1);
+        const auto encoded =
+            old_school::learned_decision_context_features(
+                context, context.decision_player);
+        CHECK(std::any_of(
+            encoded.begin(), encoded.end(),
+            [](double value) { return value != 0.0; }));
+    }
+}
+
+TEST(dense_contextual_trace_is_a_chronological_sparse_superset) {
+    const auto deck = two_card_deck(
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt);
+    old_school::GameConfig config;
+    config.max_turns = 4;
+    config.starting_player = 0;
+    config.human_controllers[0] =
+        delayed_burn_human_controller(0, 3);
+    config.human_controllers[1] =
+        delayed_burn_human_controller(1, 3);
+    constexpr std::uint64_t kSeed = 0xD345EULL;
+
+    std::vector<old_school::LearnedDecisionTracePoint> sparse;
+    old_school::Game sparse_game(deck, deck, kSeed, config);
+    const auto sparse_result =
+        sparse_game.run_with_learned_decision_trace(
+            sparse, old_school::LearnedDecisionTraceMode::Sparse);
+
+    std::vector<old_school::LearnedDecisionTracePoint> dense;
+    old_school::Game dense_game(deck, deck, kSeed, config);
+    const auto dense_result =
+        dense_game.run_with_learned_decision_trace(
+            dense, old_school::LearnedDecisionTraceMode::Dense);
+
+    CHECK(dense_result == sparse_result);
+    CHECK(!sparse.empty());
+    CHECK(dense.size() >= sparse.size());
+    CHECK(dense.size() <
+          old_school::kLearnedDenseDecisionTraceLimit);
+    CHECK(std::is_sorted(
+        dense.begin(), dense.end(),
+        [](const old_school::LearnedDecisionTracePoint& left,
+           const old_school::LearnedDecisionTracePoint& right) {
+            return left.state.turn_number <
+                   right.state.turn_number;
+        }));
+
+    std::size_t dense_index = 0;
+    for (const auto& sparse_point : sparse) {
+        while (dense_index < dense.size() &&
+               !(dense[dense_index] == sparse_point)) {
+            ++dense_index;
+        }
+        CHECK(dense_index < dense.size());
+        ++dense_index;
+    }
+}
+
+TEST(dense_contextual_trace_cap_is_deterministic_and_retains_late_stack_stratum) {
+    const auto deck = two_card_deck(
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt);
+    old_school::GameConfig config;
+    config.max_turns = 20;
+    config.starting_player = 0;
+    config.human_controllers[0] =
+        delayed_burn_human_controller(0, 15);
+    config.human_controllers[1] =
+        delayed_burn_human_controller(1, 15);
+    constexpr std::uint64_t kSeed = 0x64B0A7DULL;
+
+    const auto run = [&] {
+        std::vector<old_school::LearnedDecisionTracePoint> trace;
+        old_school::Game game(deck, deck, kSeed, config);
+        const auto result =
+            game.run_with_learned_decision_trace(
+                trace,
+                old_school::LearnedDecisionTraceMode::Dense);
+        return std::pair{result, std::move(trace)};
+    };
+    const auto [result, trace] = run();
+    const auto [repeated_result, repeated_trace] = run();
+
+    CHECK(result == repeated_result);
+    CHECK(trace == repeated_trace);
+    CHECK(trace.size() ==
+          old_school::kLearnedDenseDecisionTraceLimit);
+    CHECK(std::is_sorted(
+        trace.begin(), trace.end(),
+        [](const old_school::LearnedDecisionTracePoint& left,
+           const old_school::LearnedDecisionTracePoint& right) {
+            return left.state.turn_number <
+                   right.state.turn_number;
+        }));
+
+    const auto pass_one_stack = std::find_if(
+        trace.begin(), trace.end(),
+        [](const old_school::LearnedDecisionTracePoint& point) {
+            return point.context.valid &&
+                   point.context.consecutive_passes == 1 &&
+                   !point.state.stack.empty();
+        });
+    CHECK(pass_one_stack != trace.end());
+    CHECK(pass_one_stack->state.turn_number >= 15);
+    CHECK(pass_one_stack->context.decision_player !=
+          pass_one_stack->state.stack.back().controller);
+
+    const std::size_t perspective =
+        pass_one_stack->context.decision_player;
+    const auto repartitioned =
+        hidden_repartition(pass_one_stack->state, perspective);
+    CHECK(old_school::learned_contextual_observation(
+              pass_one_stack->state, perspective,
+              pass_one_stack->context) ==
+          old_school::learned_contextual_observation(
+              repartitioned, perspective,
+              pass_one_stack->context));
+}
+
+TEST(dense_contextual_trace_smokes_all_five_decks) {
+    const std::array<std::vector<old_school::CardId>, 5> decks = {
+        old_school::green_deck(),
+        old_school::red_deck(),
+        old_school::blue_deck(),
+        old_school::white_control_deck(),
+        old_school::ru_aggro_deck(),
+    };
+    for (std::size_t deck = 0; deck < decks.size(); ++deck) {
+        old_school::GameConfig config;
+        config.max_turns = 2;
+        config.starting_player = deck % 2;
+        old_school::Game game(
+            decks[deck], decks[(deck + 1) % decks.size()],
+            0xF1DEDEC0ULL + deck, config);
+        std::vector<old_school::LearnedDecisionTracePoint> trace;
+        static_cast<void>(
+            game.run_with_learned_decision_trace(
+                trace,
+                old_school::LearnedDecisionTraceMode::Dense));
+        CHECK(!trace.empty());
+        CHECK(trace.size() <=
+              old_school::kLearnedDenseDecisionTraceLimit);
+        CHECK(std::all_of(
+            trace.begin(), trace.end(),
+            [](const old_school::LearnedDecisionTracePoint& point) {
+                return point.context.valid &&
+                       point.context.decision_player < 2 &&
+                       point.context.consecutive_passes >= 0 &&
+                       point.context.consecutive_passes <= 1;
+            }));
+    }
+}
+
+TEST(contextual_shallow_value_uses_each_live_priority_successor) {
+    const auto model = context_sensitive_value_model();
+    auto fixture = determinization_fixture();
+    constexpr std::uint64_t kStackSeed = 0xC07E57ACULL;
+    const auto sampled_world =
+        [](const old_school::GameState& state,
+           const std::array<std::vector<old_school::CardId>, 2>&
+               decks,
+           std::size_t player, std::uint64_t seed) {
+            std::mt19937_64 random(seed);
+            return old_school::sample_determinization(
+                state, decks, player, random());
+        };
+    const auto pass_score =
+        [](const old_school::LearnedValuePriorityDiagnostic&
+               diagnostic) {
+            return diagnostic.scores[priority_action_index(
+                diagnostic.actions,
+                old_school::PriorityActionKind::Pass)];
+        };
+
+    const auto pass_zero =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 0, model, 0,
+            kStackSeed);
+    auto pass_zero_successor =
+        sampled_world(
+            fixture.state, fixture.decks, 0, kStackSeed);
+    old_school::PriorityState pass_zero_priority = {
+        .player = 0,
+        .consecutive_passes = 0,
+    };
+    CHECK(old_school::pass_priority(
+              pass_zero_successor, pass_zero_priority) ==
+          old_school::PriorityPassResult::Passed);
+    const old_school::LearnedDecisionContext
+        pass_zero_context = {
+            .valid = true,
+            .phase = old_school::TurnPhase::BeginCombat,
+            .decision_player = 1,
+            .consecutive_passes = 1,
+            .sorcery_actions = false,
+        };
+    const double expected_pass_zero =
+        old_school::learned_contextual_critic_value(
+            pass_zero_successor, 0, pass_zero_context, model);
+    CHECK(pass_score(pass_zero) == expected_pass_zero);
+    CHECK(std::abs(
+              expected_pass_zero -
+              old_school::learned_critic_value(
+                  pass_zero_successor, 0, model)) >
+          1.0e-6);
+
+    const auto pass_one =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 1, model, 0,
+            kStackSeed);
+    auto pass_one_successor =
+        sampled_world(
+            fixture.state, fixture.decks, 0, kStackSeed);
+    old_school::PriorityState pass_one_priority = {
+        .player = 0,
+        .consecutive_passes = 1,
+    };
+    CHECK(old_school::pass_priority(
+              pass_one_successor, pass_one_priority) ==
+          old_school::PriorityPassResult::
+              StackObjectResolved);
+    CHECK(pass_one_priority.player ==
+          pass_one_successor.active_player);
+    CHECK(pass_one_priority.consecutive_passes == 0);
+    const old_school::LearnedDecisionContext pass_one_context = {
+        .valid = true,
+        .phase = old_school::TurnPhase::BeginCombat,
+        .decision_player = pass_one_successor.active_player,
+        .consecutive_passes = 0,
+        .sorcery_actions = false,
+    };
+    CHECK(pass_score(pass_one) ==
+          old_school::learned_contextual_critic_value(
+              pass_one_successor, 0, pass_one_context, model));
+
+    const auto white_state =
+        old_school::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<old_school::CardId>, 2>
+        white_decks = {
+            old_school::white_control_deck(),
+            old_school::red_deck(),
+        };
+    constexpr std::uint64_t kWhiteSeed = 0xCA57C07EULL;
+    const auto cast =
+        old_school::diagnose_learned_value_priority(
+            white_state, white_decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, 0,
+            kWhiteSeed);
+    const std::size_t cast_index = priority_action_index(
+        cast.actions,
+        old_school::PriorityActionKind::CastEnchantment);
+    auto cast_successor =
+        sampled_world(
+            white_state, white_decks, 0, kWhiteSeed);
+    CHECK(old_school::apply_priority_action(
+        cast_successor, 0, cast.actions[cast_index], true));
+    const old_school::LearnedDecisionContext cast_context = {
+        .valid = true,
+        .phase = old_school::TurnPhase::FirstMain,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    CHECK(cast.scores[cast_index] ==
+          old_school::learned_contextual_critic_value(
+              cast_successor, 0, cast_context, model));
+
+    const auto ended =
+        old_school::diagnose_learned_value_priority(
+            white_state, white_decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, 0,
+            kWhiteSeed);
+    CHECK(pass_score(ended) == 0.5);
+
+    const auto legacy = small_value_model();
+    const auto legacy_ended =
+        old_school::diagnose_learned_value_priority(
+            white_state, white_decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, legacy, 0,
+            kWhiteSeed);
+    auto legacy_successor =
+        sampled_world(
+            white_state, white_decks, 0, kWhiteSeed);
+    old_school::PriorityState legacy_priority = {
+        .player = 0,
+        .consecutive_passes = 1,
+    };
+    CHECK(old_school::pass_priority(
+              legacy_successor, legacy_priority) ==
+          old_school::PriorityPassResult::WindowEnded);
+    CHECK(pass_score(legacy_ended) ==
+          old_school::learned_critic_value(
+              legacy_successor, 0, legacy));
+}
+
+TEST(contextual_combat_value_uses_end_combat_and_hides_opponent_cards) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 6;
+    state.next_permanent_id = 2;
+    state.players[0].library = {
+        old_school::CardId::Forest,
+        old_school::CardId::GiantGrowth,
+    };
+    state.players[0].hand = {
+        old_school::CardId::Forest,
+    };
+    state.players[0].creatures = {
+        creature(
+            1, old_school::CardId::GrizzlyBears, false),
+    };
+    state.players[1].hand = {
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt,
+    };
+    state.players[1].library = {
+        old_school::CardId::LightningBolt,
+        old_school::CardId::Mountain,
+    };
+    const std::vector<std::vector<old_school::PermanentId>>
+        candidates = {{1}};
+    const auto model = context_sensitive_value_model();
+    const auto scores =
+        old_school::learned_value_attack_set_scores(
+            state, 0, candidates, model, 0xE0DC0B47ULL);
+    CHECK(scores.scores.size() == 1);
+
+    auto successor = state;
+    CHECK(old_school::resolve_combat(
+        successor, 0, candidates.front(), {}));
+    const old_school::LearnedDecisionContext context = {
+        .valid = true,
+        .phase = old_school::TurnPhase::EndCombat,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = false,
+    };
+    const double expected =
+        old_school::learned_contextual_critic_value(
+            successor, 0, context, model);
+    CHECK(scores.scores.front() == expected);
+    CHECK(std::abs(
+              expected -
+              old_school::learned_critic_value(
+                  successor, 0, model)) >
+          1.0e-6);
+
+    const auto hidden = hidden_repartition(state, 0);
+    CHECK(old_school::learned_value_attack_set_scores(
+              hidden, 0, candidates, model,
+              0xE0DC0B47ULL)
+              .scores == scores.scores);
+}
+
+TEST(contextual_horizon_bootstraps_at_next_first_main_and_window_end_is_neutral) {
+    const auto state =
+        old_school::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
+    };
+    const auto model = context_sensitive_value_model();
+    const std::vector<old_school::PriorityAction> candidates = {
+        old_school::PriorityAction::pass(),
+    };
+    old_school::LearnedSearchConfig search{
+        .seed = 0xF1257A11ULL,
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = false,
+    };
+    const auto continuation =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1, candidates,
+            model, search);
+    CHECK(continuation.q_samples.size() == 1);
+    CHECK(continuation.q_samples.front().size() == 1);
+
+    auto next_turn = state;
+    old_school::PriorityState priority = {
+        .player = 0,
+        .consecutive_passes = 1,
+    };
+    CHECK(old_school::pass_priority(
+              next_turn, priority) ==
+          old_school::PriorityPassResult::WindowEnded);
+    old_school::cleanup_turn(next_turn);
+    ++next_turn.turn_number;
+    next_turn.active_player = 1;
+    old_school::begin_turn(next_turn, 1);
+    CHECK(!next_turn.players[1].library.empty());
+    next_turn.players[1].hand.push_back(
+        next_turn.players[1].library.back());
+    next_turn.players[1].library.pop_back();
+    ++next_turn.stats[1].cards_drawn;
+    const old_school::LearnedDecisionContext next_context = {
+        .valid = true,
+        .phase = old_school::TurnPhase::FirstMain,
+        .decision_player = 1,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    const double expected =
+        old_school::learned_contextual_critic_value(
+            next_turn, 0, next_context, model);
+    CHECK(continuation.q_samples.front().front() == expected);
+
+    search.blend_shallow_prior = true;
+    const auto blended =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1, candidates,
+            model, search);
+    CHECK(blended.q_samples.size() == 1);
+    CHECK(blended.q_samples.front().size() == 1);
+    CHECK(blended.q_samples.front().front() ==
+          (expected + 0.5) / 2.0);
+}
+
 TEST(interactive_observation_hides_both_libraries_and_opponent_hand) {
     old_school::GameState state;
     state.active_player = 1;
@@ -5625,7 +6449,7 @@ TEST(interactive_observation_hides_both_libraries_and_opponent_hand) {
         old_school::CardId::Island,
     };
     state.players[1].library = {
-        old_school::CardId::WaterElemental,
+        old_school::CardId::AirElemental,
         old_school::CardId::Counterspell,
     };
     state.players[1].graveyard = {

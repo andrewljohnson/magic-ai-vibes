@@ -8,106 +8,34 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 15:10 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 16:07 PDT — refreshed at the top of every review cycle.*
 
-- **ROOT CAUSE FOUND: the critic is context-blind.** The
-  value-context diagnostic (verified independently by the reviewer)
-  proves the critic's features are bit-identical between "pass and
-  retain priority" and "pass and a lethal spell resolves" — the
-  consequence of passing is unrepresentable in the current input
-  schema. This explains the RU hold/X=0 defect and the epsilon
-  treatment's backfire. Licensed next step: neutral
-  phase/pass/sorcery context features + dense traces, preregistered
-  before retraining.
-- **RU treatment #1 (epsilon continuations) FAILED its gate** —
-  epsilon 0.05 made Q(Pass)−Q(X=0) 10x worse (−0.0011 → −0.0129).
-  Now fully explained by the context-blindness above.
-- **📊 LIFT GATE: 4 of 5 — best in project history** (was 2 of 5).
-  The preregistered C16/K=8 mixed field: Blue FLIPPED to strictly best
-  (+48.8 vs +45.0; the 17.5-point gap eliminated exactly as the
-  determinization theory predicted), Green/Red/White all strictly
-  best. **RU Aggro fails by 5.0pp — the last deck between Learned and
-  the crown.** Per preregistration, next step is a card-agnostic
-  learning experiment, not tuning to the cell.
-- **🏆 Champion screen passed and reproduced bit-for-bit** by both
-  agents independently (55.7% over legacy G0, every slice ahead), and
-  the port replicates the branch game-for-game on all three
-  Handcrafted seeds. C16 is the accepted milestone challenger;
-  promotion ladder continues (2,000-game virgin seed → eight-seed
-  panel).
-
-- **Correction on record:** the branch's "G0" baseline was not the
-  legacy champion (Codex proved it by fingerprint audit — reviewer
-  error, corrected in the 12:26 entry). The virgin-seed Handcrafted
-  milestones stand unaffected. Codex is porting the challenger recipe
-  as a separate model family with legacy G0 pinned bit-for-bit; that
-  port becomes the canonical champion comparison.
-- **Challenger lift-table preview: 3 of 5 PASS** (champion: 2 of 5) at
-  the recipe's WEAKER K=2 deployment — Green flipped to strictly best,
-  Blue's gap collapsed 17.5 → 3.7 points (one-cell noise), RU (−8.7)
-  the only clear fail. Depth comparison: C16 > C2 51.8% pooled at equal
-  K=8. Rejected honestly: T=1333 data scaling (−4.8pp aggregate, RU
-  flat). Threading K=8 through the tournament path is likely worth more
-  for Blue than any training change; RU awaits probe diagnosis.
-
-- **HEADLINE: confirmed in BOTH environments.** The challenger recipe
-  beats Handcrafted at 95% confidence on virgin seeds in the four-deck
-  world (55.1%, CI 53.0–57.3) AND the five-deck world (53.5%, CI
-  51.3–55.6, 2,040 games). Four of five slices ahead — including Red
-  (46.3/36.3), historically unsolvable. **RU Aggro (38.0/46.1) is the
-  single deck between the challenger and "Learned is king"**, plus the
-  mixed-field lift gate.
-- **Environment FROZEN at `c64b80c`.** Five-deck Old School engine
-  committed with 122 passing tests and a zero-finding ASan/UBSan run.
-  Canonical lift-gate baseline: 2 of 5 (White +55.0 and Red +43.8 pass;
-  Green −1.3 and RU −5.0 are within one-cell noise; Blue −17.5 is the
-  one confirmed gap). Future table deltas now mean learning progress.
-- **The recipe transfers.** Ported challenger recipe on the five-deck
-  engine: 52.4% pooled vs Handcrafted (51.2/52.5/53.3 by seed, 720
-  games) — above 50% on every seed in an environment it was never
-  tuned on. Blue 72.9%/57.6% pooled (the lift table's largest gap,
-  directly attacked), Red best-ever 48.6%, Green a tie; RU Aggro
-  (31.9%) is the one weak deck. Next: 2,000-game virgin-seed
-  confirmation, head-to-head vs Codex's G0 champion, and scoring the
-  frozen artifacts on probe-dev-v3 when it lands.
-- **What Codex shipped:** the whole five-deck Old School engine in one
-  push — RU Aggro rules (flying, Ironclaw restriction, Disintegrate
-  X/exile), Giant Growth, frozen predeclared Handcrafted heuristics for
-  every new card, clean-break schema policy, a 30,000-game deck-balance
-  matrix with a 45-55% regression guard, 121 tests passing. Earlier in
-  the cycle: Mix50 rejected with a clean causal readout (search share
-  exonerated for the G4→G5 collapse).
-- **Claude challenger: crossed 50%.** G16 at K=8 scored 51.7% pooled vs
-  Handcrafted (49.5/53.0/52.5) on the frozen three-seed screen — the
-  program's monotone ladder is 43.3 → 46.7 → 48.7 → 51.7. Blue flipped
-  from worst slice to 65.3% pooled, beating Handcrafted's Blue — strong
-  confirmation of the stack-tactics hypothesis and directly relevant to
-  the five-deck Blue/Green gap. A 2,000-game confirmation on fresh seed
-  202 is in flight; win or lose, the old-environment program concludes
-  there and the recipe (bootstrapped targets, many short generations,
-  search-on late collection, K=8 deployment) ports to the five-deck
-  engine once Codex commits the refactor.
-- **What Codex is doing now:** building the offline probe instrument
-  (deep-reference labels for held-out decisions) that will guide an
-  iterated search-as-teacher training loop — the current best path to the
-  gate.
-- **Latest review verdict:** strongest Codex cycle yet — the healing
-  audit fixed what the review flagged and found a second defect
-  (terminal saturation) on its own. Remaining watch items: don't
-  iterate Mix50 against its own offline gates (Goodhart risk on 16
-  probes), keep the Value cross-check row when regenerating v2 labels,
-  and real-game probe harvesting is still owed.
-- **Watch next:** Mix50 results in both trees — it's the highest-value
-  experiment for the Blue gap, which is now the main obstacle to the
-  lift gate.
-- **Claude challenger** (branch `claude/challenger`, worktree
-  `../magic-ai-vibes-claude`, plan/log in `CLAUDE-PLAN.md`): racing Codex
-  toward the same gates. Monotone climb on the shared frozen 3-seed
-  protocol: 43.3% baseline → 43.8% (n-step targets) → 44.8% (8
-  bootstrapped generations) → **46.7%** (search-on collection in late
-  generations). Red recovered from 31.3% to 40.0% pooled; Blue (46.0%)
-  is now the limiting slice. Key finding for Codex too: bootstrapped
-  targets flip generation scaling from harmful to monotonically helpful.
+- **ENVIRONMENT v2 (user-directed):** Blue runs Power (Ancestral, Time
+  Walk, Mox Sapphire, Sol Ring, Braingeyser) plus Force Spike and Air
+  Elementals; Red is a curve deck; seven new cards; schema v2
+  fail-closed; 129 tests + ASan/UBSan clean. All prior champion and
+  milestone claims are noncomparable. Blue/White 90.4% random
+  imbalance recorded honestly with a full-matrix guard.
+- **Lift gate (v2 baseline): 3 of 5** at default deployment — Green,
+  White, and RU pass (RU flipped!); Red −3.7 and Blue −2.5 are the
+  narrowest misses the default view has ever shown, before any
+  retraining in this world.
+- **ROOT CAUSE CONFIRMED + FIX PREREGISTERED:** the Value critic is
+  context-blind — bit-identical features between "pass and retain
+  priority" and "pass and a lethal spell resolves" (independently
+  verified). Codex's staged 2×2 retrain (context features × dense
+  decision-root traces, bit-identical S0 control, K=8 throughout) is
+  the strongest experimental design of the project and targets the
+  last defect class directly.
+- **Program history in one line:** the challenger recipe (bootstrapped
+  targets → 16 generations → search-on collection → K=8) beat
+  Handcrafted at 95% confidence on virgin seeds in two prior
+  environments, beat the legacy champion on every deck (verified
+  bit-for-bit by both agents), and its lift table reached 4 of 5
+  before the v2 reset; full detail in the timestamped entries below.
+- **Top program risk: environment churn** — three world-resets today;
+  an explicit version/freeze policy is recommended so a champion
+  promotion can complete inside one world.
 
 ## Goal under review
 
@@ -128,6 +56,103 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 16:07 PDT
+
+Two 2×2 prerequisites completed and recorded since the last entry
+(S1 implementation continues, 14 files in flux):
+
+1. **S0 control frozen** — the exact preregistered command published
+   the state-only C16 control artifact (fingerprint `bda1ea44…`) and
+   correctly discarded its 60-game smoke as strength evidence (23-37
+   at n=60 is noise; the CLI's inconclusive exit was the right
+   verdict). S0 is now the immutable comparison point for every 2×2
+   cell.
+2. **Force Spike offline audit passed** — the deployed state-only
+   learner already selects Force Spike when the target cannot pay
+   (100% top-1 on all four Blue fixtures), and the first attempt
+   failed closed on a stale pre-expansion label cache, which is the
+   schema machinery working as designed. Codex's own follow-up (a
+   paired live/payable two-state report, required of every context
+   candidate) closes the one gap in the fixture.
+
+Lift table deterministic-identical (v2 baseline: 3 of 5; Red −3.7,
+Blue −2.5). No priorities to add — the program is executing its own
+preregistrations cleanly; reviewer's role is now verbatim verification
+at each 2×2 cell and ladder rung.
+
+## 2026-07-25 15:40 PDT
+
+The 2×2 preregistration is complete and answers the 15:37 entry's
+priority 2 exactly: cell selection is offline-only (S1 tried first;
+D0/D1 only if S1 fails its gates; D1 must beat both D0 and S1 on
+pooled regret, critic loss, and the pass-sensitive stratum; "do not
+choose a cell based on one gameplay seed"), followed by a fully
+predeclared promotion ladder — reject-only screen at seed 919191,
+2,040 games vs S0 at 271828, 2,040 vs Handcrafted at 314159, then the
+eight-seed panel and the mixed-field lift gate. Handcrafted is never
+consulted during treatment selection. This is the promotion-grade
+pipeline the project has been converging toward all day; nothing to
+critique in the design.
+
+Implementation in progress (6 files). Lift table
+deterministic-identical to the 15:37 v2 baseline (3 of 5; Red −3.7,
+Blue −2.5). Reviewer stands ready to execute each ladder rung verbatim
+as it is reached.
+
+## 2026-07-25 15:37 PDT
+
+State reviewed: environment v2 (user-directed) — Blue gains Power pieces
+(Mox Sapphire, Sol Ring, Ancestral Recall, Time Walk, Braingeyser),
+Force Spike, Flying Men, Air Elementals; Red restructured into a curve
+deck; seven new cards through the normal mana/priority/stack paths;
+schema v2 fail-closed; 129 tests + ASan/UBSan clean. Plus: the
+Counterspell probe audit passed (C16 100% top-1 on all Blue fixtures),
+and the context-aware retrain is preregistered as a staged 2×2.
+
+### Verdict
+
+Three things deserve specific credit. (1) The Blue/White 90.4% random
+imbalance is recorded honestly with a full-matrix regression guard
+instead of quietly nerfing the requested lists. (2) The 2×2 design
+(S0/S1/D0/D1: context × trace density) with zero-initialized appended
+context weights and a bit-identical S0 guarantee is the strongest
+experimental design of the project — it isolates both suspected root
+causes without confounding them. (3) The context feature set is
+minimal and clean (context bit, phase one-hot, relative priority, pass
+count, sorcery bit — nothing card-specific).
+
+### Lift table (seed 4242, environment v2, NEW baseline)
+
+| Deck | Learned lift | Best rival | Verdict |
+| --- | ---: | ---: | --- |
+| Green | +41.2 | +33.8 (HC) | PASS |
+| White | +37.5 | +35.0 (HC) | PASS |
+| RU Aggro | +46.2 | +36.2 (HC) | PASS (flipped!) |
+| Red | +62.5 | +66.2 (HC) | FAIL by 3.7 |
+| Blue | +45.0 | +47.5 (HC) | FAIL by 2.5 |
+
+3 of 5 at default G0/K=2 deployment. NOT comparable to any prior
+table. Notable: RU passes in the new metagame, while the two misses
+(Red, Blue) are both under 4 points — the closest the default view
+has ever been to the crown, before any retraining in this world.
+
+### Priorities
+
+1. Environment churn is the top program risk again: this is the third
+   world-reset today, and each one voids the promotion ladder
+   mid-flight. Strongly recommend an explicit environment-version
+   policy: batch card additions into scheduled releases, freeze
+   between them, and only run champion promotions inside a freeze
+   window. Otherwise "Learned is king" keeps being redefined faster
+   than it can be proven.
+2. The 2×2's four training cells at T=800/G16 are ~15 min each plus
+   screens — predeclare the cell comparison gates (which deltas at
+   what sample) before results arrive, so the 4-way readout doesn't
+   invite post-hoc selection.
+3. Extra-turn (Time Walk) and floating-mana states are new
+   probe-corpus territory — the harvest pipeline should collect from
+   the new mechanics before the next corpus version.
 
 ## 2026-07-25 15:10 PDT
 

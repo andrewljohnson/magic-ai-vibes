@@ -409,7 +409,24 @@ reading the opponent's hidden cards:
   --probe-worlds 8 --probe-horizon 0 \
   --train-games 800 --train-seed 424242 \
   --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
+
+./build/old-school-sim --score-probes \
+  --learned-generations 16 \
+  --challenger learned-value-context-c16 \
+  --learned-rollouts 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
 ```
+
+The context-candidate form reports the frozen state-only C16 control followed
+by its S1 context-aware treatment. Dev-v3 runs also print a supplemental
+Force Spike gate through the real deployed `K`/`H=4` Value path: one state
+where a tapped-out Red player cannot pay `{1}`, and one reachable control with
+a fourth untapped Mountain. A model passes only if it uniquely chooses Force
+Spike in the first state and Pass in the second. These two controls verify
+behavior and hidden-zone invariance but are deliberately excluded from the
+balanced 20-position metrics, label-cache identity, and promotion claims.
 
 The separate harvested RU regression asks the sharper question raised by
 interactive play—whether holding Disintegrate is ranked above spending it for
@@ -489,9 +506,3 @@ the specified Blue power cards and exact deck counts take precedence over the
 earlier count-balanced environment. The test suite pins the full ten-matchup
 seed-303 matrix within one percentage point so future rules changes cannot
 silently rewrite this baseline.
-
-As an integration check—not a Learned-strength claim—the repaired Handcrafted
-Policy beat two-rollout Monte Carlo 253–47 in the balanced five-deck harness;
-its RU slice was 45–15. It attacks with unblocked Flying Men, holds no-effect
-`X=0` Disintegrates, develops the useful land color, and saves or precombat
-pumps creatures with Giant Growth.

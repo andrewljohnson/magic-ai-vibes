@@ -199,6 +199,35 @@ CandidatePairEstimate make_candidate_pair_estimate(
     const probe_eval::ProbeLabel& label, std::string name,
     std::string_view first_key, std::string_view second_key);
 
+struct ForceSpikeControlDecision {
+    std::string stable_id;
+    double pass_score = 0.0;
+    double force_spike_score = 0.0;
+    // Priority deployment samples uniformly from all exact-score maxima.
+    // Keeping the complete set makes a tie visible instead of accidentally
+    // blessing one possible random draw.
+    std::vector<std::string> selected_keys;
+
+    bool operator==(const ForceSpikeControlDecision&) const = default;
+};
+
+struct ForceSpikePolicyControlReport {
+    std::string policy_name;
+    std::string model_fingerprint;
+    std::size_t worlds = 0;
+    std::size_t horizon_turns = 0;
+    ForceSpikeControlDecision live;
+    ForceSpikeControlDecision payable;
+    bool hidden_repartition_passed = false;
+
+    bool live_selects_force_spike() const;
+    bool payable_selects_pass() const;
+    bool gate_passed() const;
+
+    bool operator==(const ForceSpikePolicyControlReport&) const =
+        default;
+};
+
 struct ProbeScoreReport {
     ProbeCorpusKind corpus_kind = ProbeCorpusKind::DevV3;
     // Neither the small development corpus nor the focused harvested
@@ -231,6 +260,11 @@ struct ProbeScoreReport {
     // Value policy's own common-world Value-mirror search samples. G0 is
     // always first, followed by every scoring Value model in caller order.
     std::vector<CandidatePairEstimate> value_candidate_pairs;
+    // Supplemental paired behavioral controls for deployed Value search.
+    // They are deliberately excluded from cached labels, deck-balanced
+    // metrics, cache identity, and promotion claims.
+    std::vector<ForceSpikePolicyControlReport>
+        force_spike_controls;
     HiddenRepartitionSummary hidden_repartition;
 };
 
@@ -349,6 +383,16 @@ ProbeScoreReport score_probe_dev_with_candidates(
 ProbeScoreReport score_probe_corpus_with_candidates(
     ProbeCorpusKind corpus_kind, const ProbeScoreConfig& config,
     std::ostream& progress, ProbeScoringModels models);
+
+// Scores the paired live/payable Force Spike controls through the actual
+// deployed Value priority path (K worlds, H=4, aggregate shallow-prior
+// blend), including a bit-identical hidden-repartition check. This is a
+// reject-only behavioral diagnostic, not a balanced policy metric.
+ForceSpikePolicyControlReport
+score_value_force_spike_policy_controls(
+    std::shared_ptr<const LearnedModel> model,
+    std::string policy_name, std::size_t worlds = 8,
+    double value_continuation_epsilon = 0.0);
 
 // Builds the exact deployed-selection attribution used by checkpoint reports.
 // Null selected_key means uniform choice over all exact score maxima; a

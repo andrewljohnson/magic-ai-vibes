@@ -50,7 +50,8 @@ class TestRunner {
         std::cout
             << passed_
             << " probe tests passed (20 dev fixtures + 1 harvested "
-               "validation fixture)\n";
+               "validation fixture + 2 supplemental Force Spike "
+               "controls)\n";
         return 0;
     }
 
@@ -545,6 +546,129 @@ void test_force_spike_probe_is_a_live_mana_advantage_counter() {
                 CardId::ForceSpike) == 1 &&
             counter_state.stats[0].spells_countered == 1,
         "Force Spike did not counter the tapped-out Gray Ogre");
+}
+
+void test_force_spike_policy_controls_isolate_payable_tax() {
+    const std::vector<DecisionProbe> controls =
+        old_school::probes::make_force_spike_policy_controls_v1();
+    expect(
+        old_school::probes::
+            validate_force_spike_policy_controls_v1(controls)
+                .empty(),
+        "Force Spike policy controls failed specialized validation");
+    expect(controls.size() == 2,
+           "Force Spike policy controls lost a paired state");
+
+    const DecisionProbe& live = controls[0];
+    const DecisionProbe& payable = controls[1];
+    expect(
+        live.stable_id ==
+                "control.blue.force-spike-live-gray-ogre.v1" &&
+            payable.stable_id ==
+                "control.blue.force-spike-payable-gray-ogre.v1",
+        "Force Spike policy control identity changed");
+    expect(
+        live.candidates.size() == 2 &&
+            live.candidates[0].descriptor == "pass" &&
+            live.candidates[1].descriptor ==
+                "force-spike-gray-ogre" &&
+            live.candidates[0].action ==
+                payable.candidates[0].action &&
+            live.candidates[1].action ==
+                payable.candidates[1].action,
+        "Force Spike controls do not share Pass/Spike candidates");
+
+    GameState normalized_live = live.state;
+    GameState normalized_payable = payable.state;
+    auto& payable_lands =
+        normalized_payable.players[1].lands;
+    const auto extra_mountain = std::find_if(
+        payable_lands.begin(), payable_lands.end(),
+        [](const old_school::LandPermanent& permanent) {
+            return permanent.card == CardId::Mountain &&
+                   !permanent.tapped;
+        });
+    expect(extra_mountain != payable_lands.end(),
+           "payable control lacks its fourth untapped Mountain");
+    payable_lands.erase(extra_mountain);
+    normalized_payable.players[1].library.push_back(
+        CardId::Mountain);
+    for (std::size_t player = 0; player < 2; ++player) {
+        std::sort(
+            normalized_live.players[player].library.begin(),
+            normalized_live.players[player].library.end());
+        std::sort(
+            normalized_payable.players[player].library.begin(),
+            normalized_payable.players[player].library.end());
+    }
+    expect(
+        normalized_live == normalized_payable &&
+            live.state.players[1].mana_pool ==
+                old_school::ManaCost{} &&
+            payable.state.players[1].mana_pool ==
+                old_school::ManaCost{} &&
+            live.state.players[1].lands.size() == 3 &&
+            payable.state.players[1].lands.size() == 4,
+        "Force Spike controls differ by more than one public "
+        "Mountain");
+    expect(
+        old_school::probes::
+                hidden_clone_is_determinization_invariant(
+                    live, old_school::probes::kProbeValidationSeed) &&
+            old_school::probes::
+                hidden_clone_is_determinization_invariant(
+                    payable,
+                    old_school::probes::kProbeValidationSeed + 1),
+        "Force Spike controls are not hidden-repartition invariant");
+
+    const PriorityAction force_spike =
+        std::get<PriorityAction>(live.candidates[1].action);
+
+    GameState live_state = live.state;
+    expect(
+        old_school::apply_priority_action(
+            live_state, live.root_player, force_spike, false),
+        "live control could not cast Force Spike");
+    resolve_cast_spell(live_state);
+    expect(
+        live_state.stack.empty() &&
+            live_state.players[1].creatures.empty() &&
+            live_state.stats[0].spells_countered == 1,
+        "live control did not counter the unpayable Gray Ogre");
+
+    GameState payable_state = payable.state;
+    expect(
+        old_school::apply_priority_action(
+            payable_state, payable.root_player, force_spike, false),
+        "payable control could not cast Force Spike");
+    resolve_cast_spell(payable_state);
+    expect(
+        payable_state.stack.size() == 1 &&
+            payable_state.stack.back().card == CardId::GrayOgre &&
+            payable_state.players[1].mana_pool ==
+                old_school::ManaCost{} &&
+            std::all_of(
+                payable_state.players[1].lands.begin(),
+                payable_state.players[1].lands.end(),
+                [](const old_school::LandPermanent& permanent) {
+                    return permanent.tapped;
+                }) &&
+            payable_state.stats[0].spells_countered == 0,
+        "payable control did not spend the tax and retain Gray Ogre");
+    resolve_cast_spell(payable_state);
+    expect(
+        payable_state.stack.empty() &&
+            creature_id(payable_state, 1, CardId::GrayOgre) != 0 &&
+            payable_state.stats[0].spells_countered == 0,
+        "Gray Ogre failed to resolve after paying Force Spike");
+
+    std::vector<DecisionProbe> malformed = controls;
+    malformed[1].state.players[1].lands.back().tapped = true;
+    expect(
+        !old_school::probes::
+             validate_force_spike_policy_controls_v1(malformed)
+                 .empty(),
+        "specialized validator accepted two unpayable controls");
 }
 
 void test_response_windows_record_the_casters_pass() {
@@ -1059,6 +1183,8 @@ int main() {
                test_counter_war_lists_every_legal_spell_target);
     runner.run("Force Spike live counter",
                test_force_spike_probe_is_a_live_mana_advantage_counter);
+    runner.run("Force Spike policy controls",
+               test_force_spike_policy_controls_isolate_payable_tax);
     runner.run("response priority context",
                test_response_windows_record_the_casters_pass);
     runner.run("unique v3 stable IDs and categories",

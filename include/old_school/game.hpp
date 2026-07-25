@@ -130,6 +130,8 @@ struct PlayerState {
     // remains available through the current phase, then is cleared.
     ManaCost mana_pool;
     bool land_played_this_turn = false;
+
+    bool operator==(const PlayerState&) const = default;
 };
 
 struct Target {
@@ -152,6 +154,8 @@ struct PlayerGameStats {
     std::size_t cards_milled = 0;
     std::size_t decisions = 0;
     std::size_t monte_carlo_rollouts = 0;
+
+    bool operator==(const PlayerGameStats&) const = default;
 };
 
 using StackObjectId = std::uint64_t;
@@ -188,6 +192,8 @@ struct GameState {
     std::size_t turn_number = 0;
     PermanentId next_permanent_id = 1;
     StackObjectId next_stack_object_id = 1;
+
+    bool operator==(const GameState&) const = default;
 };
 
 // Samples a complete state consistent with everything `observer` can know.
@@ -283,6 +289,57 @@ enum class TurnPhase : std::uint8_t {
     EndCombat,
     SecondMain,
 };
+
+// Ephemeral rules context for a Learned critic evaluation. This is kept
+// separate from GameState because phase, priority ownership, and pass history
+// belong to the engine's control flow rather than the physical game state.
+// When `valid` is false every encoded context feature is zero, which provides
+// an explicit compatibility mode for state-only critics and non-decision
+// bootstrap boundaries.
+struct LearnedDecisionContext {
+    bool valid = false;
+    TurnPhase phase = TurnPhase::FirstMain;
+    // The player making the decision. In a priority window this is the
+    // current priority holder.
+    std::size_t decision_player = 0;
+    int consecutive_passes = 0;
+    bool sorcery_actions = false;
+
+    bool operator==(const LearnedDecisionContext&) const = default;
+};
+
+// Fixed order:
+//   valid,
+//   seven phase one-hots,
+//   decision player relative to perspective (self, opponent),
+//   pass count (zero, one),
+//   sorcery-actions bit.
+inline constexpr std::size_t kLearnedDecisionContextFeatureCount = 13;
+using LearnedDecisionContextFeatures =
+    std::array<double, kLearnedDecisionContextFeatureCount>;
+
+enum class LearnedCriticSchema : std::uint8_t {
+    LegacyStateOnly,
+    DecisionContextV1,
+};
+
+struct LearnedDecisionTracePoint {
+    GameState state;
+    LearnedDecisionContext context;
+
+    bool operator==(const LearnedDecisionTracePoint&) const = default;
+};
+
+enum class LearnedDecisionTraceMode : std::uint8_t {
+    Sparse,
+    Dense,
+};
+
+inline constexpr std::size_t kLearnedDenseDecisionTraceLimit = 64;
+
+LearnedDecisionContextFeatures learned_decision_context_features(
+    const LearnedDecisionContext& context,
+    std::size_t perspective);
 
 // A perspective-safe snapshot for an interactive player. Public zones contain
 // card identities; hidden zones expose counts only. The observer's own hand is
@@ -468,6 +525,8 @@ struct GameResult {
         BotKind::Random,
         BotKind::Random,
     };
+
+    bool operator==(const GameResult&) const = default;
 };
 
 struct GameConfig {
@@ -573,7 +632,9 @@ struct LearnedSearchConfig {
     std::size_t rollouts_per_world = 1;
     // Zero finishes the current turn, begins/draws the next turn, and
     // bootstraps before priority. A positive value plays exactly that many
-    // complete future turns and bootstraps after the final cleanup.
+    // complete future turns. DecisionContextV1 then begins/draws the following
+    // turn and bootstraps at its First Main decision; legacy models retain
+    // their historical post-cleanup bootstrap exactly.
     std::size_t horizon_turns = 4;
     LearnedVariant continuation_variant = LearnedVariant::UnifiedActor;
     // Applies only to depth-zero Value-mirror continuation decisions. Root
@@ -711,6 +772,9 @@ class Game {
 
     GameResult run();
     GameResult run_with_trace(std::vector<GameState>& trace);
+    GameResult run_with_learned_decision_trace(
+        std::vector<LearnedDecisionTracePoint>& trace,
+        LearnedDecisionTraceMode mode);
     const GameState& state() const;
 
   private:
@@ -791,7 +855,8 @@ class Game {
         const GameState& sampled_state, std::uint64_t seed) const;
     double learned_value_shallow_action_score(
         const PriorityAction& action, std::size_t player,
-        bool sorcery_actions, int consecutive_passes,
+        bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes,
         const GameState& sampled_state) const;
     std::optional<GameResult>
     finish_turn_after_priority_phase(TurnPhase phase);
@@ -822,6 +887,10 @@ class Game {
     GameState state_;
     std::optional<GameResult> setup_result_;
     std::vector<GameState>* trace_ = nullptr;
+    std::vector<LearnedDecisionTracePoint>*
+        learned_decision_trace_ = nullptr;
+    LearnedDecisionTraceMode learned_decision_trace_mode_ =
+        LearnedDecisionTraceMode::Sparse;
 };
 
 struct DeckSimulationStats {
@@ -1069,6 +1138,83 @@ load_learned_value_challenger_artifact(
     const std::string& path, std::size_t expected_training_games,
     std::uint64_t expected_seed,
     std::size_t expected_self_play_generations);
+
+// Coverage accounting for the live decision roots used by the contextual
+// S1 trainer. Deck counts are attributed to the deck controlled by the
+// decision player. Stack status uses index 0 for empty and 1 for non-empty.
+struct LearnedValueContextRootCoverage {
+    std::size_t anchor_roots = 0;
+    std::size_t self_play_roots = 0;
+    std::array<std::size_t, kDeckCount> decision_player_decks{};
+    std::array<std::size_t, 7> phases{};
+    std::array<std::size_t, 2> pass_counts{};
+    std::array<std::size_t, 2> stack_status{};
+
+    std::size_t total_roots() const;
+    bool operator==(
+        const LearnedValueContextRootCoverage&) const = default;
+};
+
+class LearnedValueContextChallengerArtifact {
+  public:
+    std::shared_ptr<const LearnedModel> model() const;
+    std::size_t training_games() const;
+    std::uint64_t seed() const;
+    std::size_t self_play_generations() const;
+    LearnedCriticSchema critic_schema() const;
+    LearnedDecisionTraceMode trace_mode() const;
+    std::size_t trace_limit() const;
+    const LearnedValueContextRootCoverage& root_coverage() const;
+
+  private:
+    LearnedValueContextChallengerArtifact(
+        std::shared_ptr<const LearnedModel> model,
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations,
+        LearnedValueContextRootCoverage root_coverage);
+
+    std::shared_ptr<const LearnedModel> model_;
+    std::size_t training_games_ = 0;
+    std::uint64_t seed_ = 0;
+    std::size_t self_play_generations_ = 0;
+    LearnedValueContextRootCoverage root_coverage_;
+
+    friend LearnedValueContextChallengerArtifact
+    train_learned_value_context_challenger_artifact(
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations);
+    friend void
+    write_learned_value_context_challenger_artifact_atomic(
+        const std::string& path,
+        const LearnedValueContextChallengerArtifact& artifact);
+    friend LearnedValueContextChallengerArtifact
+    load_learned_value_context_challenger_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed,
+        std::size_t expected_self_play_generations);
+};
+
+std::shared_ptr<const LearnedModel>
+train_learned_value_context_challenger(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations);
+LearnedValueContextChallengerArtifact
+train_learned_value_context_challenger_artifact(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations);
+std::string learned_value_context_challenger_cache_path(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations);
+void write_learned_value_context_challenger_artifact_atomic(
+    const std::string& path,
+    const LearnedValueContextChallengerArtifact& artifact);
+LearnedValueContextChallengerArtifact
+load_learned_value_context_challenger_artifact(
+    const std::string& path, std::size_t expected_training_games,
+    std::uint64_t expected_seed,
+    std::size_t expected_self_play_generations);
+
 std::shared_ptr<const LearnedModel>
 train_learned_actor_model(std::size_t training_games,
                           std::uint64_t seed);
@@ -1078,6 +1224,12 @@ train_learned_actor_model(std::size_t training_games,
 // inspects cards, game state, or another policy.
 struct LearnedCriticTrainingExample {
     std::vector<double> features;
+    double target = 0.5;
+};
+
+struct LearnedContextualCriticTrainingExample {
+    std::vector<double> features;
+    LearnedDecisionContextFeatures context_features{};
     double target = 0.5;
 };
 
@@ -1098,6 +1250,20 @@ struct LearnedValueUpdateConfig {
 std::shared_ptr<const LearnedModel> update_learned_value_model(
     std::shared_ptr<const LearnedModel> parent,
     const std::vector<LearnedCriticTrainingExample>& examples,
+    LearnedValueUpdateConfig config = {});
+
+// Returns an immutable deep clone with a separate, zero-initialized
+// DecisionContextV1 input path. The legacy state weights, policy tensors,
+// predictions, and source model are unchanged.
+std::shared_ptr<const LearnedModel> with_learned_decision_context(
+    std::shared_ptr<const LearnedModel> parent);
+
+// Fits only a DecisionContextV1 Value model. State and context inputs remain
+// physically separate so legacy model dimensions and artifacts stay stable.
+std::shared_ptr<const LearnedModel>
+update_learned_contextual_value_model(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedContextualCriticTrainingExample>& examples,
     LearnedValueUpdateConfig config = {});
 
 enum class LearnedPolicyDecisionKind : std::uint8_t {
@@ -1358,6 +1524,17 @@ std::string learned_model_fingerprint(
 // information, never the opponent's hidden card identities.
 std::vector<double>
 learned_observation(const GameState& state, std::size_t perspective);
+// Evaluation/debug seam containing the unchanged state observation followed
+// by the fixed neutral context vector. It is not consumed by legacy policies.
+std::vector<double> learned_contextual_observation(
+    const GameState& state, std::size_t perspective,
+    const LearnedDecisionContext& context);
+LearnedCriticSchema learned_critic_schema(
+    std::shared_ptr<const LearnedModel> model);
+double learned_contextual_critic_value(
+    const GameState& state, std::size_t perspective,
+    const LearnedDecisionContext& context,
+    std::shared_ptr<const LearnedModel> model);
 std::vector<double> learned_priority_policy_features(
     const GameState& state, std::size_t perspective,
     const PriorityAction& action, bool sorcery_actions,

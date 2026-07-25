@@ -129,6 +129,21 @@ constexpr std::string_view kValueChallengerEngineSchemaId =
 constexpr std::string_view kValueChallengerRecipeId =
     "old-school.learned-value-challenger."
     "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
+constexpr std::array<std::uint8_t, 8>
+    kValueContextChallengerArtifactMagic = {
+        'O', 'S', 'M', 'V', 'C', 'T', 'X', '1',
+    };
+constexpr std::uint32_t
+    kValueContextChallengerArtifactSchema = 1;
+constexpr std::string_view kValueContextChallengerRecipeId =
+    "old-school.learned-value-context-s1."
+    "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
+constexpr std::string_view kValueContextCriticSchemaId =
+    "old-school.learned-critic.decision-context-v1";
+constexpr LearnedDecisionTraceMode
+    kValueContextChallengerTraceMode =
+        LearnedDecisionTraceMode::Sparse;
+constexpr std::size_t kValueContextChallengerTraceLimit = 0;
 constexpr std::size_t kMaximumValueG8ArtifactBytes =
     64U * 1024U * 1024U;
 constexpr std::size_t kMaximumValueG8ArtifactStringBytes = 256;
@@ -578,6 +593,12 @@ class LearnedModel {
     static constexpr std::size_t kPolicyHiddenCount = 32;
     using FeatureVector = std::array<double, kFeatureCount>;
     using TrainingExample = std::pair<FeatureVector, double>;
+    using ContextFeatureVector = LearnedDecisionContextFeatures;
+    struct ContextTrainingExample {
+        FeatureVector features{};
+        ContextFeatureVector context_features{};
+        double target = 0.5;
+    };
     using PolicyFeatureVector =
         std::array<double, kPolicyFeatureCount>;
 
@@ -643,6 +664,54 @@ class LearnedModel {
             }
         }
         return 1.0 / (1.0 + std::exp(-output));
+    }
+
+    double predict(
+        const FeatureVector& features,
+        const ContextFeatureVector& context_features) const {
+        if (critic_schema_ ==
+                LearnedCriticSchema::LegacyStateOnly ||
+            std::none_of(
+                context_features.begin(), context_features.end(),
+                [](double value) { return value != 0.0; })) {
+            return predict(features);
+        }
+        if (!ensemble_.empty()) {
+            double total = 0.0;
+            for (const auto& member : ensemble_) {
+                total += member->predict(
+                    features, context_features);
+            }
+            return total /
+                   static_cast<double>(ensemble_.size());
+        }
+        const auto hidden =
+            contextual_hidden_values(features, context_features);
+        double output = output_bias_;
+        for (std::size_t index = 0; index < hidden.size(); ++index) {
+            output += output_weights_[index] * hidden[index];
+        }
+        for (std::size_t feature = 0; feature < features.size();
+             ++feature) {
+            if (features[feature] != 0.0) {
+                output += direct_output_weights_[feature] *
+                          features[feature];
+            }
+        }
+        for (std::size_t feature = 0;
+             feature < context_features.size(); ++feature) {
+            if (context_features[feature] != 0.0 &&
+                context_direct_output_weights_[feature] != 0.0) {
+                output +=
+                    context_direct_output_weights_[feature] *
+                    context_features[feature];
+            }
+        }
+        return 1.0 / (1.0 + std::exp(-output));
+    }
+
+    LearnedCriticSchema critic_schema() const {
+        return critic_schema_;
     }
 
     double policy_logit(const PolicyFeatureVector& features,
@@ -743,6 +812,122 @@ class LearnedModel {
                         }
                     }
                     hidden_biases_[hidden_index] -= rate * hidden_error;
+                }
+            }
+        }
+    }
+
+    void train_contextual(
+        const std::vector<ContextTrainingExample>& examples,
+        std::size_t epochs, double learning_rate,
+        std::uint64_t seed) {
+        if (!ensemble_.empty()) {
+            throw std::logic_error(
+                "cannot train a composite learned ensemble");
+        }
+        if (critic_schema_ !=
+            LearnedCriticSchema::DecisionContextV1) {
+            throw std::logic_error(
+                "contextual training requires a contextual critic");
+        }
+        std::mt19937_64 random(seed);
+        std::vector<std::size_t> order(examples.size());
+        for (std::size_t index = 0; index < order.size(); ++index) {
+            order[index] = index;
+        }
+        for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
+            std::shuffle(order.begin(), order.end(), random);
+            const double rate =
+                learning_rate /
+                (1.0 + 0.15 * static_cast<double>(epoch));
+            for (const std::size_t example_index : order) {
+                const auto& example = examples[example_index];
+                const auto& features = example.features;
+                const auto& context_features =
+                    example.context_features;
+                const double target = example.target;
+                const auto hidden =
+                    contextual_hidden_values(
+                        features, context_features);
+                double output_sum = output_bias_;
+                for (std::size_t index = 0; index < hidden.size();
+                     ++index) {
+                    output_sum +=
+                        output_weights_[index] * hidden[index];
+                }
+                for (std::size_t feature = 0;
+                     feature < features.size(); ++feature) {
+                    if (features[feature] != 0.0) {
+                        output_sum +=
+                            direct_output_weights_[feature] *
+                            features[feature];
+                    }
+                }
+                for (std::size_t feature = 0;
+                     feature < context_features.size(); ++feature) {
+                    if (context_features[feature] != 0.0 &&
+                        context_direct_output_weights_[feature] !=
+                            0.0) {
+                        output_sum +=
+                            context_direct_output_weights_[feature] *
+                            context_features[feature];
+                    }
+                }
+                const double output =
+                    1.0 / (1.0 + std::exp(-output_sum));
+                const double output_error = output - target;
+                const auto old_output_weights = output_weights_;
+
+                for (std::size_t hidden_index = 0;
+                     hidden_index < kHiddenCount; ++hidden_index) {
+                    output_weights_[hidden_index] -=
+                        rate * output_error * hidden[hidden_index];
+                }
+                for (std::size_t feature = 0;
+                     feature < features.size(); ++feature) {
+                    if (features[feature] != 0.0) {
+                        direct_output_weights_[feature] -=
+                            rate * output_error *
+                            features[feature];
+                    }
+                }
+                for (std::size_t feature = 0;
+                     feature < context_features.size(); ++feature) {
+                    if (context_features[feature] != 0.0) {
+                        context_direct_output_weights_[feature] -=
+                            rate * output_error *
+                            context_features[feature];
+                    }
+                }
+                output_bias_ -= rate * output_error;
+
+                for (std::size_t hidden_index = 0;
+                     hidden_index < kHiddenCount; ++hidden_index) {
+                    const double hidden_error =
+                        output_error *
+                        old_output_weights[hidden_index] *
+                        (1.0 - hidden[hidden_index] *
+                                   hidden[hidden_index]);
+                    for (std::size_t feature = 0;
+                         feature < kFeatureCount; ++feature) {
+                        if (features[feature] != 0.0) {
+                            input_weights_[hidden_index][feature] -=
+                                rate * hidden_error *
+                                features[feature];
+                        }
+                    }
+                    for (std::size_t feature = 0;
+                         feature < context_features.size();
+                         ++feature) {
+                        if (context_features[feature] != 0.0) {
+                            context_input_weights_[hidden_index]
+                                                  [feature] -=
+                                rate * hidden_error *
+                                context_features[feature];
+                        }
+                    }
+                    hidden_biases_[hidden_index] -=
+                        rate * hidden_error;
                 }
             }
         }
@@ -932,6 +1117,30 @@ class LearnedModel {
         return clone;
     }
 
+    std::shared_ptr<LearnedModel> deep_clone_contextual(
+        std::vector<std::shared_ptr<LearnedModel>>& critic_leaves)
+        const {
+        auto clone =
+            std::shared_ptr<LearnedModel>(new LearnedModel(*this));
+        clone->ensemble_.clear();
+        clone->critic_schema_ =
+            LearnedCriticSchema::DecisionContextV1;
+        if (ensemble_.empty()) {
+            critic_leaves.push_back(clone);
+            return clone;
+        }
+        clone->ensemble_.reserve(ensemble_.size());
+        for (const auto& member : ensemble_) {
+            if (!member) {
+                throw std::logic_error(
+                    "cannot clone a null Learned critic member");
+            }
+            clone->ensemble_.push_back(
+                member->deep_clone_contextual(critic_leaves));
+        }
+        return clone;
+    }
+
   private:
     void initialize_policy(std::uint64_t seed) {
         std::mt19937_64 random(seed);
@@ -959,6 +1168,35 @@ class LearnedModel {
                 if (features[feature] != 0.0) {
                     sum += input_weights_[hidden_index][feature] *
                            features[feature];
+                }
+            }
+            hidden[hidden_index] = std::tanh(sum);
+        }
+        return hidden;
+    }
+
+    std::array<double, kHiddenCount> contextual_hidden_values(
+        const FeatureVector& features,
+        const ContextFeatureVector& context_features) const {
+        std::array<double, kHiddenCount> hidden;
+        for (std::size_t hidden_index = 0;
+             hidden_index < kHiddenCount; ++hidden_index) {
+            double sum = hidden_biases_[hidden_index];
+            for (std::size_t feature = 0;
+                 feature < kFeatureCount; ++feature) {
+                if (features[feature] != 0.0) {
+                    sum += input_weights_[hidden_index][feature] *
+                           features[feature];
+                }
+            }
+            for (std::size_t feature = 0;
+                 feature < context_features.size(); ++feature) {
+                if (context_features[feature] != 0.0 &&
+                    context_input_weights_[hidden_index][feature] !=
+                        0.0) {
+                    sum +=
+                        context_input_weights_[hidden_index][feature] *
+                        context_features[feature];
                 }
             }
             hidden[hidden_index] = std::tanh(sum);
@@ -1000,6 +1238,15 @@ class LearnedModel {
         add_model_fingerprint_value(hash, output_weights_);
         add_model_fingerprint_value(hash, direct_output_weights_);
         add_model_fingerprint_value(hash, output_bias_);
+        if (critic_schema_ ==
+            LearnedCriticSchema::DecisionContextV1) {
+            hash.add(0x434F4E5445585431ULL);
+            hash.add(static_cast<std::uint64_t>(critic_schema_));
+            add_model_fingerprint_value(
+                hash, context_input_weights_);
+            add_model_fingerprint_value(
+                hash, context_direct_output_weights_);
+        }
         add_model_fingerprint_value(hash, policy_input_weights_);
         add_model_fingerprint_value(hash, policy_hidden_biases_);
         add_model_fingerprint_value(hash, policy_output_weights_);
@@ -1041,6 +1288,16 @@ class LearnedModel {
         std::size_t expected_training_games,
         std::uint64_t expected_seed,
         std::size_t expected_self_play_generations);
+    friend void
+    write_learned_value_context_challenger_artifact_atomic(
+        const std::string& path,
+        const LearnedValueContextChallengerArtifact& artifact);
+    friend LearnedValueContextChallengerArtifact
+    load_learned_value_context_challenger_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed,
+        std::size_t expected_self_play_generations);
 
     std::array<std::array<double, kFeatureCount>, kHiddenCount>
         input_weights_{};
@@ -1048,6 +1305,12 @@ class LearnedModel {
     std::array<double, kHiddenCount> output_weights_{};
     std::array<double, kFeatureCount> direct_output_weights_{};
     double output_bias_ = 0.0;
+    std::array<
+        std::array<double, kLearnedDecisionContextFeatureCount>,
+        kHiddenCount>
+        context_input_weights_{};
+    std::array<double, kLearnedDecisionContextFeatureCount>
+        context_direct_output_weights_{};
     std::array<std::array<
                    std::array<double, kPolicyFeatureCount>,
                    kPolicyHiddenCount>,
@@ -1064,6 +1327,8 @@ class LearnedModel {
         policy_direct_output_weights_{};
     std::array<double, kPolicyDecisionCount> policy_output_bias_{};
     LearnedVariant variant_;
+    LearnedCriticSchema critic_schema_ =
+        LearnedCriticSchema::LegacyStateOnly;
     std::vector<std::shared_ptr<const LearnedModel>> ensemble_;
 };
 
@@ -1420,6 +1685,111 @@ update_learned_value_model_encoded(
     return candidate;
 }
 
+std::size_t checked_value_context_coverage_total(
+    const LearnedValueContextRootCoverage& coverage,
+    std::string_view source) {
+    if (coverage.anchor_roots == 0 ||
+        coverage.self_play_roots == 0 ||
+        coverage.self_play_roots >
+            std::numeric_limits<std::size_t>::max() -
+                coverage.anchor_roots) {
+        throw std::runtime_error(
+            std::string(source) +
+            " has invalid anchor/self-play root counts");
+    }
+    return coverage.anchor_roots + coverage.self_play_roots;
+}
+
+template <std::size_t Size>
+void validate_value_context_coverage_axis(
+    const std::array<std::size_t, Size>& counts,
+    std::size_t expected_total, std::string_view source,
+    std::string_view axis) {
+    std::size_t total = 0;
+    for (const std::size_t count : counts) {
+        if (count > expected_total ||
+            count >
+                std::numeric_limits<std::size_t>::max() -
+                    total) {
+            throw std::runtime_error(
+                std::string(source) + " has invalid " +
+                std::string(axis) + " coverage");
+        }
+        total += count;
+    }
+    if (total != expected_total) {
+        throw std::runtime_error(
+            std::string(source) + " has inconsistent " +
+            std::string(axis) + " coverage");
+    }
+}
+
+void validate_value_context_root_coverage(
+    const LearnedValueContextRootCoverage& coverage,
+    std::string_view source) {
+    const std::size_t total =
+        checked_value_context_coverage_total(coverage, source);
+    validate_value_context_coverage_axis(
+        coverage.decision_player_decks, total, source,
+        "decision-player deck");
+    validate_value_context_coverage_axis(
+        coverage.phases, total, source, "phase");
+    validate_value_context_coverage_axis(
+        coverage.pass_counts, total, source, "pass");
+    validate_value_context_coverage_axis(
+        coverage.stack_status, total, source, "stack-status");
+}
+
+void add_value_context_root_coverage(
+    const std::vector<LearnedDecisionTracePoint>& trace,
+    DeckId first_deck, DeckId second_deck, bool self_play,
+    LearnedValueContextRootCoverage& coverage) {
+    std::size_t& source_total =
+        self_play ? coverage.self_play_roots
+                  : coverage.anchor_roots;
+    const std::array<DeckId, 2> decks = {
+        first_deck,
+        second_deck,
+    };
+    for (const auto& point : trace) {
+        const auto& context = point.context;
+        const std::size_t phase =
+            static_cast<std::size_t>(context.phase);
+        if (!context.valid || context.decision_player >= 2 ||
+            context.consecutive_passes < 0 ||
+            context.consecutive_passes > 1 || phase >= 7) {
+            throw std::logic_error(
+                "contextual S1 trace contains an invalid decision root");
+        }
+        if (source_total ==
+            std::numeric_limits<std::size_t>::max()) {
+            throw std::overflow_error(
+                "contextual S1 root coverage overflow");
+        }
+        ++source_total;
+        const std::size_t deck = static_cast<std::size_t>(
+            decks[context.decision_player]);
+        const std::size_t pass = static_cast<std::size_t>(
+            context.consecutive_passes);
+        const std::size_t stack =
+            point.state.stack.empty() ? 0U : 1U;
+        ++coverage.decision_player_decks[deck];
+        ++coverage.phases[phase];
+        ++coverage.pass_counts[pass];
+        ++coverage.stack_status[stack];
+    }
+}
+
+struct LearnedValueContextTrainingResult {
+    std::shared_ptr<const LearnedModel> model;
+    LearnedValueContextRootCoverage root_coverage;
+};
+
+LearnedValueContextTrainingResult
+train_learned_value_context_challenger_internal(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations);
+
 } // namespace
 
 LearnedValueChallengerArtifact::LearnedValueChallengerArtifact(
@@ -1450,6 +1820,69 @@ LearnedValueChallengerArtifact::self_play_generations() const {
     return self_play_generations_;
 }
 
+std::size_t LearnedValueContextRootCoverage::total_roots() const {
+    if (self_play_roots >
+        std::numeric_limits<std::size_t>::max() -
+            anchor_roots) {
+        throw std::overflow_error(
+            "contextual S1 root coverage total overflows size_t");
+    }
+    return anchor_roots + self_play_roots;
+}
+
+LearnedValueContextChallengerArtifact::
+    LearnedValueContextChallengerArtifact(
+        std::shared_ptr<const LearnedModel> model,
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations,
+        LearnedValueContextRootCoverage root_coverage)
+    : model_(std::move(model)),
+      training_games_(training_games),
+      seed_(seed),
+      self_play_generations_(self_play_generations),
+      root_coverage_(std::move(root_coverage)) {}
+
+std::shared_ptr<const LearnedModel>
+LearnedValueContextChallengerArtifact::model() const {
+    return model_;
+}
+
+std::size_t
+LearnedValueContextChallengerArtifact::training_games() const {
+    return training_games_;
+}
+
+std::uint64_t
+LearnedValueContextChallengerArtifact::seed() const {
+    return seed_;
+}
+
+std::size_t
+LearnedValueContextChallengerArtifact::
+    self_play_generations() const {
+    return self_play_generations_;
+}
+
+LearnedCriticSchema
+LearnedValueContextChallengerArtifact::critic_schema() const {
+    return LearnedCriticSchema::DecisionContextV1;
+}
+
+LearnedDecisionTraceMode
+LearnedValueContextChallengerArtifact::trace_mode() const {
+    return kValueContextChallengerTraceMode;
+}
+
+std::size_t
+LearnedValueContextChallengerArtifact::trace_limit() const {
+    return kValueContextChallengerTraceLimit;
+}
+
+const LearnedValueContextRootCoverage&
+LearnedValueContextChallengerArtifact::root_coverage() const {
+    return root_coverage_;
+}
+
 LearnedValueChallengerArtifact
 train_learned_value_challenger_artifact(
     std::size_t training_games, std::uint64_t seed,
@@ -1458,6 +1891,19 @@ train_learned_value_challenger_artifact(
         train_learned_value_challenger(
             training_games, seed, self_play_generations),
         training_games, seed, self_play_generations);
+}
+
+LearnedValueContextChallengerArtifact
+train_learned_value_context_challenger_artifact(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    auto trained =
+        train_learned_value_context_challenger_internal(
+            training_games, seed, self_play_generations);
+    return LearnedValueContextChallengerArtifact(
+        std::move(trained.model), training_games, seed,
+        self_play_generations,
+        std::move(trained.root_coverage));
 }
 
 std::string learned_value_g8_cache_path(
@@ -1489,6 +1935,26 @@ std::string learned_value_challenger_cache_path(
     }
     return "build/model-cache/"
            "old-school-value-challenger-v2-c" +
+           std::to_string(self_play_generations) + "-t" +
+           std::to_string(training_games) + "-s" +
+           std::to_string(seed) + ".bin";
+}
+
+std::string learned_value_context_challenger_cache_path(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value context challenger cache training_games "
+            "must be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value context challenger cache generations "
+            "must be positive");
+    }
+    return "build/model-cache/"
+           "old-school-value-context-s1-v2-c" +
            std::to_string(self_play_generations) + "-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
@@ -1571,6 +2037,12 @@ void write_learned_value_challenger_artifact_atomic(
                 throw std::runtime_error(
                     "Learned Value challenger artifact contains "
                     "a non-Value model node");
+            }
+            if (node->critic_schema_ !=
+                LearnedCriticSchema::LegacyStateOnly) {
+                throw std::runtime_error(
+                    "Learned Value challenger artifact cannot "
+                    "serialize a contextual critic");
             }
             if (node->ensemble_.size() >
                 kMaximumValueG8EnsembleMembers) {
@@ -1870,6 +2342,498 @@ load_learned_value_challenger_artifact(
     return LearnedValueChallengerArtifact(
         std::move(model), training_games, seed,
         self_play_generations);
+}
+
+void write_learned_value_context_challenger_artifact_atomic(
+    const std::string& path,
+    const LearnedValueContextChallengerArtifact& artifact) {
+    const auto& model = artifact.model_;
+    const std::size_t training_games =
+        artifact.training_games_;
+    const std::uint64_t seed = artifact.seed_;
+    const std::size_t self_play_generations =
+        artifact.self_play_generations_;
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value context artifact training_games "
+            "must be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value context artifact generations "
+            "must be positive");
+    }
+    if (!model) {
+        throw std::invalid_argument(
+            "Learned Value context artifact model must not "
+            "be null");
+    }
+    if (model->variant_ !=
+            LearnedVariant::ValueSearchChampion ||
+        model->critic_schema_ !=
+            LearnedCriticSchema::DecisionContextV1) {
+        throw std::invalid_argument(
+            "Learned Value context artifact requires a "
+            "DecisionContextV1 Value model");
+    }
+    validate_value_context_root_coverage(
+        artifact.root_coverage_,
+        "Learned Value context artifact");
+
+    const std::string fingerprint =
+        learned_model_fingerprint(model);
+    ValueG8BinaryWriter payload;
+    payload.text(kValueChallengerEngineSchemaId);
+    payload.text(kValueContextChallengerRecipeId);
+    payload.text(kValueContextCriticSchemaId);
+    payload.unsigned32(static_cast<std::uint32_t>(
+        LearnedCriticSchema::DecisionContextV1));
+    payload.unsigned32(static_cast<std::uint32_t>(
+        kValueContextChallengerTraceMode));
+    payload.size(kValueContextChallengerTraceLimit);
+    payload.size(kLearnedCardCount);
+    payload.size(LearnedModel::kScalarFeatureCount);
+    payload.size(LearnedModel::kCardPlanes);
+    payload.size(LearnedModel::kFeatureCount);
+    payload.size(kLearnedDecisionContextFeatureCount);
+    payload.size(LearnedModel::kHiddenCount);
+    payload.size(LearnedModel::kPolicyDecisionCount);
+    payload.size(LearnedModel::kPolicyPhaseCount);
+    payload.size(LearnedModel::kPolicyVerbCount);
+    payload.size(LearnedModel::kPolicyCardPlanes);
+    payload.size(LearnedModel::kPolicyScalarCount);
+    payload.size(LearnedModel::kPolicyFeatureCount);
+    payload.size(LearnedModel::kPolicyHiddenCount);
+    payload.size(training_games);
+    payload.unsigned64(seed);
+    payload.size(self_play_generations);
+    payload.size(artifact.root_coverage_.anchor_roots);
+    payload.size(artifact.root_coverage_.self_play_roots);
+    for (const std::size_t count :
+         artifact.root_coverage_.decision_player_decks) {
+        payload.size(count);
+    }
+    for (const std::size_t count :
+         artifact.root_coverage_.phases) {
+        payload.size(count);
+    }
+    for (const std::size_t count :
+         artifact.root_coverage_.pass_counts) {
+        payload.size(count);
+    }
+    for (const std::size_t count :
+         artifact.root_coverage_.stack_status) {
+        payload.size(count);
+    }
+    payload.text(fingerprint);
+
+    std::size_t node_count = 0;
+    std::function<void(
+        const std::shared_ptr<const LearnedModel>&,
+        std::size_t)>
+        write_model;
+    write_model =
+        [&](const std::shared_ptr<const LearnedModel>& node,
+            std::size_t depth) {
+            if (!node) {
+                throw std::runtime_error(
+                    "Learned Value context artifact contains "
+                    "a null model node");
+            }
+            if (depth > kMaximumValueG8ArtifactDepth ||
+                ++node_count > kMaximumValueG8ArtifactNodes) {
+                throw std::runtime_error(
+                    "Learned Value context artifact model "
+                    "graph exceeds its bound");
+            }
+            if (node->variant_ !=
+                    LearnedVariant::ValueSearchChampion ||
+                node->critic_schema_ !=
+                    LearnedCriticSchema::DecisionContextV1) {
+                throw std::runtime_error(
+                    "Learned Value context artifact contains "
+                    "a non-contextual Value model node");
+            }
+            if (node->ensemble_.size() >
+                kMaximumValueG8EnsembleMembers) {
+                throw std::runtime_error(
+                    "Learned Value context artifact ensemble "
+                    "exceeds its bound");
+            }
+            payload.unsigned32(0x4D4F444C);
+            payload.unsigned32(static_cast<std::uint32_t>(
+                node->variant_));
+            payload.unsigned32(static_cast<std::uint32_t>(
+                node->critic_schema_));
+            write_value_g8_fixed(
+                payload, node->input_weights_);
+            write_value_g8_fixed(
+                payload, node->hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->output_weights_);
+            write_value_g8_fixed(
+                payload, node->direct_output_weights_);
+            payload.real(node->output_bias_);
+            write_value_g8_fixed(
+                payload, node->context_input_weights_);
+            write_value_g8_fixed(
+                payload,
+                node->context_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_input_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->policy_output_weights_);
+            write_value_g8_fixed(
+                payload,
+                node->policy_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_output_bias_);
+            payload.unsigned32(static_cast<std::uint32_t>(
+                node->ensemble_.size()));
+            for (const auto& member : node->ensemble_) {
+                write_model(member, depth + 1);
+            }
+        };
+    write_model(model, 0);
+
+    ValueG8BinaryWriter file;
+    file.bytes(kValueContextChallengerArtifactMagic);
+    file.unsigned32(kValueContextChallengerArtifactSchema);
+    file.size(payload.data().size());
+    file.unsigned64(
+        value_g8_payload_checksum(payload.data()));
+    file.bytes(payload.data());
+    write_value_g8_file_atomic(path, file.data());
+}
+
+LearnedValueContextChallengerArtifact
+load_learned_value_context_challenger_artifact(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_seed,
+    std::size_t expected_self_play_generations) {
+    if (expected_training_games == 0) {
+        throw std::invalid_argument(
+            "expected Learned Value context training_games "
+            "must be positive");
+    }
+    if (expected_self_play_generations == 0) {
+        throw std::invalid_argument(
+            "expected Learned Value context generations "
+            "must be positive");
+    }
+
+    const std::vector<std::uint8_t> file_bytes =
+        read_bounded_value_g8_file(path);
+    ValueG8BinaryReader file(file_bytes);
+    for (const std::uint8_t expected :
+         kValueContextChallengerArtifactMagic) {
+        if (file.byte("file magic") != expected) {
+            throw std::runtime_error(
+                "Learned Value context artifact '" + path +
+                "' has the wrong magic");
+        }
+    }
+    const std::uint32_t schema = file.unsigned32("schema");
+    if (schema != kValueContextChallengerArtifactSchema) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' uses unsupported schema " +
+            std::to_string(schema) + " (expected " +
+            std::to_string(
+                kValueContextChallengerArtifactSchema) + ")");
+    }
+    const std::size_t payload_size =
+        file.size("payload length");
+    if (file.remaining() < 8 ||
+        payload_size > kMaximumValueG8ArtifactBytes ||
+        payload_size != file.remaining() - 8) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' has an invalid payload length");
+    }
+    const std::uint64_t stored_checksum =
+        file.unsigned64("payload checksum");
+    const auto payload_bytes =
+        file.take(payload_size, "payload");
+    if (!file.at_end()) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' has trailing bytes");
+    }
+    if (value_g8_payload_checksum(payload_bytes) !=
+        stored_checksum) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' failed its payload checksum");
+    }
+
+    ValueG8BinaryReader payload(payload_bytes);
+    const std::string engine_schema =
+        payload.text("engine schema ID");
+    if (engine_schema != kValueChallengerEngineSchemaId) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' engine schema mismatch: found '" +
+            engine_schema + "', expected '" +
+            std::string(kValueChallengerEngineSchemaId) + "'");
+    }
+    const std::string recipe = payload.text("recipe ID");
+    if (recipe != kValueContextChallengerRecipeId) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' recipe mismatch: found '" + recipe +
+            "', expected '" +
+            std::string(kValueContextChallengerRecipeId) + "'");
+    }
+    const std::string critic_schema_id =
+        payload.text("critic schema ID");
+    if (critic_schema_id != kValueContextCriticSchemaId) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' critic schema ID mismatch");
+    }
+    const std::uint32_t raw_critic_schema =
+        payload.unsigned32("critic schema");
+    if (raw_critic_schema != static_cast<std::uint32_t>(
+            LearnedCriticSchema::DecisionContextV1)) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' critic schema mismatch");
+    }
+    const std::uint32_t raw_trace_mode =
+        payload.unsigned32("trace mode");
+    if (raw_trace_mode != static_cast<std::uint32_t>(
+            kValueContextChallengerTraceMode)) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' trace mode mismatch");
+    }
+    const std::size_t trace_limit =
+        payload.size("trace limit");
+    if (trace_limit != kValueContextChallengerTraceLimit) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' trace limit mismatch");
+    }
+    const auto require_dimension =
+        [&](std::string_view name, std::size_t expected) {
+            const std::size_t actual = payload.size(name);
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "Learned Value context artifact '" + path +
+                    "' dimension '" + std::string(name) +
+                    "' is " + std::to_string(actual) +
+                    ", expected " + std::to_string(expected));
+            }
+        };
+    require_dimension("card count", kLearnedCardCount);
+    require_dimension(
+        "scalar feature count",
+        LearnedModel::kScalarFeatureCount);
+    require_dimension(
+        "card planes", LearnedModel::kCardPlanes);
+    require_dimension(
+        "feature count", LearnedModel::kFeatureCount);
+    require_dimension(
+        "context feature count",
+        kLearnedDecisionContextFeatureCount);
+    require_dimension(
+        "hidden count", LearnedModel::kHiddenCount);
+    require_dimension(
+        "policy decision count",
+        LearnedModel::kPolicyDecisionCount);
+    require_dimension(
+        "policy phase count",
+        LearnedModel::kPolicyPhaseCount);
+    require_dimension(
+        "policy verb count",
+        LearnedModel::kPolicyVerbCount);
+    require_dimension(
+        "policy card planes",
+        LearnedModel::kPolicyCardPlanes);
+    require_dimension(
+        "policy scalar count",
+        LearnedModel::kPolicyScalarCount);
+    require_dimension(
+        "policy feature count",
+        LearnedModel::kPolicyFeatureCount);
+    require_dimension(
+        "policy hidden count",
+        LearnedModel::kPolicyHiddenCount);
+
+    const std::size_t training_games =
+        payload.size("metadata training_games");
+    const std::uint64_t seed =
+        payload.unsigned64("metadata seed");
+    const std::size_t self_play_generations =
+        payload.size("metadata generations");
+    if (training_games != expected_training_games) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' training_games mismatch: found " +
+            std::to_string(training_games) + ", expected " +
+            std::to_string(expected_training_games));
+    }
+    if (seed != expected_seed) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' training seed mismatch: found " +
+            std::to_string(seed) + ", expected " +
+            std::to_string(expected_seed));
+    }
+    if (self_play_generations !=
+        expected_self_play_generations) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' generation mismatch: found " +
+            std::to_string(self_play_generations) +
+            ", expected " +
+            std::to_string(expected_self_play_generations));
+    }
+
+    LearnedValueContextRootCoverage root_coverage;
+    root_coverage.anchor_roots =
+        payload.size("coverage anchor roots");
+    root_coverage.self_play_roots =
+        payload.size("coverage self-play roots");
+    for (std::size_t& count :
+         root_coverage.decision_player_decks) {
+        count = payload.size(
+            "coverage decision-player deck");
+    }
+    for (std::size_t& count : root_coverage.phases) {
+        count = payload.size("coverage phase");
+    }
+    for (std::size_t& count :
+         root_coverage.pass_counts) {
+        count = payload.size("coverage pass");
+    }
+    for (std::size_t& count :
+         root_coverage.stack_status) {
+        count = payload.size("coverage stack status");
+    }
+    validate_value_context_root_coverage(
+        root_coverage,
+        "Learned Value context artifact '" + path + "'");
+
+    const std::string stored_fingerprint =
+        payload.text("model fingerprint");
+    if (!is_lower_hex_fingerprint(stored_fingerprint)) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' has a malformed model fingerprint");
+    }
+
+    std::size_t node_count = 0;
+    std::function<std::shared_ptr<const LearnedModel>(
+        std::size_t)>
+        read_model;
+    read_model = [&](std::size_t depth)
+        -> std::shared_ptr<const LearnedModel> {
+        if (depth > kMaximumValueG8ArtifactDepth ||
+            ++node_count > kMaximumValueG8ArtifactNodes) {
+            throw std::runtime_error(
+                "Learned Value context artifact '" + path +
+                "' model graph exceeds its bound");
+        }
+        if (payload.unsigned32("model marker") !=
+            0x4D4F444C) {
+            throw std::runtime_error(
+                "Learned Value context artifact '" + path +
+                "' has an invalid model marker");
+        }
+        const std::uint32_t raw_variant =
+            payload.unsigned32("model variant");
+        if (raw_variant != static_cast<std::uint32_t>(
+                LearnedVariant::ValueSearchChampion)) {
+            throw std::runtime_error(
+                "Learned Value context artifact '" + path +
+                "' contains a non-Value model variant");
+        }
+        const std::uint32_t node_schema =
+            payload.unsigned32("model critic schema");
+        if (node_schema != static_cast<std::uint32_t>(
+                LearnedCriticSchema::DecisionContextV1)) {
+            throw std::runtime_error(
+                "Learned Value context artifact '" + path +
+                "' contains a non-contextual model node");
+        }
+        auto node = std::shared_ptr<LearnedModel>(
+            new LearnedModel(
+                0, LearnedVariant::ValueSearchChampion));
+        node->critic_schema_ =
+            LearnedCriticSchema::DecisionContextV1;
+        read_value_g8_fixed(
+            payload, node->input_weights_,
+            "critic input weight");
+        read_value_g8_fixed(
+            payload, node->hidden_biases_,
+            "critic hidden bias");
+        read_value_g8_fixed(
+            payload, node->output_weights_,
+            "critic output weight");
+        read_value_g8_fixed(
+            payload, node->direct_output_weights_,
+            "critic direct weight");
+        node->output_bias_ =
+            payload.real("critic output bias");
+        read_value_g8_fixed(
+            payload, node->context_input_weights_,
+            "critic context input weight");
+        read_value_g8_fixed(
+            payload,
+            node->context_direct_output_weights_,
+            "critic context direct weight");
+        read_value_g8_fixed(
+            payload, node->policy_input_weights_,
+            "policy input weight");
+        read_value_g8_fixed(
+            payload, node->policy_hidden_biases_,
+            "policy hidden bias");
+        read_value_g8_fixed(
+            payload, node->policy_output_weights_,
+            "policy output weight");
+        read_value_g8_fixed(
+            payload,
+            node->policy_direct_output_weights_,
+            "policy direct weight");
+        read_value_g8_fixed(
+            payload, node->policy_output_bias_,
+            "policy output bias");
+        const std::uint32_t member_count =
+            payload.unsigned32("ensemble member count");
+        if (member_count >
+            kMaximumValueG8EnsembleMembers) {
+            throw std::runtime_error(
+                "Learned Value context artifact '" + path +
+                "' ensemble exceeds its bound");
+        }
+        node->ensemble_.reserve(member_count);
+        for (std::uint32_t member = 0;
+             member < member_count; ++member) {
+            node->ensemble_.push_back(
+                read_model(depth + 1));
+        }
+        return node;
+    };
+    auto model = read_model(0);
+    if (!payload.at_end()) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' has trailing payload bytes");
+    }
+    if (learned_model_fingerprint(model) !=
+        stored_fingerprint) {
+        throw std::runtime_error(
+            "Learned Value context artifact '" + path +
+            "' model fingerprint mismatch");
+    }
+    return LearnedValueContextChallengerArtifact(
+        std::move(model), training_games, seed,
+        self_play_generations, std::move(root_coverage));
 }
 
 void write_learned_value_g8_bundle_atomic(
@@ -2804,6 +3768,97 @@ std::shared_ptr<const LearnedModel> update_learned_value_model(
 
     return update_learned_value_model_encoded(
         std::move(parent), encoded, config);
+}
+
+std::shared_ptr<const LearnedModel>
+with_learned_decision_context(
+    std::shared_ptr<const LearnedModel> parent) {
+    if (!parent) {
+        throw std::invalid_argument(
+            "contextual Learned clone requires a parent model");
+    }
+    if (parent->variant() !=
+        LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "contextual Learned clone requires a Value model");
+    }
+    std::vector<std::shared_ptr<LearnedModel>> critic_leaves;
+    return parent->deep_clone_contextual(critic_leaves);
+}
+
+std::shared_ptr<const LearnedModel>
+update_learned_contextual_value_model(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedContextualCriticTrainingExample>& examples,
+    LearnedValueUpdateConfig config) {
+    if (!parent) {
+        throw std::invalid_argument(
+            "contextual Learned update requires a parent model");
+    }
+    if (parent->variant() !=
+            LearnedVariant::ValueSearchChampion ||
+        parent->critic_schema() !=
+            LearnedCriticSchema::DecisionContextV1) {
+        throw std::invalid_argument(
+            "contextual Learned update requires a contextual Value model");
+    }
+    if (!examples.empty() &&
+        (config.epochs == 0 ||
+         !std::isfinite(config.learning_rate) ||
+         config.learning_rate <= 0.0)) {
+        throw std::invalid_argument(
+            "contextual Learned update parameters must be positive");
+    }
+
+    std::vector<LearnedModel::ContextTrainingExample> encoded;
+    encoded.reserve(examples.size());
+    for (const auto& example : examples) {
+        if (example.features.size() !=
+                LearnedModel::kFeatureCount ||
+            !std::all_of(
+                example.features.begin(),
+                example.features.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                }) ||
+            !std::all_of(
+                example.context_features.begin(),
+                example.context_features.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                }) ||
+            !std::isfinite(example.target) ||
+            example.target < 0.0 || example.target > 1.0) {
+            throw std::invalid_argument(
+                "invalid contextual Learned Value training example");
+        }
+        LearnedModel::ContextTrainingExample converted;
+        std::copy(
+            example.features.begin(), example.features.end(),
+            converted.features.begin());
+        converted.context_features =
+            example.context_features;
+        converted.target = example.target;
+        encoded.push_back(std::move(converted));
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> critic_leaves;
+    auto candidate =
+        parent->deep_clone_mutable(critic_leaves);
+    std::vector<std::jthread> trainers;
+    trainers.reserve(critic_leaves.size());
+    for (std::size_t member = 0;
+         member < critic_leaves.size(); ++member) {
+        trainers.emplace_back([&, member] {
+            critic_leaves[member]->train_contextual(
+                encoded, config.epochs,
+                config.learning_rate,
+                config.root_seed ^
+                    (config.member_training_tag + member));
+        });
+    }
+    trainers.clear();
+    return candidate;
 }
 
 std::shared_ptr<const LearnedModel> update_learned_actor_model(
@@ -4495,6 +5550,16 @@ LearnedModel::FeatureVector learned_features(const GameState& state,
     return features;
 }
 
+double predict_learned_critic_with_context(
+    const std::shared_ptr<const LearnedModel>& model,
+    const GameState& state, std::size_t perspective,
+    const LearnedDecisionContext& context) {
+    return model->predict(
+        learned_features(state, perspective),
+        learned_decision_context_features(
+            context, perspective));
+}
+
 LearnedValueAttackSetScores score_learned_value_attack_sets(
     const GameState& state, std::size_t attacking_player,
     const std::vector<std::vector<PermanentId>>& candidates,
@@ -4572,8 +5637,17 @@ LearnedValueAttackSetScores score_learned_value_attack_sets(
                 successor.players[attacking_player].life <= 0) {
                 sample_score = 0.0;
             } else {
-                sample_score = model->predict(
-                    learned_features(successor, attacking_player));
+                sample_score =
+                    predict_learned_critic_with_context(
+                        model, successor, attacking_player,
+                        {
+                            .valid = true,
+                            .phase = TurnPhase::EndCombat,
+                            .decision_player =
+                                successor.active_player,
+                            .consecutive_passes = 0,
+                            .sorcery_actions = false,
+                        });
             }
             total_score += sample_score;
         }
@@ -6776,7 +7850,13 @@ PriorityAction Game::choose_priority_action(
     if (actions.empty()) {
         throw std::logic_error("priority window has no pass action");
     }
-    if (trace_ != nullptr && actions.size() > 1) {
+    const bool needs_sparse_priority_trace =
+        trace_ != nullptr ||
+        (learned_decision_trace_ != nullptr &&
+         learned_decision_trace_mode_ ==
+             LearnedDecisionTraceMode::Sparse);
+    bool sparse_priority_trace_site = false;
+    if (needs_sparse_priority_trace && actions.size() > 1) {
         const bool stack_choice = !state_.stack.empty();
         const bool activated_ability_choice = std::any_of(
             actions.begin(), actions.end(),
@@ -6785,8 +7865,26 @@ PriorityAction Game::choose_priority_action(
                        PriorityActionKind::ActivateMillstone;
             });
         if (stack_choice || activated_ability_choice) {
-            trace_->push_back(state_);
+            sparse_priority_trace_site = true;
+            if (trace_ != nullptr) {
+                trace_->push_back(state_);
+            }
         }
+    }
+    if (learned_decision_trace_ != nullptr &&
+        (learned_decision_trace_mode_ ==
+             LearnedDecisionTraceMode::Dense ||
+         sparse_priority_trace_site)) {
+        learned_decision_trace_->push_back({
+            .state = state_,
+            .context = {
+                .valid = true,
+                .phase = phase,
+                .decision_player = player,
+                .consecutive_passes = consecutive_passes,
+                .sorcery_actions = sorcery_actions,
+            },
+        });
     }
     if (actions.size() == 1) {
         return actions.front();
@@ -7000,8 +8098,8 @@ PriorityAction Game::choose_priority_action(
             for (const auto& world : worlds) {
                 scores[action_index] +=
                     learned_value_shallow_action_score(
-                    actions[action_index], player,
-                    sorcery_actions, consecutive_passes,
+                    actions[action_index], player, sorcery_actions,
+                    phase, consecutive_passes,
                     world.state);
             }
             scores[action_index] /=
@@ -7074,6 +8172,7 @@ double Game::learned_information_set_action_score(
     simulation.state_ = sampled_state;
     simulation.random_.seed(seed);
     simulation.trace_ = nullptr;
+    simulation.learned_decision_trace_ = nullptr;
     simulation.config_.human_controllers = {};
     simulation.config_.learned_policy_recorder.reset();
     simulation.config_.bots = {
@@ -7224,18 +8323,26 @@ double Game::learned_information_set_action_score(
 
 double Game::learned_value_shallow_action_score(
     const PriorityAction& action, std::size_t player,
-    bool sorcery_actions, int consecutive_passes,
+    bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes,
     const GameState& sampled_state) const {
+    const auto model = learned_model_for(player);
     GameState successor = sampled_state;
     PriorityState priority = {
         .player = player,
         .consecutive_passes = consecutive_passes,
     };
+    std::optional<PriorityPassResult> pass_result;
     if (action.kind == PriorityActionKind::Pass) {
-        pass_priority(successor, priority);
+        pass_result = pass_priority(successor, priority);
     } else if (!apply_priority_action(
                    successor, player, action, sorcery_actions)) {
         return -std::numeric_limits<double>::infinity();
+    } else {
+        priority = {
+            .player = player,
+            .consecutive_passes = 0,
+        };
     }
 
     const bool player_zero_lost =
@@ -7251,8 +8358,27 @@ double Game::learned_value_shallow_action_score(
         const std::size_t winner = player_zero_lost ? 1 : 0;
         return winner == player ? 1.0 : 0.0;
     }
-    return learned_model_for(player)->predict(
-        learned_features(successor, player));
+    if (pass_result ==
+            PriorityPassResult::WindowEnded &&
+        model->critic_schema() ==
+            LearnedCriticSchema::DecisionContextV1) {
+        return 0.5;
+    }
+    if (pass_result ==
+        PriorityPassResult::WindowEnded) {
+        return model->predict(
+            learned_features(successor, player));
+    }
+    return predict_learned_critic_with_context(
+        model, successor, player,
+        {
+            .valid = true,
+            .phase = phase,
+            .decision_player = priority.player,
+            .consecutive_passes =
+                priority.consecutive_passes,
+            .sorcery_actions = sorcery_actions,
+        });
 }
 
 std::optional<GameResult>
@@ -7365,8 +8491,15 @@ double Game::finish_learned_evaluation_horizon(
         return result_score(*result);
     }
     if (horizon_turns == 0) {
-        return model->predict(
-            learned_features(state_, perspective));
+        return predict_learned_critic_with_context(
+            model, state_, perspective,
+            {
+                .valid = true,
+                .phase = TurnPhase::FirstMain,
+                .decision_player = state_.active_player,
+                .consecutive_passes = 0,
+                .sorcery_actions = true,
+            });
     }
     for (std::size_t turn = 0; turn < horizon_turns; ++turn) {
         if (const auto result = play_prepared_turn();
@@ -7379,6 +8512,22 @@ double Game::finish_learned_evaluation_horizon(
                 return result_score(*result);
             }
         }
+    }
+    if (model->critic_schema() ==
+        LearnedCriticSchema::DecisionContextV1) {
+        if (const auto result = prepare_next_turn();
+            result.has_value()) {
+            return result_score(*result);
+        }
+        return predict_learned_critic_with_context(
+            model, state_, perspective,
+            {
+                .valid = true,
+                .phase = TurnPhase::FirstMain,
+                .decision_player = state_.active_player,
+                .consecutive_passes = 0,
+                .sorcery_actions = true,
+            });
     }
     return model->predict(learned_features(state_, perspective));
 }
@@ -7393,6 +8542,7 @@ double Game::learned_value_search_action_score(
     simulation.state_ = sampled_state;
     simulation.random_.seed(seed);
     simulation.trace_ = nullptr;
+    simulation.learned_decision_trace_ = nullptr;
     simulation.config_.human_controllers = {};
     simulation.config_.learned_policy_recorder.reset();
     simulation.config_.learned_search_depth = 0;
@@ -7480,6 +8630,41 @@ double Game::learned_value_search_action_score(
             simulation.state_.turn_number + 1);
     if (result.reason != EndReason::TurnLimit) {
         return result_score(result);
+    }
+    if (root_model->critic_schema() ==
+        LearnedCriticSchema::DecisionContextV1) {
+        if (simulation.state_.turn_number ==
+            std::numeric_limits<std::size_t>::max()) {
+            throw std::overflow_error(
+                "Learned Value bootstrap turn number overflow");
+        }
+        ++simulation.state_.turn_number;
+        advance_turn_player(simulation.state_);
+        begin_turn(
+            simulation.state_,
+            simulation.state_.active_player);
+        const bool starting_player_first_turn =
+            simulation.state_.turn_number == 1 &&
+            simulation.state_.active_player ==
+                simulation.state_.starting_player;
+        if (!starting_player_first_turn &&
+            !simulation.draw_card(
+                simulation.state_.active_player)) {
+            return result_score(simulation.make_result(
+                static_cast<int>(opponent_of(
+                    simulation.state_.active_player)),
+                EndReason::EmptyLibrary));
+        }
+        return predict_learned_critic_with_context(
+            root_model, simulation.state_, player,
+            {
+                .valid = true,
+                .phase = TurnPhase::FirstMain,
+                .decision_player =
+                    simulation.state_.active_player,
+                .consecutive_passes = 0,
+                .sorcery_actions = true,
+            });
     }
     return root_model->predict(
         learned_features(simulation.state_, player));
@@ -7862,6 +9047,7 @@ double Game::rollout_action(const PriorityAction& action,
                             std::uint64_t seed) const {
     Game rollout = *this;
     rollout.random_.seed(seed);
+    rollout.learned_decision_trace_ = nullptr;
     rollout.config_.human_controllers = {};
     rollout.config_.bots = {
         BotConfig{.kind = BotKind::Random},
@@ -8288,9 +9474,17 @@ std::optional<GameResult> Game::play_combat_with_attackers(
                 0) {
                 score = 1.0;
             } else {
-                score = model->predict(
-                    learned_features(
-                        successor, defending_player));
+                score =
+                    predict_learned_critic_with_context(
+                        model, successor, defending_player,
+                        {
+                            .valid = true,
+                            .phase = TurnPhase::EndCombat,
+                            .decision_player =
+                                successor.active_player,
+                            .consecutive_passes = 0,
+                            .sorcery_actions = false,
+                        });
             }
             if (score > best_score) {
                 best_score = score;
@@ -8484,6 +9678,91 @@ std::optional<GameResult> Game::play_combat_with_attackers(
     return play_priority_window(false, TurnPhase::EndCombat);
 }
 
+namespace {
+
+std::size_t dense_decision_trace_stratum(
+    const LearnedDecisionTracePoint& point) {
+    if (!point.context.valid ||
+        point.context.decision_player >= 2 ||
+        point.context.consecutive_passes < 0 ||
+        point.context.consecutive_passes > 1) {
+        throw std::logic_error(
+            "dense Learned decision trace has invalid context");
+    }
+    const std::size_t phase =
+        static_cast<std::size_t>(point.context.phase);
+    constexpr std::size_t kPhaseCount = 7;
+    if (phase >= kPhaseCount) {
+        throw std::logic_error(
+            "dense Learned decision trace has invalid phase");
+    }
+    const std::size_t pass =
+        static_cast<std::size_t>(
+            point.context.consecutive_passes);
+    const std::size_t stack_status =
+        point.state.stack.empty() ? 0 : 1;
+    return (phase * 2 + pass) * 2 + stack_status;
+}
+
+void cap_dense_decision_trace(
+    std::vector<LearnedDecisionTracePoint>& trace) {
+    if (trace.size() <= kLearnedDenseDecisionTraceLimit) {
+        return;
+    }
+
+    constexpr std::size_t kStratumCount = 7 * 2 * 2;
+    std::array<bool, kStratumCount> retained_strata{};
+    std::vector<bool> retained(trace.size(), false);
+    std::size_t retained_count = 0;
+    for (std::size_t index = 0; index < trace.size(); ++index) {
+        const std::size_t stratum =
+            dense_decision_trace_stratum(trace[index]);
+        if (!retained_strata[stratum]) {
+            retained_strata[stratum] = true;
+            retained[index] = true;
+            ++retained_count;
+        }
+    }
+    if (retained_count > kLearnedDenseDecisionTraceLimit) {
+        throw std::logic_error(
+            "dense Learned decision trace strata exceed cap");
+    }
+
+    std::vector<std::size_t> unretained;
+    unretained.reserve(trace.size() - retained_count);
+    for (std::size_t index = 0; index < trace.size(); ++index) {
+        if (!retained[index]) {
+            unretained.push_back(index);
+        }
+    }
+    const std::size_t fill_count = std::min(
+        kLearnedDenseDecisionTraceLimit - retained_count,
+        unretained.size());
+    for (std::size_t slot = 0; slot < fill_count; ++slot) {
+        const std::size_t interval_begin =
+            slot * unretained.size() / fill_count;
+        const std::size_t interval_end =
+            (slot + 1) * unretained.size() / fill_count;
+        const std::size_t rank =
+            interval_begin +
+            (interval_end - interval_begin) / 2;
+        retained[unretained[rank]] = true;
+    }
+
+    std::vector<LearnedDecisionTracePoint> capped;
+    capped.reserve(
+        std::min(trace.size(),
+                 kLearnedDenseDecisionTraceLimit));
+    for (std::size_t index = 0; index < trace.size(); ++index) {
+        if (retained[index]) {
+            capped.push_back(std::move(trace[index]));
+        }
+    }
+    trace = std::move(capped);
+}
+
+} // namespace
+
 GameResult Game::run() {
     initialize();
     if (setup_result_.has_value()) {
@@ -8498,6 +9777,34 @@ GameResult Game::run_with_trace(std::vector<GameState>& trace) {
     const GameResult result = run();
     trace_ = nullptr;
     return result;
+}
+
+GameResult Game::run_with_learned_decision_trace(
+    std::vector<LearnedDecisionTracePoint>& trace,
+    LearnedDecisionTraceMode mode) {
+    if (mode != LearnedDecisionTraceMode::Sparse &&
+        mode != LearnedDecisionTraceMode::Dense) {
+        throw std::invalid_argument(
+            "Learned decision trace mode is invalid");
+    }
+    trace.clear();
+    learned_decision_trace_ = &trace;
+    learned_decision_trace_mode_ = mode;
+    try {
+        const GameResult result = run();
+        learned_decision_trace_ = nullptr;
+        learned_decision_trace_mode_ =
+            LearnedDecisionTraceMode::Sparse;
+        if (mode == LearnedDecisionTraceMode::Dense) {
+            cap_dense_decision_trace(trace);
+        }
+        return result;
+    } catch (...) {
+        learned_decision_trace_ = nullptr;
+        learned_decision_trace_mode_ =
+            LearnedDecisionTraceMode::Sparse;
+        throw;
+    }
 }
 
 GameResult Game::run_from_turn(std::size_t first_turn) {
@@ -8528,6 +9835,20 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
         }
         if (trace_ != nullptr) {
             trace_->push_back(state_);
+        }
+        if (learned_decision_trace_ != nullptr &&
+            learned_decision_trace_mode_ ==
+                LearnedDecisionTraceMode::Sparse) {
+            learned_decision_trace_->push_back({
+                .state = state_,
+                .context = {
+                    .valid = true,
+                    .phase = TurnPhase::FirstMain,
+                    .decision_player = state_.active_player,
+                    .consecutive_passes = 0,
+                    .sorcery_actions = true,
+                },
+            });
         }
 
         if (const auto result = play_priority_window(
@@ -9287,6 +10608,57 @@ learned_observation(const GameState& state, std::size_t perspective) {
     return {features.begin(), features.end()};
 }
 
+LearnedDecisionContextFeatures learned_decision_context_features(
+    const LearnedDecisionContext& context,
+    std::size_t perspective) {
+    if (perspective >= 2) {
+        throw std::out_of_range(
+            "Learned context perspective must be 0 or 1");
+    }
+    LearnedDecisionContextFeatures features{};
+    if (!context.valid) {
+        return features;
+    }
+    if (context.decision_player >= 2) {
+        throw std::out_of_range(
+            "Learned context decision player must be 0 or 1");
+    }
+    if (context.consecutive_passes < 0 ||
+        context.consecutive_passes > 1) {
+        throw std::out_of_range(
+            "Learned context pass count must be zero or one");
+    }
+    const std::size_t phase =
+        static_cast<std::size_t>(context.phase);
+    if (phase >= 7) {
+        throw std::out_of_range(
+            "Learned context phase is invalid");
+    }
+    features[0] = 1.0;
+    features[1 + phase] = 1.0;
+    features[8 + (context.decision_player == perspective ? 0 : 1)] =
+        1.0;
+    features[10 +
+             static_cast<std::size_t>(
+                 context.consecutive_passes)] = 1.0;
+    features[12] = context.sorcery_actions ? 1.0 : 0.0;
+    return features;
+}
+
+std::vector<double> learned_contextual_observation(
+    const GameState& state, std::size_t perspective,
+    const LearnedDecisionContext& context) {
+    std::vector<double> features =
+        learned_observation(state, perspective);
+    const auto context_features =
+        learned_decision_context_features(
+            context, perspective);
+    features.insert(
+        features.end(), context_features.begin(),
+        context_features.end());
+    return features;
+}
+
 std::vector<double> learned_priority_policy_features(
     const GameState& state, std::size_t perspective,
     const PriorityAction& action, bool sorcery_actions,
@@ -9769,6 +11141,27 @@ double learned_critic_value(
             "Learned critic perspective must be 0 or 1");
     }
     return model->predict(learned_features(state, perspective));
+}
+
+LearnedCriticSchema learned_critic_schema(
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(model);
+    return model->critic_schema();
+}
+
+double learned_contextual_critic_value(
+    const GameState& state, std::size_t perspective,
+    const LearnedDecisionContext& context,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(model);
+    if (perspective >= state.players.size()) {
+        throw std::out_of_range(
+            "contextual Learned critic perspective must be 0 or 1");
+    }
+    return model->predict(
+        learned_features(state, perspective),
+        learned_decision_context_features(
+            context, perspective));
 }
 
 LearnedValueAttackSetScores learned_value_attack_set_scores(
@@ -11383,6 +12776,7 @@ LearnedActionSamples learned_priority_action_samples(
                 simulation.state_ = world.state;
                 simulation.random_.seed(continuation_seed);
                 simulation.trace_ = nullptr;
+                simulation.learned_decision_trace_ = nullptr;
                 simulation.config_.learned_policy_recorder.reset();
                 simulation.config_.learned_search_depth = 0;
 
@@ -11391,7 +12785,8 @@ LearnedActionSamples learned_priority_action_samples(
                         ? simulation
                               .learned_value_shallow_action_score(
                                   action, player, sorcery_actions,
-                                  consecutive_passes, world.state)
+                                  phase, consecutive_passes,
+                                  world.state)
                         : 0.0;
                 PriorityState priority{
                     .player = player,
@@ -11499,6 +12894,7 @@ LearnedActionSamples learned_binary_attack_samples(
                 simulation.state_ = world.state;
                 simulation.random_.seed(continuation_seed);
                 simulation.trace_ = nullptr;
+                simulation.learned_decision_trace_ = nullptr;
                 simulation.config_.learned_policy_recorder.reset();
                 simulation.config_.learned_search_depth = 0;
 
@@ -11560,10 +12956,19 @@ LearnedActionSamples learned_binary_attack_samples(
                     shallow_prior = learned_result_value(
                         *terminal, attacking_player);
                 } else {
-                    shallow_prior = model->predict(
-                        learned_features(
-                            simulation.state_,
-                            attacking_player));
+                    if (model->critic_schema() ==
+                        LearnedCriticSchema::DecisionContextV1) {
+                        // play_combat_with_attackers has already completed
+                        // the End Combat priority window. There is no live
+                        // decision context to attach to this post-window
+                        // state.
+                        shallow_prior = 0.5;
+                    } else {
+                        shallow_prior = model->predict(
+                            learned_features(
+                                simulation.state_,
+                                attacking_player));
+                    }
                     terminal = simulation.play_priority_window(
                         true, TurnPhase::SecondMain);
                 }
@@ -11863,7 +13268,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             diagnostic.scores[action_index] +=
                 evaluator.learned_value_shallow_action_score(
                     diagnostic.actions[action_index], player,
-                    sorcery_actions, consecutive_passes,
+                    sorcery_actions, phase,
+                    consecutive_passes,
                     world.state);
         }
         diagnostic.scores[action_index] /=

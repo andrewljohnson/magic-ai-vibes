@@ -754,6 +754,131 @@ void test_value_attack_probe_scores_are_seed_independent() {
     }
 }
 
+void test_force_spike_control_gate_and_report_semantics() {
+    using old_school::probe_runner::
+        ForceSpikePolicyControlReport;
+
+    const ForceSpikePolicyControlReport passing{
+        .policy_name = "Value G0",
+        .model_fingerprint = "value-g0-fingerprint",
+        .worlds = 8,
+        .horizon_turns = 4,
+        .live = {
+            .stable_id =
+                "control.blue.force-spike-live-gray-ogre.v1",
+            .pass_score = 0.1,
+            .force_spike_score = 0.9,
+            .selected_keys = {"force-spike-gray-ogre"},
+        },
+        .payable = {
+            .stable_id =
+                "control.blue.force-spike-payable-gray-ogre.v1",
+            .pass_score = 0.8,
+            .force_spike_score = 0.2,
+            .selected_keys = {"pass"},
+        },
+        .hidden_repartition_passed = true,
+    };
+    expect(
+        passing.live_selects_force_spike() &&
+            passing.payable_selects_pass() &&
+            passing.gate_passed(),
+        "Force Spike behavioral gate rejected the intended pair");
+
+    ForceSpikePolicyControlReport tied = passing;
+    tied.policy_name = "Value C1";
+    tied.live.selected_keys = {
+        "force-spike-gray-ogre", "pass"};
+    expect(
+        !tied.live_selects_force_spike() &&
+            tied.payable_selects_pass() &&
+            !tied.gate_passed(),
+        "Force Spike gate blessed a random exact-max tie");
+    ForceSpikePolicyControlReport hidden_failure = passing;
+    hidden_failure.hidden_repartition_passed = false;
+    expect(!hidden_failure.gate_passed(),
+           "Force Spike gate ignored hidden-repartition failure");
+
+    ProbeScoreReport report;
+    report.metadata.corpus_id =
+        std::string(old_school::probes::kProbeDevV3);
+    report.force_spike_controls = {passing, tied};
+    const std::string output =
+        old_school::probe_runner::format_probe_score_report(report);
+    expect(
+        output.find(
+            "Supplemental Force Spike deployed controls") !=
+                std::string::npos &&
+            output.find(
+                "excluded from balanced metrics, cache identity, "
+                "and promotion claims") != std::string::npos &&
+            output.find(
+                "Value G0: fingerprint value-g0-fingerprint, "
+                "K=8/H=4") != std::string::npos &&
+            output.find(
+                "live: Pass=0.1000, Force Spike=0.9000, "
+                "selected {force-spike-gray-ogre} [PASS]") !=
+                std::string::npos &&
+            output.find(
+                "payable: Pass=0.8000, Force Spike=0.2000, "
+                "selected {pass} [PASS]") !=
+                std::string::npos &&
+            output.find("behavioral gate: PASS") !=
+                std::string::npos &&
+            output.find("behavioral gate: FAIL") !=
+                std::string::npos,
+        "Force Spike control report lost exact scores, selections, "
+        "or gate status");
+}
+
+void test_force_spike_control_scorer_uses_deployed_value_path() {
+    const auto model =
+        old_school::train_learned_value_champion(1, 0xF05CEULL);
+    const auto first =
+        old_school::probe_runner::
+            score_value_force_spike_policy_controls(
+                model, "Synthetic Value", 2);
+    const auto repeated =
+        old_school::probe_runner::
+            score_value_force_spike_policy_controls(
+                model, "Synthetic Value", 2);
+
+    expect(first == repeated,
+           "deployed Force Spike control scorer is not deterministic");
+    expect(
+        first.model_fingerprint ==
+                old_school::learned_model_fingerprint(model) &&
+            first.worlds == 2 &&
+            first.horizon_turns == 4 &&
+            first.hidden_repartition_passed,
+        "Force Spike control scorer did not report deployed K/H or "
+        "hidden invariance");
+    expect(
+        first.live.stable_id ==
+                "control.blue.force-spike-live-gray-ogre.v1" &&
+            first.payable.stable_id ==
+                "control.blue.force-spike-payable-gray-ogre.v1" &&
+            std::isfinite(first.live.pass_score) &&
+            std::isfinite(first.live.force_spike_score) &&
+            std::isfinite(first.payable.pass_score) &&
+            std::isfinite(first.payable.force_spike_score) &&
+            !first.live.selected_keys.empty() &&
+            !first.payable.selected_keys.empty(),
+        "Force Spike control scorer omitted a state, score, or "
+        "exact-max selection");
+
+    const std::string world_error = expect_invalid(
+        [&] {
+            static_cast<void>(
+                old_school::probe_runner::
+                    score_value_force_spike_policy_controls(
+                        model, "Synthetic Value", 1));
+        },
+        "Force Spike controls accepted an under-sampled K");
+    expect(world_error.find("[2, 4096]") != std::string::npos,
+           "Force Spike K validation was not actionable");
+}
+
 void test_value_decision_detail_respects_ties_and_selectors() {
     const auto label = old_school::probe_eval::make_probe_label(
         "red.synthetic-selection", DeckId::Red,
@@ -1337,6 +1462,15 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             value_loaded.hidden_repartition.passed,
         "distinct Value candidate was not hidden-invariant sixth view");
     expect(
+        value_loaded.metadata.probe_count == 20 &&
+            value_loaded.force_spike_controls.size() == 2 &&
+            value_loaded.force_spike_controls[0].policy_name ==
+                "Value G0" &&
+            value_loaded.force_spike_controls[1].policy_name ==
+                "Value G8",
+        "supplemental Force Spike controls changed balanced "
+        "denominators or lost G0/candidate order");
+    expect(
         value_loaded.policies[2].name ==
                 "Value G0 deployed policy" &&
             value_loaded.policies[3].name ==
@@ -1355,6 +1489,117 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             value_output.find("6 policy views") !=
                 std::string::npos,
         "formatted report did not distinguish the Value candidate");
+
+    const auto dev_corpus =
+        old_school::probes::make_probe_dev_v3();
+    const auto force_spike_probe = std::find_if(
+        dev_corpus.begin(), dev_corpus.end(),
+        [](const DecisionProbe& probe) {
+            return probe.stable_id ==
+                   "blue.force-spike-tapped-out-gray-ogre.v3";
+        });
+    expect(force_spike_probe != dev_corpus.end(),
+           "contextual critic test lost its priority fixture");
+    const old_school::LearnedDecisionContext live_context{
+        .valid = true,
+        .phase = force_spike_probe->phase,
+        .decision_player = force_spike_probe->root_player,
+        .consecutive_passes =
+            force_spike_probe->consecutive_passes,
+        .sorcery_actions = true,
+    };
+    old_school::LearnedDecisionContext alternate_context =
+        live_context;
+    alternate_context.consecutive_passes = 0;
+    auto contextual_value =
+        old_school::with_learned_decision_context(
+            scoring_value);
+    std::vector<
+        old_school::LearnedContextualCriticTrainingExample>
+        context_examples;
+    context_examples.reserve(128);
+    for (std::size_t repeat = 0; repeat < 64; ++repeat) {
+        context_examples.push_back({
+            .features = old_school::learned_observation(
+                force_spike_probe->state,
+                force_spike_probe->root_player),
+            .context_features =
+                old_school::learned_decision_context_features(
+                    live_context,
+                    force_spike_probe->root_player),
+            .target = 0.95,
+        });
+        context_examples.push_back({
+            .features = old_school::learned_observation(
+                force_spike_probe->state,
+                force_spike_probe->root_player),
+            .context_features =
+                old_school::learned_decision_context_features(
+                    alternate_context,
+                    force_spike_probe->root_player),
+            .target = 0.05,
+        });
+    }
+    contextual_value =
+        old_school::update_learned_contextual_value_model(
+            contextual_value, context_examples,
+            {
+                .epochs = 20,
+                .learning_rate = 0.02,
+                .root_seed = 0xC07E57ULL,
+                .member_training_tag = 0xC017E000ULL,
+            });
+    const double expected_contextual_critic =
+        old_school::learned_contextual_critic_value(
+            force_spike_probe->state,
+            force_spike_probe->root_player,
+            live_context, contextual_value);
+    expect(
+        std::abs(
+            expected_contextual_critic -
+            old_school::learned_critic_value(
+                force_spike_probe->state,
+                force_spike_probe->root_player,
+                contextual_value)) > 1.0e-3,
+        "contextual test model did not separate the live priority root");
+
+    const ProbeScoreReport contextual_loaded =
+        old_school::probe_runner::score_probe_dev_with_candidates(
+            config, progress,
+            {
+                .reference_actor_model = reference,
+                .scoring_actor_model = reference,
+                .scoring_actor_name = "Actor G0",
+                .reference_value_model = reference_value,
+                .reference_value_name = "Value G0",
+                .scoring_value_models = {
+                    {"Value Context Test", contextual_value,
+                     "context-test"},
+                },
+            });
+    const auto context_checkpoint = std::find_if(
+        contextual_loaded.value_checkpoints.begin(),
+        contextual_loaded.value_checkpoints.end(),
+        [](const auto& checkpoint) {
+            return checkpoint.name == "Value Context Test";
+        });
+    expect(
+        context_checkpoint !=
+            contextual_loaded.value_checkpoints.end(),
+        "contextual candidate was omitted from checkpoint detail");
+    const auto context_decision = std::find_if(
+        context_checkpoint->decisions.begin(),
+        context_checkpoint->decisions.end(),
+        [&](const auto& decision) {
+            return decision.stable_id ==
+                   force_spike_probe->stable_id;
+        });
+    expect(
+        context_decision != context_checkpoint->decisions.end() &&
+            context_decision->critic_prediction ==
+                expected_contextual_critic,
+        "probe metrics evaluated a contextual priority critic "
+        "without its live phase/priority/pass context");
 
     const auto second_scoring_value =
         old_school::train_learned_value_champion(
@@ -1842,6 +2087,10 @@ int main() {
                test_tiny_reference_is_hidden_clone_invariant);
     runner.run("deployed Value attack seed independence",
                test_value_attack_probe_scores_are_seed_independent);
+    runner.run("Force Spike control gate and report",
+               test_force_spike_control_gate_and_report_semantics);
+    runner.run("Force Spike deployed Value scorer",
+               test_force_spike_control_scorer_uses_deployed_value_path);
     runner.run("Value selection detail semantics",
                test_value_decision_detail_respects_ties_and_selectors);
     runner.run("actionable low-margin summary",

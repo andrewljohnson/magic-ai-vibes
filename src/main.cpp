@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <locale>
 #include <map>
@@ -195,6 +196,7 @@ void print_help(std::string_view executable) {
            " [--learned-rollouts N]"
            " [--value-continuation-epsilon X]"
            " [--learned-generations N]"
+           " [--challenger learned-value-context-cN]"
            " [--actor-generation 0|1] [--value-generation 0|8]"
            " [--value-recipe canonical|mix50]"
            " [--probe-cache PATH]"
@@ -250,8 +252,11 @@ void print_help(std::string_view executable) {
         << "  --challenger BOT  Benchmark challenger "
            "(default: handcrafted; learned generations: "
            "learned-value-g0..g8, learned-value-cN, "
+           "learned-value-context-cN, "
            "learned-value-mix50-g8, "
-           "learned-actor-g0/g1)\n"
+           "learned-actor-g0/g1); under --score-probes, "
+           "learned-value-context-cN adds S1 after matching S0 "
+           "selected by --learned-generations N\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
         << "  --stability     Validate Learned against all policies across "
@@ -287,7 +292,8 @@ void print_help(std::string_view executable) {
         << "  --refresh-probe-cache  Regenerate matching probe labels "
            "atomically\n"
         << "  --refresh-value-challenger-cache  Retrain and atomically "
-           "replace every selected Value Challenger C<N> artifact\n"
+           "replace every selected state-only or context Value C<N> "
+           "artifact\n"
         << "  --refresh-value-g8-cache  Retrain and atomically replace "
            "the selected canonical Value G8 artifact\n"
         << "  --refresh-value-mix50-cache  Retrain and atomically replace "
@@ -306,6 +312,7 @@ struct BotSelection {
     enum class ValueFamily : std::uint8_t {
         LegacyG0,
         Challenger,
+        ContextChallenger,
         Canonical,
         Mix50,
     };
@@ -342,6 +349,33 @@ BotSelection parse_bot(std::string_view value) {
                 old_school::LearnedVariant::ValueSearchChampion,
             .value_generation = 0,
         };
+    }
+    constexpr std::string_view context_challenger_generation_prefix =
+        "learned-value-context-c";
+    if (value.starts_with(context_challenger_generation_prefix)) {
+        const std::string_view suffix =
+            value.substr(
+                context_challenger_generation_prefix.size());
+        std::uint64_t generation = 0;
+        const auto result =
+            std::from_chars(suffix.data(),
+                            suffix.data() + suffix.size(),
+                            generation);
+        if (result.ec == std::errc{} &&
+            result.ptr == suffix.data() + suffix.size() &&
+            generation > 0 &&
+            generation <=
+                std::numeric_limits<std::size_t>::max()) {
+            return {
+                .kind = old_school::BotKind::Learned,
+                .learned_variant =
+                    old_school::LearnedVariant::ValueSearchChampion,
+                .value_family =
+                    BotSelection::ValueFamily::ContextChallenger,
+                .value_generation =
+                    static_cast<std::size_t>(generation),
+            };
+        }
     }
     constexpr std::string_view challenger_generation_prefix =
         "learned-value-c";
@@ -718,6 +752,13 @@ train_value_challenger_with_progress(
     bool refresh_cache);
 
 std::shared_ptr<const old_school::LearnedModel>
+train_value_context_challenger_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed,
+    std::size_t generations,
+    bool refresh_cache);
+
+std::shared_ptr<const old_school::LearnedModel>
 train_frozen_learned_model(old_school::LearnedVariant variant,
                            std::size_t training_games,
                            std::uint64_t training_seed,
@@ -818,6 +859,78 @@ train_value_challenger_with_progress(
               << " fingerprint: "
               << old_school::learned_model_fingerprint(model) << '\n'
               << "  Value Challenger C" << generations
+              << " artifact cache: "
+              << (cache_exists && !refresh_cache
+                      ? "loaded "
+                      : "generated ")
+              << cache_path << '\n';
+    return model;
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+train_value_context_challenger_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed,
+    std::size_t generations,
+    bool refresh_cache) {
+    const std::string cache_path =
+        old_school::learned_value_context_challenger_cache_path(
+            training_games, training_seed, generations);
+    std::error_code exists_error;
+    const bool cache_exists =
+        std::filesystem::exists(cache_path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect Value Context C" +
+            std::to_string(generations) + " artifact cache '" +
+            cache_path + "': " + exists_error.message());
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    std::shared_ptr<const old_school::LearnedModel> model;
+    if (cache_exists && !refresh_cache) {
+        std::cout
+            << "Loading immutable Value Context C"
+            << generations << " artifact (seed " << training_seed
+            << ", " << training_games << " initial games) from "
+            << cache_path << "..." << std::flush;
+        try {
+            model = old_school::
+                        load_learned_value_context_challenger_artifact(
+                            cache_path, training_games,
+                            training_seed, generations)
+                        .model();
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                "Value Context C" +
+                std::to_string(generations) +
+                " artifact cache '" + cache_path +
+                "' is invalid: " + error.what() +
+                "; rerun this challenger route with "
+                "--refresh-value-challenger-cache to regenerate it");
+        }
+    } else {
+        std::cout << "Training frozen Value Context C"
+                  << generations << " (seed " << training_seed
+                  << ", " << training_games
+                  << " initial games)..." << std::flush;
+        const auto artifact =
+            old_school::
+                train_learned_value_context_challenger_artifact(
+                    training_games, training_seed, generations);
+        model = artifact.model();
+        old_school::
+            write_learned_value_context_challenger_artifact_atomic(
+                cache_path, artifact);
+    }
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout << " done (" << std::fixed << std::setprecision(2)
+              << elapsed.count() << "s)\n"
+              << "  Value Context C" << generations
+              << " fingerprint: "
+              << old_school::learned_model_fingerprint(model) << '\n'
+              << "  Value Context C" << generations
               << " artifact cache: "
               << (cache_exists && !refresh_cache
                       ? "loaded "
@@ -1885,6 +1998,8 @@ int main(int argc, char** argv) {
         bool learned_rollouts_option_used = false;
         bool learned_generations_option_used = false;
         bool value_continuation_epsilon_option_used = false;
+        bool challenger_option_used = false;
+        bool baseline_option_used = false;
         old_school::probe_runner::ProbeCorpusKind probe_corpus =
             old_school::probe_runner::ProbeCorpusKind::DevV3;
         bool probe_cache_was_set = false;
@@ -2015,8 +2130,10 @@ int main(int argc, char** argv) {
                     parse_bot(argv[argument]);
                 if (option == "--challenger") {
                     challenger = selection;
+                    challenger_option_used = true;
                 } else {
                     baseline = selection;
+                    baseline_option_used = true;
                 }
                 continue;
             }
@@ -2219,6 +2336,51 @@ int main(int argc, char** argv) {
                 "--probe-cache, and --refresh-probe-cache require "
                 "--score-probes");
         }
+        if (challenger_option_used &&
+            !benchmark && !score_probes) {
+            throw std::invalid_argument(
+                "--challenger requires --benchmark or "
+                "--score-probes");
+        }
+        if (baseline_option_used && !benchmark) {
+            throw std::invalid_argument(
+                "--baseline requires --benchmark");
+        }
+        const auto selects_value_context_challenger =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           old_school::BotKind::Learned &&
+                       selection.learned_variant ==
+                           old_school::LearnedVariant::
+                               ValueSearchChampion &&
+                       selection.value_family ==
+                           BotSelection::ValueFamily::
+                               ContextChallenger &&
+                       selection.value_generation > 0;
+            };
+        const bool probe_context_challenger_selected =
+            score_probes && challenger_option_used &&
+            selects_value_context_challenger(challenger);
+        if (score_probes && challenger_option_used &&
+            !probe_context_challenger_selected) {
+            throw std::invalid_argument(
+                "--score-probes --challenger requires "
+                "learned-value-context-cN");
+        }
+        if (probe_context_challenger_selected &&
+            learned_generations == 0) {
+            throw std::invalid_argument(
+                "learned-value-context-cN probe scoring requires "
+                "--learned-generations N for its state-only S0");
+        }
+        if (probe_context_challenger_selected &&
+            challenger.value_generation !=
+                learned_generations) {
+            throw std::invalid_argument(
+                "learned-value-context-cN generation must match "
+                "--learned-generations N for S0-to-S1 probe "
+                "attribution");
+        }
         if (score_probes &&
             value_recipe ==
                 old_school::LearnedValueG8Recipe::LateMix50 &&
@@ -2356,7 +2518,9 @@ int main(int argc, char** argv) {
              learned_generations > 0) ||
             (benchmark &&
              (selects_value_challenger(challenger) ||
-              selects_value_challenger(baseline)));
+              selects_value_challenger(baseline) ||
+              selects_value_context_challenger(challenger) ||
+              selects_value_context_challenger(baseline)));
         if (refresh_value_challenger_cache &&
             !value_challenger_will_be_used) {
             throw std::invalid_argument(
@@ -2456,11 +2620,19 @@ int main(int argc, char** argv) {
             std::vector<
                 old_school::probe_runner::NamedValueScoringModel>
                 scoring_value_models;
-            std::optional<
+            std::vector<
                 old_school::probe_runner::NamedValueScoringModel>
-                challenger_scoring_model;
+                challenger_scoring_models;
             if (learned_generations > 0) {
-                challenger_scoring_model =
+                const std::string transition_family =
+                    probe_context_challenger_selected
+                        ? "value-context-ablation-c" +
+                              std::to_string(
+                                  learned_generations)
+                        : "value-challenger-c" +
+                              std::to_string(
+                                  learned_generations);
+                challenger_scoring_models.push_back(
                     {
                         .name =
                             "Value Challenger C" +
@@ -2472,10 +2644,24 @@ int main(int argc, char** argv) {
                                 learned_generations,
                                 refresh_value_challenger_cache),
                         .transition_family =
-                            "value-challenger-c" +
-                            std::to_string(
-                                learned_generations),
-                    };
+                            transition_family,
+                    });
+                if (probe_context_challenger_selected) {
+                    challenger_scoring_models.push_back(
+                        {
+                            .name =
+                                "Value Context C" +
+                                std::to_string(
+                                    learned_generations),
+                            .model =
+                                train_value_context_challenger_with_progress(
+                                    training_games, training_seed,
+                                    learned_generations,
+                                    refresh_value_challenger_cache),
+                            .transition_family =
+                                transition_family,
+                        });
+                }
             }
             if (value_generation == 8) {
                 const bool mix50 =
@@ -2527,10 +2713,12 @@ int main(int argc, char** argv) {
                         });
                 }
             }
-            if (challenger_scoring_model.has_value()) {
-                scoring_value_models.push_back(
-                    std::move(*challenger_scoring_model));
-            }
+            scoring_value_models.insert(
+                scoring_value_models.end(),
+                std::make_move_iterator(
+                    challenger_scoring_models.begin()),
+                std::make_move_iterator(
+                    challenger_scoring_models.end()));
             const auto report =
                 old_school::probe_runner::
                     score_probe_corpus_with_candidates(
@@ -2578,6 +2766,10 @@ int main(int argc, char** argv) {
                 std::size_t,
                 std::shared_ptr<const old_school::LearnedModel>>
                 frozen_value_challengers;
+            std::map<
+                std::size_t,
+                std::shared_ptr<const old_school::LearnedModel>>
+                frozen_value_context_challengers;
             old_school::LearnedValueG8Result frozen_value_bundle;
             old_school::LearnedValueG8Result
                 frozen_value_mix50_bundle;
@@ -2606,6 +2798,25 @@ int main(int argc, char** argv) {
                                 selection.value_generation,
                                 refresh_value_challenger_cache);
                         frozen_value_challengers.emplace(
+                            selection.value_generation, model);
+                        return model;
+                    }
+                    if (selection.value_family ==
+                        BotSelection::ValueFamily::
+                            ContextChallenger) {
+                        const auto found =
+                            frozen_value_context_challengers.find(
+                                selection.value_generation);
+                        if (found !=
+                            frozen_value_context_challengers.end()) {
+                            return found->second;
+                        }
+                        auto model =
+                            train_value_context_challenger_with_progress(
+                                training_games, training_seed,
+                                selection.value_generation,
+                                refresh_value_challenger_cache);
+                        frozen_value_context_challengers.emplace(
                             selection.value_generation, model);
                         return model;
                     }
@@ -2711,6 +2922,8 @@ int main(int argc, char** argv) {
                     case BotSelection::ValueFamily::Mix50:
                         return true;
                     case BotSelection::ValueFamily::Challenger:
+                    case BotSelection::ValueFamily::
+                        ContextChallenger:
                     case BotSelection::ValueFamily::Canonical:
                         return left.value_generation ==
                                right.value_generation;
@@ -2760,6 +2973,17 @@ int main(int argc, char** argv) {
                             BotSelection::ValueFamily::Challenger) {
                             return std::string(
                                        "Learned Value Challenger C") +
+                                   std::to_string(
+                                       selection.value_generation) +
+                                   value_continuation_epsilon_suffix(
+                                       config
+                                           .value_continuation_epsilon);
+                        }
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                ContextChallenger) {
+                            return std::string(
+                                       "Learned Value Context C") +
                                    std::to_string(
                                        selection.value_generation) +
                                    value_continuation_epsilon_suffix(

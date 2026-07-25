@@ -3668,3 +3668,319 @@ demonstrated, do not build a context-aware Value treatment. If demonstrated,
 the next experiment may add neutral phase/relative-priority/pass/sorcery
 context and dense decision-state traces, but must be separately
 preregistered before retraining.
+
+### Markov-context alias audit (result)
+
+Recorded after rereading the independent 2026-07-25 15:10 PDT review. The
+reviewer independently ran the same diagnostic and reproduced the result.
+
+The exact declared command completed successfully. In the lethal-stack pair,
+both contexts exposed the same two legal actions and the deployed critic
+features were bit-identical. The neutral policy/action encoding differed. A
+Pass with zero prior passes returned `Passed`, transferred priority to player
+one, left one pass and one stack object, and left the root at three life. A
+Pass with one prior pass returned `StackObjectResolved`, reset priority and
+the pass count to player zero and zero, emptied the stack, and left the root at
+zero life. The First Main versus Second Main pair likewise had the same legal
+actions and identical critic features but different neutral policy/action
+features. Substituting opponent hidden cards did not change either encoding.
+
+Decision: accept the structural diagnosis. The Value critic cannot represent
+the consequence of passing even though the rules engine and card-agnostic
+policy/action encoder can. This diagnostic changes no deployed behavior. A
+context-aware critic schema plus dense decision traces is now licensed as a
+separately preregistered treatment; this deck/card implementation does not
+silently begin that learning experiment.
+
+### Exact Blue and Red deck expansion (environment result)
+
+This was a user-directed environment change, not a bot-tuning experiment. The
+new exact 40-card Blue list is 15 Island, one each of Mox Sapphire, Sol Ring,
+Ancestral Recall, Time Walk, and Braingeyser, four Flying Men, four Force
+Spike, eight Counterspell, and four Air Elemental. The exact Red list is 15
+Mountain, nine Lightning Bolt, seven Ironclaw Orcs, four Gray Ogre, three Hill
+Giant, and two Fire Elemental.
+
+The seven newly implemented cards use the normal mana, priority, and stack
+paths. Force Spike is legal only against spell stack objects and counters at
+resolution unless the target controller pays one generic mana. The normal bot
+game uses the deterministic MVP choice "pay if able"; the resolver also
+exposes and tests an explicit decline choice. Mox Sapphire and Sol Ring use
+implicit mana abilities and phase-local floating mana. Ancestral Recall and
+Braingeyser target either player and failed draws lose the game; Time Walk
+queues a real extra turn; Air Elemental is a 4/4 flyer for `3UU`. The learned
+observation gained neutral card planes, public mana pools, and queued extra
+turns without exposing the opponent's hidden cards. Model/cache schema and
+paths were advanced to v2 so old artifacts fail closed.
+
+The exact Random-vs-Random baseline command was:
+
+```sh
+./build/old-school-sim --games 30000 --seed 303 --bots random
+```
+
+It ran 300,000 games with no draws. First-deck win rates in matchup order were
+Green/Red `62.7%`, Green/Blue `56.7%`, Green/White `55.0%`, Green/RU `68.2%`,
+Red/Blue `48.6%`, Red/White `55.6%`, Red/RU `42.2%`, Blue/White `90.4%`,
+Blue/RU `49.5%`, and White/RU `38.2%`. The old generic 30--70 balance guard
+cannot truthfully describe the exact requested lists, so it was replaced by a
+deterministic full-matrix regression within one percentage point. This records
+the Blue/White imbalance rather than changing the requested cards to conceal
+it.
+
+The normal user-facing command:
+
+```sh
+make run
+```
+
+used evaluation seed `4242`, training seed `424242`, 800 G0 self-play games,
+K=2, and 100 games per matchup. Deck records were Green `40.0%`, Red `47.5%`,
+Blue `63.0%`, White `57.2%`, and RU `42.2%`. Blue averaged 9.2 spells cast and
+2.8 spells countered per game. Learned went 288--112 across its 400 seat-games
+(`72.0%`) and beat Handcrafted 42--38 directly, but the literal per-deck lift
+gate passed only Green, White, and RU: **3/5, FAIL**. Red and Blue were behind
+Handcrafted by 3.7 and 2.5 percentage points respectively in 80-game cells.
+This small report is descriptive and cannot establish a new Learned champion;
+all prior fingerprints and champion claims are noncomparable after the
+environment/schema change.
+
+A separate actual-policy integration run:
+
+```sh
+./build/old-school-sim --games 100 --seed 42 --bots handcrafted
+```
+
+gave Blue 324--76 (`81.0%`) over its 400 seat-games and 3.5 countered spells
+per game. Aggregate simulation statistics intentionally combine Counterspell
+and Force Spike, so Force Spike itself is covered by a dedicated live-stack
+fixture: Blue holds Force Spike and one untapped Island while a tapped-out
+Red player has Gray Ogre on the stack. The probe trace proves Pass resolves
+the Ogre, while casting Force Spike spends blue mana, two passes resolve the
+top object, the Ogre is countered, both graveyards are correct, and the
+counter statistic increments. A joined regression asks the deployed
+Handcrafted scorer to choose from the actual legal actions and proves it
+selects and executes that Force Spike line. Paid, declined, Sol Ring payment,
+missing-target, counter-war, and activated-ability exclusion cases are also
+covered.
+
+Verification at this point: strict `-Werror` builds, 98/98 engine/bot tests,
+6/6 learned-iteration tests, 21/21 probe-corpus tests, 11/11 metric tests,
+17/17 probe-runner tests, and the full CLI lifecycle all pass. The complete
+98-test engine/bot suite also passed under AddressSanitizer and
+UndefinedBehaviorSanitizer with halt-on-error enabled and zero findings.
+Apple's runtime does not support LeakSanitizer's `detect_leaks` option; that
+unsupported option aborted before testing, so the successful run omitted only
+that option.
+
+### Context-aware Value critic and decision-root replay (declared)
+
+Declared after rereading the independent review timestamped 2026-07-25 15:10
+PDT and before training a fresh control artifact in the exact expanded-card
+environment. The review independently reproduced the Markov-context collision:
+the current critic cannot distinguish a Pass that retains priority from a
+Pass that resolves a lethal spell.
+
+Hypothesis: C16's remaining hold-versus-waste defect is caused by the
+combination of that missing rules context and sparse state collection. Adding
+neutral decision context to the critic and fitting it on bounded, dense
+priority-root traces will improve held-out pass-sensitive action ranking and
+paired five-deck strength. This is tested as a staged 2x2 rather than bundling
+both axes:
+
+- S0: existing sparse trace, context masked (the current C16 control);
+- S1: existing sparse trace, context live;
+- D0: dense priority-root trace, context masked;
+- D1: dense priority-root trace, context live.
+
+All cells use `T=800`, 16 self-play generations, training seed `424242`, the
+same deck/game seed stream, terminal/bootstrap targets, optimizer, replay
+window, exploration schedule, Learned-mirror opponents, and K=8 deployment.
+The only context inputs are a context-valid bit, a seven-way phase one-hot,
+priority holder relative to the perspective (self/opponent), pass count
+(zero/one), and the sorcery-action bit. They append to the critic only and
+contain no card names, hand-written values, combat scores, Handcrafted labels,
+or opponent hidden cards.
+
+Dense collection records the real rules context at every priority callback,
+including pass-one/nonempty-stack positions. It is deterministically capped at
+64 retained roots per game with rules-context strata retained before an even
+chronological fill, preventing long White games from dominating memory and
+fit weight. The report must expose retained roots by deck, phase, pass count,
+and stack status. Existing `run_with_trace` and S0 remain unchanged.
+
+The treatment is a separate model/artifact family. Existing C16 remains
+read-only and must be prediction/action-record bit-identical in S0. New
+context weights append after the legacy state prefix and initialize to zero.
+Artifact metadata binds the exact engine, ordered context schema, sparse/dense
+trace mode and cap, recipe, training games, generations, seed, dimensions,
+and fingerprint; cross-family loads fail closed. Actor-owned reference labels
+remain candidate-independent and are never regenerated by a candidate model.
+
+Before implementation, freeze the fresh exact-environment S0 artifact with:
+
+```sh
+./build/old-school-sim --benchmark --games 1 --seed 919190 \
+  --challenger learned-value-c16 --baseline learned-value-g0 \
+  --learned-rollouts 8 --train-games 800 --train-seed 424242 \
+  --refresh-value-challenger-cache
+```
+
+This command is artifact generation and a deterministic smoke only; its 60
+paired games cannot support a strength conclusion.
+
+Engineering gates:
+
+1. S0 loads the frozen control and reproduces its fingerprint, predictions,
+   and fixed-seed game records exactly.
+2. The contextual encoder differs between pass zero/pass one and First/Second
+   Main while remaining bit-identical under opponent-hidden-zone
+   repartition.
+3. Every critic call site carries the live successor context: casting retains
+   priority at pass zero; pass zero transfers priority at pass one; pass one
+   resolves the stack or ends the window; next-turn bootstraps begin in First
+   Main at pass zero; combat successors enter End Combat priority.
+4. Dense traces are deterministic, bounded, chronological, and cover all five
+   decks plus nonempty-stack/pass-one states. S0 sparse traces are unchanged.
+5. Same seed reproduces every candidate fingerprint and gameplay record;
+   separate family/schema/cache validation fails closed.
+6. Strict tests, hidden-information invariance, CLI lifecycle, and
+   ASan/UBSan pass.
+
+Offline gates come before gameplay. Score S0 and each licensed treatment on
+the deck-balanced dev-v3 corpus, validation-v1 RU Pass versus Disintegrate
+X=0, the live Force Spike probe, its payable-tax control, and the existing
+Counterspell fixtures using common worlds. Report per-deck top-1/stable-pair
+agreement and regret plus critic Brier/log-loss/calibration. A treatment is
+rejected if any deck's mean regret worsens by more than 0.01 or Counterspell
+regresses. The live Force Spike candidate must select Spike at deployed K=8;
+the payable control must not prefer wasting it. At K=256, the RU
+`Q(Pass)-Q(X=0)` lower 95% bound must be above zero and its paired improvement
+over S0 must be positive. These small targeted corpora can reject but never
+promote.
+
+Stage S1 first because it is the simpler treatment. If it clears every offline
+gate, select it and defer dense collection. Otherwise train D0 and D1; D1 must
+beat both D0 and S1 on pooled regret and critic loss, demonstrate improvement
+in the pass-sensitive stratum, and respect every nonregression gate. Do not
+choose a cell based on one gameplay seed.
+
+The single offline-selected candidate enters this gameplay ladder:
+
+1. a reject-only 600-paired-game screen versus frozen S0 at virgin evaluation
+   seed `919191`; stop below 47.5% aggregate or below 40% on any deck;
+2. 2,040 paired games versus S0 at virgin seed `271828`; require a Wilson 95%
+   lower bound above 50% and more challenger wins on every deck;
+3. only then, 2,040 paired games versus Handcrafted at separate virgin seed
+   `314159`, requiring the repository's aggregate and all-five deck gates;
+4. if that passes, freeze the artifact and run seeds
+   `101,202,303,404,505,606,707,808`, followed by the mixed-field all-five
+   lift gate.
+
+No Handcrafted result is consulted during treatment selection. Promotion
+still requires no losing validation seed, pooled lower confidence above 50%,
+more wins on every challenger deck, the largest lift on all five decks, and
+all correctness/sanitizer gates.
+
+### Exact-environment S0 control artifact (result)
+
+Recorded after rereading the independent review timestamped 2026-07-25 15:40
+PDT. The exact preregistered command trained and atomically published the
+state-only C16 control in 401.35 seconds:
+
+- artifact:
+  `build/model-cache/old-school-value-challenger-v2-c16-t800-s424242.bin`;
+- fingerprint:
+  `bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`;
+- training seed `424242`, initial games `800`, generations `16`.
+
+The command then trained G0 fingerprint
+`c900b03b9b66e788c5a0d1efadea038c526968c229b7ab626b3d603dc43496a0`
+and ran the declared 60 paired games at evaluation seed `919190`. C16 went
+23--37 (`38.3%`, approximate interval `27.1%--51.0%`), with deck records
+Green 0--12, Red 4--8, Blue 8--4, White 5--7, and RU 6--6. The CLI exited one
+because its verdict was correctly inconclusive.
+
+Decision: accept only the frozen artifact identity and reject any strength
+interpretation. Sixty paired games have essentially no power for this
+comparison, and the preregistration explicitly designated it as an artifact
+smoke. This result is not used to select a treatment. S0 is now the immutable
+exact-environment control for offline metrics and equal-K paired comparisons.
+
+### Exact-environment Force Spike offline audit (result)
+
+Recorded after rereading the independent review timestamped
+2026-07-25 15:40 PDT. The first attempt correctly failed closed because the
+pre-expansion dev-v3 label cache was bound to a different Actor fingerprint.
+The exact successful command was:
+
+```sh
+./build/old-school-sim --score-probes \
+  --actor-generation 0 --value-generation 0 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --learned-rollouts 8 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv \
+  --refresh-probe-cache
+```
+
+It regenerated the 20-position labels with exact-environment Actor G0
+fingerprint
+`7639176465b7b7c240e9d0d0067d352b0cac052a7083b47e6504073206068a84`
+and scored Value G0 fingerprint
+`c900b03b9b66e788c5a0d1efadea038c526968c229b7ab626b3d603dc43496a0`.
+On the tapped-out Gray Ogre fixture the Actor reference ranked Force Spike
+above Pass by `0.0287` Q with paired standard error `0.0094` and 95% interval
+`[0.0102, 0.0472]`. Value G0's deployed K=8 policy had 100% top-1 agreement
+on all four Blue fixtures, including selecting Force Spike on this live
+counter. Hidden-zone repartition was bit-identical for every reported policy.
+
+The frozen exact-environment S0 treatment was then checked with:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-worlds 8 --probe-horizon 0 \
+  --learned-generations 16 --learned-rollouts 8 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
+```
+
+It loaded C16 fingerprint
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`
+and completed in 88.30 seconds including deterministic Actor/Value G0
+retraining. C16 likewise had 100% Blue top-1 and stable-pair agreement with
+zero regret, proving that its deployed selected key on the live fixture was
+`force-spike-gray-ogre`.
+
+Decision: the current deployed state-only learner does use Force Spike when
+the target cannot pay, and the rules-level fixture proves that choice really
+counters the spell. This remains a diagnostic rather than promotion evidence:
+the Actor margin is small, and dev-v3 lacks the paired state where the target
+controller can pay the tax. Add a supplemental live/payable two-state
+behavior report outside the balanced corpus metrics, then require every
+context candidate to select Force Spike only in the live state.
+
+The supplemental deployed-policy report was then implemented without changing
+the 20-probe corpus, its cache identity, or any balanced metric. The live
+state has exactly the three tapped Mountains used for Gray Ogre; the payable
+control has a fourth, untapped Mountain moved from Red's hidden library, so
+both card conservation and the mana history are natural. The same exact C16
+command above produced:
+
+- Value G0: live `Pass 0.0695`, `Force Spike 0.0863` (select Spike, pass);
+  payable `Pass 0.0699`, `Force Spike 0.0753` (select Spike, **fail**).
+- frozen S0 C16: live `Pass 0.1129`, `Force Spike 0.1916` (select Spike,
+  pass); payable `Pass 0.1534`, `Force Spike 0.2022` (select Spike,
+  **fail**).
+
+Both controls passed the bit-identical hidden-repartition check. The generic
+probe command still exited zero because these controls are explicitly
+reject-only diagnostics; the report marks each model's behavioral gate as
+failed.
+
+Decision: retain the diagnostic and reject the stronger claim that the current
+learner understands Force Spike. G0 and C16 do cast it when it counters, but
+both also waste it when Red can pay, exactly the hold-versus-spend defect the
+context treatment targets. S1 must flip the payable state to Pass while
+retaining Force Spike in the live state before it can clear the preregistered
+offline gate.

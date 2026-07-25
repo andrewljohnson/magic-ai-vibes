@@ -335,6 +335,31 @@ bool sorcery_actions_for(TurnPhase phase) {
            phase == TurnPhase::SecondMain;
 }
 
+LearnedDecisionContext critic_context_for_probe(
+    const probes::DecisionProbe& probe) {
+    if (probe.decision_kind !=
+        probes::DecisionKind::Priority) {
+        // Attack probes are declaration choices, not live priority roots.
+        // A contextual critic has no trained rules context for that boundary.
+        return {};
+    }
+    return {
+        .valid = true,
+        .phase = probe.phase,
+        .decision_player = probe.root_player,
+        .consecutive_passes = probe.consecutive_passes,
+        .sorcery_actions = sorcery_actions_for(probe.phase),
+    };
+}
+
+double probe_critic_value(
+    const probes::DecisionProbe& probe,
+    const std::shared_ptr<const LearnedModel>& model) {
+    return learned_contextual_critic_value(
+        probe.state, probe.root_player,
+        critic_context_for_probe(probe), model);
+}
+
 void validate_score_config(const ProbeScoreConfig& config) {
     if (config.training_games == 0) {
         throw std::invalid_argument(
@@ -948,8 +973,7 @@ std::vector<probe_eval::ProbePrediction> score_actor_raw(
     for (const probes::DecisionProbe& probe : corpus) {
         predictions.push_back(make_prediction(
             probe, actor_raw_scores(probe, actor_model),
-            learned_critic_value(
-                probe.state, probe.root_player, actor_model)));
+            probe_critic_value(probe, actor_model)));
     }
     return predictions;
 }
@@ -1000,8 +1024,7 @@ std::vector<probe_eval::ProbePrediction> score_learned_search(
                 probe, model, corpus_id, continuation_variant, worlds,
                 rollouts_per_world, horizon_turns,
                 blend_shallow_prior),
-            learned_critic_value(
-                probe.state, probe.root_player, model)));
+            probe_critic_value(probe, model)));
     }
     return predictions;
 }
@@ -1028,8 +1051,7 @@ std::vector<probe_eval::ProbePrediction> score_actor_deployed(
         }
         predictions.push_back(make_prediction(
             probe, scores,
-            learned_critic_value(
-                probe.state, probe.root_player, actor_model)));
+            probe_critic_value(probe, actor_model)));
     }
     return predictions;
 }
@@ -1084,8 +1106,7 @@ std::vector<probe_eval::ProbePrediction> score_value_deployed(
         }
         predictions.push_back(make_prediction(
             probe, scores,
-            learned_critic_value(
-                probe.state, probe.root_player, value_model),
+            probe_critic_value(probe, value_model),
             selected_candidate));
     }
     return predictions;
@@ -1144,6 +1165,48 @@ const probe_eval::PolicyScore& policy_score_for(
             "hidden-invariance prediction is missing a candidate");
     }
     return *found;
+}
+
+std::vector<std::string> deployed_selected_keys(
+    const probe_eval::ProbePrediction& prediction) {
+    if (prediction.policy_scores.empty()) {
+        throw std::runtime_error(
+            "deployed prediction has no policy scores");
+    }
+    if (prediction.selected_key.has_value()) {
+        return {*prediction.selected_key};
+    }
+
+    const double highest_score = std::max_element(
+        prediction.policy_scores.begin(),
+        prediction.policy_scores.end(),
+        [](const probe_eval::PolicyScore& left,
+           const probe_eval::PolicyScore& right) {
+            return left.score < right.score;
+        })->score;
+    std::vector<std::string> selected;
+    for (const probe_eval::PolicyScore& score :
+         prediction.policy_scores) {
+        if (score.score == highest_score) {
+            selected.push_back(score.key);
+        }
+    }
+    std::sort(selected.begin(), selected.end());
+    return selected;
+}
+
+ForceSpikeControlDecision make_force_spike_control_decision(
+    const probe_eval::ProbePrediction& prediction) {
+    return {
+        .stable_id = prediction.stable_id,
+        .pass_score =
+            policy_score_for(prediction, "pass").score,
+        .force_spike_score =
+            policy_score_for(
+                prediction, "force-spike-gray-ogre")
+                .score,
+        .selected_keys = deployed_selected_keys(prediction),
+    };
 }
 
 void require_predictions_bit_identical(
@@ -1852,6 +1915,89 @@ std::vector<CandidatePairEstimate> score_value_candidate_pair(
 
 } // namespace
 
+bool ForceSpikePolicyControlReport::live_selects_force_spike()
+    const {
+    return live.selected_keys ==
+           std::vector<std::string>{"force-spike-gray-ogre"};
+}
+
+bool ForceSpikePolicyControlReport::payable_selects_pass() const {
+    return payable.selected_keys ==
+           std::vector<std::string>{"pass"};
+}
+
+bool ForceSpikePolicyControlReport::gate_passed() const {
+    return hidden_repartition_passed &&
+           live_selects_force_spike() && payable_selects_pass();
+}
+
+ForceSpikePolicyControlReport
+score_value_force_spike_policy_controls(
+    std::shared_ptr<const LearnedModel> model,
+    std::string policy_name, std::size_t worlds,
+    double value_continuation_epsilon) {
+    if (!model) {
+        throw std::invalid_argument(
+            "Force Spike control scoring requires a frozen Value "
+            "model");
+    }
+    validate_text_field(policy_name,
+                        "Force Spike control policy name");
+    if (worlds < 2 || worlds > kMaximumReferenceWorlds) {
+        throw std::invalid_argument(
+            "Force Spike control scoring worlds must be in "
+            "[2, 4096]");
+    }
+    if (!std::isfinite(value_continuation_epsilon) ||
+        value_continuation_epsilon < 0.0 ||
+        value_continuation_epsilon > 1.0) {
+        throw std::invalid_argument(
+            "Force Spike control continuation epsilon must be "
+            "finite and in [0, 1]");
+    }
+
+    const std::vector<probes::DecisionProbe> controls =
+        probes::make_force_spike_policy_controls_v1();
+    const std::vector<std::string> validation_errors =
+        probes::validate_force_spike_policy_controls_v1(controls);
+    if (!validation_errors.empty()) {
+        std::ostringstream message;
+        message << "invalid Force Spike policy controls";
+        for (const std::string& error : validation_errors) {
+            message << "; " << error;
+        }
+        throw std::runtime_error(message.str());
+    }
+
+    const auto predictions = score_value_deployed(
+        controls, model, probes::kForceSpikePolicyControlsV1,
+        worlds, value_continuation_epsilon);
+    const std::vector<probes::DecisionProbe> hidden_clones =
+        hidden_clone_corpus(controls);
+    const auto clone_predictions = score_value_deployed(
+        hidden_clones, model,
+        probes::kForceSpikePolicyControlsV1, worlds,
+        value_continuation_epsilon);
+    require_predictions_bit_identical(
+        predictions, clone_predictions, policy_name);
+
+    constexpr std::string_view kLiveId =
+        "control.blue.force-spike-live-gray-ogre.v1";
+    constexpr std::string_view kPayableId =
+        "control.blue.force-spike-payable-gray-ogre.v1";
+    return {
+        .policy_name = std::move(policy_name),
+        .model_fingerprint = learned_model_fingerprint(model),
+        .worlds = worlds,
+        .horizon_turns = kProductionValueHorizon,
+        .live = make_force_spike_control_decision(
+            prediction_for(predictions, kLiveId)),
+        .payable = make_force_spike_control_decision(
+            prediction_for(predictions, kPayableId)),
+        .hidden_repartition_passed = true,
+    };
+}
+
 ValueProbeDecisionDetail make_value_probe_decision_detail(
     const probe_eval::ProbeLabel& label,
     const probe_eval::ProbePrediction& prediction,
@@ -2552,9 +2698,8 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         }
         value_reference_predictions.push_back(make_prediction(
             probe, scores,
-            learned_critic_value(
-                probe.state, probe.root_player,
-                models.reference_value_model)));
+            probe_critic_value(
+                probe, models.reference_value_model)));
         value_reference_labels.push_back(label);
         progress << " done\n";
     }
@@ -2691,6 +2836,27 @@ ProbeScoreReport score_probe_corpus_with_candidates(
             report.value_candidate_pairs.push_back(
                 std::move(pair));
         }
+    }
+    if (corpus_kind == ProbeCorpusKind::DevV3) {
+        progress
+            << "Scoring supplemental deployed Force Spike "
+               "live/payable controls..."
+            << std::flush;
+        report.force_spike_controls.push_back(
+            score_value_force_spike_policy_controls(
+                models.reference_value_model,
+                models.reference_value_name,
+                config.scoring_value_worlds,
+                config.scoring_value_continuation_epsilon));
+        for (const NamedValueScoringModel& candidate :
+             models.scoring_value_models) {
+            report.force_spike_controls.push_back(
+                score_value_force_spike_policy_controls(
+                    candidate.model, candidate.name,
+                    config.scoring_value_worlds,
+                    config.scoring_value_continuation_epsilon));
+        }
+        progress << " done\n";
     }
     report.hidden_repartition = {
         .passed = true,
@@ -3032,6 +3198,69 @@ std::string format_probe_score_report(
                    << pair.samples_per_candidate << '\n'
                    << "    keys: " << pair.first_key << " minus "
                    << pair.second_key << '\n';
+        }
+    }
+    if (!report.force_spike_controls.empty()) {
+        const auto append_control_key_set =
+            [&output](const std::vector<std::string>& keys) {
+                output << '{';
+                for (std::size_t index = 0;
+                     index < keys.size(); ++index) {
+                    if (index != 0) {
+                        output << ", ";
+                    }
+                    output << keys[index];
+                }
+                output << '}';
+            };
+        output
+            << "\nSupplemental Force Spike deployed controls\n"
+            << "  Reject-only diagnostic; excluded from balanced "
+               "metrics, cache identity, and promotion claims.\n"
+            << "  Gate requires the unique deployed exact maximum "
+               "to be Force Spike when the tax is unpayable and "
+               "Pass when it is payable.\n";
+        for (const ForceSpikePolicyControlReport& control :
+             report.force_spike_controls) {
+            output << "  " << control.policy_name
+                   << ": fingerprint "
+                   << control.model_fingerprint << ", K="
+                   << control.worlds << "/H="
+                   << control.horizon_turns
+                   << ", hidden repartition "
+                   << (control.hidden_repartition_passed
+                           ? "PASS"
+                           : "FAIL")
+                   << '\n'
+                   << "    live: Pass="
+                   << control.live.pass_score
+                   << ", Force Spike="
+                   << control.live.force_spike_score
+                   << ", selected ";
+            append_control_key_set(
+                control.live.selected_keys);
+            output
+                << " ["
+                << (control.live_selects_force_spike()
+                        ? "PASS"
+                        : "FAIL")
+                << "]\n"
+                << "    payable: Pass="
+                << control.payable.pass_score
+                << ", Force Spike="
+                << control.payable.force_spike_score
+                << ", selected ";
+            append_control_key_set(
+                control.payable.selected_keys);
+            output
+                << " ["
+                << (control.payable_selects_pass()
+                        ? "PASS"
+                        : "FAIL")
+                << "]\n"
+                << "    behavioral gate: "
+                << (control.gate_passed() ? "PASS" : "FAIL")
+                << '\n';
         }
     }
     if (!report.value_checkpoints.empty()) {

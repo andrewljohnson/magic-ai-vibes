@@ -91,6 +91,7 @@ case $help_output in
 "Blue: 15 Island, 1 Mox Sapphire, 1 Sol Ring, 1 Ancestral Recall, 1 Time Walk, 1 Braingeyser, 4 Flying Men, 4 Force Spike, 8 Counterspell, 4 Air Elemental"*\
 "RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate"*\
 "--interactive"*"learned-value-g0..g8"*"learned-value-cN"*\
+"learned-value-context-cN"*\
 "learned-value-mix50-g8"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
@@ -417,9 +418,30 @@ do
         --benchmark --games 1 --challenger "$invalid_challenger" \
         --baseline random
 done
+for invalid_context_challenger in \
+    learned-value-context-c learned-value-context-c0 \
+    learned-value-context-c-1 learned-value-context-c1x \
+    learned-value-context-c18446744073709551616
+do
+    expect_error "invalid bot name" \
+        --benchmark --games 1 \
+        --challenger "$invalid_context_challenger" \
+        --baseline random
+done
 expect_error "invalid bot name" \
     --benchmark --games 1 --challenger learned-value-mix50-g7 \
     --baseline random
+expect_error "--challenger requires --benchmark or --score-probes" \
+    --games 1 --challenger learned-value-context-c1
+expect_error "--baseline requires --benchmark" \
+    --games 1 --baseline learned-value-context-c1
+expect_error "requires learned-value-context-cN" \
+    --score-probes --challenger learned-value-c1
+expect_error "requires --learned-generations N" \
+    --score-probes --challenger learned-value-context-c1
+expect_error "generation must match --learned-generations N" \
+    --score-probes --learned-generations 1 \
+    --challenger learned-value-context-c2
 expect_error "--learned-rollouts must be greater than zero" \
     --games 1 --learned-rollouts 0
 expect_error "--score-probes requires --learned-rollouts of at least two" \
