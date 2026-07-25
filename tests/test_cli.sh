@@ -116,6 +116,16 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--value-continuation-epsilon X"*\
+"Value-mirror continuation priority actions in [0,1]"*\
+"the deployed root remains greedy (default: 0)"*) ;;
+    *)
+        printf 'Value continuation epsilon contract missing from --help\n' \
+            >&2
+        exit 1
+        ;;
+esac
 
 run_cli_input "q" --interactive --seed 1 \
     --train-games 1 --train-seed 424242
@@ -230,7 +240,8 @@ esac
 
 run_cli_input "q" --interactive --seed 1 \
     --train-games 1 --train-seed 424242 \
-    --learned-generations 0 --learned-rollouts 1
+    --learned-generations 0 --learned-rollouts 1 \
+    --value-continuation-epsilon 0
 if [ "$cli_status" -ne 0 ]; then
     printf 'interactive legacy-generation sentinel failed\n%s\n' \
         "$cli_output" >&2
@@ -254,10 +265,18 @@ case $cli_output in
         exit 1
         ;;
 esac
+case $cli_output in
+    *"Value continuation priority-action epsilon:"*)
+        printf 'explicit zero epsilon changed interactive reporting\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
 
 run_cli_input "q" --interactive --seed 1 \
     --train-games 1 --train-seed 424242 \
-    --learned-generations 1 --learned-rollouts 1
+    --learned-generations 1 --learned-rollouts 1 \
+    --value-continuation-epsilon 1
 if [ "$cli_status" -ne 0 ]; then
     printf 'interactive Value Challenger C1 failed\n%s\n' \
         "$cli_output" >&2
@@ -266,6 +285,7 @@ fi
 case $cli_output in
     *"Match: Human Red vs Learned Value Challenger C1 RU Aggro"*\
 "Learned search worlds per legal action: 1"*\
+"Value continuation priority-action epsilon: 1 (root remains greedy)"*\
 "Training frozen Value Challenger C1"*\
 "Value Challenger C1 fingerprint:"*\
 "Value Challenger C1 artifact cache: generated $challenger_c1_cache"*\
@@ -359,6 +379,35 @@ expect_error "$learned_generation_scope" \
 learned_rollout_scope="--learned-rollouts requires"
 expect_error "$learned_rollout_scope" \
     --games 1 --bots random --learned-rollouts 1
+value_epsilon_error="must be a finite number in [0, 1]"
+for invalid_epsilon in -0.01 1.0001 nan inf 0.05x 0x1p-1
+do
+    expect_error "$value_epsilon_error" \
+        --interactive \
+        --value-continuation-epsilon "$invalid_epsilon"
+done
+value_epsilon_scope="--value-continuation-epsilon requires"
+expect_error "$value_epsilon_scope" \
+    --games 1 --bots random --value-continuation-epsilon 0.05
+expect_error "$value_epsilon_scope" \
+    --games 1 --bots learned-actor \
+    --value-continuation-epsilon 0.05
+expect_error "$value_epsilon_scope" \
+    --benchmark --games 1 --challenger learned-actor-g0 \
+    --baseline random --value-continuation-epsilon 0.05
+expect_error "$value_epsilon_scope" \
+    --benchmark --games 1 --challenger random \
+    --baseline learned-value-g0 \
+    --value-continuation-epsilon 0.05
+expect_error "$value_epsilon_scope" \
+    --variance-study --games 1 \
+    --value-continuation-epsilon 0.05
+expect_error "$value_epsilon_scope" \
+    --evolve-deck --games 1 \
+    --value-continuation-epsilon 0.05
+expect_error "$value_epsilon_scope" \
+    --diagnose-white-plan \
+    --value-continuation-epsilon 0.05
 expect_error "--refresh-value-challenger-cache requires" \
     --games 1 --refresh-value-challenger-cache
 expect_error "--refresh-value-challenger-cache requires" \
@@ -437,6 +486,34 @@ $learned_value_alias_output" in
 *"Value Challenger"*)
         printf 'legacy Value aliases unexpectedly used another family\n%s\n%s\n' \
             "$learned_alias_output" "$learned_value_alias_output" >&2
+        exit 1
+        ;;
+esac
+
+run_cli --benchmark --games 1 --seed 1 --train-games 1 \
+    --train-seed 424242 --challenger learned-value-g0 \
+    --baseline learned-value-g0 --learned-rollouts 1 \
+    --value-continuation-epsilon 0.05
+if [ "$cli_status" -eq 2 ]; then
+    printf 'continuation-epsilon causal benchmark failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Challenger: Learned Value G0 (continuation epsilon=0.05)"*\
+"Baseline: Learned Value G0"*\
+"Challenger frozen model: Learned Value G0 (continuation epsilon=0.05), seed 424242, 1 training games, K=1"*\
+"Baseline frozen model: Learned Value G0, seed 424242, 1 training games, K=1"*) ;;
+    *)
+        printf 'continuation-epsilon benchmark reporting missing\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+case $cli_output in
+    *"Baseline: Learned Value G0 (continuation epsilon="*)
+        printf 'benchmark epsilon leaked from challenger to baseline\n%s\n' \
+            "$cli_output" >&2
         exit 1
         ;;
 esac

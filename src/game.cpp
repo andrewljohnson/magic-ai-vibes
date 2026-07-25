@@ -8613,11 +8613,11 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
     }
     validate_value_continuation_epsilon(
         tournament_config.value_continuation_epsilon);
-    if (uses_learned &&
-        tournament_config.value_continuation_epsilon != 0.0 &&
-        tournament_config.bot_field == BotField::Learned &&
-        tournament_config.learned_variant !=
-            LearnedVariant::ValueSearchChampion) {
+    if (tournament_config.value_continuation_epsilon != 0.0 &&
+        (!uses_learned ||
+         (tournament_config.bot_field == BotField::Learned &&
+          tournament_config.learned_variant !=
+              LearnedVariant::ValueSearchChampion))) {
         throw std::invalid_argument(
             "Value continuation epsilon requires a Value tournament");
     }

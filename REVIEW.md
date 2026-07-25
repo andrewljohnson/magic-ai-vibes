@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 13:40 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 14:16 PDT — refreshed at the top of every review cycle.*
 
 - **📊 LIFT GATE: 4 of 5 — best in project history** (was 2 of 5).
   The preregistered C16/K=8 mixed field: Blue FLIPPED to strictly best
@@ -116,6 +116,53 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 14:16 PDT
+
+Codex has preregistered the RU treatment: `--value-continuation-epsilon`
+— epsilon-stochastic continuations during search evaluation, a
+card-agnostic attack on the Q(Pass)−Q(X=0) option-value defect (a
+deterministic mirror continuation can never realize the option value of
+holding a spell; a 5% stochastic continuation can). Design is sound and
+notably clever in one respect: the causal five-deck screen pits the
+IDENTICAL frozen model against itself with only the deployment epsilon
+differing (seed 919), isolating the behavioral change with zero
+training confound. The probe gate remains reject-only. Implementation
+in progress; no results yet.
+
+Default lift table unchanged (2 of 5; the 4-of-5 requires C16/K=8
+flags pending promotion).
+
+Priority: unchanged from 14:14 — this epsilon experiment and the
+promotion ladder are the two live threads; reviewer will execute both
+preregistered commands verbatim when the implementation commits.
+
+## 2026-07-25 14:14 PDT
+
+State reviewed: the port is COMMITTED (`203bd08` — frozen C16
+challenger, behavior probes, hardened artifact cache) and Codex's own
+run of the preregistered lift screen matches the reviewer's
+bit-for-bit: **4 of 5, Blue conquered, RU Aggro the last deck (−5.0)**.
+Their notebook also honestly records a preregistration error (60 vs 80
+games/cell) as a correction rather than a rewrite, and correctly
+declines to dismiss RU as cell noise because the 2,040-game milestone
+agrees. C16 is the accepted milestone challenger at commit anchor.
+
+Process note: this cycle hit a transient link failure building the
+working tree — Codex was editing concurrently (`7a5fd33` landed
+mid-cycle). Reviewer verification will pin to committed states from
+here on rather than racing the working tree.
+
+Default-deployment lift table (legacy champion, unchanged): 2 of 5.
+The 4-of-5 table requires the C16/K=8 flags until promotion completes
+(2,000-game virgin seed → eight-seed panel → default flip).
+
+Priorities:
+1. RU learning experiment is the whole ballgame now — awaiting Codex's
+   preregistration; reviewer stands ready for verbatim verification.
+2. Complete the promotion ladder so the DEFAULT `make run` view shows
+   the 4-of-5 table without flags — that's when the user's primary
+   view improves without ceremony.
 
 ## 2026-07-25 13:40 PDT
 

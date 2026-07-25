@@ -11,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -310,6 +311,8 @@ void test_candidate_mapping_is_descriptor_safe() {
 void test_reference_resource_bounds_reject_early() {
     const auto probes = old_school::probes::make_probe_dev_v3();
     ProbeScoreConfig config;
+    expect(config.scoring_value_continuation_epsilon == 0.0,
+           "probe Value continuation epsilon did not default to zero");
     config.reference_worlds = 4097;
     (void)expect_invalid(
         [&]() {
@@ -351,6 +354,22 @@ void test_reference_resource_bounds_reject_early() {
                 config, probes, "model");
         },
         "oversized Value scoring world budget was accepted");
+    config.scoring_value_worlds = 2;
+    for (const double invalid : {
+             -0.01,
+             1.01,
+             std::numeric_limits<double>::quiet_NaN(),
+             std::numeric_limits<double>::infinity(),
+         }) {
+        config.scoring_value_continuation_epsilon = invalid;
+        (void)expect_invalid(
+            [&]() {
+                (void)old_school::probe_runner::
+                    make_probe_cache_metadata(
+                        config, probes, "model");
+            },
+            "invalid Value continuation epsilon was accepted");
+    }
 }
 
 void test_cache_roundtrip_and_stale_rejection() {
@@ -1700,6 +1719,47 @@ void test_validation_scoring_reports_pass_x_zero_pair() {
                     return pair.samples_per_candidate == 3;
                 }),
         "K=3 did not change Value candidate sample accounting");
+
+    ProbeScoreConfig exploratory = config;
+    exploratory.scoring_value_continuation_epsilon = 1.0;
+    const ProbeScoreReport exploratory_first =
+        old_school::probe_runner::
+            score_probe_corpus_with_candidates(
+                ProbeCorpusKind::ValidationV1, exploratory,
+                progress, models);
+    const ProbeScoreReport exploratory_repeated =
+        old_school::probe_runner::
+            score_probe_corpus_with_candidates(
+                ProbeCorpusKind::ValidationV1, exploratory,
+                progress, models);
+    expect(
+        exploratory_first.cache_status ==
+                ProbeCacheStatus::Loaded &&
+            exploratory_repeated.cache_status ==
+                ProbeCacheStatus::Loaded &&
+            exploratory_first.metadata == generated.metadata &&
+            exploratory_repeated.metadata == generated.metadata,
+        "continuation epsilon changed or regenerated the "
+        "Actor-owned label cache");
+    expect(
+        exploratory_first.hidden_repartition.passed &&
+            exploratory_repeated.hidden_repartition.passed,
+        "continuation epsilon broke hidden-zone repartition "
+        "invariance");
+    expect(
+        old_school::probe_runner::format_probe_score_report(
+            exploratory_first) ==
+            old_school::probe_runner::format_probe_score_report(
+                exploratory_repeated),
+        "nonzero continuation epsilon scoring was not deterministic");
+    const std::string exploratory_output =
+        old_school::probe_runner::format_probe_score_report(
+            exploratory_first);
+    expect(
+        exploratory_output.find("continuation epsilon=1") !=
+            std::string::npos,
+        "nonzero continuation epsilon was omitted from probe policy "
+        "configuration");
 
     const std::string output =
         old_school::probe_runner::format_probe_score_report(

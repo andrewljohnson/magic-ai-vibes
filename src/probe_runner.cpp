@@ -358,6 +358,14 @@ void validate_score_config(const ProbeScoreConfig& config) {
         throw std::invalid_argument(
             "probe scoring Value worlds must not exceed 4096");
     }
+    if (!std::isfinite(
+            config.scoring_value_continuation_epsilon) ||
+        config.scoring_value_continuation_epsilon < 0.0 ||
+        config.scoring_value_continuation_epsilon > 1.0) {
+        throw std::invalid_argument(
+            "probe scoring Value continuation epsilon must be "
+            "finite and in [0, 1]");
+    }
     if (config.cache_path.empty()) {
         throw std::invalid_argument(
             "probe cache path must not be empty");
@@ -940,7 +948,8 @@ std::vector<double> learned_search_scores(
     std::string_view corpus_id,
     LearnedVariant continuation_variant, std::size_t worlds,
     std::size_t rollouts_per_world, std::size_t horizon_turns,
-    bool blend_shallow_prior) {
+    bool blend_shallow_prior,
+    double value_continuation_epsilon = 0.0) {
     const LearnedSearchConfig config{
         .seed = reference_seed_for_probe(
             corpus_id, probe.stable_id),
@@ -948,6 +957,8 @@ std::vector<double> learned_search_scores(
         .rollouts_per_world = rollouts_per_world,
         .horizon_turns = horizon_turns,
         .continuation_variant = continuation_variant,
+        .value_continuation_epsilon =
+            value_continuation_epsilon,
         .blend_shallow_prior = blend_shallow_prior,
     };
     const LearnedActionSamples samples =
@@ -1037,7 +1048,8 @@ LearnedValueAttackSetScores value_deployed_attack_scores(
 std::vector<probe_eval::ProbePrediction> score_value_deployed(
     const std::vector<probes::DecisionProbe>& corpus,
     std::shared_ptr<const LearnedModel> value_model,
-    std::string_view corpus_id, std::size_t worlds) {
+    std::string_view corpus_id, std::size_t worlds,
+    double value_continuation_epsilon) {
     std::vector<probe_eval::ProbePrediction> predictions;
     predictions.reserve(corpus.size());
     for (const probes::DecisionProbe& probe : corpus) {
@@ -1049,7 +1061,8 @@ std::vector<probe_eval::ProbePrediction> score_value_deployed(
                 probe, value_model, corpus_id,
                 LearnedVariant::ValueSearchChampion,
                 worlds, 1,
-                kProductionValueHorizon, true);
+                kProductionValueHorizon, true,
+                value_continuation_epsilon);
         } else {
             const auto attack =
                 value_deployed_attack_scores(
@@ -1797,6 +1810,8 @@ std::vector<CandidatePairEstimate> score_value_candidate_pair(
         .horizon_turns = kProductionValueHorizon,
         .continuation_variant =
             LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon =
+            config.scoring_value_continuation_epsilon,
         .blend_shallow_prior = true,
     };
     const LearnedActionSamples original =
@@ -2575,11 +2590,13 @@ ProbeScoreReport score_probe_corpus_with_candidates(
     const auto reference_value_deployed =
         score_value_deployed(
             corpus, models.reference_value_model,
-            definition.corpus_id, config.scoring_value_worlds);
+            definition.corpus_id, config.scoring_value_worlds,
+            config.scoring_value_continuation_epsilon);
     const auto reference_value_deployed_clone =
         score_value_deployed(
             hidden_clones, models.reference_value_model,
-            definition.corpus_id, config.scoring_value_worlds);
+            definition.corpus_id, config.scoring_value_worlds,
+            config.scoring_value_continuation_epsilon);
     std::vector<std::vector<probe_eval::ProbePrediction>>
         scoring_value_deployed;
     std::vector<std::vector<probe_eval::ProbePrediction>>
@@ -2593,12 +2610,14 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         scoring_value_deployed.push_back(
             score_value_deployed(
                 corpus, candidate.model, definition.corpus_id,
-                config.scoring_value_worlds));
+                config.scoring_value_worlds,
+                config.scoring_value_continuation_epsilon));
         scoring_value_deployed_clones.push_back(
             score_value_deployed(
                 hidden_clones, candidate.model,
                 definition.corpus_id,
-                config.scoring_value_worlds));
+                config.scoring_value_worlds,
+                config.scoring_value_continuation_epsilon));
     }
     const auto handcrafted = score_handcrafted(corpus);
     const auto handcrafted_clone =
@@ -2672,11 +2691,21 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         models.scoring_actor_name + " deployed policy";
     const std::string reference_value_deployed_name =
         models.reference_value_name + " deployed policy";
+    std::ostringstream value_configuration;
+    value_configuration.imbue(std::locale::classic());
+    value_configuration
+        << "Priority: K=" << config.scoring_value_worlds
+        << "/H=4 Value mirror with deployed aggregate shallow-prior "
+           "blend";
+    if (config.scoring_value_continuation_epsilon != 0.0) {
+        value_configuration
+            << ", continuation epsilon="
+            << config.scoring_value_continuation_epsilon;
+    }
+    value_configuration
+        << "; Attack: deployed public-board attack-set scorer";
     const std::string value_deployed_configuration =
-        "Priority: K=" +
-        std::to_string(config.scoring_value_worlds) +
-        "/H=4 Value mirror with deployed aggregate shallow-prior "
-        "blend; Attack: deployed public-board attack-set scorer";
+        value_configuration.str();
     report.policies.reserve(policy_count);
     report.policies.push_back(evaluate_hidden_invariant_policy(
         raw_name,

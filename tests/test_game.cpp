@@ -896,6 +896,7 @@ TEST(learned_defaults_to_value_search_champion) {
     };
     CHECK(learned.learned_variant ==
           old_school::LearnedVariant::ValueSearchChampion);
+    CHECK(learned.value_continuation_epsilon == 0.0);
     CHECK(old_school::bot_config_name(learned) == "Learned Value");
 
     const old_school::BotConfig actor = {
@@ -903,6 +904,91 @@ TEST(learned_defaults_to_value_search_champion) {
         .learned_variant = old_school::LearnedVariant::UnifiedActor,
     };
     CHECK(old_school::bot_config_name(actor) == "Learned Actor");
+}
+
+TEST(value_continuation_epsilon_rejects_invalid_or_non_value_use) {
+    const auto rejects_game_config =
+        [](old_school::BotConfig bot) {
+            old_school::GameConfig config;
+            config.bots[0] = std::move(bot);
+            try {
+                old_school::Game game(
+                    old_school::green_deck(),
+                    old_school::red_deck(), 1, config);
+                static_cast<void>(game);
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 1,
+        .value_continuation_epsilon =
+            std::numeric_limits<double>::quiet_NaN(),
+        .learned_model = small_value_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 1,
+        .value_continuation_epsilon = -0.01,
+        .learned_model = small_value_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 1,
+        .value_continuation_epsilon = 1.01,
+        .learned_model = small_value_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .rollouts_per_action = 0,
+        .value_continuation_epsilon = 0.1,
+        .learned_model = small_actor_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Random,
+        .rollouts_per_action = 1,
+        .value_continuation_epsilon = 0.1,
+    }));
+
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
+    };
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    old_school::LearnedSearchConfig search{
+        .seed = 1,
+        .worlds = 2,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .value_continuation_epsilon = 0.1,
+    };
+    bool rejected_actor_search = false;
+    try {
+        static_cast<void>(
+            old_school::learned_priority_action_samples(
+                state, decks, 0, true,
+                old_school::TurnPhase::FirstMain, 1, actions,
+                small_actor_model(), search));
+    } catch (const std::invalid_argument&) {
+        rejected_actor_search = true;
+    }
+    CHECK(rejected_actor_search);
 }
 
 TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
@@ -937,6 +1023,13 @@ TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
             fixture.state, fixture.decks, 0, true,
             old_school::TurnPhase::FirstMain, 1, model, kRollouts,
             kEvaluationSeed);
+    const auto explicit_zero =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, kRollouts,
+            kEvaluationSeed, 0.0);
+    CHECK(explicit_zero.actions == first_main.actions);
+    CHECK(explicit_zero.scores == first_main.scores);
 
     auto hidden_variant = fixture.state;
     std::reverse(hidden_variant.players[1].hand.begin(),
@@ -963,6 +1056,32 @@ TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
     CHECK(std::all_of(
         first_main.scores.begin(), first_main.scores.end(),
         [](double score) { return std::isfinite(score); }));
+
+    const auto epsilon_one =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, kRollouts,
+            kEvaluationSeed, 1.0);
+    const auto epsilon_one_repeated =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, kRollouts,
+            kEvaluationSeed, 1.0);
+    const auto epsilon_one_hidden =
+        old_school::diagnose_learned_value_priority(
+            hidden_variant, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, kRollouts,
+            kEvaluationSeed, 1.0);
+    CHECK(epsilon_one.actions == first_main.actions);
+    CHECK(epsilon_one.actions == epsilon_one_repeated.actions);
+    CHECK(epsilon_one.scores == epsilon_one_repeated.scores);
+    CHECK(epsilon_one.scores == epsilon_one_hidden.scores);
+    CHECK(epsilon_one.sampled_worlds == kRollouts);
+    CHECK(epsilon_one.rollout_evaluations ==
+          epsilon_one.actions.size() * kRollouts);
+    // Root candidates and accounting are unchanged. Only the depth-zero
+    // Value-mirror continuation seats explore.
+    CHECK(epsilon_one.scores != first_main.scores);
 
     const auto second_main =
         old_school::diagnose_learned_value_priority(
@@ -4498,6 +4617,35 @@ TEST(benchmark_training_seed_is_independent_and_model_is_reusable) {
           repeated.challenger_stats.losses);
     CHECK(first.challenger_stats.draws ==
           repeated.challenger_stats.draws);
+}
+
+TEST(benchmark_policy_identity_includes_value_continuation_epsilon) {
+    const auto model = small_value_model();
+    const old_school::BotConfig greedy = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .training_games = 1,
+        .learned_model = model,
+    };
+    old_school::BotConfig exploratory = greedy;
+    exploratory.value_continuation_epsilon = 1.0;
+
+    const auto result = old_school::run_bot_benchmark(
+        1, 0xE05110AULL, exploratory, greedy);
+    CHECK(result.total_games == 60);
+    CHECK(result.challenger.value_continuation_epsilon == 1.0);
+    CHECK(result.baseline.value_continuation_epsilon == 0.0);
+
+    bool rejected_identical = false;
+    try {
+        static_cast<void>(old_school::run_bot_benchmark(
+            1, 0xE05110AULL, greedy, greedy));
+    } catch (const std::invalid_argument&) {
+        rejected_identical = true;
+    }
+    CHECK(rejected_identical);
 }
 
 TEST(actor_and_value_champion_use_distinct_frozen_models_in_benchmark) {

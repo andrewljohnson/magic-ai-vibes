@@ -45,8 +45,9 @@ std::uint64_t parse_number(std::string_view text, std::string_view option) {
     return value;
 }
 
-double parse_positive_real(std::string_view text,
-                           std::string_view option) {
+double parse_finite_real(std::string_view text,
+                         std::string_view option,
+                         std::string_view requirement) {
     const auto is_digit = [](char character) {
         return character >= '0' && character <= '9';
     };
@@ -94,10 +95,34 @@ double parse_positive_real(std::string_view text,
                              : 0.0;
     if (cursor != text.size() ||
         parsed_end != owned.c_str() + owned.size() ||
-        !std::isfinite(value) || value <= 0.0) {
+        !std::isfinite(value)) {
+        throw std::invalid_argument(
+            std::string(option) + std::string(requirement));
+    }
+    return value;
+}
+
+double parse_positive_real(std::string_view text,
+                           std::string_view option) {
+    const double value = parse_finite_real(
+        text, option, " must be a positive finite number");
+    if (value <= 0.0) {
         throw std::invalid_argument(
             std::string(option) +
             " must be a positive finite number");
+    }
+    return value;
+}
+
+double parse_unit_interval_real(std::string_view text,
+                                std::string_view option) {
+    constexpr std::string_view requirement =
+        " must be a finite number in [0, 1]";
+    const double value =
+        parse_finite_real(text, option, requirement);
+    if (value < 0.0 || value > 1.0) {
+        throw std::invalid_argument(
+            std::string(option) + std::string(requirement));
     }
     return value;
 }
@@ -123,22 +148,32 @@ std::string format_real(double value) {
     throw std::runtime_error("failed to format real number");
 }
 
+std::string value_continuation_epsilon_suffix(double epsilon) {
+    if (epsilon == 0.0) {
+        return {};
+    }
+    return " (continuation epsilon=" + format_real(epsilon) + ")";
+}
+
 void print_help(std::string_view executable) {
     std::cout
         << "Usage: " << executable
         << " [--games N] [--seed N] [--bots MODE] [--rollouts N]"
            " [--deep-rollouts N] [--learned-rollouts N]"
            " [--learned-generations N]"
+           " [--value-continuation-epsilon X]"
            " [--refresh-value-challenger-cache]"
            " [--train-games N] [--train-seed N]\n"
         << "       " << executable
         << " --interactive [--seed N] [--train-games N]"
            " [--train-seed N] [--learned-generations N]"
            " [--learned-rollouts N]"
+           " [--value-continuation-epsilon X]"
            " [--refresh-value-challenger-cache]\n"
         << "       " << executable
         << " --benchmark [--games N] [--challenger BOT]"
            " [--baseline BOT] [--learned-rollouts N]"
+           " [--value-continuation-epsilon X]"
            " [--actor-policy-epochs N]"
            " [--actor-policy-rate X]"
            " [--refresh-value-challenger-cache]"
@@ -146,6 +181,7 @@ void print_help(std::string_view executable) {
            " [--refresh-value-mix50-cache]\n"
         << "       " << executable
         << " --stability [--stability-runs N] [--games N]"
+           " [--value-continuation-epsilon X]"
            " [--refresh-value-challenger-cache]\n\n"
         << "       " << executable
         << " --diagnose-white-plan [--seed N] [--train-games N]\n"
@@ -155,6 +191,7 @@ void print_help(std::string_view executable) {
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
            " [--probe-corpus dev-v3|validation-v1]"
            " [--learned-rollouts N]"
+           " [--value-continuation-epsilon X]"
            " [--learned-generations N]"
            " [--actor-generation 0|1] [--value-generation 0|8]"
            " [--value-recipe canonical|mix50]"
@@ -193,6 +230,9 @@ void print_help(std::string_view executable) {
            "challenger for interactive, stability, mixed/learned "
            "simulation, or probe scoring; 0 keeps legacy G0 "
            "(default: 0)\n"
+        << "  --value-continuation-epsilon X  Research-only epsilon "
+           "for Value-mirror continuation priority actions in [0,1]; "
+           "the deployed root remains greedy (default: 0)\n"
         << "  --train-games N  Training games for the selected learned "
            "model "
            "(default: 800)\n"
@@ -619,7 +659,8 @@ old_school::BotConfig bot_config(BotSelection selection,
                             std::size_t rollouts,
                             std::size_t deep_rollouts,
                             std::size_t training_games,
-                            std::size_t learned_rollouts) {
+                            std::size_t learned_rollouts,
+                            double value_continuation_epsilon = 0.0) {
     old_school::BotConfig config;
     config.kind = selection.kind;
     config.learned_variant = selection.learned_variant;
@@ -631,6 +672,11 @@ old_school::BotConfig bot_config(BotSelection selection,
         return config;
     case old_school::BotKind::Learned:
         config.rollouts_per_action = learned_rollouts;
+        if (selection.learned_variant ==
+            old_school::LearnedVariant::ValueSearchChampion) {
+            config.value_continuation_epsilon =
+                value_continuation_epsilon;
+        }
         return config;
     case old_school::BotKind::MonteCarlo:
         config.rollouts_per_action = rollouts;
@@ -646,13 +692,14 @@ old_school::BotConfig bot_config(old_school::BotKind kind,
                             std::size_t rollouts,
                             std::size_t deep_rollouts,
                             std::size_t training_games,
-                            std::size_t learned_rollouts = 2) {
+                            std::size_t learned_rollouts = 2,
+                            double value_continuation_epsilon = 0.0) {
     return bot_config(
         {.kind = kind,
          .learned_variant =
              old_school::LearnedVariant::ValueSearchChampion},
         rollouts, deep_rollouts, training_games,
-        learned_rollouts);
+        learned_rollouts, value_continuation_epsilon);
 }
 
 std::shared_ptr<const old_school::LearnedModel>
@@ -1292,7 +1339,8 @@ bool run_stability_panel(std::size_t runs,
                          std::size_t training_games,
                          std::size_t learned_rollouts,
                          std::size_t learned_generations,
-                         bool refresh_challenger_cache) {
+                         bool refresh_challenger_cache,
+                         double value_continuation_epsilon) {
     constexpr std::array<old_school::BotKind, 4> baseline_kinds = {
         old_school::BotKind::Random,
         old_school::BotKind::MonteCarlo,
@@ -1302,7 +1350,8 @@ bool run_stability_panel(std::size_t runs,
     old_school::BotConfig learned_config =
         bot_config(old_school::BotKind::Learned, rollouts,
                    deep_rollouts, training_games,
-                   learned_rollouts);
+                   learned_rollouts,
+                   value_continuation_epsilon);
     std::array<old_school::BotBenchmarkSummary, baseline_kinds.size()>
         pooled;
     std::array<std::size_t, baseline_kinds.size()> seed_wins{};
@@ -1348,6 +1397,8 @@ bool run_stability_panel(std::size_t runs,
     mixed_config.monte_carlo_rollouts = rollouts;
     mixed_config.deep_monte_carlo_rollouts = deep_rollouts;
     mixed_config.learned_rollouts = learned_rollouts;
+    mixed_config.value_continuation_epsilon =
+        value_continuation_epsilon;
     mixed_config.learned_training_games = training_games;
     mixed_config.learned_variant =
         old_school::LearnedVariant::ValueSearchChampion;
@@ -1376,7 +1427,12 @@ bool run_stability_panel(std::size_t runs,
                       : "Challenger C" +
                             std::to_string(learned_generations))
               << "\nLearned search worlds per legal action: "
-              << learned_rollouts
+              << learned_rollouts;
+    if (value_continuation_epsilon != 0.0) {
+        std::cout << "\nValue continuation priority-action epsilon: "
+                  << format_real(value_continuation_epsilon);
+    }
+    std::cout
               << "\nTraining fixed model..." << std::flush;
 
     old_school::GameConfig shared_config;
@@ -1723,6 +1779,7 @@ int main(int argc, char** argv) {
         std::size_t deep_rollouts = 8;
         std::size_t learned_rollouts = 2;
         std::size_t learned_generations = 0;
+        double value_continuation_epsilon = 0.0;
         std::size_t training_games = 800;
         std::uint64_t training_seed =
             old_school::kDefaultLearnedTrainingSeed;
@@ -1743,6 +1800,7 @@ int main(int argc, char** argv) {
         bool actor_policy_option_used = false;
         bool learned_rollouts_option_used = false;
         bool learned_generations_option_used = false;
+        bool value_continuation_epsilon_option_used = false;
         old_school::probe_runner::ProbeCorpusKind probe_corpus =
             old_school::probe_runner::ProbeCorpusKind::DevV3;
         bool probe_cache_was_set = false;
@@ -1824,6 +1882,7 @@ int main(int argc, char** argv) {
                 option != "--deep-rollouts" &&
                 option != "--learned-rollouts" &&
                 option != "--learned-generations" &&
+                option != "--value-continuation-epsilon" &&
                 option != "--train-games" &&
                 option != "--stability-runs" &&
                 option != "--generations" &&
@@ -1850,7 +1909,8 @@ int main(int argc, char** argv) {
                 option != "--train-seed" &&
                 option != "--train-games" &&
                 option != "--learned-rollouts" &&
-                option != "--learned-generations") {
+                option != "--learned-generations" &&
+                option != "--value-continuation-epsilon") {
                 interactive_unsupported_option_used = true;
             }
             if (option == "--bots") {
@@ -1920,6 +1980,13 @@ int main(int argc, char** argv) {
                 actor_generation_config.policy_learning_rate =
                     parse_positive_real(argv[argument], option);
                 actor_policy_option_used = true;
+                continue;
+            }
+            if (option == "--value-continuation-epsilon") {
+                value_continuation_epsilon =
+                    parse_unit_interval_real(
+                        argv[argument], option);
+                value_continuation_epsilon_option_used = true;
                 continue;
             }
 
@@ -2048,7 +2115,8 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--interactive only accepts --seed, --train-seed, "
                 "--train-games, --learned-generations, and "
-                "--learned-rollouts");
+                "--learned-rollouts, and "
+                "--value-continuation-epsilon");
         }
         if (probe_option_used && !score_probes) {
             throw std::invalid_argument(
@@ -2069,6 +2137,12 @@ int main(int argc, char** argv) {
             benchmark &&
             (challenger.kind == old_school::BotKind::Learned ||
              baseline.kind == old_school::BotKind::Learned);
+        const bool benchmark_challenger_uses_value =
+            benchmark &&
+            challenger.kind == old_school::BotKind::Learned &&
+            challenger.learned_variant ==
+                old_school::LearnedVariant::
+                    ValueSearchChampion;
         const bool tournament_uses_any_learned =
             !interactive && !benchmark && !stability && !evolve &&
             !diagnose_white_plan && !variance_study && !score_probes &&
@@ -2080,6 +2154,16 @@ int main(int argc, char** argv) {
              bot_field_learned_variant ==
                  old_school::LearnedVariant::
                      ValueSearchChampion);
+        if (value_continuation_epsilon_option_used &&
+            !(interactive || stability || score_probes ||
+              tournament_uses_value ||
+              benchmark_challenger_uses_value)) {
+            throw std::invalid_argument(
+                "--value-continuation-epsilon requires "
+                "--interactive, --stability, --score-probes, a "
+                "mixed/learned-value simulation, or a benchmark "
+                "with a Learned Value challenger");
+        }
         if (learned_generations_option_used &&
             !(interactive || stability || score_probes ||
               tournament_uses_value)) {
@@ -2213,7 +2297,14 @@ int main(int argc, char** argv) {
                 << "Game seed: " << seed << '\n'
                 << "Training seed: " << training_seed << '\n'
                 << "Learned search worlds per legal action: "
-                << learned_rollouts << '\n'
+                << learned_rollouts << '\n';
+            if (value_continuation_epsilon != 0.0) {
+                std::cout
+                    << "Value continuation priority-action epsilon: "
+                    << format_real(value_continuation_epsilon)
+                    << " (root remains greedy)\n";
+            }
+            std::cout
                 << "Type q at any prompt to abandon the game.\n"
                 << "Board layout: 120 columns, expanding to 180 for "
                    "the stack rail; opponent hand is shown for "
@@ -2230,7 +2321,8 @@ int main(int argc, char** argv) {
                           refresh_value_challenger_cache);
             old_school::run_interactive_match(
                 std::cin, std::cout, seed, learned_model,
-                matchup, learned_rollouts);
+                matchup, learned_rollouts,
+                value_continuation_epsilon);
             return 0;
         }
         if (score_probes) {
@@ -2241,6 +2333,8 @@ int main(int argc, char** argv) {
                 .reference_horizon_turns = probe_horizon,
                 .reference_rollouts_per_world = 1,
                 .scoring_value_worlds = learned_rollouts,
+                .scoring_value_continuation_epsilon =
+                    value_continuation_epsilon,
                 .cache_path = probe_cache,
                 .refresh_cache = refresh_probe_cache,
             };
@@ -2370,7 +2464,8 @@ int main(int argc, char** argv) {
         if (benchmark) {
             auto challenger_config =
                 bot_config(challenger, rollouts, deep_rollouts,
-                           training_games, learned_rollouts);
+                           training_games, learned_rollouts,
+                           value_continuation_epsilon);
             auto baseline_config =
                 bot_config(baseline, rollouts, deep_rollouts,
                            training_games, learned_rollouts);
@@ -2565,16 +2660,25 @@ int main(int argc, char** argv) {
                             return std::string(
                                        "Learned Value Challenger C") +
                                    std::to_string(
-                                       selection.value_generation);
+                                       selection.value_generation) +
+                                   value_continuation_epsilon_suffix(
+                                       config
+                                           .value_continuation_epsilon);
                         }
                         if (selection.value_family ==
                             BotSelection::ValueFamily::Mix50) {
                             return std::string(
-                                "Learned Value Mix50 G8");
+                                       "Learned Value Mix50 G8") +
+                                   value_continuation_epsilon_suffix(
+                                       config
+                                           .value_continuation_epsilon);
                         }
                         return std::string("Learned Value G") +
                                std::to_string(
-                                   selection.value_generation);
+                                   selection.value_generation) +
+                               value_continuation_epsilon_suffix(
+                                   config
+                                       .value_continuation_epsilon);
                     }
                     return old_school::bot_config_name(config);
                 };
@@ -2590,7 +2694,8 @@ int main(int argc, char** argv) {
                        training_seed, rollouts, deep_rollouts,
                        training_games, learned_rollouts,
                        learned_generations,
-                       refresh_value_challenger_cache)
+                       refresh_value_challenger_cache,
+                       value_continuation_epsilon)
                        ? 0
                        : 1;
         }
@@ -2645,6 +2750,8 @@ int main(int argc, char** argv) {
         tournament_config.deep_monte_carlo_rollouts =
             deep_rollouts;
         tournament_config.learned_rollouts = learned_rollouts;
+        tournament_config.value_continuation_epsilon =
+            value_continuation_epsilon;
         tournament_config.learned_training_games =
             training_games;
         tournament_config.learned_variant =
@@ -2704,6 +2811,12 @@ int main(int argc, char** argv) {
                       << ", seed " << training_seed << ", "
                       << training_games << " training games, K="
                       << learned_rollouts << '\n';
+            if (value_continuation_epsilon != 0.0) {
+                std::cout
+                    << "Value continuation priority-action epsilon: "
+                    << format_real(value_continuation_epsilon)
+                    << " (root remains greedy)\n";
+            }
         }
         std::cout
                   << "Games per matchup: " << result.games_per_matchup
