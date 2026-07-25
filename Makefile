@@ -46,6 +46,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(PROBE_TEST_RUNNER)
 	./$(PROBE_EVAL_TEST_RUNNER)
 	./$(PROBE_RUNNER_TEST_RUNNER)
+	sh tests/test_cli.sh ./$(SIMULATOR)
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
 
 test-learned-iteration: $(LEARNED_ITERATION_TEST_RUNNER)

@@ -71,6 +71,23 @@ std::vector<double> td_lambda_targets(
     std::span<const double> chronological_values,
     double terminal_z, double lambda);
 
+// Value G8's exact four-recorded-state bootstrap. For state i, when state
+// i+4 exists, the target is the equal blend of terminal_z and V_parent(i+4).
+// The final four states retain the terminal target alone.
+std::vector<double> four_state_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    double terminal_z);
+
+// Exact one-based G5-G8 Late-Mix50 assignment. The result is pure and
+// consumes no RNG: each consecutive pair is raw first, searched second.
+constexpr bool value_g8_mix50_game_uses_search(
+    std::size_t published_generation,
+    std::size_t zero_based_game_index) noexcept {
+    return published_generation >= 5 &&
+           published_generation <= 8 &&
+           zero_based_game_index % 2 == 1;
+}
+
 inline constexpr std::size_t kReplayWindowGenerations = 3;
 
 // Generations are immutable after insertion. Snapshots share const storage,

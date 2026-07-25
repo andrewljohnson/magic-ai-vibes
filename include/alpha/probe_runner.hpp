@@ -131,6 +131,34 @@ struct HiddenRepartitionSummary {
     std::size_t probe_count = 0;
 };
 
+struct ValueProbeDecisionDetail {
+    std::string stable_id;
+    DeckId root_deck = DeckId::Green;
+    // A deterministic deployed selector has exactly one key. Otherwise this
+    // is the complete exact-score argmax set and deployment is uniform over
+    // the keys, matching probe_eval semantics.
+    std::vector<std::string> selected_keys;
+    bool deterministic_selection = false;
+    std::vector<std::string> reference_best_set;
+    double regret = 0.0;
+    double critic_prediction = 0.0;
+    double selected_action_reference_q = 0.0;
+    double critic_error = 0.0;
+    // Compares the exact deployed selection distribution with legacy G0.
+    bool selection_changed_from_reference = false;
+    // Compares the exact deployed selection distribution with the immediately
+    // preceding reported checkpoint.
+    bool selection_changed_from_previous = false;
+};
+
+struct ValueCheckpointProbeReport {
+    std::string name;
+    std::string fingerprint;
+    probe_eval::ProbeMetricSummary metrics;
+    // Stable-ID order, independent of fixture or cache row order.
+    std::vector<ValueProbeDecisionDetail> decisions;
+};
+
 struct ProbeScoreReport {
     ProbeCacheMetadata metadata;
     ProbeCacheStatus cache_status = ProbeCacheStatus::Loaded;
@@ -139,8 +167,16 @@ struct ProbeScoreReport {
     // The reference model owns the cached labels. The scoring model may be a
     // later immutable generation evaluated against those unchanged labels.
     std::string scoring_actor_model_fingerprint;
+    // The reference Value model owns only the continuation-sensitivity
+    // cross-check. A distinct scoring Value model is an evaluated candidate
+    // and never affects cached Actor labels or the cross-check.
     std::string value_model_fingerprint;
+    std::string scoring_value_model_fingerprint;
     std::vector<PolicyProbeReport> policies;
+    // Multi-checkpoint attribution keeps the full legacy G0 policy row in
+    // `policies` and reports later immutable Value checkpoints compactly.
+    // G0 is first, followed by scoring candidates in caller-provided order.
+    std::vector<ValueCheckpointProbeReport> value_checkpoints;
     ReferenceSensitivitySummary reference_sensitivity;
     LowMarginSummary low_margin;
     HiddenRepartitionSummary hidden_repartition;
@@ -197,6 +233,37 @@ ProbeReferenceSamples generate_probe_reference_samples(
 
 ProbeScoreReport score_probe_dev_v2(
     const ProbeScoreConfig& config, std::ostream& progress);
+
+struct NamedValueScoringModel {
+    std::string name;
+    std::shared_ptr<const LearnedModel> model;
+};
+
+struct ProbeScoringModels {
+    std::shared_ptr<const LearnedModel> reference_actor_model;
+    std::shared_ptr<const LearnedModel> scoring_actor_model;
+    std::string scoring_actor_name;
+    std::shared_ptr<const LearnedModel> reference_value_model;
+    std::string reference_value_name;
+    std::vector<NamedValueScoringModel> scoring_value_models;
+};
+
+// Scores explicit immutable Actor and ordered Value candidates. Actor cache
+// identity depends only on `reference_actor_model`; the reference Value is
+// used for continuation-sensitivity diagnostics and as checkpoint G0.
+// Scoring candidates never change or regenerate otherwise matching labels.
+ProbeScoreReport score_probe_dev_v2_with_candidates(
+    const ProbeScoreConfig& config, std::ostream& progress,
+    ProbeScoringModels models);
+
+// Builds the exact deployed-selection attribution used by checkpoint reports.
+// Null selected_key means uniform choice over all exact score maxima; a
+// selected_key means a deterministic deployed selector.
+ValueProbeDecisionDetail make_value_probe_decision_detail(
+    const probe_eval::ProbeLabel& label,
+    const probe_eval::ProbePrediction& prediction,
+    const ValueProbeDecisionDetail* reference = nullptr,
+    const ValueProbeDecisionDetail* previous = nullptr);
 
 // Scores an immutable Actor candidate against labels owned by an immutable
 // reference Actor. This is the offline generation-vs-generation path: changing

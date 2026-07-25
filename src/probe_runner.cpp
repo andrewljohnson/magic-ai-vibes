@@ -1365,6 +1365,148 @@ ReferenceSensitivitySummary compare_continuation_labels(
     return summary;
 }
 
+ValueProbeDecisionDetail build_value_probe_decision_detail(
+    const probe_eval::ProbeLabel& label,
+    const probe_eval::ProbePrediction& prediction,
+    const ValueProbeDecisionDetail* reference,
+    const ValueProbeDecisionDetail* previous) {
+    probe_eval::validate_probe_predictions({label}, {prediction});
+
+    std::vector<std::string> selected_keys;
+    bool deterministic_selection = false;
+    if (prediction.selected_key.has_value()) {
+        selected_keys.push_back(*prediction.selected_key);
+        deterministic_selection = true;
+    } else {
+        const double highest_score = std::max_element(
+            prediction.policy_scores.begin(),
+            prediction.policy_scores.end(),
+            [](const probe_eval::PolicyScore& left,
+               const probe_eval::PolicyScore& right) {
+                return left.score < right.score;
+            })->score;
+        for (const probe_eval::PolicyScore& score :
+             prediction.policy_scores) {
+            if (score.score == highest_score) {
+                selected_keys.push_back(score.key);
+            }
+        }
+    }
+    std::sort(selected_keys.begin(), selected_keys.end());
+
+    double selected_reference_q = 0.0;
+    for (const std::string& key : selected_keys) {
+        const auto candidate = std::find_if(
+            label.candidates.begin(), label.candidates.end(),
+            [&key](const probe_eval::CandidateLabel& item) {
+                return item.key == key;
+            });
+        if (candidate == label.candidates.end()) {
+            throw std::invalid_argument(
+                "Value detail selection is missing from reference label");
+        }
+        selected_reference_q += candidate->q;
+    }
+    selected_reference_q /=
+        static_cast<double>(selected_keys.size());
+
+    std::vector<std::string> reference_best_set =
+        label.reference_best_set;
+    std::sort(reference_best_set.begin(),
+              reference_best_set.end());
+    const auto selection_differs =
+        [&selected_keys, deterministic_selection](
+            const ValueProbeDecisionDetail* other) {
+            return other != nullptr &&
+                   (other->selected_keys != selected_keys ||
+                    other->deterministic_selection !=
+                        deterministic_selection);
+        };
+    const bool selection_changed_from_reference =
+        selection_differs(reference);
+    const bool selection_changed_from_previous =
+        selection_differs(previous);
+    return {
+        .stable_id = label.stable_id,
+        .root_deck = label.root_deck,
+        .selected_keys = std::move(selected_keys),
+        .deterministic_selection = deterministic_selection,
+        .reference_best_set = std::move(reference_best_set),
+        .regret =
+            label.reference_value - selected_reference_q,
+        .critic_prediction = prediction.critic_value,
+        .selected_action_reference_q = selected_reference_q,
+        .critic_error =
+            prediction.critic_value - selected_reference_q,
+        .selection_changed_from_reference =
+            selection_changed_from_reference,
+        .selection_changed_from_previous =
+            selection_changed_from_previous,
+    };
+}
+
+ValueCheckpointProbeReport make_value_checkpoint_report(
+    std::string name, std::string fingerprint,
+    const std::vector<probe_eval::ProbeLabel>& labels,
+    const std::vector<probe_eval::ProbePrediction>& predictions,
+    const std::vector<probe_eval::ProbePrediction>& clone_predictions,
+    const ValueCheckpointProbeReport* reference,
+    const ValueCheckpointProbeReport* previous) {
+    const PolicyProbeReport evaluated =
+        evaluate_hidden_invariant_policy(
+            name, "deployed Value checkpoint", labels,
+            predictions, clone_predictions, true);
+    ValueCheckpointProbeReport checkpoint{
+        .name = std::move(name),
+        .fingerprint = std::move(fingerprint),
+        .metrics = evaluated.metrics,
+    };
+    checkpoint.decisions.reserve(labels.size());
+    for (const probe_eval::ProbeLabel& label : labels) {
+        const auto& prediction =
+            prediction_for(predictions, label.stable_id);
+        const ValueProbeDecisionDetail* reference_detail = nullptr;
+        if (reference != nullptr) {
+            const auto found = std::find_if(
+                reference->decisions.begin(),
+                reference->decisions.end(),
+                [&label](const ValueProbeDecisionDetail& detail) {
+                    return detail.stable_id == label.stable_id;
+                });
+            if (found == reference->decisions.end()) {
+                throw std::invalid_argument(
+                    "reference Value checkpoint is missing a probe");
+            }
+            reference_detail = &*found;
+        }
+        const ValueProbeDecisionDetail* previous_detail = nullptr;
+        if (previous != nullptr) {
+            const auto found = std::find_if(
+                previous->decisions.begin(),
+                previous->decisions.end(),
+                [&label](const ValueProbeDecisionDetail& detail) {
+                    return detail.stable_id == label.stable_id;
+                });
+            if (found == previous->decisions.end()) {
+                throw std::invalid_argument(
+                    "previous Value checkpoint is missing a probe");
+            }
+            previous_detail = &*found;
+        }
+        checkpoint.decisions.push_back(
+            build_value_probe_decision_detail(
+                label, prediction, reference_detail,
+                previous_detail));
+    }
+    std::sort(
+        checkpoint.decisions.begin(), checkpoint.decisions.end(),
+        [](const ValueProbeDecisionDetail& left,
+           const ValueProbeDecisionDetail& right) {
+            return left.stable_id < right.stable_id;
+        });
+    return checkpoint;
+}
+
 ProbeReferenceSamples generate_variant_reference_samples(
     const probes::DecisionProbe& probe,
     std::shared_ptr<const LearnedModel> model,
@@ -1398,6 +1540,15 @@ ProbeReferenceSamples generate_variant_reference_samples(
 }
 
 } // namespace
+
+ValueProbeDecisionDetail make_value_probe_decision_detail(
+    const probe_eval::ProbeLabel& label,
+    const probe_eval::ProbePrediction& prediction,
+    const ValueProbeDecisionDetail* reference,
+    const ValueProbeDecisionDetail* previous) {
+    return build_value_probe_decision_detail(
+        label, prediction, reference, previous);
+}
 
 std::uint64_t reference_seed_for_probe(
     std::string_view corpus_id, std::string_view stable_id,
@@ -1816,28 +1967,68 @@ ProbeReferenceSamples generate_probe_reference_samples(
         LearnedVariant::UnifiedActor, true);
 }
 
-ProbeScoreReport score_probe_dev_v2_with_models(
+ProbeScoreReport score_probe_dev_v2_with_candidates(
     const ProbeScoreConfig& config, std::ostream& progress,
-    std::shared_ptr<const LearnedModel> reference_actor_model,
-    std::shared_ptr<const LearnedModel> scoring_actor_model,
-    std::string scoring_actor_name) {
+    ProbeScoringModels models) {
     validate_score_config(config);
-    if (!reference_actor_model || !scoring_actor_model) {
+    if (!models.reference_actor_model ||
+        !models.scoring_actor_model ||
+        !models.reference_value_model) {
         throw std::invalid_argument(
-            "probe scoring requires frozen reference and scoring Actor models");
+            "probe scoring requires frozen reference and scoring "
+            "Actor models and a reference Value model");
     }
-    if (scoring_actor_name.empty()) {
+    if (models.scoring_actor_name.empty() ||
+        models.reference_value_name.empty()) {
         throw std::invalid_argument(
-            "probe scoring Actor name must not be empty");
+            "probe scoring model names must not be empty");
     }
-    validate_text_field(scoring_actor_name,
+    validate_text_field(models.scoring_actor_name,
                         "probe scoring Actor name");
+    validate_text_field(models.reference_value_name,
+                        "probe reference Value name");
+    for (std::size_t candidate = 0;
+         candidate < models.scoring_value_models.size();
+         ++candidate) {
+        const NamedValueScoringModel& scoring =
+            models.scoring_value_models[candidate];
+        if (!scoring.model) {
+            throw std::invalid_argument(
+                "probe scoring requires every Value checkpoint "
+                "model to be frozen and non-null");
+        }
+        validate_text_field(scoring.name,
+                            "probe scoring Value name");
+        for (std::size_t prior = 0; prior < candidate; ++prior) {
+            if (models.scoring_value_models[prior].name ==
+                scoring.name) {
+                throw std::invalid_argument(
+                    "probe scoring Value names must be unique");
+            }
+        }
+        if (models.scoring_value_models.size() > 1 &&
+            scoring.name == models.reference_value_name) {
+            throw std::invalid_argument(
+                "multi-checkpoint Value names must differ from "
+                "the reference Value name");
+        }
+    }
     const std::vector<probes::DecisionProbe> corpus =
         probes::make_probe_dev_v2();
     const std::string reference_actor_fingerprint =
-        learned_model_fingerprint(reference_actor_model);
+        learned_model_fingerprint(models.reference_actor_model);
     const std::string scoring_actor_fingerprint =
-        learned_model_fingerprint(scoring_actor_model);
+        learned_model_fingerprint(models.scoring_actor_model);
+    const std::string reference_value_fingerprint =
+        learned_model_fingerprint(models.reference_value_model);
+    std::vector<std::string> scoring_value_fingerprints;
+    scoring_value_fingerprints.reserve(
+        models.scoring_value_models.size());
+    for (const NamedValueScoringModel& candidate :
+         models.scoring_value_models) {
+        scoring_value_fingerprints.push_back(
+            learned_model_fingerprint(candidate.model));
+    }
     const ProbeCacheMetadata metadata =
         make_probe_cache_metadata(
             config, corpus, reference_actor_fingerprint);
@@ -1863,7 +2054,8 @@ ProbeScoreReport score_probe_dev_v2_with_models(
                      << corpus[probe].stable_id << ")..."
                      << std::flush;
             raw.push_back(generate_probe_reference_samples(
-                corpus[probe], reference_actor_model, config));
+                corpus[probe], models.reference_actor_model,
+                config));
             progress << " done\n";
         }
         labels.reserve(raw.size());
@@ -1879,15 +2071,7 @@ ProbeScoreReport score_probe_dev_v2_with_models(
                  << config.cache_path.string() << '\n';
     }
 
-    progress << "Training frozen Value scoring model (seed "
-             << config.training_seed << ", "
-             << config.training_games << " games)..."
-             << std::flush;
-    const auto value_model = train_learned_value_champion(
-        config.training_games, config.training_seed);
-    const std::string value_fingerprint =
-        learned_model_fingerprint(value_model);
-    progress << " done\nCross-checking the Actor reference with "
+    progress << "Cross-checking the Actor reference with "
                 "identical-config Value continuations...\n";
     std::vector<probe_eval::ProbeLabel> value_reference_labels;
     std::vector<probe_eval::ProbePrediction>
@@ -1902,7 +2086,7 @@ ProbeScoreReport score_probe_dev_v2_with_models(
                  << ")..." << std::flush;
         const ProbeReferenceSamples samples =
             generate_variant_reference_samples(
-                probe, value_model, config,
+                probe, models.reference_value_model, config,
                 LearnedVariant::ValueSearchChampion, false);
         const probe_eval::ProbeLabel label =
             probe_eval::make_probe_label(
@@ -1916,7 +2100,8 @@ ProbeScoreReport score_probe_dev_v2_with_models(
         value_reference_predictions.push_back(make_prediction(
             probe, scores,
             learned_critic_value(
-                probe.state, probe.root_player, value_model)));
+                probe.state, probe.root_player,
+                models.reference_value_model)));
         value_reference_labels.push_back(label);
         progress << " done\n";
     }
@@ -1924,7 +2109,18 @@ ProbeScoreReport score_probe_dev_v2_with_models(
         compare_continuation_labels(labels,
                                     value_reference_labels);
 
-    progress << "Scoring five policy views and their hidden-zone "
+    const bool multi_checkpoint_attribution =
+        models.scoring_value_models.size() > 1;
+    const bool has_distinct_single_value_candidate =
+        models.scoring_value_models.size() == 1 &&
+        scoring_value_fingerprints.front() !=
+            reference_value_fingerprint;
+    const std::size_t policy_count =
+        5 + (multi_checkpoint_attribution
+                 ? models.scoring_value_models.size()
+                 : (has_distinct_single_value_candidate ? 1U : 0U));
+    progress << "Scoring " << policy_count
+             << " policy views and their hidden-zone "
                 "repartition clones on "
              << corpus.size() << " diagnostic positions..."
              << std::flush;
@@ -1938,29 +2134,48 @@ ProbeScoreReport score_probe_dev_v2_with_models(
     }
 
     const auto actor_raw =
-        score_actor_raw(corpus, scoring_actor_model);
+        score_actor_raw(corpus, models.scoring_actor_model);
     const auto actor_raw_clone =
-        score_actor_raw(hidden_clones, scoring_actor_model);
+        score_actor_raw(hidden_clones, models.scoring_actor_model);
     const auto actor_deployed =
-        score_actor_deployed(corpus, scoring_actor_model);
+        score_actor_deployed(corpus, models.scoring_actor_model);
     const auto actor_deployed_clone =
-        score_actor_deployed(hidden_clones, scoring_actor_model);
-    const auto value_deployed =
-        score_value_deployed(corpus, value_model);
-    const auto value_deployed_clone =
-        score_value_deployed(hidden_clones, value_model);
+        score_actor_deployed(
+            hidden_clones, models.scoring_actor_model);
+    const auto reference_value_deployed =
+        score_value_deployed(
+            corpus, models.reference_value_model);
+    const auto reference_value_deployed_clone =
+        score_value_deployed(
+            hidden_clones, models.reference_value_model);
+    std::vector<std::vector<probe_eval::ProbePrediction>>
+        scoring_value_deployed;
+    std::vector<std::vector<probe_eval::ProbePrediction>>
+        scoring_value_deployed_clones;
+    scoring_value_deployed.reserve(
+        models.scoring_value_models.size());
+    scoring_value_deployed_clones.reserve(
+        models.scoring_value_models.size());
+    for (const NamedValueScoringModel& candidate :
+         models.scoring_value_models) {
+        scoring_value_deployed.push_back(
+            score_value_deployed(corpus, candidate.model));
+        scoring_value_deployed_clones.push_back(
+            score_value_deployed(hidden_clones, candidate.model));
+    }
     const auto handcrafted = score_handcrafted(corpus);
     const auto handcrafted_clone =
         score_handcrafted(hidden_clones);
     const auto value_reference_clone = score_learned_search(
-        hidden_clones, value_model,
+        hidden_clones, models.reference_value_model,
         LearnedVariant::ValueSearchChampion, config.reference_worlds,
         config.reference_rollouts_per_world,
         config.reference_horizon_turns, false);
     require_critics_bit_identical(
         actor_raw, actor_deployed, "Actor");
     require_critics_bit_identical(
-        value_deployed, value_reference_predictions, "Value");
+        reference_value_deployed, value_reference_predictions,
+        "Value");
     progress << " done\n";
 
     ProbeScoreReport report;
@@ -1971,49 +2186,121 @@ ProbeScoreReport score_probe_dev_v2_with_models(
         reference_sample_count(metadata);
     report.scoring_actor_model_fingerprint =
         scoring_actor_fingerprint;
-    report.value_model_fingerprint = value_fingerprint;
+    report.value_model_fingerprint =
+        reference_value_fingerprint;
+    if (models.scoring_value_models.size() == 1) {
+        report.scoring_value_model_fingerprint =
+            scoring_value_fingerprints.front();
+    }
     report.reference_sensitivity = reference_sensitivity;
     report.low_margin =
         summarize_low_margin_best_pairs(labels);
     report.hidden_repartition = {
         .passed = true,
-        .policy_count = 5,
+        .policy_count = policy_count,
         .probe_count = corpus.size(),
     };
     const std::string raw_name =
-        scoring_actor_name + " raw head";
+        models.scoring_actor_name + " raw head";
     const std::string deployed_name =
-        scoring_actor_name + " deployed policy";
-    report.policies = {
-        evaluate_hidden_invariant_policy(
-            raw_name,
-            "Priority and Attack: raw masked policy logits",
-            labels, actor_raw, actor_raw_clone, true),
-        evaluate_hidden_invariant_policy(
-            deployed_name,
-            "Priority: K=2/H=0 information-set search with no "
-            "shallow blend; Attack: raw masked policy head",
-            labels, actor_deployed, actor_deployed_clone, true),
-        evaluate_hidden_invariant_policy(
-            "Value deployed policy",
+        models.scoring_actor_name + " deployed policy";
+    const std::string reference_value_deployed_name =
+        models.reference_value_name + " deployed policy";
+    report.policies.reserve(policy_count);
+    report.policies.push_back(evaluate_hidden_invariant_policy(
+        raw_name,
+        "Priority and Attack: raw masked policy logits",
+        labels, actor_raw, actor_raw_clone, true));
+    report.policies.push_back(evaluate_hidden_invariant_policy(
+        deployed_name,
+        "Priority: K=2/H=0 information-set search with no "
+        "shallow blend; Attack: raw masked policy head",
+        labels, actor_deployed, actor_deployed_clone, true));
+    report.policies.push_back(evaluate_hidden_invariant_policy(
+        reference_value_deployed_name,
+        "Priority: K=2/H=4 Champion mirror with deployed "
+        "aggregate shallow-prior blend; Attack: deployed "
+        "public-board attack-set scorer",
+        labels, reference_value_deployed,
+        reference_value_deployed_clone, true));
+    if (has_distinct_single_value_candidate) {
+        report.policies.push_back(evaluate_hidden_invariant_policy(
+            models.scoring_value_models.front().name +
+                " deployed policy",
             "Priority: K=2/H=4 Champion mirror with deployed "
             "aggregate shallow-prior blend; Attack: deployed "
             "public-board attack-set scorer",
-            labels, value_deployed, value_deployed_clone, true),
-        evaluate_hidden_invariant_policy(
-            "Handcrafted agreement",
-            "Priority and Attack: diagnostic agreement with the "
-            "Actor-derived reference only; never labels/training",
-            labels, handcrafted, handcrafted_clone, false),
-        evaluate_hidden_invariant_policy(
-            "Value-continuation deep cross-check",
-            "Priority and Attack: diagnostic K/H/rollouts match "
-            "the Actor reference; no shallow-prior blend and never "
-            "overwrites labels",
-            labels, value_reference_predictions,
-            value_reference_clone, true),
-    };
+            labels, scoring_value_deployed.front(),
+            scoring_value_deployed_clones.front(), true));
+    }
+    report.policies.push_back(evaluate_hidden_invariant_policy(
+        "Handcrafted agreement",
+        "Priority and Attack: diagnostic agreement with the "
+        "Actor-derived reference only; never labels/training",
+        labels, handcrafted, handcrafted_clone, false));
+    report.policies.push_back(evaluate_hidden_invariant_policy(
+        models.reference_value_name +
+            "-continuation deep cross-check",
+        "Priority and Attack: diagnostic K/H/rollouts match "
+        "the Actor reference; no shallow-prior blend and never "
+        "overwrites labels",
+        labels, value_reference_predictions,
+        value_reference_clone, true));
+
+    if (multi_checkpoint_attribution) {
+        report.value_checkpoints.reserve(
+            models.scoring_value_models.size() + 1);
+        report.value_checkpoints.push_back(
+            make_value_checkpoint_report(
+                models.reference_value_name,
+                reference_value_fingerprint, labels,
+                reference_value_deployed,
+                reference_value_deployed_clone, nullptr, nullptr));
+        for (std::size_t candidate = 0;
+             candidate < models.scoring_value_models.size();
+             ++candidate) {
+            const ValueCheckpointProbeReport* reference =
+                &report.value_checkpoints.front();
+            const ValueCheckpointProbeReport* previous =
+                &report.value_checkpoints.back();
+            report.value_checkpoints.push_back(
+                make_value_checkpoint_report(
+                    models.scoring_value_models[candidate].name,
+                    scoring_value_fingerprints[candidate], labels,
+                    scoring_value_deployed[candidate],
+                    scoring_value_deployed_clones[candidate],
+                    reference, previous));
+        }
+    }
     return report;
+}
+
+ProbeScoreReport score_probe_dev_v2_with_models(
+    const ProbeScoreConfig& config, std::ostream& progress,
+    std::shared_ptr<const LearnedModel> reference_actor_model,
+    std::shared_ptr<const LearnedModel> scoring_actor_model,
+    std::string scoring_actor_name) {
+    validate_score_config(config);
+    progress << "Training frozen Value scoring model (seed "
+             << config.training_seed << ", "
+             << config.training_games << " games)..."
+             << std::flush;
+    auto value_model = train_learned_value_champion(
+        config.training_games, config.training_seed);
+    progress << " done\n";
+    return score_probe_dev_v2_with_candidates(
+        config, progress,
+        {
+            .reference_actor_model =
+                std::move(reference_actor_model),
+            .scoring_actor_model =
+                std::move(scoring_actor_model),
+            .scoring_actor_name =
+                std::move(scoring_actor_name),
+            .reference_value_model = value_model,
+            .reference_value_name = "Value",
+            .scoring_value_models = {},
+        });
 }
 
 ProbeScoreReport score_probe_dev_v2(
@@ -2060,9 +2347,19 @@ std::string format_probe_score_report(
            << "Reference Actor model fingerprint: "
            << report.metadata.reference_model_fingerprint << '\n'
            << "Scoring Actor model fingerprint: "
-           << report.scoring_actor_model_fingerprint << '\n'
-           << "Diagnostic Value model fingerprint: "
-           << report.value_model_fingerprint << '\n'
+           << report.scoring_actor_model_fingerprint << '\n';
+    if (report.scoring_value_model_fingerprint.empty() ||
+        report.scoring_value_model_fingerprint ==
+            report.value_model_fingerprint) {
+        output << "Diagnostic Value model fingerprint: "
+               << report.value_model_fingerprint << '\n';
+    } else {
+        output << "Reference Value model fingerprint: "
+               << report.value_model_fingerprint << '\n'
+               << "Scoring Value model fingerprint: "
+               << report.scoring_value_model_fingerprint << '\n';
+    }
+    output
            << "Corpus: " << report.metadata.corpus_id
            << ", fingerprint "
            << report.metadata.information_set_fingerprint << '\n'
@@ -2151,6 +2448,107 @@ std::string format_probe_score_report(
     if (report.low_margin.pairs.empty()) {
         output << "  No best-versus-action pair requires "
                   "escalation.\n";
+    }
+    if (!report.value_checkpoints.empty()) {
+        const auto append_key_set =
+            [&output](const std::vector<std::string>& keys) {
+                output << '{';
+                for (std::size_t index = 0;
+                     index < keys.size(); ++index) {
+                    if (index != 0) {
+                        output << ", ";
+                    }
+                    output << keys[index];
+                }
+                output << '}';
+            };
+        output << "\nValue checkpoint transitions (compact)\n"
+               << "  Full deployed-policy metrics remain below for "
+                  "legacy G0 only; this section attributes immutable "
+                  "checkpoint changes.\n";
+        for (const ValueCheckpointProbeReport& checkpoint :
+             report.value_checkpoints) {
+            output << "  " << checkpoint.name << ": fingerprint "
+                   << checkpoint.fingerprint << ", pooled top1 "
+                   << 100.0 *
+                          checkpoint.metrics.top1_expected_agreement
+                   << "%, pair "
+                   << 100.0 *
+                          checkpoint.metrics.stable_pair_agreement
+                   << "%, regret "
+                   << checkpoint.metrics.mean_regret
+                   << ", critic Brier "
+                   << checkpoint.metrics.critic_brier
+                   << ", deck regrets [";
+            for (std::size_t deck = 0;
+                 deck < checkpoint.metrics.by_deck.size(); ++deck) {
+                if (deck != 0) {
+                    output << ", ";
+                }
+                const auto& deck_metrics =
+                    checkpoint.metrics.by_deck[deck];
+                output << deck_name(deck_metrics.root_deck)
+                       << ' ' << deck_metrics.mean_regret;
+            }
+            output << "]\n";
+        }
+        output << "  Actionable decision rows (all nonzero regret "
+                  "or legacy-G0 selection disagreements)\n";
+        for (std::size_t checkpoint_index = 0;
+             checkpoint_index < report.value_checkpoints.size();
+             ++checkpoint_index) {
+            const ValueCheckpointProbeReport& checkpoint =
+                report.value_checkpoints[checkpoint_index];
+            for (const ValueProbeDecisionDetail& detail :
+                 checkpoint.decisions) {
+                if (detail.regret == 0.0 &&
+                    !detail.selection_changed_from_reference) {
+                    continue;
+                }
+                output << "  [";
+                if (detail.regret != 0.0) {
+                    output << "NONZERO-REGRET";
+                    if (detail.selection_changed_from_reference) {
+                        output << "+G0-DISAGREEMENT";
+                    }
+                } else {
+                    output << "G0-DISAGREEMENT";
+                }
+                output << "] ";
+                if (checkpoint_index == 0) {
+                    output << checkpoint.name;
+                } else {
+                    output
+                        << report.value_checkpoints[
+                               checkpoint_index - 1]
+                               .name
+                        << " -> " << checkpoint.name;
+                }
+                output << ' ' << detail.stable_id << " ("
+                       << deck_name(detail.root_deck)
+                       << "): G0 selection "
+                       << (detail.selection_changed_from_reference
+                               ? "different"
+                               : "same")
+                       << ", adjacent selection "
+                       << (detail.selection_changed_from_previous
+                               ? "changed"
+                               : "same")
+                       << ", selected "
+                       << (detail.deterministic_selection
+                               ? "key "
+                               : "uniform exact-max set ");
+                append_key_set(detail.selected_keys);
+                output << ", Actor-reference best ";
+                append_key_set(detail.reference_best_set);
+                output << ", regret " << detail.regret
+                       << ", critic " << detail.critic_prediction
+                       << ", selected-action reference Q "
+                       << detail.selected_action_reference_q
+                       << ", critic error "
+                       << detail.critic_error << '\n';
+            }
+        }
     }
     output << '\n' << report.policies.size() << " policy views\n"
            << "  Critic calibration is conditioned on each policy's "

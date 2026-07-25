@@ -32,10 +32,12 @@ binary, never from extrapolation.
   generation shows real improvement on fixed labels.
 - **Claude challenger** (branch `claude/challenger`, worktree
   `../magic-ai-vibes-claude`, plan/log in `CLAUDE-PLAN.md`): racing Codex
-  toward the same gates. Step 1 (n-step bootstrapped self-play targets)
-  landed: neutral, 43.8% pooled vs the 43.3% baseline — kept as
-  infrastructure, not claimed as a gain. Step 2 next: 8 short generations
-  with a sliding replay window, gated generation-vs-generation.
+  toward the same gates. Monotone climb on the shared frozen 3-seed
+  protocol: 43.3% baseline → 43.8% (n-step targets) → 44.8% (8
+  bootstrapped generations) → **46.7%** (search-on collection in late
+  generations). Red recovered from 31.3% to 40.0% pooled; Blue (46.0%)
+  is now the limiting slice. Key finding for Codex too: bootstrapped
+  targets flip generation scaling from harmful to monotonically helpful.
 
 ## Goal under review
 
@@ -56,6 +58,72 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 09:27 PDT
+
+State reviewed: commit `58c3370` (deterministic probe scoring, reference
+semantic fixes) plus a large in-flight iteration framework
+(`learned_iteration.{hpp,cpp}`): domain-separated seeds, balanced deck
+schedules, TD(lambda) machinery, checkpointed G0-G8 generations with model
+caches and fingerprints, per-generation probe attribution, and a
+predeclared "Mix50" collection repair. All 106 tests pass (66 engine, 6
+iteration, 12 probe, 10 probe-metric, 12 probe-runner, CLI).
+
+### Verdict
+
+Strongest Codex cycle so far. The continuation-healing audit executed the
+23:38 review's priorities and went further: unit traces confirmed healing
+in `red.bolt-face-lethal` (the Pass branch casts the same Bolt later),
+cleared `blue.counter-lethal-bolt` of a sampler bug, and then isolated a
+*second*, distinct defect — terminal-outcome saturation, where branches
+genuinely diverge but reach the same terminal within the horizon. H=4 was
+correctly rejected for erasing a known defensive improvement. The
+probe-dev-v2 design choice (root-irreversible fixtures at real
+last-opportunity timing, not an artificial persistent-Pass rule) is better
+than the reviewer's own suggestion — it keeps labels executable under
+real Magic semantics. Also noted: `four_state_bootstrap_targets` adopts
+the challenger's frozen-parent bootstrap design — cross-pollination
+working as intended.
+
+### Convergent evidence on Blue (important)
+
+Codex's checkpoint attribution found canonical G8 (all-search late
+collection) loses 16.0 points of Blue while gaining 16.7 of White vs G3.
+The Claude challenger — a completely separate implementation of
+generation scaling — independently landed with Blue as its worst slice
+(46.0%) after enabling all-search collection in late generations. Two
+codebases, same signature. This materially raises confidence in the Mix50
+hypothesis (mixed raw/search collection), and the challenger will test
+its own mixture variant in parallel.
+
+### Lift table (seed 4242, 100 games/matchup, 60 games/cell)
+
+| Deck | Learned lift | Best rival lift | Verdict |
+| --- | ---: | ---: | --- |
+| Green | +48.3 pp | +30.0 (Handcrafted) | PASS |
+| Red | +30.0 pp | +30.0 (Handcrafted) | PASS (exact tie) |
+| White | +61.7 pp | +63.3 (Handcrafted) | FAIL by 1.6 pp (tie range) |
+| Blue | +38.3 pp | +51.7 (Handcrafted) | FAIL by 13.4 pp (real) |
+
+Gate: 2 of 4 passing. Delta vs the user's earlier view: Red recovered
+from a clear FAIL to exact parity. Blue is the one substantive gap;
+White is a coin-flip miss at this sample size (±13 pp/cell).
+
+### Priorities
+
+1. Mix50's eight offline gates use numerically exact thresholds derived
+   from canonical baselines. As one-shot rejection gates they are fine;
+   do not iterate the recipe against them — passing a 16-fixture corpus
+   by tuning is Goodhart, and the notebook's own "reject but never
+   promote" language should be enforced literally.
+2. The planned bootstrap-after-turn reference horizon is the right fix
+   for terminal saturation, but it re-introduces critic bias into
+   labels; keep the Value-continuation cross-check row when regenerating
+   v2 labels.
+3. The Blue convergence makes Mix50 the highest-value experiment in
+   either tree. Run it before further probe-semantics refinement.
+4. Real-game probe harvesting (disagreement states, Learned-loss states)
+   remains owed and is now the main corpus-quality bottleneck.
 
 ## 2026-07-24 23:38 PDT
 

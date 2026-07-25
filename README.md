@@ -150,6 +150,42 @@ self-play data. It remains available for direct comparison but is not the
 default. This is AlphaGo-inspired, not a full AlphaGo implementation: there is
 no PUCT/MCTS tree.
 
+Actor G0 is that frozen unified-actor model. Actor G1 clones G0, keeps the
+parent immutable, and performs one experimental search-as-teacher generation:
+24 balanced G0-mirror self-play games provide information-set-safe Priority and
+Attack targets plus TD(lambda) critic targets. `learned-actor` and
+`learned-actor-g0` select G0; `learned-actor-g1` selects the one-generation
+candidate in benchmark arguments. G1 is a research challenger, not an accepted
+champion, and neither actor generation replaces the default Learned Value bot.
+
+`learned-value-g8` is a separate immutable eight-generation Value challenger.
+It retains its base checkpoint and G1 through G8, so probe runs can attribute
+the first generation where a decision changes. Because the canonical
+800-game recipe is expensive, benchmark and probe routes transparently cache
+the complete frozen bundle at
+`build/model-cache/value-g8-v1-t800-s424242.bin` (with the requested training
+game count and seed in the filename). The first route prints `generated`;
+later matching routes print `loaded` and reproduce the exact report,
+fingerprints, and IEEE-754 model weights. A corrupt or mismatched artifact
+fails closed with an actionable error. Use `--refresh-value-g8-cache` on a
+benchmark or probe route that selects G8 to retrain and atomically replace it.
+Legacy `learned`/`learned-value`/`learned-value-g0` behavior is unchanged.
+For benchmarks only, `learned-value-g1` through `learned-value-g7` select the
+matching immutable checkpoint from that same validated bundle; comparing two
+such checkpoints loads or generates the bundle once and never retrains an
+individual checkpoint. Probe `--value-generation` remains limited to `0|8`
+because its G8 mode already reports the full ordered checkpoint table.
+
+`learned-value-mix50-g8` is a distinct Late-Mix50 collection challenger.
+Its base and G1-G4 use the canonical recipe; in G5-G8, consecutive game pairs
+alternate raw Value and information-safe K=1/H=4 Value search, exactly 50/50
+by games. The progress report prints raw/search game and example counts
+separately. Its artifact is isolated at
+`build/model-cache/value-g8-mix50-v1-t800-s424242.bin` (parameterized by the
+requested game count and seed), and `--refresh-value-mix50-cache` refreshes
+only that recipe. Canonical and Mix50 bundles are validated independently and
+cannot be substituted for one another.
+
 ## Bot benchmark harness
 
 Use the paired harness to decide whether a challenger is actually stronger:
@@ -172,6 +208,18 @@ make benchmark-learned
 ./build/alpha-sim --benchmark --games 5 --seed 101 \
   --challenger learned-actor --baseline learned-value \
   --train-games 800 --train-seed 424242
+
+./build/alpha-sim --benchmark --games 15 --seed 101 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-actor-g1 --baseline learned-actor-g0
+
+./build/alpha-sim --benchmark --games 15 --seed 101 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-g3 --baseline learned-value-g0
+
+./build/alpha-sim --benchmark --games 15 --seed 202 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-mix50-g8 --baseline learned-value-g0
 ```
 
 For every repetition, it covers all ten unordered deck pairings, including
@@ -212,6 +260,23 @@ reading the opponent's hidden cards:
   --probe-worlds 128 --probe-horizon 0 \
   --train-games 800 --train-seed 424242 \
   --probe-cache data/probe-dev-v2.labels.tsv
+
+./build/alpha-sim --score-probes \
+  --actor-generation 1 --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+
+./build/alpha-sim --score-probes \
+  --actor-generation 0 --value-generation 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+
+./build/alpha-sim --score-probes \
+  --actor-generation 0 --value-recipe mix50 --value-generation 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
 ```
 
 Every candidate is evaluated on the same sampled information-set worlds and
@@ -220,6 +285,17 @@ corpus, reference algorithm, and scoring semantics. The run also verifies
 that labels, policy scores, critics, and metrics are bit-identical after
 repartitioning hidden zones. `--refresh-probe-cache` deliberately regenerates
 a matching cache.
+
+Frozen Actor G0 always owns and generates the cached reference labels.
+`--actor-generation 1` changes only the candidate being scored; G1 cannot
+relabel the cache. Even when explicitly refreshing a cache, labels are
+regenerated from G0 rather than from the candidate.
+Selecting Value G8 likewise leaves the Actor-owned labels untouched and adds
+an ordered compact attribution table for the G8 base plus G1 through G8.
+`--value-recipe mix50 --value-generation 8` does the same for the Mix50 base
+and G1 through G8. Switching recipes changes only the scoring candidates:
+frozen Actor G0 remains the label/cache owner, and legacy Value G0 remains the
+continuation-sensitivity reference.
 
 `probe-dev-v2` keeps its plan choices root-irreversible using ordinary game
 states; deployed Pass semantics are not altered. Horizon zero completes the

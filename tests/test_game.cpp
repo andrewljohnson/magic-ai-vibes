@@ -3,16 +3,25 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace {
+
+static_assert(
+    sizeof(double) == sizeof(std::uint64_t) &&
+        std::numeric_limits<double>::is_iec559);
 
 struct TestCase {
     std::string_view name;
@@ -217,6 +226,59 @@ std::shared_ptr<const alpha::LearnedModel> small_value_model() {
     static const auto model =
         alpha::train_learned_value_champion(1, 0xC4A6E7A1ULL);
     return model;
+}
+
+const alpha::LearnedValueG8Result& small_value_g8() {
+    static const auto result =
+        alpha::train_learned_value_g8(1, 0x68A11EADULL);
+    return result;
+}
+
+const alpha::LearnedValueG8Result& small_value_g8_eight_games() {
+    static const auto result =
+        alpha::train_learned_value_g8(8, 0x68A15050ULL);
+    return result;
+}
+
+const alpha::LearnedValueG8Result& small_value_g8_mix50() {
+    static const auto result =
+        alpha::train_learned_value_g8_mix50(
+            8, 0x68A15050ULL);
+    return result;
+}
+
+std::vector<std::uint8_t> read_binary_file(
+    const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    CHECK(input);
+    return {
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>(),
+    };
+}
+
+void write_binary_file(
+    const std::filesystem::path& path,
+    const std::vector<std::uint8_t>& bytes) {
+    std::ofstream output(
+        path, std::ios::binary | std::ios::trunc);
+    CHECK(output);
+    output.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+    CHECK(output);
+}
+
+bool throws_with_text(
+    const std::function<void()>& operation,
+    std::string_view wanted) {
+    try {
+        operation();
+    } catch (const std::exception& error) {
+        return std::string_view(error.what()).find(wanted) !=
+               std::string_view::npos;
+    }
+    return false;
 }
 
 alpha::GameState hidden_repartition(
@@ -805,6 +867,676 @@ TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
     CHECK(rejected_null);
 }
 
+TEST(legacy_value_trainer_keeps_its_fixed_seed_fingerprint) {
+    const auto legacy =
+        alpha::train_learned_value_champion(1, 424242);
+    const auto repeated =
+        alpha::train_learned_value_champion(1, 424242);
+    CHECK(alpha::learned_model_fingerprint(legacy) ==
+          "f43617f58d2f03394eec79e2a9c6964339c93a00d9d0d663e157056df3b1eb11");
+    CHECK(alpha::learned_model_fingerprint(repeated) ==
+          alpha::learned_model_fingerprint(legacy));
+
+    const alpha::GameState state =
+        alpha::white_lock_plan_diagnostic_state();
+    CHECK(alpha::learned_critic_value(state, 0, repeated) ==
+          alpha::learned_critic_value(state, 0, legacy));
+    CHECK(alpha::learned_critic_value(state, 1, repeated) ==
+          alpha::learned_critic_value(state, 1, legacy));
+}
+
+TEST(learned_value_update_deep_clones_without_mutating_parent) {
+    const auto parent = small_value_model();
+    const alpha::GameState state =
+        alpha::white_lock_plan_diagnostic_state();
+    const std::string parent_fingerprint =
+        alpha::learned_model_fingerprint(parent);
+    const double parent_value =
+        alpha::learned_critic_value(state, 0, parent);
+
+    const auto frozen_clone =
+        alpha::update_learned_value_model(
+            parent, {}, {});
+    CHECK(frozen_clone.get() != parent.get());
+    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(
+              state, 0, frozen_clone) == parent_value);
+
+    const auto candidate =
+        alpha::update_learned_value_model(
+            frozen_clone,
+            {{
+                .features =
+                    alpha::learned_observation(state, 0),
+                .target = parent_value < 0.5 ? 1.0 : 0.0,
+            }},
+            {
+                .epochs = 4,
+                .learning_rate = 0.05,
+                .root_seed = 0xC1171CULL,
+                .member_training_tag = 0x5E1F0000ULL,
+            });
+    CHECK(alpha::learned_model_fingerprint(candidate) !=
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(
+              state, 0, candidate) != parent_value);
+    CHECK(alpha::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(state, 0, parent) ==
+          parent_value);
+
+    const auto rejects_invalid =
+        [](const std::function<void()>& operation) {
+            try {
+                operation();
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+    CHECK(rejects_invalid([] {
+        static_cast<void>(
+            alpha::update_learned_value_model(
+                nullptr, {}, {}));
+    }));
+    CHECK(rejects_invalid([] {
+        static_cast<void>(
+            alpha::update_learned_value_model(
+                small_actor_model(), {}, {}));
+    }));
+
+    auto malformed_features =
+        alpha::learned_observation(state, 0);
+    malformed_features.pop_back();
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            alpha::update_learned_value_model(
+                parent,
+                {{
+                    .features = malformed_features,
+                    .target = 0.5,
+                }},
+                {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            alpha::update_learned_value_model(
+                parent,
+                {{
+                    .features =
+                        alpha::learned_observation(state, 0),
+                    .target = 1.01,
+                }},
+                {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            alpha::update_learned_value_model(
+                parent,
+                {{
+                    .features =
+                        alpha::learned_observation(state, 0),
+                    .target = 0.5,
+                }},
+                {
+                    .epochs = 0,
+                    .learning_rate = 0.006,
+                }));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            alpha::update_learned_value_model(
+                parent,
+                {{
+                    .features =
+                        alpha::learned_observation(state, 0),
+                    .target = 0.5,
+                }},
+                {
+                    .epochs = 3,
+                    .learning_rate =
+                        std::numeric_limits<double>::
+                            quiet_NaN(),
+                }));
+    }));
+}
+
+TEST(learned_value_g8_has_immutable_replay_and_search_checkpoints) {
+    const auto& result = small_value_g8();
+    CHECK(result.model);
+    CHECK(result.checkpoints.size() ==
+          alpha::kLearnedValueG8Generations + 1);
+    CHECK(result.report.generations.size() ==
+          alpha::kLearnedValueG8Generations);
+    CHECK(result.model == result.checkpoints.back());
+    CHECK(result.report.recipe ==
+          alpha::LearnedValueG8Recipe::
+              CanonicalAllSearchLate);
+    CHECK(result.report.training_games == 1);
+    CHECK(result.report.root_seed == 0x68A11EADULL);
+    CHECK(result.report.base_examples > 0);
+    CHECK(result.report.base_fingerprint ==
+          alpha::learned_model_fingerprint(
+              result.checkpoints.front()));
+    CHECK(result.report.final_fingerprint ==
+          alpha::learned_model_fingerprint(result.model));
+
+    constexpr std::array<std::size_t, 8>
+        expected_replay_occupancy = {
+            1, 2, 3, 3, 3, 3, 3, 3,
+        };
+    std::vector<std::string> checkpoint_fingerprints;
+    checkpoint_fingerprints.reserve(
+        result.checkpoints.size());
+    for (const auto& checkpoint : result.checkpoints) {
+        checkpoint_fingerprints.push_back(
+            alpha::learned_model_fingerprint(checkpoint));
+    }
+    for (std::size_t index = 0;
+         index < result.report.generations.size();
+         ++index) {
+        const auto& generation =
+            result.report.generations[index];
+        CHECK(generation.generation == index + 1);
+        CHECK(generation.self_play_games == 1);
+        CHECK(generation.generation_examples > 0);
+        CHECK(generation.anchor_examples ==
+              result.report.base_examples);
+        CHECK(generation.replay_generations ==
+              expected_replay_occupancy[index]);
+        CHECK(generation.replay_examples >=
+              generation.generation_examples);
+        CHECK(generation.raw_collection_games == 0);
+        CHECK(generation.search_collection_games == 0);
+        CHECK(generation.raw_collection_examples == 0);
+        CHECK(generation.search_collection_examples == 0);
+        CHECK(generation.parent_fingerprint ==
+              checkpoint_fingerprints[index]);
+        CHECK(generation.candidate_fingerprint ==
+              checkpoint_fingerprints[index + 1]);
+        CHECK(generation.parent_fingerprint !=
+              generation.candidate_fingerprint);
+        CHECK(generation.exploration_rate ==
+              (index < 2 ? 0.10 : 0.05));
+        if (index < 4) {
+            CHECK(!generation.search_enabled);
+            CHECK(generation.search_worlds == 0);
+            CHECK(generation.search_horizon_turns == 0);
+            CHECK(generation.rollout_evaluations == 0);
+        } else {
+            CHECK(generation.search_enabled);
+            CHECK(generation.search_worlds == 1);
+            CHECK(generation.search_horizon_turns == 4);
+            CHECK(generation.rollout_evaluations > 0);
+        }
+    }
+
+    // Every old checkpoint must still serialize to the fingerprint recorded
+    // when it was the parent or candidate of a later update.
+    for (std::size_t index = 0;
+         index < result.checkpoints.size(); ++index) {
+        CHECK(alpha::learned_model_fingerprint(
+                  result.checkpoints[index]) ==
+              checkpoint_fingerprints[index]);
+    }
+}
+
+TEST(learned_value_g8_is_deterministic_seeded_and_hidden_safe) {
+    const auto& first = small_value_g8();
+    const auto repeated =
+        alpha::train_learned_value_g8(
+            1, 0x68A11EADULL);
+    const auto changed =
+        alpha::train_learned_value_g8(
+            1, 0x68A11EAEULL);
+    CHECK(repeated.report == first.report);
+    CHECK(repeated.checkpoints.size() ==
+          first.checkpoints.size());
+    for (std::size_t index = 0;
+         index < first.checkpoints.size(); ++index) {
+        CHECK(alpha::learned_model_fingerprint(
+                  repeated.checkpoints[index]) ==
+              alpha::learned_model_fingerprint(
+                  first.checkpoints[index]));
+    }
+    CHECK(alpha::learned_model_fingerprint(changed.model) !=
+          alpha::learned_model_fingerprint(first.model));
+
+    const auto fixture = determinization_fixture();
+    const auto hidden =
+        hidden_repartition(fixture.state, 0);
+    CHECK(physical_cards(hidden, 1) ==
+          physical_cards(fixture.state, 1));
+    for (const auto& checkpoint : first.checkpoints) {
+        CHECK(alpha::learned_critic_value(
+                  fixture.state, 0, checkpoint) ==
+              alpha::learned_critic_value(
+                  hidden, 0, checkpoint));
+    }
+}
+
+TEST(learned_value_g8_mix50_is_single_axis_deterministic_and_hidden_safe) {
+    CHECK(throws_with_text(
+        [] {
+            static_cast<void>(
+                alpha::train_learned_value_g8_mix50(
+                    1, 0x68A15050ULL));
+        },
+        "even"));
+
+    const auto& canonical = small_value_g8_eight_games();
+    const auto& mix50 = small_value_g8_mix50();
+    CHECK(canonical.report.recipe ==
+          alpha::LearnedValueG8Recipe::
+              CanonicalAllSearchLate);
+    CHECK(mix50.report.recipe ==
+          alpha::LearnedValueG8Recipe::LateMix50);
+    CHECK(mix50.checkpoints.size() ==
+          alpha::kLearnedValueG8Generations + 1);
+    CHECK(mix50.report.generations.size() ==
+          alpha::kLearnedValueG8Generations);
+
+    std::vector<std::string> frozen_fingerprints;
+    frozen_fingerprints.reserve(mix50.checkpoints.size());
+    for (const auto& checkpoint : mix50.checkpoints) {
+        frozen_fingerprints.push_back(
+            alpha::learned_model_fingerprint(checkpoint));
+    }
+    for (std::size_t checkpoint = 0;
+         checkpoint <= 4; ++checkpoint) {
+        CHECK(alpha::learned_model_fingerprint(
+                  mix50.checkpoints[checkpoint]) ==
+              alpha::learned_model_fingerprint(
+                  canonical.checkpoints[checkpoint]));
+    }
+    CHECK(alpha::learned_model_fingerprint(
+              mix50.checkpoints[5]) !=
+          alpha::learned_model_fingerprint(
+              canonical.checkpoints[5]));
+
+    constexpr std::array<std::size_t, 8>
+        expected_replay_occupancy = {
+            1, 2, 3, 3, 3, 3, 3, 3,
+        };
+    for (std::size_t index = 0;
+         index < mix50.report.generations.size(); ++index) {
+        const auto& generation =
+            mix50.report.generations[index];
+        CHECK(generation.generation == index + 1);
+        CHECK(generation.self_play_games == 2);
+        CHECK(generation.raw_collection_games ==
+              (index < 4 ? 2U : 1U));
+        CHECK(generation.search_collection_games ==
+              (index < 4 ? 0U : 1U));
+        CHECK(generation.raw_collection_examples > 0);
+        if (index < 4) {
+            CHECK(generation.search_collection_examples == 0);
+        } else {
+            CHECK(generation.search_collection_examples > 0);
+        }
+        CHECK(generation.raw_collection_examples +
+                  generation.search_collection_examples ==
+              generation.generation_examples);
+        CHECK(generation.replay_generations ==
+              expected_replay_occupancy[index]);
+        CHECK(generation.parent_fingerprint ==
+              frozen_fingerprints[index]);
+        CHECK(generation.candidate_fingerprint ==
+              frozen_fingerprints[index + 1]);
+        CHECK(generation.search_enabled == (index >= 4));
+        CHECK(generation.search_worlds ==
+              (index >= 4 ? 1U : 0U));
+        CHECK(generation.search_horizon_turns ==
+              (index >= 4 ? 4U : 0U));
+        if (index < 4) {
+            CHECK(generation.rollout_evaluations == 0);
+        } else {
+            CHECK(generation.rollout_evaluations > 0);
+        }
+        if (index < 4) {
+            const auto& canonical_generation =
+                canonical.report.generations[index];
+            CHECK(generation.generation_examples ==
+                  canonical_generation.generation_examples);
+            CHECK(generation.replay_examples ==
+                  canonical_generation.replay_examples);
+            CHECK(generation.parent_fingerprint ==
+                  canonical_generation.parent_fingerprint);
+            CHECK(generation.candidate_fingerprint ==
+                  canonical_generation.candidate_fingerprint);
+        }
+    }
+
+    const auto repeated =
+        alpha::train_learned_value_g8_mix50(
+            8, 0x68A15050ULL);
+    const auto changed =
+        alpha::train_learned_value_g8_mix50(
+            8, 0x68A15051ULL);
+    CHECK(repeated.report == mix50.report);
+    for (std::size_t index = 0;
+         index < mix50.checkpoints.size(); ++index) {
+        CHECK(alpha::learned_model_fingerprint(
+                  repeated.checkpoints[index]) ==
+              frozen_fingerprints[index]);
+        CHECK(alpha::learned_model_fingerprint(
+                  mix50.checkpoints[index]) ==
+              frozen_fingerprints[index]);
+    }
+    CHECK(alpha::learned_model_fingerprint(changed.model) !=
+          frozen_fingerprints.back());
+
+    const auto fixture = determinization_fixture();
+    const auto hidden =
+        hidden_repartition(fixture.state, 0);
+    for (const auto& checkpoint : mix50.checkpoints) {
+        CHECK(alpha::learned_critic_value(
+                  fixture.state, 0, checkpoint) ==
+              alpha::learned_critic_value(
+                  hidden, 0, checkpoint));
+    }
+}
+
+TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
+    const auto& canonical = small_value_g8_eight_games();
+    const auto& mix50 = small_value_g8_mix50();
+    const std::filesystem::path directory =
+        "build/test-model-cache";
+    const std::filesystem::path canonical_path =
+        directory / "value-g8-canonical-eight.bin";
+    const std::filesystem::path mix50_path =
+        directory / "value-g8-mix50-eight.bin";
+    const std::filesystem::path corrupt_path =
+        directory / "value-g8-mix50-corrupt.bin";
+    std::filesystem::remove(canonical_path);
+    std::filesystem::remove(mix50_path);
+    std::filesystem::remove(corrupt_path);
+
+    alpha::write_learned_value_g8_bundle_atomic(
+        canonical_path.string(), canonical);
+    alpha::write_learned_value_g8_mix50_bundle_atomic(
+        mix50_path.string(), mix50);
+    const auto loaded =
+        alpha::load_learned_value_g8_mix50_bundle(
+            mix50_path.string(), 8, 0x68A15050ULL);
+    CHECK(loaded.report == mix50.report);
+    for (std::size_t index = 0;
+         index < mix50.checkpoints.size(); ++index) {
+        CHECK(alpha::learned_model_fingerprint(
+                  loaded.checkpoints[index]) ==
+              alpha::learned_model_fingerprint(
+                  mix50.checkpoints[index]));
+    }
+    CHECK(alpha::learned_value_g8_mix50_cache_path(
+              800, 424242) ==
+          "build/model-cache/"
+          "value-g8-mix50-v1-t800-s424242.bin");
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_mix50_bundle(
+                    mix50_path.string(), 12,
+                    0x68A15050ULL));
+        },
+        "training_games mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_mix50_bundle(
+                    mix50_path.string(), 8,
+                    0x68A15051ULL));
+        },
+        "training seed mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_bundle(
+                    mix50_path.string(), 8,
+                    0x68A15050ULL));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_mix50_bundle(
+                    canonical_path.string(), 8,
+                    0x68A15050ULL));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            alpha::write_learned_value_g8_bundle_atomic(
+                canonical_path.string(), mix50);
+        },
+        "recipe"));
+    CHECK(throws_with_text(
+        [&] {
+            alpha::write_learned_value_g8_mix50_bundle_atomic(
+                mix50_path.string(), canonical);
+        },
+        "recipe"));
+    auto invalid_accounting = mix50;
+    ++invalid_accounting.report.generations[4]
+          .raw_collection_games;
+    CHECK(throws_with_text(
+        [&] {
+            alpha::write_learned_value_g8_mix50_bundle_atomic(
+                mix50_path.string(), invalid_accounting);
+        },
+        "collection accounting"));
+
+    auto corrupt = read_binary_file(mix50_path);
+    CHECK(corrupt.size() > 64);
+    corrupt.back() ^= 0x01U;
+    write_binary_file(corrupt_path, corrupt);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_mix50_bundle(
+                    corrupt_path.string(), 8,
+                    0x68A15050ULL));
+        },
+        "checksum"));
+
+    // Failed cross-recipe publication validated before I/O and left both
+    // previously published artifacts readable.
+    CHECK(alpha::load_learned_value_g8_bundle(
+              canonical_path.string(), 8,
+              0x68A15050ULL)
+              .report == canonical.report);
+    CHECK(alpha::load_learned_value_g8_mix50_bundle(
+              mix50_path.string(), 8,
+              0x68A15050ULL)
+              .report == mix50.report);
+
+    std::filesystem::remove(canonical_path);
+    std::filesystem::remove(mix50_path);
+    std::filesystem::remove(corrupt_path);
+}
+
+TEST(learned_value_g8_artifact_roundtrips_every_checkpoint_bit_exact) {
+    const auto& original = small_value_g8();
+    const std::filesystem::path path =
+        "build/test-model-cache/value-g8-roundtrip.bin";
+    std::filesystem::remove(path);
+    alpha::write_learned_value_g8_bundle_atomic(
+        path.string(), original);
+    const auto loaded =
+        alpha::load_learned_value_g8_bundle(
+            path.string(), 1, 0x68A11EADULL);
+
+    CHECK(loaded.report == original.report);
+    CHECK(loaded.model == loaded.checkpoints.back());
+    CHECK(loaded.checkpoints.size() ==
+          original.checkpoints.size());
+    const std::array<alpha::GameState, 2> states = {
+        alpha::white_lock_plan_diagnostic_state(),
+        determinization_fixture().state,
+    };
+    for (std::size_t checkpoint = 0;
+         checkpoint < original.checkpoints.size();
+         ++checkpoint) {
+        CHECK(alpha::learned_model_fingerprint(
+                  loaded.checkpoints[checkpoint]) ==
+              alpha::learned_model_fingerprint(
+                  original.checkpoints[checkpoint]));
+        for (const auto& state : states) {
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                const double before =
+                    alpha::learned_critic_value(
+                        state, perspective,
+                        original.checkpoints[checkpoint]);
+                const double after =
+                    alpha::learned_critic_value(
+                        state, perspective,
+                        loaded.checkpoints[checkpoint]);
+                CHECK(std::bit_cast<std::uint64_t>(after) ==
+                      std::bit_cast<std::uint64_t>(before));
+            }
+        }
+    }
+    CHECK(alpha::learned_value_g8_cache_path(800, 424242) ==
+          "build/model-cache/value-g8-v1-t800-s424242.bin");
+    std::filesystem::remove(path);
+}
+
+TEST(learned_value_g8_generation_selector_maps_exact_checkpoint) {
+    const auto& bundle = small_value_g8();
+    const auto g3 =
+        alpha::learned_value_g8_generation_checkpoint(bundle, 3);
+    CHECK(g3 == bundle.checkpoints[3]);
+    CHECK(alpha::learned_model_fingerprint(g3) ==
+          bundle.report.generations[2].candidate_fingerprint);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::learned_value_g8_generation_checkpoint(
+                    bundle, 0));
+        },
+        "between one and eight"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::learned_value_g8_generation_checkpoint(
+                    bundle, 9));
+        },
+        "between one and eight"));
+}
+
+TEST(learned_value_g8_artifact_rejects_mismatch_and_corruption_fail_closed) {
+    const auto& original = small_value_g8();
+    const std::filesystem::path directory =
+        "build/test-model-cache";
+    const std::filesystem::path good =
+        directory / "value-g8-good.bin";
+    const std::filesystem::path corrupt =
+        directory / "value-g8-corrupt.bin";
+    const std::filesystem::path truncated =
+        directory / "value-g8-truncated.bin";
+    const std::filesystem::path trailing =
+        directory / "value-g8-trailing.bin";
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(truncated);
+    std::filesystem::remove(trailing);
+    alpha::write_learned_value_g8_bundle_atomic(
+        good.string(), original);
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_bundle(
+                    good.string(), 2, 0x68A11EADULL));
+        },
+        "training_games mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_bundle(
+                    good.string(), 1, 0x68A11EAEULL));
+        },
+        "training seed mismatch"));
+
+    std::string embedded_nul_path = good.string();
+    embedded_nul_path.push_back('\0');
+    embedded_nul_path += ".not-the-same-file";
+    CHECK(throws_with_text(
+        [&] {
+            alpha::write_learned_value_g8_bundle_atomic(
+                embedded_nul_path, original);
+        },
+        "embedded NUL"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_bundle(
+                    embedded_nul_path, 1,
+                    0x68A11EADULL));
+        },
+        "embedded NUL"));
+
+    const auto bytes = read_binary_file(good);
+    CHECK(bytes.size() > 64);
+    auto changed = bytes;
+    changed.back() ^= 0x01U;
+    write_binary_file(corrupt, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_bundle(
+                    corrupt.string(), 1, 0x68A11EADULL));
+        },
+        "checksum"));
+
+    changed = bytes;
+    changed.resize(changed.size() - 17);
+    write_binary_file(truncated, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_bundle(
+                    truncated.string(), 1,
+                    0x68A11EADULL));
+        },
+        "payload length"));
+
+    changed = bytes;
+    changed.push_back(0);
+    write_binary_file(trailing, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                alpha::load_learned_value_g8_bundle(
+                    trailing.string(), 1,
+                    0x68A11EADULL));
+        },
+        "payload length"));
+
+    auto invalid = original;
+    invalid.report.final_fingerprint =
+        std::string(64, '0');
+    CHECK(throws_with_text(
+        [&] {
+            alpha::write_learned_value_g8_bundle_atomic(
+                good.string(), invalid);
+        },
+        "final_fingerprint"));
+    const auto still_good =
+        alpha::load_learned_value_g8_bundle(
+            good.string(), 1, 0x68A11EADULL);
+    CHECK(still_good.report == original.report);
+
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(truncated);
+    std::filesystem::remove(trailing);
+}
+
 TEST(learned_actor_updates_deep_clone_critic_and_policy_without_mutating_parent) {
     const auto parent = small_actor_model();
     const alpha::GameState state =
@@ -915,6 +1647,204 @@ TEST(learned_actor_updates_deep_clone_critic_and_policy_without_mutating_parent)
           actions, parent) == parent_logits);
 }
 
+TEST(learned_actor_fit_diagnostics_show_synthetic_loss_reduction) {
+    const auto parent = small_actor_model();
+    const alpha::GameState state =
+        alpha::white_lock_plan_diagnostic_state();
+    const auto actions =
+        alpha::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() >= 2);
+
+    std::vector<std::vector<double>> options;
+    options.reserve(actions.size());
+    for (const auto& action : actions) {
+        options.push_back(
+            alpha::learned_priority_policy_features(
+                state, 0, action, true,
+                alpha::TurnPhase::FirstMain, 0));
+    }
+    const auto parent_logits =
+        alpha::learned_actor_priority_logits(
+            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+            actions, parent);
+    const std::size_t disfavored_priority =
+        static_cast<std::size_t>(std::min_element(
+            parent_logits.begin(), parent_logits.end()) -
+                                 parent_logits.begin());
+    std::vector<double> priority_target(actions.size(), 0.0);
+    priority_target[disfavored_priority] = 1.0;
+    std::vector<double> attack_target(actions.size(), 0.0);
+    attack_target[0] = 1.0;
+
+    const std::vector<alpha::LearnedCriticTrainingExample>
+        critic_examples = {{
+            .features = alpha::learned_observation(state, 0),
+            .target =
+                alpha::learned_critic_value(state, 0, parent) <
+                        0.5
+                    ? 1.0
+                    : 0.0,
+        }};
+    const std::vector<alpha::LearnedPolicyTrainingExample>
+        policy_examples = {
+            {
+                .options = options,
+                .target_probabilities = priority_target,
+                .decision_kind =
+                    alpha::LearnedPolicyDecisionKind::Priority,
+                .weight = 0.25,
+            },
+            {
+                .options = options,
+                .target_probabilities = priority_target,
+                .decision_kind =
+                    alpha::LearnedPolicyDecisionKind::Priority,
+                .weight = 0.75,
+            },
+            {
+                .options = options,
+                .target_probabilities = attack_target,
+                .decision_kind =
+                    alpha::LearnedPolicyDecisionKind::Attack,
+                .weight = 2.0,
+            },
+        };
+    const auto candidate =
+        alpha::update_learned_actor_model(
+            parent, critic_examples, policy_examples,
+            {
+                .critic_epochs = 4,
+                .critic_learning_rate = 0.02,
+                .critic_seed = 0xF17C1171CULL,
+                .policy_epochs = 4,
+                .policy_learning_rate = 0.005,
+                .policy_seed = 0xF175011C9ULL,
+            });
+    const auto fit = alpha::diagnose_learned_actor_fit(
+        parent, candidate, critic_examples, policy_examples);
+
+    CHECK(fit.priority.example_count == 2);
+    CHECK(fit.priority.total_weight == 1.0);
+    CHECK(fit.attack.example_count == 1);
+    CHECK(fit.attack.total_weight == 2.0);
+    CHECK(fit.critic.example_count == 1);
+    CHECK(fit.priority.candidate_weighted_cross_entropy <
+          fit.priority.parent_weighted_cross_entropy);
+    CHECK(fit.attack.candidate_weighted_cross_entropy <
+          fit.attack.parent_weighted_cross_entropy);
+    CHECK(fit.critic.candidate_mean_squared_error <
+          fit.critic.parent_mean_squared_error);
+    CHECK(fit.critic.candidate_binary_cross_entropy <
+          fit.critic.parent_binary_cross_entropy);
+    CHECK(fit.priority.weighted_teacher_entropy == 0.0);
+    CHECK(fit.attack.weighted_teacher_entropy == 0.0);
+    CHECK(fit.priority.parent_excess_cross_entropy ==
+          fit.priority.parent_weighted_cross_entropy);
+    CHECK(fit.priority.candidate_excess_cross_entropy ==
+          fit.priority.candidate_weighted_cross_entropy);
+    CHECK(fit.critic.target_variance == 0.0);
+    CHECK(fit.priority.parent_expected_top_one_agreement >=
+          0.0);
+    CHECK(fit.priority.parent_expected_top_one_agreement <=
+          1.0);
+    CHECK(fit.priority.candidate_expected_top_one_agreement >=
+          0.0);
+    CHECK(fit.priority.candidate_expected_top_one_agreement <=
+          1.0);
+    CHECK(fit.priority.changed_argmax_examples <=
+          fit.priority.example_count);
+    CHECK(fit.attack.changed_argmax_examples <=
+          fit.attack.example_count);
+    CHECK(fit.priority.changed_argmax_weight >= 0.0);
+    CHECK(fit.priority.changed_argmax_weight <=
+          fit.priority.total_weight);
+    CHECK(fit.priority.changed_argmax_weight_fraction >= 0.0);
+    CHECK(fit.priority.changed_argmax_weight_fraction <= 1.0);
+}
+
+TEST(learned_actor_fit_diagnostics_match_exact_tie_semantics) {
+    const auto model = small_actor_model();
+    const alpha::GameState state =
+        alpha::white_lock_plan_diagnostic_state();
+    const auto actions =
+        alpha::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() >= 2);
+
+    std::vector<std::vector<double>> options;
+    options.reserve(actions.size());
+    for (const auto& action : actions) {
+        options.push_back(
+            alpha::learned_priority_policy_features(
+                state, 0, action, true,
+                alpha::TurnPhase::FirstMain, 0));
+    }
+
+    const std::vector<alpha::LearnedPolicyTrainingExample>
+        tied_model_examples = {{
+            .options = {options[0], options[0]},
+            .target_probabilities = {1.0, 0.0},
+            .decision_kind =
+                alpha::LearnedPolicyDecisionKind::Priority,
+            .weight = 3.0,
+        }};
+    const auto tied_model_fit =
+        alpha::diagnose_learned_actor_fit(
+            model, model, {}, tied_model_examples);
+    CHECK(std::abs(
+              tied_model_fit.priority
+                  .parent_expected_top_one_agreement -
+              0.5) <
+          1.0e-12);
+    CHECK(std::abs(
+              tied_model_fit.priority
+                  .candidate_expected_top_one_agreement -
+              0.5) <
+          1.0e-12);
+    CHECK(tied_model_fit.priority.changed_argmax_examples == 0);
+    CHECK(tied_model_fit.priority.changed_argmax_weight == 0.0);
+
+    const auto logits =
+        alpha::learned_actor_priority_logits(
+            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+            actions, model);
+    std::size_t first = 0;
+    std::size_t second = 0;
+    bool found_unequal_logits = false;
+    for (std::size_t left = 0;
+         left < logits.size() && !found_unequal_logits; ++left) {
+        for (std::size_t right = left + 1;
+             right < logits.size(); ++right) {
+            if (logits[left] != logits[right]) {
+                first = left;
+                second = right;
+                found_unequal_logits = true;
+                break;
+            }
+        }
+    }
+    CHECK(found_unequal_logits);
+    const std::vector<alpha::LearnedPolicyTrainingExample>
+        tied_teacher_examples = {{
+            .options = {options[first], options[second]},
+            .target_probabilities = {0.5, 0.5},
+            .decision_kind =
+                alpha::LearnedPolicyDecisionKind::Priority,
+            .weight = 1.0,
+        }};
+    const auto tied_teacher_fit =
+        alpha::diagnose_learned_actor_fit(
+            model, model, {}, tied_teacher_examples);
+    CHECK(tied_teacher_fit.priority
+              .parent_expected_top_one_agreement == 1.0);
+    CHECK(tied_teacher_fit.priority
+              .candidate_expected_top_one_agreement == 1.0);
+    CHECK(std::abs(
+              tied_teacher_fit.priority
+                  .weighted_teacher_entropy -
+              std::log(2.0)) <
+          1.0e-12);
+}
+
 TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
     const alpha::LearnedActorGenerationConfig defaults;
     CHECK(defaults.search_worlds == 8);
@@ -975,6 +1905,12 @@ TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
           first.report.priority_roots);
     CHECK(first.report.attack_policy_examples ==
           first.report.attack_roots);
+    CHECK(first.report.fit.priority.example_count ==
+          first.report.priority_policy_examples);
+    CHECK(first.report.fit.attack.example_count ==
+          first.report.attack_policy_examples);
+    CHECK(first.report.fit.critic.example_count ==
+          first.report.critic_examples);
     CHECK(first.report.critic_examples +
               first.report.deduplicated_critic_observations ==
           first.report.priority_roots +
@@ -993,6 +1929,8 @@ TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
     std::size_t priority_roots = 0;
     std::size_t attack_roots = 0;
     std::size_t attack_includes = 0;
+    double priority_weight_sum = 0.0;
+    double attack_weight_sum = 0.0;
     for (std::size_t index = 0;
          index < first.report.games.size(); ++index) {
         const auto& actual = first.report.games[index];
@@ -1028,11 +1966,69 @@ TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
                 actual.attack_roots_by_seat[player];
             attack_includes +=
                 actual.attack_includes_by_seat[player];
+            priority_weight_sum +=
+                actual.priority_policy_weight_sums[player];
+            attack_weight_sum +=
+                actual.attack_policy_weight_sums[player];
         }
     }
     CHECK(priority_roots == first.report.priority_roots);
     CHECK(attack_roots == first.report.attack_roots);
     CHECK(attack_includes <= attack_roots);
+    CHECK(std::abs(
+              first.report.fit.priority.total_weight -
+              priority_weight_sum) <
+          1.0e-12);
+    CHECK(std::abs(
+              first.report.fit.attack.total_weight -
+              attack_weight_sum) <
+          1.0e-12);
+    const std::array<double, 24> fit_metrics = {
+        first.report.fit.priority
+            .parent_expected_top_one_agreement,
+        first.report.fit.priority
+            .candidate_expected_top_one_agreement,
+        first.report.fit.priority.weighted_teacher_entropy,
+        first.report.fit.priority
+            .parent_weighted_cross_entropy,
+        first.report.fit.priority
+            .candidate_weighted_cross_entropy,
+        first.report.fit.priority
+            .parent_excess_cross_entropy,
+        first.report.fit.priority
+            .candidate_excess_cross_entropy,
+        first.report.fit.priority.changed_argmax_weight,
+        first.report.fit.priority
+            .changed_argmax_weight_fraction,
+        first.report.fit.attack
+            .parent_expected_top_one_agreement,
+        first.report.fit.attack
+            .candidate_expected_top_one_agreement,
+        first.report.fit.attack.weighted_teacher_entropy,
+        first.report.fit.attack
+            .parent_weighted_cross_entropy,
+        first.report.fit.attack
+            .candidate_weighted_cross_entropy,
+        first.report.fit.attack.parent_excess_cross_entropy,
+        first.report.fit.attack
+            .candidate_excess_cross_entropy,
+        first.report.fit.attack.changed_argmax_weight,
+        first.report.fit.attack.changed_argmax_weight_fraction,
+        first.report.fit.critic.target_mean,
+        first.report.fit.critic.target_variance,
+        first.report.fit.critic.parent_mean_squared_error,
+        first.report.fit.critic.candidate_mean_squared_error,
+        first.report.fit.critic.parent_binary_cross_entropy,
+        first.report.fit.critic
+            .candidate_binary_cross_entropy,
+    };
+    CHECK(std::all_of(
+        fit_metrics.begin(), fit_metrics.end(),
+        [](double value) { return std::isfinite(value); }));
+    CHECK(first.report.fit.priority.changed_argmax_examples <=
+          first.report.fit.priority.example_count);
+    CHECK(first.report.fit.attack.changed_argmax_examples <=
+          first.report.fit.attack.example_count);
 
     CHECK(alpha::learned_model_fingerprint(parent) ==
           parent_fingerprint);

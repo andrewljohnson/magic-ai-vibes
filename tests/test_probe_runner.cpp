@@ -1,7 +1,9 @@
 #include "alpha/probe_runner.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -411,6 +413,72 @@ void test_value_attack_probe_scores_are_seed_independent() {
     }
 }
 
+void test_value_decision_detail_respects_ties_and_selectors() {
+    const auto label = alpha::probe_eval::make_probe_label(
+        "red.synthetic-selection", DeckId::Red,
+        {
+            {"best", {0.8, 0.8}},
+            {"other", {0.4, 0.4}},
+        });
+    const alpha::probe_eval::ProbePrediction uniform_tie{
+        "red.synthetic-selection",
+        {{"other", 1.0}, {"best", 1.0}},
+        0.7,
+    };
+    const auto uniform_detail =
+        alpha::probe_runner::make_value_probe_decision_detail(
+            label, uniform_tie);
+    expect(
+        uniform_detail.selected_keys ==
+                std::vector<std::string>{"best", "other"} &&
+            !uniform_detail.deterministic_selection &&
+            uniform_detail.reference_best_set ==
+                std::vector<std::string>{"best"},
+        "uniform exact tie was not represented as a stable selected set");
+    expect(
+        std::abs(uniform_detail.selected_action_reference_q - 0.6) <
+                1.0e-12 &&
+            std::abs(uniform_detail.regret - 0.2) < 1.0e-12 &&
+            std::abs(uniform_detail.critic_error - 0.1) < 1.0e-12,
+        "uniform tie detail did not use expected selected-action Q");
+
+    const alpha::probe_eval::ProbePrediction deterministic_tie{
+        "red.synthetic-selection",
+        {{"best", 1.0}, {"other", 1.0}},
+        0.5,
+        "other",
+    };
+    const auto deterministic_detail =
+        alpha::probe_runner::make_value_probe_decision_detail(
+            label, deterministic_tie, &uniform_detail,
+            &uniform_detail);
+    expect(
+            deterministic_detail.selected_keys ==
+                std::vector<std::string>{"other"} &&
+            deterministic_detail.deterministic_selection &&
+            deterministic_detail.selection_changed_from_reference &&
+            deterministic_detail.selection_changed_from_previous,
+        "deterministic deployed selector was mistaken for uniform tie");
+    expect(
+        std::abs(
+            deterministic_detail.selected_action_reference_q - 0.4) <
+                1.0e-12 &&
+            std::abs(deterministic_detail.regret - 0.4) < 1.0e-12 &&
+            std::abs(deterministic_detail.critic_error - 0.1) <
+                1.0e-12,
+        "deterministic detail did not use its selected candidate");
+
+    const auto persistent_detail =
+        alpha::probe_runner::make_value_probe_decision_detail(
+            label, deterministic_tie, &uniform_detail,
+            &deterministic_detail);
+    expect(
+        persistent_detail.selection_changed_from_reference &&
+            !persistent_detail.selection_changed_from_previous,
+        "persistent G0 disagreement was mistaken for an adjacent "
+        "selection change");
+}
+
 void test_low_margin_summary_is_actionable() {
     const auto label = alpha::probe_eval::make_probe_label(
         "green.low-margin", DeckId::Green,
@@ -625,6 +693,162 @@ void test_report_contains_required_schema_and_caveats() {
            "report omitted per-deck sections");
 }
 
+void test_compact_checkpoint_report_shows_actionable_transitions() {
+    ProbeScoreReport report;
+    report.metadata = {
+        .schema =
+            std::string(alpha::probe_runner::kProbeCacheSchema),
+        .algorithm =
+            std::string(alpha::probe_runner::
+                            kProbeReferenceAlgorithm),
+        .semantic_revision =
+            std::string(alpha::probe_runner::
+                            kProbeSemanticRevision),
+        .corpus_id = "probe-dev-v2",
+        .reference_seed =
+            alpha::probe_runner::kProbeReferenceSeed,
+        .production_policy_seed =
+            alpha::probe_runner::kProbeProductionPolicySeed,
+        .training_seed = 424242,
+        .training_games = 800,
+        .worlds = 8,
+        .horizon_turns = 0,
+        .rollouts_per_world = 1,
+        .probe_count = 1,
+        .reference_model_fingerprint = "actor-reference",
+        .information_set_fingerprint = "corpus-fingerprint",
+    };
+    report.scoring_actor_model_fingerprint = "actor-scoring";
+    report.value_model_fingerprint = "value-g0-fingerprint";
+    alpha::probe_eval::ProbeMetricSummary metrics;
+    metrics.probe_count = 1;
+    metrics.top1_expected_agreement = 0.5;
+    metrics.mean_regret = 0.2;
+    metrics.critic_brier = 0.01;
+    for (std::size_t deck = 0; deck < metrics.by_deck.size();
+         ++deck) {
+        metrics.by_deck[deck].root_deck =
+            static_cast<DeckId>(deck);
+    }
+    report.value_checkpoints = {
+        {
+            .name = "Value G0",
+            .fingerprint = "value-g0-fingerprint",
+            .metrics = metrics,
+            .decisions = {{
+                .stable_id = "red.synthetic",
+                .root_deck = DeckId::Red,
+                .selected_keys = {"best", "other"},
+                .deterministic_selection = false,
+                .reference_best_set = {"best"},
+                .regret = 0.2,
+                .critic_prediction = 0.7,
+                .selected_action_reference_q = 0.6,
+                .critic_error = 0.1,
+                .selection_changed_from_previous = false,
+            }},
+        },
+        {
+            .name = "Value G1",
+            .fingerprint = "value-g1-fingerprint",
+            .metrics = metrics,
+            .decisions = {{
+                .stable_id = "red.synthetic",
+                .root_deck = DeckId::Red,
+                .selected_keys = {"best"},
+                .deterministic_selection = true,
+                .reference_best_set = {"best"},
+                .regret = 0.0,
+                .critic_prediction = 0.8,
+                .selected_action_reference_q = 0.8,
+                .critic_error = 0.0,
+                .selection_changed_from_reference = true,
+                .selection_changed_from_previous = true,
+            }},
+        },
+        {
+            .name = "Value G2",
+            .fingerprint = "value-g2-fingerprint",
+            .metrics = metrics,
+            .decisions = {{
+                .stable_id = "red.synthetic",
+                .root_deck = DeckId::Red,
+                .selected_keys = {"best"},
+                .deterministic_selection = true,
+                .reference_best_set = {"best"},
+                .regret = 0.0,
+                .critic_prediction = 0.8,
+                .selected_action_reference_q = 0.8,
+                .critic_error = 0.0,
+                .selection_changed_from_reference = true,
+                .selection_changed_from_previous = false,
+            }},
+        },
+    };
+    report.hidden_repartition = {
+        .passed = true,
+        .policy_count = 7,
+        .probe_count = 1,
+    };
+    for (std::size_t deck = 0;
+         deck < report.reference_sensitivity.by_deck.size();
+         ++deck) {
+        report.reference_sensitivity.by_deck[deck].root_deck =
+            static_cast<DeckId>(deck);
+        report.low_margin.by_deck[deck].root_deck =
+            static_cast<DeckId>(deck);
+    }
+
+    const std::string output =
+        alpha::probe_runner::format_probe_score_report(report);
+    const std::size_t g0 = output.find("value-g0-fingerprint");
+    const std::size_t g1 = output.find("value-g1-fingerprint");
+    const std::size_t g2 = output.find("value-g2-fingerprint");
+    expect(
+        output.find("Value checkpoint transitions (compact)") !=
+                std::string::npos &&
+            g0 != std::string::npos &&
+            g1 != std::string::npos &&
+            g2 != std::string::npos &&
+            g0 < g1 && g1 < g2,
+        "compact checkpoint fingerprints were missing or reordered");
+    expect(
+        output.find(
+            "[NONZERO-REGRET] Value G0 red.synthetic (Red)") !=
+                std::string::npos &&
+            output.find(
+                "selected uniform exact-max set {best, other}") !=
+                std::string::npos &&
+            output.find("Actor-reference best {best}") !=
+                std::string::npos,
+        "nonzero-regret row omitted deployed/reference selection detail");
+    expect(
+        output.find(
+            "[G0-DISAGREEMENT] Value G0 -> Value G1 "
+            "red.synthetic (Red)") != std::string::npos &&
+            output.find("G0 selection different, adjacent selection changed") !=
+                std::string::npos &&
+            output.find("selected-action reference Q 0.8000") !=
+                std::string::npos &&
+            output.find("critic error 0.0000") !=
+                std::string::npos,
+        "selection transition omitted critic attribution");
+    expect(
+        output.find(
+            "[G0-DISAGREEMENT] Value G1 -> Value G2 "
+            "red.synthetic (Red)") != std::string::npos &&
+            output.find(
+                "Value G1 -> Value G2 red.synthetic (Red): "
+                "G0 selection different, adjacent selection same") !=
+                std::string::npos,
+        "persistent G0 disagreement was omitted after the adjacent "
+        "selection stopped changing");
+    expect(
+        output.find("Value G1 deployed policy\n  Config:") ==
+            std::string::npos,
+        "checkpoint attribution duplicated a full policy report");
+}
+
 void test_candidate_scoring_reuses_reference_owned_cache() {
     TemporaryDirectory directory;
     const auto reference =
@@ -690,6 +914,208 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
     expect(name_error.find("contain no tabs/newlines") !=
                std::string::npos,
            "unsafe candidate name error was not actionable");
+
+    const auto reference_value =
+        alpha::train_learned_value_champion(
+            1, 0xA11CEULL);
+    const auto scoring_value =
+        alpha::train_learned_value_champion(
+            1, 0xB0BULL);
+    expect(
+        alpha::learned_model_fingerprint(reference_value) !=
+            alpha::learned_model_fingerprint(scoring_value),
+        "tiny Value candidate unexpectedly aliases reference content");
+    const ProbeScoreReport value_loaded =
+        alpha::probe_runner::score_probe_dev_v2_with_candidates(
+            config, progress,
+            {
+                .reference_actor_model = reference,
+                .scoring_actor_model = reference,
+                .scoring_actor_name = "Actor G0",
+                .reference_value_model = reference_value,
+                .reference_value_name = "Value G0",
+                .scoring_value_models = {
+                    {"Value G8", scoring_value},
+                },
+            });
+    expect(
+        value_loaded.cache_status == ProbeCacheStatus::Loaded &&
+            value_loaded.metadata == generated.metadata,
+        "Value candidate changed Actor-owned cache identity");
+    expect(
+        value_loaded.value_model_fingerprint ==
+                alpha::learned_model_fingerprint(reference_value) &&
+            value_loaded.scoring_value_model_fingerprint ==
+                alpha::learned_model_fingerprint(scoring_value),
+        "report did not bind reference and scoring Value models");
+    expect(
+        value_loaded.policies.size() == 6 &&
+            value_loaded.hidden_repartition.policy_count == 6 &&
+            value_loaded.hidden_repartition.passed,
+        "distinct Value candidate was not hidden-invariant sixth view");
+    expect(
+        value_loaded.policies[2].name ==
+                "Value G0 deployed policy" &&
+            value_loaded.policies[3].name ==
+                "Value G8 deployed policy" &&
+            value_loaded.policies.back().name ==
+                "Value G0-continuation deep cross-check",
+        "Value candidate/reference policy rows were mislabeled");
+    const std::string value_output =
+        alpha::probe_runner::format_probe_score_report(
+            value_loaded);
+    expect(
+        value_output.find("Reference Value model fingerprint") !=
+                std::string::npos &&
+            value_output.find("Scoring Value model fingerprint") !=
+                std::string::npos &&
+            value_output.find("6 policy views") !=
+                std::string::npos,
+        "formatted report did not distinguish the Value candidate");
+
+    const auto second_scoring_value =
+        alpha::train_learned_value_champion(
+            1, 0xC0DEULL);
+    const auto third_scoring_value =
+        alpha::train_learned_value_champion(
+            1, 0xD00DULL);
+    const ProbeScoreReport checkpoint_loaded =
+        alpha::probe_runner::score_probe_dev_v2_with_candidates(
+            config, progress,
+            {
+                .reference_actor_model = reference,
+                .scoring_actor_model = reference,
+                .scoring_actor_name = "Actor G0",
+                .reference_value_model = reference_value,
+                .reference_value_name = "Value G0",
+                .scoring_value_models = {
+                    {"Value Mix50 base", scoring_value},
+                    {"Value Mix50 G1", second_scoring_value},
+                    {"Value Mix50 G2", third_scoring_value},
+                    {"Value Mix50 G3", scoring_value},
+                    {"Value Mix50 G4", second_scoring_value},
+                    {"Value Mix50 G5", third_scoring_value},
+                    {"Value Mix50 G6", scoring_value},
+                    {"Value Mix50 G7", second_scoring_value},
+                    {"Value Mix50 G8", third_scoring_value},
+                },
+            });
+    expect(
+        checkpoint_loaded.cache_status == ProbeCacheStatus::Loaded &&
+            checkpoint_loaded.metadata == generated.metadata &&
+            checkpoint_loaded.metadata.reference_model_fingerprint ==
+                alpha::learned_model_fingerprint(reference),
+        "multiple Value checkpoints changed Actor cache identity");
+    expect(
+        checkpoint_loaded.reference_sensitivity
+                    .actor_stable_pair_count ==
+                value_loaded.reference_sensitivity
+                    .actor_stable_pair_count &&
+            checkpoint_loaded.reference_sensitivity
+                    .point_sign_reversal_count ==
+                value_loaded.reference_sensitivity
+                    .point_sign_reversal_count &&
+            checkpoint_loaded.reference_sensitivity
+                    .dual_stable_reversal_count ==
+                value_loaded.reference_sensitivity
+                    .dual_stable_reversal_count &&
+            checkpoint_loaded.reference_sensitivity.flags.size() ==
+                value_loaded.reference_sensitivity.flags.size(),
+        "Value checkpoints changed legacy continuation sensitivity");
+    expect(
+        checkpoint_loaded.policies.size() == 5 &&
+            checkpoint_loaded.hidden_repartition.passed &&
+            checkpoint_loaded.hidden_repartition.policy_count == 14,
+        "multi-checkpoint scoring did not keep five full views and "
+        "verify every compact row");
+    expect(
+        checkpoint_loaded.value_checkpoints.size() == 10 &&
+            checkpoint_loaded.value_checkpoints[0].name ==
+                "Value G0" &&
+            checkpoint_loaded.value_checkpoints[1].name ==
+                "Value Mix50 base" &&
+            checkpoint_loaded.value_checkpoints[2].name ==
+                "Value Mix50 G1" &&
+            checkpoint_loaded.value_checkpoints[9].name ==
+                "Value Mix50 G8",
+        "Value checkpoint rows did not preserve exact caller order");
+    const std::array<std::string, 10> expected_fingerprints{
+        alpha::learned_model_fingerprint(reference_value),
+        alpha::learned_model_fingerprint(scoring_value),
+        alpha::learned_model_fingerprint(second_scoring_value),
+        alpha::learned_model_fingerprint(third_scoring_value),
+        alpha::learned_model_fingerprint(scoring_value),
+        alpha::learned_model_fingerprint(second_scoring_value),
+        alpha::learned_model_fingerprint(third_scoring_value),
+        alpha::learned_model_fingerprint(scoring_value),
+        alpha::learned_model_fingerprint(second_scoring_value),
+        alpha::learned_model_fingerprint(third_scoring_value),
+    };
+    for (std::size_t checkpoint = 0;
+         checkpoint < checkpoint_loaded.value_checkpoints.size();
+         ++checkpoint) {
+        const auto& row =
+            checkpoint_loaded.value_checkpoints[checkpoint];
+        expect(row.fingerprint == expected_fingerprints[checkpoint],
+               "Value checkpoint fingerprint order changed");
+        expect(row.decisions.size() == 16,
+               "Value checkpoint lost a probe detail row");
+        expect(
+            std::is_sorted(
+                row.decisions.begin(), row.decisions.end(),
+                [](const auto& left, const auto& right) {
+                    return left.stable_id < right.stable_id;
+                }),
+            "Value checkpoint details are not in stable-ID order");
+    }
+    const std::string checkpoint_output =
+        alpha::probe_runner::format_probe_score_report(
+            checkpoint_loaded);
+    expect(
+        checkpoint_output.find(
+            "Value checkpoint transitions (compact)") !=
+            std::string::npos,
+        "formatted checkpoint report omitted its heading");
+    const std::array<std::string_view, 10> expected_names{
+        "Value G0",
+        "Value Mix50 base",
+        "Value Mix50 G1",
+        "Value Mix50 G2",
+        "Value Mix50 G3",
+        "Value Mix50 G4",
+        "Value Mix50 G5",
+        "Value Mix50 G6",
+        "Value Mix50 G7",
+        "Value Mix50 G8",
+    };
+    std::size_t prior_position = 0;
+    for (const std::string_view name : expected_names) {
+        const std::string prefix =
+            "  " + std::string(name) + ": fingerprint ";
+        const std::size_t position =
+            checkpoint_output.find(prefix, prior_position);
+        expect(position != std::string::npos,
+               "formatted Mix50 checkpoint rows lost caller order");
+        prior_position = position + prefix.size();
+    }
+    expect(
+        checkpoint_output.find("5 policy views") !=
+                std::string::npos &&
+            checkpoint_output.find(
+                "Value Mix50 base deployed policy\n  Config:") ==
+                std::string::npos &&
+            checkpoint_output.find(
+                "Value Mix50 G1 deployed policy\n  Config:") ==
+                std::string::npos &&
+            checkpoint_output.find(
+                "Value Mix50 G8 deployed policy\n  Config:") ==
+                std::string::npos,
+        "multi-checkpoint output expanded compact rows into full views");
+    expect(
+        alpha::probe_runner::format_probe_score_report(generated)
+                .find("Value checkpoint transitions (compact)") ==
+            std::string::npos,
+        "legacy five-view output gained a checkpoint section");
 }
 
 } // namespace
@@ -710,10 +1136,14 @@ int main() {
                test_tiny_reference_is_hidden_clone_invariant);
     runner.run("deployed Value attack seed independence",
                test_value_attack_probe_scores_are_seed_independent);
+    runner.run("Value selection detail semantics",
+               test_value_decision_detail_respects_ties_and_selectors);
     runner.run("actionable low-margin summary",
                test_low_margin_summary_is_actionable);
     runner.run("report summary schema",
                test_report_contains_required_schema_and_caveats);
+    runner.run("compact checkpoint attribution",
+               test_compact_checkpoint_report_shows_actionable_transitions);
     runner.run("candidate cache ownership",
                test_candidate_scoring_reuses_reference_owned_cache);
     return runner.finish();

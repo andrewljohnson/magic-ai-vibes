@@ -5,12 +5,25 @@
 #include <atomic>
 #include <array>
 #include <bit>
+#include <cerrno>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <limits>
+#include <span>
 #include <stdexcept>
+#include <system_error>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 namespace alpha {
 
@@ -87,6 +100,432 @@ void add_model_fingerprint_value(
         add_model_fingerprint_value(hash, value);
     }
 }
+
+namespace {
+
+constexpr std::array<std::uint8_t, 8> kValueG8ArtifactMagic = {
+    'M', 'T', 'G', 'V', 'G', '8', 'B', '1',
+};
+constexpr std::uint32_t kValueG8ArtifactSchema = 1;
+constexpr std::string_view kValueG8RecipeId =
+    "alpha.learned-value-g8.bootstrap-replay-k1h4.v1";
+constexpr std::array<std::uint8_t, 8>
+    kValueG8Mix50ArtifactMagic = {
+        'M', 'T', 'G', 'V', 'M', '5', 'B', '1',
+    };
+constexpr std::uint32_t kValueG8Mix50ArtifactSchema = 1;
+constexpr std::string_view kValueG8Mix50RecipeId =
+    "alpha.learned-value-g8.bootstrap-replay-k1h4."
+    "late-mix50.v1";
+constexpr std::size_t kMaximumValueG8ArtifactBytes =
+    64U * 1024U * 1024U;
+constexpr std::size_t kMaximumValueG8ArtifactStringBytes = 256;
+constexpr std::size_t kMaximumValueG8ArtifactNodes = 128;
+constexpr std::size_t kMaximumValueG8ArtifactDepth = 8;
+constexpr std::size_t kMaximumValueG8EnsembleMembers = 16;
+
+static_assert(
+    sizeof(double) == sizeof(std::uint64_t) &&
+        std::numeric_limits<double>::is_iec559,
+    "Value G8 artifacts require IEEE-754 binary64 doubles");
+
+void reject_embedded_nul_in_value_g8_path(
+    const std::string& path) {
+    if (path.find('\0') != std::string::npos) {
+        throw std::invalid_argument(
+            "Value G8 artifact path must not contain embedded "
+            "NUL bytes");
+    }
+}
+
+class ValueG8BinaryWriter {
+  public:
+    void byte(std::uint8_t value) {
+        bytes_.push_back(value);
+    }
+
+    void bytes(std::span<const std::uint8_t> values) {
+        if (values.size() >
+            kMaximumValueG8ArtifactBytes - bytes_.size()) {
+            throw std::runtime_error(
+                "Value G8 artifact exceeds the 64 MiB limit");
+        }
+        bytes_.insert(bytes_.end(), values.begin(), values.end());
+    }
+
+    void unsigned32(std::uint32_t value) {
+        for (unsigned int shift = 0; shift < 32; shift += 8) {
+            byte(static_cast<std::uint8_t>(value >> shift));
+        }
+    }
+
+    void unsigned64(std::uint64_t value) {
+        for (unsigned int shift = 0; shift < 64; shift += 8) {
+            byte(static_cast<std::uint8_t>(value >> shift));
+        }
+    }
+
+    void size(std::size_t value) {
+        unsigned64(static_cast<std::uint64_t>(value));
+    }
+
+    void real(double value) {
+        if (!std::isfinite(value)) {
+            throw std::runtime_error(
+                "Value G8 artifact cannot contain a non-finite real");
+        }
+        unsigned64(std::bit_cast<std::uint64_t>(value));
+    }
+
+    void text(std::string_view value) {
+        if (value.size() > kMaximumValueG8ArtifactStringBytes) {
+            throw std::runtime_error(
+                "Value G8 artifact string exceeds its bound");
+        }
+        unsigned32(static_cast<std::uint32_t>(value.size()));
+        bytes(std::span(
+            reinterpret_cast<const std::uint8_t*>(value.data()),
+            value.size()));
+    }
+
+    const std::vector<std::uint8_t>& data() const {
+        return bytes_;
+    }
+
+  private:
+    std::vector<std::uint8_t> bytes_;
+};
+
+class ValueG8BinaryReader {
+  public:
+    explicit ValueG8BinaryReader(
+        std::span<const std::uint8_t> bytes)
+        : bytes_(bytes) {}
+
+    std::uint8_t byte(std::string_view field) {
+        require(1, field);
+        return bytes_[cursor_++];
+    }
+
+    std::uint32_t unsigned32(std::string_view field) {
+        require(4, field);
+        std::uint32_t value = 0;
+        for (unsigned int shift = 0; shift < 32; shift += 8) {
+            value |= static_cast<std::uint32_t>(
+                         bytes_[cursor_++])
+                     << shift;
+        }
+        return value;
+    }
+
+    std::uint64_t unsigned64(std::string_view field) {
+        require(8, field);
+        std::uint64_t value = 0;
+        for (unsigned int shift = 0; shift < 64; shift += 8) {
+            value |= static_cast<std::uint64_t>(
+                         bytes_[cursor_++])
+                     << shift;
+        }
+        return value;
+    }
+
+    std::size_t size(std::string_view field) {
+        const std::uint64_t value = unsigned64(field);
+        if (value >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::size_t>::max())) {
+            fail(field, "does not fit in size_t");
+        }
+        return static_cast<std::size_t>(value);
+    }
+
+    double real(std::string_view field) {
+        const double value =
+            std::bit_cast<double>(unsigned64(field));
+        if (!std::isfinite(value)) {
+            fail(field, "is non-finite");
+        }
+        return value;
+    }
+
+    bool boolean(std::string_view field) {
+        const std::uint8_t value = byte(field);
+        if (value > 1) {
+            fail(field, "is not a canonical boolean");
+        }
+        return value != 0;
+    }
+
+    std::string text(std::string_view field) {
+        const std::uint32_t length =
+            unsigned32(std::string(field) + " length");
+        if (length > kMaximumValueG8ArtifactStringBytes) {
+            fail(field, "exceeds the string-size bound");
+        }
+        require(length, field);
+        const char* begin = reinterpret_cast<const char*>(
+            bytes_.data() + cursor_);
+        std::string value(begin, begin + length);
+        cursor_ += length;
+        return value;
+    }
+
+    std::span<const std::uint8_t> take(
+        std::size_t count, std::string_view field) {
+        require(count, field);
+        const auto value = bytes_.subspan(cursor_, count);
+        cursor_ += count;
+        return value;
+    }
+
+    bool at_end() const {
+        return cursor_ == bytes_.size();
+    }
+
+    std::size_t remaining() const {
+        return bytes_.size() - cursor_;
+    }
+
+  private:
+    [[noreturn]] static void fail(
+        std::string_view field, std::string_view detail) {
+        throw std::runtime_error(
+            "Value G8 artifact field '" + std::string(field) +
+            "' " + std::string(detail));
+    }
+
+    void require(std::size_t count, std::string_view field) const {
+        if (count > bytes_.size() - cursor_) {
+            fail(field, "is truncated");
+        }
+    }
+
+    std::span<const std::uint8_t> bytes_;
+    std::size_t cursor_ = 0;
+};
+
+template <typename Value>
+void write_value_g8_fixed(
+    ValueG8BinaryWriter& writer, const Value& value) {
+    if constexpr (std::is_same_v<Value, double>) {
+        writer.real(value);
+    } else {
+        for (const auto& child : value) {
+            write_value_g8_fixed(writer, child);
+        }
+    }
+}
+
+template <typename Value>
+void read_value_g8_fixed(
+    ValueG8BinaryReader& reader, Value& value,
+    std::string_view field) {
+    if constexpr (std::is_same_v<Value, double>) {
+        value = reader.real(field);
+    } else {
+        for (auto& child : value) {
+            read_value_g8_fixed(reader, child, field);
+        }
+    }
+}
+
+std::uint64_t value_g8_payload_checksum(
+    std::span<const std::uint8_t> bytes) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const std::uint8_t value : bytes) {
+        hash ^= value;
+        hash *= 1099511628211ULL;
+    }
+    hash ^= 0x56414C5545473842ULL;
+    hash *= 1099511628211ULL;
+    return hash;
+}
+
+bool is_lower_hex_fingerprint(std::string_view value) {
+    return value.size() == 64 &&
+           std::all_of(
+               value.begin(), value.end(), [](char character) {
+                   return (character >= '0' &&
+                           character <= '9') ||
+                          (character >= 'a' &&
+                           character <= 'f');
+               });
+}
+
+std::vector<std::uint8_t> read_bounded_value_g8_file(
+    const std::string& path) {
+    reject_embedded_nul_in_value_g8_path(path);
+    std::error_code size_error;
+    const std::uintmax_t file_size =
+        std::filesystem::file_size(path, size_error);
+    if (size_error) {
+        throw std::runtime_error(
+            "cannot inspect Value G8 artifact '" + path +
+            "': " + size_error.message());
+    }
+    if (file_size > kMaximumValueG8ArtifactBytes) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' exceeds the 64 MiB limit");
+    }
+    std::vector<std::uint8_t> bytes(
+        static_cast<std::size_t>(file_size));
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error(
+            "cannot open Value G8 artifact '" + path + "'");
+    }
+    if (!bytes.empty()) {
+        input.read(
+            reinterpret_cast<char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+    }
+    if (input.gcount() !=
+        static_cast<std::streamsize>(bytes.size())) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' was truncated while reading");
+    }
+    if (input.peek() != std::char_traits<char>::eof()) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' grew while reading");
+    }
+    return bytes;
+}
+
+void write_value_g8_file_atomic(
+    const std::string& path,
+    std::span<const std::uint8_t> bytes) {
+    reject_embedded_nul_in_value_g8_path(path);
+    const std::filesystem::path target(path);
+    if (path.empty() || target.filename().empty()) {
+        throw std::invalid_argument(
+            "Value G8 artifact path must name a file");
+    }
+    const std::filesystem::path directory =
+        target.has_parent_path()
+            ? target.parent_path()
+            : std::filesystem::path(".");
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+        directory, directory_error);
+    if (directory_error) {
+        throw std::runtime_error(
+            "cannot create Value G8 artifact directory '" +
+            directory.string() + "': " +
+            directory_error.message());
+    }
+
+    static std::atomic<std::uint64_t> temporary_counter{0};
+    std::filesystem::path temporary;
+    int descriptor = -1;
+    for (std::size_t attempt = 0; attempt < 128; ++attempt) {
+        temporary =
+            directory /
+            (target.filename().string() + ".tmp." +
+             std::to_string(
+                 static_cast<unsigned long long>(::getpid())) +
+             "." +
+             std::to_string(
+                 temporary_counter.fetch_add(
+                     1, std::memory_order_relaxed)));
+        descriptor = ::open(
+            temporary.c_str(),
+            O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+        if (descriptor >= 0) {
+            break;
+        }
+        if (errno != EEXIST) {
+            throw std::runtime_error(
+                "cannot create temporary Value G8 artifact '" +
+                temporary.string() + "': " +
+                std::strerror(errno));
+        }
+    }
+    if (descriptor < 0) {
+        throw std::runtime_error(
+            "could not reserve a temporary Value G8 artifact");
+    }
+
+    const auto cleanup = [&] {
+        if (descriptor >= 0) {
+            static_cast<void>(::close(descriptor));
+            descriptor = -1;
+        }
+        static_cast<void>(::unlink(temporary.c_str()));
+    };
+    std::size_t cursor = 0;
+    while (cursor < bytes.size()) {
+        const ssize_t written = ::write(
+            descriptor, bytes.data() + cursor,
+            bytes.size() - cursor);
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            const std::string detail = std::strerror(errno);
+            cleanup();
+            throw std::runtime_error(
+                "cannot write temporary Value G8 artifact: " +
+                detail);
+        }
+        if (written == 0) {
+            cleanup();
+            throw std::runtime_error(
+                "temporary Value G8 artifact write made no "
+                "progress");
+        }
+        cursor += static_cast<std::size_t>(written);
+    }
+    if (::fsync(descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        cleanup();
+        throw std::runtime_error(
+            "cannot sync temporary Value G8 artifact: " + detail);
+    }
+    if (::close(descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        descriptor = -1;
+        static_cast<void>(::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot close temporary Value G8 artifact: " + detail);
+    }
+    descriptor = -1;
+
+    const int directory_descriptor = ::open(
+        directory.c_str(), O_RDONLY | O_CLOEXEC);
+    if (directory_descriptor < 0) {
+        const std::string detail = std::strerror(errno);
+        static_cast<void>(::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot open Value G8 artifact directory for sync: " +
+            detail);
+    }
+    if (::rename(temporary.c_str(), target.c_str()) != 0) {
+        const std::string detail = std::strerror(errno);
+        static_cast<void>(::close(directory_descriptor));
+        static_cast<void>(::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot atomically publish Value G8 artifact '" +
+            path + "': " + detail);
+    }
+    if (::fsync(directory_descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        static_cast<void>(::close(directory_descriptor));
+        throw std::runtime_error(
+            "cannot sync published Value G8 artifact directory: " +
+            detail);
+    }
+    if (::close(directory_descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        throw std::runtime_error(
+            "cannot close published Value G8 artifact directory: " +
+            detail);
+    }
+}
+
+}  // namespace
 
 class LearnedModel {
   public:
@@ -546,6 +985,21 @@ class LearnedModel {
 
     friend std::string learned_model_fingerprint(
         std::shared_ptr<const LearnedModel> model);
+    friend void write_learned_value_g8_bundle_atomic(
+        const std::string& path,
+        const LearnedValueG8Result& result);
+    friend LearnedValueG8Result load_learned_value_g8_bundle(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed);
+    friend void write_learned_value_g8_mix50_bundle_atomic(
+        const std::string& path,
+        const LearnedValueG8Result& result);
+    friend LearnedValueG8Result
+    load_learned_value_g8_mix50_bundle(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed);
 
     std::array<std::array<double, kFeatureCount>, kHiddenCount>
         input_weights_{};
@@ -585,6 +1039,1294 @@ std::string learned_model_fingerprint(
     hash.add(1);
     model->append_fingerprint(hash);
     return hash.finish();
+}
+
+namespace {
+
+void add_value_g8_report_text(
+    ModelFingerprintHash& hash, std::string_view value) {
+    hash.add(static_cast<std::uint64_t>(value.size()));
+    for (const unsigned char character : value) {
+        hash.add(character);
+    }
+}
+
+std::string value_g8_report_fingerprint(
+    const LearnedValueG8Report& report) {
+    ModelFingerprintHash hash;
+    hash.add(0x5647385245504F52ULL);
+    hash.add(1);
+    hash.add(static_cast<std::uint64_t>(
+        report.training_games));
+    hash.add(report.root_seed);
+    hash.add(static_cast<std::uint64_t>(
+        report.base_examples));
+    add_value_g8_report_text(hash, report.base_fingerprint);
+    add_value_g8_report_text(hash, report.final_fingerprint);
+    hash.add(static_cast<std::uint64_t>(
+        report.generations.size()));
+    for (const auto& generation : report.generations) {
+        hash.add(static_cast<std::uint64_t>(
+            generation.generation));
+        hash.add(static_cast<std::uint64_t>(
+            generation.self_play_games));
+        hash.add(static_cast<std::uint64_t>(
+            generation.generation_examples));
+        hash.add(static_cast<std::uint64_t>(
+            generation.anchor_examples));
+        hash.add(static_cast<std::uint64_t>(
+            generation.replay_generations));
+        hash.add(static_cast<std::uint64_t>(
+            generation.replay_examples));
+        hash.add(generation.search_enabled ? 1U : 0U);
+        hash.add(static_cast<std::uint64_t>(
+            generation.search_worlds));
+        hash.add(static_cast<std::uint64_t>(
+            generation.search_horizon_turns));
+        hash.add(static_cast<std::uint64_t>(
+            generation.rollout_evaluations));
+        hash.add(std::bit_cast<std::uint64_t>(
+            generation.exploration_rate));
+        add_value_g8_report_text(
+            hash, generation.parent_fingerprint);
+        add_value_g8_report_text(
+            hash, generation.candidate_fingerprint);
+    }
+    return hash.finish();
+}
+
+std::string value_g8_mix50_report_fingerprint(
+    const LearnedValueG8Report& report) {
+    ModelFingerprintHash hash;
+    hash.add(0x5647384D49583530ULL);
+    hash.add(1);
+    add_value_g8_report_text(
+        hash, value_g8_report_fingerprint(report));
+    hash.add(static_cast<std::uint64_t>(report.recipe));
+    for (const auto& generation : report.generations) {
+        hash.add(static_cast<std::uint64_t>(
+            generation.raw_collection_games));
+        hash.add(static_cast<std::uint64_t>(
+            generation.search_collection_games));
+        hash.add(static_cast<std::uint64_t>(
+            generation.raw_collection_examples));
+        hash.add(static_cast<std::uint64_t>(
+            generation.search_collection_examples));
+    }
+    return hash.finish();
+}
+
+[[noreturn]] void invalid_value_g8_bundle(
+    std::string_view detail) {
+    throw std::runtime_error(
+        "invalid Value G8 artifact bundle: " +
+        std::string(detail));
+}
+
+std::vector<std::string> validate_value_g8_bundle_for_recipe(
+    const LearnedValueG8Result& result,
+    LearnedValueG8Recipe expected_recipe) {
+    if (result.report.recipe != expected_recipe) {
+        invalid_value_g8_bundle("recipe does not match writer");
+    }
+    if (result.report.training_games == 0) {
+        invalid_value_g8_bundle(
+            "training_games must be positive");
+    }
+    if (result.report.base_examples == 0) {
+        invalid_value_g8_bundle(
+            "base_examples must be positive");
+    }
+    if (result.checkpoints.size() !=
+        kLearnedValueG8Generations + 1) {
+        invalid_value_g8_bundle(
+            "checkpoint count must be exactly 9");
+    }
+    if (result.report.generations.size() !=
+        kLearnedValueG8Generations) {
+        invalid_value_g8_bundle(
+            "generation report count must be exactly 8");
+    }
+    if (!result.model ||
+        result.model != result.checkpoints.back()) {
+        invalid_value_g8_bundle(
+            "model must alias the final checkpoint");
+    }
+
+    std::vector<std::string> fingerprints;
+    fingerprints.reserve(result.checkpoints.size());
+    for (std::size_t index = 0;
+         index < result.checkpoints.size(); ++index) {
+        const auto& checkpoint = result.checkpoints[index];
+        if (!checkpoint) {
+            invalid_value_g8_bundle(
+                "checkpoint " + std::to_string(index) +
+                " is null");
+        }
+        if (checkpoint->variant() !=
+            LearnedVariant::ValueSearchChampion) {
+            invalid_value_g8_bundle(
+                "checkpoint " + std::to_string(index) +
+                " is not a Value model");
+        }
+        fingerprints.push_back(
+            learned_model_fingerprint(checkpoint));
+    }
+    if (!is_lower_hex_fingerprint(
+            result.report.base_fingerprint) ||
+        result.report.base_fingerprint !=
+            fingerprints.front()) {
+        invalid_value_g8_bundle(
+            "base_fingerprint does not match checkpoint G0");
+    }
+    if (!is_lower_hex_fingerprint(
+            result.report.final_fingerprint) ||
+        result.report.final_fingerprint !=
+            fingerprints.back()) {
+        invalid_value_g8_bundle(
+            "final_fingerprint does not match checkpoint G8");
+    }
+
+    const std::size_t expected_self_play_games =
+        std::max<std::size_t>(
+            1, result.report.training_games / 4);
+    for (std::size_t index = 0;
+         index < result.report.generations.size();
+         ++index) {
+        const auto& generation =
+            result.report.generations[index];
+        if (generation.generation != index + 1) {
+            invalid_value_g8_bundle(
+                "generation numbering is not canonical at G" +
+                std::to_string(index + 1));
+        }
+        if (generation.self_play_games !=
+            expected_self_play_games) {
+            invalid_value_g8_bundle(
+                "self_play_games is not canonical at G" +
+                std::to_string(index + 1));
+        }
+        if (generation.generation_examples == 0 ||
+            generation.anchor_examples !=
+                result.report.base_examples) {
+            invalid_value_g8_bundle(
+                "example accounting is invalid at G" +
+                std::to_string(index + 1));
+        }
+        const std::size_t expected_replay_generations =
+            std::min<std::size_t>(index + 1, 3);
+        std::size_t expected_replay_examples = 0;
+        const std::size_t replay_begin =
+            index + 1 - expected_replay_generations;
+        for (std::size_t replay_index = replay_begin;
+             replay_index <= index; ++replay_index) {
+            const std::size_t examples =
+                result.report.generations[replay_index]
+                    .generation_examples;
+            if (examples >
+                std::numeric_limits<std::size_t>::max() -
+                    expected_replay_examples) {
+                invalid_value_g8_bundle(
+                    "replay example count overflows size_t");
+            }
+            expected_replay_examples += examples;
+        }
+        if (generation.replay_generations !=
+                expected_replay_generations ||
+            generation.replay_examples !=
+                expected_replay_examples) {
+            invalid_value_g8_bundle(
+                "replay accounting is invalid at G" +
+                std::to_string(index + 1));
+        }
+        const bool expected_search = index >= 4;
+        if (expected_recipe ==
+            LearnedValueG8Recipe::CanonicalAllSearchLate) {
+            if (generation.raw_collection_games != 0 ||
+                generation.search_collection_games != 0 ||
+                generation.raw_collection_examples != 0 ||
+                generation.search_collection_examples != 0) {
+                invalid_value_g8_bundle(
+                    "canonical collection breakdown must remain "
+                    "absent at G" +
+                    std::to_string(index + 1));
+            }
+        } else {
+            const std::size_t expected_raw_games =
+                expected_search
+                    ? expected_self_play_games / 2
+                    : expected_self_play_games;
+            const std::size_t expected_search_games =
+                expected_search
+                    ? expected_self_play_games / 2
+                    : 0;
+            if (expected_self_play_games % 2 != 0 ||
+                generation.raw_collection_games !=
+                    expected_raw_games ||
+                generation.search_collection_games !=
+                    expected_search_games ||
+                generation.raw_collection_games +
+                        generation.search_collection_games !=
+                    generation.self_play_games ||
+                generation.raw_collection_examples +
+                        generation.search_collection_examples !=
+                    generation.generation_examples ||
+                generation.raw_collection_examples == 0 ||
+                (expected_search &&
+                 generation.search_collection_examples == 0) ||
+                (!expected_search &&
+                 generation.search_collection_examples != 0)) {
+                invalid_value_g8_bundle(
+                    "Late-Mix50 collection accounting is invalid "
+                    "at G" +
+                    std::to_string(index + 1));
+            }
+        }
+        if (generation.search_enabled != expected_search ||
+            generation.search_worlds !=
+                (expected_search ? 1U : 0U) ||
+            generation.search_horizon_turns !=
+                (expected_search ? 4U : 0U) ||
+            (!expected_search &&
+             generation.rollout_evaluations != 0) ||
+            (expected_search &&
+             generation.rollout_evaluations == 0)) {
+            invalid_value_g8_bundle(
+                "search accounting is invalid at G" +
+                std::to_string(index + 1));
+        }
+        const double expected_exploration =
+            index < 2 ? 0.10 : 0.05;
+        if (std::bit_cast<std::uint64_t>(
+                generation.exploration_rate) !=
+            std::bit_cast<std::uint64_t>(
+                expected_exploration)) {
+            invalid_value_g8_bundle(
+                "exploration rate is not canonical at G" +
+                std::to_string(index + 1));
+        }
+        if (!is_lower_hex_fingerprint(
+                generation.parent_fingerprint) ||
+            !is_lower_hex_fingerprint(
+                generation.candidate_fingerprint) ||
+            generation.parent_fingerprint !=
+                fingerprints[index] ||
+            generation.candidate_fingerprint !=
+                fingerprints[index + 1] ||
+            generation.parent_fingerprint ==
+                generation.candidate_fingerprint) {
+            invalid_value_g8_bundle(
+                "checkpoint fingerprint link is invalid at G" +
+                std::to_string(index + 1));
+        }
+    }
+    return fingerprints;
+}
+
+std::vector<std::string> validate_value_g8_bundle(
+    const LearnedValueG8Result& result) {
+    return validate_value_g8_bundle_for_recipe(
+        result,
+        LearnedValueG8Recipe::CanonicalAllSearchLate);
+}
+
+std::vector<std::string> validate_value_g8_mix50_bundle(
+    const LearnedValueG8Result& result) {
+    return validate_value_g8_bundle_for_recipe(
+        result, LearnedValueG8Recipe::LateMix50);
+}
+
+std::shared_ptr<const LearnedModel>
+update_learned_value_model_encoded(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedModel::TrainingExample>& examples,
+    LearnedValueUpdateConfig config) {
+    if (!parent) {
+        throw std::invalid_argument(
+            "Learned Value update requires a parent model");
+    }
+    if (parent->variant() !=
+        LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Learned Value update requires a Value model");
+    }
+    if (!examples.empty() &&
+        (config.epochs == 0 ||
+         !std::isfinite(config.learning_rate) ||
+         config.learning_rate <= 0.0)) {
+        throw std::invalid_argument(
+            "Learned Value update parameters must be positive");
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> critic_leaves;
+    auto candidate =
+        parent->deep_clone_mutable(critic_leaves);
+    std::vector<std::jthread> trainers;
+    trainers.reserve(critic_leaves.size());
+    for (std::size_t member = 0;
+         member < critic_leaves.size(); ++member) {
+        trainers.emplace_back([&, member] {
+            critic_leaves[member]->train(
+                examples, config.epochs,
+                config.learning_rate,
+                config.root_seed ^
+                    (config.member_training_tag + member));
+        });
+    }
+    // jthread destruction joins every independent critic fit before the
+    // immutable candidate is published.
+    trainers.clear();
+    return candidate;
+}
+
+} // namespace
+
+std::string learned_value_g8_cache_path(
+    std::size_t training_games, std::uint64_t seed) {
+    return "build/model-cache/value-g8-v1-t" +
+           std::to_string(training_games) + "-s" +
+           std::to_string(seed) + ".bin";
+}
+
+std::string learned_value_g8_mix50_cache_path(
+    std::size_t training_games, std::uint64_t seed) {
+    return "build/model-cache/value-g8-mix50-v1-t" +
+           std::to_string(training_games) + "-s" +
+           std::to_string(seed) + ".bin";
+}
+
+void write_learned_value_g8_bundle_atomic(
+    const std::string& path,
+    const LearnedValueG8Result& result) {
+    const std::vector<std::string> fingerprints =
+        validate_value_g8_bundle(result);
+
+    ValueG8BinaryWriter payload;
+    payload.text(kValueG8RecipeId);
+    payload.size(kLearnedCardCount);
+    payload.size(LearnedModel::kScalarFeatureCount);
+    payload.size(LearnedModel::kCardPlanes);
+    payload.size(LearnedModel::kFeatureCount);
+    payload.size(LearnedModel::kHiddenCount);
+    payload.size(LearnedModel::kPolicyDecisionCount);
+    payload.size(LearnedModel::kPolicyPhaseCount);
+    payload.size(LearnedModel::kPolicyVerbCount);
+    payload.size(LearnedModel::kPolicyCardPlanes);
+    payload.size(LearnedModel::kPolicyScalarCount);
+    payload.size(LearnedModel::kPolicyFeatureCount);
+    payload.size(LearnedModel::kPolicyHiddenCount);
+
+    payload.size(result.report.training_games);
+    payload.unsigned64(result.report.root_seed);
+    payload.text(value_g8_report_fingerprint(result.report));
+    payload.size(result.report.training_games);
+    payload.unsigned64(result.report.root_seed);
+    payload.size(result.report.base_examples);
+    payload.text(result.report.base_fingerprint);
+    payload.text(result.report.final_fingerprint);
+    payload.size(result.report.generations.size());
+    for (const auto& generation : result.report.generations) {
+        payload.size(generation.generation);
+        payload.size(generation.self_play_games);
+        payload.size(generation.generation_examples);
+        payload.size(generation.anchor_examples);
+        payload.size(generation.replay_generations);
+        payload.size(generation.replay_examples);
+        payload.byte(generation.search_enabled ? 1U : 0U);
+        payload.size(generation.search_worlds);
+        payload.size(generation.search_horizon_turns);
+        payload.size(generation.rollout_evaluations);
+        payload.real(generation.exploration_rate);
+        payload.text(generation.parent_fingerprint);
+        payload.text(generation.candidate_fingerprint);
+    }
+
+    payload.size(result.checkpoints.size());
+    std::size_t node_count = 0;
+    std::function<void(
+        const std::shared_ptr<const LearnedModel>&,
+        std::size_t)>
+        write_model;
+    write_model =
+        [&](const std::shared_ptr<const LearnedModel>& model,
+            std::size_t depth) {
+            if (!model) {
+                invalid_value_g8_bundle(
+                    "serialized model node is null");
+            }
+            if (depth > kMaximumValueG8ArtifactDepth ||
+                ++node_count >
+                    kMaximumValueG8ArtifactNodes) {
+                invalid_value_g8_bundle(
+                    "serialized model graph exceeds its bound");
+            }
+            if (model->ensemble_.size() >
+                kMaximumValueG8EnsembleMembers) {
+                invalid_value_g8_bundle(
+                    "serialized ensemble exceeds its bound");
+            }
+            payload.unsigned32(0x4D4F444C);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(model->variant_));
+            write_value_g8_fixed(
+                payload, model->input_weights_);
+            write_value_g8_fixed(
+                payload, model->hidden_biases_);
+            write_value_g8_fixed(
+                payload, model->output_weights_);
+            write_value_g8_fixed(
+                payload, model->direct_output_weights_);
+            payload.real(model->output_bias_);
+            write_value_g8_fixed(
+                payload, model->policy_input_weights_);
+            write_value_g8_fixed(
+                payload, model->policy_hidden_biases_);
+            write_value_g8_fixed(
+                payload, model->policy_output_weights_);
+            write_value_g8_fixed(
+                payload,
+                model->policy_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, model->policy_output_bias_);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(
+                    model->ensemble_.size()));
+            for (const auto& member : model->ensemble_) {
+                write_model(member, depth + 1);
+            }
+        };
+    for (std::size_t index = 0;
+         index < result.checkpoints.size(); ++index) {
+        payload.text(fingerprints[index]);
+        write_model(result.checkpoints[index], 0);
+    }
+
+    ValueG8BinaryWriter file;
+    file.bytes(kValueG8ArtifactMagic);
+    file.unsigned32(kValueG8ArtifactSchema);
+    file.size(payload.data().size());
+    file.unsigned64(
+        value_g8_payload_checksum(payload.data()));
+    file.bytes(payload.data());
+    write_value_g8_file_atomic(path, file.data());
+}
+
+void write_learned_value_g8_mix50_bundle_atomic(
+    const std::string& path,
+    const LearnedValueG8Result& result) {
+    const std::vector<std::string> fingerprints =
+        validate_value_g8_mix50_bundle(result);
+
+    ValueG8BinaryWriter payload;
+    payload.text(kValueG8Mix50RecipeId);
+    payload.size(kLearnedCardCount);
+    payload.size(LearnedModel::kScalarFeatureCount);
+    payload.size(LearnedModel::kCardPlanes);
+    payload.size(LearnedModel::kFeatureCount);
+    payload.size(LearnedModel::kHiddenCount);
+    payload.size(LearnedModel::kPolicyDecisionCount);
+    payload.size(LearnedModel::kPolicyPhaseCount);
+    payload.size(LearnedModel::kPolicyVerbCount);
+    payload.size(LearnedModel::kPolicyCardPlanes);
+    payload.size(LearnedModel::kPolicyScalarCount);
+    payload.size(LearnedModel::kPolicyFeatureCount);
+    payload.size(LearnedModel::kPolicyHiddenCount);
+
+    payload.size(result.report.training_games);
+    payload.unsigned64(result.report.root_seed);
+    payload.text(
+        value_g8_mix50_report_fingerprint(result.report));
+    payload.size(result.report.training_games);
+    payload.unsigned64(result.report.root_seed);
+    payload.size(result.report.base_examples);
+    payload.text(result.report.base_fingerprint);
+    payload.text(result.report.final_fingerprint);
+    payload.size(result.report.generations.size());
+    for (const auto& generation : result.report.generations) {
+        payload.size(generation.generation);
+        payload.size(generation.self_play_games);
+        payload.size(generation.generation_examples);
+        payload.size(generation.anchor_examples);
+        payload.size(generation.replay_generations);
+        payload.size(generation.replay_examples);
+        payload.size(generation.raw_collection_games);
+        payload.size(generation.search_collection_games);
+        payload.size(generation.raw_collection_examples);
+        payload.size(generation.search_collection_examples);
+        payload.byte(generation.search_enabled ? 1U : 0U);
+        payload.size(generation.search_worlds);
+        payload.size(generation.search_horizon_turns);
+        payload.size(generation.rollout_evaluations);
+        payload.real(generation.exploration_rate);
+        payload.text(generation.parent_fingerprint);
+        payload.text(generation.candidate_fingerprint);
+    }
+
+    payload.size(result.checkpoints.size());
+    std::size_t node_count = 0;
+    std::function<void(
+        const std::shared_ptr<const LearnedModel>&,
+        std::size_t)>
+        write_model;
+    write_model =
+        [&](const std::shared_ptr<const LearnedModel>& model,
+            std::size_t depth) {
+            if (!model) {
+                invalid_value_g8_bundle(
+                    "serialized model node is null");
+            }
+            if (depth > kMaximumValueG8ArtifactDepth ||
+                ++node_count >
+                    kMaximumValueG8ArtifactNodes) {
+                invalid_value_g8_bundle(
+                    "serialized model graph exceeds its bound");
+            }
+            if (model->ensemble_.size() >
+                kMaximumValueG8EnsembleMembers) {
+                invalid_value_g8_bundle(
+                    "serialized ensemble exceeds its bound");
+            }
+            payload.unsigned32(0x4D4F444C);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(model->variant_));
+            write_value_g8_fixed(
+                payload, model->input_weights_);
+            write_value_g8_fixed(
+                payload, model->hidden_biases_);
+            write_value_g8_fixed(
+                payload, model->output_weights_);
+            write_value_g8_fixed(
+                payload, model->direct_output_weights_);
+            payload.real(model->output_bias_);
+            write_value_g8_fixed(
+                payload, model->policy_input_weights_);
+            write_value_g8_fixed(
+                payload, model->policy_hidden_biases_);
+            write_value_g8_fixed(
+                payload, model->policy_output_weights_);
+            write_value_g8_fixed(
+                payload,
+                model->policy_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, model->policy_output_bias_);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(
+                    model->ensemble_.size()));
+            for (const auto& member : model->ensemble_) {
+                write_model(member, depth + 1);
+            }
+        };
+    for (std::size_t index = 0;
+         index < result.checkpoints.size(); ++index) {
+        payload.text(fingerprints[index]);
+        write_model(result.checkpoints[index], 0);
+    }
+
+    ValueG8BinaryWriter file;
+    file.bytes(kValueG8Mix50ArtifactMagic);
+    file.unsigned32(kValueG8Mix50ArtifactSchema);
+    file.size(payload.data().size());
+    file.unsigned64(
+        value_g8_payload_checksum(payload.data()));
+    file.bytes(payload.data());
+    write_value_g8_file_atomic(path, file.data());
+}
+
+LearnedValueG8Result load_learned_value_g8_bundle(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_seed) {
+    if (expected_training_games == 0) {
+        throw std::invalid_argument(
+            "expected Value G8 training_games must be positive");
+    }
+    const std::vector<std::uint8_t> file_bytes =
+        read_bounded_value_g8_file(path);
+    ValueG8BinaryReader file(file_bytes);
+    for (const std::uint8_t expected : kValueG8ArtifactMagic) {
+        const std::uint8_t actual =
+            file.byte("file magic");
+        if (actual != expected) {
+            throw std::runtime_error(
+                "Value G8 artifact '" + path +
+                "' has the wrong magic");
+        }
+    }
+    const std::uint32_t schema =
+        file.unsigned32("schema");
+    if (schema != kValueG8ArtifactSchema) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' uses unsupported schema " +
+            std::to_string(schema) + " (expected " +
+            std::to_string(kValueG8ArtifactSchema) + ")");
+    }
+    const std::size_t payload_size =
+        file.size("payload length");
+    if (file.remaining() < 8 ||
+        payload_size > kMaximumValueG8ArtifactBytes ||
+        payload_size != file.remaining() - 8) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' has an invalid payload length");
+    }
+    const std::uint64_t stored_checksum =
+        file.unsigned64("payload checksum");
+    const auto payload_bytes =
+        file.take(payload_size, "payload");
+    if (!file.at_end()) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' has trailing bytes");
+    }
+    if (value_g8_payload_checksum(payload_bytes) !=
+        stored_checksum) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' failed its payload checksum");
+    }
+
+    ValueG8BinaryReader payload(payload_bytes);
+    const std::string recipe = payload.text("recipe ID");
+    if (recipe != kValueG8RecipeId) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' recipe mismatch: found '" + recipe +
+            "', expected '" + std::string(kValueG8RecipeId) +
+            "'");
+    }
+    const auto require_dimension =
+        [&](std::string_view name, std::size_t expected) {
+            const std::size_t actual =
+                payload.size(name);
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "Value G8 artifact '" + path +
+                    "' dimension '" + std::string(name) +
+                    "' is " + std::to_string(actual) +
+                    ", expected " + std::to_string(expected));
+            }
+        };
+    require_dimension("card count", kLearnedCardCount);
+    require_dimension(
+        "scalar feature count",
+        LearnedModel::kScalarFeatureCount);
+    require_dimension(
+        "card planes", LearnedModel::kCardPlanes);
+    require_dimension(
+        "feature count", LearnedModel::kFeatureCount);
+    require_dimension(
+        "hidden count", LearnedModel::kHiddenCount);
+    require_dimension(
+        "policy decision count",
+        LearnedModel::kPolicyDecisionCount);
+    require_dimension(
+        "policy phase count",
+        LearnedModel::kPolicyPhaseCount);
+    require_dimension(
+        "policy verb count",
+        LearnedModel::kPolicyVerbCount);
+    require_dimension(
+        "policy card planes",
+        LearnedModel::kPolicyCardPlanes);
+    require_dimension(
+        "policy scalar count",
+        LearnedModel::kPolicyScalarCount);
+    require_dimension(
+        "policy feature count",
+        LearnedModel::kPolicyFeatureCount);
+    require_dimension(
+        "policy hidden count",
+        LearnedModel::kPolicyHiddenCount);
+
+    const std::size_t metadata_training_games =
+        payload.size("metadata training_games");
+    const std::uint64_t metadata_seed =
+        payload.unsigned64("metadata seed");
+    if (metadata_training_games != expected_training_games) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' training_games mismatch: found " +
+            std::to_string(metadata_training_games) +
+            ", expected " +
+            std::to_string(expected_training_games));
+    }
+    if (metadata_seed != expected_seed) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' training seed mismatch: found " +
+            std::to_string(metadata_seed) + ", expected " +
+            std::to_string(expected_seed));
+    }
+    const std::string stored_report_fingerprint =
+        payload.text("report fingerprint");
+    if (!is_lower_hex_fingerprint(
+            stored_report_fingerprint)) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' has a malformed report fingerprint");
+    }
+
+    LearnedValueG8Report report;
+    report.training_games =
+        payload.size("report training_games");
+    report.root_seed =
+        payload.unsigned64("report root_seed");
+    report.base_examples =
+        payload.size("report base_examples");
+    report.base_fingerprint =
+        payload.text("report base_fingerprint");
+    report.final_fingerprint =
+        payload.text("report final_fingerprint");
+    const std::size_t generation_count =
+        payload.size("report generation count");
+    if (generation_count != kLearnedValueG8Generations) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' report must contain exactly 8 generations");
+    }
+    report.generations.reserve(generation_count);
+    for (std::size_t index = 0;
+         index < generation_count; ++index) {
+        LearnedValueGenerationReport generation;
+        generation.generation =
+            payload.size("generation index");
+        generation.self_play_games =
+            payload.size("generation self_play_games");
+        generation.generation_examples =
+            payload.size("generation examples");
+        generation.anchor_examples =
+            payload.size("generation anchor examples");
+        generation.replay_generations =
+            payload.size("generation replay generations");
+        generation.replay_examples =
+            payload.size("generation replay examples");
+        generation.search_enabled =
+            payload.boolean("generation search enabled");
+        generation.search_worlds =
+            payload.size("generation search worlds");
+        generation.search_horizon_turns =
+            payload.size("generation search horizon");
+        generation.rollout_evaluations =
+            payload.size("generation rollout evaluations");
+        generation.exploration_rate =
+            payload.real("generation exploration rate");
+        generation.parent_fingerprint =
+            payload.text("generation parent fingerprint");
+        generation.candidate_fingerprint =
+            payload.text("generation candidate fingerprint");
+        report.generations.push_back(std::move(generation));
+    }
+    if (report.training_games != metadata_training_games ||
+        report.root_seed != metadata_seed) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' report metadata disagrees with its header");
+    }
+    if (value_g8_report_fingerprint(report) !=
+        stored_report_fingerprint) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' failed its report fingerprint");
+    }
+
+    const std::size_t checkpoint_count =
+        payload.size("checkpoint count");
+    if (checkpoint_count !=
+        kLearnedValueG8Generations + 1) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' must contain exactly 9 checkpoints");
+    }
+    std::size_t node_count = 0;
+    std::function<std::shared_ptr<const LearnedModel>(
+        std::size_t)>
+        read_model;
+    read_model = [&](std::size_t depth)
+        -> std::shared_ptr<const LearnedModel> {
+        if (depth > kMaximumValueG8ArtifactDepth ||
+            ++node_count > kMaximumValueG8ArtifactNodes) {
+            throw std::runtime_error(
+                "Value G8 artifact '" + path +
+                "' model graph exceeds its bound");
+        }
+        if (payload.unsigned32("model marker") !=
+            0x4D4F444C) {
+            throw std::runtime_error(
+                "Value G8 artifact '" + path +
+                "' has an invalid model marker");
+        }
+        const std::uint32_t raw_variant =
+            payload.unsigned32("model variant");
+        if (raw_variant !=
+            static_cast<std::uint32_t>(
+                LearnedVariant::ValueSearchChampion)) {
+            throw std::runtime_error(
+                "Value G8 artifact '" + path +
+                "' contains a non-Value model variant");
+        }
+        const auto variant =
+            static_cast<LearnedVariant>(raw_variant);
+        auto model = std::shared_ptr<LearnedModel>(
+            new LearnedModel(0, variant));
+        read_value_g8_fixed(
+            payload, model->input_weights_,
+            "critic input weight");
+        read_value_g8_fixed(
+            payload, model->hidden_biases_,
+            "critic hidden bias");
+        read_value_g8_fixed(
+            payload, model->output_weights_,
+            "critic output weight");
+        read_value_g8_fixed(
+            payload, model->direct_output_weights_,
+            "critic direct weight");
+        model->output_bias_ =
+            payload.real("critic output bias");
+        read_value_g8_fixed(
+            payload, model->policy_input_weights_,
+            "policy input weight");
+        read_value_g8_fixed(
+            payload, model->policy_hidden_biases_,
+            "policy hidden bias");
+        read_value_g8_fixed(
+            payload, model->policy_output_weights_,
+            "policy output weight");
+        read_value_g8_fixed(
+            payload,
+            model->policy_direct_output_weights_,
+            "policy direct weight");
+        read_value_g8_fixed(
+            payload, model->policy_output_bias_,
+            "policy output bias");
+        const std::uint32_t member_count =
+            payload.unsigned32("ensemble member count");
+        if (member_count >
+            kMaximumValueG8EnsembleMembers) {
+            throw std::runtime_error(
+                "Value G8 artifact '" + path +
+                "' ensemble exceeds its bound");
+        }
+        model->ensemble_.reserve(member_count);
+        for (std::uint32_t member = 0;
+             member < member_count; ++member) {
+            model->ensemble_.push_back(
+                read_model(depth + 1));
+        }
+        return model;
+    };
+
+    LearnedValueG8Result result;
+    result.report = std::move(report);
+    result.checkpoints.reserve(checkpoint_count);
+    for (std::size_t index = 0;
+         index < checkpoint_count; ++index) {
+        const std::string stored_fingerprint =
+            payload.text("checkpoint fingerprint");
+        if (!is_lower_hex_fingerprint(stored_fingerprint)) {
+            throw std::runtime_error(
+                "Value G8 artifact '" + path +
+                "' has a malformed checkpoint fingerprint at G" +
+                std::to_string(index));
+        }
+        auto checkpoint = read_model(0);
+        const std::string actual_fingerprint =
+            learned_model_fingerprint(checkpoint);
+        if (actual_fingerprint != stored_fingerprint) {
+            throw std::runtime_error(
+                "Value G8 artifact '" + path +
+                "' checkpoint G" + std::to_string(index) +
+                " fingerprint mismatch");
+        }
+        result.checkpoints.push_back(
+            std::move(checkpoint));
+    }
+    if (!payload.at_end()) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' has trailing payload bytes");
+    }
+    result.model = result.checkpoints.back();
+    static_cast<void>(validate_value_g8_bundle(result));
+    return result;
+}
+
+LearnedValueG8Result load_learned_value_g8_mix50_bundle(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_seed) {
+    if (expected_training_games == 0) {
+        throw std::invalid_argument(
+            "expected Value G8 Late-Mix50 training_games must "
+            "be positive");
+    }
+    const std::vector<std::uint8_t> file_bytes =
+        read_bounded_value_g8_file(path);
+    ValueG8BinaryReader file(file_bytes);
+    for (const std::uint8_t expected :
+         kValueG8Mix50ArtifactMagic) {
+        const std::uint8_t actual = file.byte("file magic");
+        if (actual != expected) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact '" + path +
+                "' has the wrong magic");
+        }
+    }
+    const std::uint32_t schema = file.unsigned32("schema");
+    if (schema != kValueG8Mix50ArtifactSchema) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' uses unsupported schema " +
+            std::to_string(schema) + " (expected " +
+            std::to_string(kValueG8Mix50ArtifactSchema) + ")");
+    }
+    const std::size_t payload_size =
+        file.size("payload length");
+    if (file.remaining() < 8 ||
+        payload_size > kMaximumValueG8ArtifactBytes ||
+        payload_size != file.remaining() - 8) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' has an invalid payload length");
+    }
+    const std::uint64_t stored_checksum =
+        file.unsigned64("payload checksum");
+    const auto payload_bytes =
+        file.take(payload_size, "payload");
+    if (!file.at_end()) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' has trailing bytes");
+    }
+    if (value_g8_payload_checksum(payload_bytes) !=
+        stored_checksum) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' failed its payload checksum");
+    }
+
+    ValueG8BinaryReader payload(payload_bytes);
+    const std::string recipe = payload.text("recipe ID");
+    if (recipe != kValueG8Mix50RecipeId) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' recipe mismatch: found '" + recipe +
+            "', expected '" +
+            std::string(kValueG8Mix50RecipeId) + "'");
+    }
+    const auto require_dimension =
+        [&](std::string_view name, std::size_t expected) {
+            const std::size_t actual = payload.size(name);
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "Value G8 Late-Mix50 artifact '" + path +
+                    "' dimension '" + std::string(name) +
+                    "' is " + std::to_string(actual) +
+                    ", expected " + std::to_string(expected));
+            }
+        };
+    require_dimension("card count", kLearnedCardCount);
+    require_dimension(
+        "scalar feature count",
+        LearnedModel::kScalarFeatureCount);
+    require_dimension(
+        "card planes", LearnedModel::kCardPlanes);
+    require_dimension(
+        "feature count", LearnedModel::kFeatureCount);
+    require_dimension(
+        "hidden count", LearnedModel::kHiddenCount);
+    require_dimension(
+        "policy decision count",
+        LearnedModel::kPolicyDecisionCount);
+    require_dimension(
+        "policy phase count",
+        LearnedModel::kPolicyPhaseCount);
+    require_dimension(
+        "policy verb count",
+        LearnedModel::kPolicyVerbCount);
+    require_dimension(
+        "policy card planes",
+        LearnedModel::kPolicyCardPlanes);
+    require_dimension(
+        "policy scalar count",
+        LearnedModel::kPolicyScalarCount);
+    require_dimension(
+        "policy feature count",
+        LearnedModel::kPolicyFeatureCount);
+    require_dimension(
+        "policy hidden count",
+        LearnedModel::kPolicyHiddenCount);
+
+    const std::size_t metadata_training_games =
+        payload.size("metadata training_games");
+    const std::uint64_t metadata_seed =
+        payload.unsigned64("metadata seed");
+    if (metadata_training_games != expected_training_games) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' training_games mismatch: found " +
+            std::to_string(metadata_training_games) +
+            ", expected " +
+            std::to_string(expected_training_games));
+    }
+    if (metadata_seed != expected_seed) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' training seed mismatch: found " +
+            std::to_string(metadata_seed) + ", expected " +
+            std::to_string(expected_seed));
+    }
+    const std::string stored_report_fingerprint =
+        payload.text("report fingerprint");
+    if (!is_lower_hex_fingerprint(
+            stored_report_fingerprint)) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' has a malformed report fingerprint");
+    }
+
+    LearnedValueG8Report report;
+    report.recipe = LearnedValueG8Recipe::LateMix50;
+    report.training_games =
+        payload.size("report training_games");
+    report.root_seed =
+        payload.unsigned64("report root_seed");
+    report.base_examples =
+        payload.size("report base_examples");
+    report.base_fingerprint =
+        payload.text("report base_fingerprint");
+    report.final_fingerprint =
+        payload.text("report final_fingerprint");
+    const std::size_t generation_count =
+        payload.size("report generation count");
+    if (generation_count != kLearnedValueG8Generations) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' report must contain exactly 8 generations");
+    }
+    report.generations.reserve(generation_count);
+    for (std::size_t index = 0;
+         index < generation_count; ++index) {
+        LearnedValueGenerationReport generation;
+        generation.generation =
+            payload.size("generation index");
+        generation.self_play_games =
+            payload.size("generation self_play_games");
+        generation.generation_examples =
+            payload.size("generation examples");
+        generation.anchor_examples =
+            payload.size("generation anchor examples");
+        generation.replay_generations =
+            payload.size("generation replay generations");
+        generation.replay_examples =
+            payload.size("generation replay examples");
+        generation.raw_collection_games =
+            payload.size("generation raw collection games");
+        generation.search_collection_games =
+            payload.size("generation search collection games");
+        generation.raw_collection_examples =
+            payload.size("generation raw collection examples");
+        generation.search_collection_examples =
+            payload.size("generation search collection examples");
+        generation.search_enabled =
+            payload.boolean("generation search enabled");
+        generation.search_worlds =
+            payload.size("generation search worlds");
+        generation.search_horizon_turns =
+            payload.size("generation search horizon");
+        generation.rollout_evaluations =
+            payload.size("generation rollout evaluations");
+        generation.exploration_rate =
+            payload.real("generation exploration rate");
+        generation.parent_fingerprint =
+            payload.text("generation parent fingerprint");
+        generation.candidate_fingerprint =
+            payload.text("generation candidate fingerprint");
+        report.generations.push_back(std::move(generation));
+    }
+    if (report.training_games != metadata_training_games ||
+        report.root_seed != metadata_seed) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' report metadata disagrees with its header");
+    }
+    if (value_g8_mix50_report_fingerprint(report) !=
+        stored_report_fingerprint) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' failed its report fingerprint");
+    }
+
+    const std::size_t checkpoint_count =
+        payload.size("checkpoint count");
+    if (checkpoint_count !=
+        kLearnedValueG8Generations + 1) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' must contain exactly 9 checkpoints");
+    }
+    std::size_t node_count = 0;
+    std::function<std::shared_ptr<const LearnedModel>(
+        std::size_t)>
+        read_model;
+    read_model = [&](std::size_t depth)
+        -> std::shared_ptr<const LearnedModel> {
+        if (depth > kMaximumValueG8ArtifactDepth ||
+            ++node_count > kMaximumValueG8ArtifactNodes) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact '" + path +
+                "' model graph exceeds its bound");
+        }
+        if (payload.unsigned32("model marker") !=
+            0x4D4F444C) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact '" + path +
+                "' has an invalid model marker");
+        }
+        const std::uint32_t raw_variant =
+            payload.unsigned32("model variant");
+        if (raw_variant !=
+            static_cast<std::uint32_t>(
+                LearnedVariant::ValueSearchChampion)) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact '" + path +
+                "' contains a non-Value model variant");
+        }
+        const auto variant =
+            static_cast<LearnedVariant>(raw_variant);
+        auto model = std::shared_ptr<LearnedModel>(
+            new LearnedModel(0, variant));
+        read_value_g8_fixed(
+            payload, model->input_weights_,
+            "critic input weight");
+        read_value_g8_fixed(
+            payload, model->hidden_biases_,
+            "critic hidden bias");
+        read_value_g8_fixed(
+            payload, model->output_weights_,
+            "critic output weight");
+        read_value_g8_fixed(
+            payload, model->direct_output_weights_,
+            "critic direct weight");
+        model->output_bias_ =
+            payload.real("critic output bias");
+        read_value_g8_fixed(
+            payload, model->policy_input_weights_,
+            "policy input weight");
+        read_value_g8_fixed(
+            payload, model->policy_hidden_biases_,
+            "policy hidden bias");
+        read_value_g8_fixed(
+            payload, model->policy_output_weights_,
+            "policy output weight");
+        read_value_g8_fixed(
+            payload,
+            model->policy_direct_output_weights_,
+            "policy direct weight");
+        read_value_g8_fixed(
+            payload, model->policy_output_bias_,
+            "policy output bias");
+        const std::uint32_t member_count =
+            payload.unsigned32("ensemble member count");
+        if (member_count >
+            kMaximumValueG8EnsembleMembers) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact '" + path +
+                "' ensemble exceeds its bound");
+        }
+        model->ensemble_.reserve(member_count);
+        for (std::uint32_t member = 0;
+             member < member_count; ++member) {
+            model->ensemble_.push_back(
+                read_model(depth + 1));
+        }
+        return model;
+    };
+
+    LearnedValueG8Result result;
+    result.report = std::move(report);
+    result.checkpoints.reserve(checkpoint_count);
+    for (std::size_t index = 0;
+         index < checkpoint_count; ++index) {
+        const std::string stored_fingerprint =
+            payload.text("checkpoint fingerprint");
+        if (!is_lower_hex_fingerprint(stored_fingerprint)) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact '" + path +
+                "' has a malformed checkpoint fingerprint at G" +
+                std::to_string(index));
+        }
+        auto checkpoint = read_model(0);
+        const std::string actual_fingerprint =
+            learned_model_fingerprint(checkpoint);
+        if (actual_fingerprint != stored_fingerprint) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact '" + path +
+                "' checkpoint G" + std::to_string(index) +
+                " fingerprint mismatch");
+        }
+        result.checkpoints.push_back(
+            std::move(checkpoint));
+    }
+    if (!payload.at_end()) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' has trailing payload bytes");
+    }
+    result.model = result.checkpoints.back();
+    static_cast<void>(
+        validate_value_g8_mix50_bundle(result));
+    return result;
+}
+
+std::shared_ptr<const LearnedModel>
+learned_value_g8_generation_checkpoint(
+    const LearnedValueG8Result& result, std::size_t generation) {
+    if (generation == 0 ||
+        generation > kLearnedValueG8Generations) {
+        throw std::out_of_range(
+            "Value G8 bundle generation must be between one "
+            "and eight");
+    }
+    if (result.report.recipe ==
+        LearnedValueG8Recipe::LateMix50) {
+        static_cast<void>(
+            validate_value_g8_mix50_bundle(result));
+    } else {
+        static_cast<void>(validate_value_g8_bundle(result));
+    }
+    return result.checkpoints[generation];
+}
+
+std::shared_ptr<const LearnedModel> update_learned_value_model(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedCriticTrainingExample>& examples,
+    LearnedValueUpdateConfig config) {
+    std::vector<LearnedModel::TrainingExample> encoded;
+    encoded.reserve(examples.size());
+    for (const auto& example : examples) {
+        if (example.features.size() !=
+                LearnedModel::kFeatureCount ||
+            !std::all_of(
+                example.features.begin(),
+                example.features.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                }) ||
+            !std::isfinite(example.target) ||
+            example.target < 0.0 || example.target > 1.0) {
+            throw std::invalid_argument(
+                "invalid Learned Value training example");
+        }
+        LearnedModel::FeatureVector features{};
+        std::copy(
+            example.features.begin(), example.features.end(),
+            features.begin());
+        encoded.emplace_back(features, example.target);
+    }
+
+    return update_learned_value_model_encoded(
+        std::move(parent), encoded, config);
 }
 
 std::shared_ptr<const LearnedModel> update_learned_actor_model(
@@ -701,6 +2443,366 @@ std::shared_ptr<const LearnedModel> update_learned_actor_model(
         encoded_policy, config.policy_epochs,
         config.policy_learning_rate, config.policy_seed);
     return candidate;
+}
+
+namespace {
+
+struct LearnedPolicyFitSnapshot {
+    std::size_t example_count = 0;
+    double total_weight = 0.0;
+    double weighted_top_one_agreement = 0.0;
+    double weighted_teacher_entropy = 0.0;
+    double weighted_cross_entropy = 0.0;
+    std::vector<double> example_weights;
+    std::vector<std::vector<std::size_t>> model_argmax_sets;
+};
+
+struct LearnedCriticFitSnapshot {
+    std::size_t example_count = 0;
+    double squared_error_sum = 0.0;
+    double binary_cross_entropy_sum = 0.0;
+    double target_sum = 0.0;
+    double target_squared_sum = 0.0;
+};
+
+struct LearnedActorFitSnapshot {
+    LearnedPolicyFitSnapshot priority;
+    LearnedPolicyFitSnapshot attack;
+    LearnedCriticFitSnapshot critic;
+};
+
+std::vector<std::size_t> exact_argmax_set(
+    const std::vector<double>& values) {
+    if (values.empty() ||
+        !std::all_of(
+            values.begin(), values.end(),
+            [](double value) { return std::isfinite(value); })) {
+        throw std::invalid_argument(
+            "fit diagnostics require finite nonempty scores");
+    }
+    const double maximum =
+        *std::max_element(values.begin(), values.end());
+    std::vector<std::size_t> result;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (values[index] == maximum) {
+            result.push_back(index);
+        }
+    }
+    return result;
+}
+
+double expected_top_one_agreement(
+    const std::vector<std::size_t>& model_argmax_set,
+    const std::vector<std::size_t>& teacher_argmax_set) {
+    std::size_t accepted = 0;
+    for (const std::size_t model_action : model_argmax_set) {
+        accepted +=
+            std::find(
+                teacher_argmax_set.begin(),
+                teacher_argmax_set.end(), model_action) !=
+                    teacher_argmax_set.end()
+                ? 1
+                : 0;
+    }
+    return static_cast<double>(accepted) /
+           static_cast<double>(model_argmax_set.size());
+}
+
+LearnedActorFitSnapshot evaluate_learned_actor_fit_snapshot(
+    const std::shared_ptr<const LearnedModel>& model,
+    const std::vector<LearnedCriticTrainingExample>& critic_examples,
+    const std::vector<LearnedPolicyTrainingExample>& policy_examples) {
+    if (!model ||
+        model->variant() != LearnedVariant::UnifiedActor) {
+        throw std::invalid_argument(
+            "fit diagnostics require a Unified Actor model");
+    }
+
+    LearnedActorFitSnapshot snapshot;
+    for (const auto& example : policy_examples) {
+        LearnedPolicyFitSnapshot* head = nullptr;
+        switch (example.decision_kind) {
+        case LearnedPolicyDecisionKind::Priority:
+            head = &snapshot.priority;
+            break;
+        case LearnedPolicyDecisionKind::Attack:
+            head = &snapshot.attack;
+            break;
+        case LearnedPolicyDecisionKind::Block:
+        case LearnedPolicyDecisionKind::DamageOrder:
+            throw std::invalid_argument(
+                "fit diagnostics only support Priority and Attack");
+        }
+        if (example.options.size() < 2 ||
+            example.target_probabilities.size() !=
+                example.options.size() ||
+            !std::isfinite(example.weight) ||
+            example.weight <= 0.0) {
+            throw std::invalid_argument(
+                "invalid policy fit diagnostic example");
+        }
+
+        std::vector<double> logits;
+        logits.reserve(example.options.size());
+        double target_sum = 0.0;
+        for (std::size_t option_index = 0;
+             option_index < example.options.size(); ++option_index) {
+            const auto& option = example.options[option_index];
+            const double target =
+                example.target_probabilities[option_index];
+            if (option.size() !=
+                    LearnedModel::kPolicyFeatureCount ||
+                !std::all_of(
+                    option.begin(), option.end(),
+                    [](double value) {
+                        return std::isfinite(value);
+                    }) ||
+                !std::isfinite(target) || target < 0.0 ||
+                target > 1.0) {
+                throw std::invalid_argument(
+                    "invalid policy fit diagnostic example");
+            }
+            LearnedModel::PolicyFeatureVector features{};
+            std::copy(
+                option.begin(), option.end(), features.begin());
+            logits.push_back(model->policy_logit(
+                features,
+                static_cast<std::size_t>(
+                    example.decision_kind)));
+            target_sum += target;
+        }
+        if (std::abs(target_sum - 1.0) > 1.0e-9) {
+            throw std::invalid_argument(
+                "policy fit targets must sum to one");
+        }
+
+        const double maximum_logit =
+            *std::max_element(logits.begin(), logits.end());
+        double exponential_sum = 0.0;
+        for (const double logit : logits) {
+            exponential_sum +=
+                std::exp(logit - maximum_logit);
+        }
+        const double log_normalizer =
+            maximum_logit + std::log(exponential_sum);
+        double cross_entropy = 0.0;
+        double teacher_entropy = 0.0;
+        for (std::size_t index = 0;
+             index < logits.size(); ++index) {
+            const double target =
+                example.target_probabilities[index];
+            cross_entropy -=
+                target * (logits[index] - log_normalizer);
+            if (target > 0.0) {
+                teacher_entropy -= target * std::log(target);
+            }
+        }
+        const auto teacher_argmax_set =
+            exact_argmax_set(example.target_probabilities);
+        const auto model_argmax_set =
+            exact_argmax_set(logits);
+        ++head->example_count;
+        head->total_weight += example.weight;
+        head->weighted_top_one_agreement +=
+            example.weight *
+            expected_top_one_agreement(
+                model_argmax_set, teacher_argmax_set);
+        head->weighted_teacher_entropy +=
+            example.weight * teacher_entropy;
+        head->weighted_cross_entropy +=
+            example.weight * cross_entropy;
+        head->example_weights.push_back(example.weight);
+        head->model_argmax_sets.push_back(model_argmax_set);
+    }
+
+    for (const auto& example : critic_examples) {
+        if (example.features.size() !=
+                LearnedModel::kFeatureCount ||
+            !std::all_of(
+                example.features.begin(),
+                example.features.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                }) ||
+            !std::isfinite(example.target) ||
+            example.target < 0.0 || example.target > 1.0) {
+            throw std::invalid_argument(
+                "invalid critic fit diagnostic example");
+        }
+        LearnedModel::FeatureVector features{};
+        std::copy(
+            example.features.begin(), example.features.end(),
+            features.begin());
+        const double prediction = model->predict(features);
+        if (!std::isfinite(prediction) || prediction < 0.0 ||
+            prediction > 1.0) {
+            throw std::logic_error(
+                "critic fit prediction must be a probability");
+        }
+        const double error = prediction - example.target;
+        snapshot.critic.squared_error_sum += error * error;
+        constexpr double kProbabilityFloor = 1.0e-12;
+        const double bounded_prediction = std::clamp(
+            prediction, kProbabilityFloor,
+            1.0 - kProbabilityFloor);
+        snapshot.critic.binary_cross_entropy_sum -=
+            example.target * std::log(bounded_prediction) +
+            (1.0 - example.target) *
+                std::log(1.0 - bounded_prediction);
+        snapshot.critic.target_sum += example.target;
+        snapshot.critic.target_squared_sum +=
+            example.target * example.target;
+        ++snapshot.critic.example_count;
+    }
+    return snapshot;
+}
+
+LearnedPolicyFitDiagnostics combine_policy_fit_snapshots(
+    const LearnedPolicyFitSnapshot& parent,
+    const LearnedPolicyFitSnapshot& candidate) {
+    if (parent.example_count != candidate.example_count ||
+        parent.model_argmax_sets.size() !=
+            candidate.model_argmax_sets.size() ||
+        parent.example_weights != candidate.example_weights ||
+        parent.total_weight != candidate.total_weight ||
+        parent.weighted_teacher_entropy !=
+            candidate.weighted_teacher_entropy) {
+        throw std::logic_error(
+            "policy fit snapshots are not aligned");
+    }
+    LearnedPolicyFitDiagnostics result;
+    result.example_count = parent.example_count;
+    result.total_weight = parent.total_weight;
+    if (result.example_count == 0) {
+        return result;
+    }
+    if (!std::isfinite(result.total_weight) ||
+        result.total_weight <= 0.0) {
+        throw std::logic_error(
+            "policy fit total weight must be positive");
+    }
+    result.parent_expected_top_one_agreement =
+        parent.weighted_top_one_agreement /
+        result.total_weight;
+    result.candidate_expected_top_one_agreement =
+        candidate.weighted_top_one_agreement /
+        result.total_weight;
+    result.weighted_teacher_entropy =
+        parent.weighted_teacher_entropy / result.total_weight;
+    result.parent_weighted_cross_entropy =
+        parent.weighted_cross_entropy /
+        result.total_weight;
+    result.candidate_weighted_cross_entropy =
+        candidate.weighted_cross_entropy /
+        result.total_weight;
+    result.parent_excess_cross_entropy = std::max(
+        0.0, result.parent_weighted_cross_entropy -
+                 result.weighted_teacher_entropy);
+    result.candidate_excess_cross_entropy = std::max(
+        0.0, result.candidate_weighted_cross_entropy -
+                 result.weighted_teacher_entropy);
+    for (std::size_t index = 0;
+         index < parent.model_argmax_sets.size(); ++index) {
+        if (parent.model_argmax_sets[index] !=
+            candidate.model_argmax_sets[index]) {
+            ++result.changed_argmax_examples;
+            result.changed_argmax_weight +=
+                parent.example_weights[index];
+        }
+    }
+    result.changed_argmax_weight_fraction =
+        result.changed_argmax_weight / result.total_weight;
+    const std::array<double, 10> finite_metrics = {
+        result.total_weight,
+        result.parent_expected_top_one_agreement,
+        result.candidate_expected_top_one_agreement,
+        result.weighted_teacher_entropy,
+        result.parent_weighted_cross_entropy,
+        result.candidate_weighted_cross_entropy,
+        result.parent_excess_cross_entropy,
+        result.candidate_excess_cross_entropy,
+        result.changed_argmax_weight,
+        result.changed_argmax_weight_fraction,
+    };
+    if (!std::all_of(
+            finite_metrics.begin(), finite_metrics.end(),
+            [](double value) { return std::isfinite(value); })) {
+        throw std::logic_error(
+            "policy fit diagnostics became non-finite");
+    }
+    return result;
+}
+
+LearnedActorFitDiagnostics combine_actor_fit_snapshots(
+    const LearnedActorFitSnapshot& parent,
+    const LearnedActorFitSnapshot& candidate) {
+    if (parent.critic.example_count !=
+            candidate.critic.example_count ||
+        parent.critic.target_sum !=
+            candidate.critic.target_sum ||
+        parent.critic.target_squared_sum !=
+            candidate.critic.target_squared_sum) {
+        throw std::logic_error(
+            "critic fit snapshots are not aligned");
+    }
+    LearnedActorFitDiagnostics result;
+    result.priority = combine_policy_fit_snapshots(
+        parent.priority, candidate.priority);
+    result.attack = combine_policy_fit_snapshots(
+        parent.attack, candidate.attack);
+    result.critic.example_count =
+        parent.critic.example_count;
+    if (result.critic.example_count != 0) {
+        const double count =
+            static_cast<double>(result.critic.example_count);
+        result.critic.target_mean =
+            parent.critic.target_sum / count;
+        result.critic.target_variance = std::max(
+            0.0,
+            parent.critic.target_squared_sum / count -
+                result.critic.target_mean *
+                    result.critic.target_mean);
+        result.critic.parent_mean_squared_error =
+            parent.critic.squared_error_sum / count;
+        result.critic.candidate_mean_squared_error =
+            candidate.critic.squared_error_sum / count;
+        result.critic.parent_binary_cross_entropy =
+            parent.critic.binary_cross_entropy_sum / count;
+        result.critic.candidate_binary_cross_entropy =
+            candidate.critic.binary_cross_entropy_sum / count;
+    }
+    const std::array<double, 6> critic_metrics = {
+        result.critic.target_mean,
+        result.critic.target_variance,
+        result.critic.parent_mean_squared_error,
+        result.critic.candidate_mean_squared_error,
+        result.critic.parent_binary_cross_entropy,
+        result.critic.candidate_binary_cross_entropy,
+    };
+    if (!std::all_of(
+            critic_metrics.begin(), critic_metrics.end(),
+            [](double value) { return std::isfinite(value); })) {
+        throw std::logic_error(
+            "critic fit diagnostics became non-finite");
+    }
+    return result;
+}
+
+} // namespace
+
+LearnedActorFitDiagnostics diagnose_learned_actor_fit(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate,
+    const std::vector<LearnedCriticTrainingExample>& critic_examples,
+    const std::vector<LearnedPolicyTrainingExample>& policy_examples) {
+    const auto parent_snapshot =
+        evaluate_learned_actor_fit_snapshot(
+            parent, critic_examples, policy_examples);
+    const auto candidate_snapshot =
+        evaluate_learned_actor_fit_snapshot(
+            candidate, critic_examples, policy_examples);
+    return combine_actor_fit_snapshots(
+        parent_snapshot, candidate_snapshot);
 }
 
 using LearnedDecisionKind = LearnedPolicyDecisionKind;
@@ -6033,6 +8135,9 @@ LearnedActorGenerationResult train_learned_actor_generation(
             policy_fit.push_back(example);
         });
 
+    const auto parent_fit_snapshot =
+        evaluate_learned_actor_fit_snapshot(
+            parent, critic_fit, policy_fit);
     output.model = update_learned_actor_model(
         parent, critic_fit, policy_fit,
         {
@@ -6053,6 +8158,11 @@ LearnedActorGenerationResult train_learned_actor_generation(
                     learned_iteration::SeedDomain::PolicyFit,
                     config.generation, 0),
         });
+    const auto candidate_fit_snapshot =
+        evaluate_learned_actor_fit_snapshot(
+            output.model, critic_fit, policy_fit);
+    report.fit = combine_actor_fit_snapshots(
+        parent_fit_snapshot, candidate_fit_snapshot);
     report.candidate_fingerprint =
         learned_model_fingerprint(output.model);
     if (learned_model_fingerprint(parent) !=
@@ -6222,6 +8332,357 @@ train_learned_value_champion(std::size_t training_games,
         model = make_ensemble();
     }
     return model;
+}
+
+static LearnedValueG8Result train_learned_value_g8_recipe(
+    std::size_t training_games, std::uint64_t seed,
+    LearnedValueG8Recipe recipe) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value G8 training games must be positive");
+    }
+    const std::size_t generation_games =
+        std::max<std::size_t>(1, training_games / 4);
+    if (recipe == LearnedValueG8Recipe::LateMix50 &&
+        generation_games % 2 != 0) {
+        throw std::invalid_argument(
+            "Learned Value G8 Late-Mix50 requires an even "
+            "self-play game count per generation");
+    }
+
+    std::mt19937_64 random(seed);
+    std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
+    const auto choose_distinct_decks = [&] {
+        const std::size_t first = choose_deck(random);
+        std::size_t second = choose_deck(random);
+        while (second == first) {
+            second = choose_deck(random);
+        }
+        return std::pair{
+            static_cast<DeckId>(first),
+            static_cast<DeckId>(second),
+        };
+    };
+    const auto terminal_target =
+        [](const GameResult& result,
+           std::size_t perspective) {
+            if (result.winner < 0) {
+                return 0.5;
+            }
+            const double discounted_outcome =
+                0.5 * std::pow(
+                          0.985,
+                          static_cast<double>(result.turns));
+            return result.winner ==
+                           static_cast<int>(perspective)
+                       ? 0.5 + discounted_outcome
+                       : 0.5 - discounted_outcome;
+        };
+    const auto add_terminal_trace =
+        [&](const std::vector<GameState>& trace,
+            const GameResult& result,
+            std::vector<LearnedModel::TrainingExample>&
+                destination) {
+            for (const auto& state : trace) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    destination.emplace_back(
+                        learned_features(state, perspective),
+                        terminal_target(result, perspective));
+                }
+            }
+        };
+    const auto add_bootstrap_trace =
+        [&](const std::vector<GameState>& trace,
+            const GameResult& result,
+            const std::shared_ptr<const LearnedModel>& parent,
+            std::vector<LearnedModel::TrainingExample>&
+                destination) {
+            std::array<std::vector<double>, 2>
+                parent_values;
+            std::array<std::vector<double>, 2> targets;
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                parent_values[perspective].reserve(
+                    trace.size());
+                for (const auto& state : trace) {
+                    parent_values[perspective].push_back(
+                        parent->predict(
+                            learned_features(
+                                state, perspective)));
+                }
+                targets[perspective] =
+                    learned_iteration::
+                        four_state_bootstrap_targets(
+                            parent_values[perspective],
+                            terminal_target(
+                                result, perspective));
+            }
+            // State-major/perspective-minor order intentionally matches the
+            // legacy and independently reviewed training corpus.
+            for (std::size_t index = 0;
+                 index < trace.size(); ++index) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    destination.emplace_back(
+                        learned_features(
+                            trace[index], perspective),
+                        targets[perspective][index]);
+                }
+            }
+        };
+
+    std::vector<LearnedModel::TrainingExample>
+        anchor_examples;
+    anchor_examples.reserve(training_games * 120);
+    for (std::size_t game_index = 0;
+         game_index < training_games; ++game_index) {
+        const auto [first_deck, second_deck] =
+            choose_distinct_decks();
+        Game game(
+            deck_cards(first_deck), deck_cards(second_deck),
+            random());
+        std::vector<GameState> trace;
+        const GameResult result = game.run_with_trace(trace);
+        add_terminal_trace(
+            trace, result, anchor_examples);
+    }
+
+    constexpr std::size_t kEnsembleMembers = 2;
+    std::array<std::shared_ptr<LearnedModel>, kEnsembleMembers>
+        base_members;
+    for (std::size_t member = 0;
+         member < base_members.size(); ++member) {
+        base_members[member] =
+            std::make_shared<LearnedModel>(
+                seed ^
+                    (0x4D4F44454C000000ULL + member),
+                LearnedVariant::ValueSearchChampion);
+    }
+    {
+        std::array<std::thread, kEnsembleMembers> trainers;
+        for (std::size_t member = 0;
+             member < base_members.size(); ++member) {
+            trainers[member] = std::thread([&, member] {
+                base_members[member]->train(
+                    anchor_examples, 8, 0.015,
+                    seed ^
+                        (0x545241494E000000ULL + member));
+            });
+        }
+        for (auto& trainer : trainers) {
+            trainer.join();
+        }
+    }
+    std::vector<std::shared_ptr<const LearnedModel>>
+        base_ensemble;
+    base_ensemble.reserve(base_members.size());
+    for (const auto& member : base_members) {
+        base_ensemble.push_back(member);
+    }
+    std::shared_ptr<const LearnedModel> model =
+        std::make_shared<LearnedModel>(
+            std::move(base_ensemble),
+            seed ^ 0x56414C5545534541ULL,
+            LearnedVariant::ValueSearchChampion);
+
+    LearnedValueG8Result output;
+    output.report.recipe = recipe;
+    output.report.training_games = training_games;
+    output.report.root_seed = seed;
+    output.report.base_examples = anchor_examples.size();
+    output.report.base_fingerprint =
+        learned_model_fingerprint(model);
+    output.report.generations.reserve(
+        kLearnedValueG8Generations);
+    output.checkpoints.reserve(
+        kLearnedValueG8Generations + 1);
+    output.checkpoints.push_back(model);
+
+    learned_iteration::ReplayWindow<
+        LearnedModel::TrainingExample>
+        replay;
+    for (std::size_t generation_index = 0;
+         generation_index < kLearnedValueG8Generations;
+         ++generation_index) {
+        const std::size_t published_generation =
+            generation_index + 1;
+        const double exploration_rate =
+            generation_index < 2 ? 0.10 : 0.05;
+        const bool generation_has_search =
+            generation_index >= 4;
+
+        const std::shared_ptr<const LearnedModel> parent =
+            model;
+        const std::string parent_fingerprint =
+            learned_model_fingerprint(parent);
+        std::vector<LearnedModel::TrainingExample>
+            generation_examples;
+        generation_examples.reserve(
+            generation_games * 60);
+        std::size_t rollout_evaluations = 0;
+        std::size_t raw_collection_games = 0;
+        std::size_t search_collection_games = 0;
+        std::size_t raw_collection_examples = 0;
+        std::size_t search_collection_examples = 0;
+        for (std::size_t game_index = 0;
+             game_index < generation_games; ++game_index) {
+            const bool game_uses_search =
+                generation_has_search &&
+                (recipe ==
+                         LearnedValueG8Recipe::
+                             CanonicalAllSearchLate ||
+                 learned_iteration::
+                     value_g8_mix50_game_uses_search(
+                         published_generation, game_index));
+            GameConfig config;
+            config.learned_model = parent;
+            config.learned_search_depth =
+                game_uses_search ? 1 : 0;
+            config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action =
+                        game_uses_search ? 1U : 0U,
+                    .exploration_rate = exploration_rate,
+                    .learned_model = parent,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action =
+                        game_uses_search ? 1U : 0U,
+                    .exploration_rate = exploration_rate,
+                    .learned_model = parent,
+                },
+            };
+            const auto [first_deck, second_deck] =
+                choose_distinct_decks();
+            Game game(
+                deck_cards(first_deck),
+                deck_cards(second_deck), random(), config);
+            std::vector<GameState> trace;
+            const GameResult result =
+                game.run_with_trace(trace);
+            const std::size_t example_begin =
+                generation_examples.size();
+            add_bootstrap_trace(
+                trace, result, parent,
+                generation_examples);
+            const std::size_t game_examples =
+                generation_examples.size() - example_begin;
+            if (recipe ==
+                LearnedValueG8Recipe::LateMix50) {
+                if (game_uses_search) {
+                    ++search_collection_games;
+                    search_collection_examples += game_examples;
+                } else {
+                    ++raw_collection_games;
+                    raw_collection_examples += game_examples;
+                }
+            }
+            for (const auto& stats : result.player_stats) {
+                rollout_evaluations +=
+                    stats.monte_carlo_rollouts;
+            }
+        }
+
+        const std::size_t generation_example_count =
+            generation_examples.size();
+        replay.append_generation(
+            published_generation,
+            std::move(generation_examples));
+        std::vector<LearnedModel::TrainingExample>
+            fit_examples;
+        fit_examples.reserve(
+            anchor_examples.size() +
+            replay.example_count());
+        fit_examples.insert(
+            fit_examples.end(), anchor_examples.begin(),
+            anchor_examples.end());
+        replay.for_each(
+            [&](std::uint64_t,
+                const LearnedModel::TrainingExample& example) {
+                fit_examples.push_back(example);
+            });
+
+        model = update_learned_value_model_encoded(
+            parent, fit_examples,
+            {
+                .epochs = 3,
+                .learning_rate = 0.006,
+                .root_seed = seed,
+                .member_training_tag =
+                    0x53454C4600000000ULL +
+                    0x100ULL * generation_index,
+            });
+        const std::string candidate_fingerprint =
+            learned_model_fingerprint(model);
+        if (learned_model_fingerprint(parent) !=
+            parent_fingerprint) {
+            throw std::logic_error(
+                "Value G8 update mutated a frozen checkpoint");
+        }
+        if (candidate_fingerprint ==
+            parent_fingerprint) {
+            throw std::logic_error(
+                "Value G8 generation did not update");
+        }
+
+        output.report.generations.push_back({
+            .generation = published_generation,
+            .self_play_games = generation_games,
+            .generation_examples =
+                generation_example_count,
+            .anchor_examples = anchor_examples.size(),
+            .replay_generations =
+                replay.generation_count(),
+            .replay_examples = replay.example_count(),
+            .raw_collection_games =
+                raw_collection_games,
+            .search_collection_games =
+                search_collection_games,
+            .raw_collection_examples =
+                raw_collection_examples,
+            .search_collection_examples =
+                search_collection_examples,
+            .search_enabled = generation_has_search,
+            .search_worlds =
+                generation_has_search ? 1U : 0U,
+            .search_horizon_turns =
+                generation_has_search ? 4U : 0U,
+            .rollout_evaluations =
+                rollout_evaluations,
+            .exploration_rate = exploration_rate,
+            .parent_fingerprint =
+                parent_fingerprint,
+            .candidate_fingerprint =
+                candidate_fingerprint,
+        });
+        output.checkpoints.push_back(model);
+    }
+
+    output.model = model;
+    output.report.final_fingerprint =
+        learned_model_fingerprint(model);
+    return output;
+}
+
+LearnedValueG8Result train_learned_value_g8(
+    std::size_t training_games, std::uint64_t seed) {
+    return train_learned_value_g8_recipe(
+        training_games, seed,
+        LearnedValueG8Recipe::CanonicalAllSearchLate);
+}
+
+LearnedValueG8Result train_learned_value_g8_mix50(
+    std::size_t training_games, std::uint64_t seed) {
+    return train_learned_value_g8_recipe(
+        training_games, seed,
+        LearnedValueG8Recipe::LateMix50);
 }
 
 std::shared_ptr<const LearnedModel>

@@ -1957,3 +1957,561 @@ stop if G1 is below 45% aggregate or below 40% on any deck. A result near
 50% is not an improvement claim. Any promotion or roughly three-point claim
 requires at least 2,000 paired games followed by evaluation seeds
 101/202/303/404/505/606/707/808.
+
+Implementation and verification:
+
+- The immutable update recursively clones both critic ensemble leaves and the
+  outer policy heads. Parent fingerprint and sampled predictions stay
+  bit-identical; critic-only and policy-only update tests prove there is no
+  aliasing.
+- Collection uses the exact 24-game schedule, indexed seed domains, an online
+  per-seat/per-kind cap, K/H/no-prior configuration carried explicitly into
+  both generic scorers, and frozen G0 for both seats and every continuation.
+- Focused transition tests prove the searched choices control the real game:
+  an Include search result declares and resolves a lethal attacker, and a
+  Counterspell search result taps the real Islands and puts the real
+  Counterspell above the lethal Bolt.
+- `make test` passes 55 engine, 4 iteration, 12 corpus, 10 metric, and 10
+  runner tests plus CLI smoke under `-Werror`.
+- AddressSanitizer/UndefinedBehaviorSanitizer pass all 55 engine and all 10
+  probe-runner tests with `ASAN_OPTIONS=detect_leaks=0`.
+- Independent audit found no blocker for exact G1. It did find that the replay
+  objects currently live inside a single generation call: this truthfully
+  contains one shard for G1, but does **not** yet retain G1 when fitting G2.
+  Multi-generation training must fix that before claiming a three-generation
+  sliding window.
+
+Exact G0 offline baseline command:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --score-probes \
+  --actor-generation 0 --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+```
+
+Runtime 45.32 seconds. G0 fingerprint:
+`26cb6bc9c0633b901da5d59bbeb924e06c0b61a580eca51af3cb104ab535031c`.
+The cache loaded without relabeling and hidden-repartition invariance passed.
+
+G0 deployed metrics:
+
+| slice | top-one | stable-pair agreement | regret | critic Brier | critic bias |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| pooled | 93.75% | 96.30% | 0.0078 | 0.0604 | -0.0599 |
+| Green | 75.00% | 50.00% | 0.0311 | 0.0096 | +0.0595 |
+| Red | 100.00% | 100.00% | 0.0000 | 0.1558 | -0.3176 |
+| Blue | 100.00% | 100.00% | 0.0000 | 0.0562 | +0.0833 |
+| White | 100.00% | 100.00% | 0.0000 | 0.0201 | -0.0646 |
+
+Exact G1 offline candidate command:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --score-probes \
+  --actor-generation 1 --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+```
+
+Runtime 42.86 seconds. G0 training took 28.37 seconds and the actual balanced
+G1 collection/update took 0.98 seconds:
+
+- Priority: 993 searched roots, 20,768 rollout evaluations, 993 soft examples;
+- Attack: 162 searched roots, 2,592 rollout evaluations, 162 soft examples;
+- critic: 810 deduplicated TD(lambda) examples;
+- G1 fingerprint:
+  `441edc8bd49814922526716c52fd54abdb43fc5112576412516ba1068feffd32`.
+
+G1 deployed metrics:
+
+| slice | top-one | stable-pair agreement | regret | critic Brier | critic bias |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| pooled | 93.75% | 96.30% | 0.0078 | 0.0668 | -0.0568 |
+| Green | 75.00% | 50.00% | 0.0311 | 0.0062 | +0.0261 |
+| Red | 100.00% | 100.00% | 0.0000 | 0.1774 | -0.3484 |
+| Blue | 100.00% | 100.00% | 0.0000 | 0.0644 | +0.1218 |
+| White | 100.00% | 100.00% | 0.0000 | 0.0191 | -0.0267 |
+
+Decision: reject G1 as a strength candidate. Raw-head and deployed top-one,
+pair agreement, and regret were numerically unchanged on every deck, so it did
+not satisfy the preregistered improvement gate. The critic calibration change
+was mixed: Green and White improved, while Red and Blue worsened. The 600-game
+screen was therefore not run. This is the intended use of the cheap offline
+rejection gate, not evidence that G1 is equal in playing strength.
+
+### Search-distillation fit diagnostic (predeclared)
+
+Before changing learning rate, epochs, targets, or corpus size, instrument the
+already-fixed G1 update on its collected examples. Report separately for
+Priority and Attack:
+
+- frozen-parent versus teacher top-one agreement;
+- candidate versus teacher top-one agreement;
+- weighted soft-target cross-entropy before and after;
+- number of examples whose deployed argmax changes; and
+- frozen-parent versus candidate TD-target MSE for the critic.
+
+No model/configuration change is allowed in this diagnostic. Hypothesis: the
+unchanged development-probe ranking is caused either by an already-agreeing
+teacher or by an update too small to distill its disagreements. A healthy
+operator must reduce soft-target cross-entropy for both trained heads and
+critic MSE overall. If it changes no policy argmax despite material parent
+disagreement, the next candidate will increase optimization strength; if
+parent agreement is already saturated, the next candidate must improve the
+teacher/trajectory diversity instead. Do not run the 600-game benchmark until
+one of those mechanisms is demonstrated offline.
+
+Diagnostic result:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --score-probes \
+  --actor-generation 1 --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+```
+
+The unchanged G1 reproduced its exact prior fingerprints and probe metrics:
+G0
+`26cb6bc9c0633b901da5d59bbeb924e06c0b61a580eca51af3cb104ab535031c`,
+G1
+`441edc8bd49814922526716c52fd54abdb43fc5112576412516ba1068feffd32`,
+and deployed pooled top-one 93.75%, stable-pair agreement 96.30%, regret
+0.0078. Runtime was 42.39 seconds.
+
+Fit on the exact collected training examples:
+
+| head | examples / total weight | parent top-one | candidate top-one | teacher entropy | cross-entropy | excess CE/KL | changed argmax |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Priority | 993 / 48.0 | 93.27% | 93.27% | 0.877027 | 0.896762 -> 0.896587 | 0.019735 -> 0.019560 | 0 / 0.0 weight |
+| Attack | 162 / 27.0 | 86.49% | 86.49% | 0.634728 | 0.681660 -> 0.681115 | 0.046932 -> 0.046387 | 0 / 0.0 weight |
+
+The critic did learn from its 810 TD examples: MSE improved
+0.066216 -> 0.058819 and BCE improved 0.607466 -> 0.590793 (target mean
+0.507883, variance 0.105007).
+
+Decision: the policy-update operator is underfitting this corpus. Teacher
+disagreement is material, especially for Attack, but two epochs at 0.001
+change no exact argmax and remove only 0.9% of Priority excess CE and 1.2% of
+Attack excess CE. The critic result rules out a wholly inert generation.
+Keep the original G1 rejected; do not reinterpret unchanged development
+probes as teacher saturation.
+
+Independent review also reports a promising but not yet adequately powered
+Value-search challenger: eight bootstrapped generations with a true
+last-three replay window and search-guided late collection reached 46.7%
+against Handcrafted over 600 pooled games. It is a Value critic, not this
+Unified Actor, and did not satisfy this repository's probe, direct-generation,
+2,000-game, seed-panel, or sanitizer gates. Treat its scaling result as a
+lead to reproduce cleanly, not an accepted champion.
+
+### Actor policy optimization-strength diagnostic (predeclared)
+
+Hold G0, all 24 trajectories, K=8/H=0 teacher scores, soft targets, example
+weights, critic update, seeds, and replay contents fixed. Change only policy
+optimization from two epochs at 0.001 to 16 epochs at 0.005. Expose the
+generation policy epochs/rate in the CLI and print them so this remains
+reproducible; the default two/0.001 recipe and its G1 fingerprint must remain
+unchanged.
+
+Hypothesis: the moderate update will reduce excess CE/KL by at least 20% for
+both Priority and Attack, improve tie-aware teacher top-one for both heads,
+and change nonzero argmax weight. This is a fit diagnostic, not a strength
+claim. First use a one-repetition paired benchmark only to invoke training and
+inspect fit; ignore its game result. If the fit hypothesis passes, run the
+fixed `probe-dev-v2` offline rejection gate. If it changes decisions in the
+wrong direction or remains inert, reject it and inspect per-example gradient
+weighting before escalating farther. No Handcrafted strength screen is
+allowed from this diagnostic alone.
+
+Diagnostic command:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 1 --seed 101 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-actor-g1 --baseline learned-actor-g0 \
+  --actor-policy-epochs 16 --actor-policy-rate 0.005
+```
+
+The 40 paired games were invocation smoke only and are not interpreted as
+strength evidence. The fit result was:
+
+| head | parent top-one | candidate top-one | excess CE/KL | changed argmax |
+| --- | ---: | ---: | ---: | ---: |
+| Priority | 93.27% | 92.27% | 0.019735 -> 0.016754 (-15.1%) | 105 examples / 9.80% weight |
+| Attack | 86.49% | 86.49% | 0.046932 -> 0.039658 (-15.5%) | 0 examples / 0.00% weight |
+
+G0 retained its exact fingerprint
+`26cb6bc9c0633b901da5d59bbeb924e06c0b61a580eca51af3cb104ab535031c`.
+Collection counts, teacher entropy, parent losses, and every critic metric
+were exact matches for the default G1 diagnostic. The candidate fingerprint
+was
+`1865ec2391c812a034578f205999a8d1c34a3140727064cf464280d1b4c28c9f`.
+Runtime was 29.77 seconds.
+
+Decision: reject 16/0.005. It failed every conjunctive fit gate: neither head
+removed 20% of excess CE, Priority teacher agreement regressed by one point,
+and Attack remained argmax-inert. The probe and Handcrafted screens are not
+run. This is useful evidence that simply turning up the same per-example SGD
+does not give a healthy actor improvement operator; lower CE can coexist with
+worse decision ranking.
+
+Rather than spend another cycle escalating the same one-generation actor
+update, pivot to a clean reproduction of the independent bootstrapped
+multi-generation Value lead. That path has actual (though underpowered)
+gameplay evidence of monotone scaling and directly couples critic improvement
+to deployed value-search decisions. Preserve the actor fit CLI as a
+diagnostic; it defaults to the original two/0.001 recipe and does not promote
+the rejected stronger setting.
+
+### Immutable bootstrapped Value G8 reproduction (predeclared)
+
+Reproduce the independent 46.7% lead as a separate canonical challenger,
+without altering the accepted behavior of `learned`, `learned-value`, or the
+legacy Value trainer. This is not "legacy G0 plus eight generations": start
+from the same initial random-play corpus/base fit, then replace the legacy
+terminal-only two-generation loop with exactly:
+
+- 800 initial random-play games at the canonical run size;
+- eight generations of `max(1, training_games / 4)` Value-mirror self-play
+  games;
+- for each recorded state with another trace state four positions later,
+  target `0.5 * terminal + 0.5 * frozen_parent_value(trace[i + 4])`;
+  use the terminal target alone for the final four trace positions;
+- keep the initial random corpus as a fixed anchor and fit it together with
+  the newest three immutable self-play shards;
+- exploration 0.10 for zero-based generations 0-1 and 0.05 for 2-7;
+- collect generations 0-3 with raw Value priority and generations 4-7 with
+  the existing information-safe K=1/H=4 Value search; combat remains the
+  existing public-board Value enumeration;
+- clone the frozen parent recursively, then fit every independent critic leaf
+  for three epochs at 0.006 using separate deterministic member seeds.
+
+Expose this only as `learned-value-g8` and `--value-generation 8`; G0 remains
+the default everywhere. Preserve all nine immutable checkpoints and report
+per generation: examples, replay occupancy, whether search actually ran,
+rollout evaluations, and parent/candidate fingerprints. The Actor G0 remains
+the sole owner of probe labels/cache metadata; Value G8 is only an additional
+scoring candidate.
+
+Mechanism gates before any strength run:
+
+1. exact four-state bootstrap and replay-window unit tests pass;
+2. the legacy Value trainer's fixed-seed fingerprint/predictions remain
+   bit-identical;
+3. every older checkpoint remains bit-identical after all later generations;
+4. same seed reproduces all reports/fingerprints and a different seed changes
+   the final fingerprint;
+5. reports show replay occupancy `1,2,3,3,3,3,3,3`, no collection rollouts in
+   generations 1-4, and nonzero K=1/H=4 rollouts in generations 5-8;
+6. benchmark routing retains distinct explicit G0/G8 pointers and balances
+   the same 40-game tiny fixture;
+7. opponent-hidden-zone repartition invariance and Actor-owned probe-cache
+   reuse pass for the new Value row;
+8. all existing tests, strict warnings, and sanitizers pass.
+
+Hypothesis: search-guided bootstrapped replay produces a deterministic G8
+whose fixed `probe-dev-v2` row has no deck regret regression greater than
+0.01 versus legacy Value G0 and whose direct 600-game paired screen against
+legacy G0 is at least 52.5% aggregate with no deck below 45%. The 16 probes
+can reject but not promote. The exact offline command will use the existing
+K=8/H=0 Actor-owned cache with training seed 424242. The exact direct screen
+is:
+
+```sh
+./build/alpha-sim --benchmark --games 15 --seed 101 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-g8 --baseline learned-value-g0
+```
+
+Do not interpret 600 games as proof of a roughly three-point gain. If the
+screen clears, run at least 2,000 direct paired games on a separately
+predeclared evaluation seed before touching Handcrafted, then the fixed
+101/202/303/404/505/606/707/808 panel for any promotion claim.
+
+Implementation verification:
+
+- the legacy one-game Value fingerprint remains fixed at
+  `f43617f58d2f03394eec79e2a9c6964339c93a00d9d0d663e157056df3b1eb11`;
+- the canonical trainer retains nine immutable checkpoints, exact last-three
+  replay occupancy, and actual zero/nonzero search-rollout accounting;
+- same-seed reports/fingerprints reproduce and hidden-zone repartition is
+  exact;
+- distinct G0/G8 benchmark and probe routing have CLI/cache tests;
+- `make -j4 test` passes 61 engine, 5 iteration, 12 corpus, 10 metric, and
+  10 probe-runner tests plus CLI/simulator smoke;
+- post-integration AddressSanitizer/UndefinedBehaviorSanitizer pass all 61
+  engine and all 10 probe-runner tests.
+
+Exact offline command:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --score-probes \
+  --actor-generation 0 --value-generation 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+```
+
+The Actor-owned cache loaded without relabeling and all six views were
+bit-identical under hidden-zone repartition. Legacy fingerprints reproduced:
+Actor G0
+`26cb6bc9c0633b901da5d59bbeb924e06c0b61a580eca51af3cb104ab535031c`
+and Value G0
+`7fa5978ef57e8ccb903380f5c3d1c48480e5e6adc8af67973082a9dfe49980a3`.
+
+Canonical G8 took 210.23 seconds to train (251.59 seconds end to end).
+The initial 75,220-example random anchor fingerprint was
+`1099b6b6f62e0dcc28d093f47961823dbbb0205db268f8cd5415b58909fc1dc2`.
+Replay occupancy was exactly `1,2,3,3,3,3,3,3`; generations 1-4 used zero
+rollouts and generations 5-8 used respectively
+29,730/30,194/36,431/41,158 rollout evaluations. Final G8 fingerprint:
+`70480c43652a7532247aa320a76f70939e4863c14f5fc26a6a8af2149a1f0fde`.
+
+Offline deployed Value comparison:
+
+| slice | G0 top-one / pair / regret | G8 top-one / pair / regret | G0 Brier | G8 Brier |
+| --- | ---: | ---: | ---: | ---: |
+| pooled | 87.50% / 100.00% / 0.0018 | 75.00% / 85.19% / 0.0138 | 0.0662 | 0.1145 |
+| Green | 75.00% / 100.00% / 0.0045 | 75.00% / 100.00% / 0.0045 | 0.0088 | 0.0188 |
+| Red | 100.00% / 100.00% / 0.0000 | 75.00% / 88.24% / 0.0321 | 0.1352 | 0.2621 |
+| Blue | 75.00% / 100.00% / 0.0029 | 75.00% / 100.00% / 0.0029 | 0.0638 | 0.0612 |
+| White | 100.00% / 100.00% / 0.0000 | 75.00% / 60.00% / 0.0157 | 0.0569 | 0.1158 |
+
+Decision: reject G8 under its preregistered offline gate and do not run the
+600-game screen. Red regret regressed by 0.0321 and White by 0.0157, both
+above the allowed 0.01. This does not refute the independent underpowered
+46.7% gameplay result; the small Actor-referenced corpus is known to miss
+some real-game advantages. It does show that the recipe loses specific
+Red/White tactical rankings and materially worsens critic calibration, which
+must be understood before promotion.
+
+### Value G8 checkpoint/disagreement attribution (predeclared)
+
+Make no training or policy change. Extend the offline report so one canonical
+G8 fit scores immutable G1 through G8 alongside legacy G0, and prints each
+policy's deployed selected action, reference-best set, per-probe regret, and
+critic error for every nonzero-regret or G0-versus-generation disagreement.
+
+Hypothesis: the Red and White regressions first appear at a specific
+generation boundary. If they appear before search-on collection, the
+bootstrapped target/replay fit is responsible; if they first appear at G5,
+search-guided trajectory distribution is responsible. A White disagreement
+only on the already reference-sensitive redundant-Moat fixture is weak
+evidence, but a lethal Bolt, Counterspell, emergency-Moat, or mill-timing
+regression is actionable. Use the same frozen cache/seed/K/H command. This is
+measurement-only and cannot reopen the rejected gameplay screen by itself.
+
+Attribution result:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --score-probes \
+  --actor-generation 0 --value-generation 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/probe-dev-v2-k8-h0-audit.labels.tsv
+```
+
+The instrumentation preserved legacy Value G0 as a separate reference and
+then scored the ordered G8 base and G1 through G8 checkpoints. All 14 policy
+views, including hidden-zone repartition clones, were bit-identical.
+
+| checkpoint | pooled top-one | stable-pair agreement | regret | critic Brier | Green regret | Red regret | Blue regret | White regret |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| legacy Value G0 | 87.50% | 100.00% | 0.0018 | 0.0662 | 0.0045 | 0.0000 | 0.0029 | 0.0000 |
+| G8 base | 93.75% | 96.30% | 0.0010 | 0.0585 | 0.0010 | 0.0000 | 0.0029 | 0.0000 |
+| G1 | 89.58% | 96.30% | 0.0064 | 0.0595 | 0.0000 | 0.0228 | 0.0029 | 0.0000 |
+| G2 | 87.50% | 100.00% | 0.0018 | 0.0585 | 0.0045 | 0.0000 | 0.0029 | 0.0000 |
+| G3 | **93.75%** | **100.00%** | **0.0007** | **0.0522** | **0.0000** | **0.0000** | 0.0029 | **0.0000** |
+| G4 | 87.50% | 100.00% | 0.0021 | 0.0531 | 0.0055 | 0.0000 | 0.0029 | 0.0000 |
+| G5 | 83.33% | 88.89% | 0.0116 | 0.0630 | 0.0010 | 0.0228 | 0.0000 | 0.0224 |
+| G6 | 81.25% | 85.19% | 0.0132 | 0.0762 | 0.0045 | 0.0321 | 0.0000 | 0.0164 |
+| G7 | 75.00% | 85.19% | 0.0138 | 0.0997 | 0.0045 | 0.0321 | 0.0029 | 0.0157 |
+| G8 | 75.00% | 85.19% | 0.0138 | 0.1145 | 0.0045 | 0.0321 | 0.0029 | 0.0157 |
+
+The random-anchor-only base is already better than legacy G0 on this corpus,
+so the proposed legacy-G0 warm-start explanation is refuted here. The first
+generation has a temporary Red regression, but G2 recovers it and G3 is the
+best checkpoint on every pooled offline criterion. The decisive collapse is
+exactly G4 -> G5, when collection switches from raw Value to K=1/H=4 search:
+
+- `red.bolt-blocker.v2` changes from the reference-best Bolt target to a
+  three-way exact tie, producing 0.0914 per-probe regret;
+- `white.establish-millstone.v2` changes from Millstone to Pass, producing
+  0.0243 regret;
+- `white.avoid-redundant-moat.v2` changes from Millstone to redundant Moat,
+  producing 0.0654 regret, though this fixture is reference-sensitive; and
+- pooled critic Brier then worsens monotonically from 0.0630 at G5 to 0.1145
+  at G8.
+
+Decision: the attribution hypothesis supports a late search-distribution
+failure, not a bad starting checkpoint. Keep final G8 rejected. Preserve G3
+as the current offline checkpoint lead, and make the next training repair a
+single-axis reduction of search-guided late-generation collection rather than
+changing bootstrap targets, model width, or the starting parent.
+
+The same run also published a versioned, crash-durable, bit-exact artifact
+containing the report and all nine checkpoints at
+`build/model-cache/value-g8-v1-t800-s424242.bin`. The fresh run took 246.80
+seconds end to end, of which 204.62 seconds was G8 training. Repeating the
+exact command loaded the bundle in 0.05 seconds, reproduced every fingerprint,
+metric, and decision row, and completed in 42.25 seconds: an 83% end-to-end
+reduction and effectively all G8 retraining removed. The format fails closed
+on corruption/mismatch, syncs both file and containing directory, and the CLI
+requires explicit `--refresh-value-g8-cache` to replace it.
+
+Post-integration verification passes 63 engine, 5 iteration, 12 probe-corpus,
+10 probe-metric, and 12 probe-runner tests, the cache lifecycle/CLI suite,
+simulator smoke, strict warnings, and the 63-test AddressSanitizer/
+UndefinedBehaviorSanitizer engine run.
+
+### Value G3 early-stop gameplay screen (predeclared)
+
+Expose immutable checkpoints G1 through G7 as benchmark-only Value selections
+loaded from the same validated G8 bundle; this must not retrain, alter, or
+reinterpret any checkpoint. `learned-value-g3` must resolve to fingerprint
+`fecf1f9908b2674bc6dc1e58372f2c7029a24feab12aca2e206a54548c7f76e1`.
+Legacy `learned`, `learned-value`, and `learned-value-g0` remain unchanged.
+
+Run one frozen 600-game paired screen:
+
+```sh
+./build/alpha-sim --benchmark --games 15 --seed 101 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-g3 --baseline learned-value-g0
+```
+
+Hypothesis: the offline-leading G3 checkpoint scores at least 52.5% aggregate
+against legacy Value G0 with no deck below 45%. This is an independent
+gameplay screen after selecting G3 on the development probes, not proof of a
+roughly three-point gain. If it clears, predeclare and run at least 2,000
+paired games on a new evaluation seed before any Handcrafted comparison. If
+it fails, reject early stopping as a sufficient repair and proceed directly
+to the 50/50 raw/search late-collection experiment indicated by the G5
+boundary.
+
+Screen result:
+
+```text
+Overall: 308-292-0, 51.3% (approximate 95% CI 47.3% to 55.3%)
+Green:   41.3% (62-88)
+Red:     40.0% (60-90)
+Blue:    54.7% (82-68)
+White:   69.3% (104-46)
+```
+
+The exact G3 fingerprint loaded from the bundle and the 600 games completed
+in 39.83 seconds. The baseline's corresponding deck win rates were Green
+40.0%, Red 38.7%, Blue 38.7%, and White 77.3%.
+
+Decision: reject G3 early stopping as a sufficient repair. It missed the
+52.5% pooled gate and both the Green and Red 45% floors. The large Blue gain
+and White loss also demonstrate why the 16-position probe corpus is
+rejection/diagnostic evidence rather than a strength oracle: G3 led every
+pooled offline criterion, yet its gameplay effect was highly deck-specific.
+Do not escalate G3 to 2,000 games or Handcrafted.
+
+### Canonical G8 versus G3 late-search diagnostic (predeclared)
+
+The G3 screen is new evidence that the development probes do not reliably rank
+gameplay strength, while the independent challenger reported that enabling
+late search collection improved its Handcrafted screen. Before choosing how
+much late search Mix50 should retain, directly isolate canonical G5-G8's net
+gameplay effect against its own G3 checkpoint:
+
+```sh
+./build/alpha-sim --benchmark --games 15 --seed 303 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-g8 --baseline learned-value-g3
+```
+
+This is a measurement-only 600-game paired diagnostic using two checkpoints
+from one already-frozen bundle; it cannot promote either policy. The
+predeclared minimum detectable signal is eight percentage points: >=54%
+supports a large late-stage gameplay benefit, <=46% supports a large
+regression, and anything between is inconclusive. Per-deck slices have only
+150 games and will be interpreted descriptively unless they differ by at
+least ten points. Regardless of the result, keep final G8 rejected under its
+original gate and continue the already-predeclared Mix50 experiment; use this
+diagnostic only to interpret whether Mix50 is preserving a useful gameplay
+effect that the probes miss.
+
+Diagnostic result:
+
+```text
+Overall: 298-302-0, 49.7% (approximate 95% CI 45.7% to 53.7%)
+Green:   G8 32.7% vs G3 38.0%
+Red:     G8 40.7% vs G3 38.7%
+Blue:    G8 43.3% vs G3 59.3%
+White:   G8 82.0% vs G3 65.3%
+```
+
+The run completed in 29.37 seconds. Pooled performance is inside the
+predeclared 46-54% inconclusive region: canonical late search is not a clear
+net gameplay win or loss over G3. The deck slices do show two large,
+opposing effects above the descriptive ten-point threshold: G8 loses 16.0
+points with Blue and gains 16.7 points with White. Red improves only 2.0
+points and Green loses 5.3.
+
+Interpretation: the late search distribution does contain useful White
+gameplay signal that the Actor-referenced probes call a regression, but it
+simultaneously erases G3's large Blue advantage. This directly supports the
+Mix50 design goal: retain some search-guided late data rather than deleting
+it, while preventing it from fully replacing the raw-Value trajectory
+distribution. It does not rescue or promote canonical G8.
+
+### Value G8 Late-Mix50 collection repair (predeclared)
+
+Change one root cause isolated by the checkpoint attribution: for G5 through
+G8, replace all-search collection with an exact 50/50 mixture by games. Keep
+the base, G1-G4, frozen-parent bootstrap targets, anchor, last-three replay,
+exploration, model shape, optimizer, training seeds, deck-selection sequence,
+and terminal discount unchanged.
+
+At the canonical 200 games per generation, assign each consecutive pair
+without consuming RNG:
+
+- even zero-based game index: both seats use raw Value, depth 0/rollouts 0;
+- odd game index: both seats use information-safe K=1/H=4 Value search.
+
+Require an even generation game count rather than silently approximating the
+mixture. Report raw/search game counts and raw/search example counts
+separately; the mixture is exactly 50/50 by games, not necessarily by
+examples. Search scores choose behavior only; targets remain the same
+four-record frozen-parent bootstrap.
+
+This is a distinct challenger and artifact recipe:
+`learned-value-mix50-g8` and
+`build/model-cache/value-g8-mix50-v1-t800-s424242.bin`. The canonical G8
+entry point, recipe ID, cache path/bytes, fingerprints, and CLI behavior must
+remain bit-identical. The Mix50 cache must reject a canonical artifact and
+vice versa. Probe labels remain owned by frozen Actor G0.
+
+Mechanism and offline rejection gates:
+
+1. canonical small-run and 800-game base/G1-G4 fingerprints remain exact;
+2. Mix50 base/G1-G4 equal canonical and divergence first occurs at G5;
+3. every G5-G8 report has 100 raw and 100 search games, with nonzero search
+   rollouts and internally consistent example totals;
+4. same-seed reports/fingerprints reproduce, a different seed changes G8,
+   all checkpoints remain immutable, and hidden-zone repartition passes;
+5. at G5, Red regret is at most 0.0114 and White regret at most 0.0112,
+   halving the canonical G5 regressions;
+6. final per-deck regret is no more than legacy G0 + 0.01: Green <= 0.0145,
+   Red <= 0.0100, Blue <= 0.0129, White <= 0.0100;
+7. final pooled regret is <= 0.0110 and critic Brier <= 0.0916, each at least
+   20% better than canonical G8; and
+8. strict tests, artifact corruption/mismatch checks, Actor-cache reuse, and
+   hidden-repartition invariance pass.
+
+The development probes can reject but cannot promote Mix50. Only if every
+offline gate passes, run this new frozen 600-game screen:
+
+```sh
+./build/alpha-sim --benchmark --games 15 --seed 202 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-mix50-g8 --baseline learned-value-g0
+```
+
+Require at least 52.5% aggregate and every deck at least 45%. A pass still
+requires a separately predeclared 2,000-game evaluation on another seed
+before any Handcrafted comparison.

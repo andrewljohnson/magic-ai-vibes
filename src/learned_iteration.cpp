@@ -141,4 +141,33 @@ std::vector<double> td_lambda_targets(
     return targets;
 }
 
+std::vector<double> four_state_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    double terminal_z) {
+    if (!valid_probability(terminal_z)) {
+        throw std::invalid_argument(
+            "terminal value must be a probability");
+    }
+    for (const double value : chronological_parent_values) {
+        if (!valid_probability(value)) {
+            throw std::invalid_argument(
+                "bootstrap values must be probabilities");
+        }
+    }
+
+    constexpr std::size_t kBootstrapStepStates = 4;
+    std::vector<double> targets(
+        chronological_parent_values.size(), terminal_z);
+    for (std::size_t index = 0;
+         index + kBootstrapStepStates <
+         chronological_parent_values.size();
+         ++index) {
+        targets[index] =
+            0.5 * terminal_z +
+            0.5 * chronological_parent_values[
+                      index + kBootstrapStepStates];
+    }
+    return targets;
+}
+
 } // namespace alpha::learned_iteration

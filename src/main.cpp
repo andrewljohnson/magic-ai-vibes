@@ -5,11 +5,17 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <locale>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -37,6 +43,84 @@ std::uint64_t parse_number(std::string_view text, std::string_view option) {
     return value;
 }
 
+double parse_positive_real(std::string_view text,
+                           std::string_view option) {
+    const auto is_digit = [](char character) {
+        return character >= '0' && character <= '9';
+    };
+    std::size_t cursor = 0;
+    if (cursor < text.size() &&
+        (text[cursor] == '+' || text[cursor] == '-')) {
+        ++cursor;
+    }
+    const std::size_t integer_start = cursor;
+    while (cursor < text.size() && is_digit(text[cursor])) {
+        ++cursor;
+    }
+    const bool has_integer_digits = cursor != integer_start;
+    bool has_fraction_digits = false;
+    if (cursor < text.size() && text[cursor] == '.') {
+        ++cursor;
+        const std::size_t fraction_start = cursor;
+        while (cursor < text.size() && is_digit(text[cursor])) {
+            ++cursor;
+        }
+        has_fraction_digits = cursor != fraction_start;
+    }
+    if (!has_integer_digits && !has_fraction_digits) {
+        cursor = text.size() + 1;
+    }
+    if (cursor < text.size() &&
+        (text[cursor] == 'e' || text[cursor] == 'E')) {
+        ++cursor;
+        if (cursor < text.size() &&
+            (text[cursor] == '+' || text[cursor] == '-')) {
+            ++cursor;
+        }
+        const std::size_t exponent_start = cursor;
+        while (cursor < text.size() && is_digit(text[cursor])) {
+            ++cursor;
+        }
+        if (cursor == exponent_start) {
+            cursor = text.size() + 1;
+        }
+    }
+    const std::string owned(text);
+    char* parsed_end = nullptr;
+    const double value = cursor == text.size()
+                             ? std::strtod(owned.c_str(), &parsed_end)
+                             : 0.0;
+    if (cursor != text.size() ||
+        parsed_end != owned.c_str() + owned.size() ||
+        !std::isfinite(value) || value <= 0.0) {
+        throw std::invalid_argument(
+            std::string(option) +
+            " must be a positive finite number");
+    }
+    return value;
+}
+
+std::string format_real(double value) {
+    for (int precision = 1;
+         precision <=
+         std::numeric_limits<double>::max_digits10;
+         ++precision) {
+        std::ostringstream output;
+        output.imbue(std::locale::classic());
+        output << std::setprecision(precision) << value;
+        const std::string candidate = output.str();
+        char* parsed_end = nullptr;
+        const double reparsed =
+            std::strtod(candidate.c_str(), &parsed_end);
+        if (parsed_end ==
+                candidate.c_str() + candidate.size() &&
+            reparsed == value) {
+            return candidate;
+        }
+    }
+    throw std::runtime_error("failed to format real number");
+}
+
 void print_help(std::string_view executable) {
     std::cout
         << "Usage: " << executable
@@ -44,7 +128,10 @@ void print_help(std::string_view executable) {
            " [--deep-rollouts N] [--train-games N] [--train-seed N]\n"
         << "       " << executable
         << " --benchmark [--games N] [--challenger BOT]"
-           " [--baseline BOT]\n"
+           " [--baseline BOT] [--actor-policy-epochs N]"
+           " [--actor-policy-rate X]"
+           " [--refresh-value-g8-cache]"
+           " [--refresh-value-mix50-cache]\n"
         << "       " << executable
         << " --stability [--stability-runs N] [--games N]\n\n"
         << "       " << executable
@@ -53,8 +140,13 @@ void print_help(std::string_view executable) {
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
-           " [--actor-generation 0|1] [--probe-cache PATH]"
-           " [--refresh-probe-cache]\n"
+           " [--actor-generation 0|1] [--value-generation 0|8]"
+           " [--value-recipe canonical|mix50]"
+           " [--probe-cache PATH]"
+           " [--refresh-probe-cache]"
+           " [--refresh-value-g8-cache]"
+           " [--refresh-value-mix50-cache]"
+           " [--actor-policy-epochs N] [--actor-policy-rate X]\n"
         << "       " << executable
         << " --evolve-deck [--generations N] [--population N] "
            "[--games N]\n\n"
@@ -81,7 +173,8 @@ void print_help(std::string_view executable) {
            "(default: 424242)\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
-           "(default: handcrafted; actor generations: "
+           "(default: handcrafted; learned generations: "
+           "learned-value-g0..g8, learned-value-mix50-g8, "
            "learned-actor-g0/g1)\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
@@ -101,10 +194,22 @@ void print_help(std::string_view executable) {
            "(default: 12)\n"
         << "  --actor-generation N  Score frozen Actor G0 or G1 "
            "(default: 0; requires --score-probes)\n"
+        << "  --value-generation N  Score frozen Value G0 or G8 "
+           "(default: 0; requires --score-probes)\n"
+        << "  --value-recipe NAME  Select canonical or mix50 Value G8 "
+           "checkpoints (default: canonical; requires --score-probes)\n"
+        << "  --actor-policy-epochs N  G1 policy-fit epochs "
+           "(default: 2; requires a selected Actor G1)\n"
+        << "  --actor-policy-rate X  G1 policy-fit learning rate "
+           "(default: 0.001; requires a selected Actor G1)\n"
         << "  --probe-cache PATH  Deterministic label cache "
            "(default: data/probe-dev-v2.labels.tsv)\n"
         << "  --refresh-probe-cache  Regenerate matching probe labels "
            "atomically\n"
+        << "  --refresh-value-g8-cache  Retrain and atomically replace "
+           "the selected canonical Value G8 artifact\n"
+        << "  --refresh-value-mix50-cache  Retrain and atomically replace "
+           "the selected Value G8 Late-Mix50 artifact\n"
         << "  --evolve-deck   Evolve a 40-card deck against the current "
            "metagame\n"
         << "  --generations N  Evolution generations (default: 10)\n"
@@ -119,6 +224,9 @@ struct BotSelection {
     alpha::BotKind kind = alpha::BotKind::Random;
     alpha::LearnedVariant learned_variant =
         alpha::LearnedVariant::ValueSearchChampion;
+    alpha::LearnedValueG8Recipe value_recipe =
+        alpha::LearnedValueG8Recipe::CanonicalAllSearchLate;
+    std::size_t value_generation = 0;
     std::size_t actor_generation = 0;
 };
 
@@ -136,11 +244,36 @@ BotSelection parse_bot(std::string_view value) {
         value == "strategic") {
         return {.kind = alpha::BotKind::Handcrafted};
     }
-    if (value == "learned" || value == "learned-value") {
+    if (value == "learned" || value == "learned-value" ||
+        value == "learned-value-g0") {
         return {
             .kind = alpha::BotKind::Learned,
             .learned_variant =
                 alpha::LearnedVariant::ValueSearchChampion,
+            .value_generation = 0,
+        };
+    }
+    constexpr std::string_view value_generation_prefix =
+        "learned-value-g";
+    if (value.starts_with(value_generation_prefix) &&
+        value.size() == value_generation_prefix.size() + 1 &&
+        value.back() >= '0' && value.back() <= '8') {
+        return {
+            .kind = alpha::BotKind::Learned,
+            .learned_variant =
+                alpha::LearnedVariant::ValueSearchChampion,
+            .value_generation =
+                static_cast<std::size_t>(value.back() - '0'),
+        };
+    }
+    if (value == "learned-value-mix50-g8") {
+        return {
+            .kind = alpha::BotKind::Learned,
+            .learned_variant =
+                alpha::LearnedVariant::ValueSearchChampion,
+            .value_recipe =
+                alpha::LearnedValueG8Recipe::LateMix50,
+            .value_generation = 8,
         };
     }
     if (value == "learned-actor" || value == "actor" ||
@@ -450,6 +583,204 @@ train_frozen_learned_model(alpha::LearnedVariant variant,
 }
 
 std::shared_ptr<const alpha::LearnedModel>
+train_value_g0_with_progress(std::size_t training_games,
+                             std::uint64_t training_seed) {
+    std::cout << "Training frozen Value G0 (seed " << training_seed
+              << ", " << training_games << " games)..."
+              << std::flush;
+    const auto started = std::chrono::steady_clock::now();
+    auto model = alpha::train_learned_value_champion(
+        training_games, training_seed);
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout << " done (" << std::fixed << std::setprecision(2)
+              << elapsed.count() << "s)\n"
+              << "  Value G0 fingerprint: "
+              << alpha::learned_model_fingerprint(model) << '\n';
+    return model;
+}
+
+alpha::LearnedValueG8Result
+train_value_g8_with_progress(std::size_t training_games,
+                             std::uint64_t training_seed,
+                             bool refresh_cache) {
+    const std::string cache_path =
+        alpha::learned_value_g8_cache_path(
+            training_games, training_seed);
+    std::error_code exists_error;
+    const bool cache_exists =
+        std::filesystem::exists(cache_path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect Value G8 artifact cache '" +
+            cache_path + "': " + exists_error.message());
+    }
+
+    alpha::LearnedValueG8Result result;
+    const auto started = std::chrono::steady_clock::now();
+    if (cache_exists && !refresh_cache) {
+        std::cout << "Loading immutable Value G8 artifact (seed "
+                  << training_seed << ", " << training_games
+                  << " initial games) from " << cache_path
+                  << "..." << std::flush;
+        try {
+            result = alpha::load_learned_value_g8_bundle(
+                cache_path, training_games, training_seed);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                "Value G8 artifact cache '" + cache_path +
+                "' is invalid: " + error.what() +
+                "; rerun this G8 route with "
+                "--refresh-value-g8-cache to regenerate it");
+        }
+    } else {
+        std::cout << "Training immutable Value G8 (seed "
+                  << training_seed << ", " << training_games
+                  << " initial games, 8 generations)..."
+                  << std::flush;
+        result = alpha::train_learned_value_g8(
+            training_games, training_seed);
+        alpha::write_learned_value_g8_bundle_atomic(
+            cache_path, result);
+    }
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout << " done (" << std::fixed << std::setprecision(2)
+              << elapsed.count() << "s)\n"
+              << "  Value G8 artifact cache: "
+              << (cache_exists && !refresh_cache
+                      ? "loaded "
+                      : "generated ")
+              << cache_path << '\n';
+    const auto& report = result.report;
+    std::cout << "  G8 base: " << report.base_examples
+              << " anchor examples; fingerprint "
+              << report.base_fingerprint << '\n';
+    for (const auto& generation : report.generations) {
+        std::cout
+            << "  G8 generation " << generation.generation << ": "
+            << generation.self_play_games << " games, "
+            << generation.generation_examples << " new + "
+            << generation.anchor_examples << " anchor, replay "
+            << generation.replay_generations << " shards/"
+            << generation.replay_examples << " examples, "
+            << (generation.search_enabled ? "search K=" : "raw Value");
+        if (generation.search_enabled) {
+            std::cout << generation.search_worlds << "/H="
+                      << generation.search_horizon_turns;
+        }
+        std::cout << ", " << generation.rollout_evaluations
+                  << " rollout evaluations, exploration "
+                  << format_real(generation.exploration_rate)
+                  << ", fingerprints "
+                  << generation.parent_fingerprint << " -> "
+                  << generation.candidate_fingerprint << '\n';
+    }
+    std::cout << "  Value G8 final fingerprint: "
+              << report.final_fingerprint << '\n';
+    return result;
+}
+
+alpha::LearnedValueG8Result
+train_value_g8_mix50_with_progress(std::size_t training_games,
+                                   std::uint64_t training_seed,
+                                   bool refresh_cache) {
+    const std::string cache_path =
+        alpha::learned_value_g8_mix50_cache_path(
+            training_games, training_seed);
+    std::error_code exists_error;
+    const bool cache_exists =
+        std::filesystem::exists(cache_path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect Value G8 Late-Mix50 artifact cache '" +
+            cache_path + "': " + exists_error.message());
+    }
+
+    alpha::LearnedValueG8Result result;
+    const auto started = std::chrono::steady_clock::now();
+    if (cache_exists && !refresh_cache) {
+        std::cout
+            << "Loading immutable Value G8 Late-Mix50 artifact (seed "
+            << training_seed << ", " << training_games
+            << " initial games) from " << cache_path
+            << "..." << std::flush;
+        try {
+            result = alpha::load_learned_value_g8_mix50_bundle(
+                cache_path, training_games, training_seed);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                "Value G8 Late-Mix50 artifact cache '" +
+                cache_path + "' is invalid: " + error.what() +
+                "; rerun this Mix50 route with "
+                "--refresh-value-mix50-cache to regenerate it");
+        }
+    } else {
+        std::cout
+            << "Training immutable Value G8 Late-Mix50 (seed "
+            << training_seed << ", " << training_games
+            << " initial games, 8 generations)..."
+            << std::flush;
+        result = alpha::train_learned_value_g8_mix50(
+            training_games, training_seed);
+        alpha::write_learned_value_g8_mix50_bundle_atomic(
+            cache_path, result);
+    }
+    if (result.report.recipe !=
+        alpha::LearnedValueG8Recipe::LateMix50) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 route returned a canonical recipe");
+    }
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout
+        << " done (" << std::fixed << std::setprecision(2)
+        << elapsed.count() << "s)\n"
+        << "  Value G8 Late-Mix50 artifact cache: "
+        << (cache_exists && !refresh_cache
+                ? "loaded "
+                : "generated ")
+        << cache_path << '\n';
+    const auto& report = result.report;
+    std::cout << "  Mix50 G8 base: " << report.base_examples
+              << " anchor examples; fingerprint "
+              << report.base_fingerprint << '\n';
+    for (const auto& generation : report.generations) {
+        std::cout
+            << "  Mix50 G8 generation "
+            << generation.generation << ": "
+            << generation.self_play_games << " games, "
+            << generation.generation_examples << " new + "
+            << generation.anchor_examples << " anchor, replay "
+            << generation.replay_generations << " shards/"
+            << generation.replay_examples << " examples, collection "
+            << generation.raw_collection_games << " raw games/"
+            << generation.raw_collection_examples
+            << " raw examples + "
+            << generation.search_collection_games
+            << " search games/"
+            << generation.search_collection_examples
+            << " search examples, "
+            << (generation.search_enabled
+                    ? "search present K="
+                    : "raw Value only");
+        if (generation.search_enabled) {
+            std::cout << generation.search_worlds << "/H="
+                      << generation.search_horizon_turns;
+        }
+        std::cout << ", " << generation.rollout_evaluations
+                  << " rollout evaluations, exploration "
+                  << format_real(generation.exploration_rate)
+                  << ", fingerprints "
+                  << generation.parent_fingerprint << " -> "
+                  << generation.candidate_fingerprint << '\n';
+    }
+    std::cout << "  Value G8 Late-Mix50 final fingerprint: "
+              << report.final_fingerprint << '\n';
+    return result;
+}
+
+std::shared_ptr<const alpha::LearnedModel>
 train_actor_g0_with_progress(std::size_t training_games,
                              std::uint64_t training_seed) {
     std::cout << "Training frozen Actor G0 (seed " << training_seed
@@ -470,16 +801,53 @@ train_actor_g0_with_progress(std::size_t training_games,
 alpha::LearnedActorGenerationResult
 train_actor_g1_with_progress(
     std::shared_ptr<const alpha::LearnedModel> actor_g0,
-    std::uint64_t training_seed) {
+    std::uint64_t training_seed,
+    alpha::LearnedActorGenerationConfig config) {
     std::cout << "Training Actor G1 from frozen G0 "
-                 "(24 balanced games, K=8/H=0, cap=24/seat/kind)..."
+                 "(24 balanced games, K="
+              << config.search_worlds << "/H="
+              << config.horizon_turns << ", cap="
+              << config.max_roots_per_seat_kind
+              << "/seat/kind, policy epochs="
+              << config.policy_epochs << ", rate="
+              << format_real(config.policy_learning_rate) << ")..."
               << std::flush;
     const auto started = std::chrono::steady_clock::now();
     auto result = alpha::train_learned_actor_generation(
-        std::move(actor_g0), training_seed);
+        std::move(actor_g0), training_seed, config);
     const std::chrono::duration<double> elapsed =
         std::chrono::steady_clock::now() - started;
     const auto& report = result.report;
+    const auto print_policy_fit =
+        [](std::string_view label,
+           const alpha::LearnedPolicyFitDiagnostics& fit) {
+            std::cout
+                << "  " << label << " fit: "
+                << fit.example_count << " examples, weight "
+                << std::setprecision(2) << fit.total_weight
+                << ", teacher top-1 "
+                << 100.0 *
+                       fit.parent_expected_top_one_agreement
+                << "% -> "
+                << 100.0 *
+                       fit.candidate_expected_top_one_agreement
+                << "%, entropy "
+                << std::setprecision(6)
+                << fit.weighted_teacher_entropy
+                << ", cross-entropy "
+                << std::setprecision(6)
+                << fit.parent_weighted_cross_entropy << " -> "
+                << fit.candidate_weighted_cross_entropy
+                << " (excess "
+                << fit.parent_excess_cross_entropy << " -> "
+                << fit.candidate_excess_cross_entropy << ')'
+                << ", changed argmax "
+                << fit.changed_argmax_examples << " (weight "
+                << fit.changed_argmax_weight << ", "
+                << 100.0 *
+                       fit.changed_argmax_weight_fraction
+                << "%)\n";
+        };
     std::cout << " done (" << std::fixed << std::setprecision(2)
               << elapsed.count() << "s)\n"
               << "  Search roots: Priority " << report.priority_roots
@@ -491,9 +859,23 @@ train_actor_g1_with_progress(
               << report.critic_examples << ", Priority "
               << report.priority_policy_examples << ", Attack "
               << report.attack_policy_examples << "; replay generations "
-              << report.replay_generations << '\n'
-              << "  G1 fingerprint: "
-              << report.candidate_fingerprint << '\n';
+              << report.replay_generations << '\n';
+    print_policy_fit("Priority", report.fit.priority);
+    print_policy_fit("Attack", report.fit.attack);
+    std::cout
+        << "  Critic TD fit: " << report.fit.critic.example_count
+        << " examples, target mean/variance "
+        << std::setprecision(6)
+        << report.fit.critic.target_mean << '/'
+        << report.fit.critic.target_variance
+        << ", MSE "
+        << report.fit.critic.parent_mean_squared_error << " -> "
+        << report.fit.critic.candidate_mean_squared_error
+        << ", BCE "
+        << report.fit.critic.parent_binary_cross_entropy << " -> "
+        << report.fit.critic.candidate_binary_cross_entropy << '\n'
+        << "  G1 fingerprint: "
+        << report.candidate_fingerprint << '\n';
     return result;
 }
 
@@ -625,29 +1007,37 @@ void print_white_plan_diagnostic(
 }
 
 void print_benchmark(const alpha::BotBenchmarkSummary& result,
-                     std::uint64_t evaluation_seed) {
+                     std::uint64_t evaluation_seed,
+                     std::string challenger_name = {},
+                     std::string baseline_name = {}) {
+    if (challenger_name.empty()) {
+        challenger_name =
+            alpha::bot_config_name(result.challenger);
+    }
+    if (baseline_name.empty()) {
+        baseline_name =
+            alpha::bot_config_name(result.baseline);
+    }
     std::cout << std::fixed << std::setprecision(1)
               << "Early Magic Bot Benchmark\n"
               << "Evaluation seed: " << evaluation_seed << '\n'
               << "Training seed: "
               << result.learned_training_seed << '\n'
               << "Challenger: "
-              << alpha::bot_config_name(result.challenger) << '\n'
+              << challenger_name << '\n'
               << "Baseline: "
-              << alpha::bot_config_name(result.baseline)
+              << baseline_name
               << '\n';
     if (result.challenger.kind == alpha::BotKind::Learned) {
         std::cout << "Challenger frozen model: "
-                  << alpha::learned_variant_name(
-                         result.challenger.learned_variant)
+                  << challenger_name
                   << ", seed " << result.learned_training_seed
                   << ", " << result.challenger.training_games
                   << " training games\n";
     }
     if (result.baseline.kind == alpha::BotKind::Learned) {
         std::cout << "Baseline frozen model: "
-                  << alpha::learned_variant_name(
-                         result.baseline.learned_variant)
+                  << baseline_name
                   << ", seed " << result.learned_training_seed
                   << ", " << result.baseline.training_games
                   << " training games\n";
@@ -1142,10 +1532,18 @@ int main(int argc, char** argv) {
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
+        bool refresh_value_g8_cache = false;
+        bool refresh_value_mix50_cache = false;
         bool probe_option_used = false;
+        bool actor_policy_option_used = false;
         std::size_t probe_worlds = 128;
         std::size_t probe_horizon = 12;
         std::size_t actor_generation = 0;
+        std::size_t value_generation = 0;
+        alpha::LearnedValueG8Recipe value_recipe =
+            alpha::LearnedValueG8Recipe::CanonicalAllSearchLate;
+        alpha::LearnedActorGenerationConfig
+            actor_generation_config;
         std::string probe_cache =
             "data/probe-dev-v2.labels.tsv";
         std::size_t stability_runs = 8;
@@ -1193,6 +1591,14 @@ int main(int argc, char** argv) {
                 probe_option_used = true;
                 continue;
             }
+            if (option == "--refresh-value-g8-cache") {
+                refresh_value_g8_cache = true;
+                continue;
+            }
+            if (option == "--refresh-value-mix50-cache") {
+                refresh_value_mix50_cache = true;
+                continue;
+            }
             if (option != "--games" && option != "--seed" &&
                 option != "--train-seed" &&
                 option != "--bots" && option != "--rollouts" &&
@@ -1206,6 +1612,10 @@ int main(int argc, char** argv) {
                 option != "--probe-worlds" &&
                 option != "--probe-horizon" &&
                 option != "--actor-generation" &&
+                option != "--value-generation" &&
+                option != "--value-recipe" &&
+                option != "--actor-policy-epochs" &&
+                option != "--actor-policy-rate" &&
                 option != "--probe-cache") {
                 throw std::invalid_argument("unknown option: " +
                                             std::string(option));
@@ -1240,6 +1650,28 @@ int main(int argc, char** argv) {
                         "--probe-cache must not be empty");
                 }
                 probe_option_used = true;
+                continue;
+            }
+            if (option == "--value-recipe") {
+                const std::string_view recipe = argv[argument];
+                if (recipe == "canonical") {
+                    value_recipe =
+                        alpha::LearnedValueG8Recipe::
+                            CanonicalAllSearchLate;
+                } else if (recipe == "mix50") {
+                    value_recipe =
+                        alpha::LearnedValueG8Recipe::LateMix50;
+                } else {
+                    throw std::invalid_argument(
+                        "--value-recipe must be canonical or mix50");
+                }
+                probe_option_used = true;
+                continue;
+            }
+            if (option == "--actor-policy-rate") {
+                actor_generation_config.policy_learning_rate =
+                    parse_positive_real(argv[argument], option);
+                actor_policy_option_used = true;
                 continue;
             }
 
@@ -1303,6 +1735,23 @@ int main(int argc, char** argv) {
                 actor_generation =
                     static_cast<std::size_t>(value);
                 probe_option_used = true;
+            } else if (option == "--value-generation") {
+                if (value != 0 && value != 8) {
+                    throw std::invalid_argument(
+                        "--value-generation must be zero or eight");
+                }
+                value_generation =
+                    static_cast<std::size_t>(value);
+                probe_option_used = true;
+            } else if (option == "--actor-policy-epochs") {
+                if (value == 0) {
+                    throw std::invalid_argument(
+                        "--actor-policy-epochs must be greater "
+                        "than zero");
+                }
+                actor_generation_config.policy_epochs =
+                    static_cast<std::size_t>(value);
+                actor_policy_option_used = true;
             } else {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -1326,8 +1775,87 @@ int main(int argc, char** argv) {
         if (probe_option_used && !score_probes) {
             throw std::invalid_argument(
                 "--probe-worlds, --probe-horizon, --actor-generation, "
-                "--probe-cache, and --refresh-probe-cache require "
-                "--score-probes");
+                "--value-generation, --value-recipe, --probe-cache, and "
+                "--refresh-probe-cache require --score-probes");
+        }
+        if (score_probes &&
+            value_recipe ==
+                alpha::LearnedValueG8Recipe::LateMix50 &&
+            value_generation != 8) {
+            throw std::invalid_argument(
+                "--value-recipe mix50 requires "
+                "--value-generation 8");
+        }
+        const auto selects_actor_g1 =
+            [](const BotSelection& selection) {
+                return selection.kind == alpha::BotKind::Learned &&
+                       selection.learned_variant ==
+                           alpha::LearnedVariant::UnifiedActor &&
+                       selection.actor_generation == 1;
+            };
+        const bool actor_g1_will_be_trained =
+            (score_probes && actor_generation == 1) ||
+            (benchmark &&
+             (selects_actor_g1(challenger) ||
+              selects_actor_g1(baseline)));
+        if (actor_policy_option_used &&
+            !actor_g1_will_be_trained) {
+            throw std::invalid_argument(
+                "--actor-policy-epochs and --actor-policy-rate "
+                "require a selected Actor G1");
+        }
+        const auto selects_canonical_value_bundle_checkpoint =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           alpha::BotKind::Learned &&
+                       selection.learned_variant ==
+                           alpha::LearnedVariant::
+                               ValueSearchChampion &&
+                       selection.value_recipe ==
+                           alpha::LearnedValueG8Recipe::
+                               CanonicalAllSearchLate &&
+                       selection.value_generation > 0;
+            };
+        const auto selects_mix50_value_bundle =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           alpha::BotKind::Learned &&
+                       selection.learned_variant ==
+                           alpha::LearnedVariant::
+                               ValueSearchChampion &&
+                       selection.value_recipe ==
+                           alpha::LearnedValueG8Recipe::
+                               LateMix50 &&
+                       selection.value_generation == 8;
+            };
+        const bool value_g8_will_be_used =
+            (score_probes && value_generation == 8 &&
+             value_recipe ==
+                 alpha::LearnedValueG8Recipe::
+                     CanonicalAllSearchLate) ||
+            (benchmark &&
+             (selects_canonical_value_bundle_checkpoint(
+                  challenger) ||
+              selects_canonical_value_bundle_checkpoint(
+                  baseline)));
+        const bool value_mix50_will_be_used =
+            (score_probes && value_generation == 8 &&
+             value_recipe ==
+                 alpha::LearnedValueG8Recipe::LateMix50) ||
+            (benchmark &&
+             (selects_mix50_value_bundle(challenger) ||
+              selects_mix50_value_bundle(baseline)));
+        if (refresh_value_g8_cache &&
+            !value_g8_will_be_used) {
+            throw std::invalid_argument(
+                "--refresh-value-g8-cache requires a benchmark "
+                "or probe route that selects canonical Value G8");
+        }
+        if (refresh_value_mix50_cache &&
+            !value_mix50_will_be_used) {
+            throw std::invalid_argument(
+                "--refresh-value-mix50-cache requires a benchmark "
+                "or probe route that selects Value G8 Late-Mix50");
         }
         if (score_probes) {
             const alpha::probe_runner::ProbeScoreConfig config{
@@ -1346,14 +1874,75 @@ int main(int argc, char** argv) {
             if (actor_generation == 1) {
                 scoring_actor =
                     train_actor_g1_with_progress(
-                        actor_g0, training_seed)
+                        actor_g0, training_seed,
+                        actor_generation_config)
                         .model;
             }
+            const auto value_g0 =
+                train_value_g0_with_progress(
+                    training_games, training_seed);
+            std::vector<
+                alpha::probe_runner::NamedValueScoringModel>
+                scoring_value_models;
+            if (value_generation == 8) {
+                const bool mix50 =
+                    value_recipe ==
+                    alpha::LearnedValueG8Recipe::LateMix50;
+                const auto value_g8 =
+                    mix50
+                        ? train_value_g8_mix50_with_progress(
+                              training_games, training_seed,
+                              refresh_value_mix50_cache)
+                        : train_value_g8_with_progress(
+                              training_games, training_seed,
+                              refresh_value_g8_cache);
+                if (value_g8.checkpoints.size() !=
+                    alpha::kLearnedValueG8Generations + 1) {
+                    throw std::runtime_error(
+                        std::string(
+                            mix50 ? "Value G8 Late-Mix50"
+                                  : "Value G8") +
+                        " trainer did not retain base-G8");
+                }
+                scoring_value_models.reserve(9);
+                scoring_value_models.push_back(
+                    {
+                        .name =
+                            mix50 ? "Value Mix50 base"
+                                  : "Value G8 base",
+                        .model = value_g8.checkpoints.front(),
+                    });
+                for (std::size_t generation = 1;
+                     generation < value_g8.checkpoints.size();
+                     ++generation) {
+                    scoring_value_models.push_back(
+                        {
+                            .name =
+                                std::string(
+                                    mix50 ? "Value Mix50 G"
+                                          : "Value G") +
+                                std::to_string(generation),
+                            .model =
+                                value_g8.checkpoints[generation],
+                        });
+                }
+            }
             const auto report =
-                alpha::probe_runner::score_probe_dev_v2_with_models(
-                    config, std::cout, actor_g0, scoring_actor,
-                    actor_generation == 0 ? "Actor G0"
-                                          : "Actor G1");
+                alpha::probe_runner::
+                    score_probe_dev_v2_with_candidates(
+                        config, std::cout,
+                        {
+                            .reference_actor_model = actor_g0,
+                            .scoring_actor_model = scoring_actor,
+                            .scoring_actor_name =
+                                actor_generation == 0
+                                    ? "Actor G0"
+                                    : "Actor G1",
+                            .reference_value_model = value_g0,
+                            .reference_value_name = "Value G0",
+                            .scoring_value_models =
+                                std::move(scoring_value_models),
+                        });
             std::cout
                 << alpha::probe_runner::format_probe_score_report(
                        report);
@@ -1379,7 +1968,10 @@ int main(int argc, char** argv) {
             alpha::GameConfig shared_config;
             shared_config.learned_training_seed = training_seed;
             std::shared_ptr<const alpha::LearnedModel>
-                frozen_value;
+                frozen_value_g0;
+            alpha::LearnedValueG8Result frozen_value_bundle;
+            alpha::LearnedValueG8Result
+                frozen_value_mix50_bundle;
             std::shared_ptr<const alpha::LearnedModel>
                 frozen_actor_g0;
             std::shared_ptr<const alpha::LearnedModel>
@@ -1390,12 +1982,67 @@ int main(int argc, char** argv) {
                 if (selection.learned_variant ==
                     alpha::LearnedVariant::
                         ValueSearchChampion) {
-                    if (!frozen_value) {
-                        frozen_value =
-                            alpha::train_learned_value_champion(
-                                training_games, training_seed);
+                    if (selection.value_recipe ==
+                        alpha::LearnedValueG8Recipe::
+                            LateMix50) {
+                        if (selection.value_generation != 8) {
+                            throw std::logic_error(
+                                "Value G8 Late-Mix50 supports only "
+                                "generation eight");
+                        }
+                        if (frozen_value_mix50_bundle
+                                .checkpoints.empty()) {
+                            frozen_value_mix50_bundle =
+                                train_value_g8_mix50_with_progress(
+                                    training_games,
+                                    training_seed,
+                                    refresh_value_mix50_cache);
+                        }
+                        const auto checkpoint =
+                            alpha::
+                                learned_value_g8_generation_checkpoint(
+                                    frozen_value_mix50_bundle,
+                                    selection.value_generation);
+                        std::cout
+                            << "  Selected Value Mix50 G8 "
+                               "fingerprint: "
+                            << alpha::learned_model_fingerprint(
+                                   checkpoint)
+                            << '\n';
+                        return checkpoint;
                     }
-                    return frozen_value;
+                    if (selection.value_generation == 0) {
+                        if (!frozen_value_g0) {
+                            frozen_value_g0 =
+                                train_value_g0_with_progress(
+                                    training_games, training_seed);
+                        }
+                        return frozen_value_g0;
+                    }
+                    if (selection.value_generation >
+                        alpha::kLearnedValueG8Generations) {
+                        throw std::logic_error(
+                            "unsupported Value generation");
+                    }
+                    if (frozen_value_bundle.checkpoints.empty()) {
+                        frozen_value_bundle =
+                            train_value_g8_with_progress(
+                                training_games, training_seed,
+                                refresh_value_g8_cache);
+                    }
+                    const auto checkpoint =
+                        alpha::
+                            learned_value_g8_generation_checkpoint(
+                                frozen_value_bundle,
+                                selection.value_generation);
+                    std::cout
+                        << "  Selected Value G"
+                        << selection.value_generation
+                        << " fingerprint: "
+                        << alpha::learned_model_fingerprint(
+                               checkpoint)
+                        << '\n';
+                    return checkpoint;
                 }
                 if (!frozen_actor_g0) {
                     frozen_actor_g0 =
@@ -1408,11 +2055,29 @@ int main(int argc, char** argv) {
                 if (!frozen_actor_g1) {
                     frozen_actor_g1 =
                         train_actor_g1_with_progress(
-                            frozen_actor_g0, training_seed)
+                            frozen_actor_g0, training_seed,
+                            actor_generation_config)
                             .model;
                 }
                 return frozen_actor_g1;
             };
+            const auto selections_share_model =
+                [](const BotSelection& left,
+                   const BotSelection& right) {
+                    if (left.learned_variant !=
+                        right.learned_variant) {
+                        return false;
+                    }
+                    if (left.learned_variant ==
+                        alpha::LearnedVariant::UnifiedActor) {
+                        return left.actor_generation ==
+                               right.actor_generation;
+                    }
+                    return left.value_recipe ==
+                               right.value_recipe &&
+                           left.value_generation ==
+                           right.value_generation;
+                };
             if (challenger_config.kind ==
                 alpha::BotKind::Learned) {
                 challenger_config.learned_model =
@@ -1424,10 +2089,7 @@ int main(int argc, char** argv) {
                 alpha::BotKind::Learned) {
                 if (challenger_config.kind ==
                         alpha::BotKind::Learned &&
-                    challenger_config.learned_variant ==
-                        baseline_config.learned_variant &&
-                    challenger.actor_generation ==
-                        baseline.actor_generation) {
+                    selections_share_model(challenger, baseline)) {
                     baseline_config.learned_model =
                         challenger_config.learned_model;
                 } else {
@@ -1442,7 +2104,35 @@ int main(int argc, char** argv) {
             const auto result = alpha::run_bot_benchmark(
                 games, seed, challenger_config,
                 baseline_config, shared_config);
-            print_benchmark(result, seed);
+            const auto benchmark_name =
+                [](const BotSelection& selection,
+                   const alpha::BotConfig& config) {
+                    if (selection.kind ==
+                            alpha::BotKind::Learned) {
+                        if (selection.learned_variant ==
+                            alpha::LearnedVariant::
+                                UnifiedActor) {
+                            return std::string(
+                                       "Learned Actor G") +
+                                   std::to_string(
+                                       selection.actor_generation);
+                        }
+                        if (selection.value_recipe ==
+                            alpha::LearnedValueG8Recipe::
+                                LateMix50) {
+                            return std::string(
+                                "Learned Value Mix50 G8");
+                        }
+                        return std::string("Learned Value G") +
+                               std::to_string(
+                                   selection.value_generation);
+                    }
+                    return alpha::bot_config_name(config);
+                };
+            print_benchmark(
+                result, seed,
+                benchmark_name(challenger, challenger_config),
+                benchmark_name(baseline, baseline_config));
             return result.challenger_is_better_95() ? 0 : 1;
         }
         if (stability) {

@@ -1,5 +1,6 @@
 #include "alpha/learned_iteration.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -388,6 +389,95 @@ void test_td_lambda_three_state_math_and_terminal_values() {
         "invalid perspective must be rejected");
 }
 
+void test_four_state_bootstrap_is_exact_and_terminal_at_tail() {
+    const std::vector<double> parent_values = {
+        0.10, 0.20, 0.30, 0.40,
+        0.50, 0.60, 0.70, 0.80,
+        0.90,
+    };
+    const auto targets =
+        iteration::four_state_bootstrap_targets(
+            parent_values, 0.25);
+    const std::vector<double> expected = {
+        0.375, 0.425, 0.475, 0.525, 0.575,
+        0.25, 0.25, 0.25, 0.25,
+    };
+    expect(targets.size() == expected.size(),
+           "bootstrap target count must match state count");
+    for (std::size_t index = 0; index < targets.size();
+         ++index) {
+        expect_near(
+            targets[index], expected[index], 1.0e-12,
+            "four-state bootstrap target");
+    }
+
+    const std::vector<double> four_values = {
+        0.1, 0.2, 0.3, 0.4,
+    };
+    const auto four_targets =
+        iteration::four_state_bootstrap_targets(
+            four_values, 1.0);
+    expect(
+        std::all_of(
+            four_targets.begin(), four_targets.end(),
+            [](double target) { return target == 1.0; }),
+        "a four-state trace has no state four positions later");
+    const std::vector<double> empty;
+    expect(
+        iteration::four_state_bootstrap_targets(
+            empty, 0.5).empty(),
+        "empty bootstrap trajectory must stay empty");
+
+    expect_invalid(
+        [&] {
+            iteration::four_state_bootstrap_targets(
+                parent_values, 1.01);
+        },
+        "invalid bootstrap terminal value must be rejected");
+    expect_invalid(
+        [] {
+            const std::vector<double> invalid = {
+                0.2,
+                std::numeric_limits<double>::infinity(),
+            };
+            iteration::four_state_bootstrap_targets(
+                invalid, 0.5);
+        },
+        "invalid parent bootstrap value must be rejected");
+}
+
+void test_value_g8_mix50_assignment_is_exact_and_rng_free() {
+    for (std::size_t generation = 1; generation <= 4;
+         ++generation) {
+        for (std::size_t game = 0; game < 200; ++game) {
+            expect(
+                !iteration::value_g8_mix50_game_uses_search(
+                    generation, game),
+                "G1-G4 must remain entirely raw");
+        }
+    }
+    for (std::size_t generation = 5; generation <= 8;
+         ++generation) {
+        std::size_t raw_games = 0;
+        std::size_t search_games = 0;
+        for (std::size_t game = 0; game < 200; ++game) {
+            const bool searched =
+                iteration::value_g8_mix50_game_uses_search(
+                    generation, game);
+            expect(
+                searched == (game % 2 == 1),
+                "each late pair must be raw then search");
+            raw_games += searched ? 0 : 1;
+            search_games += searched ? 1 : 0;
+        }
+        expect(raw_games == 100 && search_games == 100,
+               "canonical late generations must split 100/100");
+    }
+    expect(
+        !iteration::value_g8_mix50_game_uses_search(9, 1),
+        "assignment must be bounded to G5-G8");
+}
+
 void test_replay_window_evicts_without_consuming() {
     iteration::ReplayWindow<std::string> replay;
     std::vector<std::string> first = {"g0-a", "g0-b"};
@@ -490,6 +580,12 @@ int main() {
     runner.run(
         "TD lambda three-state and terminal math",
         test_td_lambda_three_state_math_and_terminal_values);
+    runner.run(
+        "exact four-state Value bootstrap",
+        test_four_state_bootstrap_is_exact_and_terminal_at_tail);
+    runner.run(
+        "exact Value G8 Late-Mix50 assignment",
+        test_value_g8_mix50_assignment_is_exact_and_rng_free);
     runner.run(
         "immutable three-generation replay window",
         test_replay_window_evicts_without_consuming);

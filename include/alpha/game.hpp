@@ -775,13 +775,32 @@ std::shared_ptr<const LearnedModel>
 train_learned_actor_model(std::size_t training_games,
                           std::uint64_t seed);
 
-// Card-agnostic update seam for iterated Learned Actor training. Callers
-// provide already-encoded observations/action features and soft policy
-// targets; this layer never inspects cards, game state, or another policy.
+// Card-agnostic update seams for iterated Learned training. Callers provide
+// already-encoded observations/action features and targets; this layer never
+// inspects cards, game state, or another policy.
 struct LearnedCriticTrainingExample {
     std::vector<double> features;
     double target = 0.5;
 };
+
+struct LearnedValueUpdateConfig {
+    std::size_t epochs = 3;
+    double learning_rate = 0.006;
+    // Every independently cloned critic leaf uses
+    //   root_seed ^ (member_training_tag + member_index).
+    // Keeping both components explicit reproduces the legacy Value trainer's
+    // member seed flow without coupling callers to ensemble size.
+    std::uint64_t root_seed = 0;
+    std::uint64_t member_training_tag = 0;
+};
+
+// Recursively deep-clones a frozen Value model, updates every independently
+// cloned critic leaf, then republishes the composite as immutable. An empty
+// example set performs a pure recursive clone.
+std::shared_ptr<const LearnedModel> update_learned_value_model(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedCriticTrainingExample>& examples,
+    LearnedValueUpdateConfig config = {});
 
 enum class LearnedPolicyDecisionKind : std::uint8_t {
     Priority,
@@ -851,6 +870,49 @@ struct LearnedActorGenerationGameReport {
         const LearnedActorGenerationGameReport&) const = default;
 };
 
+struct LearnedPolicyFitDiagnostics {
+    std::size_t example_count = 0;
+    double total_weight = 0.0;
+    // Runtime chooses uniformly among exact model-logit ties. The teacher
+    // accepts every exact target maximum, so per-example expected agreement
+    // is |model-best intersection teacher-best| / |model-best|.
+    double parent_expected_top_one_agreement = 0.0;
+    double candidate_expected_top_one_agreement = 0.0;
+    double weighted_teacher_entropy = 0.0;
+    double parent_weighted_cross_entropy = 0.0;
+    double candidate_weighted_cross_entropy = 0.0;
+    double parent_excess_cross_entropy = 0.0;
+    double candidate_excess_cross_entropy = 0.0;
+    std::size_t changed_argmax_examples = 0;
+    double changed_argmax_weight = 0.0;
+    double changed_argmax_weight_fraction = 0.0;
+
+    bool operator==(
+        const LearnedPolicyFitDiagnostics&) const = default;
+};
+
+struct LearnedCriticFitDiagnostics {
+    std::size_t example_count = 0;
+    double target_mean = 0.0;
+    double target_variance = 0.0;
+    double parent_mean_squared_error = 0.0;
+    double candidate_mean_squared_error = 0.0;
+    double parent_binary_cross_entropy = 0.0;
+    double candidate_binary_cross_entropy = 0.0;
+
+    bool operator==(
+        const LearnedCriticFitDiagnostics&) const = default;
+};
+
+struct LearnedActorFitDiagnostics {
+    LearnedPolicyFitDiagnostics priority;
+    LearnedPolicyFitDiagnostics attack;
+    LearnedCriticFitDiagnostics critic;
+
+    bool operator==(
+        const LearnedActorFitDiagnostics&) const = default;
+};
+
 struct LearnedActorGenerationReport {
     std::uint64_t root_seed = 0;
     std::uint64_t generation = 1;
@@ -868,6 +930,7 @@ struct LearnedActorGenerationReport {
     double maximum_policy_target_sum = 0.0;
     std::string parent_fingerprint;
     std::string candidate_fingerprint;
+    LearnedActorFitDiagnostics fit;
 
     bool operator==(
         const LearnedActorGenerationReport&) const = default;
@@ -884,6 +947,110 @@ LearnedActorGenerationResult train_learned_actor_generation(
     std::shared_ptr<const LearnedModel> parent,
     std::uint64_t root_seed,
     LearnedActorGenerationConfig config = {});
+
+// Evaluates fixed, already-encoded training examples without fitting either
+// model. This is also the focused test seam for the generation fit report.
+LearnedActorFitDiagnostics diagnose_learned_actor_fit(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate,
+    const std::vector<LearnedCriticTrainingExample>& critic_examples,
+    const std::vector<LearnedPolicyTrainingExample>& policy_examples);
+
+inline constexpr std::size_t kLearnedValueG8Generations = 8;
+
+enum class LearnedValueG8Recipe : std::uint8_t {
+    CanonicalAllSearchLate,
+    LateMix50,
+};
+
+struct LearnedValueGenerationReport {
+    // One-based publication index: G1 through G8.
+    std::size_t generation = 0;
+    std::size_t self_play_games = 0;
+    std::size_t generation_examples = 0;
+    std::size_t anchor_examples = 0;
+    std::size_t replay_generations = 0;
+    std::size_t replay_examples = 0;
+    // Populated only by the distinct Late-Mix50 recipe. Canonical reports
+    // retain zeroes here so their v1 serialized bytes remain unchanged.
+    std::size_t raw_collection_games = 0;
+    std::size_t search_collection_games = 0;
+    std::size_t raw_collection_examples = 0;
+    std::size_t search_collection_examples = 0;
+    bool search_enabled = false;
+    std::size_t search_worlds = 0;
+    std::size_t search_horizon_turns = 0;
+    std::size_t rollout_evaluations = 0;
+    double exploration_rate = 0.0;
+    std::string parent_fingerprint;
+    std::string candidate_fingerprint;
+
+    bool operator==(
+        const LearnedValueGenerationReport&) const = default;
+};
+
+struct LearnedValueG8Report {
+    // The canonical recipe is the default so legacy aggregate initialization
+    // and the canonical v1 loader preserve their exact semantics.
+    LearnedValueG8Recipe recipe =
+        LearnedValueG8Recipe::CanonicalAllSearchLate;
+    std::size_t training_games = 0;
+    std::uint64_t root_seed = 0;
+    std::size_t base_examples = 0;
+    std::string base_fingerprint;
+    std::string final_fingerprint;
+    std::vector<LearnedValueGenerationReport> generations;
+
+    bool operator==(const LearnedValueG8Report&) const = default;
+};
+
+struct LearnedValueG8Result {
+    // Convenience alias for checkpoints.back().
+    std::shared_ptr<const LearnedModel> model;
+    // G0 is the base random-play fit; entries 1..8 are immutable G1..G8.
+    std::vector<std::shared_ptr<const LearnedModel>> checkpoints;
+    LearnedValueG8Report report;
+};
+
+// Canonical immutable reproduction of the bootstrapped Value lead. At the
+// default run size it uses an 800-game random anchor and eight 200-game
+// frozen-parent mirror generations.
+LearnedValueG8Result train_learned_value_g8(
+    std::size_t training_games, std::uint64_t seed);
+
+// Single-axis collection repair: base/G1-G4 are canonical, while G5-G8
+// alternate exact raw/search game pairs without consuming assignment RNG.
+// The derived generation game count must be positive and even.
+LearnedValueG8Result train_learned_value_g8_mix50(
+    std::size_t training_games, std::uint64_t seed);
+
+// Canonical, versioned frozen-artifact cache for the exact immutable G8
+// recipe above. The writer validates the complete report/checkpoint graph
+// before atomically replacing `path`; the loader is fail-closed on stale
+// metadata, corruption, trailing bytes, or fingerprint mismatches.
+std::string learned_value_g8_cache_path(
+    std::size_t training_games, std::uint64_t seed);
+void write_learned_value_g8_bundle_atomic(
+    const std::string& path, const LearnedValueG8Result& result);
+LearnedValueG8Result load_learned_value_g8_bundle(
+    const std::string& path, std::size_t expected_training_games,
+    std::uint64_t expected_seed);
+
+// Separate fail-closed artifact recipe for Late-Mix50. These functions never
+// accept or overwrite a canonical Value G8 bundle.
+std::string learned_value_g8_mix50_cache_path(
+    std::size_t training_games, std::uint64_t seed);
+void write_learned_value_g8_mix50_bundle_atomic(
+    const std::string& path, const LearnedValueG8Result& result);
+LearnedValueG8Result load_learned_value_g8_mix50_bundle(
+    const std::string& path, std::size_t expected_training_games,
+    std::uint64_t expected_seed);
+// Selects immutable published G1..G8 from a canonical bundle. Generation zero
+// is deliberately excluded because benchmark G0 is the separate legacy Value
+// model, not the bundle's random-anchor base.
+std::shared_ptr<const LearnedModel>
+learned_value_g8_generation_checkpoint(
+    const LearnedValueG8Result& result, std::size_t generation);
 
 // Stable content fingerprint over the model variant, all critic/policy weight
 // bit patterns, and recursively serialized ensemble members.
