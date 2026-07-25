@@ -3075,7 +3075,7 @@ make test
 ```
 
 Results: 18 probe-corpus tests across 20 fixtures, 11 probe-metric tests, 13
-probe-runner tests, 82 engine/bot tests, 6 learned-iteration tests, the full
+probe-runner tests, 83 engine/bot tests, 6 learned-iteration tests, the full
 CLI lifecycle suite, and a representative simulation all pass under strict
 C++20 `-Wall -Wextra -Wpedantic -Werror`. The integrated source also compiled
 under AddressSanitizer and UndefinedBehaviorSanitizer; the engine suite,
