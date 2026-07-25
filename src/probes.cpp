@@ -939,6 +939,220 @@ DecisionProbe ru_disintegrate_lethal_probe() {
     return probe;
 }
 
+std::string harvested_priority_descriptor(
+    const PriorityAction& action) {
+    std::string descriptor =
+        "kind-" +
+        std::to_string(static_cast<std::size_t>(action.kind)) +
+        ".card-" +
+        std::to_string(static_cast<std::size_t>(action.card)) +
+        ".x-" + std::to_string(action.x_value);
+    if (action.target.has_value()) {
+        descriptor +=
+            ".target-player-" +
+            std::to_string(action.target->player);
+        if (action.target->creature.has_value()) {
+            descriptor +=
+                ".creature-" +
+                std::to_string(*action.target->creature);
+        }
+    }
+    if (action.spell_target.has_value()) {
+        descriptor +=
+            ".spell-" + std::to_string(*action.spell_target);
+    }
+    if (action.source_permanent.has_value()) {
+        descriptor +=
+            ".source-" + std::to_string(*action.source_permanent);
+    }
+    return descriptor;
+}
+
+struct PriorityCallbackHarvest {
+    Game* game = nullptr;
+    std::size_t next_priority_decision_ordinal = 0;
+    std::optional<GameState> state;
+    std::vector<PriorityAction> actions;
+    std::size_t captured_priority_decision_ordinal = 0;
+    TurnPhase phase = TurnPhase::FirstMain;
+};
+
+struct PriorityCallbackHarvestComplete {};
+
+HumanController land_then_pass_controller(
+    std::size_t controlled_player, PriorityCallbackHarvest& harvest) {
+    HumanController controller;
+    controller.choose_priority_action =
+        [controlled_player, &harvest](
+            const PlayerObservation&, TurnPhase phase,
+            const std::vector<PriorityAction>& actions) {
+            const std::size_t ordinal =
+                harvest.next_priority_decision_ordinal++;
+            if (harvest.game == nullptr) {
+                throw std::logic_error(
+                    "priority harvest callback has no running game");
+            }
+
+            constexpr std::size_t kRootPlayer = 0;
+            constexpr std::size_t kOpponent = 1;
+            const GameState& state = harvest.game->state();
+            bool has_x_zero = false;
+            bool has_affordable_lethal_x = false;
+            for (const PriorityAction& action : actions) {
+                if (action.kind !=
+                        PriorityActionKind::CastDisintegrate ||
+                    !action.target.has_value() ||
+                    action.target->creature.has_value() ||
+                    action.target->player != kOpponent) {
+                    continue;
+                }
+                has_x_zero = has_x_zero || action.x_value == 0;
+                has_affordable_lethal_x =
+                    has_affordable_lethal_x ||
+                    action.x_value >=
+                        state.players[kOpponent].life;
+            }
+
+            if (controlled_player == kRootPlayer &&
+                phase == TurnPhase::SecondMain &&
+                state.active_player == kRootPlayer &&
+                state.stack.empty() &&
+                state.players[kRootPlayer].land_played_this_turn &&
+                has_x_zero &&
+                !has_affordable_lethal_x) {
+                harvest.state = state;
+                harvest.actions = actions;
+                harvest.captured_priority_decision_ordinal =
+                    ordinal;
+                harvest.phase = phase;
+                throw PriorityCallbackHarvestComplete{};
+            }
+
+            const auto choose_action =
+                [&actions](const auto& predicate)
+                    -> std::optional<std::size_t> {
+                    const auto found = std::find_if(
+                        actions.begin(), actions.end(), predicate);
+                    if (found == actions.end()) {
+                        return std::nullopt;
+                    }
+                    return static_cast<std::size_t>(
+                        std::distance(actions.begin(), found));
+                };
+
+            // The fixed trajectory develops mana but deliberately casts no
+            // spells. Prefer a Mountain for RU, then any legal land.
+            if (controlled_player == kRootPlayer) {
+                const auto mountain = choose_action(
+                    [](const PriorityAction& action) {
+                        return action.kind ==
+                                   PriorityActionKind::PlayLand &&
+                               action.card == CardId::Mountain;
+                    });
+                if (mountain.has_value()) {
+                    return *mountain;
+                }
+            }
+            const auto land_action = choose_action(
+                [](const PriorityAction& action) {
+                    return action.kind ==
+                           PriorityActionKind::PlayLand;
+                });
+            if (land_action.has_value()) {
+                return *land_action;
+            }
+            const auto pass = choose_action(
+                [](const PriorityAction& action) {
+                    return action.kind == PriorityActionKind::Pass;
+                });
+            if (!pass.has_value()) {
+                throw std::logic_error(
+                    "priority harvest decision has no Pass");
+            }
+            return *pass;
+        };
+    controller.choose_attackers =
+        [](const PlayerObservation&,
+           const std::vector<PermanentId>&) {
+            return std::vector<PermanentId>{};
+        };
+    controller.choose_blockers =
+        [](const PlayerObservation&,
+           const std::vector<PermanentId>&,
+           const std::vector<LegalBlockerChoice>&) {
+            return std::vector<
+                std::pair<PermanentId, PermanentId>>{};
+        };
+    controller.choose_damage_order =
+        [](const PlayerObservation&, PermanentId,
+           const std::vector<PermanentId>& blockers) {
+            return blockers;
+        };
+    return controller;
+}
+
+DecisionProbe harvest_ru_disintegrate_hold_probe() {
+    constexpr std::size_t kRootPlayer = 0;
+    constexpr std::size_t kOpponent = 1;
+    PriorityCallbackHarvest harvest;
+
+    GameConfig config;
+    config.max_turns = 70;
+    config.starting_player = kRootPlayer;
+    config.human_controllers[kRootPlayer] =
+        land_then_pass_controller(kRootPlayer, harvest);
+    config.human_controllers[kOpponent] =
+        land_then_pass_controller(kOpponent, harvest);
+
+    const std::array<std::vector<CardId>, 2> decks = {
+        ru_aggro_deck(),
+        green_deck(),
+    };
+    Game game(decks[0], decks[1], kProbeValidationV1GameSeed,
+              config);
+    harvest.game = &game;
+    try {
+        static_cast<void>(game.run());
+    } catch (const PriorityCallbackHarvestComplete&) {
+        // The callback snapshots the exact pre-action state and legal list.
+    }
+    if (!harvest.state.has_value()) {
+        throw std::logic_error(
+            "fixed validation trajectory did not reach the RU X=0 state");
+    }
+
+    DecisionProbe probe;
+    probe.stable_id =
+        "validation.ru.disintegrate-hold-x0.v1";
+    probe.category = Category::RUDisintegrateHoldValidation;
+    probe.decision_kind = DecisionKind::Priority;
+    probe.root_deck = DeckId::RUAggro;
+    probe.opponent_deck = DeckId::Green;
+    probe.root_player = kRootPlayer;
+    probe.phase = harvest.phase;
+    probe.consecutive_passes = 0;
+    probe.state = std::move(*harvest.state);
+    probe.original_decks = decks;
+    probe.candidates.reserve(harvest.actions.size());
+    for (const PriorityAction& action : harvest.actions) {
+        probe.candidates.push_back(priority_candidate(
+            harvested_priority_descriptor(action), action));
+    }
+    probe.harvest = HarvestProvenance{
+        .collector =
+            std::string(kProbePriorityCallbackCollector),
+        .trajectory_script =
+            std::string(kProbeLandThenPassScript),
+        .game_seed = kProbeValidationV1GameSeed,
+        .starting_player = kRootPlayer,
+        .priority_decision_ordinal =
+            harvest.captured_priority_decision_ordinal,
+        .turn_number = probe.state.turn_number,
+        .phase = probe.phase,
+    };
+    return probe;
+}
+
 bool sorcery_actions_for(TurnPhase phase) {
     return phase == TurnPhase::FirstMain ||
            phase == TurnPhase::SecondMain;
@@ -1566,6 +1780,10 @@ std::vector<DecisionProbe> make_probe_dev_v3() {
     return probes;
 }
 
+std::vector<DecisionProbe> make_probe_validation_v1() {
+    return {harvest_ru_disintegrate_hold_probe()};
+}
+
 bool hidden_clone_is_determinization_invariant(
     const DecisionProbe& probe, std::uint64_t seed) {
     if (probe.root_player >= kPlayerCount) {
@@ -1685,6 +1903,102 @@ std::vector<std::string> validate_probe_dev_v3(
         if (count != 4) {
             errors.push_back(
                 "probe-dev-v3 requires four probes per root deck");
+        }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_probe_validation_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed) {
+    std::vector<std::string> errors;
+    if (probes.size() != 1) {
+        errors.push_back(
+            "probe-validation-v1 must contain exactly one probe");
+    }
+
+    for (const DecisionProbe& probe : probes) {
+        if (probe.stable_id !=
+            "validation.ru.disintegrate-hold-x0.v1") {
+            errors.push_back(
+                "probe-validation-v1 has an unknown stable ID");
+        }
+        if (probe.category !=
+                Category::RUDisintegrateHoldValidation ||
+            probe.decision_kind != DecisionKind::Priority ||
+            probe.root_deck != DeckId::RUAggro ||
+            probe.opponent_deck != DeckId::Green ||
+            probe.root_player != 0 ||
+            probe.phase != TurnPhase::SecondMain ||
+            probe.consecutive_passes != 0 ||
+            probe.state.active_player != probe.root_player ||
+            !probe.state.players[probe.root_player]
+                 .land_played_this_turn) {
+            errors.push_back(
+                "probe-validation-v1 lost its harvested decision context");
+        }
+
+        if (!probe.harvest.has_value()) {
+            errors.push_back(
+                "probe-validation-v1 is missing harvest provenance");
+        } else {
+            const HarvestProvenance& harvest = *probe.harvest;
+            if (harvest.collector !=
+                    kProbePriorityCallbackCollector ||
+                harvest.trajectory_script !=
+                    kProbeLandThenPassScript ||
+                harvest.game_seed !=
+                    kProbeValidationV1GameSeed ||
+                harvest.starting_player !=
+                    probe.state.starting_player ||
+                harvest.turn_number != probe.state.turn_number ||
+                harvest.phase != probe.phase) {
+                errors.push_back(
+                    "probe-validation-v1 harvest provenance disagrees "
+                    "with the state");
+            }
+        }
+
+        const PriorityAction x_zero =
+            PriorityAction::cast_disintegrate(
+                0, Target::player_target(1));
+        bool has_pass = false;
+        bool has_x_zero = false;
+        bool has_affordable_lethal_x = false;
+        bool has_land_play = false;
+        for (const Candidate& candidate : probe.candidates) {
+            const auto* action =
+                std::get_if<PriorityAction>(&candidate.action);
+            if (action == nullptr) {
+                continue;
+            }
+            has_pass =
+                has_pass ||
+                action->kind == PriorityActionKind::Pass;
+            has_land_play =
+                has_land_play ||
+                action->kind == PriorityActionKind::PlayLand;
+            has_x_zero = has_x_zero || *action == x_zero;
+            if (action->kind ==
+                    PriorityActionKind::CastDisintegrate &&
+                action->target.has_value() &&
+                !action->target->creature.has_value() &&
+                action->target->player == 1 &&
+                action->x_value >= probe.state.players[1].life) {
+                has_affordable_lethal_x = true;
+            }
+        }
+        if (!has_pass || !has_x_zero || has_land_play ||
+            has_affordable_lethal_x) {
+            errors.push_back(
+                "probe-validation-v1 is not a nonlethal "
+                "Pass-versus-X=0 decision");
+        }
+
+        const Validation validation =
+            validate_probe(probe, hidden_seed);
+        for (const std::string& error : validation.errors) {
+            errors.push_back(probe.stable_id + ": " + error);
         }
     }
     return errors;

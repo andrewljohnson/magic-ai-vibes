@@ -18,17 +18,24 @@ cli_status=0
 g8_cache=build/model-cache/old-school-value-g8-v1-t1-s424242.bin
 g8_t8_cache=build/model-cache/old-school-value-g8-v1-t8-s424242.bin
 mix50_cache=build/model-cache/old-school-value-g8-mix50-v1-t8-s424242.bin
+challenger_c1_cache=build/model-cache/old-school-value-challenger-v1-c1-t1-s424242.bin
+challenger_c2_cache=build/model-cache/old-school-value-challenger-v1-c2-t1-s424242.bin
 probe_cache=
 mix50_probe_cache=
+validation_probe_cache=
 probe_directory=
 
 cleanup() {
-    rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache"
+    rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
+        "$challenger_c1_cache" "$challenger_c2_cache"
     if [ -n "$probe_cache" ]; then
         rm -f "$probe_cache"
     fi
     if [ -n "$mix50_probe_cache" ]; then
         rm -f "$mix50_probe_cache"
+    fi
+    if [ -n "$validation_probe_cache" ]; then
+        rm -f "$validation_probe_cache"
     fi
     if [ -n "$probe_directory" ]; then
         rmdir "$probe_directory" 2>/dev/null || true
@@ -37,8 +44,8 @@ cleanup() {
     rm -rf "$cli_workspace"
 }
 trap cleanup EXIT HUP INT TERM
-rm -f "$g8_cache"
-rm -f "$g8_t8_cache" "$mix50_cache"
+rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
+    "$challenger_c1_cache" "$challenger_c2_cache"
 
 run_cli() {
     set +e
@@ -81,12 +88,31 @@ expect_error() {
 help_output=$("$simulator" --help)
 case $help_output in
     *"RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate"*\
-"--interactive"*"learned-value-g0..g8"*"learned-value-mix50-g8"*\
+"--interactive"*"learned-value-g0..g8"*"learned-value-cN"*\
+"learned-value-mix50-g8"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
+"--refresh-value-challenger-cache"*\
 "--refresh-value-g8-cache"*"--refresh-value-mix50-cache"*) ;;
     *)
         printf 'learned-generation options missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+for learned_option in "--learned-generations N" "--learned-rollouts N"
+do
+    case $help_output in
+        *"$learned_option"*) ;;
+        *)
+            printf 'missing %s from --help\n' "$learned_option" >&2
+            exit 1
+            ;;
+    esac
+done
+case $help_output in
+    *"--probe-corpus NAME"*"validation-v1"*) ;;
+    *)
+        printf 'probe-corpus selector missing from --help\n' >&2
         exit 1
         ;;
 esac
@@ -99,9 +125,10 @@ if [ "$cli_status" -ne 0 ]; then
 fi
 case $cli_output in
     *"Old School Magic Interactive"*\
-"Match: Human Red vs Learned Value RU Aggro"*\
+"Match: Human Red vs Learned Value G0 RU Aggro"*\
 "Game seed: 1"*\
 "Training seed: 424242"*\
+"Learned search worlds per legal action: 2"*\
 "Board layout: 120 columns"*\
 "HAND (DEBUG REVEAL)"*\
 "|GRAVEYARD"*\
@@ -201,6 +228,55 @@ case $cli_output in
         ;;
 esac
 
+run_cli_input "q" --interactive --seed 1 \
+    --train-games 1 --train-seed 424242 \
+    --learned-generations 0 --learned-rollouts 1
+if [ "$cli_status" -ne 0 ]; then
+    printf 'interactive legacy-generation sentinel failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Match: Human Red vs Learned Value G0 RU Aggro"*\
+"Learned search worlds per legal action: 1"*\
+"Training frozen Value G0"*\
+"Game abandoned."*) ;;
+    *)
+        printf 'interactive generation zero did not preserve G0\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+case $cli_output in
+    *"Value Challenger"*)
+        printf 'interactive generation zero selected challenger\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+run_cli_input "q" --interactive --seed 1 \
+    --train-games 1 --train-seed 424242 \
+    --learned-generations 1 --learned-rollouts 1
+if [ "$cli_status" -ne 0 ]; then
+    printf 'interactive Value Challenger C1 failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Match: Human Red vs Learned Value Challenger C1 RU Aggro"*\
+"Learned search worlds per legal action: 1"*\
+"Training frozen Value Challenger C1"*\
+"Value Challenger C1 fingerprint:"*\
+"Value Challenger C1 artifact cache: generated $challenger_c1_cache"*\
+"Game abandoned."*) ;;
+    *)
+        printf 'interactive challenger route/reporting missing\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
 expect_error "--interactive only accepts" \
     --interactive --games 1
 expect_error "cannot be combined" \
@@ -242,6 +318,10 @@ expect_error "require --score-probes" \
     --games 1 --value-generation 8
 expect_error "require --score-probes" \
     --games 1 --value-recipe mix50
+expect_error "require --score-probes" \
+    --probe-corpus validation-v1
+expect_error "--probe-corpus must be dev-v3 or validation-v1" \
+    --score-probes --probe-corpus unknown
 expect_error "--value-generation must be zero or eight" \
     --score-probes --value-generation 1
 expect_error "--value-generation must be zero or eight" \
@@ -253,9 +333,37 @@ expect_error "--value-recipe mix50 requires --value-generation 8" \
 expect_error "invalid bot name" \
     --benchmark --games 1 --challenger learned-value-g9 \
     --baseline random
+for invalid_challenger in \
+    learned-value-c learned-value-c0 learned-value-c-1 \
+    learned-value-c1x learned-value-c18446744073709551616
+do
+    expect_error "invalid bot name" \
+        --benchmark --games 1 --challenger "$invalid_challenger" \
+        --baseline random
+done
 expect_error "invalid bot name" \
     --benchmark --games 1 --challenger learned-value-mix50-g7 \
     --baseline random
+expect_error "--learned-rollouts must be greater than zero" \
+    --games 1 --learned-rollouts 0
+expect_error "--score-probes requires --learned-rollouts of at least two" \
+    --score-probes --learned-rollouts 1
+learned_generation_scope="--learned-generations requires"
+expect_error "$learned_generation_scope" \
+    --games 1 --bots random --learned-generations 1
+expect_error "$learned_generation_scope" \
+    --benchmark --games 1 --challenger learned-value-g0 \
+    --baseline random --learned-generations 1
+expect_error "$learned_generation_scope" \
+    --variance-study --games 1 --learned-generations 1
+learned_rollout_scope="--learned-rollouts requires"
+expect_error "$learned_rollout_scope" \
+    --games 1 --bots random --learned-rollouts 1
+expect_error "--refresh-value-challenger-cache requires" \
+    --games 1 --refresh-value-challenger-cache
+expect_error "--refresh-value-challenger-cache requires" \
+    --benchmark --games 1 --challenger learned-value-g0 \
+    --baseline random --refresh-value-challenger-cache
 refresh_scope_error="requires a benchmark or probe route"
 expect_error "$refresh_scope_error" \
     --games 1 --refresh-value-g8-cache
@@ -313,7 +421,10 @@ fi
 learned_value_alias_output=$cli_output
 case "$learned_alias_output
 $learned_value_alias_output" in
-    *"Challenger: Learned Value G0"*"Challenger: Learned Value G0"*) ;;
+    *"Challenger: Learned Value G0"*\
+"Challenger frozen model: Learned Value G0, seed 424242, 1 training games, K=2"*\
+"Challenger: Learned Value G0"*\
+"Challenger frozen model: Learned Value G0, seed 424242, 1 training games, K=2"*) ;;
     *)
         printf 'legacy Value aliases changed routing\n%s\n%s\n' \
             "$learned_alias_output" "$learned_value_alias_output" >&2
@@ -322,9 +433,234 @@ $learned_value_alias_output" in
 esac
 case "$learned_alias_output
 $learned_value_alias_output" in
-    *"immutable Value G8"*|*"Value G8 artifact cache:"*)
-        printf 'legacy Value aliases unexpectedly used G8 bundle\n%s\n%s\n' \
+    *"immutable Value G8"*|*"Value G8 artifact cache:"*|\
+*"Value Challenger"*)
+        printf 'legacy Value aliases unexpectedly used another family\n%s\n%s\n' \
             "$learned_alias_output" "$learned_value_alias_output" >&2
+        exit 1
+        ;;
+esac
+
+challenger_args="--benchmark --games 1 --seed 1 --train-games 1 \
+--train-seed 424242 --challenger learned-value-c1 \
+--baseline learned-value-g0 --learned-rollouts 1"
+
+# shellcheck disable=SC2086
+run_cli $challenger_args
+if [ "$cli_status" -eq 2 ]; then
+    printf 'Value Challenger C1 benchmark route failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+challenger_first_output=$cli_output
+case $challenger_first_output in
+    *"Loading immutable Value Challenger C1 artifact"*\
+"Value Challenger C1 fingerprint:"*\
+"Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*\
+"Challenger: Learned Value Challenger C1"*\
+"Baseline: Learned Value G0"*\
+"Challenger frozen model: Learned Value Challenger C1, seed 424242, 1 training games, K=1"*\
+"Baseline frozen model: Learned Value G0, seed 424242, 1 training games, K=1"*) ;;
+    *)
+        printf 'Value Challenger C1 routing/reporting missing\n%s\n' \
+            "$challenger_first_output" >&2
+        exit 1
+        ;;
+esac
+challenger_first_fingerprint=$(
+    printf '%s\n' "$challenger_first_output" |
+        sed -n 's/^  Value Challenger C1 fingerprint: //p'
+)
+challenger_first_record=$(
+    printf '%s\n' "$challenger_first_output" |
+        sed -n 's/^  Challenger record: //p'
+)
+
+# shellcheck disable=SC2086
+run_cli $challenger_args
+if [ "$cli_status" -eq 2 ]; then
+    printf 'repeated Value Challenger C1 benchmark failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+challenger_second_fingerprint=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Value Challenger C1 fingerprint: //p'
+)
+challenger_second_record=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Challenger record: //p'
+)
+case $cli_output in
+    *"Loading immutable Value Challenger C1 artifact"*\
+"Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*) ;;
+    *)
+        printf 'repeated challenger did not reuse its artifact\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+if [ -z "$challenger_first_fingerprint" ] ||
+    [ "$challenger_first_fingerprint" != \
+      "$challenger_second_fingerprint" ] ||
+    [ -z "$challenger_first_record" ] ||
+    [ "$challenger_first_record" != "$challenger_second_record" ]; then
+    printf 'Value Challenger C1 was not fixed-seed deterministic\n' >&2
+    printf 'fingerprints: %s / %s\nrecords: %s / %s\n' \
+        "$challenger_first_fingerprint" \
+        "$challenger_second_fingerprint" \
+        "$challenger_first_record" "$challenger_second_record" >&2
+    exit 1
+fi
+
+printf 'corrupt' >>"$challenger_c1_cache"
+# shellcheck disable=SC2086
+expect_error "--refresh-value-challenger-cache" $challenger_args
+case $cli_output in
+    *"Training frozen Value Challenger C1"*)
+        printf 'corrupt challenger cache silently retrained\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+# shellcheck disable=SC2086
+run_cli $challenger_args --refresh-value-challenger-cache
+if [ "$cli_status" -eq 2 ]; then
+    printf 'Value Challenger C1 cache refresh failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Training frozen Value Challenger C1"*\
+"Value Challenger C1 artifact cache: generated $challenger_c1_cache"*) ;;
+    *)
+        printf 'challenger refresh did not regenerate atomically\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+refreshed_challenger_fingerprint=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Value Challenger C1 fingerprint: //p'
+)
+if [ "$refreshed_challenger_fingerprint" != \
+     "$challenger_first_fingerprint" ]; then
+    printf 'refreshed challenger fingerprint changed\n' >&2
+    exit 1
+fi
+
+run_cli --benchmark --games 1 --seed 1 --train-games 1 \
+    --train-seed 424242 --challenger learned-value-c1 \
+    --baseline learned-value-c2 --learned-rollouts 1
+if [ "$cli_status" -eq 2 ]; then
+    printf 'distinct challenger-generation benchmark failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Loading immutable Value Challenger C1 artifact"*\
+"Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*\
+"Training frozen Value Challenger C2"*\
+"Value Challenger C2 artifact cache: generated $challenger_c2_cache"*\
+"Challenger: Learned Value Challenger C1"*\
+"Baseline: Learned Value Challenger C2"*) ;;
+    *)
+        printf 'challenger generation keys were conflated\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+c1_fingerprint=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Value Challenger C1 fingerprint: //p'
+)
+c2_fingerprint=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Value Challenger C2 fingerprint: //p'
+)
+if [ -z "$c1_fingerprint" ] || [ -z "$c2_fingerprint" ] ||
+    [ "$c1_fingerprint" = "$c2_fingerprint" ]; then
+    printf 'challenger C1/C2 fingerprints were not distinct\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+
+run_cli --games 1 --seed 1 --bots learned-value \
+    --train-games 1 --train-seed 424242 \
+    --learned-generations 1 --learned-rollouts 1
+if [ "$cli_status" -ne 0 ]; then
+    printf 'learned-only challenger simulation failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Loading immutable Value Challenger C1 artifact"*\
+"Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*\
+"Bot field: Learned Value Challenger C1 only"*\
+"Frozen learned model: Learned Value Challenger C1, seed 424242, 1 training games, K=1"*\
+"Learned Value Challenger C1"*) ;;
+    *)
+        printf 'learned-only challenger route/reporting missing\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+run_cli --games 1 --seed 1 --bots mixed \
+    --train-games 1 --train-seed 424242 \
+    --rollouts 1 --deep-rollouts 2 \
+    --learned-generations 1 --learned-rollouts 1
+if [ "$cli_status" -ne 0 ]; then
+    printf 'mixed-field challenger cache reuse failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Loading immutable Value Challenger C1 artifact"*\
+"Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*\
+"Bot field: mixed Random, Monte Carlo, Deep Monte Carlo, Handcrafted Policy, and Learned Value Challenger C1"*) ;;
+    *)
+        printf 'mixed-field route did not reuse challenger cache\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+run_cli --stability --stability-runs 1 --games 1 --seed 1 \
+    --train-games 1 --train-seed 424242 \
+    --rollouts 1 --deep-rollouts 2 \
+    --learned-generations 1 --learned-rollouts 1
+if [ "$cli_status" -eq 2 ]; then
+    printf 'stability challenger cache reuse failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Learned Value Challenger All-Policy Stability Panel"*\
+"Loading immutable Value Challenger C1 artifact"*\
+"Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*) ;;
+    *)
+        printf 'stability route did not reuse challenger cache\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+run_cli --games 1 --seed 1 --bots learned-actor \
+    --train-games 1 --train-seed 424242 \
+    --learned-rollouts 1
+if [ "$cli_status" -ne 0 ]; then
+    printf 'learned-actor rollout selection failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Bot field: Learned Unified Actor only"*\
+"Frozen learned model: Learned Actor, seed 424242, 1 training games, K=1"*) ;;
+    *)
+        printf 'learned-actor rollout routing/reporting missing\n%s\n' \
+            "$cli_output" >&2
         exit 1
         ;;
 esac
@@ -580,6 +916,7 @@ probe_directory=$(
 )
 probe_cache=$probe_directory/cache.tsv
 mix50_probe_cache=$probe_directory/mix50-cache.tsv
+validation_probe_cache=$probe_directory/validation-cache.tsv
 
 run_cli --score-probes --value-generation 8 \
     --probe-worlds 2 --probe-horizon 0 \
@@ -809,7 +1146,7 @@ fi
 run_cli --score-probes --value-generation 0 \
     --probe-worlds 2 --probe-horizon 0 \
     --train-games 1 --train-seed 424242 \
-    --probe-cache "$probe_cache"
+    --probe-cache "$probe_cache" --learned-generations 1
 if [ "$cli_status" -ne 0 ]; then
     printf 'legacy Value G0 probe smoke failed\n%s\n' \
         "$cli_output" >&2
@@ -817,10 +1154,11 @@ if [ "$cli_status" -ne 0 ]; then
 fi
 case $cli_output in
     *"Cache: loaded"*\
-"5 policy views"*\
-"Value G0 deployed policy"*) ;;
+"6 policy views"*\
+"Value G0 deployed policy"*\
+"Value Challenger C1"*) ;;
     *)
-        printf 'legacy Value G0 probe output changed\n%s\n' \
+        printf 'legacy G0 reference/challenger probe output changed\n%s\n' \
             "$cli_output" >&2
         exit 1
         ;;
@@ -829,6 +1167,34 @@ case $cli_output in
     *"Training immutable Value G8"*|\
 *"Value checkpoint transitions (compact)"*)
         printf 'legacy Value G0 unexpectedly trained/scored G8\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+run_cli --score-probes --probe-corpus validation-v1 \
+    --probe-worlds 2 --probe-horizon 0 \
+    --learned-rollouts 3 \
+    --train-games 1 --train-seed 424242 \
+    --probe-cache "$validation_probe_cache" --refresh-probe-cache
+if [ "$cli_status" -ne 0 ]; then
+    printf 'harvested validation-v1 probe smoke failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Probe Validation-v1 Offline Score"*\
+*"cannot be used for policy promotion"*\
+*"validation.ru.disintegrate-hold-x0.v1"*\
+*"Focused cached Actor-reference candidate pairs"*\
+*"Actor reference Q(Pass) - Q(X=0)"*\
+*"Focused Value-policy candidate pairs"*\
+*"Value G0 Q(Pass) - Q(X=0)"*\
+*"paired SE"*\
+*"95% CI"*\
+*"K=3"*) ;;
+    *)
+        printf 'validation-v1 behavioral pair report missing\n%s\n' \
             "$cli_output" >&2
         exit 1
         ;;

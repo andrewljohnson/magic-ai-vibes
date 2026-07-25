@@ -1325,10 +1325,14 @@ InteractiveMatchup choose_interactive_matchup(std::uint64_t seed) {
 InteractiveMatchResult run_interactive_match(
     std::istream& input, std::ostream& output, std::uint64_t seed,
     std::shared_ptr<const LearnedModel> learned_model,
-    InteractiveMatchup matchup) {
+    InteractiveMatchup matchup, std::size_t learned_rollouts) {
     if (!learned_model) {
         throw std::invalid_argument(
             "interactive match requires a frozen Learned model");
+    }
+    if (learned_rollouts == 0) {
+        throw std::invalid_argument(
+            "interactive match requires positive Learned rollouts");
     }
     TerminalSession terminal(input, output);
     GameConfig config;
@@ -1340,7 +1344,7 @@ InteractiveMatchResult run_interactive_match(
     config.bots[1] = {
         .kind = BotKind::Learned,
         .learned_variant = LearnedVariant::ValueSearchChampion,
-        .rollouts_per_action = 2,
+        .rollouts_per_action = learned_rollouts,
         .learned_model = learned_model,
     };
     config.learned_model = learned_model;

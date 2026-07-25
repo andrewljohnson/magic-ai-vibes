@@ -116,6 +116,19 @@ constexpr std::uint32_t kValueG8Mix50ArtifactSchema = 1;
 constexpr std::string_view kValueG8Mix50RecipeId =
     "old-school.learned-value-g8.bootstrap-replay-k1h4."
     "late-mix50.v1";
+constexpr std::array<std::uint8_t, 8>
+    kValueChallengerArtifactMagic = {
+        'O', 'S', 'M', 'V', 'C', 'N', 'B', '1',
+    };
+constexpr std::uint32_t kValueChallengerArtifactSchema = 1;
+// Bump the engine ID for card/rules/observation changes, the recipe ID for
+// trainer changes, and the cache-path version for either. A stale artifact
+// must never silently stand in for a newly defined C<N>.
+constexpr std::string_view kValueChallengerEngineSchemaId =
+    "old-school.engine-five-deck-rules-observation.v1";
+constexpr std::string_view kValueChallengerRecipeId =
+    "old-school.learned-value-challenger."
+    "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
 constexpr std::size_t kMaximumValueG8ArtifactBytes =
     64U * 1024U * 1024U;
 constexpr std::size_t kMaximumValueG8ArtifactStringBytes = 256;
@@ -999,6 +1012,15 @@ class LearnedModel {
         const std::string& path,
         std::size_t expected_training_games,
         std::uint64_t expected_seed);
+    friend void write_learned_value_challenger_artifact_atomic(
+        const std::string& path,
+        const LearnedValueChallengerArtifact& artifact);
+    friend LearnedValueChallengerArtifact
+    load_learned_value_challenger_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed,
+        std::size_t expected_self_play_generations);
 
     std::array<std::array<double, kFeatureCount>, kHiddenCount>
         input_weights_{};
@@ -1380,6 +1402,44 @@ update_learned_value_model_encoded(
 
 } // namespace
 
+LearnedValueChallengerArtifact::LearnedValueChallengerArtifact(
+    std::shared_ptr<const LearnedModel> model,
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations)
+    : model_(std::move(model)),
+      training_games_(training_games),
+      seed_(seed),
+      self_play_generations_(self_play_generations) {}
+
+std::shared_ptr<const LearnedModel>
+LearnedValueChallengerArtifact::model() const {
+    return model_;
+}
+
+std::size_t
+LearnedValueChallengerArtifact::training_games() const {
+    return training_games_;
+}
+
+std::uint64_t LearnedValueChallengerArtifact::seed() const {
+    return seed_;
+}
+
+std::size_t
+LearnedValueChallengerArtifact::self_play_generations() const {
+    return self_play_generations_;
+}
+
+LearnedValueChallengerArtifact
+train_learned_value_challenger_artifact(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    return LearnedValueChallengerArtifact(
+        train_learned_value_challenger(
+            training_games, seed, self_play_generations),
+        training_games, seed, self_play_generations);
+}
+
 std::string learned_value_g8_cache_path(
     std::size_t training_games, std::uint64_t seed) {
     return "build/model-cache/old-school-value-g8-v1-t" +
@@ -1392,6 +1452,404 @@ std::string learned_value_g8_mix50_cache_path(
     return "build/model-cache/old-school-value-g8-mix50-v1-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
+}
+
+std::string learned_value_challenger_cache_path(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value challenger cache training_games must "
+            "be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value challenger cache generations must be "
+            "positive");
+    }
+    return "build/model-cache/"
+           "old-school-value-challenger-v1-c" +
+           std::to_string(self_play_generations) + "-t" +
+           std::to_string(training_games) + "-s" +
+           std::to_string(seed) + ".bin";
+}
+
+void write_learned_value_challenger_artifact_atomic(
+    const std::string& path,
+    const LearnedValueChallengerArtifact& artifact) {
+    const auto& model = artifact.model_;
+    const std::size_t training_games =
+        artifact.training_games_;
+    const std::uint64_t seed = artifact.seed_;
+    const std::size_t self_play_generations =
+        artifact.self_play_generations_;
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value challenger artifact training_games "
+            "must be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value challenger artifact generations must "
+            "be positive");
+    }
+    if (!model) {
+        throw std::invalid_argument(
+            "Learned Value challenger artifact model must not "
+            "be null");
+    }
+    if (model->variant_ !=
+        LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Learned Value challenger artifact requires a Value "
+            "model");
+    }
+
+    const std::string fingerprint =
+        learned_model_fingerprint(model);
+    ValueG8BinaryWriter payload;
+    payload.text(kValueChallengerEngineSchemaId);
+    payload.text(kValueChallengerRecipeId);
+    payload.size(kLearnedCardCount);
+    payload.size(LearnedModel::kScalarFeatureCount);
+    payload.size(LearnedModel::kCardPlanes);
+    payload.size(LearnedModel::kFeatureCount);
+    payload.size(LearnedModel::kHiddenCount);
+    payload.size(LearnedModel::kPolicyDecisionCount);
+    payload.size(LearnedModel::kPolicyPhaseCount);
+    payload.size(LearnedModel::kPolicyVerbCount);
+    payload.size(LearnedModel::kPolicyCardPlanes);
+    payload.size(LearnedModel::kPolicyScalarCount);
+    payload.size(LearnedModel::kPolicyFeatureCount);
+    payload.size(LearnedModel::kPolicyHiddenCount);
+    payload.size(training_games);
+    payload.unsigned64(seed);
+    payload.size(self_play_generations);
+    payload.text(fingerprint);
+
+    std::size_t node_count = 0;
+    std::function<void(
+        const std::shared_ptr<const LearnedModel>&,
+        std::size_t)>
+        write_model;
+    write_model =
+        [&](const std::shared_ptr<const LearnedModel>& node,
+            std::size_t depth) {
+            if (!node) {
+                throw std::runtime_error(
+                    "Learned Value challenger artifact contains "
+                    "a null model node");
+            }
+            if (depth > kMaximumValueG8ArtifactDepth ||
+                ++node_count > kMaximumValueG8ArtifactNodes) {
+                throw std::runtime_error(
+                    "Learned Value challenger artifact model "
+                    "graph exceeds its bound");
+            }
+            if (node->variant_ !=
+                LearnedVariant::ValueSearchChampion) {
+                throw std::runtime_error(
+                    "Learned Value challenger artifact contains "
+                    "a non-Value model node");
+            }
+            if (node->ensemble_.size() >
+                kMaximumValueG8EnsembleMembers) {
+                throw std::runtime_error(
+                    "Learned Value challenger artifact ensemble "
+                    "exceeds its bound");
+            }
+            payload.unsigned32(0x4D4F444C);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(node->variant_));
+            write_value_g8_fixed(
+                payload, node->input_weights_);
+            write_value_g8_fixed(
+                payload, node->hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->output_weights_);
+            write_value_g8_fixed(
+                payload, node->direct_output_weights_);
+            payload.real(node->output_bias_);
+            write_value_g8_fixed(
+                payload, node->policy_input_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->policy_output_weights_);
+            write_value_g8_fixed(
+                payload,
+                node->policy_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_output_bias_);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(
+                    node->ensemble_.size()));
+            for (const auto& member : node->ensemble_) {
+                write_model(member, depth + 1);
+            }
+        };
+    write_model(model, 0);
+
+    ValueG8BinaryWriter file;
+    file.bytes(kValueChallengerArtifactMagic);
+    file.unsigned32(kValueChallengerArtifactSchema);
+    file.size(payload.data().size());
+    file.unsigned64(
+        value_g8_payload_checksum(payload.data()));
+    file.bytes(payload.data());
+    write_value_g8_file_atomic(path, file.data());
+}
+
+LearnedValueChallengerArtifact
+load_learned_value_challenger_artifact(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_seed,
+    std::size_t expected_self_play_generations) {
+    if (expected_training_games == 0) {
+        throw std::invalid_argument(
+            "expected Learned Value challenger training_games "
+            "must be positive");
+    }
+    if (expected_self_play_generations == 0) {
+        throw std::invalid_argument(
+            "expected Learned Value challenger generations must "
+            "be positive");
+    }
+
+    const std::vector<std::uint8_t> file_bytes =
+        read_bounded_value_g8_file(path);
+    ValueG8BinaryReader file(file_bytes);
+    for (const std::uint8_t expected :
+         kValueChallengerArtifactMagic) {
+        if (file.byte("file magic") != expected) {
+            throw std::runtime_error(
+                "Learned Value challenger artifact '" + path +
+                "' has the wrong magic");
+        }
+    }
+    const std::uint32_t schema = file.unsigned32("schema");
+    if (schema != kValueChallengerArtifactSchema) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' uses unsupported schema " +
+            std::to_string(schema) + " (expected " +
+            std::to_string(kValueChallengerArtifactSchema) + ")");
+    }
+    const std::size_t payload_size =
+        file.size("payload length");
+    if (file.remaining() < 8 ||
+        payload_size > kMaximumValueG8ArtifactBytes ||
+        payload_size != file.remaining() - 8) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' has an invalid payload length");
+    }
+    const std::uint64_t stored_checksum =
+        file.unsigned64("payload checksum");
+    const auto payload_bytes =
+        file.take(payload_size, "payload");
+    if (!file.at_end()) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' has trailing bytes");
+    }
+    if (value_g8_payload_checksum(payload_bytes) !=
+        stored_checksum) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' failed its payload checksum");
+    }
+
+    ValueG8BinaryReader payload(payload_bytes);
+    const std::string engine_schema =
+        payload.text("engine schema ID");
+    if (engine_schema !=
+        kValueChallengerEngineSchemaId) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' engine schema mismatch: found '" +
+            engine_schema + "', expected '" +
+            std::string(kValueChallengerEngineSchemaId) + "'");
+    }
+    const std::string recipe = payload.text("recipe ID");
+    if (recipe != kValueChallengerRecipeId) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' recipe mismatch: found '" + recipe +
+            "', expected '" +
+            std::string(kValueChallengerRecipeId) + "'");
+    }
+    const auto require_dimension =
+        [&](std::string_view name, std::size_t expected) {
+            const std::size_t actual = payload.size(name);
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "Learned Value challenger artifact '" + path +
+                    "' dimension '" + std::string(name) +
+                    "' is " + std::to_string(actual) +
+                    ", expected " + std::to_string(expected));
+            }
+        };
+    require_dimension("card count", kLearnedCardCount);
+    require_dimension(
+        "scalar feature count",
+        LearnedModel::kScalarFeatureCount);
+    require_dimension(
+        "card planes", LearnedModel::kCardPlanes);
+    require_dimension(
+        "feature count", LearnedModel::kFeatureCount);
+    require_dimension(
+        "hidden count", LearnedModel::kHiddenCount);
+    require_dimension(
+        "policy decision count",
+        LearnedModel::kPolicyDecisionCount);
+    require_dimension(
+        "policy phase count",
+        LearnedModel::kPolicyPhaseCount);
+    require_dimension(
+        "policy verb count",
+        LearnedModel::kPolicyVerbCount);
+    require_dimension(
+        "policy card planes",
+        LearnedModel::kPolicyCardPlanes);
+    require_dimension(
+        "policy scalar count",
+        LearnedModel::kPolicyScalarCount);
+    require_dimension(
+        "policy feature count",
+        LearnedModel::kPolicyFeatureCount);
+    require_dimension(
+        "policy hidden count",
+        LearnedModel::kPolicyHiddenCount);
+
+    const std::size_t training_games =
+        payload.size("metadata training_games");
+    const std::uint64_t seed =
+        payload.unsigned64("metadata seed");
+    const std::size_t self_play_generations =
+        payload.size("metadata generations");
+    if (training_games != expected_training_games) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' training_games mismatch: found " +
+            std::to_string(training_games) + ", expected " +
+            std::to_string(expected_training_games));
+    }
+    if (seed != expected_seed) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' training seed mismatch: found " +
+            std::to_string(seed) + ", expected " +
+            std::to_string(expected_seed));
+    }
+    if (self_play_generations !=
+        expected_self_play_generations) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' generation mismatch: found " +
+            std::to_string(self_play_generations) +
+            ", expected " +
+            std::to_string(expected_self_play_generations));
+    }
+    const std::string stored_fingerprint =
+        payload.text("model fingerprint");
+    if (!is_lower_hex_fingerprint(stored_fingerprint)) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' has a malformed model fingerprint");
+    }
+
+    std::size_t node_count = 0;
+    std::function<std::shared_ptr<const LearnedModel>(
+        std::size_t)>
+        read_model;
+    read_model = [&](std::size_t depth)
+        -> std::shared_ptr<const LearnedModel> {
+        if (depth > kMaximumValueG8ArtifactDepth ||
+            ++node_count > kMaximumValueG8ArtifactNodes) {
+            throw std::runtime_error(
+                "Learned Value challenger artifact '" + path +
+                "' model graph exceeds its bound");
+        }
+        if (payload.unsigned32("model marker") !=
+            0x4D4F444C) {
+            throw std::runtime_error(
+                "Learned Value challenger artifact '" + path +
+                "' has an invalid model marker");
+        }
+        const std::uint32_t raw_variant =
+            payload.unsigned32("model variant");
+        if (raw_variant !=
+            static_cast<std::uint32_t>(
+                LearnedVariant::ValueSearchChampion)) {
+            throw std::runtime_error(
+                "Learned Value challenger artifact '" + path +
+                "' contains a non-Value model variant");
+        }
+        auto node = std::shared_ptr<LearnedModel>(
+            new LearnedModel(
+                0, LearnedVariant::ValueSearchChampion));
+        read_value_g8_fixed(
+            payload, node->input_weights_,
+            "critic input weight");
+        read_value_g8_fixed(
+            payload, node->hidden_biases_,
+            "critic hidden bias");
+        read_value_g8_fixed(
+            payload, node->output_weights_,
+            "critic output weight");
+        read_value_g8_fixed(
+            payload, node->direct_output_weights_,
+            "critic direct weight");
+        node->output_bias_ =
+            payload.real("critic output bias");
+        read_value_g8_fixed(
+            payload, node->policy_input_weights_,
+            "policy input weight");
+        read_value_g8_fixed(
+            payload, node->policy_hidden_biases_,
+            "policy hidden bias");
+        read_value_g8_fixed(
+            payload, node->policy_output_weights_,
+            "policy output weight");
+        read_value_g8_fixed(
+            payload,
+            node->policy_direct_output_weights_,
+            "policy direct weight");
+        read_value_g8_fixed(
+            payload, node->policy_output_bias_,
+            "policy output bias");
+        const std::uint32_t member_count =
+            payload.unsigned32("ensemble member count");
+        if (member_count >
+            kMaximumValueG8EnsembleMembers) {
+            throw std::runtime_error(
+                "Learned Value challenger artifact '" + path +
+                "' ensemble exceeds its bound");
+        }
+        node->ensemble_.reserve(member_count);
+        for (std::uint32_t member = 0;
+             member < member_count; ++member) {
+            node->ensemble_.push_back(
+                read_model(depth + 1));
+        }
+        return node;
+    };
+    auto model = read_model(0);
+    if (!payload.at_end()) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' has trailing payload bytes");
+    }
+    if (learned_model_fingerprint(model) != stored_fingerprint) {
+        throw std::runtime_error(
+            "Learned Value challenger artifact '" + path +
+            "' model fingerprint mismatch");
+    }
+    return LearnedValueChallengerArtifact(
+        std::move(model), training_games, seed,
+        self_play_generations);
 }
 
 void write_learned_value_g8_bundle_atomic(
@@ -7662,7 +8120,8 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
             tournament_config.bot_field == BotField::Mixed
                 ? LearnedVariant::ValueSearchChampion
                 : tournament_config.learned_variant,
-        .rollouts_per_action = 2,
+        .rollouts_per_action =
+            tournament_config.learned_rollouts,
         .training_games = tournament_config.learned_training_games,
     };
 
@@ -8117,6 +8576,11 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
             tournament_config.monte_carlo_rollouts) {
         throw std::invalid_argument(
             "deep Monte Carlo must use more rollouts than Monte Carlo");
+    }
+    if (uses_learned &&
+        tournament_config.learned_rollouts == 0) {
+        throw std::invalid_argument(
+            "Learned rollouts per action must be positive");
     }
     if (uses_learned &&
         tournament_config.learned_training_games == 0 &&
@@ -9274,6 +9738,235 @@ train_learned_value_champion(std::size_t training_games,
         examples.insert(
             examples.end(), self_play_examples.begin(),
             self_play_examples.end());
+        train_members(
+            3, 0.006,
+            0x53454C4600000000ULL +
+                0x100ULL * generation);
+        model = make_ensemble();
+    }
+    return model;
+}
+
+std::shared_ptr<const LearnedModel>
+train_learned_value_challenger(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value challenger training games must be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value challenger generations must be positive");
+    }
+
+    std::mt19937_64 random(seed);
+    std::uniform_int_distribution<std::size_t> choose_deck(
+        0, kDeckCount - 1);
+    const auto choose_distinct_decks = [&] {
+        const std::size_t first = choose_deck(random);
+        std::size_t second = choose_deck(random);
+        while (second == first) {
+            second = choose_deck(random);
+        }
+        return std::pair{
+            static_cast<DeckId>(first),
+            static_cast<DeckId>(second),
+        };
+    };
+    const auto add_trace =
+        [](const std::vector<GameState>& trace,
+           const GameResult& result,
+           std::vector<LearnedModel::TrainingExample>& destination) {
+            for (const auto& state : trace) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    double target = 0.5;
+                    if (result.winner >= 0) {
+                        const double discounted_outcome =
+                            0.5 * std::pow(
+                                      0.985,
+                                      static_cast<double>(
+                                          result.turns));
+                        target =
+                            result.winner ==
+                                    static_cast<int>(perspective)
+                                ? 0.5 + discounted_outcome
+                                : 0.5 - discounted_outcome;
+                    }
+                    destination.emplace_back(
+                        learned_features(state, perspective),
+                        target);
+                }
+            }
+        };
+
+    constexpr std::size_t kBootstrapStepStates = 4;
+    constexpr double kBootstrapWeight = 0.5;
+    const auto add_bootstrap_trace =
+        [&add_trace](
+            const std::vector<GameState>& trace,
+            const GameResult& result,
+            const std::shared_ptr<const LearnedModel>& frozen,
+            std::vector<LearnedModel::TrainingExample>& destination) {
+            if (frozen == nullptr) {
+                add_trace(trace, result, destination);
+                return;
+            }
+            for (std::size_t index = 0; index < trace.size();
+                 ++index) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    double terminal_target = 0.5;
+                    if (result.winner >= 0) {
+                        const double discounted_outcome =
+                            0.5 * std::pow(
+                                      0.985,
+                                      static_cast<double>(
+                                          result.turns));
+                        terminal_target =
+                            result.winner ==
+                                    static_cast<int>(perspective)
+                                ? 0.5 + discounted_outcome
+                                : 0.5 - discounted_outcome;
+                    }
+                    double target = terminal_target;
+                    const std::size_t bootstrap_index =
+                        index + kBootstrapStepStates;
+                    if (bootstrap_index < trace.size()) {
+                        const double bootstrap = frozen->predict(
+                            learned_features(
+                                trace[bootstrap_index],
+                                perspective));
+                        target = (1.0 - kBootstrapWeight) *
+                                     terminal_target +
+                                 kBootstrapWeight * bootstrap;
+                    }
+                    destination.emplace_back(
+                        learned_features(trace[index], perspective),
+                        target);
+                }
+            }
+        };
+
+    std::vector<LearnedModel::TrainingExample> examples;
+    examples.reserve(training_games * 120);
+    for (std::size_t game_index = 0;
+         game_index < training_games; ++game_index) {
+        const auto [first_deck, second_deck] =
+            choose_distinct_decks();
+        Game game(deck_cards(first_deck),
+                  deck_cards(second_deck), random());
+        std::vector<GameState> trace;
+        const GameResult result = game.run_with_trace(trace);
+        add_trace(trace, result, examples);
+    }
+
+    constexpr std::size_t kEnsembleMembers = 2;
+    std::array<std::shared_ptr<LearnedModel>, kEnsembleMembers>
+        members;
+    for (std::size_t member = 0; member < members.size();
+         ++member) {
+        members[member] = std::make_shared<LearnedModel>(
+            seed ^ (0x4D4F44454C000000ULL + member),
+            LearnedVariant::ValueSearchChampion);
+    }
+    const auto train_members =
+        [&](std::size_t epochs, double learning_rate,
+            std::uint64_t training_tag) {
+            std::array<std::thread, kEnsembleMembers> trainers;
+            for (std::size_t member = 0;
+                 member < members.size(); ++member) {
+                trainers[member] = std::thread([&, member] {
+                    members[member]->train(
+                        examples, epochs, learning_rate,
+                        seed ^ (training_tag + member));
+                });
+            }
+            for (auto& trainer : trainers) {
+                trainer.join();
+            }
+        };
+    const auto make_ensemble = [&] {
+        std::vector<std::shared_ptr<const LearnedModel>>
+            ensemble_members;
+        ensemble_members.reserve(members.size());
+        for (const auto& member : members) {
+            ensemble_members.push_back(member);
+        }
+        return std::make_shared<LearnedModel>(
+            std::move(ensemble_members),
+            seed ^ 0x56414C5545534541ULL,
+            LearnedVariant::ValueSearchChampion);
+    };
+
+    train_members(8, 0.015, 0x545241494E000000ULL);
+    std::shared_ptr<const LearnedModel> model =
+        make_ensemble();
+
+    constexpr std::size_t kReplayWindowGenerations = 3;
+    const std::size_t random_example_count = examples.size();
+    std::vector<std::vector<LearnedModel::TrainingExample>>
+        generation_blocks;
+    for (std::size_t generation = 0;
+         generation < self_play_generations; ++generation) {
+        std::vector<LearnedModel::TrainingExample>
+            self_play_examples;
+        const std::size_t generation_games =
+            std::max<std::size_t>(1, training_games / 4);
+        self_play_examples.reserve(generation_games * 60);
+        for (std::size_t game_index = 0;
+             game_index < generation_games; ++game_index) {
+            GameConfig config;
+            config.learned_model = model;
+            const double exploration_rate =
+                generation < 2 ? 0.10 : 0.05;
+            const std::size_t collection_rollouts =
+                generation < self_play_generations / 2
+                    ? 0
+                    : 1;
+            config.learned_search_depth =
+                collection_rollouts == 0 ? 0 : 1;
+            config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = collection_rollouts,
+                    .exploration_rate = exploration_rate,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = collection_rollouts,
+                    .exploration_rate = exploration_rate,
+                },
+            };
+            const auto [first_deck, second_deck] =
+                choose_distinct_decks();
+            Game game(deck_cards(first_deck),
+                      deck_cards(second_deck), random(), config);
+            std::vector<GameState> trace;
+            const GameResult result =
+                game.run_with_trace(trace);
+            add_bootstrap_trace(
+                trace, result, model, self_play_examples);
+        }
+        generation_blocks.push_back(
+            std::move(self_play_examples));
+        examples.resize(random_example_count);
+        const std::size_t window_begin =
+            generation_blocks.size() > kReplayWindowGenerations
+                ? generation_blocks.size() -
+                      kReplayWindowGenerations
+                : 0;
+        for (std::size_t block = window_begin;
+             block < generation_blocks.size(); ++block) {
+            examples.insert(examples.end(),
+                            generation_blocks[block].begin(),
+                            generation_blocks[block].end());
+        }
         train_members(
             3, 0.006,
             0x53454C4600000000ULL +

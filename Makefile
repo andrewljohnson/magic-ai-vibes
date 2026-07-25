@@ -15,8 +15,11 @@ LEARNED_ITERATION_TEST_RUNNER := $(BUILD_DIR)/old-school-learned-iteration-tests
 PROBE_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-tests
 PROBE_EVAL_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-eval-tests
 PROBE_RUNNER_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-runner-tests
+LEARNED_ROLLOUTS ?= 2
+LEARNED_GENERATIONS ?= 0
+CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-learned-iteration test-probes benchmark benchmark-deep benchmark-learned stability evolve run clean
+.PHONY: all test test-learned-iteration test-probes benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -65,16 +68,19 @@ benchmark-deep: $(SIMULATOR)
 	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger handcrafted --baseline deep-monte-carlo --deep-rollouts 8
 
 benchmark-learned: $(SIMULATOR)
-	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger learned --baseline handcrafted --rollouts 2 --train-games 800
+	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger learned --baseline handcrafted --learned-rollouts $(LEARNED_ROLLOUTS) --train-games 800
+
+benchmark-challenger: $(SIMULATOR)
+	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger learned-value-c$(CHALLENGER_GENERATIONS) --baseline learned-value-g0 --learned-rollouts $(LEARNED_ROLLOUTS) --train-games 800
 
 stability: $(SIMULATOR)
-	./$(SIMULATOR) --stability --stability-runs 8 --games 5 --seed 0 --rollouts 2 --deep-rollouts 8 --train-games 800
+	./$(SIMULATOR) --stability --stability-runs 8 --games 5 --seed 0 --rollouts 2 --deep-rollouts 8 --learned-rollouts $(LEARNED_ROLLOUTS) --learned-generations $(LEARNED_GENERATIONS) --train-games 800
 
 evolve: $(SIMULATOR)
 	./$(SIMULATOR) --evolve-deck --generations 10 --population 16 --games 4
 
 run: $(SIMULATOR)
-	./$(SIMULATOR) --seed 4242
+	./$(SIMULATOR) --seed 4242 --learned-rollouts $(LEARNED_ROLLOUTS) --learned-generations $(LEARNED_GENERATIONS)
 
 clean:
 	rm -rf $(BUILD_DIR)

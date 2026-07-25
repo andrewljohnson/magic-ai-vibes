@@ -14,6 +14,7 @@
 #include <iostream>
 #include <limits>
 #include <locale>
+#include <map>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -126,28 +127,40 @@ void print_help(std::string_view executable) {
     std::cout
         << "Usage: " << executable
         << " [--games N] [--seed N] [--bots MODE] [--rollouts N]"
-           " [--deep-rollouts N] [--train-games N] [--train-seed N]\n"
+           " [--deep-rollouts N] [--learned-rollouts N]"
+           " [--learned-generations N]"
+           " [--refresh-value-challenger-cache]"
+           " [--train-games N] [--train-seed N]\n"
         << "       " << executable
         << " --interactive [--seed N] [--train-games N]"
-           " [--train-seed N]\n"
+           " [--train-seed N] [--learned-generations N]"
+           " [--learned-rollouts N]"
+           " [--refresh-value-challenger-cache]\n"
         << "       " << executable
         << " --benchmark [--games N] [--challenger BOT]"
-           " [--baseline BOT] [--actor-policy-epochs N]"
+           " [--baseline BOT] [--learned-rollouts N]"
+           " [--actor-policy-epochs N]"
            " [--actor-policy-rate X]"
+           " [--refresh-value-challenger-cache]"
            " [--refresh-value-g8-cache]"
            " [--refresh-value-mix50-cache]\n"
         << "       " << executable
-        << " --stability [--stability-runs N] [--games N]\n\n"
+        << " --stability [--stability-runs N] [--games N]"
+           " [--refresh-value-challenger-cache]\n\n"
         << "       " << executable
         << " --diagnose-white-plan [--seed N] [--train-games N]\n"
         << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
+           " [--probe-corpus dev-v3|validation-v1]"
+           " [--learned-rollouts N]"
+           " [--learned-generations N]"
            " [--actor-generation 0|1] [--value-generation 0|8]"
            " [--value-recipe canonical|mix50]"
            " [--probe-cache PATH]"
            " [--refresh-probe-cache]"
+           " [--refresh-value-challenger-cache]"
            " [--refresh-value-g8-cache]"
            " [--refresh-value-mix50-cache]"
            " [--actor-policy-epochs N] [--actor-policy-rate X]\n"
@@ -173,6 +186,13 @@ void print_help(std::string_view executable) {
            "(default: 2)\n"
         << "  --deep-rollouts N  Deep Monte Carlo continuations per "
            "legal action (default: 8)\n"
+        << "  --learned-rollouts N  Learned search worlds per legal "
+           "action, including Value candidate scoring under "
+           "--score-probes (default: 2; probe minimum: 2)\n"
+        << "  --learned-generations N  Select the separate Value "
+           "challenger for interactive, stability, mixed/learned "
+           "simulation, or probe scoring; 0 keeps legacy G0 "
+           "(default: 0)\n"
         << "  --train-games N  Training games for the selected learned "
            "model "
            "(default: 800)\n"
@@ -183,7 +203,8 @@ void print_help(std::string_view executable) {
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
            "(default: handcrafted; learned generations: "
-           "learned-value-g0..g8, learned-value-mix50-g8, "
+           "learned-value-g0..g8, learned-value-cN, "
+           "learned-value-mix50-g8, "
            "learned-actor-g0/g1)\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
@@ -195,8 +216,10 @@ void print_help(std::string_view executable) {
            "rankings on a held-out White lock state\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
-        << "  --score-probes   Label/score the held-out 20-position "
-           "probe-dev-v3 development corpus\n"
+        << "  --score-probes   Label/score an offline decision-probe "
+           "corpus\n"
+        << "  --probe-corpus NAME  dev-v3 (20-position development "
+           "default) or validation-v1 (harvested RU X=0 regression)\n"
         << "  --probe-worlds N  Common worlds per reference candidate "
            "(default: 128; minimum: 2)\n"
         << "  --probe-horizon N  Actor-mirror reference horizon in turns "
@@ -212,9 +235,11 @@ void print_help(std::string_view executable) {
         << "  --actor-policy-rate X  G1 policy-fit learning rate "
            "(default: 0.001; requires a selected Actor G1)\n"
         << "  --probe-cache PATH  Deterministic label cache "
-           "(default: data/old-school-probe-dev-v3.labels.tsv)\n"
+           "(default depends on --probe-corpus)\n"
         << "  --refresh-probe-cache  Regenerate matching probe labels "
            "atomically\n"
+        << "  --refresh-value-challenger-cache  Retrain and atomically "
+           "replace every selected Value Challenger C<N> artifact\n"
         << "  --refresh-value-g8-cache  Retrain and atomically replace "
            "the selected canonical Value G8 artifact\n"
         << "  --refresh-value-mix50-cache  Retrain and atomically replace "
@@ -230,9 +255,17 @@ void print_help(std::string_view executable) {
 }
 
 struct BotSelection {
+    enum class ValueFamily : std::uint8_t {
+        LegacyG0,
+        Challenger,
+        Canonical,
+        Mix50,
+    };
+
     old_school::BotKind kind = old_school::BotKind::Random;
     old_school::LearnedVariant learned_variant =
         old_school::LearnedVariant::ValueSearchChampion;
+    ValueFamily value_family = ValueFamily::LegacyG0;
     old_school::LearnedValueG8Recipe value_recipe =
         old_school::LearnedValueG8Recipe::CanonicalAllSearchLate;
     std::size_t value_generation = 0;
@@ -262,6 +295,32 @@ BotSelection parse_bot(std::string_view value) {
             .value_generation = 0,
         };
     }
+    constexpr std::string_view challenger_generation_prefix =
+        "learned-value-c";
+    if (value.starts_with(challenger_generation_prefix)) {
+        const std::string_view suffix =
+            value.substr(challenger_generation_prefix.size());
+        std::uint64_t generation = 0;
+        const auto result =
+            std::from_chars(suffix.data(),
+                            suffix.data() + suffix.size(),
+                            generation);
+        if (result.ec == std::errc{} &&
+            result.ptr == suffix.data() + suffix.size() &&
+            generation > 0 &&
+            generation <=
+                std::numeric_limits<std::size_t>::max()) {
+            return {
+                .kind = old_school::BotKind::Learned,
+                .learned_variant =
+                    old_school::LearnedVariant::ValueSearchChampion,
+                .value_family =
+                    BotSelection::ValueFamily::Challenger,
+                .value_generation =
+                    static_cast<std::size_t>(generation),
+            };
+        }
+    }
     constexpr std::string_view value_generation_prefix =
         "learned-value-g";
     if (value.starts_with(value_generation_prefix) &&
@@ -271,6 +330,8 @@ BotSelection parse_bot(std::string_view value) {
             .kind = old_school::BotKind::Learned,
             .learned_variant =
                 old_school::LearnedVariant::ValueSearchChampion,
+            .value_family =
+                BotSelection::ValueFamily::Canonical,
             .value_generation =
                 static_cast<std::size_t>(value.back() - '0'),
         };
@@ -280,6 +341,7 @@ BotSelection parse_bot(std::string_view value) {
             .kind = old_school::BotKind::Learned,
             .learned_variant =
                 old_school::LearnedVariant::ValueSearchChampion,
+            .value_family = BotSelection::ValueFamily::Mix50,
             .value_recipe =
                 old_school::LearnedValueG8Recipe::LateMix50,
             .value_generation = 8,
@@ -349,9 +411,10 @@ BotFieldSelection parse_bot_field(std::string_view value) {
         "learned-actor)");
 }
 
-std::string_view bot_field_name(
+std::string bot_field_name(
     old_school::BotField field,
-    old_school::LearnedVariant learned_variant) {
+    old_school::LearnedVariant learned_variant,
+    std::size_t learned_generations) {
     switch (field) {
     case old_school::BotField::Random:
         return "random only";
@@ -362,13 +425,23 @@ std::string_view bot_field_name(
     case old_school::BotField::Handcrafted:
         return "Handcrafted Policy only";
     case old_school::BotField::Learned:
-        return learned_variant ==
-                       old_school::LearnedVariant::UnifiedActor
-                   ? "Learned Unified Actor only"
-                   : "Learned Value Search Champion only";
+        if (learned_variant ==
+            old_school::LearnedVariant::UnifiedActor) {
+            return "Learned Unified Actor only";
+        }
+        return learned_generations == 0
+                   ? "Learned Value G0 only"
+                   : "Learned Value Challenger C" +
+                         std::to_string(learned_generations) +
+                         " only";
     case old_school::BotField::Mixed:
         return "mixed Random, Monte Carlo, Deep Monte Carlo, "
-               "Handcrafted Policy, and Learned Value Search Champion";
+               "Handcrafted Policy, and " +
+               (learned_generations == 0
+                    ? std::string("Learned Value G0")
+                    : "Learned Value Challenger C" +
+                          std::to_string(
+                              learned_generations));
     }
     return "unknown";
 }
@@ -545,7 +618,8 @@ void print_deck_bot_benefit(const old_school::TournamentSummary& result) {
 old_school::BotConfig bot_config(BotSelection selection,
                             std::size_t rollouts,
                             std::size_t deep_rollouts,
-                            std::size_t training_games) {
+                            std::size_t training_games,
+                            std::size_t learned_rollouts) {
     old_school::BotConfig config;
     config.kind = selection.kind;
     config.learned_variant = selection.learned_variant;
@@ -556,7 +630,7 @@ old_school::BotConfig bot_config(BotSelection selection,
         config.rollouts_per_action = 1;
         return config;
     case old_school::BotKind::Learned:
-        config.rollouts_per_action = 2;
+        config.rollouts_per_action = learned_rollouts;
         return config;
     case old_school::BotKind::MonteCarlo:
         config.rollouts_per_action = rollouts;
@@ -571,21 +645,38 @@ old_school::BotConfig bot_config(BotSelection selection,
 old_school::BotConfig bot_config(old_school::BotKind kind,
                             std::size_t rollouts,
                             std::size_t deep_rollouts,
-                            std::size_t training_games) {
+                            std::size_t training_games,
+                            std::size_t learned_rollouts = 2) {
     return bot_config(
         {.kind = kind,
          .learned_variant =
              old_school::LearnedVariant::ValueSearchChampion},
-        rollouts, deep_rollouts, training_games);
+        rollouts, deep_rollouts, training_games,
+        learned_rollouts);
 }
+
+std::shared_ptr<const old_school::LearnedModel>
+train_value_challenger_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed,
+    std::size_t generations,
+    bool refresh_cache);
 
 std::shared_ptr<const old_school::LearnedModel>
 train_frozen_learned_model(old_school::LearnedVariant variant,
                            std::size_t training_games,
-                           std::uint64_t training_seed) {
+                           std::uint64_t training_seed,
+                           std::size_t challenger_generations,
+                           bool refresh_challenger_cache) {
     if (variant == old_school::LearnedVariant::UnifiedActor) {
         return old_school::train_learned_actor_model(
             training_games, training_seed);
+    }
+    if (challenger_generations > 0) {
+        return train_value_challenger_with_progress(
+            training_games, training_seed,
+            challenger_generations,
+            refresh_challenger_cache);
     }
     return old_school::train_learned_value_champion(
         training_games, training_seed);
@@ -606,6 +697,77 @@ train_value_g0_with_progress(std::size_t training_games,
               << elapsed.count() << "s)\n"
               << "  Value G0 fingerprint: "
               << old_school::learned_model_fingerprint(model) << '\n';
+    return model;
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+train_value_challenger_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed,
+    std::size_t generations,
+    bool refresh_cache) {
+    const std::string cache_path =
+        old_school::learned_value_challenger_cache_path(
+            training_games, training_seed, generations);
+    std::error_code exists_error;
+    const bool cache_exists =
+        std::filesystem::exists(cache_path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect Value Challenger C" +
+            std::to_string(generations) + " artifact cache '" +
+            cache_path + "': " + exists_error.message());
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    std::shared_ptr<const old_school::LearnedModel> model;
+    if (cache_exists && !refresh_cache) {
+        std::cout
+            << "Loading immutable Value Challenger C"
+            << generations << " artifact (seed " << training_seed
+            << ", " << training_games << " initial games) from "
+            << cache_path << "..." << std::flush;
+        try {
+            model = old_school::
+                        load_learned_value_challenger_artifact(
+                            cache_path, training_games,
+                            training_seed, generations)
+                        .model();
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                "Value Challenger C" +
+                std::to_string(generations) +
+                " artifact cache '" + cache_path +
+                "' is invalid: " + error.what() +
+                "; rerun this challenger route with "
+                "--refresh-value-challenger-cache to regenerate it");
+        }
+    } else {
+        std::cout << "Training frozen Value Challenger C"
+                  << generations << " (seed " << training_seed
+                  << ", " << training_games
+                  << " initial games)..." << std::flush;
+        const auto artifact =
+            old_school::train_learned_value_challenger_artifact(
+                training_games, training_seed, generations);
+        model = artifact.model();
+        old_school::
+            write_learned_value_challenger_artifact_atomic(
+                cache_path, artifact);
+    }
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout << " done (" << std::fixed << std::setprecision(2)
+              << elapsed.count() << "s)\n"
+              << "  Value Challenger C" << generations
+              << " fingerprint: "
+              << old_school::learned_model_fingerprint(model) << '\n'
+              << "  Value Challenger C" << generations
+              << " artifact cache: "
+              << (cache_exists && !refresh_cache
+                      ? "loaded "
+                      : "generated ")
+              << cache_path << '\n';
     return model;
 }
 
@@ -1047,14 +1209,16 @@ void print_benchmark(const old_school::BotBenchmarkSummary& result,
                   << challenger_name
                   << ", seed " << result.learned_training_seed
                   << ", " << result.challenger.training_games
-                  << " training games\n";
+                  << " training games, K="
+                  << result.challenger.rollouts_per_action << '\n';
     }
     if (result.baseline.kind == old_school::BotKind::Learned) {
         std::cout << "Baseline frozen model: "
                   << baseline_name
                   << ", seed " << result.learned_training_seed
                   << ", " << result.baseline.training_games
-                  << " training games\n";
+                  << " training games, K="
+                  << result.baseline.rollouts_per_action << '\n';
     }
     std::cout
               << "Repetitions per unordered deck pairing: "
@@ -1125,7 +1289,10 @@ bool run_stability_panel(std::size_t runs,
                          std::uint64_t training_seed,
                          std::size_t rollouts,
                          std::size_t deep_rollouts,
-                         std::size_t training_games) {
+                         std::size_t training_games,
+                         std::size_t learned_rollouts,
+                         std::size_t learned_generations,
+                         bool refresh_challenger_cache) {
     constexpr std::array<old_school::BotKind, 4> baseline_kinds = {
         old_school::BotKind::Random,
         old_school::BotKind::MonteCarlo,
@@ -1134,7 +1301,8 @@ bool run_stability_panel(std::size_t runs,
     };
     old_school::BotConfig learned_config =
         bot_config(old_school::BotKind::Learned, rollouts,
-                   deep_rollouts, training_games);
+                   deep_rollouts, training_games,
+                   learned_rollouts);
     std::array<old_school::BotBenchmarkSummary, baseline_kinds.size()>
         pooled;
     std::array<std::size_t, baseline_kinds.size()> seed_wins{};
@@ -1179,6 +1347,7 @@ bool run_stability_panel(std::size_t runs,
     mixed_config.bot_field = old_school::BotField::Mixed;
     mixed_config.monte_carlo_rollouts = rollouts;
     mixed_config.deep_monte_carlo_rollouts = deep_rollouts;
+    mixed_config.learned_rollouts = learned_rollouts;
     mixed_config.learned_training_games = training_games;
     mixed_config.learned_variant =
         old_school::LearnedVariant::ValueSearchChampion;
@@ -1187,7 +1356,10 @@ bool run_stability_panel(std::size_t runs,
     std::size_t all_policy_seed_wins = 0;
 
     std::cout << std::fixed << std::setprecision(1)
-              << "Learned Value All-Policy Stability Panel\n"
+              << (learned_generations == 0
+                      ? "Learned Value G0 All-Policy Stability Panel\n"
+                      : "Learned Value Challenger All-Policy "
+                        "Stability Panel\n")
               << "Runs: " << runs << '\n'
               << "Evaluation base seed: " << base_seed << '\n'
               << "Training seed: " << training_seed << '\n'
@@ -1197,14 +1369,24 @@ bool run_stability_panel(std::size_t runs,
               << "Mixed-field games per deck pairing per run: "
               << mixed_games_per_matchup << '\n'
               << "Training games for fixed model: "
-              << training_games
+              << training_games << '\n'
+              << "Learned model: "
+              << (learned_generations == 0
+                      ? "Legacy G0"
+                      : "Challenger C" +
+                            std::to_string(learned_generations))
+              << "\nLearned search worlds per legal action: "
+              << learned_rollouts
               << "\nTraining fixed model..." << std::flush;
 
     old_school::GameConfig shared_config;
     shared_config.learned_training_seed = training_seed;
     shared_config.learned_model =
-        old_school::train_learned_value_champion(
-            training_games, training_seed);
+        train_frozen_learned_model(
+            old_school::LearnedVariant::ValueSearchChampion,
+            training_games, training_seed,
+            learned_generations,
+            refresh_challenger_cache);
     learned_config.learned_model = shared_config.learned_model;
     for (auto& result : pooled) {
         result.challenger.learned_model =
@@ -1539,6 +1721,8 @@ int main(int argc, char** argv) {
             old_school::LearnedVariant::ValueSearchChampion;
         std::size_t rollouts = 2;
         std::size_t deep_rollouts = 8;
+        std::size_t learned_rollouts = 2;
+        std::size_t learned_generations = 0;
         std::size_t training_games = 800;
         std::uint64_t training_seed =
             old_school::kDefaultLearnedTrainingSeed;
@@ -1552,10 +1736,16 @@ int main(int argc, char** argv) {
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
+        bool refresh_value_challenger_cache = false;
         bool refresh_value_g8_cache = false;
         bool refresh_value_mix50_cache = false;
         bool probe_option_used = false;
         bool actor_policy_option_used = false;
+        bool learned_rollouts_option_used = false;
+        bool learned_generations_option_used = false;
+        old_school::probe_runner::ProbeCorpusKind probe_corpus =
+            old_school::probe_runner::ProbeCorpusKind::DevV3;
+        bool probe_cache_was_set = false;
         std::size_t probe_worlds = 128;
         std::size_t probe_horizon = 12;
         std::size_t actor_generation = 0;
@@ -1615,6 +1805,11 @@ int main(int argc, char** argv) {
                 probe_option_used = true;
                 continue;
             }
+            if (option ==
+                "--refresh-value-challenger-cache") {
+                refresh_value_challenger_cache = true;
+                continue;
+            }
             if (option == "--refresh-value-g8-cache") {
                 refresh_value_g8_cache = true;
                 continue;
@@ -1627,12 +1822,15 @@ int main(int argc, char** argv) {
                 option != "--train-seed" &&
                 option != "--bots" && option != "--rollouts" &&
                 option != "--deep-rollouts" &&
+                option != "--learned-rollouts" &&
+                option != "--learned-generations" &&
                 option != "--train-games" &&
                 option != "--stability-runs" &&
                 option != "--generations" &&
                 option != "--population" &&
                 option != "--challenger" &&
                 option != "--baseline" &&
+                option != "--probe-corpus" &&
                 option != "--probe-worlds" &&
                 option != "--probe-horizon" &&
                 option != "--actor-generation" &&
@@ -1650,7 +1848,9 @@ int main(int argc, char** argv) {
             }
             if (option != "--seed" &&
                 option != "--train-seed" &&
-                option != "--train-games") {
+                option != "--train-games" &&
+                option != "--learned-rollouts" &&
+                option != "--learned-generations") {
                 interactive_unsupported_option_used = true;
             }
             if (option == "--bots") {
@@ -1677,6 +1877,25 @@ int main(int argc, char** argv) {
                 if (probe_cache.empty()) {
                     throw std::invalid_argument(
                         "--probe-cache must not be empty");
+                }
+                probe_cache_was_set = true;
+                probe_option_used = true;
+                continue;
+            }
+            if (option == "--probe-corpus") {
+                const std::string_view corpus = argv[argument];
+                if (corpus == "dev-v3") {
+                    probe_corpus =
+                        old_school::probe_runner::
+                            ProbeCorpusKind::DevV3;
+                } else if (corpus == "validation-v1") {
+                    probe_corpus =
+                        old_school::probe_runner::
+                            ProbeCorpusKind::ValidationV1;
+                } else {
+                    throw std::invalid_argument(
+                        "--probe-corpus must be dev-v3 or "
+                        "validation-v1");
                 }
                 probe_option_used = true;
                 continue;
@@ -1728,6 +1947,18 @@ int main(int argc, char** argv) {
                         "--deep-rollouts must be greater than zero");
                 }
                 deep_rollouts = static_cast<std::size_t>(value);
+            } else if (option == "--learned-rollouts") {
+                if (value == 0) {
+                    throw std::invalid_argument(
+                        "--learned-rollouts must be greater than zero");
+                }
+                learned_rollouts =
+                    static_cast<std::size_t>(value);
+                learned_rollouts_option_used = true;
+            } else if (option == "--learned-generations") {
+                learned_generations =
+                    static_cast<std::size_t>(value);
+                learned_generations_option_used = true;
             } else if (option == "--stability-runs") {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -1791,6 +2022,13 @@ int main(int argc, char** argv) {
             }
         }
 
+        if (!probe_cache_was_set) {
+            probe_cache =
+                old_school::probe_runner::default_probe_cache_path(
+                    probe_corpus)
+                    .string();
+        }
+
         if (static_cast<int>(interactive) +
                 static_cast<int>(benchmark) +
                 static_cast<int>(stability) +
@@ -1809,13 +2047,15 @@ int main(int argc, char** argv) {
             interactive_unsupported_option_used) {
             throw std::invalid_argument(
                 "--interactive only accepts --seed, --train-seed, "
-                "and --train-games");
+                "--train-games, --learned-generations, and "
+                "--learned-rollouts");
         }
         if (probe_option_used && !score_probes) {
             throw std::invalid_argument(
-                "--probe-worlds, --probe-horizon, --actor-generation, "
-                "--value-generation, --value-recipe, --probe-cache, and "
-                "--refresh-probe-cache require --score-probes");
+                "--probe-corpus, --probe-worlds, --probe-horizon, "
+                "--actor-generation, --value-generation, --value-recipe, "
+                "--probe-cache, and --refresh-probe-cache require "
+                "--score-probes");
         }
         if (score_probes &&
             value_recipe ==
@@ -1824,6 +2064,44 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--value-recipe mix50 requires "
                 "--value-generation 8");
+        }
+        const bool benchmark_uses_learned =
+            benchmark &&
+            (challenger.kind == old_school::BotKind::Learned ||
+             baseline.kind == old_school::BotKind::Learned);
+        const bool tournament_uses_any_learned =
+            !interactive && !benchmark && !stability && !evolve &&
+            !diagnose_white_plan && !variance_study && !score_probes &&
+            (bot_field == old_school::BotField::Mixed ||
+             bot_field == old_school::BotField::Learned);
+        const bool tournament_uses_value =
+            tournament_uses_any_learned &&
+            (bot_field == old_school::BotField::Mixed ||
+             bot_field_learned_variant ==
+                 old_school::LearnedVariant::
+                     ValueSearchChampion);
+        if (learned_generations_option_used &&
+            !(interactive || stability || score_probes ||
+              tournament_uses_value)) {
+            throw std::invalid_argument(
+                "--learned-generations requires --interactive, "
+                "--stability, --score-probes, or a mixed/learned-value "
+                "simulation; benchmark challengers use "
+                "learned-value-cN");
+        }
+        if (learned_rollouts_option_used &&
+            !(interactive || stability || score_probes ||
+              tournament_uses_any_learned ||
+              benchmark_uses_learned)) {
+            throw std::invalid_argument(
+                "--learned-rollouts requires --interactive, "
+                "--stability, --score-probes, a benchmark with a "
+                "Learned bot, or a mixed/learned simulation");
+        }
+        if (score_probes && learned_rollouts < 2) {
+            throw std::invalid_argument(
+                "--score-probes requires --learned-rollouts "
+                "of at least two");
         }
         const auto selects_actor_g1 =
             [](const BotSelection& selection) {
@@ -1843,6 +2121,17 @@ int main(int argc, char** argv) {
                 "--actor-policy-epochs and --actor-policy-rate "
                 "require a selected Actor G1");
         }
+        const auto selects_value_challenger =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           old_school::BotKind::Learned &&
+                       selection.learned_variant ==
+                           old_school::LearnedVariant::
+                               ValueSearchChampion &&
+                       selection.value_family ==
+                           BotSelection::ValueFamily::Challenger &&
+                       selection.value_generation > 0;
+            };
         const auto selects_canonical_value_bundle_checkpoint =
             [](const BotSelection& selection) {
                 return selection.kind ==
@@ -1850,9 +2139,8 @@ int main(int argc, char** argv) {
                        selection.learned_variant ==
                            old_school::LearnedVariant::
                                ValueSearchChampion &&
-                       selection.value_recipe ==
-                           old_school::LearnedValueG8Recipe::
-                               CanonicalAllSearchLate &&
+                       selection.value_family ==
+                           BotSelection::ValueFamily::Canonical &&
                        selection.value_generation > 0;
             };
         const auto selects_mix50_value_bundle =
@@ -1862,9 +2150,8 @@ int main(int argc, char** argv) {
                        selection.learned_variant ==
                            old_school::LearnedVariant::
                                ValueSearchChampion &&
-                       selection.value_recipe ==
-                           old_school::LearnedValueG8Recipe::
-                               LateMix50 &&
+                       selection.value_family ==
+                           BotSelection::ValueFamily::Mix50 &&
                        selection.value_generation == 8;
             };
         const bool value_g8_will_be_used =
@@ -1884,6 +2171,19 @@ int main(int argc, char** argv) {
             (benchmark &&
              (selects_mix50_value_bundle(challenger) ||
               selects_mix50_value_bundle(baseline)));
+        const bool value_challenger_will_be_used =
+            ((interactive || stability || score_probes ||
+              tournament_uses_value) &&
+             learned_generations > 0) ||
+            (benchmark &&
+             (selects_value_challenger(challenger) ||
+              selects_value_challenger(baseline)));
+        if (refresh_value_challenger_cache &&
+            !value_challenger_will_be_used) {
+            throw std::invalid_argument(
+                "--refresh-value-challenger-cache requires a route "
+                "that selects Value Challenger C<N>");
+        }
         if (refresh_value_g8_cache &&
             !value_g8_will_be_used) {
             throw std::invalid_argument(
@@ -1904,9 +2204,16 @@ int main(int argc, char** argv) {
                 << "Match: Human "
                 << old_school::deck_name(matchup.human_deck)
                 << " vs Learned Value "
+                << (learned_generations == 0
+                        ? "G0 "
+                        : "Challenger C" +
+                              std::to_string(learned_generations) +
+                              " ")
                 << old_school::deck_name(matchup.learned_deck) << '\n'
                 << "Game seed: " << seed << '\n'
                 << "Training seed: " << training_seed << '\n'
+                << "Learned search worlds per legal action: "
+                << learned_rollouts << '\n'
                 << "Type q at any prompt to abandon the game.\n"
                 << "Board layout: 120 columns, expanding to 180 for "
                    "the stack rail; opponent hand is shown for "
@@ -1914,11 +2221,16 @@ int main(int argc, char** argv) {
                 << "MVP timing note: there is no priority window after "
                    "attackers or blockers are declared.\n";
             const auto learned_model =
-                train_value_g0_with_progress(
-                    training_games, training_seed);
+                learned_generations == 0
+                    ? train_value_g0_with_progress(
+                          training_games, training_seed)
+                    : train_value_challenger_with_progress(
+                          training_games, training_seed,
+                          learned_generations,
+                          refresh_value_challenger_cache);
             old_school::run_interactive_match(
                 std::cin, std::cout, seed, learned_model,
-                matchup);
+                matchup, learned_rollouts);
             return 0;
         }
         if (score_probes) {
@@ -1928,6 +2240,7 @@ int main(int argc, char** argv) {
                 .reference_worlds = probe_worlds,
                 .reference_horizon_turns = probe_horizon,
                 .reference_rollouts_per_world = 1,
+                .scoring_value_worlds = learned_rollouts,
                 .cache_path = probe_cache,
                 .refresh_cache = refresh_probe_cache,
             };
@@ -1948,6 +2261,27 @@ int main(int argc, char** argv) {
             std::vector<
                 old_school::probe_runner::NamedValueScoringModel>
                 scoring_value_models;
+            std::optional<
+                old_school::probe_runner::NamedValueScoringModel>
+                challenger_scoring_model;
+            if (learned_generations > 0) {
+                challenger_scoring_model =
+                    {
+                        .name =
+                            "Value Challenger C" +
+                            std::to_string(
+                                learned_generations),
+                        .model =
+                            train_value_challenger_with_progress(
+                                training_games, training_seed,
+                                learned_generations,
+                                refresh_value_challenger_cache),
+                        .transition_family =
+                            "value-challenger-c" +
+                            std::to_string(
+                                learned_generations),
+                    };
+            }
             if (value_generation == 8) {
                 const bool mix50 =
                     value_recipe ==
@@ -1968,13 +2302,17 @@ int main(int argc, char** argv) {
                                   : "Value G8") +
                         " trainer did not retain base-G8");
                 }
-                scoring_value_models.reserve(9);
+                scoring_value_models.reserve(
+                    scoring_value_models.size() + 9);
                 scoring_value_models.push_back(
                     {
                         .name =
                             mix50 ? "Value Mix50 base"
                                   : "Value G8 base",
                         .model = value_g8.checkpoints.front(),
+                        .transition_family =
+                            mix50 ? "value-mix50-g8"
+                                  : "value-canonical-g8",
                     });
                 for (std::size_t generation = 1;
                      generation < value_g8.checkpoints.size();
@@ -1988,13 +2326,20 @@ int main(int argc, char** argv) {
                                 std::to_string(generation),
                             .model =
                                 value_g8.checkpoints[generation],
+                            .transition_family =
+                                mix50 ? "value-mix50-g8"
+                                      : "value-canonical-g8",
                         });
                 }
             }
+            if (challenger_scoring_model.has_value()) {
+                scoring_value_models.push_back(
+                    std::move(*challenger_scoring_model));
+            }
             const auto report =
                 old_school::probe_runner::
-                    score_probe_dev_with_candidates(
-                        config, std::cout,
+                    score_probe_corpus_with_candidates(
+                        probe_corpus, config, std::cout,
                         {
                             .reference_actor_model = actor_g0,
                             .scoring_actor_model = scoring_actor,
@@ -2025,14 +2370,18 @@ int main(int argc, char** argv) {
         if (benchmark) {
             auto challenger_config =
                 bot_config(challenger, rollouts, deep_rollouts,
-                           training_games);
+                           training_games, learned_rollouts);
             auto baseline_config =
                 bot_config(baseline, rollouts, deep_rollouts,
-                           training_games);
+                           training_games, learned_rollouts);
             old_school::GameConfig shared_config;
             shared_config.learned_training_seed = training_seed;
             std::shared_ptr<const old_school::LearnedModel>
                 frozen_value_g0;
+            std::map<
+                std::size_t,
+                std::shared_ptr<const old_school::LearnedModel>>
+                frozen_value_challengers;
             old_school::LearnedValueG8Result frozen_value_bundle;
             old_school::LearnedValueG8Result
                 frozen_value_mix50_bundle;
@@ -2046,9 +2395,26 @@ int main(int argc, char** argv) {
                 if (selection.learned_variant ==
                     old_school::LearnedVariant::
                         ValueSearchChampion) {
-                    if (selection.value_recipe ==
-                        old_school::LearnedValueG8Recipe::
-                            LateMix50) {
+                    if (selection.value_family ==
+                        BotSelection::ValueFamily::Challenger) {
+                        const auto found =
+                            frozen_value_challengers.find(
+                                selection.value_generation);
+                        if (found !=
+                            frozen_value_challengers.end()) {
+                            return found->second;
+                        }
+                        auto model =
+                            train_value_challenger_with_progress(
+                                training_games, training_seed,
+                                selection.value_generation,
+                                refresh_value_challenger_cache);
+                        frozen_value_challengers.emplace(
+                            selection.value_generation, model);
+                        return model;
+                    }
+                    if (selection.value_family ==
+                        BotSelection::ValueFamily::Mix50) {
                         if (selection.value_generation != 8) {
                             throw std::logic_error(
                                 "Value G8 Late-Mix50 supports only "
@@ -2075,7 +2441,8 @@ int main(int argc, char** argv) {
                             << '\n';
                         return checkpoint;
                     }
-                    if (selection.value_generation == 0) {
+                    if (selection.value_family ==
+                        BotSelection::ValueFamily::LegacyG0) {
                         if (!frozen_value_g0) {
                             frozen_value_g0 =
                                 train_value_g0_with_progress(
@@ -2083,7 +2450,9 @@ int main(int argc, char** argv) {
                         }
                         return frozen_value_g0;
                     }
-                    if (selection.value_generation >
+                    if (selection.value_family !=
+                            BotSelection::ValueFamily::Canonical ||
+                        selection.value_generation >
                         old_school::kLearnedValueG8Generations) {
                         throw std::logic_error(
                             "unsupported Value generation");
@@ -2137,10 +2506,20 @@ int main(int argc, char** argv) {
                         return left.actor_generation ==
                                right.actor_generation;
                     }
-                    return left.value_recipe ==
-                               right.value_recipe &&
-                           left.value_generation ==
-                           right.value_generation;
+                    if (left.value_family !=
+                        right.value_family) {
+                        return false;
+                    }
+                    switch (left.value_family) {
+                    case BotSelection::ValueFamily::LegacyG0:
+                    case BotSelection::ValueFamily::Mix50:
+                        return true;
+                    case BotSelection::ValueFamily::Challenger:
+                    case BotSelection::ValueFamily::Canonical:
+                        return left.value_generation ==
+                               right.value_generation;
+                    }
+                    return false;
                 };
             if (challenger_config.kind ==
                 old_school::BotKind::Learned) {
@@ -2181,9 +2560,15 @@ int main(int argc, char** argv) {
                                    std::to_string(
                                        selection.actor_generation);
                         }
-                        if (selection.value_recipe ==
-                            old_school::LearnedValueG8Recipe::
-                                LateMix50) {
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::Challenger) {
+                            return std::string(
+                                       "Learned Value Challenger C") +
+                                   std::to_string(
+                                       selection.value_generation);
+                        }
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::Mix50) {
                             return std::string(
                                 "Learned Value Mix50 G8");
                         }
@@ -2203,7 +2588,9 @@ int main(int argc, char** argv) {
             return run_stability_panel(
                        stability_runs, games, seed,
                        training_seed, rollouts, deep_rollouts,
-                       training_games)
+                       training_games, learned_rollouts,
+                       learned_generations,
+                       refresh_value_challenger_cache)
                        ? 0
                        : 1;
         }
@@ -2248,13 +2635,16 @@ int main(int argc, char** argv) {
             tournament_game_config.learned_model =
                 train_frozen_learned_model(
                     model_variant, training_games,
-                    training_seed);
+                    training_seed,
+                    learned_generations,
+                    refresh_value_challenger_cache);
         }
         old_school::TournamentConfig tournament_config;
         tournament_config.bot_field = bot_field;
         tournament_config.monte_carlo_rollouts = rollouts;
         tournament_config.deep_monte_carlo_rollouts =
             deep_rollouts;
+        tournament_config.learned_rollouts = learned_rollouts;
         tournament_config.learned_training_games =
             training_games;
         tournament_config.learned_variant =
@@ -2273,7 +2663,8 @@ int main(int argc, char** argv) {
                   << "Bot field: "
                   << bot_field_name(
                          bot_field,
-                         bot_field_learned_variant)
+                         bot_field_learned_variant,
+                         learned_generations)
                   << '\n';
         if (bot_field == old_school::BotField::Mixed ||
             bot_field == old_school::BotField::MonteCarlo) {
@@ -2293,11 +2684,26 @@ int main(int argc, char** argv) {
                     ? old_school::LearnedVariant::
                           ValueSearchChampion
                     : bot_field_learned_variant;
-            std::cout << "Frozen learned model: "
-                      << old_school::learned_variant_name(
-                             model_variant)
+            std::cout << "Frozen learned model: ";
+            if (model_variant ==
+                    old_school::LearnedVariant::
+                        ValueSearchChampion &&
+                learned_generations > 0) {
+                std::cout << "Learned Value Challenger C"
+                          << learned_generations;
+            } else if (
+                model_variant ==
+                old_school::LearnedVariant::
+                    ValueSearchChampion) {
+                std::cout << "Learned Value G0";
+            } else {
+                std::cout << old_school::learned_variant_name(
+                                 model_variant);
+            }
+            std::cout
                       << ", seed " << training_seed << ", "
-                      << training_games << " training games\n";
+                      << training_games << " training games, K="
+                      << learned_rollouts << '\n';
         }
         std::cout
                   << "Games per matchup: " << result.games_per_matchup
@@ -2349,9 +2755,21 @@ int main(int argc, char** argv) {
                              ? old_school::LearnedVariant::
                                    ValueSearchChampion
                              : bot_field_learned_variant},
-                    rollouts, deep_rollouts, training_games);
+                    rollouts, deep_rollouts, training_games,
+                    learned_rollouts);
+                const std::string learned_label =
+                    learned_display.learned_variant ==
+                            old_school::LearnedVariant::
+                                UnifiedActor
+                        ? old_school::bot_config_name(
+                              learned_display)
+                        : learned_generations == 0
+                              ? "Learned Value G0"
+                              : "Learned Value Challenger C" +
+                                    std::to_string(
+                                        learned_generations);
                 print_bot_stats(
-                    old_school::bot_config_name(learned_display),
+                    learned_label,
                     result.bots[bot]);
             } else {
                 print_bot_stats(old_school::bot_name(kind),

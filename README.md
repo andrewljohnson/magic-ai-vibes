@@ -31,7 +31,8 @@ For reproducible or larger runs:
 ```sh
 make
 ./build/old-school-sim --games 100 --seed 42 --bots mixed \
-  --rollouts 2 --deep-rollouts 8 --train-games 800 \
+  --rollouts 2 --deep-rollouts 8 --learned-rollouts 2 \
+  --train-games 800 \
   --train-seed 424242
 ```
 
@@ -44,6 +45,11 @@ Value bot:
 # A fast, reproducible model/game while inspecting the interface:
 ./build/old-school-sim --interactive --seed 42 \
   --train-games 100 --train-seed 424242
+
+# Inspect an explicit one-generation research challenger at K=1:
+./build/old-school-sim --interactive --seed 42 \
+  --train-games 100 --train-seed 424242 \
+  --learned-generations 1 --learned-rollouts 1
 ```
 
 Omit `--seed` for a fresh deck pairing on every invocation; provide it to
@@ -67,11 +73,14 @@ window after attackers or blockers are declared.
 
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
 `handcrafted`, `learned`/`learned-value`, or `learned-actor`. The default
-Learned bot and the Learned seat in `mixed` use the value-search policy;
+Learned bot and the Learned seat in `mixed` use the frozen legacy Value G0
+policy;
 the unified actor is an explicit research challenger and is not silently put
 in the mixed field. `--rollouts` and `--deep-rollouts` control sampled
-continuations; `--train-games` controls the selected Learned model's training
-set. `--train-seed` controls model generation independently from the
+continuations for the two Monte Carlo policies. `--learned-rollouts` controls
+Learned's information-set search worlds per legal action and defaults to two.
+`--train-games` controls the selected Learned model's initial training set.
+`--train-seed` controls model generation independently from the
 game/evaluation `--seed` and defaults to `424242`. Mixed mode uses a 25-game
 rotation containing all ordered policy
 pairings, including mirrors. Games in a policy matrix use common shuffle seeds
@@ -176,7 +185,8 @@ graveyards, both exile zones, and stack objects by controller. Opponent hand
 identities and library order remain hidden. A learned linear skip path helps
 sparse card-zone signals while the hidden layer learns interactions.
 
-Learned Value training starts with random games, then runs two generations of
+Legacy Learned Value G0 training starts with random games, then runs two
+generations of
 Learned-Value-versus-Learned-Value fitted self-play with 10%/5% legal-action
 exploration.
 Terminal returns are discounted by game length, so dominant decks still learn
@@ -189,6 +199,31 @@ samples. They use normal pass/stack handling and resume from the current phase
 through every priority window the MVP engine currently models. Combat
 enumerates small public-board attack/block spaces and samples bounded
 candidates for large spaces, using learned expected value throughout.
+
+The separate Value challenger extends that clean, card-agnostic training
+recipe with a requested number of bootstrapped self-play generations, a
+bounded replay window, and information-safe search in the later collection
+generations. It is opt-in and never silently replaces G0. In benchmarks,
+`learned-value-cN` selects exactly `N` positive challenger generations. In
+interactive play, stability, probe scoring, and mixed or learned-only
+simulation, `--learned-generations N` selects the same challenger; omitting it
+or passing zero keeps legacy G0. Training and evaluation seeds remain
+separate. `--learned-rollouts N` independently selects deployment search
+width, so a challenger and G0 can be compared at equal K.
+
+Challenger training is cached independently for every `(N, training games,
+training seed)` identity. For example, C16 at the default training settings
+uses
+`build/model-cache/old-school-value-challenger-v1-c16-t800-s424242.bin`.
+The artifact also binds the exact challenger recipe, Old School engine/model
+schema, and final content fingerprint. The first matching interactive,
+benchmark, stability, probe, or tournament route prints `generated`; later
+routes print `loaded` and skip retraining. A corrupt, stale, or mismatched
+artifact fails closed rather than silently retraining. Pass
+`--refresh-value-challenger-cache` on a route that selects C<N> to retrain and
+atomically replace the selected challenger artifact. Challenger artifacts use
+their own magic and recipe and can never be loaded as legacy G0 or a G8
+bundle.
 
 `learned-actor` keeps the separate unified policy-head experiment: its priority,
 attack, block, and damage-order heads train from information-safe search and
@@ -244,6 +279,7 @@ Use the paired harness to decide whether a challenger is actually stronger:
 make benchmark
 make benchmark-deep
 make benchmark-learned
+make benchmark-challenger
 
 ./build/old-school-sim --benchmark --games 20 --seed 424242 \
   --challenger handcrafted --baseline monte-carlo --rollouts 2
@@ -270,7 +306,18 @@ make benchmark-learned
 ./build/old-school-sim --benchmark --games 15 --seed 202 \
   --train-games 800 --train-seed 424242 \
   --challenger learned-value-mix50-g8 --baseline learned-value-g0
+
+# Separate research challenger versus frozen legacy G0 at equal K=8:
+./build/old-school-sim --benchmark --games 20 --seed 404 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-c16 --baseline learned-value-g0 \
+  --learned-rollouts 8
 ```
+
+`make benchmark-challenger` defaults to the small C1 research route; override
+`CHALLENGER_GENERATIONS` and `LEARNED_ROLLOUTS` explicitly for a declared
+experiment. Neither that target nor `learned-value-cN` promotes a challenger
+to the default.
 
 For every repetition, the harness covers all fifteen unordered pairings of
 the five decks, including mirrors; swaps which policy pilots each deck;
@@ -289,7 +336,9 @@ make stability
 The all-policy harness trains one model from `--train-seed`, reuses that exact
 model against Random, Monte Carlo, Deep Monte Carlo, and Handcrafted Policy
 across every evaluation seed, and requires aggregate, per-seed, confidence,
-and per-deck gates.
+and per-deck gates. It uses legacy G0 unless `--learned-generations N` is
+passed explicitly, and applies `--learned-rollouts N` to both its paired and
+mixed-field evaluations.
 
 To measure training-seed and evaluation-seed variance separately:
 
@@ -330,6 +379,31 @@ reading the opponent's hidden cards:
   --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
 ```
 
+The separate harvested RU regression asks the sharper question raised by
+interactive play—whether holding Disintegrate is ranked above spending it for
+X=0 when no lethal X is available:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-corpus validation-v1 \
+  --probe-worlds 128 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16 --learned-rollouts 8 \
+  --refresh-probe-cache
+```
+
+Its default cache is
+`data/old-school-probe-validation-v1.labels.tsv`. The report clearly separates
+the cached Actor-reference `Q(Pass) - Q(X=0)` estimate from independent
+common-world paired estimates for Value G0 and every requested scoring Value
+model. Each includes its standard error and 95% interval.
+`--learned-rollouts N` (minimum 2 for probe scoring) controls the Value-policy
+estimates' K without changing the Actor-owned labels or cache identity, so the
+example measures C16 at K=8.
+This one-state RU corpus can reject a behaviorally broken model but cannot
+promote one; promotion evidence must remain held out and balanced across all
+five decks.
+
 Every candidate is evaluated on the same sampled information-set worlds and
 continuation seeds. The cache is atomic and bound to the exact model,
 corpus, reference algorithm, and scoring semantics. The run also verifies
@@ -347,6 +421,9 @@ an ordered compact attribution table for the G8 base plus G1 through G8.
 and G1 through G8. Switching recipes changes only the scoring candidates:
 frozen Actor G0 remains the label/cache owner, and Value G0 remains the
 continuation-sensitivity reference.
+Passing `--learned-generations N` adds `Value Challenger C<N>` as another
+scoring candidate only. It does not change the legacy Value G0 sensitivity
+reference, Actor G0 label owner, cache metadata, or cached labels.
 
 `probe-dev-v3` keeps its plan choices root-irreversible using ordinary game
 states; deployed Pass semantics are not altered. Horizon zero completes the

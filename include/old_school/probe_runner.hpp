@@ -22,10 +22,19 @@ inline constexpr std::string_view kProbeReferenceAlgorithm =
     "actor-mirror-common-world-v2";
 inline constexpr std::string_view kProbeSemanticRevision =
     "old-school-probe-score-semantics-v2";
+inline constexpr std::string_view kProbeValidationCacheSchema =
+    "old-school-probe-validation-label-cache-v1";
+inline constexpr std::string_view kProbeValidationSemanticRevision =
+    "old-school-probe-validation-score-semantics-v1";
 inline constexpr std::uint64_t kProbeReferenceSeed =
     0x50524F4245524546ULL;
 inline constexpr std::uint64_t kProbeProductionPolicySeed =
     0x50524F44504F4C59ULL;
+
+enum class ProbeCorpusKind : std::uint8_t {
+    DevV3,
+    ValidationV1,
+};
 
 struct ProbeScoreConfig {
     std::size_t training_games = 800;
@@ -33,6 +42,10 @@ struct ProbeScoreConfig {
     std::size_t reference_worlds = 128;
     std::size_t reference_horizon_turns = 12;
     std::size_t reference_rollouts_per_world = 1;
+    // Information-set worlds used to score each Value policy. This is
+    // deliberately excluded from Actor-owned cache metadata: changing a
+    // candidate's deployed search width must never relabel the reference.
+    std::size_t scoring_value_worlds = 2;
     std::filesystem::path cache_path =
         "data/old-school-probe-dev-v3.labels.tsv";
     bool refresh_cache = false;
@@ -154,12 +167,39 @@ struct ValueProbeDecisionDetail {
 struct ValueCheckpointProbeReport {
     std::string name;
     std::string fingerprint;
+    // Empty for the G0 baseline. Every other row names the actual checkpoint
+    // used for its adjacent-transition comparison; this need not be the
+    // immediately preceding displayed row when families are independent.
+    std::string transition_parent_name;
     probe_eval::ProbeMetricSummary metrics;
     // Stable-ID order, independent of fixture or cache row order.
     std::vector<ValueProbeDecisionDetail> decisions;
 };
 
+struct CandidatePairEstimate {
+    std::string name;
+    std::string stable_id;
+    DeckId root_deck = DeckId::Green;
+    std::string first_key;
+    std::string second_key;
+    std::size_t samples_per_candidate = 0;
+    double delta_q = 0.0;
+    double paired_standard_error = 0.0;
+    double confidence_lower_95 = 0.0;
+    double confidence_upper_95 = 0.0;
+};
+
+// Extracts and explicitly orients a cached common-world pair as
+// Q(first)-Q(second), regardless of the cache's canonical candidate order.
+CandidatePairEstimate make_candidate_pair_estimate(
+    const probe_eval::ProbeLabel& label, std::string name,
+    std::string_view first_key, std::string_view second_key);
+
 struct ProbeScoreReport {
+    ProbeCorpusKind corpus_kind = ProbeCorpusKind::DevV3;
+    // Neither the small development corpus nor the focused harvested
+    // validation corpus can promote a policy.
+    bool promotion_eligible = false;
     ProbeCacheMetadata metadata;
     ProbeCacheStatus cache_status = ProbeCacheStatus::Loaded;
     std::filesystem::path cache_path;
@@ -179,8 +219,19 @@ struct ProbeScoreReport {
     std::vector<ValueCheckpointProbeReport> value_checkpoints;
     ReferenceSensitivitySummary reference_sensitivity;
     LowMarginSummary low_margin;
+    // Focused cached Actor-reference comparisons. Validation-v1 reports the
+    // immutable teacher's Q(Pass)-Q(X=0) here. These values do not measure
+    // any scoring Value candidate.
+    std::vector<CandidatePairEstimate> candidate_pairs;
+    // The same focused comparisons independently re-estimated from each
+    // Value policy's own common-world Value-mirror search samples. G0 is
+    // always first, followed by every scoring Value model in caller order.
+    std::vector<CandidatePairEstimate> value_candidate_pairs;
     HiddenRepartitionSummary hidden_repartition;
 };
+
+std::filesystem::path default_probe_cache_path(
+    ProbeCorpusKind corpus_kind);
 
 // Stable FNV-1a derivation over corpus ID, probe ID, and the fixed reference
 // seed. It intentionally does not depend on corpus iteration order.
@@ -192,6 +243,10 @@ std::uint64_t reference_seed_for_probe(
 // public zones/state, hidden-zone sizes, candidate schema, and declared
 // deck IDs. Opponent hidden identities and library order never enter it.
 std::string corpus_information_set_fingerprint(
+    const std::vector<probes::DecisionProbe>& corpus);
+
+std::string corpus_information_set_fingerprint(
+    ProbeCorpusKind corpus_kind,
     const std::vector<probes::DecisionProbe>& corpus);
 
 GameState hidden_repartition_clone(
@@ -210,8 +265,19 @@ ProbeCacheMetadata make_probe_cache_metadata(
     const std::vector<probes::DecisionProbe>& corpus,
     std::string_view reference_model_fingerprint);
 
+ProbeCacheMetadata make_probe_cache_metadata(
+    ProbeCorpusKind corpus_kind, const ProbeScoreConfig& config,
+    const std::vector<probes::DecisionProbe>& corpus,
+    std::string_view reference_model_fingerprint);
+
 void write_probe_label_cache_atomic(
     const std::filesystem::path& path,
+    const ProbeCacheMetadata& metadata,
+    const std::vector<probes::DecisionProbe>& corpus,
+    const std::vector<ProbeReferenceSamples>& samples);
+
+void write_probe_label_cache_atomic(
+    ProbeCorpusKind corpus_kind, const std::filesystem::path& path,
     const ProbeCacheMetadata& metadata,
     const std::vector<probes::DecisionProbe>& corpus,
     const std::vector<ProbeReferenceSamples>& samples);
@@ -223,10 +289,21 @@ std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
     const ProbeCacheMetadata& expected_metadata,
     const std::vector<probes::DecisionProbe>& corpus);
 
+std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
+    ProbeCorpusKind corpus_kind, const std::filesystem::path& path,
+    const ProbeCacheMetadata& expected_metadata,
+    const std::vector<probes::DecisionProbe>& corpus);
+
 LowMarginSummary summarize_low_margin_best_pairs(
     const std::vector<probe_eval::ProbeLabel>& labels);
 
 ProbeReferenceSamples generate_probe_reference_samples(
+    const probes::DecisionProbe& probe,
+    std::shared_ptr<const LearnedModel> actor_model,
+    const ProbeScoreConfig& config);
+
+ProbeReferenceSamples generate_probe_reference_samples(
+    ProbeCorpusKind corpus_kind,
     const probes::DecisionProbe& probe,
     std::shared_ptr<const LearnedModel> actor_model,
     const ProbeScoreConfig& config);
@@ -237,6 +314,10 @@ ProbeScoreReport score_probe_dev(
 struct NamedValueScoringModel {
     std::string name;
     std::shared_ptr<const LearnedModel> model;
+    // Checkpoints sharing a nonempty family form one ordered transition
+    // ladder. The first row in each family compares directly with G0.
+    // An empty family is a standalone candidate compared directly with G0.
+    std::string transition_family;
 };
 
 struct ProbeScoringModels {
@@ -255,6 +336,15 @@ struct ProbeScoringModels {
 ProbeScoreReport score_probe_dev_with_candidates(
     const ProbeScoreConfig& config, std::ostream& progress,
     ProbeScoringModels models);
+
+// Generic eval-only scorer. Dev-v3 and validation-v1 retain separate corpus,
+// schema, seed, magic-header, fingerprint, and default-path identities.
+// Validation-v1 is a focused behavioral regression corpus and can never
+// establish policy promotion. Callers selecting validation-v1 must use
+// default_probe_cache_path(ValidationV1) or an explicit distinct path.
+ProbeScoreReport score_probe_corpus_with_candidates(
+    ProbeCorpusKind corpus_kind, const ProbeScoreConfig& config,
+    std::ostream& progress, ProbeScoringModels models);
 
 // Builds the exact deployed-selection attribution used by checkpoint reports.
 // Null selected_key means uniform choice over all exact score maxima; a

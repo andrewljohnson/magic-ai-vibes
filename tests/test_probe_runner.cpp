@@ -25,6 +25,7 @@ using old_school::LearnedActionSamples;
 using old_school::probe_eval::DeckProbeMetrics;
 using old_school::probe_runner::PolicyProbeReport;
 using old_school::probe_runner::ProbeCacheStatus;
+using old_school::probe_runner::ProbeCorpusKind;
 using old_school::probe_runner::ProbeReferenceSamples;
 using old_school::probe_runner::ProbeScoreConfig;
 using old_school::probe_runner::ProbeScoreReport;
@@ -163,6 +164,9 @@ void test_seed_and_fingerprint_ignore_iteration_order() {
         old_school::probe_runner::reference_seed_for_probe(
             old_school::probes::kProbeDevV3,
             probes[1].stable_id);
+    expect(
+        first_fingerprint == "fc5950b222351bd0",
+        "frozen probe-dev-v3 information-set fingerprint changed");
     expect(first_seed == 0x89D27C5C0BC11CB5ULL,
            "stable FNV-1a seed derivation changed");
     std::reverse(probes.begin(), probes.end());
@@ -332,6 +336,21 @@ void test_reference_resource_bounds_reject_early() {
                 config, probes, "model");
         },
         "oversized rollout budget was accepted");
+    config.reference_rollouts_per_world = 1;
+    config.scoring_value_worlds = 1;
+    (void)expect_invalid(
+        [&]() {
+            (void)old_school::probe_runner::make_probe_cache_metadata(
+                config, probes, "model");
+        },
+        "one-world Value scoring budget was accepted");
+    config.scoring_value_worlds = 4097;
+    (void)expect_invalid(
+        [&]() {
+            (void)old_school::probe_runner::make_probe_cache_metadata(
+                config, probes, "model");
+        },
+        "oversized Value scoring world budget was accepted");
 }
 
 void test_cache_roundtrip_and_stale_rejection() {
@@ -464,6 +483,156 @@ void test_cache_roundtrip_and_stale_rejection() {
     expect(v2_error.find("unknown magic header") !=
                std::string::npos,
            "v2 cache rejection did not identify its magic");
+}
+
+void test_validation_cache_identity_is_fail_closed() {
+    const auto dev = old_school::probes::make_probe_dev_v3();
+    const auto validation =
+        old_school::probes::make_probe_validation_v1();
+    ProbeScoreConfig config;
+    config.training_games = 7;
+    config.training_seed = 12345;
+    config.reference_worlds = 2;
+    config.reference_horizon_turns = 1;
+    config.reference_rollouts_per_world = 1;
+
+    const auto dev_metadata =
+        old_school::probe_runner::make_probe_cache_metadata(
+            ProbeCorpusKind::DevV3, config, dev,
+            "synthetic-model-fingerprint-v1");
+    const auto validation_metadata =
+        old_school::probe_runner::make_probe_cache_metadata(
+            ProbeCorpusKind::ValidationV1, config, validation,
+            "synthetic-model-fingerprint-v1");
+    expect(
+        dev_metadata.schema ==
+                old_school::probe_runner::kProbeCacheSchema &&
+            validation_metadata.schema ==
+                old_school::probe_runner::
+                    kProbeValidationCacheSchema &&
+            dev_metadata.schema != validation_metadata.schema,
+        "validation cache did not receive a distinct schema");
+    expect(
+        dev_metadata.corpus_id ==
+                old_school::probes::kProbeDevV3 &&
+            validation_metadata.corpus_id ==
+                old_school::probes::kProbeValidationV1 &&
+            dev_metadata.information_set_fingerprint !=
+                validation_metadata.information_set_fingerprint,
+        "validation cache did not receive a distinct corpus identity");
+    expect(
+        validation_metadata.semantic_revision ==
+                old_school::probe_runner::
+                    kProbeValidationSemanticRevision &&
+            validation_metadata.semantic_revision !=
+                dev_metadata.semantic_revision,
+        "validation cache did not receive a distinct semantic revision");
+    expect(
+        old_school::probe_runner::default_probe_cache_path(
+            ProbeCorpusKind::DevV3) !=
+            old_school::probe_runner::default_probe_cache_path(
+                ProbeCorpusKind::ValidationV1),
+        "validation default cache path collides with dev-v3");
+    expect(
+        old_school::probe_runner::reference_seed_for_probe(
+            old_school::probes::kProbeDevV3,
+            validation.front().stable_id) !=
+            old_school::probe_runner::reference_seed_for_probe(
+            old_school::probes::kProbeValidationV1,
+                validation.front().stable_id),
+        "validation and dev corpus seed domains collide");
+
+    ProbeScoreConfig clustered = config;
+    clustered.reference_rollouts_per_world = 2;
+    const std::string clustered_error = expect_invalid(
+        [&] {
+            (void)old_school::probe_runner::
+                make_probe_cache_metadata(
+                    ProbeCorpusKind::ValidationV1, clustered,
+                    validation, "synthetic-model-fingerprint-v1");
+        },
+        "validation accepted clustered within-world rollouts");
+    expect(
+        clustered_error.find("exactly one rollout per world") !=
+            std::string::npos,
+        "validation clustered-rollout rejection was not actionable");
+
+    std::ostringstream unused_progress;
+    const std::string default_path_error = expect_invalid(
+        [&] {
+            (void)old_school::probe_runner::
+                score_probe_corpus_with_candidates(
+                    ProbeCorpusKind::ValidationV1,
+                    ProbeScoreConfig{}, unused_progress, {});
+        },
+        "validation silently reused or rewrote the dev cache path");
+    expect(
+        default_path_error.find(
+            "cannot use the dev-v3 default cache path") !=
+            std::string::npos,
+        "validation default-path rejection was not actionable");
+
+    TemporaryDirectory directory;
+    const auto dev_path = directory.path() / "dev.tsv";
+    const auto validation_path =
+        directory.path() / "validation.tsv";
+    old_school::probe_runner::write_probe_label_cache_atomic(
+        ProbeCorpusKind::DevV3, dev_path, dev_metadata, dev,
+        synthetic_samples(dev, 2));
+    old_school::probe_runner::write_probe_label_cache_atomic(
+        ProbeCorpusKind::ValidationV1, validation_path,
+        validation_metadata, validation,
+        synthetic_samples(validation, 2));
+    {
+        std::ifstream cache(validation_path);
+        std::string magic;
+        std::getline(cache, magic);
+        expect(
+            magic ==
+                "# old-school-probe-validation-label-cache-v1",
+            "validation cache did not receive a distinct magic header");
+    }
+    expect(
+        old_school::probe_runner::load_probe_label_cache(
+            ProbeCorpusKind::ValidationV1, validation_path,
+            validation_metadata, validation)
+                .size() == validation.size(),
+        "validation cache did not roundtrip");
+
+    const std::string dev_as_validation = expect_invalid(
+        [&] {
+            (void)old_school::probe_runner::load_probe_label_cache(
+                ProbeCorpusKind::ValidationV1, dev_path,
+                validation_metadata, validation);
+        },
+        "dev-v3 cache was accepted as validation-v1");
+    expect(
+        dev_as_validation.find("unknown magic header") !=
+            std::string::npos,
+        "cross-corpus dev cache rejection was not fail-closed");
+    const std::string validation_as_dev = expect_invalid(
+        [&] {
+            (void)old_school::probe_runner::load_probe_label_cache(
+                ProbeCorpusKind::DevV3, validation_path,
+                dev_metadata, dev);
+        },
+        "validation-v1 cache was accepted as dev-v3");
+    expect(
+        validation_as_dev.find("unknown magic header") !=
+            std::string::npos,
+        "cross-corpus validation cache rejection was not fail-closed");
+    const std::string wrong_selector_metadata = expect_invalid(
+        [&] {
+            (void)old_school::probe_runner::load_probe_label_cache(
+                ProbeCorpusKind::ValidationV1, validation_path,
+                dev_metadata, validation);
+        },
+        "dev metadata was accepted under validation selector");
+    expect(
+        wrong_selector_metadata.find(
+            "expected metadata does not match") !=
+            std::string::npos,
+        "selector/metadata mismatch did not fail before cache use");
 }
 
 void test_hidden_clone_preserves_information_set() {
@@ -636,6 +805,43 @@ void test_low_margin_summary_is_actionable() {
                summary.pairs.front()
                    .effect_below_stable_threshold,
            "low-margin summary is not actionable");
+}
+
+void test_candidate_pair_estimate_reorients_canonical_pair() {
+    const auto label = old_school::probe_eval::make_probe_label(
+        "ru.synthetic-reversed-pair", DeckId::RUAggro,
+        {
+            {"x-zero", {0.10, 0.20, 0.30, 0.40}},
+            {"pass", {0.80, 0.80, 0.80, 0.80}},
+        });
+    expect(
+        label.pairs.size() == 1 &&
+            label.pairs.front().first == "x-zero" &&
+            label.pairs.front().second == "pass" &&
+            label.pairs.front().delta_q < 0.0,
+        "synthetic fixture did not force reverse canonical order");
+    const auto estimate =
+        old_school::probe_runner::make_candidate_pair_estimate(
+            label, "Q(Pass) - Q(X=0)", "pass", "x-zero");
+    expect(
+        estimate.first_key == "pass" &&
+            estimate.second_key == "x-zero" &&
+            std::abs(estimate.delta_q - 0.55) < 1.0e-12 &&
+            estimate.delta_q == -label.pairs.front().delta_q &&
+            estimate.paired_standard_error ==
+                label.pairs.front().paired_standard_error,
+        "candidate-pair helper did not orient Q(first)-Q(second)");
+    const double radius =
+        old_school::probe_eval::kNormal95CriticalValue *
+        estimate.paired_standard_error;
+    expect(
+        std::abs(
+            estimate.confidence_lower_95 -
+            (estimate.delta_q - radius)) < 1.0e-12 &&
+            std::abs(
+                estimate.confidence_upper_95 -
+                (estimate.delta_q + radius)) < 1.0e-12,
+        "reoriented pair CI was not centered on its delta");
 }
 
 void test_report_contains_required_schema_and_caveats() {
@@ -892,6 +1098,7 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
         {
             .name = "Value G1",
             .fingerprint = "value-g1-fingerprint",
+            .transition_parent_name = "Value G0",
             .metrics = metrics,
             .decisions = {{
                 .stable_id = "red.synthetic",
@@ -910,6 +1117,7 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
         {
             .name = "Value G2",
             .fingerprint = "value-g2-fingerprint",
+            .transition_parent_name = "Value G1",
             .metrics = metrics,
             .decisions = {{
                 .stable_id = "red.synthetic",
@@ -1076,7 +1284,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 .reference_value_model = reference_value,
                 .reference_value_name = "Value G0",
                 .scoring_value_models = {
-                    {"Value G8", scoring_value},
+                    {"Value G8", scoring_value, ""},
                 },
             });
     expect(
@@ -1130,15 +1338,23 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 .reference_value_model = reference_value,
                 .reference_value_name = "Value G0",
                 .scoring_value_models = {
-                    {"Value Mix50 base", scoring_value},
-                    {"Value Mix50 G1", second_scoring_value},
-                    {"Value Mix50 G2", third_scoring_value},
-                    {"Value Mix50 G3", scoring_value},
-                    {"Value Mix50 G4", second_scoring_value},
-                    {"Value Mix50 G5", third_scoring_value},
-                    {"Value Mix50 G6", scoring_value},
-                    {"Value Mix50 G7", second_scoring_value},
-                    {"Value Mix50 G8", third_scoring_value},
+                    {"Value Mix50 base", scoring_value, "mix50"},
+                    {"Value Mix50 G1", second_scoring_value,
+                     "mix50"},
+                    {"Value Mix50 G2", third_scoring_value,
+                     "mix50"},
+                    {"Value Mix50 G3", scoring_value, "mix50"},
+                    {"Value Mix50 G4", second_scoring_value,
+                     "mix50"},
+                    {"Value Mix50 G5", third_scoring_value,
+                     "mix50"},
+                    {"Value Mix50 G6", scoring_value, "mix50"},
+                    {"Value Mix50 G7", second_scoring_value,
+                     "mix50"},
+                    {"Value Mix50 G8", third_scoring_value,
+                     "mix50"},
+                    {"Value Challenger C16", scoring_value,
+                     "challenger-c16"},
                 },
             });
     expect(
@@ -1166,11 +1382,11 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
     expect(
         checkpoint_loaded.policies.size() == 5 &&
             checkpoint_loaded.hidden_repartition.passed &&
-            checkpoint_loaded.hidden_repartition.policy_count == 14,
+            checkpoint_loaded.hidden_repartition.policy_count == 15,
         "multi-checkpoint scoring did not keep five full views and "
         "verify every compact row");
     expect(
-        checkpoint_loaded.value_checkpoints.size() == 10 &&
+        checkpoint_loaded.value_checkpoints.size() == 11 &&
             checkpoint_loaded.value_checkpoints[0].name ==
                 "Value G0" &&
             checkpoint_loaded.value_checkpoints[1].name ==
@@ -1178,9 +1394,21 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             checkpoint_loaded.value_checkpoints[2].name ==
                 "Value Mix50 G1" &&
             checkpoint_loaded.value_checkpoints[9].name ==
-                "Value Mix50 G8",
+                "Value Mix50 G8" &&
+            checkpoint_loaded.value_checkpoints[10].name ==
+                "Value Challenger C16" &&
+            checkpoint_loaded.value_checkpoints[1]
+                    .transition_parent_name == "Value G0" &&
+            checkpoint_loaded.value_checkpoints[2]
+                    .transition_parent_name ==
+                "Value Mix50 base" &&
+            checkpoint_loaded.value_checkpoints[9]
+                    .transition_parent_name ==
+                "Value Mix50 G7" &&
+            checkpoint_loaded.value_checkpoints[10]
+                    .transition_parent_name == "Value G0",
         "Value checkpoint rows did not preserve exact caller order");
-    const std::array<std::string, 10> expected_fingerprints{
+    const std::array<std::string, 11> expected_fingerprints{
         old_school::learned_model_fingerprint(reference_value),
         old_school::learned_model_fingerprint(scoring_value),
         old_school::learned_model_fingerprint(second_scoring_value),
@@ -1191,6 +1419,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
         old_school::learned_model_fingerprint(scoring_value),
         old_school::learned_model_fingerprint(second_scoring_value),
         old_school::learned_model_fingerprint(third_scoring_value),
+        old_school::learned_model_fingerprint(scoring_value),
     };
     for (std::size_t checkpoint = 0;
          checkpoint < checkpoint_loaded.value_checkpoints.size();
@@ -1217,7 +1446,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             "Value checkpoint transitions (compact)") !=
             std::string::npos,
         "formatted checkpoint report omitted its heading");
-    const std::array<std::string_view, 10> expected_names{
+    const std::array<std::string_view, 11> expected_names{
         "Value G0",
         "Value Mix50 base",
         "Value Mix50 G1",
@@ -1228,6 +1457,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
         "Value Mix50 G6",
         "Value Mix50 G7",
         "Value Mix50 G8",
+        "Value Challenger C16",
     };
     std::size_t prior_position = 0;
     for (const std::string_view name : expected_names) {
@@ -1253,10 +1483,266 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 std::string::npos,
         "multi-checkpoint output expanded compact rows into full views");
     expect(
+        checkpoint_output.find(
+            "Value Challenger C16: fingerprint ") !=
+                std::string::npos &&
+            checkpoint_output.find(
+                "transition parent Value G0") !=
+                std::string::npos &&
+            checkpoint_output.find(
+                "Value Mix50 G8 -> Value Challenger C16") ==
+                std::string::npos,
+        "standalone challenger inherited a cross-family transition");
+    expect(
         old_school::probe_runner::format_probe_score_report(generated)
                 .find("Value checkpoint transitions (compact)") ==
             std::string::npos,
         "legacy five-view output gained a checkpoint section");
+}
+
+void test_validation_scoring_reports_pass_x_zero_pair() {
+    TemporaryDirectory directory;
+    const auto actor =
+        old_school::train_learned_actor_model(
+            1, 0x5156414CULL);
+    const auto value =
+        old_school::train_learned_value_champion(
+            1, 0x5156414CULL);
+    const auto candidate_a =
+        old_school::train_learned_value_champion(
+            1, 0x5156414DULL);
+    const auto candidate_b =
+        old_school::train_learned_value_champion(
+            1, 0x5156414EULL);
+    const ProbeScoreConfig config{
+        .training_games = 1,
+        .training_seed = 0x5156414CULL,
+        .reference_worlds = 2,
+        .reference_horizon_turns = 0,
+        .reference_rollouts_per_world = 1,
+        .scoring_value_worlds = 2,
+        .cache_path =
+            directory.path() / "validation-v1.labels.tsv",
+        .refresh_cache = false,
+    };
+    std::ostringstream progress;
+    const auto models = old_school::probe_runner::ProbeScoringModels{
+        .reference_actor_model = actor,
+        .scoring_actor_model = actor,
+        .scoring_actor_name = "Actor validation",
+        .reference_value_model = value,
+        .reference_value_name = "Value validation",
+        .scoring_value_models = {
+            {"Synthetic Value A", candidate_a, ""},
+            {"Synthetic Value B", candidate_b, ""},
+        },
+    };
+    const ProbeScoreReport generated =
+        old_school::probe_runner::
+            score_probe_corpus_with_candidates(
+                ProbeCorpusKind::ValidationV1, config, progress,
+                models);
+    const ProbeScoreReport loaded =
+        old_school::probe_runner::
+            score_probe_corpus_with_candidates(
+                ProbeCorpusKind::ValidationV1, config, progress,
+                models);
+
+    expect(
+        generated.cache_status == ProbeCacheStatus::Generated &&
+            loaded.cache_status == ProbeCacheStatus::Loaded &&
+            generated.metadata == loaded.metadata,
+        "validation scorer did not reuse its reference-owned cache");
+    expect(
+        generated.corpus_kind ==
+                ProbeCorpusKind::ValidationV1 &&
+            !generated.promotion_eligible &&
+            generated.metadata.schema ==
+                old_school::probe_runner::
+                    kProbeValidationCacheSchema &&
+            generated.metadata.corpus_id ==
+                old_school::probes::kProbeValidationV1 &&
+            generated.cache_path == config.cache_path,
+        "validation report lost its non-promotion corpus identity");
+    expect(
+        generated.hidden_repartition.passed &&
+            generated.hidden_repartition.probe_count == 1 &&
+            generated.reference_samples_per_candidate == 2,
+        "validation scoring did not use hidden-safe common worlds");
+    expect(
+        generated.candidate_pairs.size() == 1 &&
+            loaded.candidate_pairs.size() == 1,
+        "validation report omitted its Actor-reference pair");
+    expect(
+        generated.value_candidate_pairs.size() == 3 &&
+            loaded.value_candidate_pairs.size() == 3,
+        "validation report omitted a Value policy pair");
+
+    const auto& estimate = generated.candidate_pairs.front();
+    const auto corpus =
+        old_school::probes::make_probe_validation_v1();
+    const auto& probe = corpus.front();
+    std::string pass_key;
+    std::string x_zero_key;
+    for (const auto& candidate : probe.candidates) {
+        const auto* action =
+            std::get_if<old_school::PriorityAction>(
+                &candidate.action);
+        if (action == nullptr) {
+            continue;
+        }
+        if (action->kind ==
+            old_school::PriorityActionKind::Pass) {
+            pass_key = candidate.descriptor;
+        }
+        if (action->kind ==
+                old_school::PriorityActionKind::CastDisintegrate &&
+            action->x_value == 0 &&
+            action->target.has_value() &&
+            !action->target->creature.has_value() &&
+            action->target->player == 1 - probe.root_player) {
+            x_zero_key = candidate.descriptor;
+        }
+    }
+    expect(
+        !pass_key.empty() && !x_zero_key.empty() &&
+            estimate.name ==
+                "Actor reference Q(Pass) - Q(X=0)" &&
+            estimate.first_key == pass_key &&
+            estimate.second_key == x_zero_key &&
+            estimate.stable_id == probe.stable_id &&
+            estimate.root_deck == DeckId::RUAggro &&
+            estimate.samples_per_candidate == 2,
+        "focused pair is not explicitly oriented Pass minus X=0");
+    const auto labels =
+        old_school::probe_runner::load_probe_label_cache(
+            ProbeCorpusKind::ValidationV1, config.cache_path,
+            generated.metadata, corpus);
+    const auto& label = labels.front();
+    const auto pair = std::find_if(
+        label.pairs.begin(), label.pairs.end(),
+        [&pass_key, &x_zero_key](const auto& candidate_pair) {
+            return (candidate_pair.first == pass_key &&
+                    candidate_pair.second == x_zero_key) ||
+                   (candidate_pair.first == x_zero_key &&
+                    candidate_pair.second == pass_key);
+        });
+    expect(pair != label.pairs.end(),
+           "cache label omitted the Pass-versus-X=0 pair");
+    const double expected_delta =
+        pair->first == pass_key ? pair->delta_q : -pair->delta_q;
+    expect(
+        estimate.delta_q == expected_delta &&
+            estimate.paired_standard_error ==
+                pair->paired_standard_error,
+        "focused estimate did not preserve the oriented cached pair");
+    const double radius =
+        old_school::probe_eval::kNormal95CriticalValue *
+        estimate.paired_standard_error;
+    expect(
+        std::abs(
+            estimate.confidence_lower_95 -
+            (estimate.delta_q - radius)) < 1.0e-12 &&
+            std::abs(
+                estimate.confidence_upper_95 -
+                (estimate.delta_q + radius)) < 1.0e-12,
+        "focused pair confidence interval is not paired 95%");
+    expect(
+        estimate.delta_q ==
+                loaded.candidate_pairs.front().delta_q &&
+            estimate.paired_standard_error ==
+                loaded.candidate_pairs.front()
+                    .paired_standard_error,
+        "focused pair changed after cache reload");
+    expect(
+        generated.value_candidate_pairs[0].name ==
+                "Value validation Q(Pass) - Q(X=0)" &&
+            generated.value_candidate_pairs[1].name ==
+                "Synthetic Value A Q(Pass) - Q(X=0)" &&
+            generated.value_candidate_pairs[2].name ==
+                "Synthetic Value B Q(Pass) - Q(X=0)" &&
+            generated.value_candidate_pairs[0]
+                    .samples_per_candidate == 2 &&
+            generated.value_candidate_pairs[1]
+                    .samples_per_candidate == 2 &&
+            generated.value_candidate_pairs[2]
+                    .samples_per_candidate == 2,
+        "Value pair rows lost caller order or K=2 accounting");
+    expect(
+        generated.value_candidate_pairs[1].delta_q !=
+            generated.value_candidate_pairs[2].delta_q,
+        "two distinct synthetic Value policies produced an "
+        "indistinguishable focused pair");
+
+    ProbeScoreConfig wider = config;
+    wider.scoring_value_worlds = 3;
+    const ProbeScoreReport wider_scoring =
+        old_school::probe_runner::
+            score_probe_corpus_with_candidates(
+                ProbeCorpusKind::ValidationV1, wider, progress,
+                models);
+    expect(
+        wider_scoring.cache_status == ProbeCacheStatus::Loaded &&
+            wider_scoring.metadata == generated.metadata &&
+            wider_scoring.candidate_pairs.front().delta_q ==
+                generated.candidate_pairs.front().delta_q &&
+            wider_scoring.candidate_pairs.front()
+                    .paired_standard_error ==
+                generated.candidate_pairs.front()
+                    .paired_standard_error,
+        "candidate K changed or regenerated the Actor-owned labels");
+    expect(
+        wider_scoring.value_candidate_pairs.size() == 3 &&
+            std::all_of(
+                wider_scoring.value_candidate_pairs.begin(),
+                wider_scoring.value_candidate_pairs.end(),
+                [](const auto& pair) {
+                    return pair.samples_per_candidate == 3;
+                }),
+        "K=3 did not change Value candidate sample accounting");
+
+    const std::string output =
+        old_school::probe_runner::format_probe_score_report(
+            wider_scoring);
+    expect(
+        output.find("Probe Validation-v1 Offline Score") !=
+                std::string::npos &&
+            output.find("cannot be used for policy promotion") !=
+                std::string::npos &&
+            output.find(
+                "Focused cached Actor-reference candidate pairs") !=
+                std::string::npos &&
+            output.find("Focused Value-policy candidate pairs") !=
+                std::string::npos &&
+            output.find(
+                "Synthetic Value A Q(Pass) - Q(X=0)") !=
+                std::string::npos &&
+            output.find("K=3") !=
+                std::string::npos &&
+            output.find("paired SE") != std::string::npos &&
+            output.find("95% CI") != std::string::npos &&
+            output.find("Probe Dev-v3 Offline Score") ==
+                std::string::npos,
+        "validation report omitted pair uncertainty or promotion caveat");
+}
+
+void test_validation_corpus_identity_is_golden() {
+    const auto corpus =
+        old_school::probes::make_probe_validation_v1();
+    expect(
+        old_school::probe_runner::
+                corpus_information_set_fingerprint(
+                    ProbeCorpusKind::ValidationV1, corpus) ==
+            "e181051de454c79a",
+        "validation-v1 information-set fingerprint drifted");
+    expect(corpus.size() == 1 &&
+               corpus.front().harvest.has_value(),
+           "validation-v1 golden probe lost harvest provenance");
+    const auto& harvest = *corpus.front().harvest;
+    expect(
+        harvest.turn_number == 5 &&
+            harvest.priority_decision_ordinal == 10,
+        "validation-v1 harvest turn/decision ordinal drifted");
 }
 
 } // namespace
@@ -1273,6 +1759,8 @@ int main() {
                test_reference_resource_bounds_reject_early);
     runner.run("cache roundtrip and stale rejection",
                test_cache_roundtrip_and_stale_rejection);
+    runner.run("validation cache identity separation",
+               test_validation_cache_identity_is_fail_closed);
     runner.run("hidden clone information set",
                test_hidden_clone_preserves_information_set);
     runner.run("tiny hidden-safe reference",
@@ -1283,11 +1771,17 @@ int main() {
                test_value_decision_detail_respects_ties_and_selectors);
     runner.run("actionable low-margin summary",
                test_low_margin_summary_is_actionable);
+    runner.run("oriented candidate-pair estimate",
+               test_candidate_pair_estimate_reorients_canonical_pair);
     runner.run("report summary schema",
                test_report_contains_required_schema_and_caveats);
     runner.run("compact checkpoint attribution",
                test_compact_checkpoint_report_shows_actionable_transitions);
     runner.run("candidate cache ownership",
                test_candidate_scoring_reuses_reference_owned_cache);
+    runner.run("validation Pass-vs-X0 scoring",
+               test_validation_scoring_reports_pass_x_zero_pair);
+    runner.run("validation golden corpus identity",
+               test_validation_corpus_identity_is_golden);
     return runner.finish();
 }

@@ -236,6 +236,19 @@ std::shared_ptr<const old_school::LearnedModel> small_value_model() {
     return model;
 }
 
+const old_school::LearnedValueChallengerArtifact&
+small_value_challenger_c2_artifact() {
+    static const auto artifact =
+        old_school::train_learned_value_challenger_artifact(
+            1, 424242, 2);
+    return artifact;
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+small_value_challenger_c2() {
+    return small_value_challenger_c2_artifact().model();
+}
+
 const old_school::LearnedValueG8Result& small_value_g8() {
     static const auto result =
         old_school::train_learned_value_g8(1, 0x68A11EADULL);
@@ -1085,7 +1098,8 @@ TEST(value_trainer_is_seeded_deterministic_in_the_old_school_schema) {
         old_school::train_learned_value_champion(1, 424243);
     const auto fingerprint =
         old_school::learned_model_fingerprint(model);
-    CHECK(fingerprint.size() == 64);
+    CHECK(fingerprint ==
+          "b2eec9390d1c7edc358aa27220f9f25b1c31022627a4701e9590efa669e982ba");
     CHECK(old_school::learned_model_fingerprint(repeated) ==
           fingerprint);
     CHECK(old_school::learned_model_fingerprint(changed) != fingerprint);
@@ -1096,6 +1110,177 @@ TEST(value_trainer_is_seeded_deterministic_in_the_old_school_schema) {
           old_school::learned_critic_value(state, 0, model));
     CHECK(old_school::learned_critic_value(state, 1, repeated) ==
           old_school::learned_critic_value(state, 1, model));
+}
+
+TEST(value_challenger_is_explicit_deterministic_and_generation_bound) {
+    const auto generation_one =
+        old_school::train_learned_value_challenger(
+            1, 424242, 1);
+    const auto repeated =
+        old_school::train_learned_value_challenger(
+            1, 424242, 1);
+    const auto changed_seed =
+        old_school::train_learned_value_challenger(
+            1, 424243, 1);
+    const auto generation_two = small_value_challenger_c2();
+
+    const std::string generation_one_fingerprint =
+        old_school::learned_model_fingerprint(generation_one);
+    CHECK(old_school::learned_model_fingerprint(repeated) ==
+          generation_one_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(changed_seed) !=
+          generation_one_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(generation_two) !=
+          generation_one_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(generation_two) ==
+          "88528336069e681b4c4a54264a6fbdd4cd5d8613d6e6d2b8e46c578689adf817");
+
+    bool rejected_zero_generations = false;
+    try {
+        static_cast<void>(
+            old_school::train_learned_value_challenger(
+                1, 424242, 0));
+    } catch (const std::invalid_argument&) {
+        rejected_zero_generations = true;
+    }
+    CHECK(rejected_zero_generations);
+}
+
+TEST(value_challenger_artifact_is_versioned_bit_exact_and_fail_closed) {
+    const auto& original_artifact =
+        small_value_challenger_c2_artifact();
+    const auto original = original_artifact.model();
+    const std::filesystem::path directory =
+        "build/test-model-cache";
+    const std::filesystem::path good =
+        directory / "value-challenger-c2-good.bin";
+    const std::filesystem::path corrupt =
+        directory / "value-challenger-c2-corrupt.bin";
+    const std::filesystem::path canonical_path =
+        directory / "value-g8-canonical-cross-family.bin";
+    const std::filesystem::path mix50_path =
+        directory / "value-g8-mix50-cross-family.bin";
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(canonical_path);
+    std::filesystem::remove(mix50_path);
+
+    old_school::write_learned_value_challenger_artifact_atomic(
+        good.string(), original_artifact);
+    const auto loaded_artifact =
+        old_school::load_learned_value_challenger_artifact(
+            good.string(), 1, 424242, 2);
+    const auto loaded = loaded_artifact.model();
+    const std::string fingerprint =
+        old_school::learned_model_fingerprint(original);
+    CHECK(fingerprint ==
+          "88528336069e681b4c4a54264a6fbdd4cd5d8613d6e6d2b8e46c578689adf817");
+    CHECK(old_school::learned_model_fingerprint(loaded) ==
+          fingerprint);
+    CHECK(loaded_artifact.training_games() == 1);
+    CHECK(loaded_artifact.seed() == 424242);
+    CHECK(loaded_artifact.self_play_generations() == 2);
+    CHECK(old_school::learned_value_challenger_cache_path(
+              800, 424242, 16) ==
+          "build/model-cache/"
+          "old-school-value-challenger-v1-c16-t800-s424242.bin");
+
+    const std::array<old_school::GameState, 2> states = {
+        old_school::white_lock_plan_diagnostic_state(),
+        determinization_fixture().state,
+    };
+    for (const auto& state : states) {
+        for (std::size_t perspective = 0;
+             perspective < 2; ++perspective) {
+            const double before =
+                old_school::learned_critic_value(
+                    state, perspective, original);
+            const double after =
+                old_school::learned_critic_value(
+                    state, perspective, loaded);
+            CHECK(std::bit_cast<std::uint64_t>(after) ==
+                  std::bit_cast<std::uint64_t>(before));
+        }
+    }
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_challenger_artifact(
+                    good.string(), 2, 424242, 2));
+        },
+        "training_games mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_challenger_artifact(
+                    good.string(), 1, 424243, 2));
+        },
+        "training seed mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_challenger_artifact(
+                    good.string(), 1, 424242, 1));
+        },
+        "generation mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_g8_bundle(
+                    good.string(), 1, 424242));
+        },
+        "wrong magic"));
+
+    old_school::write_learned_value_g8_bundle_atomic(
+        canonical_path.string(), small_value_g8());
+    old_school::write_learned_value_g8_mix50_bundle_atomic(
+        mix50_path.string(), small_value_g8_mix50());
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_challenger_artifact(
+                    canonical_path.string(), 1,
+                    0x68A11EADULL, 2));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_challenger_artifact(
+                    mix50_path.string(), 8,
+                    0x68A15050ULL, 2));
+        },
+        "wrong magic"));
+
+    auto changed = read_binary_file(good);
+    CHECK(changed.size() > 64);
+    changed.back() ^= 0x01U;
+    write_binary_file(corrupt, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_challenger_artifact(
+                    corrupt.string(), 1, 424242, 2));
+        },
+        "checksum"));
+    CHECK(old_school::learned_model_fingerprint(
+              old_school::load_learned_value_challenger_artifact(
+                  good.string(), 1, 424242, 2)
+                  .model()) ==
+          fingerprint);
+
+    CHECK(throws_with_text(
+        [] {
+            static_cast<void>(
+                old_school::learned_value_challenger_cache_path(
+                    1, 424242, 0));
+        },
+        "generations"));
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(canonical_path);
+    std::filesystem::remove(mix50_path);
 }
 
 TEST(learned_value_update_deep_clones_without_mutating_parent) {
@@ -4146,6 +4331,37 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
               .wins == learned.wins);
     CHECK(repeated.bot_matchups.back().second_wins ==
           result.bot_matchups.back().second_wins);
+}
+
+TEST(tournament_threads_and_validates_learned_rollout_budget) {
+    old_school::GameConfig game;
+    game.learned_model = small_value_model();
+    old_school::TournamentConfig tournament = {
+        .bot_field = old_school::BotField::Learned,
+        .learned_rollouts = 3,
+        .learned_training_games = 1,
+    };
+    const auto result =
+        old_school::run_tournament(
+            1, 0x1EA4E0ULL, game, tournament);
+    const auto& learned =
+        result.bots[static_cast<std::size_t>(
+            old_school::BotKind::Learned)];
+    CHECK(learned.games == 20);
+    CHECK(learned.total_decisions > 0);
+    CHECK(learned.total_rollouts >=
+          learned.total_decisions * tournament.learned_rollouts);
+
+    tournament.learned_rollouts = 0;
+    bool rejected_zero = false;
+    try {
+        static_cast<void>(
+            old_school::run_tournament(
+                1, 0x1EA4E0ULL, game, tournament));
+    } catch (const std::invalid_argument&) {
+        rejected_zero = true;
+    }
+    CHECK(rejected_zero);
 }
 
 TEST(learned_deck_lift_gate_requires_every_policy_and_allows_ties) {

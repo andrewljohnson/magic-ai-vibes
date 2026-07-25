@@ -47,8 +47,10 @@ class TestRunner {
                       << " passed\n";
             return 1;
         }
-        std::cout << passed_
-                  << " probe tests passed across 20 fixtures\n";
+        std::cout
+            << passed_
+            << " probe tests passed (20 dev fixtures + 1 harvested "
+               "validation fixture)\n";
         return 0;
     }
 
@@ -115,6 +117,69 @@ bool contains_action(const std::vector<PriorityAction>& actions,
            actions.end();
 }
 
+const PriorityAction& find_priority_action(
+    const DecisionProbe& probe, const PriorityAction& wanted) {
+    const auto found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [&wanted](const old_school::probes::Candidate& candidate) {
+            const auto* action =
+                std::get_if<PriorityAction>(&candidate.action);
+            return action != nullptr && *action == wanted;
+        });
+    if (found == probe.candidates.end()) {
+        throw std::runtime_error(
+            "required priority action is missing");
+    }
+    return std::get<PriorityAction>(found->action);
+}
+
+bool player_states_equal(const old_school::PlayerState& left,
+                         const old_school::PlayerState& right) {
+    return left.life == right.life &&
+           left.library == right.library &&
+           left.hand == right.hand &&
+           left.graveyard == right.graveyard &&
+           left.exile == right.exile &&
+           left.lands == right.lands &&
+           left.creatures == right.creatures &&
+           left.artifacts == right.artifacts &&
+           left.enchantments == right.enchantments &&
+           left.land_played_this_turn ==
+               right.land_played_this_turn;
+}
+
+bool player_stats_equal(const old_school::PlayerGameStats& left,
+                        const old_school::PlayerGameStats& right) {
+    return left.cards_drawn == right.cards_drawn &&
+           left.lands_played == right.lands_played &&
+           left.spells_cast == right.spells_cast &&
+           left.spells_countered == right.spells_countered &&
+           left.damage_to_opponent == right.damage_to_opponent &&
+           left.cards_milled == right.cards_milled &&
+           left.decisions == right.decisions &&
+           left.monte_carlo_rollouts ==
+               right.monte_carlo_rollouts;
+}
+
+bool game_states_equal(const GameState& left,
+                       const GameState& right) {
+    for (std::size_t player = 0; player < 2; ++player) {
+        if (!player_states_equal(left.players[player],
+                                 right.players[player]) ||
+            !player_stats_equal(left.stats[player],
+                                right.stats[player])) {
+            return false;
+        }
+    }
+    return left.stack == right.stack &&
+           left.active_player == right.active_player &&
+           left.starting_player == right.starting_player &&
+           left.turn_number == right.turn_number &&
+           left.next_permanent_id == right.next_permanent_id &&
+           left.next_stack_object_id ==
+               right.next_stack_object_id;
+}
+
 std::string validation_errors(const Validation& validation) {
     std::string joined;
     for (const std::string& error : validation.errors) {
@@ -156,6 +221,7 @@ std::size_t expected_candidate_count(Category category) {
     case Category::GreenTsunamiTiming:
     case Category::GreenFavorableAttack:
     case Category::GreenUnfavorableAttack:
+    case Category::RUDisintegrateHoldValidation:
         break;
     }
     throw std::runtime_error(
@@ -180,6 +246,8 @@ void test_corpus_shape_and_candidate_schema() {
         expect(probe.candidates.size() ==
                    expected_candidate_count(probe.category),
                "fixture candidate count changed");
+        expect(!probe.harvest.has_value(),
+               "probe-dev-v3 absorbed validation harvest metadata");
         ++deck_counts[static_cast<std::size_t>(probe.root_deck)];
         for (const auto& candidate : probe.candidates) {
             expect(!candidate.descriptor.empty(),
@@ -709,6 +777,184 @@ void test_ru_flying_and_disintegrate_traces() {
            "X=2 Disintegrate dealt the wrong damage");
 }
 
+void test_harvested_validation_probe_is_reproducible_and_valid() {
+    const std::vector<DecisionProbe> first =
+        old_school::probes::make_probe_validation_v1();
+    const std::vector<DecisionProbe> repeated =
+        old_school::probes::make_probe_validation_v1();
+    expect(first.size() == 1 && repeated.size() == 1,
+           "validation-v1 must contain one harvested decision");
+    expect(
+        old_school::probes::validate_probe_validation_v1(first)
+            .empty(),
+        "harvested validation-v1 corpus failed validation");
+
+    const DecisionProbe& probe = first.front();
+    const DecisionProbe& second = repeated.front();
+    expect(probe.stable_id ==
+                   "validation.ru.disintegrate-hold-x0.v1" &&
+               probe.category ==
+                   Category::RUDisintegrateHoldValidation &&
+               probe.root_deck == DeckId::RUAggro &&
+               probe.opponent_deck == DeckId::Green &&
+               probe.phase == TurnPhase::SecondMain &&
+               probe.state.active_player == probe.root_player &&
+               probe.state.players[probe.root_player]
+                   .land_played_this_turn,
+           "harvested probe lost its RU decision identity");
+    expect(probe.harvest.has_value() &&
+               second.harvest.has_value(),
+           "harvested probe omitted provenance");
+    expect(
+        probe.harvest->collector ==
+                old_school::probes::
+                    kProbePriorityCallbackCollector &&
+            probe.harvest->trajectory_script ==
+                old_school::probes::kProbeLandThenPassScript &&
+            probe.harvest->game_seed ==
+                old_school::probes::
+                    kProbeValidationV1GameSeed &&
+            probe.harvest->turn_number ==
+                probe.state.turn_number &&
+            probe.harvest->phase == probe.phase,
+        "harvest provenance does not identify the seeded callback");
+    expect(probe.harvest == second.harvest &&
+               probe.original_decks == second.original_decks &&
+               game_states_equal(probe.state, second.state) &&
+               probe.candidates.size() ==
+                   second.candidates.size(),
+           "fixed harvest seed did not reproduce the same state");
+    for (std::size_t index = 0;
+         index < probe.candidates.size(); ++index) {
+        expect(
+            probe.candidates[index].descriptor ==
+                    second.candidates[index].descriptor &&
+                probe.candidates[index].action ==
+                    second.candidates[index].action,
+            "fixed harvest seed changed its legal action list");
+    }
+
+    const Validation validation =
+        old_school::probes::validate_probe(probe);
+    expect(validation.exact_card_conservation &&
+               validation.candidates_legal_and_complete &&
+               validation.reachable_state &&
+               validation.hidden_clone_invariant &&
+               validation.ok(),
+           "harvested state failed a probe validation dimension");
+
+    int maximum_opponent_x = -1;
+    bool has_land_play = false;
+    for (const auto& candidate : probe.candidates) {
+        const auto* action =
+            std::get_if<PriorityAction>(&candidate.action);
+        has_land_play =
+            has_land_play ||
+            (action != nullptr &&
+             action->kind == PriorityActionKind::PlayLand);
+        if (action != nullptr &&
+            action->kind ==
+                PriorityActionKind::CastDisintegrate &&
+            action->target.has_value() &&
+            !action->target->creature.has_value() &&
+            action->target->player == 1) {
+            maximum_opponent_x =
+                std::max(maximum_opponent_x, action->x_value);
+        }
+    }
+    expect(!has_land_play && maximum_opponent_x >= 0 &&
+               maximum_opponent_x <
+                   probe.state.players[1].life,
+           "harvested decision includes a land play or lethal X");
+}
+
+void test_harvested_x_zero_has_no_effect_and_pass_holds() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_validation_v1();
+    const DecisionProbe& probe = probes.front();
+    const PriorityAction x_zero =
+        PriorityAction::cast_disintegrate(
+            0, old_school::Target::player_target(1));
+    static_cast<void>(find_priority_action(probe, x_zero));
+    static_cast<void>(
+        find_priority_action(probe, PriorityAction::pass()));
+
+    const auto count_card =
+        [](const std::vector<CardId>& cards, CardId card) {
+            return static_cast<std::size_t>(
+                std::count(cards.begin(), cards.end(), card));
+        };
+    const auto untapped_mountains =
+        [](const old_school::PlayerState& player) {
+            return static_cast<std::size_t>(std::count_if(
+                player.lands.begin(), player.lands.end(),
+                [](const old_school::LandPermanent& land) {
+                    return land.card == CardId::Mountain &&
+                           !land.tapped;
+                }));
+        };
+
+    const std::size_t disintegrates_in_hand =
+        count_card(probe.state.players[0].hand,
+                   CardId::Disintegrate);
+    const std::size_t disintegrates_in_graveyard =
+        count_card(probe.state.players[0].graveyard,
+                   CardId::Disintegrate);
+    const std::size_t ready_red =
+        untapped_mountains(probe.state.players[0]);
+    expect(disintegrates_in_hand > 0 && ready_red > 0,
+           "harvested state cannot cast its X=0 spell");
+
+    GameState wasted = probe.state;
+    const std::array<int, 2> original_life = {
+        wasted.players[0].life,
+        wasted.players[1].life,
+    };
+    expect(old_school::apply_priority_action(
+               wasted, probe.root_player, x_zero, true),
+           "harvested X=0 action failed to apply");
+    resolve_cast_spell(wasted);
+    expect(wasted.players[0].life == original_life[0] &&
+               wasted.players[1].life == original_life[1],
+           "X=0 Disintegrate changed a life total");
+    expect(
+        count_card(wasted.players[0].hand,
+                   CardId::Disintegrate) +
+                    1 ==
+                disintegrates_in_hand &&
+            count_card(wasted.players[0].graveyard,
+                       CardId::Disintegrate) ==
+                disintegrates_in_graveyard + 1 &&
+            untapped_mountains(wasted.players[0]) + 1 ==
+                ready_red,
+        "X=0 did not spend exactly the spell and one red mana");
+
+    GameState held = probe.state;
+    PriorityState priority{
+        .player = probe.root_player,
+        .consecutive_passes = probe.consecutive_passes,
+    };
+    expect(old_school::pass_priority(held, priority) ==
+                   PriorityPassResult::Passed &&
+               old_school::pass_priority(held, priority) ==
+                   PriorityPassResult::WindowEnded,
+           "two passes did not close the harvested final main");
+    expect(
+        held.players[0].hand == probe.state.players[0].hand &&
+            held.players[0].graveyard ==
+                probe.state.players[0].graveyard &&
+            held.players[0].lands ==
+                probe.state.players[0].lands,
+        "Pass failed to retain Disintegrate and its mana");
+    old_school::begin_turn(held, probe.root_player);
+    expect(
+        contains_action(
+            old_school::legal_priority_actions(
+                held, probe.root_player, true),
+            x_zero),
+        "held Disintegrate was not available on a later main phase");
+}
+
 } // namespace
 
 int main() {
@@ -749,5 +995,9 @@ int main() {
                test_ru_land_color_and_blocker_traces);
     runner.run("RU flying and Disintegrate traces",
                test_ru_flying_and_disintegrate_traces);
+    runner.run("harvested validation-v1 reproducibility",
+               test_harvested_validation_probe_is_reproducible_and_valid);
+    runner.run("harvested X=0 hold-versus-waste trace",
+               test_harvested_x_zero_has_no_effect_and_pass_holds);
     return runner.finish();
 }

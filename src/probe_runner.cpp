@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -32,13 +33,73 @@ constexpr std::uint64_t kFnvOffsetBasis = 14695981039346656037ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 constexpr std::size_t kProductionActorWorlds = 2;
 constexpr std::size_t kProductionActorHorizon = 0;
-constexpr std::size_t kProductionValueWorlds = 2;
 constexpr std::size_t kProductionValueHorizon = 4;
 constexpr std::size_t kMaximumReferenceWorlds = 4096;
 constexpr std::size_t kMaximumReferenceHorizon = 128;
 constexpr std::size_t kMaximumReferenceRollouts = 256;
 constexpr std::string_view kProbeCacheMagic =
     "# old-school-probe-label-cache-v2";
+constexpr std::string_view kProbeValidationCacheMagic =
+    "# old-school-probe-validation-label-cache-v1";
+constexpr std::string_view kProbeDevDefaultCachePath =
+    "data/old-school-probe-dev-v3.labels.tsv";
+constexpr std::string_view kProbeValidationDefaultCachePath =
+    "data/old-school-probe-validation-v1.labels.tsv";
+
+struct ProbeCorpusDefinition {
+    std::string_view corpus_id;
+    std::string_view cache_schema;
+    std::string_view cache_magic;
+    std::string_view semantic_revision;
+    std::string_view default_cache_path;
+};
+
+ProbeCorpusDefinition corpus_definition(
+    ProbeCorpusKind corpus_kind) {
+    switch (corpus_kind) {
+    case ProbeCorpusKind::DevV3:
+        return {
+            .corpus_id = probes::kProbeDevV3,
+            .cache_schema = kProbeCacheSchema,
+            .cache_magic = kProbeCacheMagic,
+            .semantic_revision = kProbeSemanticRevision,
+            .default_cache_path = kProbeDevDefaultCachePath,
+        };
+    case ProbeCorpusKind::ValidationV1:
+        return {
+            .corpus_id = probes::kProbeValidationV1,
+            .cache_schema = kProbeValidationCacheSchema,
+            .cache_magic = kProbeValidationCacheMagic,
+            .semantic_revision = kProbeValidationSemanticRevision,
+            .default_cache_path =
+                kProbeValidationDefaultCachePath,
+        };
+    }
+    throw std::invalid_argument("unknown probe corpus kind");
+}
+
+std::vector<probes::DecisionProbe> make_corpus(
+    ProbeCorpusKind corpus_kind) {
+    switch (corpus_kind) {
+    case ProbeCorpusKind::DevV3:
+        return probes::make_probe_dev_v3();
+    case ProbeCorpusKind::ValidationV1:
+        return probes::make_probe_validation_v1();
+    }
+    throw std::invalid_argument("unknown probe corpus kind");
+}
+
+std::vector<std::string> validate_corpus(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<probes::DecisionProbe>& corpus) {
+    switch (corpus_kind) {
+    case ProbeCorpusKind::DevV3:
+        return probes::validate_probe_dev_v3(corpus);
+    case ProbeCorpusKind::ValidationV1:
+        return probes::validate_probe_validation_v1(corpus);
+    }
+    throw std::invalid_argument("unknown probe corpus kind");
+}
 
 class Fnv1a {
   public:
@@ -289,9 +350,30 @@ void validate_score_config(const ProbeScoreConfig& config) {
         throw std::invalid_argument(
             "probe reference rollouts must not exceed 256");
     }
+    if (config.scoring_value_worlds < 2) {
+        throw std::invalid_argument(
+            "probe scoring Value requires at least two worlds");
+    }
+    if (config.scoring_value_worlds > kMaximumReferenceWorlds) {
+        throw std::invalid_argument(
+            "probe scoring Value worlds must not exceed 4096");
+    }
     if (config.cache_path.empty()) {
         throw std::invalid_argument(
             "probe cache path must not be empty");
+    }
+}
+
+void validate_corpus_score_config(
+    ProbeCorpusKind corpus_kind,
+    const ProbeScoreConfig& config) {
+    validate_score_config(config);
+    if (corpus_kind == ProbeCorpusKind::ValidationV1 &&
+        config.reference_rollouts_per_world != 1) {
+        throw std::invalid_argument(
+            "probe-validation-v1 requires exactly one rollout per "
+            "world so its paired confidence interval does not treat "
+            "within-world rollouts as independent");
     }
 }
 
@@ -445,10 +527,11 @@ std::string read_meta_value(std::istream& input,
     return std::string(fields[2]);
 }
 
-ProbeCacheMetadata read_metadata(std::istream& input) {
+ProbeCacheMetadata read_metadata(
+    std::istream& input, std::string_view expected_magic) {
     const std::string magic =
         read_required_line(input, "cache magic");
-    if (magic != kProbeCacheMagic) {
+    if (magic != expected_magic) {
         throw std::invalid_argument(
             "probe cache has an unknown magic header");
     }
@@ -592,11 +675,12 @@ void validate_reference_samples(
 
 void write_cache_contents(
     std::ostream& output,
+    std::string_view cache_magic,
     const ProbeCacheMetadata& metadata,
     const std::vector<probes::DecisionProbe>& corpus,
     const std::vector<ProbeReferenceSamples>& samples) {
     output.imbue(std::locale::classic());
-    output << kProbeCacheMagic << '\n'
+    output << cache_magic << '\n'
            << "meta\tschema\t" << metadata.schema << '\n'
            << "meta\talgorithm\t" << metadata.algorithm << '\n'
            << "meta\tsemantic_revision\t"
@@ -853,12 +937,13 @@ std::vector<probe_eval::ProbePrediction> score_actor_raw(
 std::vector<double> learned_search_scores(
     const probes::DecisionProbe& probe,
     std::shared_ptr<const LearnedModel> model,
+    std::string_view corpus_id,
     LearnedVariant continuation_variant, std::size_t worlds,
     std::size_t rollouts_per_world, std::size_t horizon_turns,
     bool blend_shallow_prior) {
     const LearnedSearchConfig config{
         .seed = reference_seed_for_probe(
-            probes::kProbeDevV3, probe.stable_id),
+            corpus_id, probe.stable_id),
         .worlds = worlds,
         .rollouts_per_world = rollouts_per_world,
         .horizon_turns = horizon_turns,
@@ -879,6 +964,7 @@ std::vector<double> learned_search_scores(
 std::vector<probe_eval::ProbePrediction> score_learned_search(
     const std::vector<probes::DecisionProbe>& corpus,
     std::shared_ptr<const LearnedModel> model,
+    std::string_view corpus_id,
     LearnedVariant continuation_variant, std::size_t worlds,
     std::size_t rollouts_per_world, std::size_t horizon_turns,
     bool blend_shallow_prior) {
@@ -888,7 +974,7 @@ std::vector<probe_eval::ProbePrediction> score_learned_search(
         predictions.push_back(make_prediction(
             probe,
             learned_search_scores(
-                probe, model, continuation_variant, worlds,
+                probe, model, corpus_id, continuation_variant, worlds,
                 rollouts_per_world, horizon_turns,
                 blend_shallow_prior),
             learned_critic_value(
@@ -899,7 +985,8 @@ std::vector<probe_eval::ProbePrediction> score_learned_search(
 
 std::vector<probe_eval::ProbePrediction> score_actor_deployed(
     const std::vector<probes::DecisionProbe>& corpus,
-    std::shared_ptr<const LearnedModel> actor_model) {
+    std::shared_ptr<const LearnedModel> actor_model,
+    std::string_view corpus_id) {
     std::vector<probe_eval::ProbePrediction> predictions;
     predictions.reserve(corpus.size());
     for (const probes::DecisionProbe& probe : corpus) {
@@ -907,7 +994,8 @@ std::vector<probe_eval::ProbePrediction> score_actor_deployed(
         if (probe.decision_kind ==
             probes::DecisionKind::Priority) {
             scores = learned_search_scores(
-                probe, actor_model, LearnedVariant::UnifiedActor,
+                probe, actor_model, corpus_id,
+                LearnedVariant::UnifiedActor,
                 kProductionActorWorlds, 1,
                 kProductionActorHorizon, false);
         } else {
@@ -925,7 +1013,8 @@ std::vector<probe_eval::ProbePrediction> score_actor_deployed(
 
 LearnedValueAttackSetScores value_deployed_attack_scores(
     const probes::DecisionProbe& probe,
-    std::shared_ptr<const LearnedModel> value_model) {
+    std::shared_ptr<const LearnedModel> value_model,
+    std::string_view corpus_id) {
     const PermanentId subject = binary_attack_subject(probe);
     std::vector<std::vector<PermanentId>> attack_sets;
     attack_sets.reserve(probe.candidates.size());
@@ -938,7 +1027,7 @@ LearnedValueAttackSetScores value_deployed_attack_scores(
                              : std::vector<PermanentId>{});
     }
     const std::uint64_t policy_seed = reference_seed_for_probe(
-        probes::kProbeDevV3, probe.stable_id,
+        corpus_id, probe.stable_id,
         kProbeProductionPolicySeed);
     return learned_value_attack_set_scores(
         probe.state, probe.root_player, attack_sets,
@@ -947,7 +1036,8 @@ LearnedValueAttackSetScores value_deployed_attack_scores(
 
 std::vector<probe_eval::ProbePrediction> score_value_deployed(
     const std::vector<probes::DecisionProbe>& corpus,
-    std::shared_ptr<const LearnedModel> value_model) {
+    std::shared_ptr<const LearnedModel> value_model,
+    std::string_view corpus_id, std::size_t worlds) {
     std::vector<probe_eval::ProbePrediction> predictions;
     predictions.reserve(corpus.size());
     for (const probes::DecisionProbe& probe : corpus) {
@@ -956,13 +1046,14 @@ std::vector<probe_eval::ProbePrediction> score_value_deployed(
         if (probe.decision_kind ==
             probes::DecisionKind::Priority) {
             scores = learned_search_scores(
-                probe, value_model,
+                probe, value_model, corpus_id,
                 LearnedVariant::ValueSearchChampion,
-                kProductionValueWorlds, 1,
+                worlds, 1,
                 kProductionValueHorizon, true);
         } else {
             const auto attack =
-                value_deployed_attack_scores(probe, value_model);
+                value_deployed_attack_scores(
+                    probe, value_model, corpus_id);
             scores = attack.scores;
             selected_candidate = attack.selected_candidate;
         }
@@ -1467,6 +1558,8 @@ ValueCheckpointProbeReport make_value_checkpoint_report(
     ValueCheckpointProbeReport checkpoint{
         .name = std::move(name),
         .fingerprint = std::move(fingerprint),
+        .transition_parent_name =
+            previous == nullptr ? std::string{} : previous->name,
         .metrics = evaluated.metrics,
     };
     checkpoint.decisions.reserve(labels.size());
@@ -1515,14 +1608,153 @@ ValueCheckpointProbeReport make_value_checkpoint_report(
     return checkpoint;
 }
 
+const std::string& unique_candidate_key(
+    const probes::DecisionProbe& probe,
+    const std::function<bool(const probes::Candidate&)>& matches,
+    std::string_view description) {
+    const std::string* key = nullptr;
+    for (const probes::Candidate& candidate : probe.candidates) {
+        if (!matches(candidate)) {
+            continue;
+        }
+        if (key != nullptr) {
+            throw std::invalid_argument(
+                "focused pair has multiple " +
+                std::string(description) + " candidates");
+        }
+        key = &candidate.descriptor;
+    }
+    if (key == nullptr) {
+        throw std::invalid_argument(
+            "focused pair is missing its " +
+            std::string(description) + " candidate");
+    }
+    return *key;
+}
+
+CandidatePairEstimate oriented_pair_estimate(
+    const probe_eval::ProbeLabel& label,
+    std::string name, std::string_view first_key,
+    std::string_view second_key,
+    std::size_t samples_per_candidate = 0) {
+    const probe_eval::PairLabel* matched = nullptr;
+    double direction = 1.0;
+    for (const probe_eval::PairLabel& pair : label.pairs) {
+        if (pair.first == first_key &&
+            pair.second == second_key) {
+            matched = &pair;
+            break;
+        }
+        if (pair.first == second_key &&
+            pair.second == first_key) {
+            matched = &pair;
+            direction = -1.0;
+            break;
+        }
+    }
+    if (matched == nullptr) {
+        throw std::invalid_argument(
+            "focused pair is absent from the reference labels");
+    }
+    const double delta = direction * matched->delta_q;
+    const double radius =
+        probe_eval::kNormal95CriticalValue *
+        matched->paired_standard_error;
+    return {
+        .name = std::move(name),
+        .stable_id = label.stable_id,
+        .root_deck = label.root_deck,
+        .first_key = std::string(first_key),
+        .second_key = std::string(second_key),
+        .samples_per_candidate = samples_per_candidate,
+        .delta_q = delta,
+        .paired_standard_error =
+            matched->paired_standard_error,
+        .confidence_lower_95 = delta - radius,
+        .confidence_upper_95 = delta + radius,
+    };
+}
+
+struct FocusedCandidatePair {
+    const probes::DecisionProbe* probe = nullptr;
+    const std::string* first_key = nullptr;
+    const std::string* second_key = nullptr;
+};
+
+std::optional<FocusedCandidatePair> focused_candidate_pair(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<probes::DecisionProbe>& corpus) {
+    if (corpus_kind == ProbeCorpusKind::DevV3) {
+        return std::nullopt;
+    }
+    if (corpus.size() != 1) {
+        throw std::invalid_argument(
+            "validation-v1 focused pair requires its one "
+            "canonical probe");
+    }
+    const probes::DecisionProbe& probe = corpus.front();
+    const std::string& pass_key = unique_candidate_key(
+        probe,
+        [](const probes::Candidate& candidate) {
+            const auto* action =
+                std::get_if<PriorityAction>(&candidate.action);
+            return action != nullptr &&
+                   action->kind == PriorityActionKind::Pass;
+        },
+        "Pass");
+    const std::string& x_zero_key = unique_candidate_key(
+        probe,
+        [&probe](const probes::Candidate& candidate) {
+            const auto* action =
+                std::get_if<PriorityAction>(&candidate.action);
+            return action != nullptr &&
+                   action->kind ==
+                       PriorityActionKind::CastDisintegrate &&
+                   action->x_value == 0 &&
+                   action->target.has_value() &&
+                   !action->target->creature.has_value() &&
+                   action->target->player ==
+                       1 - probe.root_player;
+        },
+        "opponent-targeted X=0 Disintegrate");
+    return FocusedCandidatePair{
+        .probe = &probe,
+        .first_key = &pass_key,
+        .second_key = &x_zero_key,
+    };
+}
+
+std::vector<CandidatePairEstimate> focused_candidate_pairs(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<probes::DecisionProbe>& corpus,
+    const std::vector<probe_eval::ProbeLabel>& labels,
+    std::size_t samples_per_candidate) {
+    const auto focused =
+        focused_candidate_pair(corpus_kind, corpus);
+    if (!focused.has_value()) {
+        return {};
+    }
+    if (labels.size() != 1 ||
+        corpus.front().stable_id != labels.front().stable_id) {
+        throw std::invalid_argument(
+            "validation-v1 focused pair requires its one "
+            "canonical labeled probe");
+    }
+    return {oriented_pair_estimate(
+        labels.front(), "Actor reference Q(Pass) - Q(X=0)",
+        *focused->first_key, *focused->second_key,
+        samples_per_candidate)};
+}
+
 ProbeReferenceSamples generate_variant_reference_samples(
     const probes::DecisionProbe& probe,
     std::shared_ptr<const LearnedModel> model,
-    const ProbeScoreConfig& config, LearnedVariant variant,
+    const ProbeScoreConfig& config, std::string_view corpus_id,
+    LearnedVariant variant,
     bool verify_hidden_repartition) {
     const LearnedSearchConfig search{
         .seed = reference_seed_for_probe(
-            probes::kProbeDevV3, probe.stable_id),
+            corpus_id, probe.stable_id),
         .worlds = config.reference_worlds,
         .rollouts_per_world =
             config.reference_rollouts_per_world,
@@ -1547,6 +1779,50 @@ ProbeReferenceSamples generate_variant_reference_samples(
     };
 }
 
+std::vector<CandidatePairEstimate> score_value_candidate_pair(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<probes::DecisionProbe>& corpus,
+    std::shared_ptr<const LearnedModel> model, std::string name,
+    std::string_view corpus_id, const ProbeScoreConfig& config) {
+    const auto focused =
+        focused_candidate_pair(corpus_kind, corpus);
+    if (!focused.has_value()) {
+        return {};
+    }
+    const LearnedSearchConfig search{
+        .seed = reference_seed_for_probe(
+            corpus_id, focused->probe->stable_id),
+        .worlds = config.scoring_value_worlds,
+        .rollouts_per_world = 1,
+        .horizon_turns = kProductionValueHorizon,
+        .continuation_variant =
+            LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = true,
+    };
+    const LearnedActionSamples original =
+        score_probe_actions(
+            *focused->probe, focused->probe->state, model, search);
+    const GameState clone =
+        hidden_repartition_clone(*focused->probe);
+    const LearnedActionSamples repartitioned =
+        score_probe_actions(
+            *focused->probe, clone, model, search);
+    require_bit_identical(
+        original, repartitioned,
+        focused->probe->stable_id + " " + name);
+
+    const auto candidate_samples =
+        map_candidate_samples(*focused->probe, original);
+    const probe_eval::ProbeLabel label =
+        probe_eval::make_probe_label(
+            focused->probe->stable_id,
+            focused->probe->root_deck, candidate_samples);
+    return {oriented_pair_estimate(
+        label, std::move(name), *focused->first_key,
+        *focused->second_key,
+        config.scoring_value_worlds)};
+}
+
 } // namespace
 
 ValueProbeDecisionDetail make_value_probe_decision_detail(
@@ -1556,6 +1832,20 @@ ValueProbeDecisionDetail make_value_probe_decision_detail(
     const ValueProbeDecisionDetail* previous) {
     return build_value_probe_decision_detail(
         label, prediction, reference, previous);
+}
+
+CandidatePairEstimate make_candidate_pair_estimate(
+    const probe_eval::ProbeLabel& label, std::string name,
+    std::string_view first_key, std::string_view second_key) {
+    probe_eval::validate_probe_label(label);
+    return oriented_pair_estimate(
+        label, std::move(name), first_key, second_key);
+}
+
+std::filesystem::path default_probe_cache_path(
+    ProbeCorpusKind corpus_kind) {
+    return std::filesystem::path(
+        corpus_definition(corpus_kind).default_cache_path);
 }
 
 std::uint64_t reference_seed_for_probe(
@@ -1570,8 +1860,15 @@ std::uint64_t reference_seed_for_probe(
 
 std::string corpus_information_set_fingerprint(
     const std::vector<probes::DecisionProbe>& corpus) {
+    return corpus_information_set_fingerprint(
+        ProbeCorpusKind::DevV3, corpus);
+}
+
+std::string corpus_information_set_fingerprint(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<probes::DecisionProbe>& corpus) {
     Fnv1a hash;
-    hash.text(probes::kProbeDevV3);
+    hash.text(corpus_definition(corpus_kind).corpus_id);
     const auto sorted = sorted_probes(corpus);
     hash.unsigned_integer(sorted.size());
     for (const probes::DecisionProbe* probe : sorted) {
@@ -1656,21 +1953,33 @@ ProbeCacheMetadata make_probe_cache_metadata(
     const ProbeScoreConfig& config,
     const std::vector<probes::DecisionProbe>& corpus,
     std::string_view reference_model_fingerprint) {
-    validate_score_config(config);
+    return make_probe_cache_metadata(
+        ProbeCorpusKind::DevV3, config, corpus,
+        reference_model_fingerprint);
+}
+
+ProbeCacheMetadata make_probe_cache_metadata(
+    ProbeCorpusKind corpus_kind, const ProbeScoreConfig& config,
+    const std::vector<probes::DecisionProbe>& corpus,
+    std::string_view reference_model_fingerprint) {
+    validate_corpus_score_config(corpus_kind, config);
     validate_text_field(reference_model_fingerprint,
                         "reference model fingerprint");
     const auto validation_errors =
-        probes::validate_probe_dev_v3(corpus);
+        validate_corpus(corpus_kind, corpus);
     if (!validation_errors.empty()) {
         throw std::invalid_argument(
             "cannot label an invalid probe corpus: " +
             validation_errors.front());
     }
+    const ProbeCorpusDefinition definition =
+        corpus_definition(corpus_kind);
     return {
-        .schema = std::string(kProbeCacheSchema),
+        .schema = std::string(definition.cache_schema),
         .algorithm = std::string(kProbeReferenceAlgorithm),
-        .semantic_revision = std::string(kProbeSemanticRevision),
-        .corpus_id = std::string(probes::kProbeDevV3),
+        .semantic_revision =
+            std::string(definition.semantic_revision),
+        .corpus_id = std::string(definition.corpus_id),
         .reference_seed = kProbeReferenceSeed,
         .production_policy_seed = kProbeProductionPolicySeed,
         .training_seed = config.training_seed,
@@ -1683,7 +1992,8 @@ ProbeCacheMetadata make_probe_cache_metadata(
         .reference_model_fingerprint =
             std::string(reference_model_fingerprint),
         .information_set_fingerprint =
-            corpus_information_set_fingerprint(corpus),
+            corpus_information_set_fingerprint(
+                corpus_kind, corpus),
     };
 }
 
@@ -1692,20 +2002,42 @@ void write_probe_label_cache_atomic(
     const ProbeCacheMetadata& metadata,
     const std::vector<probes::DecisionProbe>& corpus,
     const std::vector<ProbeReferenceSamples>& samples) {
+    write_probe_label_cache_atomic(
+        ProbeCorpusKind::DevV3, path, metadata, corpus, samples);
+}
+
+void write_probe_label_cache_atomic(
+    ProbeCorpusKind corpus_kind, const std::filesystem::path& path,
+    const ProbeCacheMetadata& metadata,
+    const std::vector<probes::DecisionProbe>& corpus,
+    const std::vector<ProbeReferenceSamples>& samples) {
     if (path.empty()) {
         throw std::invalid_argument(
             "probe cache path must not be empty");
     }
-    if (metadata.schema != kProbeCacheSchema ||
+    const ProbeCorpusDefinition definition =
+        corpus_definition(corpus_kind);
+    const auto validation_errors =
+        validate_corpus(corpus_kind, corpus);
+    if (!validation_errors.empty()) {
+        throw std::invalid_argument(
+            "cannot write an invalid probe corpus: " +
+            validation_errors.front());
+    }
+    if (metadata.schema != definition.cache_schema ||
         metadata.algorithm != kProbeReferenceAlgorithm ||
-        metadata.semantic_revision != kProbeSemanticRevision ||
-        metadata.corpus_id != probes::kProbeDevV3 ||
+        metadata.semantic_revision !=
+            definition.semantic_revision ||
+        metadata.corpus_id != definition.corpus_id ||
         metadata.reference_seed != kProbeReferenceSeed ||
         metadata.production_policy_seed !=
             kProbeProductionPolicySeed ||
         metadata.probe_count != corpus.size() ||
         metadata.information_set_fingerprint !=
-            corpus_information_set_fingerprint(corpus)) {
+            corpus_information_set_fingerprint(
+                corpus_kind, corpus) ||
+        (corpus_kind == ProbeCorpusKind::ValidationV1 &&
+         metadata.rollouts_per_world != 1)) {
         throw std::invalid_argument(
             "probe cache metadata does not match corpus");
     }
@@ -1756,7 +2088,8 @@ void write_probe_label_cache_atomic(
                     "could not open temporary probe cache");
             }
             write_cache_contents(
-                output, metadata, corpus, samples);
+                output, definition.cache_magic, metadata, corpus,
+                samples);
             output.close();
             if (!output) {
                 throw std::runtime_error(
@@ -1780,14 +2113,69 @@ std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
     const std::filesystem::path& path,
     const ProbeCacheMetadata& expected_metadata,
     const std::vector<probes::DecisionProbe>& corpus) {
+    return load_probe_label_cache(
+        ProbeCorpusKind::DevV3, path, expected_metadata, corpus);
+}
+
+std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
+    ProbeCorpusKind corpus_kind, const std::filesystem::path& path,
+    const ProbeCacheMetadata& expected_metadata,
+    const std::vector<probes::DecisionProbe>& corpus) {
     try {
+        const ProbeCorpusDefinition definition =
+            corpus_definition(corpus_kind);
+        const auto validation_errors =
+            validate_corpus(corpus_kind, corpus);
+        if (!validation_errors.empty()) {
+            throw std::invalid_argument(
+                "expected corpus is invalid: " +
+                validation_errors.front());
+        }
+        std::string expected_mismatch;
+        if (expected_metadata.schema !=
+            definition.cache_schema) {
+            expected_mismatch = "schema";
+        } else if (expected_metadata.algorithm !=
+                   kProbeReferenceAlgorithm) {
+            expected_mismatch = "algorithm";
+        } else if (expected_metadata.semantic_revision !=
+                   definition.semantic_revision) {
+            expected_mismatch = "semantic_revision";
+        } else if (expected_metadata.corpus_id !=
+                   definition.corpus_id) {
+            expected_mismatch = "corpus";
+        } else if (expected_metadata.reference_seed !=
+                   kProbeReferenceSeed) {
+            expected_mismatch = "reference_seed";
+        } else if (expected_metadata.production_policy_seed !=
+                   kProbeProductionPolicySeed) {
+            expected_mismatch = "production_policy_seed";
+        } else if (
+            corpus_kind == ProbeCorpusKind::ValidationV1 &&
+            expected_metadata.rollouts_per_world != 1) {
+            expected_mismatch = "rollouts";
+        } else if (expected_metadata.probe_count !=
+                   corpus.size()) {
+            expected_mismatch = "probe_count";
+        } else if (
+            expected_metadata.information_set_fingerprint !=
+            corpus_information_set_fingerprint(
+                corpus_kind, corpus)) {
+            expected_mismatch = "fingerprint";
+        }
+        if (!expected_mismatch.empty()) {
+            throw std::invalid_argument(
+                "expected metadata does not match the selected "
+                "probe corpus: " + expected_mismatch);
+        }
         std::ifstream input(path);
         if (!input) {
             throw std::invalid_argument(
                 "cache file is missing or unreadable");
         }
         input.imbue(std::locale::classic());
-        const ProbeCacheMetadata actual = read_metadata(input);
+        const ProbeCacheMetadata actual =
+            read_metadata(input, definition.cache_magic);
         const std::string mismatch =
             metadata_mismatch(actual, expected_metadata);
         if (!mismatch.empty()) {
@@ -1960,7 +2348,17 @@ ProbeReferenceSamples generate_probe_reference_samples(
     const probes::DecisionProbe& probe,
     std::shared_ptr<const LearnedModel> actor_model,
     const ProbeScoreConfig& config) {
-    validate_score_config(config);
+    return generate_probe_reference_samples(
+        ProbeCorpusKind::DevV3, probe, std::move(actor_model),
+        config);
+}
+
+ProbeReferenceSamples generate_probe_reference_samples(
+    ProbeCorpusKind corpus_kind,
+    const probes::DecisionProbe& probe,
+    std::shared_ptr<const LearnedModel> actor_model,
+    const ProbeScoreConfig& config) {
+    validate_corpus_score_config(corpus_kind, config);
     if (!actor_model) {
         throw std::invalid_argument(
             "reference labeling requires a frozen Actor model");
@@ -1972,13 +2370,24 @@ ProbeReferenceSamples generate_probe_reference_samples(
     }
     return generate_variant_reference_samples(
         probe, std::move(actor_model), config,
+        corpus_definition(corpus_kind).corpus_id,
         LearnedVariant::UnifiedActor, true);
 }
 
-ProbeScoreReport score_probe_dev_with_candidates(
-    const ProbeScoreConfig& config, std::ostream& progress,
-    ProbeScoringModels models) {
-    validate_score_config(config);
+ProbeScoreReport score_probe_corpus_with_candidates(
+    ProbeCorpusKind corpus_kind,
+    const ProbeScoreConfig& requested_config,
+    std::ostream& progress, ProbeScoringModels models) {
+    ProbeScoreConfig config = requested_config;
+    if (corpus_kind == ProbeCorpusKind::ValidationV1 &&
+        config.cache_path ==
+            default_probe_cache_path(ProbeCorpusKind::DevV3)) {
+        throw std::invalid_argument(
+            "probe-validation-v1 cannot use the dev-v3 default "
+            "cache path; use " +
+            default_probe_cache_path(corpus_kind).string());
+    }
+    validate_corpus_score_config(corpus_kind, config);
     if (!models.reference_actor_model ||
         !models.scoring_actor_model ||
         !models.reference_value_model) {
@@ -2007,6 +2416,11 @@ ProbeScoreReport score_probe_dev_with_candidates(
         }
         validate_text_field(scoring.name,
                             "probe scoring Value name");
+        if (!scoring.transition_family.empty()) {
+            validate_text_field(
+                scoring.transition_family,
+                "probe scoring Value transition family");
+        }
         for (std::size_t prior = 0; prior < candidate; ++prior) {
             if (models.scoring_value_models[prior].name ==
                 scoring.name) {
@@ -2021,8 +2435,10 @@ ProbeScoreReport score_probe_dev_with_candidates(
                 "the reference Value name");
         }
     }
+    const ProbeCorpusDefinition definition =
+        corpus_definition(corpus_kind);
     const std::vector<probes::DecisionProbe> corpus =
-        probes::make_probe_dev_v3();
+        make_corpus(corpus_kind);
     const std::string reference_actor_fingerprint =
         learned_model_fingerprint(models.reference_actor_model);
     const std::string scoring_actor_fingerprint =
@@ -2039,7 +2455,8 @@ ProbeScoreReport score_probe_dev_with_candidates(
     }
     const ProbeCacheMetadata metadata =
         make_probe_cache_metadata(
-            config, corpus, reference_actor_fingerprint);
+            corpus_kind, config, corpus,
+            reference_actor_fingerprint);
     std::vector<probe_eval::ProbeLabel> labels;
     ProbeCacheStatus cache_status = ProbeCacheStatus::Loaded;
 
@@ -2050,7 +2467,7 @@ ProbeScoreReport score_probe_dev_with_candidates(
                  << config.cache_path.string() << "...\n"
                  << std::flush;
         labels = load_probe_label_cache(
-            config.cache_path, metadata, corpus);
+            corpus_kind, config.cache_path, metadata, corpus);
     } else {
         cache_status = ProbeCacheStatus::Generated;
         std::vector<ProbeReferenceSamples> raw;
@@ -2062,8 +2479,8 @@ ProbeScoreReport score_probe_dev_with_candidates(
                      << corpus[probe].stable_id << ")..."
                      << std::flush;
             raw.push_back(generate_probe_reference_samples(
-                corpus[probe], models.reference_actor_model,
-                config));
+                corpus_kind, corpus[probe],
+                models.reference_actor_model, config));
             progress << " done\n";
         }
         labels.reserve(raw.size());
@@ -2074,7 +2491,7 @@ ProbeScoreReport score_probe_dev_with_candidates(
         }
         probe_eval::validate_probe_labels(labels);
         write_probe_label_cache_atomic(
-            config.cache_path, metadata, corpus, raw);
+            corpus_kind, config.cache_path, metadata, corpus, raw);
         progress << "Published deterministic probe cache to "
                  << config.cache_path.string() << '\n';
     }
@@ -2095,6 +2512,7 @@ ProbeScoreReport score_probe_dev_with_candidates(
         const ProbeReferenceSamples samples =
             generate_variant_reference_samples(
                 probe, models.reference_value_model, config,
+                definition.corpus_id,
                 LearnedVariant::ValueSearchChampion, false);
         const probe_eval::ProbeLabel label =
             probe_eval::make_probe_label(
@@ -2135,7 +2553,8 @@ ProbeScoreReport score_probe_dev_with_candidates(
 
     const std::vector<probes::DecisionProbe> hidden_clones =
         hidden_clone_corpus(corpus);
-    if (corpus_information_set_fingerprint(hidden_clones) !=
+    if (corpus_information_set_fingerprint(
+            corpus_kind, hidden_clones) !=
         metadata.information_set_fingerprint) {
         throw std::runtime_error(
             "hidden clone changed corpus information-set fingerprint");
@@ -2146,16 +2565,21 @@ ProbeScoreReport score_probe_dev_with_candidates(
     const auto actor_raw_clone =
         score_actor_raw(hidden_clones, models.scoring_actor_model);
     const auto actor_deployed =
-        score_actor_deployed(corpus, models.scoring_actor_model);
+        score_actor_deployed(
+            corpus, models.scoring_actor_model,
+            definition.corpus_id);
     const auto actor_deployed_clone =
         score_actor_deployed(
-            hidden_clones, models.scoring_actor_model);
+            hidden_clones, models.scoring_actor_model,
+            definition.corpus_id);
     const auto reference_value_deployed =
         score_value_deployed(
-            corpus, models.reference_value_model);
+            corpus, models.reference_value_model,
+            definition.corpus_id, config.scoring_value_worlds);
     const auto reference_value_deployed_clone =
         score_value_deployed(
-            hidden_clones, models.reference_value_model);
+            hidden_clones, models.reference_value_model,
+            definition.corpus_id, config.scoring_value_worlds);
     std::vector<std::vector<probe_eval::ProbePrediction>>
         scoring_value_deployed;
     std::vector<std::vector<probe_eval::ProbePrediction>>
@@ -2167,15 +2591,21 @@ ProbeScoreReport score_probe_dev_with_candidates(
     for (const NamedValueScoringModel& candidate :
          models.scoring_value_models) {
         scoring_value_deployed.push_back(
-            score_value_deployed(corpus, candidate.model));
+            score_value_deployed(
+                corpus, candidate.model, definition.corpus_id,
+                config.scoring_value_worlds));
         scoring_value_deployed_clones.push_back(
-            score_value_deployed(hidden_clones, candidate.model));
+            score_value_deployed(
+                hidden_clones, candidate.model,
+                definition.corpus_id,
+                config.scoring_value_worlds));
     }
     const auto handcrafted = score_handcrafted(corpus);
     const auto handcrafted_clone =
         score_handcrafted(hidden_clones);
     const auto value_reference_clone = score_learned_search(
         hidden_clones, models.reference_value_model,
+        definition.corpus_id,
         LearnedVariant::ValueSearchChampion, config.reference_worlds,
         config.reference_rollouts_per_world,
         config.reference_horizon_turns, false);
@@ -2187,6 +2617,8 @@ ProbeScoreReport score_probe_dev_with_candidates(
     progress << " done\n";
 
     ProbeScoreReport report;
+    report.corpus_kind = corpus_kind;
+    report.promotion_eligible = false;
     report.metadata = metadata;
     report.cache_status = cache_status;
     report.cache_path = config.cache_path;
@@ -2203,6 +2635,32 @@ ProbeScoreReport score_probe_dev_with_candidates(
     report.reference_sensitivity = reference_sensitivity;
     report.low_margin =
         summarize_low_margin_best_pairs(labels);
+    report.candidate_pairs =
+        focused_candidate_pairs(
+            corpus_kind, corpus, labels,
+            report.reference_samples_per_candidate);
+    {
+        auto value_pairs = score_value_candidate_pair(
+            corpus_kind, corpus, models.reference_value_model,
+            models.reference_value_name +
+                " Q(Pass) - Q(X=0)",
+            definition.corpus_id, config);
+        for (CandidatePairEstimate& pair : value_pairs) {
+            report.value_candidate_pairs.push_back(
+                std::move(pair));
+        }
+    }
+    for (const NamedValueScoringModel& candidate :
+         models.scoring_value_models) {
+        auto value_pairs = score_value_candidate_pair(
+            corpus_kind, corpus, candidate.model,
+            candidate.name + " Q(Pass) - Q(X=0)",
+            definition.corpus_id, config);
+        for (CandidatePairEstimate& pair : value_pairs) {
+            report.value_candidate_pairs.push_back(
+                std::move(pair));
+        }
+    }
     report.hidden_repartition = {
         .passed = true,
         .policy_count = policy_count,
@@ -2214,6 +2672,11 @@ ProbeScoreReport score_probe_dev_with_candidates(
         models.scoring_actor_name + " deployed policy";
     const std::string reference_value_deployed_name =
         models.reference_value_name + " deployed policy";
+    const std::string value_deployed_configuration =
+        "Priority: K=" +
+        std::to_string(config.scoring_value_worlds) +
+        "/H=4 Value mirror with deployed aggregate shallow-prior "
+        "blend; Attack: deployed public-board attack-set scorer";
     report.policies.reserve(policy_count);
     report.policies.push_back(evaluate_hidden_invariant_policy(
         raw_name,
@@ -2226,18 +2689,14 @@ ProbeScoreReport score_probe_dev_with_candidates(
         labels, actor_deployed, actor_deployed_clone, true));
     report.policies.push_back(evaluate_hidden_invariant_policy(
         reference_value_deployed_name,
-        "Priority: K=2/H=4 Champion mirror with deployed "
-        "aggregate shallow-prior blend; Attack: deployed "
-        "public-board attack-set scorer",
+        value_deployed_configuration,
         labels, reference_value_deployed,
         reference_value_deployed_clone, true));
     if (has_distinct_single_value_candidate) {
         report.policies.push_back(evaluate_hidden_invariant_policy(
             models.scoring_value_models.front().name +
                 " deployed policy",
-            "Priority: K=2/H=4 Champion mirror with deployed "
-            "aggregate shallow-prior blend; Attack: deployed "
-            "public-board attack-set scorer",
+            value_deployed_configuration,
             labels, scoring_value_deployed.front(),
             scoring_value_deployed_clones.front(), true));
     }
@@ -2264,23 +2723,48 @@ ProbeScoreReport score_probe_dev_with_candidates(
                 reference_value_fingerprint, labels,
                 reference_value_deployed,
                 reference_value_deployed_clone, nullptr, nullptr));
+        std::unordered_map<std::string, std::size_t>
+            last_checkpoint_by_family;
         for (std::size_t candidate = 0;
              candidate < models.scoring_value_models.size();
              ++candidate) {
             const ValueCheckpointProbeReport* reference =
                 &report.value_checkpoints.front();
-            const ValueCheckpointProbeReport* previous =
-                &report.value_checkpoints.back();
+            const NamedValueScoringModel& scoring =
+                models.scoring_value_models[candidate];
+            const ValueCheckpointProbeReport* previous = reference;
+            if (!scoring.transition_family.empty()) {
+                const auto found = last_checkpoint_by_family.find(
+                    scoring.transition_family);
+                if (found !=
+                    last_checkpoint_by_family.end()) {
+                    previous =
+                        &report.value_checkpoints[found->second];
+                }
+            }
             report.value_checkpoints.push_back(
                 make_value_checkpoint_report(
-                    models.scoring_value_models[candidate].name,
+                    scoring.name,
                     scoring_value_fingerprints[candidate], labels,
                     scoring_value_deployed[candidate],
                     scoring_value_deployed_clones[candidate],
                     reference, previous));
+            if (!scoring.transition_family.empty()) {
+                last_checkpoint_by_family[
+                    scoring.transition_family] =
+                    report.value_checkpoints.size() - 1;
+            }
         }
     }
     return report;
+}
+
+ProbeScoreReport score_probe_dev_with_candidates(
+    const ProbeScoreConfig& config, std::ostream& progress,
+    ProbeScoringModels models) {
+    return score_probe_corpus_with_candidates(
+        ProbeCorpusKind::DevV3, config, progress,
+        std::move(models));
 }
 
 ProbeScoreReport score_probe_dev_with_models(
@@ -2330,12 +2814,21 @@ std::string format_probe_score_report(
     const ProbeScoreReport& report) {
     std::ostringstream output;
     output.imbue(std::locale::classic());
-    output << std::fixed << std::setprecision(4)
-           << "\nProbe Dev-v3 Offline Score\n"
-           << "WARNING: diagnostic only, 4 positions each for "
-              "Green/Red/Blue/White/RU Aggro. "
-              "This cannot establish playing strength or a champion.\n"
-           << "Reference: Actor-mirror common worlds, K="
+    output << std::fixed << std::setprecision(4);
+    if (report.corpus_kind == ProbeCorpusKind::ValidationV1) {
+        output
+            << "\nProbe Validation-v1 Offline Score\n"
+            << "WARNING: focused harvested behavioral regression "
+               "only; not deck-balanced and cannot be used for "
+               "policy promotion or a Learned-is-king claim.\n";
+    } else {
+        output
+            << "\nProbe Dev-v3 Offline Score\n"
+            << "WARNING: diagnostic only, 4 positions each for "
+               "Green/Red/Blue/White/RU Aggro. "
+               "This cannot establish playing strength or a champion.\n";
+    }
+    output << "Reference: Actor-mirror common worlds, K="
            << report.metadata.worlds << ", H="
            << report.metadata.horizon_turns << ", rollouts/world="
            << report.metadata.rollouts_per_world
@@ -2458,6 +2951,48 @@ std::string format_probe_score_report(
         output << "  No best-versus-action pair requires "
                   "escalation.\n";
     }
+    if (!report.candidate_pairs.empty()) {
+        output
+            << "\nFocused cached Actor-reference candidate pairs\n"
+            << "  These are immutable teacher-label diagnostics, "
+               "not measurements of a Value scoring policy.\n";
+        for (const CandidatePairEstimate& pair :
+             report.candidate_pairs) {
+            output << "  [BEHAVIORAL-REGRESSION-ONLY] "
+                   << pair.stable_id << " ("
+                   << deck_name(pair.root_deck) << "): "
+                   << pair.name << " = " << pair.delta_q
+                   << ", paired SE "
+                   << pair.paired_standard_error << ", 95% CI ["
+                   << pair.confidence_lower_95 << ", "
+                   << pair.confidence_upper_95 << "], "
+                   << pair.samples_per_candidate
+                   << " common-world samples/candidate\n"
+                   << "    keys: " << pair.first_key << " minus "
+                   << pair.second_key << '\n';
+        }
+    }
+    if (!report.value_candidate_pairs.empty()) {
+        output
+            << "\nFocused Value-policy candidate pairs\n"
+            << "  Each row is independently estimated from that "
+               "policy's own Value-mirror K/H=4 search; changing K "
+               "does not change the cached Actor reference.\n";
+        for (const CandidatePairEstimate& pair :
+             report.value_candidate_pairs) {
+            output << "  [BEHAVIORAL-REGRESSION-ONLY] "
+                   << pair.stable_id << " ("
+                   << deck_name(pair.root_deck) << "): "
+                   << pair.name << " = " << pair.delta_q
+                   << ", paired SE "
+                   << pair.paired_standard_error << ", 95% CI ["
+                   << pair.confidence_lower_95 << ", "
+                   << pair.confidence_upper_95 << "], K="
+                   << pair.samples_per_candidate << '\n'
+                   << "    keys: " << pair.first_key << " minus "
+                   << pair.second_key << '\n';
+        }
+    }
     if (!report.value_checkpoints.empty()) {
         const auto append_key_set =
             [&output](const std::vector<std::string>& keys) {
@@ -2488,6 +3023,10 @@ std::string format_probe_score_report(
                    << checkpoint.metrics.mean_regret
                    << ", critic Brier "
                    << checkpoint.metrics.critic_brier
+                   << ", transition parent "
+                   << (checkpoint.transition_parent_name.empty()
+                           ? "(baseline)"
+                           : checkpoint.transition_parent_name)
                    << ", deck regrets [";
             for (std::size_t deck = 0;
                  deck < checkpoint.metrics.by_deck.size(); ++deck) {
@@ -2527,11 +3066,8 @@ std::string format_probe_score_report(
                 if (checkpoint_index == 0) {
                     output << checkpoint.name;
                 } else {
-                    output
-                        << report.value_checkpoints[
-                               checkpoint_index - 1]
-                               .name
-                        << " -> " << checkpoint.name;
+                    output << checkpoint.transition_parent_name
+                           << " -> " << checkpoint.name;
                 }
                 output << ' ' << detail.stable_id << " ("
                        << deck_name(detail.root_deck)

@@ -3088,3 +3088,329 @@ strength result. The next measurement remains one frozen v3 label cache,
 G0-G8 plus Handcrafted diagnostic scoring, and then the five-deck G16 artifact
 comparison. A separately harvested real-game validation corpus is still
 required for any promotion claim.
+
+### Frozen probe-dev-v3 K=8/H=0 baseline and X=0 audit
+
+Recorded after rereading the newest independent review, timestamped 2026-07-25
+11:51 PDT. This executes the already-declared first v3 measurement; it does
+not change the probe corpus or promote a model.
+
+Exact command:
+
+```sh
+./build/old-school-sim --score-probes \
+  --actor-generation 0 --value-generation 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv \
+  --refresh-probe-cache
+```
+
+The frozen Actor G0 fingerprint was
+`41a1be597a46b49cefcfe553f6b8758016a9fd7c3b385cb3e3820c5b6f811d9c`;
+Value G0 was
+`39e8d950a0ffcfa84180594432f197289cf5b41567dd57ae504166658e9b7646`;
+and canonical Value G8 was
+`ca85d00831b1a5c7da9de3a124f4d49154c380600c3c3edde0a65f11bc89284e`.
+The generated v3 label cache SHA-256 was
+`f04055d76272beced1a12371960627cf7acdc3fb003c4cf784a60c9d3e7b660c`.
+All 14 policy views were bit-identical after hidden-zone repartitioning.
+
+The compact Value ladder was not monotone on this small development corpus:
+
+- Value G0: 100% pooled top-1, regret 0.0006, critic Brier 0.0752;
+- G8 random-anchor base: 80% top-1, regret 0.0192, Brier 0.0527;
+- G1: 85%, 0.0089, 0.0512;
+- G2: 95%, 0.0027, 0.0572;
+- G4 and G5: 100%, 0.0006, 0.0587/0.0624;
+- G6: 90%, 0.0061, 0.0662;
+- G8: 95%, 0.0013, 0.0748.
+
+Handcrafted's diagnostic-only agreement was 95% top-1 with 0.0032 regret.
+Actor G0's deployed policy was 100% top-1 with 0.0029 regret, while its raw
+head was 80% with 0.0238 regret. There were six low-margin best-action pairs
+and one reference-sensitive White pair, so the result remains a rejection
+diagnostic only. The worsening late-generation critic calibration and
+non-monotone probe scores are warnings, not causal attributions.
+
+The RU lethal-X fixture does **not** close the user's observed X=0 failure.
+Because the opponent is at three life, K=2 search reliably finds X=3 lethal
+and can pass top-1 even while ranking X=0 above Pass in an ordinary nonlethal
+state. A separate read-only diagnostic on the same fixture exposed the
+underlying ranking:
+
+- Value G0 trained for 100 games, raw: Pass 0.880711, X=0 opponent
+  0.885661, X=3 opponent 0.880807, so raw selected X=0;
+- the same model at K=2: Pass 0.870671, X=0 0.872321, X=3 0.960269;
+- Value G0 trained for 800 games, raw: Pass 0.765471, X=0 0.795801,
+  X=3 0.794311, again selecting X=0;
+- the 800-game model at K=2: Pass 0.790917, X=0 0.801027, X=3
+  0.931437.
+
+For the 100-game model, the Pass-versus-X=0 gap under K=2 and K=8 is exactly
+the bad shallow-prior gap divided by `K+1`: continuation assigns holding and
+wasting the spell equal value. This supports a structural, falsifiable
+explanation: deterministic parent-policy continuation can "heal" Pass by
+wasting the retained card later. Merely increasing deployment rollouts cannot
+teach option value.
+
+Decision: retain X=0 as a legal Magic action and reject a Disintegrate-specific
+mask. Add an independently harvested, nonlethal RU hold-versus-X=0 state to
+the future validation corpus, explicitly report `Q(Pass)-Q(X=0)` with a paired
+confidence interval, and test card-agnostic stochastic/recursive policy
+improvement plus soft targets over every legal action. Keep the frozen
+20-position v3 corpus unchanged. Interactive should use the strongest accepted
+frozen checkpoint at its validated search budget once that checkpoint is
+integrated; this improves observed play but does not replace the new
+hold-versus-waste regression.
+
+### Separate C16 recipe port with a true frozen G0 comparator (declared)
+
+Declared after rereading the 2026-07-25 11:51 independent review and before
+porting challenger code. The review says its branch's explicit
+`learned-value-g0` pins the frozen Codex champion, but a read-only audit
+falsified that statement: at train size 1 and seed 424242, main's true legacy
+G0 fingerprint is
+`b2eec9390d1c7edc358aa27220f9f25b1c31022627a4701e9590efa669e982ba`,
+whereas the branch's explicit “G0” fingerprint is
+`88528336069e681b4c4a54264a6fbdd4cd5d8613d6e6d2b8e46c578689adf817`.
+The branch actually stops its new bootstrapped/sliding/search-on recipe at
+generation two; it changes labels, self-play game allocation, search
+collection, and replay semantics. Therefore the in-flight branch C16-vs-G0
+experiment is C16 versus new-recipe G2 and cannot establish superiority over
+legacy G0. This disagreement is recorded explicitly rather than editing
+`REVIEW.md`.
+
+Hypothesis: manually porting the clean card-agnostic challenger recipe as a
+separate model family will preserve legacy G0 bit-for-bit, make C16 and G0
+unambiguous CLI selections, and reproduce the branch's five-deck improvement
+when both deploy with K=8. No Handcrafted/card-name targets or opponent hidden
+cards will enter the new trainer.
+
+Engineering gates before any strength run:
+
+1. leave `train_learned_value_champion(T, seed)` behavior unchanged and pin a
+   golden legacy fingerprint;
+2. add a separately named challenger trainer with a positive explicit
+   generation count, deterministic same-seed artifacts, and distinct
+   fingerprints for different generation counts;
+3. make model reuse/equality keys include recipe and generation, so C16 and
+   explicit legacy G0 can never alias;
+4. keep probe-dev-v3 labels and Value G0 continuation owned by true legacy G0,
+   then add C16 only as a scoring candidate;
+5. thread the validated deployment budget through benchmark, stability, and
+   interactive routes without silently relabeling the default champion;
+6. preserve five-deck-balanced Learned-mirror self-play, hidden-information
+   isolation, strict build/tests, and ASan/UBSan.
+
+After those gates, first score C16 and true G0 on the frozen v3 cache, then run
+an equal-K=8 C16-vs-G0 paired comparison. Only if that passes the predeclared
+screen should C16 be rerun against Handcrafted on the three existing
+five-deck evaluation seeds, followed by a virgin-seed 2,000+ paired gate and
+the fixed eight-seed panel. The current 720-game branch result does not
+promote C16: RU loses 31.9% versus 39.6% and Green is tied.
+
+### Separate C_N port and X=0 validation instrumentation result
+
+Recorded after rereading the newest independent review, timestamped
+2026-07-25 12:40 PDT. This closes engineering gates only; it is not a
+strength or promotion result.
+
+The separate challenger family is now explicit throughout training,
+benchmark, stability, mixed-field, probe, and interactive routes.
+`train_learned_value_champion(T, seed)` remains the legacy G0 implementation;
+at `T=1`, seed `424242`, its golden fingerprint is still
+`b2eec9390d1c7edc358aa27220f9f25b1c31022627a4701e9590efa669e982ba`.
+The separately named C2 recipe at the same size and seed has golden
+fingerprint
+`88528336069e681b4c4a54264a6fbdd4cd5d8613d6e6d2b8e46c578689adf817`,
+exactly reproducing the independent branch artifact and proving that C2 and
+legacy G0 are not aliases. Model-family/generation keys prevent reuse across
+those identities. `--learned-rollouts N` now reaches each Learned seat at the
+same declared K.
+
+Validation-v1 is a separate, non-promotable corpus containing one fixed-seed,
+real-engine RU-versus-Green second-main state. Its exact information-set
+fingerprint `e181051de454c79a`, turn 5, and priority-decision ordinal 10 are
+golden-pinned. It has complete legal actions and explicitly compares Pass with
+opponent-player Disintegrate X=0. It does **not** reproduce the user's exact
+game or prove that a particular Learned checkpoint selected X=0; it is a
+focused hold-versus-waste behavioral regression.
+
+The probe report now keeps the cached Actor-owned reference estimate separate
+from fresh common-world paired estimates for legacy G0 and every requested
+Value candidate. Candidate K is controlled by `--learned-rollouts`, is excluded
+from the reference-cache identity, and must be at least two so its paired
+standard error is defined. This fixes an audit defect in which the previous
+candidate-pair display could repeat the cached Actor label instead of measuring
+the requested C_N model.
+
+A tiny `T=1`, K=2/3 instrumentation smoke confirmed that the diagnostic catches
+the failure: the Actor reference estimated `Q(Pass)-Q(X=0)=-0.0224` (paired
+SE `0.0080`, 95% interval `[-0.0381,-0.0066]`), while legacy Value G0 estimated
+approximately `-0.0026` at K=2 and `-0.0019` at K=3. These deliberately tiny
+models are not strength evidence. They show that Actor top-1 is not a
+correctness oracle here and that the explicit per-Value pair sign is the useful
+regression.
+
+Strict verification on the integrated source passed 85 engine/bot tests,
+6 learned-iteration tests, 20 probe-corpus tests, 11 probe-metric tests, and
+17 probe-runner tests. The full pre-final-patch ASan/UBSan matrix reported zero
+findings, and the focused final probe-runner sanitizer passed 17/17. The
+user-observed legal X=0 action remains legal; no card-specific mask, handcrafted
+label, opponent hidden card, or combat score was added to Learned.
+
+### C16 versus legacy G0 and nonlethal X=0 screen (declared)
+
+Declared after rereading the 2026-07-25 12:40 independent review and before
+training the ported C16 at `T=800`. Training seed and evaluation seed remain
+independent. This is a large-regression screen, not the final Learned-is-king
+gate.
+
+Hypothesis 1: the independently reproduced C16 recipe deployed at K=8 will
+improve the focused nonlethal option-value defect relative to true legacy G0.
+On validation-v1, C16's fresh `Q(Pass)-Q(X=0)` point estimate must be positive
+and no worse than G0's. Because the corpus has one state and only eight
+candidate worlds, this can reject a behaviorally broken checkpoint but cannot
+accept or promote one. Exact command:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-corpus validation-v1 \
+  --probe-worlds 128 --probe-horizon 0 \
+  --learned-generations 16 --learned-rollouts 8 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-validation-v1-k128-h0-t800-s424242.labels.tsv \
+  --refresh-probe-cache
+```
+
+Hypothesis 2: at equal K=8, C16 is a materially stronger five-deck policy than
+legacy G0. The preregistered 600-paired-game screen uses evaluation seed `909`
+and passes only if C16 exceeds 55% aggregate and has more wins than G0 for each
+of Green, Red, Blue, White, and RU Aggro. With 120 games per deck, slice results
+are large-regression guards rather than few-point estimates. Exact command:
+
+```sh
+./build/old-school-sim --benchmark --games 10 --seed 909 \
+  --challenger learned-value-c16 --baseline learned-value-g0 \
+  --learned-rollouts 8 \
+  --train-games 800 --train-seed 424242
+```
+
+If this screen passes, the next preregistered milestone will reproduce the
+three existing Handcrafted evaluation seeds and then use at least 2,000 paired
+games on a virgin seed before the fixed eight-seed panel. If either screen
+fails, do not tune against this one-state corpus; use the result to choose a
+card-agnostic policy-improvement experiment.
+
+### C16 versus legacy G0 and nonlethal X=0 screen (result)
+
+Recorded after rereading the newest independent review, timestamped
+2026-07-25 13:40 PDT. Both preregistered hypotheses passed their stated
+screens, with an important uncertainty caveat on the one-state behavioral
+result.
+
+The validation-v1 command trained these frozen artifacts:
+
+- Actor G0:
+  `41a1be597a46b49cefcfe553f6b8758016a9fd7c3b385cb3e3820c5b6f811d9c`;
+- legacy Value G0:
+  `39e8d950a0ffcfa84180594432f197289cf5b41567dd57ae504166658e9b7646`;
+- Value Challenger C16:
+  `e4e9cc8869a9a501a68ba2c0e904acf43847564c935d032aa697562553d8c145`.
+
+At K=8, legacy G0 estimated
+`Q(Pass)-Q(X=0)=-0.0095` (paired SE `0.0042`, 95% interval
+`[-0.0178,-0.0011]`). C16 estimated `+0.0006` (paired SE `0.0005`,
+95% interval `[-0.0005,+0.0016]`). Thus C16 passed the preregistered point-sign
+and no-worse-than-G0 screen, but the margin is statistically compatible with
+zero. Decision: accept the directional correction as useful diagnostic
+evidence, not as proof that X=0 is solved in natural games. The scripted
+validation state still does not claim that either deployed policy selected
+X=0 there.
+
+The exact seed-909, 600-paired-game C16-versus-legacy-G0 command produced:
+
+- aggregate C16 **334-266 (55.7%)**, Wilson 95% interval
+  **51.7%-59.6%**;
+- Green 56/120 versus G0 30/120;
+- Red 60/120 versus G0 52/120;
+- Blue 80/120 versus G0 53/120;
+- White 88/120 versus G0 85/120;
+- RU Aggro 50/120 versus G0 46/120.
+
+This passes the predeclared `>55%` aggregate bar, the aggregate lower-bound
+gate, and all five deck-slice guards. The independent reviewer ran the exact
+same command from the same working tree and reported the exact same 334-266
+total and every slice, providing a live bit-for-bit determinism replication.
+Distinct fingerprints prove that the comparison did not alias the two model
+families.
+
+Decision: accept C16 as the new clean milestone challenger over legacy G0.
+Do not yet make a Learned-is-king or default-policy promotion claim. Existing
+independent C16-versus-Handcrafted evidence still shows RU Aggro behind at the
+2,040-game seed-404 milestone, and the mixed-field all-five lift gate has not
+yet been rerun at the validated K=8 deployment.
+
+### C16 K=8 five-deck mixed-lift screen (declared)
+
+Declared after rereading the 2026-07-25 13:40 independent review and before
+rerunning the user-facing five-deck mixed field with C16. Hypothesis: replacing
+legacy G0/K=2 with the frozen C16/K=8 challenger will make Learned's lift over
+Random at least as large as every other policy's lift on each of Green, Red,
+Blue, White, and RU Aggro in the fixed seed-4242 report.
+
+Exact command:
+
+```sh
+./build/old-school-sim --games 100 --seed 4242 --bots mixed \
+  --learned-generations 16 --learned-rollouts 8 \
+  --train-games 800 --train-seed 424242
+```
+
+This 1,000-game report has only 60 games per deck/policy cell, so it is a
+large-gap screen and cannot resolve a few points. Pass requires the existing
+literal all-five lift gate (ties allowed); aggregate win rate alone cannot
+pass it. Failure on any deck selects the next card-agnostic learning
+experiment and does not authorize tuning to the cell.
+
+### Frozen C_N artifact cache engineering result
+
+Recorded after rereading the newest independent review, timestamped
+2026-07-25 13:40 PDT. This is a runtime/integrity improvement, not a bot
+strength result.
+
+The separate Challenger family now has an immutable, versioned cache at
+`build/model-cache/old-school-value-challenger-v1-cN-tT-sSEED.bin`.
+Its payload identity binds the Old School engine/observation schema, exact
+challenger trainer recipe, all model dimensions, training size, training seed,
+generation count, and final model fingerprint. A first matching route trains
+and atomically publishes the artifact; later interactive, benchmark,
+learned-only, mixed, stability, and probe routes load the bit-exact model.
+`--refresh-value-challenger-cache` is the only automatic regeneration path.
+Corrupt, stale, mismatched, trailing-byte, or cross-family artifacts fail
+closed rather than silently retraining.
+
+A safety audit found that an early writer API could wrap an arbitrary Value
+model with caller-supplied Challenger metadata. That version was rejected.
+The final API uses a private-provenance artifact object constructible only by
+the Challenger trainer or its validated loader, so legacy G0/G8 cannot be
+relabelled C_N. Tests also prove both canonical and Mix50 G8 loaders reject
+Challenger artifacts and vice versa.
+
+Verification on the final cache source:
+
+- strict C++20 `-Wall -Wextra -Wpedantic -Werror` engine and simulator builds;
+- 86/86 engine/bot tests, including the legacy G0 and C2 golden fingerprints,
+  bit-exact artifact round-trip, metadata/corruption failures, generation-key
+  separation, and opaque provenance;
+- the complete CLI lifecycle, including generate/load identity, deterministic
+  record reuse, corrupt fail-closed behavior, atomic refresh, and every
+  advertised route;
+- 20/20 probe-corpus, 11/11 probe-metric, and 17/17 probe-runner tests;
+- ASan/UBSan 86/86 with zero findings.
+
+Decision: accept the cache. It does not alter model weights, rollout policy, or
+benchmark results; it removes approximately five minutes of repeated C16
+training from each matching follow-up command and makes frozen-model reuse
+visible in CLI output.

@@ -840,6 +840,7 @@ struct TournamentConfig {
         LearnedVariant::ValueSearchChampion;
     std::size_t monte_carlo_rollouts = 2;
     std::size_t deep_monte_carlo_rollouts = 8;
+    std::size_t learned_rollouts = 2;
     std::size_t learned_training_games = 800;
 };
 
@@ -926,6 +927,61 @@ train_learned_model(std::size_t training_games, std::uint64_t seed);
 std::shared_ptr<const LearnedModel>
 train_learned_value_champion(std::size_t training_games,
                             std::uint64_t seed);
+std::shared_ptr<const LearnedModel>
+train_learned_value_challenger(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations);
+class LearnedValueChallengerArtifact {
+  public:
+    std::shared_ptr<const LearnedModel> model() const;
+    std::size_t training_games() const;
+    std::uint64_t seed() const;
+    std::size_t self_play_generations() const;
+
+  private:
+    LearnedValueChallengerArtifact(
+        std::shared_ptr<const LearnedModel> model,
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations);
+
+    std::shared_ptr<const LearnedModel> model_;
+    std::size_t training_games_ = 0;
+    std::uint64_t seed_ = 0;
+    std::size_t self_play_generations_ = 0;
+
+    friend LearnedValueChallengerArtifact
+    train_learned_value_challenger_artifact(
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations);
+    friend void write_learned_value_challenger_artifact_atomic(
+        const std::string& path,
+        const LearnedValueChallengerArtifact& artifact);
+    friend LearnedValueChallengerArtifact
+    load_learned_value_challenger_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_seed,
+        std::size_t expected_self_play_generations);
+};
+
+LearnedValueChallengerArtifact
+train_learned_value_challenger_artifact(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations);
+// Challenger artifacts are deliberately separate from legacy G0 and the
+// immutable G8 bundles. Their cache identity binds the exact challenger
+// recipe, engine/model schema, training size, seed, and generation count.
+std::string learned_value_challenger_cache_path(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations);
+void write_learned_value_challenger_artifact_atomic(
+    const std::string& path,
+    const LearnedValueChallengerArtifact& artifact);
+LearnedValueChallengerArtifact
+load_learned_value_challenger_artifact(
+    const std::string& path, std::size_t expected_training_games,
+    std::uint64_t expected_seed,
+    std::size_t expected_self_play_generations);
 std::shared_ptr<const LearnedModel>
 train_learned_actor_model(std::size_t training_games,
                           std::uint64_t seed);

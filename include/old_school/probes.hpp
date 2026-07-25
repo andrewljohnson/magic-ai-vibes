@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -14,6 +15,14 @@ namespace old_school::probes {
 inline constexpr std::string_view kProbeDevV3 =
     "old-school-probe-dev-v3";
 inline constexpr std::uint64_t kProbeValidationSeed = 0x50524F42455631ULL;
+inline constexpr std::string_view kProbeValidationV1 =
+    "old-school-probe-validation-v1";
+inline constexpr std::uint64_t kProbeValidationV1GameSeed =
+    0x52555830484F4C44ULL;
+inline constexpr std::string_view kProbePriorityCallbackCollector =
+    "Game::HumanController::choose_priority_action";
+inline constexpr std::string_view kProbeLandThenPassScript =
+    "land-then-pass-v1";
 
 enum class DecisionKind : std::uint8_t {
     Priority,
@@ -47,6 +56,7 @@ enum class Category : std::uint8_t {
     RUBlockerDevelopment,
     RUFlyingMoatAttack,
     RUDisintegrateLethal,
+    RUDisintegrateHoldValidation,
 };
 
 struct BinaryAttackDecision {
@@ -67,6 +77,19 @@ struct Candidate {
     CandidateAction action;
 };
 
+struct HarvestProvenance {
+    std::string collector;
+    std::string trajectory_script;
+    std::uint64_t game_seed = 0;
+    std::size_t starting_player = 0;
+    // Zero-based across all nontrivial priority callbacks in the game.
+    std::size_t priority_decision_ordinal = 0;
+    std::size_t turn_number = 0;
+    TurnPhase phase = TurnPhase::FirstMain;
+
+    bool operator==(const HarvestProvenance&) const = default;
+};
+
 struct DecisionProbe {
     std::string stable_id;
     Category category = Category::GreenDevelop;
@@ -79,6 +102,9 @@ struct DecisionProbe {
     GameState state;
     std::array<std::vector<CardId>, 2> original_decks;
     std::vector<Candidate> candidates;
+    // Present only when the state was captured from a real seeded engine
+    // trajectory rather than authored directly.
+    std::optional<HarvestProvenance> harvest;
 };
 
 struct Validation {
@@ -97,6 +123,13 @@ struct Validation {
 // Nothing in the runtime policy or training path imports this module.
 std::vector<DecisionProbe> make_probe_dev_v3();
 
+// A focused, independently named validation corpus harvested from real seeded
+// priority callbacks. V1 intentionally contains one nonlethal RU
+// hold-versus-X=0 state. It is a behavioral regression instrument, not a
+// deck-balanced corpus and therefore cannot support bot promotion or
+// all-five-deck strength claims.
+std::vector<DecisionProbe> make_probe_validation_v1();
+
 Validation validate_probe(
     const DecisionProbe& probe,
     std::uint64_t hidden_seed = kProbeValidationSeed);
@@ -104,6 +137,10 @@ Validation validate_probe(
 // Includes per-probe validation plus corpus-level checks such as stable-ID
 // and category uniqueness and exactly four probes per metagame deck.
 std::vector<std::string> validate_probe_dev_v3(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed = kProbeValidationSeed);
+
+std::vector<std::string> validate_probe_validation_v1(
     const std::vector<DecisionProbe>& probes,
     std::uint64_t hidden_seed = kProbeValidationSeed);
 
