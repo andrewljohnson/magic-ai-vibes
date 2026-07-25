@@ -1,10 +1,12 @@
 #include "alpha/game.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -44,8 +46,10 @@ class LearnedModel {
         }
         for (std::size_t feature = 0; feature < features.size();
              ++feature) {
-            output +=
-                direct_output_weights_[feature] * features[feature];
+            if (features[feature] != 0.0) {
+                output += direct_output_weights_[feature] *
+                          features[feature];
+            }
         }
         return 1.0 / (1.0 + std::exp(-output));
     }
@@ -75,9 +79,11 @@ class LearnedModel {
                 }
                 for (std::size_t feature = 0;
                      feature < features.size(); ++feature) {
-                    output_sum +=
-                        direct_output_weights_[feature] *
-                        features[feature];
+                    if (features[feature] != 0.0) {
+                        output_sum +=
+                            direct_output_weights_[feature] *
+                            features[feature];
+                    }
                 }
                 const double output =
                     1.0 / (1.0 + std::exp(-output_sum));
@@ -92,8 +98,11 @@ class LearnedModel {
                 }
                 for (std::size_t feature = 0;
                      feature < features.size(); ++feature) {
-                    direct_output_weights_[feature] -=
-                        rate * output_error * features[feature];
+                    if (features[feature] != 0.0) {
+                        direct_output_weights_[feature] -=
+                            rate * output_error *
+                            features[feature];
+                    }
                 }
                 output_bias_ -= rate * output_error;
 
@@ -106,8 +115,11 @@ class LearnedModel {
                                    hidden[hidden_index]);
                     for (std::size_t feature = 0;
                          feature < kFeatureCount; ++feature) {
-                        input_weights_[hidden_index][feature] -=
-                            rate * hidden_error * features[feature];
+                        if (features[feature] != 0.0) {
+                            input_weights_[hidden_index][feature] -=
+                                rate * hidden_error *
+                                features[feature];
+                        }
                     }
                     hidden_biases_[hidden_index] -= rate * hidden_error;
                 }
@@ -124,8 +136,10 @@ class LearnedModel {
             double sum = hidden_biases_[hidden_index];
             for (std::size_t feature = 0; feature < kFeatureCount;
                  ++feature) {
-                sum += input_weights_[hidden_index][feature] *
-                       features[feature];
+                if (features[feature] != 0.0) {
+                    sum += input_weights_[hidden_index][feature] *
+                           features[feature];
+                }
             }
             hidden[hidden_index] = std::tanh(sum);
         }
@@ -1433,6 +1447,10 @@ PriorityAction Game::choose_priority_action(
     if (actions.empty()) {
         throw std::logic_error("priority window has no pass action");
     }
+    if (trace_ != nullptr && !state_.stack.empty() &&
+        actions.size() > 1) {
+        trace_->push_back(state_);
+    }
     if (actions.size() == 1) {
         return actions.front();
     }
@@ -2406,16 +2424,67 @@ SimulationSummary run_matchup(const std::vector<CardId>& first_deck,
     summary.bot_matchups = empty_bot_matchups();
     std::mt19937_64 seed_generator(seed);
 
+    std::vector<GameConfig> configs(games, game_config);
+    std::vector<std::uint64_t> game_seeds(games);
+    std::size_t current_matrix =
+        std::numeric_limits<std::size_t>::max();
+    std::uint64_t matrix_seed = 0;
     for (std::size_t game_index = 0; game_index < games; ++game_index) {
-        GameConfig current_game_config = game_config;
         if (tournament_config.has_value()) {
-            configure_bots(current_game_config,
+            configure_bots(configs[game_index],
                            schedule_offset + game_index,
                            *tournament_config);
         }
-        Game game(first_deck, second_deck, seed_generator(),
-                  current_game_config);
-        const GameResult result = game.run();
+        if (tournament_config.has_value() &&
+            tournament_config->bot_field == BotField::Mixed) {
+            const std::size_t scheduled_game =
+                schedule_offset + game_index;
+            const std::size_t matrix =
+                scheduled_game /
+                (kBotKindCount * kBotKindCount);
+            if (matrix != current_matrix) {
+                current_matrix = matrix;
+                matrix_seed = seed_generator();
+            }
+            game_seeds[game_index] = matrix_seed;
+            if (!game_config.starting_player.has_value()) {
+                const std::size_t pairing =
+                    scheduled_game %
+                    (kBotKindCount * kBotKindCount);
+                configs[game_index].starting_player =
+                    (pairing + matrix) % 2;
+            }
+        } else {
+            game_seeds[game_index] = seed_generator();
+        }
+    }
+
+    std::vector<GameResult> results(games);
+    std::atomic_size_t next_game = 0;
+    const std::size_t worker_count = std::min<std::size_t>(
+        games, std::max(1U, std::thread::hardware_concurrency()));
+    std::vector<std::thread> workers;
+    workers.reserve(worker_count);
+    for (std::size_t worker = 0; worker < worker_count; ++worker) {
+        workers.emplace_back([&] {
+            while (true) {
+                const std::size_t game_index =
+                    next_game.fetch_add(1, std::memory_order_relaxed);
+                if (game_index >= games) {
+                    return;
+                }
+                Game game(first_deck, second_deck,
+                          game_seeds[game_index],
+                          configs[game_index]);
+                results[game_index] = game.run();
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    for (const GameResult& result : results) {
         summary.total_turns += result.turns;
 
         for (std::size_t player = 0; player < summary.decks.size();
@@ -2694,6 +2763,17 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
 
     std::mt19937_64 random(seed);
     std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
+    const auto choose_distinct_decks = [&] {
+        const std::size_t first = choose_deck(random);
+        std::size_t second = choose_deck(random);
+        while (second == first) {
+            second = choose_deck(random);
+        }
+        return std::pair{
+            static_cast<DeckId>(first),
+            static_cast<DeckId>(second),
+        };
+    };
     std::vector<LearnedModel::TrainingExample> examples;
     examples.reserve(training_games * 120);
     const auto add_trace =
@@ -2719,10 +2799,8 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
 
     for (std::size_t game_index = 0; game_index < training_games;
          ++game_index) {
-        const auto first_deck =
-            static_cast<DeckId>(choose_deck(random));
-        const auto second_deck =
-            static_cast<DeckId>(choose_deck(random));
+        const auto [first_deck, second_deck] =
+            choose_distinct_decks();
         Game game(deck_cards(first_deck), deck_cards(second_deck),
                   random());
         std::vector<GameState> trace;
@@ -2760,10 +2838,8 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
                         generation == 0 ? 0.10 : 0.05,
                 },
             };
-            const auto first_deck =
-                static_cast<DeckId>(choose_deck(random));
-            const auto second_deck =
-                static_cast<DeckId>(choose_deck(random));
+            const auto [first_deck, second_deck] =
+                choose_distinct_decks();
             Game game(deck_cards(first_deck), deck_cards(second_deck),
                       random(), config);
             std::vector<GameState> trace;
@@ -2863,17 +2939,21 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
             repetitions_per_deck_pairing,
     };
     std::mt19937_64 seed_generator(seed);
-
+    struct BenchmarkTask {
+        std::size_t first_deck;
+        std::size_t second_deck;
+        std::size_t challenger_player;
+        std::size_t baseline_player;
+        std::size_t challenger_deck;
+        std::size_t baseline_deck;
+        std::size_t starting_player;
+        std::uint64_t seed;
+    };
+    std::vector<BenchmarkTask> tasks;
+    tasks.reserve(repetitions_per_deck_pairing * 40);
     for (std::size_t first_deck = 0; first_deck < 4; ++first_deck) {
         for (std::size_t second_deck = first_deck;
              second_deck < 4; ++second_deck) {
-            const auto first_id =
-                static_cast<DeckId>(first_deck);
-            const auto second_id =
-                static_cast<DeckId>(second_deck);
-            const auto first_cards = deck_cards(first_id);
-            const auto second_cards = deck_cards(second_id);
-
             for (std::size_t repetition = 0;
                  repetition < repetitions_per_deck_pairing;
                  ++repetition) {
@@ -2892,31 +2972,75 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
 
                     for (std::size_t starting_player = 0;
                          starting_player < 2; ++starting_player) {
-                        GameConfig current_config = game_config;
-                        current_config.starting_player =
-                            starting_player;
-                        current_config.bots[challenger_player] =
-                            challenger;
-                        current_config.bots[baseline_player] = baseline;
-
-                        Game game(first_cards, second_cards, game_seed,
-                                  current_config);
-                        const GameResult result = game.run();
-                        ++summary.total_games;
-                        record_bot_result(summary.challenger_stats,
-                                          result, challenger_player);
-                        record_bot_result(summary.baseline_stats, result,
-                                          baseline_player);
-                        record_deck_result(
-                            summary.challenger_decks[challenger_deck],
-                            result, challenger_player);
-                        record_deck_result(
-                            summary.baseline_decks[baseline_deck], result,
-                            baseline_player);
+                        tasks.push_back({
+                            .first_deck = first_deck,
+                            .second_deck = second_deck,
+                            .challenger_player = challenger_player,
+                            .baseline_player = baseline_player,
+                            .challenger_deck = challenger_deck,
+                            .baseline_deck = baseline_deck,
+                            .starting_player = starting_player,
+                            .seed = game_seed,
+                        });
                     }
                 }
             }
         }
+    }
+
+    const std::array<std::vector<CardId>, 4> decks = {
+        deck_cards(DeckId::Green),
+        deck_cards(DeckId::Red),
+        deck_cards(DeckId::Blue),
+        deck_cards(DeckId::White),
+    };
+    std::vector<GameResult> results(tasks.size());
+    std::atomic_size_t next_task = 0;
+    const std::size_t worker_count = std::min<std::size_t>(
+        tasks.size(),
+        std::max(1U, std::thread::hardware_concurrency()));
+    std::vector<std::thread> workers;
+    workers.reserve(worker_count);
+    for (std::size_t worker = 0; worker < worker_count; ++worker) {
+        workers.emplace_back([&] {
+            while (true) {
+                const std::size_t task_index =
+                    next_task.fetch_add(1, std::memory_order_relaxed);
+                if (task_index >= tasks.size()) {
+                    return;
+                }
+                const auto& task = tasks[task_index];
+                GameConfig current_config = game_config;
+                current_config.starting_player =
+                    task.starting_player;
+                current_config.bots[task.challenger_player] =
+                    challenger;
+                current_config.bots[task.baseline_player] = baseline;
+                Game game(decks[task.first_deck],
+                          decks[task.second_deck], task.seed,
+                          current_config);
+                results[task_index] = game.run();
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    for (std::size_t task_index = 0; task_index < tasks.size();
+         ++task_index) {
+        const auto& task = tasks[task_index];
+        const auto& result = results[task_index];
+        ++summary.total_games;
+        record_bot_result(summary.challenger_stats, result,
+                          task.challenger_player);
+        record_bot_result(summary.baseline_stats, result,
+                          task.baseline_player);
+        record_deck_result(
+            summary.challenger_decks[task.challenger_deck], result,
+            task.challenger_player);
+        record_deck_result(
+            summary.baseline_decks[task.baseline_deck], result,
+            task.baseline_player);
     }
 
     return summary;

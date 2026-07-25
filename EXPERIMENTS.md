@@ -176,6 +176,98 @@ Full development benchmark:
 - Decision: passes the development Handcrafted gate for aggregate confidence
   and all four deck slices. Advance to the all-policy, multi-seed panel.
 
+All-policy one-seed smoke panel:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --stability --stability-runs 1 \
+  --games 3 --seed 424141 --rollouts 2 --deep-rollouts 8 \
+  --train-games 800
+```
+
+- Random: 109-11; all deck slices pass.
+- Monte Carlo: 101-19; all deck slices pass.
+- Deep Monte Carlo: 86-34; all deck slices pass.
+- Handcrafted: 70-50; Green, Red, and Blue pass, White ties 22-22.
+- Runtime: 54.75 seconds with one shared model across all baselines.
+- Decision: the harness works and the weaker policies clear comfortably. The
+  Handcrafted sample is too small for confidence and White; proceed to pooled
+  multi-seed validation after performance work.
+
+### Sparse feature arithmetic
+
+Hypothesis: most of the 191 state features are zero. Skip zero-valued
+multiply/update operations in prediction and SGD without changing numerical
+results for nonzero inputs.
+
+Status: implementation complete; timing validation pending.
+
+Timing validation combined with parallel paired-game execution:
+
+- The identical one-seed all-policy smoke panel retained byte-for-byte result
+  totals.
+- Wall time fell from 54.75 seconds to 15.39 seconds (3.6x faster).
+- Decision: keep. Fixed-seed outcomes and reduction order remain
+  deterministic.
+
+### Mixed-field per-deck lift gate
+
+New user-facing requirement: in `make run`, Learned must provide a larger
+win-rate lift over Random than Monte Carlo, Deep Monte Carlo, and Handcrafted
+for each of Green, Red, Blue, and White. Direct paired benchmarks remain
+required but are no longer sufficient by themselves.
+
+Status: reproduce the seeded default tournament with the current candidate,
+then add this requirement to stability validation.
+
+First common-seed/parallel run:
+
+- Wall time fell from 31.28 seconds to 12.07 seconds.
+- Learned was best overall (69.2%) and had the largest lift for Green and
+  Red, but Handcrafted led Blue and White.
+- The common seed accidentally gave each 25-game policy matrix one random
+  starting player, creating badly imbalanced deck play/draw counts (for
+  example Green was 50/250).
+- Decision: performance change is promising, but the result is invalid for
+  strength. Explicitly balance play/draw within each policy matrix and rerun.
+
+Balanced common-seed run:
+
+- Wall time: 11.61 seconds.
+- Every deck had a 150/150 play/draw split.
+- Learned was best overall (68.8%) and had the largest lift for Green and
+  Red. Handcrafted still led Learned on Blue (75.0%/68.3%) and White
+  (96.7%/91.7%).
+- Decision: keep balanced common seeds and parallel execution. The
+  Blue/White mixed-field gate genuinely needs a training improvement.
+
+### Cross-deck metagame training
+
+Hypothesis: training samples same-deck mirrors 25% of the time, but the
+round-robin metagame and displayed lift contain only six distinct-deck
+pairings. Sample ordered distinct deck pairs uniformly for initial random
+play and fitted Learned-vs-Learned self-play.
+
+Status: implementation complete; seeded mixed-field run pending.
+
+Seeded mixed-field result:
+
+- Learned remained best overall (68.3%).
+- Largest lift: Green and Red passed.
+- White nearly passed: Learned 95.0% versus Handcrafted 96.7%.
+- Blue failed: Learned 68.3% versus Handcrafted 75.0%.
+- Decision: cross-deck sampling improves the metagame fit, particularly Red,
+  but is not sufficient for the all-deck lift gate.
+
+### Targeted nonempty-stack replay
+
+Hypothesis: the network has stack card planes but receives outcome labels
+almost exclusively at turn starts. Record a training snapshot only when the
+stack is nonempty and the priority player has more than pass available. This
+targets Counterspell decisions without repeating every pass/priority state,
+which previously collapsed the model.
+
+Status: implementation complete; seeded mixed-field run pending.
+
 Development screen:
 
 ```sh

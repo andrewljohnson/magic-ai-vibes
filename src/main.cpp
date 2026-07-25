@@ -201,12 +201,16 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
     const bool has_deep_comparison =
         result.bots[random_index].games > 0 &&
         result.bots[deep_index].games > 0;
+    const bool has_learned_comparison =
+        result.bots[random_index].games > 0 &&
+        result.bots[learned_index].games > 0;
     const bool has_monte_carlo_comparison =
         result.bots[random_index].games > 0 &&
         result.bots[monte_carlo_index].games > 0;
 
     std::cout << "\nBot benefit by deck\n";
-    if (!has_deep_comparison && !has_monte_carlo_comparison) {
+    if (!has_learned_comparison && !has_deep_comparison &&
+        !has_monte_carlo_comparison) {
         std::cout << "  Not available; use --bots mixed to compare "
                      "policies.\n";
         return;
@@ -216,9 +220,11 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
     for (std::size_t deck = 0; deck < result.deck_bots.size(); ++deck) {
         const auto& random = result.deck_bots[deck][random_index];
         const auto& comparison =
-            has_deep_comparison
-                ? result.deck_bots[deck][deep_index]
-                : result.deck_bots[deck][monte_carlo_index];
+            has_learned_comparison
+                ? result.deck_bots[deck][learned_index]
+                : (has_deep_comparison
+                       ? result.deck_bots[deck][deep_index]
+                       : result.deck_bots[deck][monte_carlo_index]);
         if (random.games == 0 || comparison.games == 0) {
             continue;
         }
@@ -234,8 +240,10 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
               });
 
     std::cout << "  Ranked by "
-              << (has_deep_comparison ? "Deep Monte Carlo"
-                                      : "Monte Carlo")
+              << (has_learned_comparison
+                      ? "Learned Value"
+                      : (has_deep_comparison ? "Deep Monte Carlo"
+                                             : "Monte Carlo"))
               << " win-rate lift over Random:\n";
     for (std::size_t rank = 0; rank < benefits.size(); ++rank) {
         const auto deck_index =

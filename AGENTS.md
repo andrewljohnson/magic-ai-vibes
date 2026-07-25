@@ -54,6 +54,8 @@ For the current four-deck environment, acceptance requires:
   benchmark;
 - more direct wins than Handcrafted for every Learned challenger deck in the
   pooled results;
+- the largest mixed-field win-rate lift over Random for Learned on Green,
+  Red, Blue, and White in the seeded stability run;
 - no losing validation seed in aggregate;
 - all unit/integration tests and sanitizer checks passing.
 
