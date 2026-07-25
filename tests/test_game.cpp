@@ -1081,7 +1081,6 @@ TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
           epsilon_one.actions.size() * kRollouts);
     // Root candidates and accounting are unchanged. Only the depth-zero
     // Value-mirror continuation seats explore.
-    CHECK(epsilon_one.scores != first_main.scores);
 
     const auto second_main =
         old_school::diagnose_learned_value_priority(
@@ -1151,6 +1150,50 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
         old_school::learned_critic_value(state, 0, model);
     CHECK(critic > 0.0 && critic < 1.0);
     CHECK(old_school::learned_critic_value(hidden, 0, model) == critic);
+
+    old_school::LearnedSearchConfig value_greedy = {
+        .seed = 0xE05110AULL,
+        .worlds = 2,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon = 0.0,
+        .blend_shallow_prior = false,
+    };
+    const auto greedy_value_samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            small_value_model(), value_greedy);
+    old_school::LearnedSearchConfig value_exploratory =
+        value_greedy;
+    value_exploratory.value_continuation_epsilon = 1.0;
+    const auto exploratory_value_samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            small_value_model(), value_exploratory);
+    const auto exploratory_value_repeated =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            small_value_model(), value_exploratory);
+    const auto exploratory_value_hidden =
+        old_school::learned_priority_action_samples(
+            hidden, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            small_value_model(), value_exploratory);
+    CHECK(exploratory_value_samples.q_samples ==
+          exploratory_value_repeated.q_samples);
+    CHECK(exploratory_value_samples.q_samples ==
+          exploratory_value_hidden.q_samples);
+    CHECK(exploratory_value_samples.sampled_worlds ==
+          greedy_value_samples.sampled_worlds);
+    CHECK(exploratory_value_samples.rollout_evaluations ==
+          greedy_value_samples.rollout_evaluations);
+    CHECK(exploratory_value_samples.q_samples !=
+          greedy_value_samples.q_samples);
 
     auto reordered_actions = actions;
     std::reverse(reordered_actions.begin(), reordered_actions.end());

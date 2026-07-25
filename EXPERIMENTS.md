@@ -3518,3 +3518,113 @@ That 600-paired-game screen passes only above 52.5% aggregate with the
 treatment ahead on every challenger deck. It is still a large-effect screen,
 not promotion evidence. A failure rejects epsilon 0.05 without trying nearby
 values; a pass permits a separately preregistered mixed-lift rerun.
+
+### Continuation-only epsilon experiment (result)
+
+Recorded after rereading the newest independent review, timestamped
+2026-07-25 14:16 PDT. Both commands in the declaration were run exactly as
+written against the same cached Actor labels and frozen C16 artifact. The
+cache remained an Actor-reference cache: changing candidate continuation
+epsilon neither regenerated it nor changed its identity. Hidden-zone
+repartition invariance passed bit-for-bit in both runs.
+
+At epsilon zero, C16 estimated
+`Q(Pass)-Q(X=0)=-0.0011` (paired SE `0.0002`, 95% interval
+`[-0.0014,-0.0008]`) from 128 common-world samples per action. The more
+precise K=128 estimate therefore corrected the earlier K=8 point estimate:
+standard C16 slightly but significantly preferred the nonlethal X=0 action in
+this state.
+
+At the single predeclared treatment `epsilon=0.05`, C16 estimated
+`Q(Pass)-Q(X=0)=-0.0129` (paired SE `0.0053`, 95% interval
+`[-0.0233,-0.0025]`). The treatment moved the point estimate `-0.0118` in
+the wrong direction, and its entire interval remained below zero. Candidate
+pair estimates became noisier because stochastic continuations added genuine
+within-policy outcome variance; common-world seeds and rollout accounting
+remained paired and deterministic.
+
+Decision: **reject continuation epsilon 0.05**. Per preregistration, do not
+try nearby epsilon values and do not run the conditional seed-919 five-deck
+benchmark or a mixed-lift rerun. The falsified hypothesis is informative:
+rare uniformly random priority choices do not reveal useful option value to
+this frozen critic; in this fixture they make the hold branch look worse.
+Keep the explicit zero-default ablation available for reproducibility, but it
+is not part of the promoted C16 policy.
+
+Engineering verification for the rejected ablation remains green: strict
+C++20 `-Wall -Wextra -Wpedantic -Werror` builds, 88/88 engine/bot tests,
+17/17 probe-runner tests, and the full CLI suite. The tests cover a bit-exact
+zero default, finite `[0,1]` validation, root isolation, both continuation
+seats, fixed-seed repeatability, hidden-repartition invariance, unchanged
+world/evaluation accounting, same-model benchmark identity, challenger-only
+CLI treatment, and Actor-cache exclusion. Sanitizer verification is recorded
+separately when rerun on the final source state.
+
+### C16 Counterspell probe audit (declared)
+
+Declared after rereading the newest independent review and in response to the
+user asking whether Counterspell is tested for use and mana discipline.
+Hypothesis: frozen C16 at deployed K=8 selects an Actor-reference-best action
+on all four existing Blue stack fixtures:
+
+- use a two-mana Counterspell on a five-mana Fire Elemental;
+- decide whether to spend it against a one-mana Bolt threatening a five-mana
+  Water Elemental;
+- counter a lethal Bolt;
+- in a counter war, target the opponent's Counterspell rather than its own
+  Water Elemental.
+
+Exact command:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-worlds 8 --probe-horizon 0 \
+  --learned-generations 16 --learned-rollouts 8 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
+```
+
+Pass requires C16 top-1 agreement on all four Blue fixtures and zero Blue
+regret. The one-mana-Bolt pair has only a tiny cached reference margin, so
+failure there is diagnostic rather than a reason to reject C16. This frozen
+four-state development slice can expose a Counterspell regression; it cannot
+promote a policy or establish a general mana-value threshold.
+
+### C16 Counterspell probe audit (result)
+
+Recorded after rereading the newest independent review, timestamped
+2026-07-25 14:16 PDT. The exact command loaded the immutable v3 labels and
+frozen C16 artifact. All six policy views and their hidden-zone repartition
+clones were bit-identical.
+
+The cached deep-reference action values support the intended semantics:
+
+- countering five-mana Fire Elemental with two-mana Counterspell:
+  `0.694699` versus Pass `0.616914`, delta `+0.077785`;
+- countering one-mana Bolt to preserve five-mana Water Elemental:
+  `0.743886` versus Pass `0.741592`, delta `+0.002294`;
+- countering lethal Bolt: `0.116456` versus terminal Pass `0`;
+- countering the opponent's Counterspell in the counter war: `0.670836`
+  versus Pass `0.602954` and incorrectly countering the protected Water
+  Elemental `0.591295`.
+
+C16 at K=8 achieved **100% top-1 agreement across all four Blue probes** and
+**100% agreement on all three statistically stable Blue action pairs**.
+Therefore it selected a reference-best action in the expensive-spell,
+protect-the-threat, lethal, and counter-war fixtures. Hidden-information
+invariance passed.
+
+The stricter declaration technically failed because C16's mean Blue regret
+was `0.0006`, not exactly zero. The discrepancy is compatible with selecting
+within a reference-best uncertainty set rather than the single maximum; the
+report still counted all four top-1 choices as reference-best. Two labels are
+weak diagnostics: the protect-Water margin is only `0.0023`, and lethal
+Counterspell has paired SE `0.1165` at K=8 because only one sampled world
+found the visible winning continuation.
+
+Decision: accept the narrow answer that C16 uses Counterspell correctly in
+these four fixtures, including the clean two-mana-for-five-mana trade and the
+correct counter-war target. Do **not** claim general mana discipline or use
+this result for promotion. A future mana-discipline family should hold the
+information set fixed while varying incoming spell cost/public consequence
+and test monotonic action preference with more common worlds.

@@ -211,6 +211,25 @@ or passing zero keeps legacy G0. Training and evaluation seeds remain
 separate. `--learned-rollouts N` independently selects deployment search
 width, so a challenger and G0 can be compared at equal K.
 
+`--value-continuation-epsilon X` is an explicit research ablation for
+card-agnostic exploration in the depth-zero Learned Value mirror
+continuations. `X` must be finite and in `[0,1]`; the deployed root remains
+greedy, and zero preserves the normal policy without consuming an extra
+random draw. For a causal same-model/same-K benchmark, the option applies only
+to the challenger while the baseline remains at zero:
+
+```sh
+./build/old-school-sim --benchmark --games 20 --seed 424242 \
+  --challenger learned-value-c16 --baseline learned-value-c16 \
+  --learned-rollouts 8 --train-games 800 --train-seed 424242 \
+  --value-continuation-epsilon 0.05
+```
+
+Interactive play, stability, probe scoring, and mixed or learned-value
+simulation apply it to their selected Value policy. It is a runtime policy
+setting, not training data or model identity, and probe label-cache metadata
+deliberately excludes it.
+
 Challenger training is cached independently for every `(N, training games,
 training seed)` identity. For example, C16 at the default training settings
 uses
