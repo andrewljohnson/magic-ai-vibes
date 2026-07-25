@@ -1,4 +1,5 @@
 #include "alpha/game.hpp"
+#include "alpha/learned_iteration.hpp"
 
 #include <algorithm>
 #include <array>
@@ -802,6 +803,380 @@ TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
         rejected_null = true;
     }
     CHECK(rejected_null);
+}
+
+TEST(learned_actor_updates_deep_clone_critic_and_policy_without_mutating_parent) {
+    const auto parent = small_actor_model();
+    const alpha::GameState state =
+        alpha::white_lock_plan_diagnostic_state();
+    const auto actions =
+        alpha::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() >= 2);
+
+    const std::string parent_fingerprint =
+        alpha::learned_model_fingerprint(parent);
+    const double parent_critic =
+        alpha::learned_critic_value(state, 0, parent);
+    const auto parent_logits =
+        alpha::learned_actor_priority_logits(
+            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+            actions, parent);
+
+    std::vector<std::vector<double>> policy_options;
+    policy_options.reserve(actions.size());
+    for (const auto& action : actions) {
+        policy_options.push_back(
+            alpha::learned_priority_policy_features(
+                state, 0, action, true,
+                alpha::TurnPhase::FirstMain, 0));
+    }
+
+    // Even a no-op update is a recursive clone, but its serialized content
+    // and both prediction paths are initially bit-identical.
+    const auto frozen_clone =
+        alpha::update_learned_actor_model(parent, {}, {}, {});
+    CHECK(frozen_clone.get() != parent.get());
+    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(state, 0, frozen_clone) ==
+          parent_critic);
+    CHECK(alpha::learned_actor_priority_logits(
+              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+              actions, frozen_clone) == parent_logits);
+
+    const double critic_target =
+        parent_critic < 0.5 ? 1.0 : 0.0;
+    const auto critic_candidate =
+        alpha::update_learned_actor_model(
+            frozen_clone,
+            {{
+                .features = alpha::learned_observation(state, 0),
+                .target = critic_target,
+            }},
+            {},
+            {
+                .critic_epochs = 4,
+                .critic_learning_rate = 0.05,
+                .critic_seed = 0xC1171CULL,
+                .policy_epochs = 1,
+                .policy_learning_rate = 0.001,
+                .policy_seed = 0x5011C9ULL,
+            });
+    CHECK(alpha::learned_model_fingerprint(critic_candidate) !=
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(
+              state, 0, critic_candidate) != parent_critic);
+    CHECK(alpha::learned_actor_priority_logits(
+              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+              actions, critic_candidate) == parent_logits);
+
+    std::vector<double> soft_target(actions.size(), 0.0);
+    const std::size_t target_option =
+        static_cast<std::size_t>(std::min_element(
+            parent_logits.begin(), parent_logits.end()) -
+                                 parent_logits.begin());
+    soft_target[target_option] = 1.0;
+    const auto policy_candidate =
+        alpha::update_learned_actor_model(
+            frozen_clone, {},
+            {{
+                .options = policy_options,
+                .target_probabilities = soft_target,
+                .decision_kind =
+                    alpha::LearnedPolicyDecisionKind::Priority,
+                .weight = 1.0,
+            }},
+            {
+                .critic_epochs = 1,
+                .critic_learning_rate = 0.001,
+                .critic_seed = 0xC1171CULL,
+                .policy_epochs = 4,
+                .policy_learning_rate = 0.01,
+                .policy_seed = 0x5011C9ULL,
+            });
+    CHECK(alpha::learned_model_fingerprint(policy_candidate) !=
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(
+              state, 0, policy_candidate) == parent_critic);
+    CHECK(alpha::learned_actor_priority_logits(
+              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+              actions, policy_candidate) != parent_logits);
+
+    // Neither the original publication nor the no-op cloned publication was
+    // aliased by either mutable training candidate.
+    CHECK(alpha::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+    CHECK(alpha::learned_model_fingerprint(frozen_clone) ==
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(state, 0, parent) ==
+          parent_critic);
+    CHECK(alpha::learned_actor_priority_logits(
+              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+          actions, parent) == parent_logits);
+}
+
+TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
+    const alpha::LearnedActorGenerationConfig defaults;
+    CHECK(defaults.search_worlds == 8);
+    CHECK(defaults.rollouts_per_world == 1);
+    CHECK(defaults.horizon_turns == 0);
+    CHECK(defaults.max_roots_per_seat_kind == 24);
+    CHECK(defaults.td_lambda == 0.90);
+    CHECK(defaults.critic_epochs == 2);
+    CHECK(defaults.critic_learning_rate == 0.002);
+    CHECK(defaults.policy_epochs == 2);
+    CHECK(defaults.policy_learning_rate == 0.001);
+
+    const auto parent = small_actor_model();
+    const alpha::GameState state =
+        alpha::white_lock_plan_diagnostic_state();
+    const auto actions =
+        alpha::legal_priority_actions(state, 0, true);
+    const std::string parent_fingerprint =
+        alpha::learned_model_fingerprint(parent);
+    const double parent_critic =
+        alpha::learned_critic_value(state, 0, parent);
+    const auto parent_logits =
+        alpha::learned_actor_priority_logits(
+            state, 0, true, alpha::TurnPhase::FirstMain, 0,
+            actions, parent);
+
+    constexpr std::uint64_t kRootSeed = 0x617E2A710ULL;
+    const alpha::LearnedActorGenerationConfig fast = {
+        .search_worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .max_roots_per_seat_kind = 1,
+        .td_lambda = 0.90,
+        .critic_epochs = 1,
+        .critic_learning_rate = 0.002,
+        .policy_epochs = 1,
+        .policy_learning_rate = 0.001,
+        .generation = 1,
+    };
+    const auto first =
+        alpha::train_learned_actor_generation(
+            parent, kRootSeed, fast);
+    const auto expected =
+        alpha::learned_iteration::balanced_schedule(
+            kRootSeed, fast.generation);
+
+    CHECK(first.model);
+    CHECK(first.report.games.size() == expected.size());
+    CHECK(first.report.games.size() == 24);
+    CHECK(first.report.parent_fingerprint ==
+          parent_fingerprint);
+    CHECK(first.report.candidate_fingerprint ==
+          alpha::learned_model_fingerprint(first.model));
+    CHECK(first.report.candidate_fingerprint !=
+          parent_fingerprint);
+    CHECK(first.report.replay_generations == 1);
+    CHECK(first.report.priority_policy_examples ==
+          first.report.priority_roots);
+    CHECK(first.report.attack_policy_examples ==
+          first.report.attack_roots);
+    CHECK(first.report.critic_examples +
+              first.report.deduplicated_critic_observations ==
+          first.report.priority_roots +
+              first.report.attack_roots);
+    CHECK(std::abs(
+              first.report.minimum_policy_target_sum - 1.0) <
+          1.0e-12);
+    CHECK(std::abs(
+              first.report.maximum_policy_target_sum - 1.0) <
+          1.0e-12);
+    CHECK(first.report.attack_rollout_evaluations ==
+          2 * first.report.attack_roots);
+    CHECK(first.report.priority_rollout_evaluations >=
+          2 * first.report.priority_roots);
+
+    std::size_t priority_roots = 0;
+    std::size_t attack_roots = 0;
+    std::size_t attack_includes = 0;
+    for (std::size_t index = 0;
+         index < first.report.games.size(); ++index) {
+        const auto& actual = first.report.games[index];
+        const auto& scheduled = expected[index];
+        CHECK(actual.schedule_index ==
+              scheduled.schedule_index);
+        CHECK(actual.pairing_index ==
+              scheduled.pairing_index);
+        CHECK(actual.seat_decks == scheduled.seat_decks);
+        CHECK(actual.starting_player ==
+              scheduled.starting_player);
+        CHECK(actual.game_seed == scheduled.seed);
+        for (std::size_t player = 0; player < 2; ++player) {
+            CHECK(actual.priority_roots_by_seat[player] <= 1);
+            CHECK(actual.attack_roots_by_seat[player] <= 1);
+            CHECK(actual.attack_includes_by_seat[player] <=
+                  actual.attack_roots_by_seat[player]);
+            if (actual.priority_roots_by_seat[player] != 0) {
+                CHECK(std::abs(
+                          actual.priority_policy_weight_sums[player] -
+                          1.0) <
+                      1.0e-12);
+            }
+            if (actual.attack_roots_by_seat[player] != 0) {
+                CHECK(std::abs(
+                          actual.attack_policy_weight_sums[player] -
+                          1.0) <
+                      1.0e-12);
+            }
+            priority_roots +=
+                actual.priority_roots_by_seat[player];
+            attack_roots +=
+                actual.attack_roots_by_seat[player];
+            attack_includes +=
+                actual.attack_includes_by_seat[player];
+        }
+    }
+    CHECK(priority_roots == first.report.priority_roots);
+    CHECK(attack_roots == first.report.attack_roots);
+    CHECK(attack_includes <= attack_roots);
+
+    CHECK(alpha::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+    CHECK(alpha::learned_critic_value(state, 0, parent) ==
+          parent_critic);
+    CHECK(alpha::learned_actor_priority_logits(
+              state, 0, true, alpha::TurnPhase::FirstMain, 0,
+              actions, parent) == parent_logits);
+
+    const auto repeated =
+        alpha::train_learned_actor_generation(
+            parent, kRootSeed, fast);
+    CHECK(repeated.model.get() != first.model.get());
+    CHECK(repeated.report == first.report);
+    CHECK(alpha::learned_model_fingerprint(repeated.model) ==
+          alpha::learned_model_fingerprint(first.model));
+    CHECK(alpha::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+}
+
+TEST(learned_actor_generation_attack_search_controls_real_lethal_combat) {
+    auto fixture =
+        attack_evaluation_fixture(alpha::CardId::GrizzlyBears);
+    fixture.state.players[1].library.push_back(
+        alpha::CardId::GrizzlyBears);
+    fixture.state.players[1].creatures.clear();
+    fixture.state.players[1].life = 3;
+
+    const auto diagnostic =
+        alpha::diagnose_learned_actor_generation_attack(
+            fixture.state, fixture.decks, small_actor_model(),
+            {
+                .seed = 0xA77AC6ULL,
+                .worlds = 2,
+                .rollouts_per_world = 1,
+                .horizon_turns = 0,
+                .continuation_variant =
+                    alpha::LearnedVariant::UnifiedActor,
+                .blend_shallow_prior = false,
+            });
+    CHECK(diagnostic.searched_roots == 1);
+    CHECK(diagnostic.rollout_evaluations == 4);
+    CHECK(diagnostic.included_attackers == 1);
+    CHECK(diagnostic.terminal_result.has_value());
+    CHECK(diagnostic.terminal_result->winner == 0);
+    CHECK(diagnostic.terminal_result->reason ==
+          alpha::EndReason::LifeTotal);
+    CHECK(diagnostic.final_state.players[1].life == 0);
+    CHECK(diagnostic.final_state.players[0].creatures[0].tapped);
+}
+
+TEST(learned_actor_generation_priority_search_applies_real_counterspell) {
+    const std::array<std::vector<alpha::CardId>, 2> decks = {
+        alpha::blue_alpha_deck(),
+        alpha::red_alpha_deck(),
+    };
+    alpha::GameState state;
+    state.active_player = 1;
+    state.starting_player = 1;
+    state.turn_number = 8;
+    state.next_stack_object_id = 2;
+    state.players[0].life = 3;
+    state.players[0].hand = {
+        alpha::CardId::Counterspell,
+    };
+    state.players[0].lands = {
+        {.card = alpha::CardId::Island, .tapped = false},
+        {.card = alpha::CardId::Island, .tapped = false},
+    };
+    state.players[0].library = decks[0];
+    remove_fixture_card(
+        state.players[0].library, alpha::CardId::Counterspell);
+    remove_fixture_card(
+        state.players[0].library, alpha::CardId::Island);
+    remove_fixture_card(
+        state.players[0].library, alpha::CardId::Island);
+
+    state.players[1].lands = {
+        {.card = alpha::CardId::Mountain, .tapped = true},
+    };
+    state.players[1].library = decks[1];
+    remove_fixture_card(
+        state.players[1].library, alpha::CardId::Mountain);
+    remove_fixture_card(
+        state.players[1].library, alpha::CardId::LightningBolt);
+    state.stack = {
+        {
+            .kind = alpha::StackObjectKind::Spell,
+            .id = 1,
+            .card = alpha::CardId::LightningBolt,
+            .controller = 1,
+            .target = alpha::Target::player_target(0),
+            .spell_target = std::nullopt,
+        },
+    };
+
+    const auto actions =
+        alpha::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() == 2);
+    CHECK(std::find(
+              actions.begin(), actions.end(),
+              alpha::PriorityAction::cast_counterspell(1)) !=
+          actions.end());
+
+    const auto diagnostic =
+        alpha::diagnose_learned_actor_generation_priority(
+            state, decks, 0, true,
+            alpha::TurnPhase::SecondMain, 1,
+            small_actor_model(),
+            {
+                .seed = 0xC0A17E5EEDULL,
+                .worlds = 2,
+                .rollouts_per_world = 1,
+                .horizon_turns = 0,
+                .continuation_variant =
+                    alpha::LearnedVariant::UnifiedActor,
+                .blend_shallow_prior = false,
+            });
+
+    CHECK(diagnostic.searched_roots == 1);
+    CHECK(diagnostic.rollout_evaluations == 4);
+    CHECK(diagnostic.selected_action ==
+          alpha::PriorityAction::cast_counterspell(1));
+    CHECK(diagnostic.transition_applied);
+    CHECK(!diagnostic.pass_result.has_value());
+    CHECK(!diagnostic.terminal_result.has_value());
+    CHECK(diagnostic.final_state.players[0].life == 3);
+    CHECK(diagnostic.final_state.players[0].hand.empty());
+    CHECK(std::all_of(
+        diagnostic.final_state.players[0].lands.begin(),
+        diagnostic.final_state.players[0].lands.end(),
+        [](const alpha::LandPermanent& land) {
+            return land.tapped;
+        }));
+    CHECK(diagnostic.final_state.stack.size() == 2);
+    CHECK(diagnostic.final_state.stack[0].card ==
+          alpha::CardId::LightningBolt);
+    CHECK(diagnostic.final_state.stack[1].card ==
+          alpha::CardId::Counterspell);
+    CHECK(diagnostic.final_state.stack[1].controller == 0);
+    CHECK(diagnostic.final_state.stack[1].spell_target ==
+          std::optional<alpha::StackObjectId>{1});
+    CHECK(diagnostic.final_state.next_stack_object_id == 3);
+    CHECK(diagnostic.final_state.stats[0].spells_cast == 1);
 }
 
 TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {

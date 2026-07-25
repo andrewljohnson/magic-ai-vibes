@@ -442,6 +442,41 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     int consecutive_passes, std::shared_ptr<const LearnedModel> model,
     std::size_t rollouts_per_action, std::uint64_t seed);
 
+// Focused evaluation-only seams for proving that generation-mode searched
+// choices are the actions actually applied by the engine.
+struct LearnedActorGenerationPriorityDiagnostic {
+    std::size_t searched_roots = 0;
+    std::size_t rollout_evaluations = 0;
+    PriorityAction selected_action;
+    bool transition_applied = false;
+    std::optional<PriorityPassResult> pass_result;
+    std::optional<GameResult> terminal_result;
+    GameState final_state;
+};
+
+LearnedActorGenerationPriorityDiagnostic
+diagnose_learned_actor_generation_priority(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, std::shared_ptr<const LearnedModel> parent,
+    LearnedSearchConfig search);
+
+struct LearnedActorGenerationAttackDiagnostic {
+    std::size_t searched_roots = 0;
+    std::size_t rollout_evaluations = 0;
+    std::size_t included_attackers = 0;
+    std::optional<GameResult> terminal_result;
+    GameState final_state;
+};
+
+LearnedActorGenerationAttackDiagnostic
+diagnose_learned_actor_generation_attack(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::shared_ptr<const LearnedModel> parent,
+    LearnedSearchConfig search);
+
 class Game {
   public:
     Game(std::vector<CardId> player_zero_deck,
@@ -484,6 +519,20 @@ class Game {
     friend std::vector<double> handcrafted_priority_scores(
         const GameState& state, std::size_t player,
         const std::vector<PriorityAction>& candidates);
+    friend LearnedActorGenerationAttackDiagnostic
+    diagnose_learned_actor_generation_attack(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::shared_ptr<const LearnedModel> parent,
+        LearnedSearchConfig search);
+    friend LearnedActorGenerationPriorityDiagnostic
+    diagnose_learned_actor_generation_priority(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t player, bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes,
+        std::shared_ptr<const LearnedModel> parent,
+        LearnedSearchConfig search);
 
     void initialize();
     bool draw_card(std::size_t player);
@@ -725,6 +774,117 @@ train_learned_value_champion(std::size_t training_games,
 std::shared_ptr<const LearnedModel>
 train_learned_actor_model(std::size_t training_games,
                           std::uint64_t seed);
+
+// Card-agnostic update seam for iterated Learned Actor training. Callers
+// provide already-encoded observations/action features and soft policy
+// targets; this layer never inspects cards, game state, or another policy.
+struct LearnedCriticTrainingExample {
+    std::vector<double> features;
+    double target = 0.5;
+};
+
+enum class LearnedPolicyDecisionKind : std::uint8_t {
+    Priority,
+    Attack,
+    Block,
+    DamageOrder,
+};
+
+struct LearnedPolicyTrainingExample {
+    std::vector<std::vector<double>> options;
+    std::vector<double> target_probabilities;
+    LearnedPolicyDecisionKind decision_kind =
+        LearnedPolicyDecisionKind::Priority;
+    double weight = 1.0;
+};
+
+struct LearnedActorUpdateConfig {
+    std::size_t critic_epochs = 1;
+    double critic_learning_rate = 0.001;
+    std::uint64_t critic_seed = 0;
+    std::size_t policy_epochs = 1;
+    double policy_learning_rate = 0.001;
+    std::uint64_t policy_seed = 0;
+};
+
+// Recursively deep-clones `parent`, updates every independently cloned critic
+// leaf and the cloned outer policy heads, then republishes the result as
+// immutable. Empty example sets perform a pure deep clone.
+std::shared_ptr<const LearnedModel> update_learned_actor_model(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedCriticTrainingExample>& critic_examples,
+    const std::vector<LearnedPolicyTrainingExample>& policy_examples,
+    LearnedActorUpdateConfig config);
+
+struct LearnedActorGenerationConfig {
+    std::size_t search_worlds = 8;
+    std::size_t rollouts_per_world = 1;
+    std::size_t horizon_turns = 0;
+    std::size_t max_roots_per_seat_kind = 24;
+    double td_lambda = 0.90;
+    std::size_t critic_epochs = 2;
+    double critic_learning_rate = 0.002;
+    std::size_t policy_epochs = 2;
+    double policy_learning_rate = 0.001;
+    std::uint64_t generation = 1;
+};
+
+struct LearnedActorGenerationGameReport {
+    std::size_t schedule_index = 0;
+    std::size_t pairing_index = 0;
+    std::array<DeckId, 2> seat_decks = {
+        DeckId::Green,
+        DeckId::Red,
+    };
+    std::size_t starting_player = 0;
+    std::uint64_t game_seed = 0;
+    int winner = -1;
+    std::array<std::size_t, 2> priority_roots_by_seat{};
+    std::array<std::size_t, 2> attack_roots_by_seat{};
+    std::array<std::size_t, 2> attack_includes_by_seat{};
+    std::array<double, 2> priority_policy_weight_sums{};
+    std::array<double, 2> attack_policy_weight_sums{};
+    std::size_t priority_rollout_evaluations = 0;
+    std::size_t attack_rollout_evaluations = 0;
+
+    bool operator==(
+        const LearnedActorGenerationGameReport&) const = default;
+};
+
+struct LearnedActorGenerationReport {
+    std::uint64_t root_seed = 0;
+    std::uint64_t generation = 1;
+    std::vector<LearnedActorGenerationGameReport> games;
+    std::size_t priority_roots = 0;
+    std::size_t attack_roots = 0;
+    std::size_t priority_rollout_evaluations = 0;
+    std::size_t attack_rollout_evaluations = 0;
+    std::size_t critic_examples = 0;
+    std::size_t priority_policy_examples = 0;
+    std::size_t attack_policy_examples = 0;
+    std::size_t deduplicated_critic_observations = 0;
+    std::size_t replay_generations = 0;
+    double minimum_policy_target_sum = 0.0;
+    double maximum_policy_target_sum = 0.0;
+    std::string parent_fingerprint;
+    std::string candidate_fingerprint;
+
+    bool operator==(
+        const LearnedActorGenerationReport&) const = default;
+};
+
+struct LearnedActorGenerationResult {
+    std::shared_ptr<const LearnedModel> model;
+    LearnedActorGenerationReport report;
+};
+
+// Fits exactly one new immutable generation from one exact 24-game balanced
+// frozen-parent mirror block.
+LearnedActorGenerationResult train_learned_actor_generation(
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t root_seed,
+    LearnedActorGenerationConfig config = {});
+
 // Stable content fingerprint over the model variant, all critic/policy weight
 // bit patterns, and recursively serialized ensemble members.
 std::string learned_model_fingerprint(

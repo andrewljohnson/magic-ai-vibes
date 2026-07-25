@@ -4,43 +4,52 @@ CPPFLAGS ?= -Iinclude
 
 BUILD_DIR := build
 ENGINE_SOURCE := src/game.cpp
+LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
 PROBE_SOURCE := src/probes.cpp
 PROBE_EVAL_SOURCE := src/probe_eval.cpp
 PROBE_RUNNER_SOURCE := src/probe_runner.cpp
 SIMULATOR := $(BUILD_DIR)/alpha-sim
 TEST_RUNNER := $(BUILD_DIR)/alpha-tests
+LEARNED_ITERATION_TEST_RUNNER := $(BUILD_DIR)/alpha-learned-iteration-tests
 PROBE_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-tests
 PROBE_EVAL_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-eval-tests
 PROBE_RUNNER_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-runner-tests
 
-.PHONY: all test test-probes benchmark benchmark-deep benchmark-learned stability evolve run clean
+.PHONY: all test test-learned-iteration test-probes benchmark benchmark-deep benchmark-learned stability evolve run clean
 
 all: $(SIMULATOR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(SIMULATOR): $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp include/alpha/game.hpp include/alpha/probes.hpp include/alpha/probe_eval.hpp include/alpha/probe_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp -o $@
+$(SIMULATOR): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp include/alpha/game.hpp include/alpha/learned_iteration.hpp include/alpha/probes.hpp include/alpha/probe_eval.hpp include/alpha/probe_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp -o $@
 
-$(TEST_RUNNER): $(ENGINE_SOURCE) tests/test_game.cpp include/alpha/game.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) tests/test_game.cpp -o $@
+$(TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp include/alpha/game.hpp include/alpha/learned_iteration.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp -o $@
 
-$(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp include/alpha/game.hpp include/alpha/probes.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp -o $@
+$(LEARNED_ITERATION_TEST_RUNNER): $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp include/alpha/game.hpp include/alpha/learned_iteration.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp -o $@
+
+$(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp include/alpha/game.hpp include/alpha/learned_iteration.hpp include/alpha/probes.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp -o $@
 
 $(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp include/alpha/game.hpp include/alpha/probe_eval.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp -o $@
 
-$(PROBE_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp include/alpha/game.hpp include/alpha/probes.hpp include/alpha/probe_eval.hpp include/alpha/probe_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp -o $@
+$(PROBE_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp include/alpha/game.hpp include/alpha/learned_iteration.hpp include/alpha/probes.hpp include/alpha/probe_eval.hpp include/alpha/probe_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp -o $@
 
-test: $(TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(SIMULATOR)
 	./$(TEST_RUNNER)
+	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
 	./$(PROBE_EVAL_TEST_RUNNER)
 	./$(PROBE_RUNNER_TEST_RUNNER)
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
+
+test-learned-iteration: $(LEARNED_ITERATION_TEST_RUNNER)
+	./$(LEARNED_ITERATION_TEST_RUNNER)
 
 test-probes: $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)

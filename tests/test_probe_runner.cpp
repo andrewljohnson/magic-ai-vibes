@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -460,6 +461,8 @@ void test_report_contains_required_schema_and_caveats() {
     report.cache_status = ProbeCacheStatus::Loaded;
     report.cache_path = "labels.tsv";
     report.reference_samples_per_candidate = 128;
+    report.scoring_actor_model_fingerprint =
+        "actor-candidate-fingerprint";
     report.value_model_fingerprint = "value-model-fingerprint";
     alpha::probe_eval::ProbeMetricSummary metrics;
     metrics.probe_count = 16;
@@ -550,6 +553,11 @@ void test_report_contains_required_schema_and_caveats() {
 
     const std::string output =
         alpha::probe_runner::format_probe_score_report(report);
+    expect(output.find("actor-model-fingerprint") !=
+                   std::string::npos &&
+               output.find("actor-candidate-fingerprint") !=
+                   std::string::npos,
+           "report did not distinguish reference and scoring Actor models");
     expect(output.find(
                "diagnostic only, 4 positions/deck") !=
                std::string::npos,
@@ -617,6 +625,73 @@ void test_report_contains_required_schema_and_caveats() {
            "report omitted per-deck sections");
 }
 
+void test_candidate_scoring_reuses_reference_owned_cache() {
+    TemporaryDirectory directory;
+    const auto reference =
+        alpha::train_learned_actor_model(1, 0xA11CEULL);
+    const auto candidate =
+        alpha::train_learned_actor_model(1, 0xB0BULL);
+    expect(alpha::learned_model_fingerprint(reference) !=
+               alpha::learned_model_fingerprint(candidate),
+           "tiny candidate model unexpectedly aliases reference content");
+
+    const ProbeScoreConfig config{
+        .training_games = 1,
+        .training_seed = 0xA11CEULL,
+        .reference_worlds = 2,
+        .reference_horizon_turns = 0,
+        .reference_rollouts_per_world = 1,
+        .cache_path = directory.path() / "candidate-cache.tsv",
+        .refresh_cache = false,
+    };
+    std::ostringstream progress;
+    const ProbeScoreReport generated =
+        alpha::probe_runner::score_probe_dev_v2_with_models(
+            config, progress, reference, reference, "Actor G0");
+    const ProbeScoreReport loaded =
+        alpha::probe_runner::score_probe_dev_v2_with_models(
+            config, progress, reference, candidate, "Actor G1");
+
+    expect(generated.cache_status == ProbeCacheStatus::Generated &&
+               loaded.cache_status == ProbeCacheStatus::Loaded,
+           "candidate-only change regenerated reference-owned labels");
+    expect(generated.metadata == loaded.metadata &&
+               generated.metadata.reference_model_fingerprint ==
+                   alpha::learned_model_fingerprint(reference),
+           "candidate-only change altered reference cache identity");
+    expect(generated.scoring_actor_model_fingerprint ==
+                   generated.metadata.reference_model_fingerprint &&
+               loaded.scoring_actor_model_fingerprint ==
+                   alpha::learned_model_fingerprint(candidate),
+           "report did not bind the actual scoring Actor");
+    expect(generated.policies.front().name == "Actor G0 raw head" &&
+               loaded.policies.front().name == "Actor G1 raw head",
+           "candidate policy labels were not generation-specific");
+    expect(generated.hidden_repartition.passed &&
+               loaded.hidden_repartition.passed,
+           "candidate scoring did not enforce hidden repartition");
+
+    const std::string null_error = expect_invalid(
+        [&] {
+            alpha::probe_runner::score_probe_dev_v2_with_models(
+                config, progress, nullptr, candidate, "Actor G1");
+        },
+        "null reference Actor was accepted");
+    expect(null_error.find("reference and scoring") !=
+               std::string::npos,
+           "null model error was not actionable");
+    const std::string name_error = expect_invalid(
+        [&] {
+            alpha::probe_runner::score_probe_dev_v2_with_models(
+                config, progress, reference, candidate,
+                "Actor\tG1");
+        },
+        "unsafe candidate name was accepted");
+    expect(name_error.find("contain no tabs/newlines") !=
+               std::string::npos,
+           "unsafe candidate name error was not actionable");
+}
+
 } // namespace
 
 int main() {
@@ -639,5 +714,7 @@ int main() {
                test_low_margin_summary_is_actionable);
     runner.run("report summary schema",
                test_report_contains_required_schema_and_caveats);
+    runner.run("candidate cache ownership",
+               test_candidate_scoring_reuses_reference_owned_cache);
     return runner.finish();
 }

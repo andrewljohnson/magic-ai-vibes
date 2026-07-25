@@ -30,6 +30,12 @@ binary, never from extrapolation.
 - **Watch next:** whether Codex fixes the probe semantics before running
   the K=8/H=4 teacher comparison, and whether the first G0→G1 training
   generation shows real improvement on fixed labels.
+- **Claude challenger** (branch `claude/challenger`, worktree
+  `../magic-ai-vibes-claude`, plan/log in `CLAUDE-PLAN.md`): racing Codex
+  toward the same gates. Step 1 (n-step bootstrapped self-play targets)
+  landed: neutral, 43.8% pooled vs the 43.3% baseline — kept as
+  infrastructure, not claimed as a gain. Step 2 next: 8 short generations
+  with a sliding replay window, gated generation-vs-generation.
 
 ## Goal under review
 

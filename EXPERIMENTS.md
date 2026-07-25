@@ -1912,3 +1912,48 @@ Checkpoint audit:
 - AddressSanitizer/UndefinedBehaviorSanitizer pass all 51 engine tests and all
   9 probe-runner tests (`detect_leaks=0`, because macOS's sanitizer runtime
   rejects leak detection).
+
+### Frozen G0 to G1 search-as-teacher generation (predeclared)
+
+The first iterated candidate is fixed before implementation results:
+
+- parent G0: `train_learned_actor_model(800, 424242)`, retained bit-for-bit;
+- one generation, 24 self-play games in the exact balanced block of six
+  unordered distinct-deck matchups, both deck-to-seat orientations, and both
+  starting players;
+- both seats use the frozen G0 mirror, never Handcrafted;
+- every retained Priority and binary Attack root uses eight common
+  information-set worlds, one continuation/world, H=0, no shallow prior;
+- at most 24 searched roots per seat and decision kind per game;
+- soft all-action targets use temperature 0.10 with 90% teacher mass;
+- critic targets use TD(lambda), lambda=0.90, terminal win/draw/loss
+  1/0.5/0, and frozen-parent next-state values;
+- replay retains three immutable generation shards (one exists for G1);
+- critic update: two epochs at learning rate 0.002 with independent ensemble
+  shuffle seeds; Priority/Attack policy update: two epochs at 0.001;
+- Block and DamageOrder heads are copied unchanged in this minimal G1.
+
+Required implementation gates: G0 fingerprint and predictions remain
+bit-identical after G1 training; G1 has a distinct fingerprint; fixed-seed
+training is deterministic; schedule, seed-domain, TD(lambda), replay eviction,
+hidden-repartition teacher targets, and same-variant distinct-model benchmark
+routing have focused tests.
+
+Offline rejection gate on `probe-dev-v2`: G1 must improve either pooled
+deployed agreement or regret versus G0, may worsen no deck's mean regret by
+more than 0.01, and must not regress search-supervised Attack decisions. The
+16 fixtures can reject, not promote.
+
+If offline gates pass, the exact large-regression screen is:
+
+```sh
+./build/alpha-sim --benchmark --games 15 --seed 101 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-actor-g1 --baseline learned-actor-g0
+```
+
+This is 600 paired games and is only allowed to reject a large regression:
+stop if G1 is below 45% aggregate or below 40% on any deck. A result near
+50% is not an improvement claim. Any promotion or roughly three-point claim
+requires at least 2,000 paired games followed by evaluation seeds
+101/202/303/404/505/606/707/808.

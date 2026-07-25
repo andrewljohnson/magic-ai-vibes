@@ -53,7 +53,8 @@ void print_help(std::string_view executable) {
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
-           " [--probe-cache PATH] [--refresh-probe-cache]\n"
+           " [--actor-generation 0|1] [--probe-cache PATH]"
+           " [--refresh-probe-cache]\n"
         << "       " << executable
         << " --evolve-deck [--generations N] [--population N] "
            "[--games N]\n\n"
@@ -80,7 +81,8 @@ void print_help(std::string_view executable) {
            "(default: 424242)\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
-           "(default: handcrafted; learned aliases learned-value)\n"
+           "(default: handcrafted; actor generations: "
+           "learned-actor-g0/g1)\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
         << "  --stability     Validate Learned against all policies across "
@@ -97,6 +99,8 @@ void print_help(std::string_view executable) {
            "(default: 128; minimum: 2)\n"
         << "  --probe-horizon N  Actor-mirror reference horizon in turns "
            "(default: 12)\n"
+        << "  --actor-generation N  Score frozen Actor G0 or G1 "
+           "(default: 0; requires --score-probes)\n"
         << "  --probe-cache PATH  Deterministic label cache "
            "(default: data/probe-dev-v2.labels.tsv)\n"
         << "  --refresh-probe-cache  Regenerate matching probe labels "
@@ -115,6 +119,7 @@ struct BotSelection {
     alpha::BotKind kind = alpha::BotKind::Random;
     alpha::LearnedVariant learned_variant =
         alpha::LearnedVariant::ValueSearchChampion;
+    std::size_t actor_generation = 0;
 };
 
 BotSelection parse_bot(std::string_view value) {
@@ -138,11 +143,21 @@ BotSelection parse_bot(std::string_view value) {
                 alpha::LearnedVariant::ValueSearchChampion,
         };
     }
-    if (value == "learned-actor" || value == "actor") {
+    if (value == "learned-actor" || value == "actor" ||
+        value == "learned-actor-g0") {
         return {
             .kind = alpha::BotKind::Learned,
             .learned_variant =
                 alpha::LearnedVariant::UnifiedActor,
+            .actor_generation = 0,
+        };
+    }
+    if (value == "learned-actor-g1") {
+        return {
+            .kind = alpha::BotKind::Learned,
+            .learned_variant =
+                alpha::LearnedVariant::UnifiedActor,
+            .actor_generation = 1,
         };
     }
     throw std::invalid_argument("invalid bot name: " +
@@ -432,6 +447,54 @@ train_frozen_learned_model(alpha::LearnedVariant variant,
     }
     return alpha::train_learned_value_champion(
         training_games, training_seed);
+}
+
+std::shared_ptr<const alpha::LearnedModel>
+train_actor_g0_with_progress(std::size_t training_games,
+                             std::uint64_t training_seed) {
+    std::cout << "Training frozen Actor G0 (seed " << training_seed
+              << ", " << training_games << " games)..."
+              << std::flush;
+    const auto started = std::chrono::steady_clock::now();
+    auto model = alpha::train_learned_actor_model(
+        training_games, training_seed);
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout << " done (" << std::fixed << std::setprecision(2)
+              << elapsed.count() << "s)\n"
+              << "  G0 fingerprint: "
+              << alpha::learned_model_fingerprint(model) << '\n';
+    return model;
+}
+
+alpha::LearnedActorGenerationResult
+train_actor_g1_with_progress(
+    std::shared_ptr<const alpha::LearnedModel> actor_g0,
+    std::uint64_t training_seed) {
+    std::cout << "Training Actor G1 from frozen G0 "
+                 "(24 balanced games, K=8/H=0, cap=24/seat/kind)..."
+              << std::flush;
+    const auto started = std::chrono::steady_clock::now();
+    auto result = alpha::train_learned_actor_generation(
+        std::move(actor_g0), training_seed);
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    const auto& report = result.report;
+    std::cout << " done (" << std::fixed << std::setprecision(2)
+              << elapsed.count() << "s)\n"
+              << "  Search roots: Priority " << report.priority_roots
+              << ", Attack " << report.attack_roots
+              << "; evaluations: Priority "
+              << report.priority_rollout_evaluations << ", Attack "
+              << report.attack_rollout_evaluations << '\n'
+              << "  Training examples: critic "
+              << report.critic_examples << ", Priority "
+              << report.priority_policy_examples << ", Attack "
+              << report.attack_policy_examples << "; replay generations "
+              << report.replay_generations << '\n'
+              << "  G1 fingerprint: "
+              << report.candidate_fingerprint << '\n';
+    return result;
 }
 
 std::string white_plan_action_name(
@@ -1082,6 +1145,7 @@ int main(int argc, char** argv) {
         bool probe_option_used = false;
         std::size_t probe_worlds = 128;
         std::size_t probe_horizon = 12;
+        std::size_t actor_generation = 0;
         std::string probe_cache =
             "data/probe-dev-v2.labels.tsv";
         std::size_t stability_runs = 8;
@@ -1141,6 +1205,7 @@ int main(int argc, char** argv) {
                 option != "--baseline" &&
                 option != "--probe-worlds" &&
                 option != "--probe-horizon" &&
+                option != "--actor-generation" &&
                 option != "--probe-cache") {
                 throw std::invalid_argument("unknown option: " +
                                             std::string(option));
@@ -1230,6 +1295,14 @@ int main(int argc, char** argv) {
             } else if (option == "--probe-horizon") {
                 probe_horizon = static_cast<std::size_t>(value);
                 probe_option_used = true;
+            } else if (option == "--actor-generation") {
+                if (value > 1) {
+                    throw std::invalid_argument(
+                        "--actor-generation must be zero or one");
+                }
+                actor_generation =
+                    static_cast<std::size_t>(value);
+                probe_option_used = true;
             } else {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -1252,8 +1325,9 @@ int main(int argc, char** argv) {
         }
         if (probe_option_used && !score_probes) {
             throw std::invalid_argument(
-                "--probe-worlds, --probe-horizon, --probe-cache, and "
-                "--refresh-probe-cache require --score-probes");
+                "--probe-worlds, --probe-horizon, --actor-generation, "
+                "--probe-cache, and --refresh-probe-cache require "
+                "--score-probes");
         }
         if (score_probes) {
             const alpha::probe_runner::ProbeScoreConfig config{
@@ -1265,9 +1339,21 @@ int main(int argc, char** argv) {
                 .cache_path = probe_cache,
                 .refresh_cache = refresh_probe_cache,
             };
+            const auto actor_g0 =
+                train_actor_g0_with_progress(
+                    training_games, training_seed);
+            auto scoring_actor = actor_g0;
+            if (actor_generation == 1) {
+                scoring_actor =
+                    train_actor_g1_with_progress(
+                        actor_g0, training_seed)
+                        .model;
+            }
             const auto report =
-                alpha::probe_runner::score_probe_dev_v2(
-                    config, std::cout);
+                alpha::probe_runner::score_probe_dev_v2_with_models(
+                    config, std::cout, actor_g0, scoring_actor,
+                    actor_generation == 0 ? "Actor G0"
+                                          : "Actor G1");
             std::cout
                 << alpha::probe_runner::format_probe_score_report(
                        report);
@@ -1292,12 +1378,45 @@ int main(int argc, char** argv) {
                            training_games);
             alpha::GameConfig shared_config;
             shared_config.learned_training_seed = training_seed;
+            std::shared_ptr<const alpha::LearnedModel>
+                frozen_value;
+            std::shared_ptr<const alpha::LearnedModel>
+                frozen_actor_g0;
+            std::shared_ptr<const alpha::LearnedModel>
+                frozen_actor_g1;
+            const auto resolve_frozen_model =
+                [&](const BotSelection& selection)
+                -> std::shared_ptr<const alpha::LearnedModel> {
+                if (selection.learned_variant ==
+                    alpha::LearnedVariant::
+                        ValueSearchChampion) {
+                    if (!frozen_value) {
+                        frozen_value =
+                            alpha::train_learned_value_champion(
+                                training_games, training_seed);
+                    }
+                    return frozen_value;
+                }
+                if (!frozen_actor_g0) {
+                    frozen_actor_g0 =
+                        train_actor_g0_with_progress(
+                            training_games, training_seed);
+                }
+                if (selection.actor_generation == 0) {
+                    return frozen_actor_g0;
+                }
+                if (!frozen_actor_g1) {
+                    frozen_actor_g1 =
+                        train_actor_g1_with_progress(
+                            frozen_actor_g0, training_seed)
+                            .model;
+                }
+                return frozen_actor_g1;
+            };
             if (challenger_config.kind ==
                 alpha::BotKind::Learned) {
                 challenger_config.learned_model =
-                    train_frozen_learned_model(
-                        challenger_config.learned_variant,
-                        training_games, training_seed);
+                    resolve_frozen_model(challenger);
                 shared_config.learned_model =
                     challenger_config.learned_model;
             }
@@ -1306,14 +1425,14 @@ int main(int argc, char** argv) {
                 if (challenger_config.kind ==
                         alpha::BotKind::Learned &&
                     challenger_config.learned_variant ==
-                        baseline_config.learned_variant) {
+                        baseline_config.learned_variant &&
+                    challenger.actor_generation ==
+                        baseline.actor_generation) {
                     baseline_config.learned_model =
                         challenger_config.learned_model;
                 } else {
                     baseline_config.learned_model =
-                        train_frozen_learned_model(
-                            baseline_config.learned_variant,
-                            training_games, training_seed);
+                        resolve_frozen_model(baseline);
                 }
                 if (!shared_config.learned_model) {
                     shared_config.learned_model =

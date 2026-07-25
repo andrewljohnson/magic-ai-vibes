@@ -1,4 +1,5 @@
 #include "alpha/game.hpp"
+#include "alpha/learned_iteration.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -435,6 +436,31 @@ class LearnedModel {
         }
     }
 
+    std::shared_ptr<LearnedModel> deep_clone_mutable(
+        std::vector<std::shared_ptr<LearnedModel>>& critic_leaves)
+        const {
+        // The implicit copy is intentionally followed by recursive
+        // replacement of every ensemble pointer. Published models may share
+        // immutable children; a training candidate must not.
+        auto clone =
+            std::shared_ptr<LearnedModel>(new LearnedModel(*this));
+        clone->ensemble_.clear();
+        if (ensemble_.empty()) {
+            critic_leaves.push_back(clone);
+            return clone;
+        }
+        clone->ensemble_.reserve(ensemble_.size());
+        for (const auto& member : ensemble_) {
+            if (!member) {
+                throw std::logic_error(
+                    "cannot clone a null Learned critic member");
+            }
+            clone->ensemble_.push_back(
+                member->deep_clone_mutable(critic_leaves));
+        }
+        return clone;
+    }
+
   private:
     void initialize_policy(std::uint64_t seed) {
         std::mt19937_64 random(seed);
@@ -561,17 +587,129 @@ std::string learned_model_fingerprint(
     return hash.finish();
 }
 
-enum class LearnedDecisionKind : std::uint8_t {
-    Priority,
-    Attack,
-    Block,
-    DamageOrder,
-};
+std::shared_ptr<const LearnedModel> update_learned_actor_model(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedCriticTrainingExample>& critic_examples,
+    const std::vector<LearnedPolicyTrainingExample>& policy_examples,
+    LearnedActorUpdateConfig config) {
+    if (!parent) {
+        throw std::invalid_argument(
+            "Learned Actor update requires a parent model");
+    }
+    if (parent->variant() != LearnedVariant::UnifiedActor) {
+        throw std::invalid_argument(
+            "Learned Actor update requires a Unified Actor model");
+    }
+    if (!critic_examples.empty() &&
+        (config.critic_epochs == 0 ||
+         !std::isfinite(config.critic_learning_rate) ||
+         config.critic_learning_rate <= 0.0)) {
+        throw std::invalid_argument(
+            "Learned critic update parameters must be positive");
+    }
+    if (!policy_examples.empty() &&
+        (config.policy_epochs == 0 ||
+         !std::isfinite(config.policy_learning_rate) ||
+         config.policy_learning_rate <= 0.0)) {
+        throw std::invalid_argument(
+            "Learned policy update parameters must be positive");
+    }
+
+    std::vector<LearnedModel::TrainingExample> encoded_critic;
+    encoded_critic.reserve(critic_examples.size());
+    for (const auto& example : critic_examples) {
+        if (example.features.size() != LearnedModel::kFeatureCount ||
+            !std::all_of(
+                example.features.begin(), example.features.end(),
+                [](double value) { return std::isfinite(value); }) ||
+            !std::isfinite(example.target) ||
+            example.target < 0.0 || example.target > 1.0) {
+            throw std::invalid_argument(
+                "invalid Learned critic training example");
+        }
+        LearnedModel::FeatureVector features{};
+        std::copy(example.features.begin(), example.features.end(),
+                  features.begin());
+        encoded_critic.emplace_back(features, example.target);
+    }
+
+    std::vector<LearnedModel::PolicyTrainingExample> encoded_policy;
+    encoded_policy.reserve(policy_examples.size());
+    for (const auto& example : policy_examples) {
+        const std::size_t decision_kind =
+            static_cast<std::size_t>(example.decision_kind);
+        if (example.options.size() < 2 ||
+            example.target_probabilities.size() !=
+                example.options.size() ||
+            decision_kind >= LearnedModel::kPolicyDecisionCount ||
+            !std::isfinite(example.weight) ||
+            example.weight <= 0.0) {
+            throw std::invalid_argument(
+                "invalid Learned policy training example");
+        }
+
+        LearnedModel::PolicyTrainingExample encoded;
+        encoded.options.reserve(example.options.size());
+        double target_total = 0.0;
+        for (std::size_t option_index = 0;
+             option_index < example.options.size(); ++option_index) {
+            const auto& option = example.options[option_index];
+            const double target =
+                example.target_probabilities[option_index];
+            if (option.size() !=
+                    LearnedModel::kPolicyFeatureCount ||
+                !std::all_of(
+                    option.begin(), option.end(),
+                    [](double value) {
+                        return std::isfinite(value);
+                    }) ||
+                !std::isfinite(target) || target < 0.0 ||
+                target > 1.0) {
+                throw std::invalid_argument(
+                    "invalid Learned policy training example");
+            }
+            LearnedModel::PolicyFeatureVector features{};
+            std::copy(option.begin(), option.end(),
+                      features.begin());
+            encoded.options.push_back(features);
+            target_total += target;
+        }
+        if (std::abs(target_total - 1.0) > 1.0e-9) {
+            throw std::invalid_argument(
+                "Learned policy targets must sum to one");
+        }
+        encoded.target_probabilities =
+            example.target_probabilities;
+        encoded.chosen = 0;
+        encoded.decision_kind = decision_kind;
+        encoded.weight = example.weight;
+        encoded_policy.push_back(std::move(encoded));
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> critic_leaves;
+    auto candidate =
+        parent->deep_clone_mutable(critic_leaves);
+    for (std::size_t member = 0; member < critic_leaves.size();
+         ++member) {
+        critic_leaves[member]->train(
+            encoded_critic, config.critic_epochs,
+            config.critic_learning_rate,
+            config.critic_seed ^
+                (0x4352495449430000ULL + member));
+    }
+    candidate->train_policy(
+        encoded_policy, config.policy_epochs,
+        config.policy_learning_rate, config.policy_seed);
+    return candidate;
+}
+
+using LearnedDecisionKind = LearnedPolicyDecisionKind;
 
 class LearnedPolicyRecorder {
   public:
     struct Step {
         std::vector<LearnedModel::PolicyFeatureVector> options;
+        LearnedModel::FeatureVector critic_features{};
         std::size_t chosen = 0;
         std::size_t actor = 0;
         LearnedDecisionKind kind = LearnedDecisionKind::Priority;
@@ -579,7 +717,25 @@ class LearnedPolicyRecorder {
         std::vector<double> target_probabilities;
     };
 
+    struct GenerationCollection {
+        std::uint64_t root_seed = 0;
+        std::uint64_t generation = 1;
+        std::size_t schedule_index = 0;
+        std::size_t worlds = 8;
+        std::size_t rollouts_per_world = 1;
+        std::size_t horizon_turns = 0;
+        std::size_t max_roots_per_seat_kind = 24;
+        std::array<std::array<std::size_t, 2>, 2>
+            searched_roots{};
+        std::array<std::array<std::size_t, 2>, 2>
+            rollout_evaluations{};
+        std::array<std::array<std::size_t, 2>, 2>
+            action_choice_indices{};
+        std::array<std::size_t, 2> attack_includes{};
+    };
+
     std::vector<Step> steps;
+    std::optional<GenerationCollection> generation_collection;
 };
 
 namespace {
@@ -1524,6 +1680,143 @@ std::shared_ptr<const LearnedModel> configured_learned_model(
     return config.learned_model;
 }
 
+std::optional<std::size_t> generation_kind_index(
+    LearnedDecisionKind kind) {
+    switch (kind) {
+    case LearnedDecisionKind::Priority:
+        return 0;
+    case LearnedDecisionKind::Attack:
+        return 1;
+    case LearnedDecisionKind::Block:
+    case LearnedDecisionKind::DamageOrder:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::uint64_t generation_decision_subindex(
+    std::size_t player, std::size_t kind_index,
+    std::size_t ordinal) {
+    return
+        (static_cast<std::uint64_t>(player) << 56) ^
+        (static_cast<std::uint64_t>(kind_index) << 48) ^
+        static_cast<std::uint64_t>(ordinal);
+}
+
+std::optional<std::uint64_t> reserve_generation_search_seed(
+    const GameConfig& config, std::size_t player,
+    LearnedDecisionKind kind) {
+    if (!config.learned_policy_recorder ||
+        !config.learned_policy_recorder->generation_collection) {
+        return std::nullopt;
+    }
+    const auto kind_index = generation_kind_index(kind);
+    if (!kind_index.has_value()) {
+        return std::nullopt;
+    }
+    auto& collection =
+        *config.learned_policy_recorder->generation_collection;
+    auto& roots =
+        collection.searched_roots[player][*kind_index];
+    if (roots >= collection.max_roots_per_seat_kind) {
+        return std::nullopt;
+    }
+    const std::size_t ordinal = roots++;
+    const auto domain =
+        kind == LearnedDecisionKind::Priority
+            ? learned_iteration::SeedDomain::PrioritySearch
+            : learned_iteration::SeedDomain::AttackSearch;
+    return learned_iteration::derive_seed(
+        collection.root_seed, domain, collection.generation,
+        collection.schedule_index,
+        generation_decision_subindex(
+            player, *kind_index, ordinal));
+}
+
+std::optional<std::uint64_t> next_generation_choice_seed(
+    const GameConfig& config, std::size_t player,
+    LearnedDecisionKind kind) {
+    if (!config.learned_policy_recorder ||
+        !config.learned_policy_recorder->generation_collection) {
+        return std::nullopt;
+    }
+    const auto kind_index = generation_kind_index(kind);
+    if (!kind_index.has_value()) {
+        return std::nullopt;
+    }
+    auto& collection =
+        *config.learned_policy_recorder->generation_collection;
+    auto& choices =
+        collection.action_choice_indices[player][*kind_index];
+    const std::size_t ordinal = choices++;
+    const auto domain =
+        kind == LearnedDecisionKind::Priority
+            ? learned_iteration::SeedDomain::PriorityChoice
+            : learned_iteration::SeedDomain::AttackChoice;
+    return learned_iteration::derive_seed(
+        collection.root_seed, domain, collection.generation,
+        collection.schedule_index,
+        generation_decision_subindex(
+            player, *kind_index, ordinal));
+}
+
+void add_generation_rollout_evaluations(
+    const GameConfig& config, std::size_t player,
+    LearnedDecisionKind kind, std::size_t evaluations) {
+    const auto kind_index = generation_kind_index(kind);
+    if (!kind_index.has_value() ||
+        !config.learned_policy_recorder ||
+        !config.learned_policy_recorder->generation_collection) {
+        throw std::logic_error(
+            "generation rollout accounting requires collection mode");
+    }
+    config.learned_policy_recorder->generation_collection
+        ->rollout_evaluations[player][*kind_index] +=
+        evaluations;
+}
+
+std::size_t choose_best_generation_score(
+    const std::vector<double>& scores, std::uint64_t seed) {
+    if (scores.empty() ||
+        !std::all_of(
+            scores.begin(), scores.end(),
+            [](double value) { return std::isfinite(value); })) {
+        throw std::invalid_argument(
+            "generation choices require finite scores");
+    }
+    const double best =
+        *std::max_element(scores.begin(), scores.end());
+    std::vector<std::size_t> best_options;
+    for (std::size_t index = 0; index < scores.size(); ++index) {
+        if (scores[index] == best) {
+            best_options.push_back(index);
+        }
+    }
+    std::mt19937_64 random(seed);
+    std::uniform_int_distribution<std::size_t> break_tie(
+        0, best_options.size() - 1);
+    return best_options[break_tie(random)];
+}
+
+std::vector<double> mean_generation_action_scores(
+    const LearnedActionSamples& samples) {
+    std::vector<double> means;
+    means.reserve(samples.q_samples.size());
+    for (const auto& action_samples : samples.q_samples) {
+        if (action_samples.empty()) {
+            throw std::logic_error(
+                "generation search returned no action samples");
+        }
+        double total = 0.0;
+        for (const double sample : action_samples) {
+            total += sample;
+        }
+        means.push_back(
+            total / static_cast<double>(action_samples.size()));
+    }
+    return means;
+}
+
 void record_learned_policy_choice(
     const GameState& state, const GameConfig& config,
     std::size_t player, LearnedDecisionKind kind,
@@ -1533,11 +1826,20 @@ void record_learned_policy_choice(
     if (!config.learned_policy_recorder || encoded.size() < 2) {
         return;
     }
+    if (config.learned_policy_recorder->generation_collection &&
+        (!generation_kind_index(kind).has_value() ||
+         target_probabilities.size() != encoded.size())) {
+        // G1 only learns from its searched Priority/Attack roots. In
+        // particular, copied Block/Damage heads and capped raw choices must
+        // not leak old on-policy targets into this generation.
+        return;
+    }
     const auto model = configured_learned_model(config, player);
     const double baseline =
         model ? model->predict(learned_features(state, player)) : 0.5;
     config.learned_policy_recorder->steps.push_back({
         .options = std::move(encoded),
+        .critic_features = learned_features(state, player),
         .chosen = chosen,
         .actor = player,
         .kind = kind,
@@ -1569,6 +1871,15 @@ std::size_t choose_learned_policy_option(
                 options.front().decision)));
     }
 
+    std::optional<std::mt19937_64> indexed_random;
+    if (const auto seed = next_generation_choice_seed(
+            config, player, options.front().decision);
+        seed.has_value()) {
+        indexed_random.emplace(*seed);
+    }
+    std::mt19937_64& choice_random =
+        indexed_random.has_value() ? *indexed_random : random;
+
     std::size_t chosen = 0;
     const double temperature =
         config.bots[player].exploration_rate;
@@ -1583,7 +1894,7 @@ std::size_t choose_learned_policy_option(
         }
         std::discrete_distribution<std::size_t> sample(
             weights.begin(), weights.end());
-        chosen = sample(random);
+        chosen = sample(choice_random);
     } else {
         const double best =
             *std::max_element(logits.begin(), logits.end());
@@ -1595,7 +1906,7 @@ std::size_t choose_learned_policy_option(
         }
         std::uniform_int_distribution<std::size_t> break_tie(
             0, best_options.size() - 1);
-        chosen = best_options[break_tie(random)];
+        chosen = best_options[break_tie(choice_random)];
     }
     record_learned_policy_choice(
         state, config, player, options.front().decision,
@@ -2803,6 +3114,70 @@ PriorityAction Game::choose_priority_action(
                 priority_policy_options(
                     state_, player, actions, sorcery_actions,
                     phase, consecutive_passes);
+            const bool collecting_generation =
+                config_.learned_policy_recorder &&
+                config_.learned_policy_recorder
+                    ->generation_collection.has_value();
+            if (collecting_generation) {
+                const auto search_seed =
+                    reserve_generation_search_seed(
+                        config_, player,
+                        LearnedDecisionKind::Priority);
+                if (search_seed.has_value()) {
+                    const auto& collection =
+                        *config_.learned_policy_recorder
+                             ->generation_collection;
+                    const auto samples =
+                        learned_priority_action_samples(
+                            state_, decks_, player,
+                            sorcery_actions, phase,
+                            consecutive_passes, actions,
+                            learned_model_for(player),
+                            {
+                                .seed = *search_seed,
+                                .worlds = collection.worlds,
+                                .rollouts_per_world =
+                                    collection.rollouts_per_world,
+                                .horizon_turns =
+                                    collection.horizon_turns,
+                                .continuation_variant =
+                                    LearnedVariant::UnifiedActor,
+                                .blend_shallow_prior = false,
+                            });
+                    const auto scores =
+                        mean_generation_action_scores(samples);
+                    const auto choice_seed =
+                        next_generation_choice_seed(
+                            config_, player,
+                            LearnedDecisionKind::Priority);
+                    if (!choice_seed.has_value()) {
+                        throw std::logic_error(
+                            "generation priority choice has no seed");
+                    }
+                    const std::size_t chosen =
+                        choose_best_generation_score(
+                            scores, *choice_seed);
+                    add_generation_rollout_evaluations(
+                        config_, player,
+                        LearnedDecisionKind::Priority,
+                        samples.rollout_evaluations);
+                    state_.stats[player].monte_carlo_rollouts +=
+                        samples.rollout_evaluations;
+                    record_learned_policy_choice(
+                        state_, config_, player,
+                        LearnedDecisionKind::Priority,
+                        encode_learned_policy_options(
+                            state_, player, options),
+                        chosen,
+                        learned_soft_priority_target(scores));
+                    return actions[chosen];
+                }
+                // Once the per-game cap is reached, continue with the
+                // frozen parent head. The helper still uses a choice-domain
+                // seed, but this unsearched root is not recorded.
+                return actions[choose_learned_policy_option(
+                    state_, config_, options, player, random_)];
+            }
             if (bot.rollouts_per_action == 0) {
                 return actions[choose_learned_policy_option(
                     state_, config_, options, player, random_)];
@@ -3667,9 +4042,77 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
             const auto options = attack_policy_options(
                 state_, state_.active_player, legal_attackers[index],
                 attackers, legal_attackers.size() - index);
-            if (choose_learned_policy_option(
-                    state_, config_, options, state_.active_player,
-                    random_) == 1) {
+            std::size_t chosen = 0;
+            const bool collecting_generation =
+                config_.learned_policy_recorder &&
+                config_.learned_policy_recorder
+                    ->generation_collection.has_value();
+            const auto search_seed =
+                collecting_generation
+                    ? reserve_generation_search_seed(
+                          config_, state_.active_player,
+                          LearnedDecisionKind::Attack)
+                    : std::nullopt;
+            if (search_seed.has_value()) {
+                const auto& collection =
+                    *config_.learned_policy_recorder
+                         ->generation_collection;
+                const std::vector<PermanentId> remaining(
+                    legal_attackers.begin() +
+                        static_cast<std::ptrdiff_t>(index + 1),
+                    legal_attackers.end());
+                const auto samples =
+                    learned_binary_attack_samples(
+                        state_, decks_, state_.active_player,
+                        attackers, legal_attackers[index], remaining,
+                        learned_model_for(state_.active_player),
+                        {
+                            .seed = *search_seed,
+                            .worlds = collection.worlds,
+                            .rollouts_per_world =
+                                collection.rollouts_per_world,
+                            .horizon_turns =
+                                collection.horizon_turns,
+                            .continuation_variant =
+                                LearnedVariant::UnifiedActor,
+                            .blend_shallow_prior = false,
+                        });
+                const auto scores =
+                    mean_generation_action_scores(samples);
+                const auto choice_seed =
+                    next_generation_choice_seed(
+                        config_, state_.active_player,
+                        LearnedDecisionKind::Attack);
+                if (!choice_seed.has_value()) {
+                    throw std::logic_error(
+                        "generation attack choice has no seed");
+                }
+                chosen = choose_best_generation_score(
+                    scores, *choice_seed);
+                add_generation_rollout_evaluations(
+                    config_, state_.active_player,
+                    LearnedDecisionKind::Attack,
+                    samples.rollout_evaluations);
+                state_.stats[state_.active_player]
+                    .monte_carlo_rollouts +=
+                    samples.rollout_evaluations;
+                record_learned_policy_choice(
+                    state_, config_, state_.active_player,
+                    LearnedDecisionKind::Attack,
+                    encode_learned_policy_options(
+                        state_, state_.active_player, options),
+                    chosen, learned_soft_priority_target(scores));
+                if (chosen == 1) {
+                    ++config_.learned_policy_recorder
+                          ->generation_collection
+                          ->attack_includes[state_.active_player];
+                }
+            } else {
+                chosen = choose_learned_policy_option(
+                    state_, config_, options,
+                    state_.active_player, random_);
+            }
+            if (chosen == 1) {
                 attackers.push_back(legal_attackers[index]);
             }
         }
@@ -5309,6 +5752,322 @@ train_learned_actor_model(std::size_t training_games,
     return model;
 }
 
+LearnedActorGenerationResult train_learned_actor_generation(
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t root_seed,
+    LearnedActorGenerationConfig config) {
+    if (!parent ||
+        parent->variant() != LearnedVariant::UnifiedActor) {
+        throw std::invalid_argument(
+            "actor generation requires a frozen Unified Actor parent");
+    }
+    if (config.search_worlds == 0 ||
+        config.search_worlds > 4096 ||
+        config.rollouts_per_world == 0 ||
+        config.rollouts_per_world > 256 ||
+        config.horizon_turns > 128 ||
+        config.max_roots_per_seat_kind == 0 ||
+        config.generation == 0 ||
+        !std::isfinite(config.td_lambda) ||
+        config.td_lambda < 0.0 ||
+        config.td_lambda > 1.0 ||
+        config.critic_epochs == 0 ||
+        !std::isfinite(config.critic_learning_rate) ||
+        config.critic_learning_rate <= 0.0 ||
+        config.policy_epochs == 0 ||
+        !std::isfinite(config.policy_learning_rate) ||
+        config.policy_learning_rate <= 0.0) {
+        throw std::invalid_argument(
+            "invalid Learned Actor generation configuration");
+    }
+
+    LearnedActorGenerationResult output;
+    auto& report = output.report;
+    report.root_seed = root_seed;
+    report.generation = config.generation;
+    report.parent_fingerprint =
+        learned_model_fingerprint(parent);
+    report.games.reserve(
+        learned_iteration::kBalancedScheduleGames);
+
+    std::vector<LearnedCriticTrainingExample>
+        generation_critic_examples;
+    std::vector<LearnedPolicyTrainingExample>
+        generation_policy_examples;
+    double minimum_target_sum =
+        std::numeric_limits<double>::infinity();
+    double maximum_target_sum =
+        -std::numeric_limits<double>::infinity();
+
+    const auto schedule = learned_iteration::balanced_schedule(
+        root_seed, config.generation);
+    for (const auto& scheduled : schedule) {
+        auto recorder =
+            std::make_shared<LearnedPolicyRecorder>();
+        recorder->generation_collection =
+            LearnedPolicyRecorder::GenerationCollection{
+                .root_seed = root_seed,
+                .generation = config.generation,
+                .schedule_index = scheduled.schedule_index,
+                .worlds = config.search_worlds,
+                .rollouts_per_world =
+                    config.rollouts_per_world,
+                .horizon_turns = config.horizon_turns,
+                .max_roots_per_seat_kind =
+                    config.max_roots_per_seat_kind,
+            };
+
+        GameConfig game_config;
+        game_config.starting_player =
+            scheduled.starting_player;
+        game_config.learned_model = parent;
+        game_config.learned_search_depth = 0;
+        game_config.learned_policy_recorder = recorder;
+        game_config.bots = {
+            BotConfig{
+                .kind = BotKind::Learned,
+                .learned_variant =
+                    LearnedVariant::UnifiedActor,
+                .rollouts_per_action = 0,
+                .exploration_rate = 0.0,
+                .learned_model = parent,
+            },
+            BotConfig{
+                .kind = BotKind::Learned,
+                .learned_variant =
+                    LearnedVariant::UnifiedActor,
+                .rollouts_per_action = 0,
+                .exploration_rate = 0.0,
+                .learned_model = parent,
+            },
+        };
+
+        Game game(
+            deck_cards(scheduled.seat_decks[0]),
+            deck_cards(scheduled.seat_decks[1]),
+            scheduled.seed, game_config);
+        const GameResult result = game.run();
+        const auto& collection =
+            *recorder->generation_collection;
+
+        LearnedActorGenerationGameReport game_report{
+            .schedule_index = scheduled.schedule_index,
+            .pairing_index = scheduled.pairing_index,
+            .seat_decks = scheduled.seat_decks,
+            .starting_player = result.starting_player,
+            .game_seed = scheduled.seed,
+            .winner = result.winner,
+            .priority_roots_by_seat = {
+                collection.searched_roots[0][0],
+                collection.searched_roots[1][0],
+            },
+            .attack_roots_by_seat = {
+                collection.searched_roots[0][1],
+                collection.searched_roots[1][1],
+            },
+            .attack_includes_by_seat =
+                collection.attack_includes,
+        };
+        for (std::size_t player = 0; player < 2; ++player) {
+            game_report.priority_rollout_evaluations +=
+                collection.rollout_evaluations[player][0];
+            game_report.attack_rollout_evaluations +=
+                collection.rollout_evaluations[player][1];
+        }
+
+        std::array<std::array<std::size_t, 2>, 2>
+            policy_counts{};
+        for (const auto& step : recorder->steps) {
+            const auto kind_index =
+                generation_kind_index(step.kind);
+            if (!kind_index.has_value() ||
+                step.target_probabilities.size() !=
+                    step.options.size()) {
+                throw std::logic_error(
+                    "generation recorder retained an invalid step");
+            }
+            ++policy_counts[step.actor][*kind_index];
+        }
+
+        for (const auto& step : recorder->steps) {
+            const std::size_t kind_index =
+                *generation_kind_index(step.kind);
+            const std::size_t count =
+                policy_counts[step.actor][kind_index];
+            if (count == 0) {
+                throw std::logic_error(
+                    "generation policy normalization count is zero");
+            }
+            std::vector<std::vector<double>> options;
+            options.reserve(step.options.size());
+            for (const auto& encoded : step.options) {
+                options.emplace_back(
+                    encoded.begin(), encoded.end());
+            }
+            double target_sum = 0.0;
+            for (const double target :
+                 step.target_probabilities) {
+                target_sum += target;
+            }
+            minimum_target_sum =
+                std::min(minimum_target_sum, target_sum);
+            maximum_target_sum =
+                std::max(maximum_target_sum, target_sum);
+            const double weight =
+                1.0 / static_cast<double>(count);
+            generation_policy_examples.push_back({
+                .options = std::move(options),
+                .target_probabilities =
+                    step.target_probabilities,
+                .decision_kind = step.kind,
+                .weight = weight,
+            });
+            if (kind_index == 0) {
+                ++report.priority_policy_examples;
+                game_report.priority_policy_weight_sums
+                    [step.actor] += weight;
+            } else {
+                ++report.attack_policy_examples;
+                game_report.attack_policy_weight_sums
+                    [step.actor] += weight;
+            }
+        }
+
+        for (std::size_t player = 0; player < 2; ++player) {
+            std::vector<const LearnedPolicyRecorder::Step*>
+                chronological;
+            for (const auto& step : recorder->steps) {
+                if (step.actor != player) {
+                    continue;
+                }
+                if (!chronological.empty() &&
+                    chronological.back()->critic_features ==
+                        step.critic_features) {
+                    ++report.deduplicated_critic_observations;
+                    continue;
+                }
+                chronological.push_back(&step);
+            }
+            std::vector<double> baselines;
+            baselines.reserve(chronological.size());
+            for (const auto* step : chronological) {
+                baselines.push_back(step->critic_baseline);
+            }
+            const auto targets =
+                learned_iteration::td_lambda_targets(
+                    baselines,
+                    learned_iteration::
+                        terminal_value_for_perspective(
+                            result.winner, player),
+                    config.td_lambda);
+            for (std::size_t index = 0;
+                 index < chronological.size(); ++index) {
+                generation_critic_examples.push_back({
+                    .features = std::vector<double>(
+                        chronological[index]
+                            ->critic_features.begin(),
+                        chronological[index]
+                            ->critic_features.end()),
+                    .target = targets[index],
+                });
+            }
+        }
+
+        for (const std::size_t roots :
+             game_report.priority_roots_by_seat) {
+            report.priority_roots += roots;
+        }
+        for (const std::size_t roots :
+             game_report.attack_roots_by_seat) {
+            report.attack_roots += roots;
+        }
+        report.priority_rollout_evaluations +=
+            game_report.priority_rollout_evaluations;
+        report.attack_rollout_evaluations +=
+            game_report.attack_rollout_evaluations;
+        report.games.push_back(std::move(game_report));
+    }
+
+    if (generation_policy_examples.empty() ||
+        generation_critic_examples.empty()) {
+        throw std::logic_error(
+            "balanced actor generation collected no training data");
+    }
+    report.minimum_policy_target_sum = minimum_target_sum;
+    report.maximum_policy_target_sum = maximum_target_sum;
+    report.critic_examples =
+        generation_critic_examples.size();
+
+    learned_iteration::ReplayWindow<
+        LearnedCriticTrainingExample>
+        critic_replay;
+    learned_iteration::ReplayWindow<
+        LearnedPolicyTrainingExample>
+        policy_replay;
+    critic_replay.append_generation(
+        config.generation,
+        std::move(generation_critic_examples));
+    policy_replay.append_generation(
+        config.generation,
+        std::move(generation_policy_examples));
+    if (critic_replay.generation_count() !=
+        policy_replay.generation_count()) {
+        throw std::logic_error(
+            "generation replay shards became misaligned");
+    }
+    report.replay_generations =
+        critic_replay.generation_count();
+
+    std::vector<LearnedCriticTrainingExample> critic_fit;
+    std::vector<LearnedPolicyTrainingExample> policy_fit;
+    critic_fit.reserve(critic_replay.example_count());
+    policy_fit.reserve(policy_replay.example_count());
+    critic_replay.for_each(
+        [&](std::uint64_t,
+            const LearnedCriticTrainingExample& example) {
+            critic_fit.push_back(example);
+        });
+    policy_replay.for_each(
+        [&](std::uint64_t,
+            const LearnedPolicyTrainingExample& example) {
+            policy_fit.push_back(example);
+        });
+
+    output.model = update_learned_actor_model(
+        parent, critic_fit, policy_fit,
+        {
+            .critic_epochs = config.critic_epochs,
+            .critic_learning_rate =
+                config.critic_learning_rate,
+            .critic_seed =
+                learned_iteration::derive_seed(
+                    root_seed,
+                    learned_iteration::SeedDomain::CriticFit,
+                    config.generation, 0),
+            .policy_epochs = config.policy_epochs,
+            .policy_learning_rate =
+                config.policy_learning_rate,
+            .policy_seed =
+                learned_iteration::derive_seed(
+                    root_seed,
+                    learned_iteration::SeedDomain::PolicyFit,
+                    config.generation, 0),
+        });
+    report.candidate_fingerprint =
+        learned_model_fingerprint(output.model);
+    if (learned_model_fingerprint(parent) !=
+        report.parent_fingerprint) {
+        throw std::logic_error(
+            "actor generation mutated its frozen parent");
+    }
+    if (report.candidate_fingerprint ==
+        report.parent_fingerprint) {
+        throw std::logic_error(
+            "actor generation did not update the candidate");
+    }
+    return output;
+}
+
 std::shared_ptr<const LearnedModel>
 train_learned_value_champion(std::size_t training_games,
                              std::uint64_t seed) {
@@ -5868,6 +6627,190 @@ LearnedActionSamples learned_binary_attack_samples(
             "Learned attack evaluation accounting mismatch");
     }
     return result;
+}
+
+LearnedActorGenerationPriorityDiagnostic
+diagnose_learned_actor_generation_priority(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, std::shared_ptr<const LearnedModel> parent,
+    LearnedSearchConfig search) {
+    if (search.continuation_variant !=
+            LearnedVariant::UnifiedActor ||
+        search.blend_shallow_prior) {
+        throw std::invalid_argument(
+            "generation priority diagnostic requires unblended Actor search");
+    }
+    validate_search_config(search, parent);
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "generation priority diagnostic player is invalid");
+    }
+
+    auto recorder =
+        std::make_shared<LearnedPolicyRecorder>();
+    recorder->generation_collection =
+        LearnedPolicyRecorder::GenerationCollection{
+            .root_seed = search.seed,
+            .generation = 1,
+            .schedule_index = 0,
+            .worlds = search.worlds,
+            .rollouts_per_world =
+                search.rollouts_per_world,
+            .horizon_turns = search.horizon_turns,
+            .max_roots_per_seat_kind = 1,
+        };
+    GameConfig config;
+    config.learned_model = parent;
+    config.learned_search_depth = 0;
+    config.learned_policy_recorder = recorder;
+    config.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .exploration_rate = 0.0,
+            .learned_model = parent,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .exploration_rate = 0.0,
+            .learned_model = parent,
+        },
+    };
+    Game simulation(
+        original_decks[0], original_decks[1],
+        learned_iteration::derive_seed(
+            search.seed,
+            learned_iteration::SeedDomain::SelfPlayGame,
+            1, 0),
+        config);
+    simulation.state_ = state;
+
+    const auto actions =
+        legal_priority_actions(state, player, sorcery_actions);
+    const PriorityAction selected =
+        simulation.choose_priority_action(
+            actions, player, sorcery_actions, phase,
+            consecutive_passes);
+    bool transition_applied = false;
+    std::optional<PriorityPassResult> pass_result;
+    std::optional<GameResult> terminal;
+    if (selected.kind == PriorityActionKind::Pass) {
+        PriorityState priority{
+            .player = player,
+            .consecutive_passes = consecutive_passes,
+        };
+        pass_result =
+            pass_priority(simulation.state_, priority);
+        transition_applied = true;
+        if (*pass_result ==
+            PriorityPassResult::StackObjectResolved) {
+            terminal = simulation.life_total_result();
+        }
+    } else {
+        transition_applied =
+            apply_priority_action(
+                simulation.state_, player, selected,
+                sorcery_actions);
+    }
+
+    const auto& collection =
+        *recorder->generation_collection;
+    return {
+        .searched_roots =
+            collection.searched_roots[player][0],
+        .rollout_evaluations =
+            collection.rollout_evaluations[player][0],
+        .selected_action = selected,
+        .transition_applied = transition_applied,
+        .pass_result = pass_result,
+        .terminal_result = terminal,
+        .final_state = simulation.state_,
+    };
+}
+
+LearnedActorGenerationAttackDiagnostic
+diagnose_learned_actor_generation_attack(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::shared_ptr<const LearnedModel> parent,
+    LearnedSearchConfig search) {
+    if (search.continuation_variant !=
+            LearnedVariant::UnifiedActor ||
+        search.blend_shallow_prior) {
+        throw std::invalid_argument(
+            "generation attack diagnostic requires unblended Actor search");
+    }
+    validate_search_config(search, parent);
+    if (state.active_player >= state.players.size()) {
+        throw std::out_of_range(
+            "generation attack diagnostic active player is invalid");
+    }
+
+    auto recorder =
+        std::make_shared<LearnedPolicyRecorder>();
+    recorder->generation_collection =
+        LearnedPolicyRecorder::GenerationCollection{
+            .root_seed = search.seed,
+            .generation = 1,
+            .schedule_index = 0,
+            .worlds = search.worlds,
+            .rollouts_per_world =
+                search.rollouts_per_world,
+            .horizon_turns = search.horizon_turns,
+            .max_roots_per_seat_kind = 1,
+        };
+    GameConfig config;
+    config.learned_model = parent;
+    config.learned_search_depth = 0;
+    config.learned_policy_recorder = recorder;
+    config.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .exploration_rate = 0.0,
+            .learned_model = parent,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .exploration_rate = 0.0,
+            .learned_model = parent,
+        },
+    };
+    Game simulation(
+        original_decks[0], original_decks[1],
+        learned_iteration::derive_seed(
+            search.seed,
+            learned_iteration::SeedDomain::SelfPlayGame,
+            1, 0),
+        config);
+    simulation.state_ = state;
+    const auto terminal =
+        simulation.play_combat_after_beginning();
+    const auto& collection =
+        *recorder->generation_collection;
+    const std::size_t player = state.active_player;
+    return {
+        .searched_roots =
+            collection.searched_roots[player][1],
+        .rollout_evaluations =
+            collection.rollout_evaluations[player][1],
+        .included_attackers =
+            collection.attack_includes[player],
+        .terminal_result = terminal,
+        .final_state = simulation.state_,
+    };
 }
 
 LearnedValuePriorityDiagnostic diagnose_learned_value_priority(

@@ -1816,24 +1816,31 @@ ProbeReferenceSamples generate_probe_reference_samples(
         LearnedVariant::UnifiedActor, true);
 }
 
-ProbeScoreReport score_probe_dev_v2(
-    const ProbeScoreConfig& config, std::ostream& progress) {
+ProbeScoreReport score_probe_dev_v2_with_models(
+    const ProbeScoreConfig& config, std::ostream& progress,
+    std::shared_ptr<const LearnedModel> reference_actor_model,
+    std::shared_ptr<const LearnedModel> scoring_actor_model,
+    std::string scoring_actor_name) {
     validate_score_config(config);
+    if (!reference_actor_model || !scoring_actor_model) {
+        throw std::invalid_argument(
+            "probe scoring requires frozen reference and scoring Actor models");
+    }
+    if (scoring_actor_name.empty()) {
+        throw std::invalid_argument(
+            "probe scoring Actor name must not be empty");
+    }
+    validate_text_field(scoring_actor_name,
+                        "probe scoring Actor name");
     const std::vector<probes::DecisionProbe> corpus =
         probes::make_probe_dev_v2();
-    progress << "Training frozen Actor reference/scoring model (seed "
-             << config.training_seed << ", "
-             << config.training_games << " games)..."
-             << std::flush;
-    std::shared_ptr<const LearnedModel> actor_model =
-        train_learned_actor_model(
-            config.training_games, config.training_seed);
-    progress << " done\n";
-    const std::string actor_fingerprint =
-        learned_model_fingerprint(actor_model);
+    const std::string reference_actor_fingerprint =
+        learned_model_fingerprint(reference_actor_model);
+    const std::string scoring_actor_fingerprint =
+        learned_model_fingerprint(scoring_actor_model);
     const ProbeCacheMetadata metadata =
         make_probe_cache_metadata(
-            config, corpus, actor_fingerprint);
+            config, corpus, reference_actor_fingerprint);
     std::vector<probe_eval::ProbeLabel> labels;
     ProbeCacheStatus cache_status = ProbeCacheStatus::Loaded;
 
@@ -1856,7 +1863,7 @@ ProbeScoreReport score_probe_dev_v2(
                      << corpus[probe].stable_id << ")..."
                      << std::flush;
             raw.push_back(generate_probe_reference_samples(
-                corpus[probe], actor_model, config));
+                corpus[probe], reference_actor_model, config));
             progress << " done\n";
         }
         labels.reserve(raw.size());
@@ -1930,13 +1937,14 @@ ProbeScoreReport score_probe_dev_v2(
             "hidden clone changed corpus information-set fingerprint");
     }
 
-    const auto actor_raw = score_actor_raw(corpus, actor_model);
+    const auto actor_raw =
+        score_actor_raw(corpus, scoring_actor_model);
     const auto actor_raw_clone =
-        score_actor_raw(hidden_clones, actor_model);
+        score_actor_raw(hidden_clones, scoring_actor_model);
     const auto actor_deployed =
-        score_actor_deployed(corpus, actor_model);
+        score_actor_deployed(corpus, scoring_actor_model);
     const auto actor_deployed_clone =
-        score_actor_deployed(hidden_clones, actor_model);
+        score_actor_deployed(hidden_clones, scoring_actor_model);
     const auto value_deployed =
         score_value_deployed(corpus, value_model);
     const auto value_deployed_clone =
@@ -1961,6 +1969,8 @@ ProbeScoreReport score_probe_dev_v2(
     report.cache_path = config.cache_path;
     report.reference_samples_per_candidate =
         reference_sample_count(metadata);
+    report.scoring_actor_model_fingerprint =
+        scoring_actor_fingerprint;
     report.value_model_fingerprint = value_fingerprint;
     report.reference_sensitivity = reference_sensitivity;
     report.low_margin =
@@ -1970,13 +1980,17 @@ ProbeScoreReport score_probe_dev_v2(
         .policy_count = 5,
         .probe_count = corpus.size(),
     };
+    const std::string raw_name =
+        scoring_actor_name + " raw head";
+    const std::string deployed_name =
+        scoring_actor_name + " deployed policy";
     report.policies = {
         evaluate_hidden_invariant_policy(
-            "Actor raw head",
+            raw_name,
             "Priority and Attack: raw masked policy logits",
             labels, actor_raw, actor_raw_clone, true),
         evaluate_hidden_invariant_policy(
-            "Actor deployed policy",
+            deployed_name,
             "Priority: K=2/H=0 information-set search with no "
             "shallow blend; Attack: raw masked policy head",
             labels, actor_deployed, actor_deployed_clone, true),
@@ -2002,6 +2016,21 @@ ProbeScoreReport score_probe_dev_v2(
     return report;
 }
 
+ProbeScoreReport score_probe_dev_v2(
+    const ProbeScoreConfig& config, std::ostream& progress) {
+    validate_score_config(config);
+    progress << "Training frozen Actor reference/scoring model (seed "
+             << config.training_seed << ", "
+             << config.training_games << " games)..."
+             << std::flush;
+    auto actor_model = train_learned_actor_model(
+        config.training_games, config.training_seed);
+    progress << " done\n";
+    return score_probe_dev_v2_with_models(
+        config, progress, actor_model, actor_model,
+        "Actor");
+}
+
 std::string format_probe_score_report(
     const ProbeScoreReport& report) {
     std::ostringstream output;
@@ -2025,11 +2054,13 @@ std::string format_probe_score_report(
            << '\n'
            << "Reference samples/candidate: "
            << report.reference_samples_per_candidate << '\n'
-           << "Frozen training model: seed "
+           << "Reference Actor training recipe: seed "
            << report.metadata.training_seed << ", "
            << report.metadata.training_games << " games\n"
            << "Reference Actor model fingerprint: "
            << report.metadata.reference_model_fingerprint << '\n'
+           << "Scoring Actor model fingerprint: "
+           << report.scoring_actor_model_fingerprint << '\n'
            << "Diagnostic Value model fingerprint: "
            << report.value_model_fingerprint << '\n'
            << "Corpus: " << report.metadata.corpus_id

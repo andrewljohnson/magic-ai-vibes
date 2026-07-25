@@ -136,6 +136,9 @@ struct ProbeScoreReport {
     ProbeCacheStatus cache_status = ProbeCacheStatus::Loaded;
     std::filesystem::path cache_path;
     std::size_t reference_samples_per_candidate = 0;
+    // The reference model owns the cached labels. The scoring model may be a
+    // later immutable generation evaluated against those unchanged labels.
+    std::string scoring_actor_model_fingerprint;
     std::string value_model_fingerprint;
     std::vector<PolicyProbeReport> policies;
     ReferenceSensitivitySummary reference_sensitivity;
@@ -194,6 +197,15 @@ ProbeReferenceSamples generate_probe_reference_samples(
 
 ProbeScoreReport score_probe_dev_v2(
     const ProbeScoreConfig& config, std::ostream& progress);
+
+// Scores an immutable Actor candidate against labels owned by an immutable
+// reference Actor. This is the offline generation-vs-generation path: changing
+// `scoring_actor_model` never changes cache identity or regenerates labels.
+ProbeScoreReport score_probe_dev_v2_with_models(
+    const ProbeScoreConfig& config, std::ostream& progress,
+    std::shared_ptr<const LearnedModel> reference_actor_model,
+    std::shared_ptr<const LearnedModel> scoring_actor_model,
+    std::string scoring_actor_name);
 
 std::string format_probe_score_report(
     const ProbeScoreReport& report);
