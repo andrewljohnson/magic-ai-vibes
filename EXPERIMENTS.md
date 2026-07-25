@@ -1334,3 +1334,145 @@ Decision: change the research workflow before further policy tuning.
 - Train future policy/value generations by iterated search supervision and
   compare each frozen generation against prior frozen generations before
   consulting Handcrafted at a milestone.
+
+### Information-safe restoration of the value-search champion
+
+Hypothesis: the historical value-search architecture remains a substantially
+stronger working baseline than the unified actor after its hidden-state
+rollouts are replaced with common information-set determinizations and its
+priority continuation uses the current phase-aware engine. Restoring it as a
+separate `learned-value` variant, while retaining the actor as
+`learned-actor`, should beat the actor by at least eight percentage points
+when one frozen model of each is pooled over evaluation seeds
+`424242, 101, 707`.
+
+This is a champion-restoration experiment, not a claim that the historical
+54.1% estimate transfers unchanged. That estimate retrained a model for each
+evaluation seed. The restored variant must:
+
+- never inspect the real opponent hand/library partition or real future
+  library order;
+- use identical sampled worlds for every candidate action;
+- preserve the MVP engine's stack/priority loop in every currently modeled
+  window and continue through the remaining supported turn phases;
+- keep its public-board learned-value combat search isolated from the
+  actor-only combat research path;
+- use an explicit training seed and frozen model across evaluation seeds;
+- expose `learned-value` and `learned-actor` separately in CLI output and
+  permit a direct paired benchmark between them.
+
+The 600-game three-seed pool is only a large-regression/champion-restoration
+check. No few-point strength claim will be accepted from it; milestone claims
+still require the held-out probes and 2,000+ paired games.
+
+The engine does not yet open priority after attacker or blocker declaration.
+That is a pre-existing rules-engine limitation, not a property hidden by this
+experiment.
+
+#### Restoration implementation and three-seed regression result
+
+Implementation tested:
+
+- `LearnedVariant::ValueSearchChampion` is the default `learned` /
+  `learned-value`; `LearnedVariant::UnifiedActor` is explicitly selected as
+  `learned-actor` and is excluded from the default mixed field.
+- Each Learned seat can carry its own frozen, variant-tagged model. The direct
+  paired harness therefore supports Actor-versus-Champion and frozen
+  generation-versus-generation comparisons without a shared-model fallback.
+- The Champion trains its value ensemble from Random traces followed by two
+  generations of value-only Champion self-play. It does not use the Actor,
+  Handcrafted, Handcrafted labels, or card-specific policy weights.
+- Champion root search samples common determinizations from the acting
+  player's information set, applies every candidate to identical worlds,
+  follows the real pass/priority/stack machinery through all currently
+  modeled windows, resumes from the correct current phase, and continues for
+  a bounded four-turn Champion-mirror horizon. Nested search depth is
+  explicitly zero. The one-ply prior is the mean over all common worlds.
+- Champion combat restores the historical public-board value enumeration;
+  the Actor combat path remains separate.
+
+Correctness gates before the final panel:
+
+- `make test`: 45/45 engine tests, including hidden-identity invariance,
+  phase-sensitive stack continuation, bounded rollout accounting, distinct
+  frozen Actor/Champion model routing, and equal-budget frozen generation
+  comparisons.
+- Held-out probe suite: 10/10 groups across 16 fixtures.
+- Representative CLI simulation passed.
+
+Exact final commands (training seed `424242`, 800 training games, two
+rollouts per root action, 200 paired games per evaluation seed):
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 \
+  --seed 424242 --train-seed 424242 --train-games 800 \
+  --challenger learned-actor --baseline learned-value
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 \
+  --seed 101 --train-seed 424242 --train-games 800 \
+  --challenger learned-actor --baseline learned-value
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 \
+  --seed 707 --train-seed 424242 --train-games 800 \
+  --challenger learned-actor --baseline learned-value
+```
+
+The deterministic training procedure produced the same frozen model for each
+separate process; no evaluation seed entered model training.
+
+| evaluation seed | Actor | Champion | Actor rate | runtime |
+| ---: | ---: | ---: | ---: | ---: |
+| 424242 | 103 | 97 | 51.5% | 51.75 s |
+| 101 | 100 | 100 | 50.0% | 51.14 s |
+| 707 | 100 | 100 | 50.0% | 50.06 s |
+| **pooled** | **303** | **297** | **50.5%** | **152.95 s** |
+
+The pooled Actor Wilson 95% interval was 46.5% to 54.5%. Pooled records by
+the policy's own deck were:
+
+| deck | Actor | Champion | higher record |
+| --- | ---: | ---: | --- |
+| Green | 47-103 (31.3%) | 61-89 (40.7%) | Champion |
+| Red | 59-91 (39.3%) | 63-87 (42.0%) | Champion |
+| Blue | 100-50 (66.7%) | 68-82 (45.3%) | Actor |
+| White | 97-53 (64.7%) | 105-45 (70.0%) | Champion |
+
+Average work per game was 29.7 decisions and 159.7 root continuations for
+Actor versus 26.1 decisions and 140.2 root continuations for Champion.
+
+An audit after the first three-seed execution found that the shallow prior
+used only the first common world. That first execution was therefore marked
+superseded even though it also produced Actor 303-297 Champion (runtimes
+47.74, 53.11, and 47.75 seconds). After changing the prior to its common-world
+mean, all three final records and per-deck records reproduced exactly; the
+table above is from the corrected binary.
+
+Decision: reject the predeclared restoration hypothesis. Champion did not
+beat Actor by eight points; it lost by one pooled point, with a confidence
+interval spanning a material advantage for either policy. It did produce
+better deck records on Green, Red, and White, but Actor's large Blue advantage
+outweighed them. This is not a strength milestone, does not justify a
+Handcrafted gate, and does not satisfy the project's per-deck definition of a
+stronger policy. `learned-value` remains the explicit restored incumbent
+architecture, not a newly validated strength claim; `learned-actor` remains a
+challenger.
+
+Known restoration limitations retained for a separate falsifiable
+experiment:
+
+- The rules engine currently provides priority in First Main, Begin Combat,
+  End Combat, and Second Main, but not after declaring attackers or blockers.
+  “All modeled priority windows” must not be described as every Magic
+  priority window.
+- Champion attack scoring averages the enumerated legal block assignments,
+  while an actual Champion defender chooses its highest-valued assignment.
+  The search response is therefore not yet the exact deployed mirror.
+- Multi-block order participates in candidate scoring, but the deployed
+  Champion attacker currently executes a random damage order. This is an
+  agency/model mismatch, not a hidden-information leak.
+
+Next: predeclare a public-board combat-consistency experiment that makes
+rollout blocking match the deployed Champion mirror and gives the attacking
+Champion its legal damage-order choice. Check the held-out per-deck probes
+first, with Blue counter/creature timing called out separately, then use the
+same 600-game Actor comparison only as a large-regression screen. Do not run
+the Handcrafted milestone gate until a challenger clears offline probes and
+the frozen-generation gates.

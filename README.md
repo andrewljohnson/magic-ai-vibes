@@ -29,9 +29,12 @@ make
 ```
 
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
-`handcrafted`, or `learned`. `--rollouts` and `--deep-rollouts` control sampled
-continuations; `--train-games` controls Learned Value's random self-play
-dataset. `--train-seed` controls model generation independently from the
+`handcrafted`, `learned`/`learned-value`, or `learned-actor`. The default
+Learned bot and the Learned seat in `mixed` are the value-search champion;
+the unified actor is an explicit research challenger and is not silently put
+in the mixed field. `--rollouts` and `--deep-rollouts` control sampled
+continuations; `--train-games` controls the selected Learned model's training
+set. `--train-seed` controls model generation independently from the
 game/evaluation `--seed` and defaults to `424242`. Mixed mode uses a 25-game
 rotation containing all ordered policy
 pairings, including mirrors. Games in a policy matrix use common shuffle seeds
@@ -77,6 +80,9 @@ do not evaluate hybrid decks far outside the value model's training data.
   LIFO stack
 - Priority alternates between players; after two consecutive passes, the top
   spell resolves, or the phase ends when the stack is empty
+- Priority windows currently occur in first main, beginning of combat, end of
+  combat, and second main. Post-attacker and post-blocker priority windows are
+  not implemented yet.
 - The casting player retains priority after casting, and the active player
   receives priority after a spell resolves
 - Creatures, sorceries, artifacts, and enchantments require an active-player
@@ -112,10 +118,10 @@ Handcrafted Policy is deliberately simpler and cheaper than Monte Carlo. It uses
 card-aware rules to play lands first, avoid self-targeting, Bolt useful targets,
 counter opposing spells, mill the opponent, preserve Counterspell mana, and
 pass priority to resolve its own stack objects. It also chooses favorable
-attacks, blocks, and damage order. The other three policies retain the shared
-random combat sub-policy.
+attacks, blocks, and damage order.
 
-Learned Value contains no scripted card values or card-specific action rules.
+Both Learned variants contain no scripted card values or card-specific action
+rules.
 It is a dependency-free ensemble of two 16-hidden-unit neural networks. Inputs
 include scalar state (life, zone sizes, mana, creature power/toughness, stack,
 turn) plus neutral per-card count planes for its own library and hand and every
@@ -124,20 +130,25 @@ graveyards, and stack objects by controller. Opponent hand identities and
 library order remain hidden. A learned linear skip path helps sparse card-zone
 signals while the hidden layer learns interactions.
 
-Training starts with random games, then runs two generations of
-Learned-vs-Learned fitted self-play with 10%/5% legal-action exploration.
+Learned Value training starts with random games, then runs two generations of
+Learned-Value-versus-Learned-Value fitted self-play with 10%/5% legal-action
+exploration.
 Terminal returns are discounted by game length, so dominant decks still learn
 to win efficiently. Counterspell choices and activated-ability states receive
 targeted replay. The two networks train concurrently and average predictions.
 
 During play, every legal action receives an immediate value plus two
-stack-faithful, four-turn Learned-vs-Learned continuations with re-randomized
-hidden libraries. Combat enumerates small legal attack/block spaces and samples
-bounded candidates for large spaces, using learned expected value throughout.
+four-turn Learned-Value mirror continuations over common information-set
+samples. They use normal pass/stack handling and resume from the current phase
+through every priority window the MVP engine currently models. Combat
+enumerates small public-board attack/block spaces and samples bounded
+candidates for large spaces, using learned expected value throughout.
 
-This is AlphaGo-inspired, not a full AlphaGo implementation: it is an ensemble
-value function plus fitted self-play and shallow candidate search, without a
-learned policy head or PUCT/MCTS tree yet.
+`learned-actor` keeps the separate unified policy-head experiment: its priority,
+attack, block, and damage-order heads train from information-safe search and
+self-play data. It remains available for direct comparison but is not the
+default. This is AlphaGo-inspired, not a full AlphaGo implementation: there is
+no PUCT/MCTS tree.
 
 ## Bot benchmark harness
 
@@ -157,6 +168,10 @@ make benchmark-learned
 ./build/alpha-sim --benchmark --games 20 --seed 424242 \
   --challenger learned --baseline monte-carlo \
   --rollouts 2 --train-games 800 --train-seed 424242
+
+./build/alpha-sim --benchmark --games 5 --seed 101 \
+  --challenger learned-actor --baseline learned-value \
+  --train-games 800 --train-seed 424242
 ```
 
 For every repetition, it covers all ten unordered deck pairings, including
@@ -209,7 +224,9 @@ every pairing inside a 45–55% win-rate band.
 
 ## Mixed-bot baseline
 
-At 100 games per matchup with seed `424242`, 800 training games, two standard
+The following is a historical unified-actor baseline, not a result from the
+current restored value-search default. At 100 games per matchup with seed
+`424242`, 800 training games, two standard
 rollouts, and eight deep rollouts, the current five-policy 600-game run took
 about 26 seconds on the development machine. Aggregate seat-game win rates
 were 23.8% Random, 40.8% Monte Carlo, 49.2% Deep Monte Carlo, 63.3%

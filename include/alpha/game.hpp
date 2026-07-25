@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -246,6 +247,11 @@ enum class BotKind : std::uint8_t {
     Learned,
 };
 
+enum class LearnedVariant : std::uint8_t {
+    ValueSearchChampion,
+    UnifiedActor,
+};
+
 inline constexpr std::size_t kBotKindCount = 5;
 inline constexpr std::size_t kBotMatchupCount =
     kBotKindCount * (kBotKindCount - 1) / 2;
@@ -257,10 +263,16 @@ inline constexpr std::uint64_t kDefaultLearnedTrainingSeed = 424242;
 
 struct BotConfig {
     BotKind kind = BotKind::Random;
+    // `learned` is the frozen value-search champion. The unified actor remains
+    // an explicit research challenger and is never selected implicitly.
+    LearnedVariant learned_variant = LearnedVariant::ValueSearchChampion;
     // Complete random continuations sampled for every legal action.
     std::size_t rollouts_per_action = 2;
     double exploration_rate = 0.0;
     std::size_t training_games = 800;
+    // Optional per-seat frozen model. This permits a paired benchmark between
+    // two Learned variants without sharing or silently retraining a model.
+    std::shared_ptr<const LearnedModel> learned_model;
 };
 
 struct GameResult {
@@ -285,6 +297,9 @@ struct GameConfig {
     std::uint64_t learned_training_seed =
         kDefaultLearnedTrainingSeed;
     std::shared_ptr<const LearnedModel> learned_model;
+    // Root value search is one ply. Continuations set this to zero explicitly
+    // so mirror play remains bounded rather than recursively searching.
+    std::size_t learned_search_depth = 1;
     // Training-only sink. The concrete recorder is intentionally opaque so
     // runtime callers cannot inspect or provide hidden game state.
     std::shared_ptr<LearnedPolicyRecorder> learned_policy_recorder;
@@ -320,6 +335,22 @@ GameState white_lock_plan_diagnostic_state();
 WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
     std::shared_ptr<const LearnedModel> model, std::uint64_t seed);
 
+struct LearnedValuePriorityDiagnostic {
+    std::vector<PriorityAction> actions;
+    std::vector<double> scores;
+    std::size_t sampled_worlds = 0;
+    std::size_t rollout_evaluations = 0;
+};
+
+// Evaluation-only seam used to verify information-set invariance and bounded
+// root-search accounting. It uses exactly the champion's common-world scorer.
+LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, std::shared_ptr<const LearnedModel> model,
+    std::size_t rollouts_per_action, std::uint64_t seed);
+
 class Game {
   public:
     Game(std::vector<CardId> player_zero_deck,
@@ -334,6 +365,14 @@ class Game {
     friend WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
         std::shared_ptr<const LearnedModel> model,
         std::uint64_t seed);
+    friend LearnedValuePriorityDiagnostic
+    diagnose_learned_value_priority(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t player, bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes,
+        std::shared_ptr<const LearnedModel> model,
+        std::size_t rollouts_per_action, std::uint64_t seed);
 
     void initialize();
     bool draw_card(std::size_t player);
@@ -353,6 +392,19 @@ class Game {
         bool sorcery_actions, TurnPhase phase,
         int consecutive_passes,
         const GameState& sampled_state, std::uint64_t seed) const;
+    double learned_value_search_action_score(
+        const PriorityAction& action, std::size_t player,
+        bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes,
+        const GameState& sampled_state, std::uint64_t seed) const;
+    double learned_value_shallow_action_score(
+        const PriorityAction& action, std::size_t player,
+        bool sorcery_actions, int consecutive_passes,
+        const GameState& sampled_state) const;
+    std::optional<GameResult>
+    finish_turn_after_priority_phase(TurnPhase phase);
+    std::shared_ptr<const LearnedModel>
+    learned_model_for(std::size_t player) const;
     PriorityAction
     choose_handcrafted_action(const std::vector<PriorityAction>& actions,
                               std::size_t player);
@@ -466,6 +518,8 @@ enum class BotField : std::uint8_t {
 
 struct TournamentConfig {
     BotField bot_field = BotField::Random;
+    LearnedVariant learned_variant =
+        LearnedVariant::ValueSearchChampion;
     std::size_t monte_carlo_rollouts = 2;
     std::size_t deep_monte_carlo_rollouts = 8;
     std::size_t learned_training_games = 800;
@@ -516,6 +570,8 @@ struct LearnedDeckLiftSummary {
 std::string_view deck_name(DeckId deck);
 std::string_view deck_list(DeckId deck);
 std::string_view bot_name(BotKind bot);
+std::string_view learned_variant_name(LearnedVariant variant);
+std::string bot_config_name(const BotConfig& bot);
 LearnedDeckLiftSummary
 compare_learned_deck_lifts(const TournamentSummary& summary);
 TournamentSummary run_tournament(std::size_t games_per_matchup,
@@ -548,6 +604,12 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
 
 std::shared_ptr<const LearnedModel>
 train_learned_model(std::size_t training_games, std::uint64_t seed);
+std::shared_ptr<const LearnedModel>
+train_learned_value_champion(std::size_t training_games,
+                            std::uint64_t seed);
+std::shared_ptr<const LearnedModel>
+train_learned_actor_model(std::size_t training_games,
+                          std::uint64_t seed);
 // Observation presented to Learned: own private zones plus public
 // information, never the opponent's hidden card identities.
 std::vector<double>

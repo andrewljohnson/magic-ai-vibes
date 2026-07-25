@@ -4,10 +4,14 @@ CPPFLAGS ?= -Iinclude
 
 BUILD_DIR := build
 ENGINE_SOURCE := src/game.cpp
+PROBE_SOURCE := src/probes.cpp
+PROBE_EVAL_SOURCE := src/probe_eval.cpp
 SIMULATOR := $(BUILD_DIR)/alpha-sim
 TEST_RUNNER := $(BUILD_DIR)/alpha-tests
+PROBE_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-tests
+PROBE_EVAL_TEST_RUNNER := $(BUILD_DIR)/alpha-probe-eval-tests
 
-.PHONY: all test benchmark benchmark-deep benchmark-learned stability evolve run clean
+.PHONY: all test test-probes benchmark benchmark-deep benchmark-learned stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -20,9 +24,21 @@ $(SIMULATOR): $(ENGINE_SOURCE) src/main.cpp include/alpha/game.hpp | $(BUILD_DIR
 $(TEST_RUNNER): $(ENGINE_SOURCE) tests/test_game.cpp include/alpha/game.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) tests/test_game.cpp -o $@
 
-test: $(TEST_RUNNER) $(SIMULATOR)
+$(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp include/alpha/game.hpp include/alpha/probes.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp -o $@
+
+$(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp include/alpha/game.hpp include/alpha/probe_eval.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp -o $@
+
+test: $(TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(SIMULATOR)
 	./$(TEST_RUNNER)
+	./$(PROBE_TEST_RUNNER)
+	./$(PROBE_EVAL_TEST_RUNNER)
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
+
+test-probes: $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER)
+	./$(PROBE_TEST_RUNNER)
+	./$(PROBE_EVAL_TEST_RUNNER)
 
 benchmark: $(SIMULATOR)
 	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger handcrafted --baseline monte-carlo --rollouts 2

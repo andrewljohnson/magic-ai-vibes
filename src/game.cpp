@@ -46,7 +46,9 @@ class LearnedModel {
         double weight = 1.0;
     };
 
-    explicit LearnedModel(std::uint64_t seed) {
+    explicit LearnedModel(std::uint64_t seed,
+                          LearnedVariant variant)
+        : variant_(variant) {
         std::mt19937_64 random(seed);
         std::normal_distribution<double> initialize(0.0, 0.12);
         for (auto& hidden_weights : input_weights_) {
@@ -62,13 +64,17 @@ class LearnedModel {
 
     explicit LearnedModel(
         std::vector<std::shared_ptr<const LearnedModel>> members,
-        std::uint64_t policy_seed)
-        : ensemble_(std::move(members)) {
+        std::uint64_t policy_seed, LearnedVariant variant)
+        : variant_(variant), ensemble_(std::move(members)) {
         if (ensemble_.empty()) {
             throw std::invalid_argument(
                 "learned ensemble requires at least one member");
         }
         initialize_policy(policy_seed);
+    }
+
+    LearnedVariant variant() const {
+        return variant_;
     }
 
     double predict(const FeatureVector& features) const {
@@ -434,6 +440,7 @@ class LearnedModel {
                kPolicyDecisionCount>
         policy_direct_output_weights_{};
     std::array<double, kPolicyDecisionCount> policy_output_bias_{};
+    LearnedVariant variant_;
     std::vector<std::shared_ptr<const LearnedModel>> ensemble_;
 };
 
@@ -765,6 +772,112 @@ bool can_attack_through_moat(const GameState& state,
                              const CreaturePermanent& creature) {
     return !moat_on_battlefield(state) ||
            card_definition(creature.card).flying;
+}
+
+std::vector<std::vector<PermanentId>>
+learned_value_attack_candidates(
+    const std::vector<PermanentId>& legal_attackers,
+    std::mt19937_64& random) {
+    constexpr std::size_t kExhaustiveLimit = 256;
+    std::vector<std::vector<PermanentId>> candidates;
+    if (legal_attackers.size() < 63 &&
+        (std::uint64_t{1} << legal_attackers.size()) <=
+            kExhaustiveLimit) {
+        const std::uint64_t combinations =
+            std::uint64_t{1} << legal_attackers.size();
+        candidates.reserve(static_cast<std::size_t>(combinations));
+        for (std::uint64_t mask = 0; mask < combinations; ++mask) {
+            std::vector<PermanentId> candidate;
+            for (std::size_t index = 0;
+                 index < legal_attackers.size(); ++index) {
+                if ((mask & (std::uint64_t{1} << index)) != 0) {
+                    candidate.push_back(legal_attackers[index]);
+                }
+            }
+            candidates.push_back(std::move(candidate));
+        }
+        return candidates;
+    }
+
+    candidates = {{}, legal_attackers};
+    for (const PermanentId attacker : legal_attackers) {
+        candidates.push_back({attacker});
+    }
+    std::uniform_int_distribution<int> include_attacker(0, 1);
+    constexpr int kRandomCandidates = 48;
+    for (int sample = 0; sample < kRandomCandidates; ++sample) {
+        std::vector<PermanentId> candidate;
+        for (const PermanentId attacker : legal_attackers) {
+            if (include_attacker(random) == 1) {
+                candidate.push_back(attacker);
+            }
+        }
+        candidates.push_back(std::move(candidate));
+    }
+    return candidates;
+}
+
+std::vector<std::vector<std::pair<PermanentId, PermanentId>>>
+learned_value_block_candidates(
+    const std::vector<PermanentId>& attackers,
+    const std::vector<PermanentId>& available_blockers,
+    std::mt19937_64& random, std::size_t exhaustive_limit,
+    int random_samples) {
+    using Block = std::pair<PermanentId, PermanentId>;
+    std::vector<std::vector<Block>> candidates;
+    const std::size_t choices = attackers.size() + 1;
+    std::size_t combinations = 1;
+    bool exhaustive = !attackers.empty();
+    for (std::size_t blocker = 0;
+         blocker < available_blockers.size(); ++blocker) {
+        if (combinations > exhaustive_limit / choices) {
+            exhaustive = false;
+            break;
+        }
+        combinations *= choices;
+    }
+    if (exhaustive) {
+        candidates.reserve(combinations);
+        for (std::size_t encoding = 0; encoding < combinations;
+             ++encoding) {
+            std::size_t remaining = encoding;
+            std::vector<Block> candidate;
+            for (const PermanentId blocker : available_blockers) {
+                const std::size_t choice = remaining % choices;
+                remaining /= choices;
+                if (choice != 0) {
+                    candidate.emplace_back(attackers[choice - 1],
+                                           blocker);
+                }
+            }
+            candidates.push_back(std::move(candidate));
+        }
+        return candidates;
+    }
+
+    candidates.push_back({});
+    for (const PermanentId attacker : attackers) {
+        std::vector<Block> all_on_attacker;
+        for (const PermanentId blocker : available_blockers) {
+            all_on_attacker.emplace_back(attacker, blocker);
+        }
+        candidates.push_back(std::move(all_on_attacker));
+    }
+    for (int sample = 0; sample < random_samples; ++sample) {
+        std::vector<Block> candidate;
+        std::uniform_int_distribution<std::size_t> choose_block(
+            0, attackers.size());
+        for (const PermanentId blocker : available_blockers) {
+            const std::size_t choice = choose_block(random);
+            if (choice != 0) {
+                candidate.emplace_back(attackers[choice - 1],
+                                       blocker);
+            }
+        }
+        std::shuffle(candidate.begin(), candidate.end(), random);
+        candidates.push_back(std::move(candidate));
+    }
+    return candidates;
 }
 
 void remove_dead_creatures(PlayerState& player) {
@@ -1190,6 +1303,17 @@ encode_learned_policy_options(
     return encoded;
 }
 
+std::shared_ptr<const LearnedModel> configured_learned_model(
+    const GameConfig& config, std::size_t player) {
+    if (player >= config.bots.size()) {
+        throw std::out_of_range("Learned model player must be 0 or 1");
+    }
+    if (config.bots[player].learned_model) {
+        return config.bots[player].learned_model;
+    }
+    return config.learned_model;
+}
+
 void record_learned_policy_choice(
     const GameState& state, const GameConfig& config,
     std::size_t player, LearnedDecisionKind kind,
@@ -1199,11 +1323,9 @@ void record_learned_policy_choice(
     if (!config.learned_policy_recorder || encoded.size() < 2) {
         return;
     }
+    const auto model = configured_learned_model(config, player);
     const double baseline =
-        config.learned_model
-            ? config.learned_model->predict(
-                  learned_features(state, player))
-            : 0.5;
+        model ? model->predict(learned_features(state, player)) : 0.5;
     config.learned_policy_recorder->steps.push_back({
         .options = std::move(encoded),
         .chosen = chosen,
@@ -1219,7 +1341,8 @@ std::size_t choose_learned_policy_option(
     const GameState& state, const GameConfig& config,
     const std::vector<LearnedPolicyOption>& options,
     std::size_t player, std::mt19937_64& random) {
-    if (!config.learned_model) {
+    const auto model = configured_learned_model(config, player);
+    if (!model) {
         throw std::logic_error("Learned bot has no policy model");
     }
     if (options.empty()) {
@@ -1230,7 +1353,7 @@ std::size_t choose_learned_policy_option(
     std::vector<double> logits;
     logits.reserve(encoded.size());
     for (const auto& option : encoded) {
-        logits.push_back(config.learned_model->policy_logit(
+        logits.push_back(model->policy_logit(
             option,
             static_cast<std::size_t>(
                 options.front().decision)));
@@ -2279,15 +2402,27 @@ Game::Game(std::vector<CardId> player_zero_deck,
                 "Monte Carlo rollouts per action must be positive");
         }
     }
-    const bool uses_learned =
-        std::any_of(config_.bots.begin(), config_.bots.end(),
-                    [](const BotConfig& bot) {
-                        return bot.kind == BotKind::Learned;
-                    });
-    if (uses_learned && !config_.learned_model) {
-        throw std::invalid_argument(
-            "Learned bot requires a trained value model");
+    for (std::size_t player = 0; player < config_.bots.size();
+         ++player) {
+        if (config_.bots[player].kind == BotKind::Learned) {
+            const auto model =
+                configured_learned_model(config_, player);
+            if (!model) {
+                throw std::invalid_argument(
+                    "Learned bot requires a frozen trained model");
+            }
+            if (model->variant() !=
+                config_.bots[player].learned_variant) {
+                throw std::invalid_argument(
+                    "Learned bot model does not match its variant");
+            }
+        }
     }
+}
+
+std::shared_ptr<const LearnedModel>
+Game::learned_model_for(std::size_t player) const {
+    return configured_learned_model(config_, player);
 }
 
 void Game::initialize() {
@@ -2453,23 +2588,101 @@ PriorityAction Game::choose_priority_action(
         return choose_handcrafted_action(actions, player);
     }
     if (bot.kind == BotKind::Learned) {
-        const auto options =
-            priority_policy_options(
-                state_, player, actions, sorcery_actions,
-                phase, consecutive_passes);
-        if (bot.rollouts_per_action == 0) {
-            return actions[choose_learned_policy_option(
-                state_, config_, options, player, random_)];
+        if (bot.learned_variant == LearnedVariant::UnifiedActor) {
+            const auto options =
+                priority_policy_options(
+                    state_, player, actions, sorcery_actions,
+                    phase, consecutive_passes);
+            if (bot.rollouts_per_action == 0) {
+                return actions[choose_learned_policy_option(
+                    state_, config_, options, player, random_)];
+            }
+
+            struct SampledWorld {
+                GameState state;
+                std::uint64_t continuation_seed = 0;
+            };
+            std::vector<SampledWorld> worlds;
+            worlds.reserve(bot.rollouts_per_action);
+            for (std::size_t rollout = 0;
+                 rollout < bot.rollouts_per_action; ++rollout) {
+                const std::uint64_t world_seed = random_();
+                worlds.push_back({
+                    .state = sample_determinization(
+                        state_, decks_, player, world_seed),
+                    .continuation_seed = random_(),
+                });
+            }
+
+            std::vector<double> scores(actions.size(), 0.0);
+            for (std::size_t action_index = 0;
+                 action_index < actions.size(); ++action_index) {
+                for (const auto& world : worlds) {
+                    scores[action_index] +=
+                        learned_information_set_action_score(
+                            actions[action_index], player,
+                            sorcery_actions, phase,
+                            consecutive_passes,
+                            world.state,
+                            world.continuation_seed);
+                }
+            }
+            state_.stats[player].monte_carlo_rollouts +=
+                actions.size() * bot.rollouts_per_action;
+
+            std::vector<double> average_scores = scores;
+            for (double& score : average_scores) {
+                score /= static_cast<double>(worlds.size());
+            }
+            const double best = *std::max_element(
+                average_scores.begin(), average_scores.end());
+            std::vector<std::size_t> best_actions;
+            for (std::size_t index = 0;
+                 index < average_scores.size(); ++index) {
+                if (average_scores[index] == best) {
+                    best_actions.push_back(index);
+                }
+            }
+            std::uniform_int_distribution<std::size_t> break_tie(
+                0, best_actions.size() - 1);
+            const std::size_t chosen =
+                best_actions[break_tie(random_)];
+            if (config_.learned_policy_recorder) {
+                record_learned_policy_choice(
+                    state_, config_, player,
+                    LearnedDecisionKind::Priority,
+                    encode_learned_policy_options(
+                        state_, player, options),
+                    chosen,
+                    learned_soft_priority_target(
+                        average_scores));
+            }
+            return actions[chosen];
+        }
+
+        if (bot.exploration_rate > 0.0) {
+            std::bernoulli_distribution explore(
+                bot.exploration_rate);
+            if (explore(random_)) {
+                std::uniform_int_distribution<std::size_t>
+                    choose_action(0, actions.size() - 1);
+                return actions[choose_action(random_)];
+            }
         }
 
         struct SampledWorld {
             GameState state;
             std::uint64_t continuation_seed = 0;
         };
+        const bool root_search =
+            bot.rollouts_per_action > 0 &&
+            config_.learned_search_depth > 0;
+        const std::size_t world_count =
+            root_search ? bot.rollouts_per_action : 1;
         std::vector<SampledWorld> worlds;
-        worlds.reserve(bot.rollouts_per_action);
-        for (std::size_t rollout = 0;
-             rollout < bot.rollouts_per_action; ++rollout) {
+        worlds.reserve(world_count);
+        for (std::size_t rollout = 0; rollout < world_count;
+             ++rollout) {
             const std::uint64_t world_seed = random_();
             worlds.push_back({
                 .state = sample_determinization(
@@ -2481,45 +2694,48 @@ PriorityAction Game::choose_priority_action(
         std::vector<double> scores(actions.size(), 0.0);
         for (std::size_t action_index = 0;
              action_index < actions.size(); ++action_index) {
+            // The historical champion blended a one-ply value prior with
+            // complete continuations. This prior never force-resolves hidden
+            // state: its mean is evaluated over the same common worlds.
             for (const auto& world : worlds) {
                 scores[action_index] +=
-                    learned_information_set_action_score(
-                        actions[action_index], player,
-                        sorcery_actions, phase,
-                        consecutive_passes,
-                        world.state, world.continuation_seed);
+                    learned_value_shallow_action_score(
+                    actions[action_index], player,
+                    sorcery_actions, consecutive_passes,
+                    world.state);
+            }
+            scores[action_index] /=
+                static_cast<double>(worlds.size());
+            if (root_search) {
+                for (const auto& world : worlds) {
+                    scores[action_index] +=
+                        learned_value_search_action_score(
+                            actions[action_index], player,
+                            sorcery_actions, phase,
+                            consecutive_passes,
+                            world.state,
+                            world.continuation_seed);
+                }
+                scores[action_index] /=
+                    static_cast<double>(worlds.size() + 1);
             }
         }
-        state_.stats[player].monte_carlo_rollouts +=
-            actions.size() * bot.rollouts_per_action;
-
-        std::vector<double> average_scores = scores;
-        for (double& score : average_scores) {
-            score /= static_cast<double>(worlds.size());
+        if (root_search) {
+            state_.stats[player].monte_carlo_rollouts +=
+                actions.size() * bot.rollouts_per_action;
         }
-        const double best = *std::max_element(
-            average_scores.begin(), average_scores.end());
+
+        const double best =
+            *std::max_element(scores.begin(), scores.end());
         std::vector<std::size_t> best_actions;
-        for (std::size_t index = 0;
-             index < average_scores.size(); ++index) {
-            if (average_scores[index] == best) {
+        for (std::size_t index = 0; index < scores.size(); ++index) {
+            if (scores[index] == best) {
                 best_actions.push_back(index);
             }
         }
         std::uniform_int_distribution<std::size_t> break_tie(
             0, best_actions.size() - 1);
-        const std::size_t chosen =
-            best_actions[break_tie(random_)];
-        if (config_.learned_policy_recorder) {
-            record_learned_policy_choice(
-                state_, config_, player,
-                LearnedDecisionKind::Priority,
-                encode_learned_policy_options(
-                    state_, player, options),
-                chosen,
-                learned_soft_priority_target(average_scores));
-        }
-        return actions[chosen];
+        return actions[best_actions[break_tie(random_)]];
     }
 
     std::vector<double> scores(actions.size(), 0.0);
@@ -2562,15 +2778,19 @@ double Game::learned_information_set_action_score(
     simulation.config_.bots = {
         BotConfig{
             .kind = BotKind::Learned,
+            .learned_variant = LearnedVariant::UnifiedActor,
             .rollouts_per_action = 0,
             .exploration_rate =
                 config_.bots[player].exploration_rate,
+            .learned_model = learned_model_for(player),
         },
         BotConfig{
             .kind = BotKind::Learned,
+            .learned_variant = LearnedVariant::UnifiedActor,
             .rollouts_per_action = 0,
             .exploration_rate =
                 config_.bots[player].exploration_rate,
+            .learned_model = learned_model_for(player),
         },
     };
 
@@ -2698,7 +2918,174 @@ double Game::learned_information_set_action_score(
             EndReason::EmptyLibrary);
         return result_score(result);
     }
-    return simulation.config_.learned_model->predict(
+    return simulation.learned_model_for(player)->predict(
+        learned_features(simulation.state_, player));
+}
+
+double Game::learned_value_shallow_action_score(
+    const PriorityAction& action, std::size_t player,
+    bool sorcery_actions, int consecutive_passes,
+    const GameState& sampled_state) const {
+    GameState successor = sampled_state;
+    PriorityState priority = {
+        .player = player,
+        .consecutive_passes = consecutive_passes,
+    };
+    if (action.kind == PriorityActionKind::Pass) {
+        pass_priority(successor, priority);
+    } else if (!apply_priority_action(
+                   successor, player, action, sorcery_actions)) {
+        return -std::numeric_limits<double>::infinity();
+    }
+
+    const bool player_zero_lost = successor.players[0].life <= 0;
+    const bool player_one_lost = successor.players[1].life <= 0;
+    if (player_zero_lost || player_one_lost) {
+        if (player_zero_lost == player_one_lost) {
+            return 0.5;
+        }
+        const std::size_t winner = player_zero_lost ? 1 : 0;
+        return winner == player ? 1.0 : 0.0;
+    }
+    return learned_model_for(player)->predict(
+        learned_features(successor, player));
+}
+
+std::optional<GameResult>
+Game::finish_turn_after_priority_phase(TurnPhase phase) {
+    switch (phase) {
+    case TurnPhase::FirstMain:
+        if (const auto result = play_combat(); result.has_value()) {
+            return result;
+        }
+        if (const auto result = play_priority_window(
+                true, TurnPhase::SecondMain);
+            result.has_value()) {
+            return result;
+        }
+        break;
+    case TurnPhase::BeginCombat:
+        if (const auto result = play_combat_after_beginning();
+            result.has_value()) {
+            return result;
+        }
+        if (const auto result = play_priority_window(
+                true, TurnPhase::SecondMain);
+            result.has_value()) {
+            return result;
+        }
+        break;
+    case TurnPhase::EndCombat:
+        if (const auto result = play_priority_window(
+                true, TurnPhase::SecondMain);
+            result.has_value()) {
+            return result;
+        }
+        break;
+    case TurnPhase::SecondMain:
+        break;
+    case TurnPhase::DeclareAttackers:
+    case TurnPhase::DeclareBlockers:
+    case TurnPhase::DamageOrder:
+        throw std::logic_error(
+            "priority search started from a declaration phase");
+    }
+    cleanup_turn(state_);
+    return std::nullopt;
+}
+
+double Game::learned_value_search_action_score(
+    const PriorityAction& action, std::size_t player,
+    bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes,
+    const GameState& sampled_state, std::uint64_t seed) const {
+    const auto root_model = learned_model_for(player);
+    Game simulation = *this;
+    simulation.state_ = sampled_state;
+    simulation.random_.seed(seed);
+    simulation.trace_ = nullptr;
+    simulation.config_.learned_policy_recorder.reset();
+    simulation.config_.learned_search_depth = 0;
+    simulation.config_.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .learned_model = root_model,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .learned_model = root_model,
+        },
+    };
+
+    const auto result_score =
+        [player](const GameResult& result) {
+            return result.winner < 0
+                       ? 0.5
+                       : (result.winner ==
+                                  static_cast<int>(player)
+                              ? 1.0
+                              : 0.0);
+        };
+    PriorityState priority = {
+        .player = player,
+        .consecutive_passes = consecutive_passes,
+    };
+    bool window_ended = false;
+    if (action.kind == PriorityActionKind::Pass) {
+        const PriorityPassResult pass =
+            pass_priority(simulation.state_, priority);
+        window_ended =
+            pass == PriorityPassResult::WindowEnded;
+        if (pass == PriorityPassResult::StackObjectResolved) {
+            if (const auto result = simulation.life_total_result();
+                result.has_value()) {
+                return result_score(*result);
+            }
+        }
+    } else {
+        if (!apply_priority_action(
+                simulation.state_, player, action,
+                sorcery_actions)) {
+            return 0.0;
+        }
+        priority = {
+            .player = player,
+            .consecutive_passes = 0,
+        };
+    }
+
+    if (!window_ended) {
+        if (const auto result =
+                simulation.continue_priority_window(
+                    sorcery_actions, phase, priority);
+            result.has_value()) {
+            return result_score(*result);
+        }
+    }
+    if (const auto result =
+            simulation.finish_turn_after_priority_phase(phase);
+        result.has_value()) {
+        return result_score(*result);
+    }
+
+    constexpr std::size_t kSearchHorizonTurns = 4;
+    simulation.config_.max_turns =
+        std::min(simulation.config_.max_turns,
+                 simulation.state_.turn_number +
+                     kSearchHorizonTurns);
+    const GameResult result =
+        simulation.run_from_turn(
+            simulation.state_.turn_number + 1);
+    if (result.reason != EndReason::TurnLimit) {
+        return result_score(result);
+    }
+    return root_model->predict(
         learned_features(simulation.state_, player));
 }
 
@@ -2912,8 +3299,14 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
     std::vector<PermanentId> attackers;
     const bool handcrafted_attacker =
         config_.bots[state_.active_player].kind == BotKind::Handcrafted;
-    const bool learned_attacker =
-        config_.bots[state_.active_player].kind == BotKind::Learned;
+    const bool learned_value_attacker =
+        config_.bots[state_.active_player].kind == BotKind::Learned &&
+        config_.bots[state_.active_player].learned_variant ==
+            LearnedVariant::ValueSearchChampion;
+    const bool learned_actor_attacker =
+        config_.bots[state_.active_player].kind == BotKind::Learned &&
+        config_.bots[state_.active_player].learned_variant ==
+            LearnedVariant::UnifiedActor;
     if (handcrafted_attacker) {
         std::vector<const CreaturePermanent*> legal_attackers;
         int total_power = 0;
@@ -2945,7 +3338,69 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
                 attackers.push_back(creature->id);
             }
         }
-    } else if (learned_attacker) {
+    } else if (learned_value_attacker) {
+        std::vector<PermanentId> legal_attackers;
+        for (const auto& creature : attacking_state.creatures) {
+            if (!creature.tapped && !creature.summoning_sick &&
+                can_attack_through_moat(state_, creature)) {
+                legal_attackers.push_back(creature.id);
+            }
+        }
+        std::vector<PermanentId> available_blockers;
+        for (const auto& creature : defending_state.creatures) {
+            if (!creature.tapped) {
+                available_blockers.push_back(creature.id);
+            }
+        }
+
+        const auto candidates =
+            learned_value_attack_candidates(
+                legal_attackers, random_);
+        double best_score =
+            -std::numeric_limits<double>::infinity();
+        const auto model =
+            learned_model_for(state_.active_player);
+        for (const auto& candidate : candidates) {
+            const auto block_candidates =
+                learned_value_block_candidates(
+                    candidate, available_blockers, random_,
+                    64, 48);
+            double total_score = 0.0;
+            for (const auto& sampled_blocks :
+                 block_candidates) {
+                GameState successor = state_;
+                if (!resolve_combat(
+                        successor, state_.active_player,
+                        candidate, sampled_blocks)) {
+                    throw std::logic_error(
+                        "Learned Value sampled illegal combat");
+                }
+                double sample_score = 0.5;
+                if (successor.players[defending_player].life <=
+                    0) {
+                    sample_score = 1.0;
+                } else if (
+                    successor.players[state_.active_player].life <=
+                    0) {
+                    sample_score = 0.0;
+                } else {
+                    sample_score = model->predict(
+                        learned_features(
+                            successor,
+                            state_.active_player));
+                }
+                total_score += sample_score;
+            }
+            const double expected_score =
+                total_score /
+                static_cast<double>(
+                    block_candidates.size());
+            if (expected_score > best_score) {
+                best_score = expected_score;
+                attackers = candidate;
+            }
+        }
+    } else if (learned_actor_attacker) {
         std::vector<PermanentId> legal_attackers;
         for (const auto& creature : attacking_state.creatures) {
             if (!creature.tapped && !creature.summoning_sick &&
@@ -3006,8 +3461,14 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
         blockers_by_attacker;
     const bool handcrafted_defender =
         config_.bots[defending_player].kind == BotKind::Handcrafted;
-    const bool learned_defender =
-        config_.bots[defending_player].kind == BotKind::Learned;
+    const bool learned_value_defender =
+        config_.bots[defending_player].kind == BotKind::Learned &&
+        config_.bots[defending_player].learned_variant ==
+            LearnedVariant::ValueSearchChampion;
+    const bool learned_actor_defender =
+        config_.bots[defending_player].kind == BotKind::Learned &&
+        config_.bots[defending_player].learned_variant ==
+            LearnedVariant::UnifiedActor;
     if (handcrafted_defender) {
         std::vector<PermanentId> unassigned = available_blockers;
         std::vector<PermanentId> ordered_attackers = attackers;
@@ -3072,7 +3533,47 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
                 unassigned.erase(best_blocker);
             }
         }
-    } else if (learned_defender) {
+    } else if (learned_value_defender) {
+        const auto candidates =
+            learned_value_block_candidates(
+                attackers, available_blockers, random_, 512,
+                96);
+        double best_score =
+            -std::numeric_limits<double>::infinity();
+        std::vector<std::pair<PermanentId, PermanentId>>
+            best_blocks;
+        const auto model =
+            learned_model_for(defending_player);
+        for (const auto& candidate : candidates) {
+            GameState successor = state_;
+            if (!resolve_combat(
+                    successor, state_.active_player,
+                    attackers, candidate)) {
+                throw std::logic_error(
+                    "Learned Value sampled illegal blocks");
+            }
+            double score = 0.5;
+            if (successor.players[defending_player].life <= 0) {
+                score = 0.0;
+            } else if (
+                successor.players[state_.active_player].life <=
+                0) {
+                score = 1.0;
+            } else {
+                score = model->predict(
+                    learned_features(
+                        successor, defending_player));
+            }
+            if (score > best_score) {
+                best_score = score;
+                best_blocks = candidate;
+            }
+        }
+        for (const auto& [attacker, blocker] : best_blocks) {
+            blockers_by_attacker[attacker].push_back(
+                blocker);
+        }
+    } else if (learned_actor_defender) {
         for (std::size_t index = 0;
              index < available_blockers.size(); ++index) {
             const auto options = block_policy_options(
@@ -3134,7 +3635,7 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
                                  card_definition(right_creature->card)
                                      .toughness;
                       });
-        } else if (learned_attacker) {
+        } else if (learned_actor_attacker) {
             const std::vector<PermanentId> all_blockers = blockers;
             std::vector<PermanentId> remaining = blockers;
             std::vector<PermanentId> ordered;
@@ -3399,6 +3900,10 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
     };
     const BotConfig learned = {
         .kind = BotKind::Learned,
+        .learned_variant =
+            tournament_config.bot_field == BotField::Mixed
+                ? LearnedVariant::ValueSearchChampion
+                : tournament_config.learned_variant,
         .rollouts_per_action = 2,
         .training_games = tournament_config.learned_training_games,
     };
@@ -3723,6 +4228,23 @@ std::string_view bot_name(BotKind bot) {
     return "Unknown";
 }
 
+std::string_view learned_variant_name(LearnedVariant variant) {
+    switch (variant) {
+    case LearnedVariant::ValueSearchChampion:
+        return "Learned Value";
+    case LearnedVariant::UnifiedActor:
+        return "Learned Actor";
+    }
+    return "Unknown Learned";
+}
+
+std::string bot_config_name(const BotConfig& bot) {
+    if (bot.kind == BotKind::Learned) {
+        return std::string(learned_variant_name(bot.learned_variant));
+    }
+    return std::string(bot_name(bot.kind));
+}
+
 double TournamentSummary::average_turns() const {
     return total_games == 0
                ? 0.0
@@ -3837,9 +4359,18 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
             "Learned bot training games must be positive");
     }
     if (uses_learned && !game_config.learned_model) {
-        game_config.learned_model = train_learned_model(
-            tournament_config.learned_training_games,
-            game_config.learned_training_seed);
+        const LearnedVariant variant =
+            tournament_config.bot_field == BotField::Mixed
+                ? LearnedVariant::ValueSearchChampion
+                : tournament_config.learned_variant;
+        game_config.learned_model =
+            variant == LearnedVariant::UnifiedActor
+                ? train_learned_actor_model(
+                      tournament_config.learned_training_games,
+                      game_config.learned_training_seed)
+                : train_learned_value_champion(
+                      tournament_config.learned_training_games,
+                      game_config.learned_training_seed);
     }
 
     TournamentSummary summary;
@@ -3972,7 +4503,8 @@ learned_soft_priority_target(const std::vector<double>& scores) {
 }
 
 std::shared_ptr<const LearnedModel>
-train_learned_model(std::size_t training_games, std::uint64_t seed) {
+train_learned_actor_model(std::size_t training_games,
+                          std::uint64_t seed) {
     if (training_games == 0) {
         throw std::invalid_argument(
             "Learned model training games must be positive");
@@ -3997,7 +4529,8 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
         members;
     for (std::size_t member = 0; member < members.size(); ++member) {
         members[member] = std::make_shared<LearnedModel>(
-            seed ^ (0x4D4F44454C000000ULL + member));
+            seed ^ (0x4D4F44454C000000ULL + member),
+            LearnedVariant::UnifiedActor);
     }
 
     std::vector<LearnedModel::TrainingExample> examples;
@@ -4059,7 +4592,8 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
     }
     auto model = std::make_shared<LearnedModel>(
         std::move(ensemble_members),
-        seed ^ 0x534841524544504FULL);
+        seed ^ 0x534841524544504FULL,
+        LearnedVariant::UnifiedActor);
 
     std::vector<LearnedModel::PolicyTrainingExample> policy_batch;
     const auto append_policy_game =
@@ -4171,11 +4705,15 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
             config.bots = {
                 BotConfig{
                     .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::UnifiedActor,
                     .rollouts_per_action = 2,
                     .exploration_rate = 1.0,
                 },
                 BotConfig{
                     .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::UnifiedActor,
                     .rollouts_per_action = 2,
                     .exploration_rate = 1.0,
                 },
@@ -4194,6 +4732,265 @@ train_learned_model(std::size_t training_games, std::uint64_t seed) {
     }
 
     return model;
+}
+
+std::shared_ptr<const LearnedModel>
+train_learned_value_champion(std::size_t training_games,
+                             std::uint64_t seed) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value training games must be positive");
+    }
+
+    std::mt19937_64 random(seed);
+    std::uniform_int_distribution<std::size_t> choose_deck(0, 3);
+    const auto choose_distinct_decks = [&] {
+        const std::size_t first = choose_deck(random);
+        std::size_t second = choose_deck(random);
+        while (second == first) {
+            second = choose_deck(random);
+        }
+        return std::pair{
+            static_cast<DeckId>(first),
+            static_cast<DeckId>(second),
+        };
+    };
+    const auto add_trace =
+        [](const std::vector<GameState>& trace,
+           const GameResult& result,
+           std::vector<LearnedModel::TrainingExample>& destination) {
+            for (const auto& state : trace) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    double target = 0.5;
+                    if (result.winner >= 0) {
+                        const double discounted_outcome =
+                            0.5 * std::pow(
+                                      0.985,
+                                      static_cast<double>(
+                                          result.turns));
+                        target =
+                            result.winner ==
+                                    static_cast<int>(perspective)
+                                ? 0.5 + discounted_outcome
+                                : 0.5 - discounted_outcome;
+                    }
+                    destination.emplace_back(
+                        learned_features(state, perspective),
+                        target);
+                }
+            }
+        };
+
+    std::vector<LearnedModel::TrainingExample> examples;
+    examples.reserve(training_games * 120);
+    for (std::size_t game_index = 0;
+         game_index < training_games; ++game_index) {
+        const auto [first_deck, second_deck] =
+            choose_distinct_decks();
+        Game game(deck_cards(first_deck),
+                  deck_cards(second_deck), random());
+        std::vector<GameState> trace;
+        const GameResult result = game.run_with_trace(trace);
+        add_trace(trace, result, examples);
+    }
+
+    constexpr std::size_t kEnsembleMembers = 2;
+    std::array<std::shared_ptr<LearnedModel>, kEnsembleMembers>
+        members;
+    for (std::size_t member = 0; member < members.size();
+         ++member) {
+        members[member] = std::make_shared<LearnedModel>(
+            seed ^ (0x4D4F44454C000000ULL + member),
+            LearnedVariant::ValueSearchChampion);
+    }
+    const auto train_members =
+        [&](std::size_t epochs, double learning_rate,
+            std::uint64_t training_tag) {
+            std::array<std::thread, kEnsembleMembers> trainers;
+            for (std::size_t member = 0;
+                 member < members.size(); ++member) {
+                trainers[member] = std::thread([&, member] {
+                    members[member]->train(
+                        examples, epochs, learning_rate,
+                        seed ^ (training_tag + member));
+                });
+            }
+            for (auto& trainer : trainers) {
+                trainer.join();
+            }
+        };
+    const auto make_ensemble = [&] {
+        std::vector<std::shared_ptr<const LearnedModel>>
+            ensemble_members;
+        ensemble_members.reserve(members.size());
+        for (const auto& member : members) {
+            ensemble_members.push_back(member);
+        }
+        return std::make_shared<LearnedModel>(
+            std::move(ensemble_members),
+            seed ^ 0x56414C5545534541ULL,
+            LearnedVariant::ValueSearchChampion);
+    };
+
+    train_members(8, 0.015, 0x545241494E000000ULL);
+    std::shared_ptr<const LearnedModel> model =
+        make_ensemble();
+
+    // Value-only fitted self-play: neither the unified actor nor
+    // Handcrafted contributes actions or labels.
+    for (std::size_t generation = 0; generation < 2;
+         ++generation) {
+        std::vector<LearnedModel::TrainingExample>
+            self_play_examples;
+        const std::size_t generation_games =
+            std::max<std::size_t>(1, training_games / 2);
+        self_play_examples.reserve(generation_games * 60);
+        for (std::size_t game_index = 0;
+             game_index < generation_games; ++game_index) {
+            GameConfig config;
+            config.learned_model = model;
+            config.learned_search_depth = 0;
+            config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = 0,
+                    .exploration_rate =
+                        generation == 0 ? 0.10 : 0.05,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = 0,
+                    .exploration_rate =
+                        generation == 0 ? 0.10 : 0.05,
+                },
+            };
+            const auto [first_deck, second_deck] =
+                choose_distinct_decks();
+            Game game(deck_cards(first_deck),
+                      deck_cards(second_deck), random(), config);
+            std::vector<GameState> trace;
+            const GameResult result =
+                game.run_with_trace(trace);
+            add_trace(trace, result, self_play_examples);
+        }
+        examples.insert(
+            examples.end(), self_play_examples.begin(),
+            self_play_examples.end());
+        train_members(
+            3, 0.006,
+            0x53454C4600000000ULL +
+                0x100ULL * generation);
+        model = make_ensemble();
+    }
+    return model;
+}
+
+std::shared_ptr<const LearnedModel>
+train_learned_model(std::size_t training_games, std::uint64_t seed) {
+    return train_learned_value_champion(training_games, seed);
+}
+
+LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, std::shared_ptr<const LearnedModel> model,
+    std::size_t rollouts_per_action, std::uint64_t seed) {
+    if (!model) {
+        throw std::invalid_argument(
+            "Learned Value diagnostic requires a frozen model");
+    }
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned Value diagnostic player must be 0 or 1");
+    }
+    if (consecutive_passes < 0 || consecutive_passes > 1) {
+        throw std::out_of_range(
+            "Learned Value diagnostic pass count must be zero or one");
+    }
+
+    GameConfig config;
+    config.learned_model = model;
+    config.learned_search_depth =
+        rollouts_per_action == 0 ? 0 : 1;
+    config.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = rollouts_per_action,
+            .learned_model = model,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = rollouts_per_action,
+            .learned_model = model,
+        },
+    };
+    Game evaluator(
+        original_decks[0], original_decks[1],
+        seed ^ 0x56414C5545444941ULL, config);
+    evaluator.state_ = state;
+
+    LearnedValuePriorityDiagnostic diagnostic;
+    diagnostic.actions =
+        legal_priority_actions(state, player, sorcery_actions);
+    diagnostic.sampled_worlds =
+        std::max<std::size_t>(1, rollouts_per_action);
+    diagnostic.rollout_evaluations =
+        diagnostic.actions.size() * rollouts_per_action;
+    diagnostic.scores.assign(
+        diagnostic.actions.size(), 0.0);
+
+    struct SampledWorld {
+        GameState state;
+        std::uint64_t continuation_seed = 0;
+    };
+    std::mt19937_64 random(seed);
+    std::vector<SampledWorld> worlds;
+    worlds.reserve(diagnostic.sampled_worlds);
+    for (std::size_t world = 0;
+         world < diagnostic.sampled_worlds; ++world) {
+        const std::uint64_t world_seed = random();
+        worlds.push_back({
+            .state = sample_determinization(
+                state, original_decks, player, world_seed),
+            .continuation_seed = random(),
+        });
+    }
+    for (std::size_t action_index = 0;
+         action_index < diagnostic.actions.size();
+         ++action_index) {
+        for (const auto& world : worlds) {
+            diagnostic.scores[action_index] +=
+                evaluator.learned_value_shallow_action_score(
+                    diagnostic.actions[action_index], player,
+                    sorcery_actions, consecutive_passes,
+                    world.state);
+        }
+        diagnostic.scores[action_index] /=
+            static_cast<double>(worlds.size());
+        if (rollouts_per_action == 0) {
+            continue;
+        }
+        for (const auto& world : worlds) {
+            diagnostic.scores[action_index] +=
+                evaluator.learned_value_search_action_score(
+                    diagnostic.actions[action_index], player,
+                    sorcery_actions, phase, consecutive_passes,
+                    world.state, world.continuation_seed);
+        }
+        diagnostic.scores[action_index] /=
+            static_cast<double>(worlds.size() + 1);
+    }
+    return diagnostic;
 }
 
 double WhitePlanTeacherDiagnostic::
@@ -4242,11 +5039,13 @@ WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
     config.bots = {
         BotConfig{
             .kind = BotKind::Learned,
+            .learned_variant = LearnedVariant::UnifiedActor,
             .rollouts_per_action = 0,
             .exploration_rate = 1.0,
         },
         BotConfig{
             .kind = BotKind::Learned,
+            .learned_variant = LearnedVariant::UnifiedActor,
             .rollouts_per_action = 0,
             .exploration_rate = 1.0,
         },
@@ -4436,26 +5235,57 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         throw std::invalid_argument(
             "benchmark repetitions must be positive");
     }
-    if (challenger.kind == baseline.kind &&
+    const bool distinct_explicit_models =
+        challenger.kind == BotKind::Learned &&
+        baseline.kind == BotKind::Learned &&
+        challenger.learned_model && baseline.learned_model &&
+        challenger.learned_model != baseline.learned_model;
+    const bool same_policy =
+        challenger.kind == baseline.kind &&
+        (challenger.kind != BotKind::Learned ||
+         (challenger.learned_variant ==
+              baseline.learned_variant &&
+          !distinct_explicit_models));
+    if (same_policy &&
         challenger.rollouts_per_action ==
             baseline.rollouts_per_action) {
         throw std::invalid_argument(
             "benchmark bots must use different policies or rollout counts");
     }
-    const bool uses_learned =
-        challenger.kind == BotKind::Learned ||
-        baseline.kind == BotKind::Learned;
-    if (uses_learned && !game_config.learned_model) {
-        const std::size_t training_games = std::max(
-            challenger.kind == BotKind::Learned
-                ? challenger.training_games
-                : std::size_t{0},
-            baseline.kind == BotKind::Learned
-                ? baseline.training_games
-                : std::size_t{0});
-        game_config.learned_model = train_learned_model(
-            training_games,
-            game_config.learned_training_seed);
+    const bool distinct_learned_variants =
+        challenger.kind == BotKind::Learned &&
+        baseline.kind == BotKind::Learned &&
+        challenger.learned_variant != baseline.learned_variant;
+    if (!game_config.learned_model || distinct_learned_variants) {
+        std::array<std::shared_ptr<const LearnedModel>, 2>
+            trained_by_variant;
+        const auto ensure_frozen_model =
+            [&](BotConfig& bot) {
+                if (bot.kind != BotKind::Learned ||
+                    bot.learned_model) {
+                    return;
+                }
+                const std::size_t variant =
+                    static_cast<std::size_t>(
+                        bot.learned_variant);
+                if (!trained_by_variant[variant]) {
+                    trained_by_variant[variant] =
+                        bot.learned_variant ==
+                                LearnedVariant::UnifiedActor
+                            ? train_learned_actor_model(
+                                  bot.training_games,
+                                  game_config
+                                      .learned_training_seed)
+                            : train_learned_value_champion(
+                                  bot.training_games,
+                                  game_config
+                                      .learned_training_seed);
+                }
+                bot.learned_model =
+                    trained_by_variant[variant];
+            };
+        ensure_frozen_model(challenger);
+        ensure_frozen_model(baseline);
     }
 
     BotBenchmarkSummary summary = {

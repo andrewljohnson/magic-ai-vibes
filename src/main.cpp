@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -62,18 +63,20 @@ void print_help(std::string_view executable) {
         << "  --games N       Games per matchup (default: 100)\n"
         << "  --seed N        Reproducible random seed (default: random)\n"
         << "  --bots MODE     mixed, random, monte-carlo, "
-           "deep-monte-carlo, handcrafted, or learned (default: mixed)\n"
+           "deep-monte-carlo, handcrafted, learned-value, or "
+           "learned-actor (default: mixed)\n"
         << "  --rollouts N    Monte Carlo continuations per legal action "
            "(default: 2)\n"
         << "  --deep-rollouts N  Deep Monte Carlo continuations per "
            "legal action (default: 8)\n"
-        << "  --train-games N  Random-play games for Learned Value "
+        << "  --train-games N  Training games for the selected learned "
+           "model "
            "(default: 800)\n"
         << "  --train-seed N   Learned model seed, independent of --seed "
            "(default: 424242)\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
-           "(default: handcrafted)\n"
+           "(default: handcrafted; learned aliases learned-value)\n"
         << "  --baseline BOT    Benchmark baseline "
            "(default: monte-carlo)\n"
         << "  --stability     Validate Learned against all policies across "
@@ -94,53 +97,90 @@ void print_help(std::string_view executable) {
         << "  --help          Show this help\n";
 }
 
-alpha::BotKind parse_bot_kind(std::string_view value) {
+struct BotSelection {
+    alpha::BotKind kind = alpha::BotKind::Random;
+    alpha::LearnedVariant learned_variant =
+        alpha::LearnedVariant::ValueSearchChampion;
+};
+
+BotSelection parse_bot(std::string_view value) {
     if (value == "random") {
-        return alpha::BotKind::Random;
+        return {.kind = alpha::BotKind::Random};
     }
     if (value == "monte-carlo" || value == "mc") {
-        return alpha::BotKind::MonteCarlo;
+        return {.kind = alpha::BotKind::MonteCarlo};
     }
     if (value == "deep-monte-carlo" || value == "deep-mc") {
-        return alpha::BotKind::DeepMonteCarlo;
+        return {.kind = alpha::BotKind::DeepMonteCarlo};
     }
     if (value == "handcrafted" || value == "handcoded" ||
         value == "strategic") {
-        return alpha::BotKind::Handcrafted;
+        return {.kind = alpha::BotKind::Handcrafted};
     }
     if (value == "learned" || value == "learned-value") {
-        return alpha::BotKind::Learned;
+        return {
+            .kind = alpha::BotKind::Learned,
+            .learned_variant =
+                alpha::LearnedVariant::ValueSearchChampion,
+        };
+    }
+    if (value == "learned-actor" || value == "actor") {
+        return {
+            .kind = alpha::BotKind::Learned,
+            .learned_variant =
+                alpha::LearnedVariant::UnifiedActor,
+        };
     }
     throw std::invalid_argument("invalid bot name: " +
                                 std::string(value));
 }
 
-alpha::BotField parse_bot_field(std::string_view value) {
+struct BotFieldSelection {
+    alpha::BotField field = alpha::BotField::Mixed;
+    alpha::LearnedVariant learned_variant =
+        alpha::LearnedVariant::ValueSearchChampion;
+};
+
+BotFieldSelection parse_bot_field(std::string_view value) {
     if (value == "mixed") {
-        return alpha::BotField::Mixed;
+        return {.field = alpha::BotField::Mixed};
     }
     if (value == "random") {
-        return alpha::BotField::Random;
+        return {.field = alpha::BotField::Random};
     }
     if (value == "monte-carlo" || value == "mc") {
-        return alpha::BotField::MonteCarlo;
+        return {.field = alpha::BotField::MonteCarlo};
     }
     if (value == "deep-monte-carlo" || value == "deep-mc") {
-        return alpha::BotField::DeepMonteCarlo;
+        return {.field = alpha::BotField::DeepMonteCarlo};
     }
     if (value == "handcrafted" || value == "handcoded" ||
         value == "strategic") {
-        return alpha::BotField::Handcrafted;
+        return {.field = alpha::BotField::Handcrafted};
     }
     if (value == "learned" || value == "learned-value") {
-        return alpha::BotField::Learned;
+        return {
+            .field = alpha::BotField::Learned,
+            .learned_variant =
+                alpha::LearnedVariant::ValueSearchChampion,
+        };
+    }
+    if (value == "learned-actor" || value == "actor") {
+        return {
+            .field = alpha::BotField::Learned,
+            .learned_variant =
+                alpha::LearnedVariant::UnifiedActor,
+        };
     }
     throw std::invalid_argument(
         "invalid value for --bots (use mixed, random, monte-carlo, "
-        "deep-monte-carlo, handcrafted, or learned)");
+        "deep-monte-carlo, handcrafted, learned-value, or "
+        "learned-actor)");
 }
 
-std::string_view bot_field_name(alpha::BotField field) {
+std::string_view bot_field_name(
+    alpha::BotField field,
+    alpha::LearnedVariant learned_variant) {
     switch (field) {
     case alpha::BotField::Random:
         return "random only";
@@ -151,10 +191,13 @@ std::string_view bot_field_name(alpha::BotField field) {
     case alpha::BotField::Handcrafted:
         return "Handcrafted Policy only";
     case alpha::BotField::Learned:
-        return "Learned Value only";
+        return learned_variant ==
+                       alpha::LearnedVariant::UnifiedActor
+                   ? "Learned Unified Actor only"
+                   : "Learned Value Search Champion only";
     case alpha::BotField::Mixed:
         return "mixed Random, Monte Carlo, Deep Monte Carlo, "
-               "Handcrafted Policy, and Learned Value";
+               "Handcrafted Policy, and Learned Value Search Champion";
     }
     return "unknown";
 }
@@ -328,34 +371,53 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
     }
 }
 
-alpha::BotConfig bot_config(alpha::BotKind kind, std::size_t rollouts,
+alpha::BotConfig bot_config(BotSelection selection,
+                            std::size_t rollouts,
                             std::size_t deep_rollouts,
                             std::size_t training_games) {
-    switch (kind) {
+    alpha::BotConfig config;
+    config.kind = selection.kind;
+    config.learned_variant = selection.learned_variant;
+    config.training_games = training_games;
+    switch (selection.kind) {
     case alpha::BotKind::Random:
     case alpha::BotKind::Handcrafted:
-        return {
-            .kind = kind,
-            .rollouts_per_action = 1,
-        };
+        config.rollouts_per_action = 1;
+        return config;
     case alpha::BotKind::Learned:
-        return {
-            .kind = kind,
-            .rollouts_per_action = 2,
-            .training_games = training_games,
-        };
+        config.rollouts_per_action = 2;
+        return config;
     case alpha::BotKind::MonteCarlo:
-        return {
-            .kind = kind,
-            .rollouts_per_action = rollouts,
-        };
+        config.rollouts_per_action = rollouts;
+        return config;
     case alpha::BotKind::DeepMonteCarlo:
-        return {
-            .kind = kind,
-            .rollouts_per_action = deep_rollouts,
-        };
+        config.rollouts_per_action = deep_rollouts;
+        return config;
     }
     throw std::invalid_argument("unknown bot kind");
+}
+
+alpha::BotConfig bot_config(alpha::BotKind kind,
+                            std::size_t rollouts,
+                            std::size_t deep_rollouts,
+                            std::size_t training_games) {
+    return bot_config(
+        {.kind = kind,
+         .learned_variant =
+             alpha::LearnedVariant::ValueSearchChampion},
+        rollouts, deep_rollouts, training_games);
+}
+
+std::shared_ptr<const alpha::LearnedModel>
+train_frozen_learned_model(alpha::LearnedVariant variant,
+                           std::size_t training_games,
+                           std::uint64_t training_seed) {
+    if (variant == alpha::LearnedVariant::UnifiedActor) {
+        return alpha::train_learned_actor_model(
+            training_games, training_seed);
+    }
+    return alpha::train_learned_value_champion(
+        training_games, training_seed);
 }
 
 std::string white_plan_action_name(
@@ -407,6 +469,10 @@ void print_white_plan_diagnostic(
               << "White Lock-Plan Teacher Diagnostic\n"
               << "Evaluation seed: " << evaluation_seed << '\n'
               << "Training seed: " << training_seed << '\n'
+              << "Model: "
+              << alpha::learned_variant_name(
+                     alpha::LearnedVariant::UnifiedActor)
+              << '\n'
               << "Learned training games: " << training_games << '\n'
               << "Fixture: White first main, four untapped Plains, "
                  "land played, one Moat, one untapped Millstone, "
@@ -489,17 +555,25 @@ void print_benchmark(const alpha::BotBenchmarkSummary& result,
               << "Training seed: "
               << result.learned_training_seed << '\n'
               << "Challenger: "
-              << alpha::bot_name(result.challenger.kind) << '\n'
-              << "Baseline: " << alpha::bot_name(result.baseline.kind)
+              << alpha::bot_config_name(result.challenger) << '\n'
+              << "Baseline: "
+              << alpha::bot_config_name(result.baseline)
               << '\n';
-    if (result.challenger.kind == alpha::BotKind::Learned ||
-        result.baseline.kind == alpha::BotKind::Learned) {
-        const std::size_t training_games =
-            result.challenger.kind == alpha::BotKind::Learned
-                ? result.challenger.training_games
-                : result.baseline.training_games;
-        std::cout << "Learned self-play training games: "
-                  << training_games << '\n';
+    if (result.challenger.kind == alpha::BotKind::Learned) {
+        std::cout << "Challenger frozen model: "
+                  << alpha::learned_variant_name(
+                         result.challenger.learned_variant)
+                  << ", seed " << result.learned_training_seed
+                  << ", " << result.challenger.training_games
+                  << " training games\n";
+    }
+    if (result.baseline.kind == alpha::BotKind::Learned) {
+        std::cout << "Baseline frozen model: "
+                  << alpha::learned_variant_name(
+                         result.baseline.learned_variant)
+                  << ", seed " << result.learned_training_seed
+                  << ", " << result.baseline.training_games
+                  << " training games\n";
     }
     std::cout
               << "Repetitions per unordered deck pairing: "
@@ -571,7 +645,7 @@ bool run_stability_panel(std::size_t runs,
         alpha::BotKind::DeepMonteCarlo,
         alpha::BotKind::Handcrafted,
     };
-    const alpha::BotConfig learned_config =
+    alpha::BotConfig learned_config =
         bot_config(alpha::BotKind::Learned, rollouts,
                    deep_rollouts, training_games);
     std::array<alpha::BotBenchmarkSummary, baseline_kinds.size()>
@@ -614,12 +688,13 @@ bool run_stability_panel(std::size_t runs,
         ((mixed_target_games + mixed_policy_matrix_games - 1) /
          mixed_policy_matrix_games) *
         mixed_policy_matrix_games;
-    const alpha::TournamentConfig mixed_config = {
-        .bot_field = alpha::BotField::Mixed,
-        .monte_carlo_rollouts = rollouts,
-        .deep_monte_carlo_rollouts = deep_rollouts,
-        .learned_training_games = training_games,
-    };
+    alpha::TournamentConfig mixed_config;
+    mixed_config.bot_field = alpha::BotField::Mixed;
+    mixed_config.monte_carlo_rollouts = rollouts;
+    mixed_config.deep_monte_carlo_rollouts = deep_rollouts;
+    mixed_config.learned_training_games = training_games;
+    mixed_config.learned_variant =
+        alpha::LearnedVariant::ValueSearchChampion;
     alpha::TournamentSummary pooled_mixed;
     std::size_t mixed_seed_lift_passes = 0;
     std::size_t all_policy_seed_wins = 0;
@@ -640,8 +715,14 @@ bool run_stability_panel(std::size_t runs,
 
     alpha::GameConfig shared_config;
     shared_config.learned_training_seed = training_seed;
-    shared_config.learned_model = alpha::train_learned_model(
-        training_games, training_seed);
+    shared_config.learned_model =
+        alpha::train_learned_value_champion(
+            training_games, training_seed);
+    learned_config.learned_model = shared_config.learned_model;
+    for (auto& result : pooled) {
+        result.challenger.learned_model =
+            shared_config.learned_model;
+    }
     std::cout << " done\n\n";
 
     for (std::size_t run = 0; run < runs; ++run) {
@@ -796,7 +877,7 @@ void run_variance_study(
         101,
         707,
     };
-    const auto learned = bot_config(
+    auto learned = bot_config(
         alpha::BotKind::Learned, rollouts,
         deep_rollouts, training_games);
     const auto handcrafted = bot_config(
@@ -808,7 +889,7 @@ void run_variance_study(
     std::cout << std::fixed << std::setprecision(1)
               << "Learned Training/Evaluation Seed Variance Study\n"
               << "Challenger: "
-              << alpha::bot_name(alpha::BotKind::Learned) << '\n'
+              << alpha::bot_config_name(learned) << '\n'
               << "Baseline: "
               << alpha::bot_name(alpha::BotKind::Handcrafted)
               << '\n'
@@ -825,8 +906,10 @@ void run_variance_study(
         shared_config.learned_training_seed = seeds[training];
         std::cout << "Training seed " << seeds[training]
                   << "..." << std::flush;
-        shared_config.learned_model = alpha::train_learned_model(
-            training_games, seeds[training]);
+        shared_config.learned_model =
+            alpha::train_learned_value_champion(
+                training_games, seeds[training]);
+        learned.learned_model = shared_config.learned_model;
         std::cout << " done\n";
         for (std::size_t evaluation = 0;
              evaluation < seeds.size(); ++evaluation) {
@@ -967,6 +1050,8 @@ int main(int argc, char** argv) {
         std::size_t games = 100;
         std::uint64_t seed = random_seed();
         alpha::BotField bot_field = alpha::BotField::Mixed;
+        alpha::LearnedVariant bot_field_learned_variant =
+            alpha::LearnedVariant::ValueSearchChampion;
         std::size_t rollouts = 2;
         std::size_t deep_rollouts = 8;
         std::size_t training_games = 800;
@@ -981,8 +1066,12 @@ int main(int argc, char** argv) {
         std::size_t stability_runs = 8;
         std::size_t generations = 10;
         std::size_t population = 16;
-        alpha::BotKind challenger = alpha::BotKind::Handcrafted;
-        alpha::BotKind baseline = alpha::BotKind::MonteCarlo;
+        BotSelection challenger = {
+            .kind = alpha::BotKind::Handcrafted,
+        };
+        BotSelection baseline = {
+            .kind = alpha::BotKind::MonteCarlo,
+        };
 
         for (int argument = 1; argument < argc; ++argument) {
             const std::string_view option = argv[argument];
@@ -1028,16 +1117,21 @@ int main(int argc, char** argv) {
                                             std::string(option));
             }
             if (option == "--bots") {
-                bot_field = parse_bot_field(argv[argument]);
+                const auto selection =
+                    parse_bot_field(argv[argument]);
+                bot_field = selection.field;
+                bot_field_learned_variant =
+                    selection.learned_variant;
                 continue;
             }
             if (option == "--challenger" ||
                 option == "--baseline") {
-                const auto kind = parse_bot_kind(argv[argument]);
+                const auto selection =
+                    parse_bot(argv[argument]);
                 if (option == "--challenger") {
-                    challenger = kind;
+                    challenger = selection;
                 } else {
-                    baseline = kind;
+                    baseline = selection;
                 }
                 continue;
             }
@@ -1104,8 +1198,9 @@ int main(int argc, char** argv) {
                 "be combined");
         }
         if (diagnose_white_plan) {
-            const auto model = alpha::train_learned_model(
-                training_games, training_seed);
+            const auto model =
+                alpha::train_learned_actor_model(
+                    training_games, training_seed);
             const auto result =
                 alpha::diagnose_white_lock_plan_teacher(model, seed);
             print_white_plan_diagnostic(
@@ -1113,19 +1208,41 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (benchmark) {
-            const auto challenger_config =
+            auto challenger_config =
                 bot_config(challenger, rollouts, deep_rollouts,
                            training_games);
-            const auto baseline_config =
+            auto baseline_config =
                 bot_config(baseline, rollouts, deep_rollouts,
                            training_games);
             alpha::GameConfig shared_config;
             shared_config.learned_training_seed = training_seed;
-            if (challenger == alpha::BotKind::Learned ||
-                baseline == alpha::BotKind::Learned) {
-                shared_config.learned_model =
-                    alpha::train_learned_model(
+            if (challenger_config.kind ==
+                alpha::BotKind::Learned) {
+                challenger_config.learned_model =
+                    train_frozen_learned_model(
+                        challenger_config.learned_variant,
                         training_games, training_seed);
+                shared_config.learned_model =
+                    challenger_config.learned_model;
+            }
+            if (baseline_config.kind ==
+                alpha::BotKind::Learned) {
+                if (challenger_config.kind ==
+                        alpha::BotKind::Learned &&
+                    challenger_config.learned_variant ==
+                        baseline_config.learned_variant) {
+                    baseline_config.learned_model =
+                        challenger_config.learned_model;
+                } else {
+                    baseline_config.learned_model =
+                        train_frozen_learned_model(
+                            baseline_config.learned_variant,
+                            training_games, training_seed);
+                }
+                if (!shared_config.learned_model) {
+                    shared_config.learned_model =
+                        baseline_config.learned_model;
+                }
             }
             const auto result = alpha::run_bot_benchmark(
                 games, seed, challenger_config,
@@ -1174,23 +1291,41 @@ int main(int argc, char** argv) {
             training_seed;
         if (bot_field == alpha::BotField::Mixed ||
             bot_field == alpha::BotField::Learned) {
+            const auto model_variant =
+                bot_field == alpha::BotField::Mixed
+                    ? alpha::LearnedVariant::
+                          ValueSearchChampion
+                    : bot_field_learned_variant;
             tournament_game_config.learned_model =
-                alpha::train_learned_model(
-                    training_games, training_seed);
+                train_frozen_learned_model(
+                    model_variant, training_games,
+                    training_seed);
         }
+        alpha::TournamentConfig tournament_config;
+        tournament_config.bot_field = bot_field;
+        tournament_config.monte_carlo_rollouts = rollouts;
+        tournament_config.deep_monte_carlo_rollouts =
+            deep_rollouts;
+        tournament_config.learned_training_games =
+            training_games;
+        tournament_config.learned_variant =
+            bot_field == alpha::BotField::Mixed
+                ? alpha::LearnedVariant::ValueSearchChampion
+                : bot_field_learned_variant;
         const alpha::TournamentSummary result =
             alpha::run_tournament(
                 games, seed, tournament_game_config,
-                {.bot_field = bot_field,
-                 .monte_carlo_rollouts = rollouts,
-                 .deep_monte_carlo_rollouts = deep_rollouts,
-                 .learned_training_games = training_games});
+                tournament_config);
 
         std::cout << std::fixed << std::setprecision(1)
                   << "Early Magic Bot Simulator\n"
                   << "Evaluation seed: " << seed << '\n'
                   << "Training seed: " << training_seed << '\n'
-                  << "Bot field: " << bot_field_name(bot_field) << '\n';
+                  << "Bot field: "
+                  << bot_field_name(
+                         bot_field,
+                         bot_field_learned_variant)
+                  << '\n';
         if (bot_field == alpha::BotField::Mixed ||
             bot_field == alpha::BotField::MonteCarlo) {
             std::cout << "Monte Carlo rollouts per legal action: "
@@ -1204,8 +1339,16 @@ int main(int argc, char** argv) {
         }
         if (bot_field == alpha::BotField::Mixed ||
             bot_field == alpha::BotField::Learned) {
-            std::cout << "Learned Value self-play training games: "
-                      << training_games << '\n';
+            const auto model_variant =
+                bot_field == alpha::BotField::Mixed
+                    ? alpha::LearnedVariant::
+                          ValueSearchChampion
+                    : bot_field_learned_variant;
+            std::cout << "Frozen learned model: "
+                      << alpha::learned_variant_name(
+                             model_variant)
+                      << ", seed " << training_seed << ", "
+                      << training_games << " training games\n";
         }
         std::cout
                   << "Games per matchup: " << result.games_per_matchup
@@ -1249,7 +1392,22 @@ int main(int argc, char** argv) {
                 std::cout << '\n';
             }
             const auto kind = static_cast<alpha::BotKind>(bot);
-            print_bot_stats(alpha::bot_name(kind), result.bots[bot]);
+            if (kind == alpha::BotKind::Learned) {
+                const auto learned_display = bot_config(
+                    {.kind = alpha::BotKind::Learned,
+                     .learned_variant =
+                         bot_field == alpha::BotField::Mixed
+                             ? alpha::LearnedVariant::
+                                   ValueSearchChampion
+                             : bot_field_learned_variant},
+                    rollouts, deep_rollouts, training_games);
+                print_bot_stats(
+                    alpha::bot_config_name(learned_display),
+                    result.bots[bot]);
+            } else {
+                print_bot_stats(alpha::bot_name(kind),
+                                result.bots[bot]);
+            }
             printed_bot = true;
         }
         bool printed_matchup = false;

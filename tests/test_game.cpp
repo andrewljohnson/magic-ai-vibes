@@ -515,6 +515,89 @@ TEST(learned_soft_priority_target_is_smoothed_and_ordered) {
     CHECK(alpha::learned_soft_priority_target({}).empty());
 }
 
+TEST(learned_defaults_to_value_search_champion) {
+    const alpha::BotConfig learned = {
+        .kind = alpha::BotKind::Learned,
+    };
+    CHECK(learned.learned_variant ==
+          alpha::LearnedVariant::ValueSearchChampion);
+    CHECK(alpha::bot_config_name(learned) == "Learned Value");
+
+    const alpha::BotConfig actor = {
+        .kind = alpha::BotKind::Learned,
+        .learned_variant = alpha::LearnedVariant::UnifiedActor,
+    };
+    CHECK(alpha::bot_config_name(actor) == "Learned Actor");
+}
+
+TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
+    auto fixture = determinization_fixture();
+    fixture.state.active_player = 0;
+    fixture.state.starting_player = 0;
+    fixture.state.players[0].artifacts[0].tapped = false;
+    fixture.state.players[0].lands[0].tapped = false;
+    fixture.state.players[0].lands.push_back(
+        {.card = alpha::CardId::Plains, .tapped = false});
+    remove_fixture_card(
+        fixture.state.players[0].library,
+        alpha::CardId::Plains);
+    // Make phase continuation observably different: the First Main path has
+    // a guaranteed lethal combat, while Second Main has already passed it.
+    remove_fixture_card(
+        fixture.decks[0], alpha::CardId::Moat);
+    fixture.decks[0].push_back(alpha::CardId::GrizzlyBears);
+    remove_fixture_card(
+        fixture.state.players[0].library,
+        alpha::CardId::Moat);
+    fixture.state.players[0].creatures.push_back(bear(91));
+    fixture.state.players[1].creatures[0].tapped = true;
+    fixture.state.players[1].life = 2;
+    const auto model =
+        alpha::train_learned_value_champion(1, 0xC4A6A10ULL);
+
+    constexpr std::size_t kRollouts = 2;
+    constexpr std::uint64_t kEvaluationSeed = 0x1F05AFEULL;
+    const auto first_main =
+        alpha::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, 0, true,
+            alpha::TurnPhase::FirstMain, 1, model, kRollouts,
+            kEvaluationSeed);
+
+    auto hidden_variant = fixture.state;
+    std::reverse(hidden_variant.players[1].hand.begin(),
+                 hidden_variant.players[1].hand.end());
+    std::reverse(hidden_variant.players[1].library.begin(),
+                 hidden_variant.players[1].library.end());
+    if (!hidden_variant.players[1].hand.empty() &&
+        !hidden_variant.players[1].library.empty()) {
+        std::swap(hidden_variant.players[1].hand.front(),
+                  hidden_variant.players[1].library.front());
+    }
+    const auto hidden_repeated =
+        alpha::diagnose_learned_value_priority(
+            hidden_variant, fixture.decks, 0, true,
+            alpha::TurnPhase::FirstMain, 1, model, kRollouts,
+            kEvaluationSeed);
+
+    CHECK(first_main.actions == hidden_repeated.actions);
+    CHECK(first_main.scores == hidden_repeated.scores);
+    CHECK(first_main.sampled_worlds == kRollouts);
+    CHECK(first_main.rollout_evaluations ==
+          first_main.actions.size() * kRollouts);
+    CHECK(first_main.actions.size() > 1);
+    CHECK(std::all_of(
+        first_main.scores.begin(), first_main.scores.end(),
+        [](double score) { return std::isfinite(score); }));
+
+    const auto second_main =
+        alpha::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, 0, true,
+            alpha::TurnPhase::SecondMain, 1, model, kRollouts,
+            kEvaluationSeed);
+    CHECK(second_main.actions == first_main.actions);
+    CHECK(second_main.scores != first_main.scores);
+}
+
 TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
     const auto state = alpha::white_lock_plan_diagnostic_state();
     CHECK(state.active_player == 0);
@@ -1426,6 +1509,59 @@ TEST(benchmark_training_seed_is_independent_and_model_is_reusable) {
           repeated.challenger_stats.draws);
 }
 
+TEST(actor_and_value_champion_use_distinct_frozen_models_in_benchmark) {
+    constexpr std::uint64_t kTrainingSeed = 424242;
+    const auto actor_model =
+        alpha::train_learned_actor_model(1, kTrainingSeed);
+
+    const alpha::BotConfig actor = {
+        .kind = alpha::BotKind::Learned,
+        .learned_variant = alpha::LearnedVariant::UnifiedActor,
+        .rollouts_per_action = 0,
+        .training_games = 1,
+        .learned_model = actor_model,
+    };
+    const alpha::BotConfig champion = {
+        .kind = alpha::BotKind::Learned,
+        .learned_variant =
+            alpha::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 1,
+        .training_games = 1,
+    };
+    alpha::GameConfig config;
+    config.learned_training_seed = kTrainingSeed;
+    // A global Actor fallback must not be silently reused for the Champion.
+    config.learned_model = actor_model;
+    const auto result = alpha::run_bot_benchmark(
+        1, 0xAC70C4A6ULL, actor, champion, config);
+
+    CHECK(result.total_games == 40);
+    CHECK(result.challenger_stats.games == 40);
+    CHECK(result.baseline_stats.games == 40);
+    CHECK(result.challenger.learned_model == actor_model);
+    CHECK(result.baseline.learned_model);
+    CHECK(result.baseline.learned_model != actor_model);
+    CHECK(result.challenger_stats.total_rollouts == 0);
+    CHECK(result.baseline_stats.total_rollouts > 0);
+    for (std::size_t deck = 0;
+         deck < result.challenger_decks.size(); ++deck) {
+        CHECK(result.challenger_decks[deck].games == 10);
+        CHECK(result.baseline_decks[deck].games == 10);
+    }
+
+    const auto next_actor_model =
+        alpha::train_learned_actor_model(
+            1, kTrainingSeed + 1);
+    alpha::BotConfig next_actor = actor;
+    next_actor.learned_model = next_actor_model;
+    const auto generations = alpha::run_bot_benchmark(
+        1, 0x6E6E5EEDULL, next_actor, actor);
+    CHECK(generations.total_games == 40);
+    CHECK(generations.challenger.learned_model ==
+          next_actor_model);
+    CHECK(generations.baseline.learned_model == actor_model);
+}
+
 TEST(handcrafted_bot_beats_monte_carlo_in_seeded_benchmark) {
     const alpha::BotConfig challenger = {
         .kind = alpha::BotKind::Handcrafted,
@@ -1464,10 +1600,14 @@ TEST(handcrafted_bot_beats_deep_monte_carlo_in_seeded_benchmark) {
 }
 
 TEST(learned_policy_bot_beats_monte_carlo_without_rollouts_or_handcrafted_values) {
+    const auto actor_model =
+        alpha::train_learned_actor_model(200, 424242);
     const alpha::BotConfig challenger = {
         .kind = alpha::BotKind::Learned,
+        .learned_variant = alpha::LearnedVariant::UnifiedActor,
         .rollouts_per_action = 0,
         .training_games = 200,
+        .learned_model = actor_model,
     };
     const alpha::BotConfig baseline = {
         .kind = alpha::BotKind::MonteCarlo,
