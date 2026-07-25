@@ -334,6 +334,39 @@ TEST(fire_elemental_defeats_ironroot_treefolk_in_combat) {
     CHECK(state.players[1].creatures.empty());
 }
 
+TEST(attacking_player_controls_multi_block_damage_order) {
+    const auto combat_state = [] {
+        alpha::GameState state;
+        state.players[0].creatures = {
+            creature(1, alpha::CardId::FireElemental)};
+        state.players[1].creatures = {
+            bear(2),
+            creature(3, alpha::CardId::IronrootTreefolk),
+        };
+        return state;
+    };
+
+    auto bears_first = combat_state();
+    CHECK(alpha::resolve_combat(
+        bears_first, 0, {1}, {{1, 2}, {1, 3}}));
+    CHECK(bears_first.players[0].creatures.empty());
+    CHECK(bears_first.players[1].creatures.size() == 1);
+    CHECK(bears_first.players[1].creatures[0].card ==
+          alpha::CardId::IronrootTreefolk);
+    CHECK(count_card(bears_first.players[1].graveyard,
+                     alpha::CardId::GrizzlyBears) == 1);
+
+    auto treefolk_first = combat_state();
+    CHECK(alpha::resolve_combat(
+        treefolk_first, 0, {1}, {{1, 3}, {1, 2}}));
+    CHECK(treefolk_first.players[0].creatures.empty());
+    CHECK(treefolk_first.players[1].creatures.size() == 1);
+    CHECK(treefolk_first.players[1].creatures[0].card ==
+          alpha::CardId::GrizzlyBears);
+    CHECK(count_card(treefolk_first.players[1].graveyard,
+                     alpha::CardId::IronrootTreefolk) == 1);
+}
+
 TEST(water_elemental_requires_two_blue_mana) {
     alpha::GameState state;
     state.players[0].hand = {alpha::CardId::WaterElemental};
@@ -872,6 +905,64 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
               .wins == learned.wins);
     CHECK(repeated.bot_matchups.back().second_wins ==
           result.bot_matchups.back().second_wins);
+}
+
+TEST(learned_deck_lift_gate_requires_every_policy_and_allows_ties) {
+    alpha::TournamentSummary summary;
+    const auto set_record =
+        [&](alpha::DeckId deck, alpha::BotKind bot,
+            std::size_t wins) {
+            auto& stats =
+                summary.deck_bots[static_cast<std::size_t>(deck)]
+                                  [static_cast<std::size_t>(bot)];
+            stats.games = 100;
+            stats.wins = wins;
+            stats.losses = 100 - wins;
+        };
+
+    for (std::size_t deck = 0;
+         deck < summary.deck_bots.size(); ++deck) {
+        const auto id = static_cast<alpha::DeckId>(deck);
+        set_record(id, alpha::BotKind::Random, 20);
+        set_record(id, alpha::BotKind::MonteCarlo, 40);
+        set_record(id, alpha::BotKind::DeepMonteCarlo, 50);
+        set_record(id, alpha::BotKind::Handcrafted, 60);
+        set_record(id, alpha::BotKind::Learned, 61);
+    }
+    set_record(alpha::DeckId::Red, alpha::BotKind::Learned, 60);
+
+    const auto passing =
+        alpha::compare_learned_deck_lifts(summary);
+    CHECK(passing.complete());
+    CHECK(passing.learned_is_best_on_every_deck());
+    const auto& red =
+        passing.decks[static_cast<std::size_t>(alpha::DeckId::Red)];
+    CHECK(red.learned_lift == red.best_other_lift);
+    CHECK(red.learned_is_best);
+    CHECK(red.best_other == alpha::BotKind::Handcrafted);
+
+    set_record(alpha::DeckId::Blue, alpha::BotKind::Learned, 59);
+    const auto losing =
+        alpha::compare_learned_deck_lifts(summary);
+    CHECK(losing.complete());
+    CHECK(!losing.learned_is_best_on_every_deck());
+    CHECK(!losing.decks[static_cast<std::size_t>(
+               alpha::DeckId::Blue)]
+               .learned_is_best);
+
+    auto& missing =
+        summary.deck_bots[static_cast<std::size_t>(
+                              alpha::DeckId::White)]
+                         [static_cast<std::size_t>(
+                              alpha::BotKind::MonteCarlo)];
+    missing = {};
+    const auto incomplete =
+        alpha::compare_learned_deck_lifts(summary);
+    CHECK(!incomplete.complete());
+    CHECK(!incomplete.learned_is_best_on_every_deck());
+    CHECK(!incomplete.decks[static_cast<std::size_t>(
+                   alpha::DeckId::White)]
+                   .available);
 }
 
 TEST(bot_benchmark_balances_decks_seats_and_play_draw) {

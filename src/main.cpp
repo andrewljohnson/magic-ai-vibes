@@ -217,6 +217,8 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
     const bool has_monte_carlo_comparison =
         result.bots[random_index].games > 0 &&
         result.bots[monte_carlo_index].games > 0;
+    const auto learned_lift =
+        alpha::compare_learned_deck_lifts(result);
 
     std::cout << "\nBot benefit by deck\n";
     if (!has_learned_comparison && !has_deep_comparison &&
@@ -295,6 +297,22 @@ void print_deck_bot_benefit(const alpha::TournamentSummary& result) {
             std::cout << ", Learned " << learned.win_rate() << "% (";
             print_delta(learned.win_rate() - random.win_rate());
             std::cout << ", " << learned.games << " games)";
+        }
+        const auto& lift = learned_lift.decks[deck_index];
+        if (lift.available) {
+            std::cout << " [Learned lift "
+                      << (lift.learned_is_best ? "PASS" : "FAIL")
+                      << ']';
+        }
+        std::cout << '\n';
+    }
+    if (has_learned_comparison) {
+        std::cout << "  Learned per-deck lift gate: "
+                  << (learned_lift.learned_is_best_on_every_deck()
+                          ? "PASS"
+                          : "FAIL");
+        if (!learned_lift.complete()) {
+            std::cout << " (all five policies need samples)";
         }
         std::cout << '\n';
     }
@@ -448,6 +466,22 @@ bool run_stability_panel(std::size_t runs,
         destination.on_draw_games += source.on_draw_games;
         destination.on_draw_wins += source.on_draw_wins;
     };
+    constexpr std::size_t mixed_policy_matrix_games =
+        alpha::kBotKindCount * alpha::kBotKindCount;
+    const std::size_t mixed_target_games =
+        20 * repetitions_per_deck_pairing;
+    const std::size_t mixed_games_per_matchup =
+        ((mixed_target_games + mixed_policy_matrix_games - 1) /
+         mixed_policy_matrix_games) *
+        mixed_policy_matrix_games;
+    const alpha::TournamentConfig mixed_config = {
+        .bot_field = alpha::BotField::Mixed,
+        .monte_carlo_rollouts = rollouts,
+        .deep_monte_carlo_rollouts = deep_rollouts,
+        .learned_training_games = training_games,
+    };
+    alpha::TournamentSummary pooled_mixed;
+    std::size_t mixed_seed_lift_passes = 0;
     std::size_t all_policy_seed_wins = 0;
 
     std::cout << std::fixed << std::setprecision(1)
@@ -456,6 +490,8 @@ bool run_stability_panel(std::size_t runs,
               << "Repetitions per unordered deck pairing per run: "
               << repetitions_per_deck_pairing
               << '\n'
+              << "Mixed-field games per deck pairing per run: "
+              << mixed_games_per_matchup << '\n'
               << "Training games per independent model: "
               << training_games << "\n\n";
 
@@ -498,6 +534,32 @@ bool run_stability_panel(std::size_t runs,
                       << result.challenger_stats.draws << " ("
                       << result.challenger_win_rate() << "%)"
                       << (learned_won ? " PASS\n" : " FAIL\n");
+        }
+        const auto mixed = alpha::run_tournament(
+            mixed_games_per_matchup, seed, shared_config,
+            mixed_config);
+        const auto seed_lift =
+            alpha::compare_learned_deck_lifts(mixed);
+        const bool seed_lift_pass =
+            seed_lift.learned_is_best_on_every_deck();
+        mixed_seed_lift_passes += seed_lift_pass ? 1 : 0;
+        std::cout << "    mixed-field lift:";
+        for (const auto& deck : seed_lift.decks) {
+            std::cout << ' ' << alpha::deck_name(deck.deck) << '='
+                      << (deck.available
+                              ? (deck.learned_is_best ? "PASS"
+                                                     : "FAIL")
+                              : "N/A");
+        }
+        std::cout << " => "
+                  << (seed_lift_pass ? "PASS\n" : "FAIL\n");
+        for (std::size_t deck = 0;
+             deck < mixed.deck_bots.size(); ++deck) {
+            for (std::size_t bot = 0;
+                 bot < mixed.deck_bots[deck].size(); ++bot) {
+                merge_deck(pooled_mixed.deck_bots[deck][bot],
+                           mixed.deck_bots[deck][bot]);
+            }
         }
         all_policy_seed_wins += seed_pass ? 1 : 0;
     }
@@ -544,8 +606,32 @@ bool run_stability_panel(std::size_t runs,
                   << " => " << (policy_pass ? "PASS" : "FAIL")
                   << '\n';
     }
+    const auto pooled_lift =
+        alpha::compare_learned_deck_lifts(pooled_mixed);
+    const bool mixed_lift_pass =
+        pooled_lift.learned_is_best_on_every_deck();
+    std::cout << "\nPooled mixed-field lift over Random\n";
+    for (const auto& deck : pooled_lift.decks) {
+        std::cout << "  " << alpha::deck_name(deck.deck) << ": ";
+        if (!deck.available) {
+            std::cout << "N/A FAIL\n";
+            continue;
+        }
+        std::cout << "Learned ";
+        print_delta(deck.learned_lift);
+        std::cout << ", best other "
+                  << alpha::bot_name(deck.best_other) << ' ';
+        print_delta(deck.best_other_lift);
+        std::cout << ' '
+                  << (deck.learned_is_best ? "PASS\n" : "FAIL\n");
+    }
+    std::cout << "  Mixed-field seeds: "
+              << mixed_seed_lift_passes << '/' << runs
+              << "\n  Per-deck pooled lift gate: "
+              << (mixed_lift_pass ? "PASS" : "FAIL") << '\n';
     const bool passed =
-        all_policy_seed_wins == runs && every_policy_passed;
+        all_policy_seed_wins == runs && every_policy_passed &&
+        mixed_lift_pass;
     std::cout << "\nAll-policy seed verdict: "
               << all_policy_seed_wins << '/' << runs
               << "\nOverall: " << (passed ? "PASS" : "FAIL")

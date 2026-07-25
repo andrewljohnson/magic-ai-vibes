@@ -2685,6 +2685,77 @@ double TournamentSummary::average_turns() const {
                      static_cast<double>(total_games);
 }
 
+bool LearnedDeckLiftSummary::complete() const {
+    return std::all_of(
+        decks.begin(), decks.end(),
+        [](const DeckLiftComparison& deck) { return deck.available; });
+}
+
+bool LearnedDeckLiftSummary::learned_is_best_on_every_deck() const {
+    return complete() &&
+           std::all_of(
+               decks.begin(), decks.end(),
+               [](const DeckLiftComparison& deck) {
+                   return deck.learned_is_best;
+               });
+}
+
+LearnedDeckLiftSummary
+compare_learned_deck_lifts(const TournamentSummary& summary) {
+    constexpr std::array<BotKind, 3> comparison_bots = {
+        BotKind::MonteCarlo,
+        BotKind::DeepMonteCarlo,
+        BotKind::Handcrafted,
+    };
+    constexpr double comparison_tolerance = 1.0e-12;
+    const auto random_index =
+        static_cast<std::size_t>(BotKind::Random);
+    const auto learned_index =
+        static_cast<std::size_t>(BotKind::Learned);
+
+    LearnedDeckLiftSummary result;
+    for (std::size_t deck = 0; deck < result.decks.size(); ++deck) {
+        DeckLiftComparison& comparison = result.decks[deck];
+        comparison.deck = static_cast<DeckId>(deck);
+        const auto& random = summary.deck_bots[deck][random_index];
+        const auto& learned = summary.deck_bots[deck][learned_index];
+        if (random.games == 0 || learned.games == 0) {
+            continue;
+        }
+
+        bool has_every_comparison = true;
+        bool has_best_other = false;
+        double best_other_rate = 0.0;
+        for (const BotKind bot : comparison_bots) {
+            const auto& stats = summary.deck_bots[deck][
+                static_cast<std::size_t>(bot)];
+            if (stats.games == 0) {
+                has_every_comparison = false;
+                break;
+            }
+            if (!has_best_other ||
+                stats.win_rate() > best_other_rate) {
+                has_best_other = true;
+                best_other_rate = stats.win_rate();
+                comparison.best_other = bot;
+            }
+        }
+        if (!has_every_comparison || !has_best_other) {
+            continue;
+        }
+
+        comparison.available = true;
+        comparison.learned_lift =
+            learned.win_rate() - random.win_rate();
+        comparison.best_other_lift =
+            best_other_rate - random.win_rate();
+        comparison.learned_is_best =
+            comparison.learned_lift + comparison_tolerance >=
+            comparison.best_other_lift;
+    }
+    return result;
+}
+
 TournamentSummary run_tournament(std::size_t games_per_matchup,
                                  std::uint64_t seed,
                                  GameConfig game_config,

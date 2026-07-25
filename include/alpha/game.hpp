@@ -432,9 +432,27 @@ struct TournamentSummary {
     double average_turns() const;
 };
 
+struct DeckLiftComparison {
+    DeckId deck = DeckId::Green;
+    bool available = false;
+    double learned_lift = 0.0;
+    double best_other_lift = 0.0;
+    BotKind best_other = BotKind::Random;
+    bool learned_is_best = false;
+};
+
+struct LearnedDeckLiftSummary {
+    std::array<DeckLiftComparison, 4> decks;
+
+    bool complete() const;
+    bool learned_is_best_on_every_deck() const;
+};
+
 std::string_view deck_name(DeckId deck);
 std::string_view deck_list(DeckId deck);
 std::string_view bot_name(BotKind bot);
+LearnedDeckLiftSummary
+compare_learned_deck_lifts(const TournamentSummary& summary);
 TournamentSummary run_tournament(std::size_t games_per_matchup,
                                  std::uint64_t seed,
                                  GameConfig game_config = {},

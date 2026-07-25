@@ -758,3 +758,180 @@ Timing check:
   diagnostics.
 - Deterministic evolution smoke: three generations improved best observed
   fitness from 75.0% to 87.5%.
+
+### Remaining-horizon discounted returns
+
+Hypothesis: using the terminal turn number in every trace target suppresses
+the learning signal for late tactical and stack states. Discount each trace
+state by the remaining turns (`result.turns - state.turn_number`) so positions
+near a known outcome receive a sharper target. This changes only mirror/random
+terminal-outcome training and introduces no card-specific knowledge.
+
+Development screen:
+
+```sh
+./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 99-101 (49.5%).
+- Learned/Handcrafted by challenger deck: Green 36%/32%, Red 32%/40%,
+  Blue 60%/60%, White 70%/70%.
+- Decision: rejected and reverted. The theoretically consistent TD horizon
+  weakened the aggregate model and left Red clearly behind.
+- Next: preserve the stable value target and add an explicit learned action
+  objective, rather than trying more scalar return transformations.
+
+### Chosen resolved-afterstate replay
+
+Hypothesis: deployment ranks resolved successor states, while replay contains
+mostly turn starts and a few pre-action stack/activation states. Add the
+resolved successor of each priority action actually selected in fitted
+self-play, then fit it to the same terminal outcome. This is a narrow
+on-policy action-value objective with no external teacher.
+
+Development screen:
+
+```sh
+./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 96-104 (48.0%).
+- Learned/Handcrafted by challenger deck: Green 38%/28%, Red 30%/48%,
+  Blue 66%/52%, White 58%/80%.
+- Decision: rejected and reverted. Replaying only the selected afterstate
+  reinforced poor Red/White actions and shifted the model away from useful
+  turn-start calibration.
+- Next: action learning needs counterfactual legal-action comparisons or an
+  advantage objective, not more outcome labels on the current greedy action.
+
+### Optimistic value-ensemble uncertainty
+
+Hypothesis: the average of two fitted value members may underrate
+underexplored legal successors, contributing to Red's low casting rate.
+Deploy an upper-confidence estimate `mean + 0.15 * standard_deviation` from
+the learned ensemble. The uncertainty and values are fully learned; there is
+no card-specific branch.
+
+Development screen:
+
+```sh
+./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 102-98 (51.0%).
+- Learned/Handcrafted by challenger deck: Green 38%/26%, Red 32%/46%,
+  Blue 62%/54%, White 72%/70%.
+- Decision: rejected and reverted. Optimism helped the aggregate and White
+  slice, but did not make Red cast effectively enough to clear the required
+  per-deck gate.
+- Next: use counterfactual action outcomes to learn preference directly;
+  ensemble confidence alone cannot identify which uncertain action is good.
+
+### Counterfactual mirror-rollout value targets
+
+Hypothesis: a sampled main-phase state can provide a direct comparison among
+all legal actions. In every fourth fitted self-play game, sample one such
+state, evaluate each action with two four-turn stack-faithful Learned-mirror
+rollouts, and briefly fit the resolved successor to that counterfactual
+target. Handcrafted is never queried.
+
+Development screen:
+
+```sh
+./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 98-102 (49.0%).
+- Learned/Handcrafted by challenger deck: Green 36%/30%, Red 34%/42%,
+  Blue 58%/58%, White 68%/74%.
+- Decision: rejected and reverted. Short mirror rollouts are useful at
+  deployment when averaged with the calibrated value prior, but fitting
+  their noisy scalar outcomes back into that same value model damages its
+  calibration.
+- Next: keep action preferences in a separate policy head so counterfactual
+  supervision cannot overwrite the state-value baseline.
+
+### Learned combat damage-assignment order
+
+Hypothesis: Learned previously randomized the attacking player's legal
+damage-assignment order when one attacker had multiple blockers. Enumerate
+the joint blocker-order space up to 64 candidates (bounded random samples
+beyond that), select the order with the highest learned state value, and use
+the same ordering logic in combat search and execution. This uses only rules
+and learned value.
+
+Development screen:
+
+```sh
+./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 101-99 (50.5%).
+- Learned/Handcrafted by challenger deck: Green 38%/24%, Red 32%/42%,
+  Blue 58%/62%, White 74%/70%.
+- Runtime: approximately 47 seconds for 200 paired games including training.
+- Decision: rejected and reverted. Learned ordering helped some positions,
+  but the changed combat values reduced Red and Blue enough to fail the
+  development gate. Keep the deterministic engine regression proving that
+  input block order controls multi-block damage assignment.
+- Next: proceed with a separate learned policy head; do not add more
+  value-only combat search.
+
+### Search-distilled listwise policy head
+
+Hypothesis: counterfactual mirror-search comparisons contain useful action
+information, but fitting them into the value model destroys calibration. Keep
+the value ensemble frozen and train a separate 16-hidden-unit policy head on
+grouped resolved legal afterstates. Generate `training_games / 8` Learned
+mirror games, use the existing immediate-plus-two-rollout score as the
+listwise teacher, and add the learned action distribution to deployment with
+a bounded `0.05` prior. No Handcrafted games or card-specific rules enter
+training.
+
+Development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 102-98 (51.0%).
+- Learned/Handcrafted by challenger deck: Green 36%/22%, Red 32%/42%,
+  Blue 64%/62%, White 72%/70%.
+- Runtime: 91.24 seconds.
+- Decision: rejected. The isolated policy prior improved or held Blue and
+  White without damaging value calibration, but Red remained ten percentage
+  points behind and training nearly doubled the practical screen cost.
+- Next: test whether uncapped long control games dominated the listwise
+  corpus before reverting the policy architecture.
+
+Balanced bounded follow-up hypothesis: cycle the 12 ordered distinct-deck
+pairs, halve teacher games to `training_games / 16`, and retain at most 24
+evenly spaced decision groups from each game. If control-game replay
+imbalance caused the failure, a slightly stronger `0.08` prior should improve
+Red while preserving the three passing deck slices and materially reduce
+runtime. Otherwise reject and revert the entire policy head.
+
+Follow-up development screen:
+
+```sh
+/usr/bin/time -p ./build/alpha-sim --benchmark --games 5 --seed 424242 \
+  --challenger learned --baseline handcrafted --train-games 800
+```
+
+- Aggregate: 104-96 (52.0%).
+- Learned/Handcrafted by challenger deck: Green 36%/22%, Red 34%/42%,
+  Blue 64%/58%, White 74%/70%.
+- Runtime: 69.51 seconds.
+- Decision: rejected and fully reverted. Balancing the policy corpus gained
+  one Red game and reduced runtime by 22 seconds, but Red remained clearly
+  behind. The distilled head cannot systematically outperform the same
+  mirror-search teacher from which its labels come.
+- Next: improve the self-play/search target itself or use a genuinely
+  different learned improvement operator; do not tune this distillation
+  prior further.
