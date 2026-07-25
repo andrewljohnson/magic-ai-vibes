@@ -17,11 +17,11 @@
 namespace old_school::probe_runner {
 
 inline constexpr std::string_view kProbeCacheSchema =
-    "old-school-probe-label-cache-v1";
+    "old-school-probe-label-cache-v2";
 inline constexpr std::string_view kProbeReferenceAlgorithm =
     "actor-mirror-common-world-v2";
 inline constexpr std::string_view kProbeSemanticRevision =
-    "old-school-probe-score-semantics-v1";
+    "old-school-probe-score-semantics-v2";
 inline constexpr std::uint64_t kProbeReferenceSeed =
     0x50524F4245524546ULL;
 inline constexpr std::uint64_t kProbeProductionPolicySeed =
@@ -34,7 +34,7 @@ struct ProbeScoreConfig {
     std::size_t reference_horizon_turns = 12;
     std::size_t reference_rollouts_per_world = 1;
     std::filesystem::path cache_path =
-        "data/old-school-probe-dev-v2.labels.tsv";
+        "data/old-school-probe-dev-v3.labels.tsv";
     bool refresh_cache = false;
 };
 
@@ -99,8 +99,7 @@ struct ReferenceSensitivitySummary {
     std::size_t actor_stable_pair_count = 0;
     std::size_t point_sign_reversal_count = 0;
     std::size_t dual_stable_reversal_count = 0;
-    // Green, Red, Blue, and White; RU Aggro has no dev probes yet.
-    std::array<DeckReferenceSensitivity, 4> by_deck{};
+    std::array<DeckReferenceSensitivity, kDeckCount> by_deck{};
     std::vector<ReferenceSensitivityFlag> flags;
 };
 
@@ -122,8 +121,7 @@ struct DeckLowMarginSummary {
 
 struct LowMarginSummary {
     std::size_t pair_count = 0;
-    // Green, Red, Blue, and White; RU Aggro has no dev probes yet.
-    std::array<DeckLowMarginSummary, 4> by_deck{};
+    std::array<DeckLowMarginSummary, kDeckCount> by_deck{};
     std::vector<LowMarginBestPair> pairs;
 };
 
@@ -233,7 +231,7 @@ ProbeReferenceSamples generate_probe_reference_samples(
     std::shared_ptr<const LearnedModel> actor_model,
     const ProbeScoreConfig& config);
 
-ProbeScoreReport score_probe_dev_v2(
+ProbeScoreReport score_probe_dev(
     const ProbeScoreConfig& config, std::ostream& progress);
 
 struct NamedValueScoringModel {
@@ -254,7 +252,7 @@ struct ProbeScoringModels {
 // identity depends only on `reference_actor_model`; the reference Value is
 // used for continuation-sensitivity diagnostics and as checkpoint G0.
 // Scoring candidates never change or regenerate otherwise matching labels.
-ProbeScoreReport score_probe_dev_v2_with_candidates(
+ProbeScoreReport score_probe_dev_with_candidates(
     const ProbeScoreConfig& config, std::ostream& progress,
     ProbeScoringModels models);
 
@@ -270,7 +268,7 @@ ValueProbeDecisionDetail make_value_probe_decision_detail(
 // Scores an immutable Actor candidate against labels owned by an immutable
 // reference Actor. This is the offline generation-vs-generation path: changing
 // `scoring_actor_model` never changes cache identity or regenerates labels.
-ProbeScoreReport score_probe_dev_v2_with_models(
+ProbeScoreReport score_probe_dev_with_models(
     const ProbeScoreConfig& config, std::ostream& progress,
     std::shared_ptr<const LearnedModel> reference_actor_model,
     std::shared_ptr<const LearnedModel> scoring_actor_model,

@@ -5509,6 +5509,39 @@ void cleanup_turn(GameState& state) {
     }
 }
 
+PlayerObservation observe_game_state(const GameState& state,
+                                     std::size_t observer) {
+    if (observer >= state.players.size()) {
+        throw std::out_of_range("observer must be 0 or 1");
+    }
+
+    PlayerObservation observation{
+        .observer = observer,
+        .players = {},
+        .hand = state.players[observer].hand,
+        .stack = state.stack,
+        .active_player = state.active_player,
+        .starting_player = state.starting_player,
+        .turn_number = state.turn_number,
+    };
+    for (std::size_t player = 0; player < state.players.size(); ++player) {
+        const auto& source = state.players[player];
+        observation.players[player] = {
+            .life = source.life,
+            .library_size = source.library.size(),
+            .hand_size = source.hand.size(),
+            .graveyard = source.graveyard,
+            .exile = source.exile,
+            .lands = source.lands,
+            .creatures = source.creatures,
+            .artifacts = source.artifacts,
+            .enchantments = source.enchantments,
+            .land_played_this_turn = source.land_played_this_turn,
+        };
+    }
+    return observation;
+}
+
 Game::Game(std::vector<CardId> player_zero_deck,
            std::vector<CardId> player_one_deck, std::uint64_t seed,
            GameConfig config)
@@ -5529,6 +5562,18 @@ Game::Game(std::vector<CardId> player_zero_deck,
                 "Monte Carlo rollouts per action must be positive");
         }
     }
+    for (const auto& controller : config_.human_controllers) {
+        if (!controller.has_value()) {
+            continue;
+        }
+        if (!controller->choose_priority_action ||
+            !controller->choose_attackers ||
+            !controller->choose_blockers ||
+            !controller->choose_damage_order) {
+            throw std::invalid_argument(
+                "human controller requires every decision callback");
+        }
+    }
     for (std::size_t player = 0; player < config_.bots.size();
          ++player) {
         if (config_.bots[player].kind == BotKind::Learned) {
@@ -5543,6 +5588,36 @@ Game::Game(std::vector<CardId> player_zero_deck,
                 throw std::invalid_argument(
                     "Learned bot model does not match its variant");
             }
+        }
+    }
+}
+
+const HumanController*
+Game::human_controller(std::size_t player) const {
+    if (player >= config_.human_controllers.size() ||
+        !config_.human_controllers[player].has_value()) {
+        return nullptr;
+    }
+    return &*config_.human_controllers[player];
+}
+
+bool Game::has_human_observer() const {
+    return std::any_of(
+        config_.human_controllers.begin(),
+        config_.human_controllers.end(),
+        [](const std::optional<HumanController>& controller) {
+            return controller.has_value() &&
+                   static_cast<bool>(controller->observe);
+        });
+}
+
+void Game::notify_human_observers(const GameEvent& event) const {
+    for (std::size_t player = 0;
+         player < config_.human_controllers.size(); ++player) {
+        const auto* controller = human_controller(player);
+        if (controller != nullptr && controller->observe) {
+            controller->observe(
+                observe_game_state(state_, player), event);
         }
     }
 }
@@ -5648,6 +5723,17 @@ Game::continue_priority_window(bool sorcery_actions,
                                    priority.consecutive_passes);
 
         if (action.kind == PriorityActionKind::Pass) {
+            notify_human_observers({
+                .kind = GameEventKind::PriorityActionSelected,
+                .player = priority.player,
+                .phase = phase,
+                .priority_action = action,
+            });
+            const std::optional<StackObject> resolving =
+                state_.stack.empty()
+                    ? std::nullopt
+                    : std::optional<StackObject>(
+                          state_.stack.back());
             const PriorityPassResult pass =
                 pass_priority(state_, priority);
             if (pass == PriorityPassResult::Passed) {
@@ -5656,6 +5742,16 @@ Game::continue_priority_window(bool sorcery_actions,
             if (pass == PriorityPassResult::WindowEnded) {
                 return std::nullopt;
             }
+            if (!resolving.has_value()) {
+                throw std::logic_error(
+                    "stack resolved without a stack object");
+            }
+            notify_human_observers({
+                .kind = GameEventKind::StackObjectResolved,
+                .player = resolving->controller,
+                .phase = phase,
+                .stack_object = resolving,
+            });
             if (const auto result = life_total_result();
                 result.has_value()) {
                 return result;
@@ -5667,6 +5763,12 @@ Game::continue_priority_window(bool sorcery_actions,
                                    sorcery_actions)) {
             throw std::logic_error("bot policy selected an illegal action");
         }
+        notify_human_observers({
+            .kind = GameEventKind::PriorityActionSelected,
+            .player = priority.player,
+            .phase = phase,
+            .priority_action = action,
+        });
         // The player who acted receives priority again.
         priority.consecutive_passes = 0;
     }
@@ -5696,6 +5798,18 @@ PriorityAction Game::choose_priority_action(
     }
 
     ++state_.stats[player].decisions;
+    if (const auto* controller = human_controller(player);
+        controller != nullptr) {
+        const std::size_t chosen =
+            controller->choose_priority_action(
+                observe_game_state(state_, player), phase,
+                actions);
+        if (chosen >= actions.size()) {
+            throw std::invalid_argument(
+                "human selected an invalid priority action");
+        }
+        return actions[chosen];
+    }
     const auto& bot = config_.bots[player];
     if (bot.kind == BotKind::Random) {
         std::uniform_int_distribution<std::size_t> choose_action(
@@ -5965,6 +6079,7 @@ double Game::learned_information_set_action_score(
     simulation.state_ = sampled_state;
     simulation.random_.seed(seed);
     simulation.trace_ = nullptr;
+    simulation.config_.human_controllers = {};
     simulation.config_.learned_policy_recorder.reset();
     simulation.config_.bots = {
         BotConfig{
@@ -6282,6 +6397,7 @@ double Game::learned_value_search_action_score(
     simulation.state_ = sampled_state;
     simulation.random_.seed(seed);
     simulation.trace_ = nullptr;
+    simulation.config_.human_controllers = {};
     simulation.config_.learned_policy_recorder.reset();
     simulation.config_.learned_search_depth = 0;
     simulation.config_.bots = {
@@ -6683,6 +6799,7 @@ double Game::rollout_action(const PriorityAction& action,
                             std::uint64_t seed) const {
     Game rollout = *this;
     rollout.random_.seed(seed);
+    rollout.config_.human_controllers = {};
     rollout.config_.bots = {
         BotConfig{.kind = BotKind::Random},
         BotConfig{.kind = BotKind::Random},
@@ -6752,7 +6869,30 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
         config_.bots[state_.active_player].kind == BotKind::Learned &&
         config_.bots[state_.active_player].learned_variant ==
             LearnedVariant::UnifiedActor;
-    if (handcrafted_attacker) {
+    const auto* human_attacker =
+        human_controller(state_.active_player);
+    if (human_attacker != nullptr) {
+        std::vector<PermanentId> legal_attackers;
+        for (const auto& creature : attacking_state.creatures) {
+            if (!creature.tapped && !creature.summoning_sick &&
+                can_attack_through_moat(state_, creature)) {
+                legal_attackers.push_back(creature.id);
+            }
+        }
+        attackers = human_attacker->choose_attackers(
+            observe_game_state(state_, state_.active_player),
+            legal_attackers);
+        std::unordered_set<PermanentId> selected;
+        for (const PermanentId attacker : attackers) {
+            if (std::find(legal_attackers.begin(),
+                          legal_attackers.end(),
+                          attacker) == legal_attackers.end() ||
+                !selected.insert(attacker).second) {
+                throw std::invalid_argument(
+                    "human selected an invalid attacker set");
+            }
+        }
+    } else if (handcrafted_attacker) {
         std::vector<const CreaturePermanent*> legal_attackers;
         int total_power = 0;
         for (const auto& creature : attacking_state.creatures) {
@@ -6924,6 +7064,14 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         config_.bots[state_.active_player].learned_variant ==
             LearnedVariant::UnifiedActor;
 
+    if (has_human_observer()) {
+        notify_human_observers({
+            .kind = GameEventKind::AttackersDeclared,
+            .player = state_.active_player,
+            .phase = TurnPhase::DeclareAttackers,
+            .attackers = attackers,
+        });
+    }
     if (attackers.empty()) {
         return play_priority_window(false, TurnPhase::EndCombat);
     }
@@ -6946,7 +7094,46 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         config_.bots[defending_player].kind == BotKind::Learned &&
         config_.bots[defending_player].learned_variant ==
             LearnedVariant::UnifiedActor;
-    if (handcrafted_defender) {
+    const auto* human_defender =
+        human_controller(defending_player);
+    if (human_defender != nullptr) {
+        std::vector<LegalBlockerChoice> choices;
+        choices.reserve(available_blockers.size());
+        for (const PermanentId blocker : available_blockers) {
+            LegalBlockerChoice choice{
+                .blocker = blocker,
+                .legal_attackers =
+                    legal_attackers_for_blocker(
+                        state_, state_.active_player,
+                        blocker, attackers),
+            };
+            if (!choice.legal_attackers.empty()) {
+                choices.push_back(std::move(choice));
+            }
+        }
+        const auto selected =
+            human_defender->choose_blockers(
+                observe_game_state(state_, defending_player),
+                attackers, choices);
+        std::unordered_set<PermanentId> assigned_blockers;
+        for (const auto& [attacker, blocker] : selected) {
+            const auto choice = std::find_if(
+                choices.begin(), choices.end(),
+                [blocker](const LegalBlockerChoice& candidate) {
+                    return candidate.blocker == blocker;
+                });
+            if (choice == choices.end() ||
+                std::find(choice->legal_attackers.begin(),
+                          choice->legal_attackers.end(),
+                          attacker) ==
+                    choice->legal_attackers.end() ||
+                !assigned_blockers.insert(blocker).second) {
+                throw std::invalid_argument(
+                    "human selected an invalid blocker assignment");
+            }
+            blockers_by_attacker[attacker].push_back(blocker);
+        }
+    } else if (handcrafted_defender) {
         std::vector<PermanentId> unassigned = available_blockers;
         std::vector<PermanentId> ordered_attackers = attackers;
         std::sort(ordered_attackers.begin(), ordered_attackers.end(),
@@ -7106,13 +7293,51 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         }
     }
 
+    if (has_human_observer()) {
+        std::vector<std::pair<PermanentId, PermanentId>>
+            declared_blocks;
+        for (const PermanentId attacker : attackers) {
+            for (const PermanentId blocker :
+                 blockers_by_attacker[attacker]) {
+                declared_blocks.emplace_back(attacker, blocker);
+            }
+        }
+        notify_human_observers({
+            .kind = GameEventKind::BlockersDeclared,
+            .player = defending_player,
+            .phase = TurnPhase::DeclareBlockers,
+            .attackers = attackers,
+            .blocks = declared_blocks,
+        });
+    }
+
     std::vector<std::pair<PermanentId, PermanentId>> blocks;
+    const auto* damage_order_controller =
+        human_controller(state_.active_player);
     for (const PermanentId attacker : attackers) {
         auto& blockers = blockers_by_attacker[attacker];
         // The attacking player chooses damage assignment order. The
         // handcrafted
         // policy orders the easiest creatures to kill first.
-        if (handcrafted_attacker) {
+        if (damage_order_controller != nullptr &&
+            blockers.size() > 1) {
+            const std::vector<PermanentId> ordered =
+                damage_order_controller->choose_damage_order(
+                    observe_game_state(
+                        state_, state_.active_player),
+                    attacker, blockers);
+            std::unordered_set<PermanentId> remaining(
+                blockers.begin(), blockers.end());
+            bool valid = ordered.size() == blockers.size();
+            for (const PermanentId blocker : ordered) {
+                valid = valid && remaining.erase(blocker) == 1;
+            }
+            if (!valid || !remaining.empty()) {
+                throw std::invalid_argument(
+                    "human selected an invalid combat damage order");
+            }
+            blockers = ordered;
+        } else if (handcrafted_attacker) {
             std::sort(blockers.begin(), blockers.end(),
                       [&](PermanentId left, PermanentId right) {
                           const auto* left_creature =
@@ -7170,8 +7395,26 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         }
     }
 
+    if (has_human_observer()) {
+        notify_human_observers({
+            .kind = GameEventKind::DamageOrderChosen,
+            .player = state_.active_player,
+            .phase = TurnPhase::DamageOrder,
+            .attackers = attackers,
+            .blocks = blocks,
+        });
+    }
     if (!resolve_combat(state_, state_.active_player, attackers, blocks)) {
         throw std::logic_error("random policy declared illegal combat");
+    }
+    if (has_human_observer()) {
+        notify_human_observers({
+            .kind = GameEventKind::CombatResolved,
+            .player = state_.active_player,
+            .phase = TurnPhase::EndCombat,
+            .attackers = attackers,
+            .blocks = blocks,
+        });
     }
     if (const auto result = life_total_result(); result.has_value()) {
         return result;
@@ -7210,6 +7453,11 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
                 static_cast<int>(opponent_of(state_.active_player)),
                 EndReason::EmptyLibrary);
         }
+        notify_human_observers({
+            .kind = GameEventKind::TurnStarted,
+            .player = state_.active_player,
+            .phase = TurnPhase::FirstMain,
+        });
         if (trace_ != nullptr) {
             trace_->push_back(state_);
         }

@@ -4,6 +4,7 @@ CPPFLAGS ?= -Iinclude
 
 BUILD_DIR := build
 ENGINE_SOURCE := src/game.cpp
+INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
 PROBE_SOURCE := src/probes.cpp
 PROBE_EVAL_SOURCE := src/probe_eval.cpp
@@ -22,8 +23,8 @@ all: $(SIMULATOR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(SIMULATOR): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp -o $@
+$(SIMULATOR): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/main.cpp -o $@
 
 $(TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp -o $@

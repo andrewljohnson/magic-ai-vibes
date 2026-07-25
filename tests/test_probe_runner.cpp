@@ -151,19 +151,19 @@ std::vector<ProbeReferenceSamples> synthetic_samples(
 
 void test_seed_and_fingerprint_ignore_iteration_order() {
     std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v2();
+        old_school::probes::make_probe_dev_v3();
     const std::string first_fingerprint =
         old_school::probe_runner::corpus_information_set_fingerprint(
             probes);
     const std::uint64_t first_seed =
         old_school::probe_runner::reference_seed_for_probe(
-            old_school::probes::kProbeDevV2,
+            old_school::probes::kProbeDevV3,
             probes.front().stable_id);
     const std::uint64_t second_seed =
         old_school::probe_runner::reference_seed_for_probe(
-            old_school::probes::kProbeDevV2,
+            old_school::probes::kProbeDevV3,
             probes[1].stable_id);
-    expect(first_seed == 0x8A710A31F17F94F1ULL,
+    expect(first_seed == 0x89D27C5C0BC11CB5ULL,
            "stable FNV-1a seed derivation changed");
     std::reverse(probes.begin(), probes.end());
     expect(
@@ -172,7 +172,7 @@ void test_seed_and_fingerprint_ignore_iteration_order() {
         "corpus fingerprint depends on iteration order");
     expect(
         old_school::probe_runner::reference_seed_for_probe(
-            old_school::probes::kProbeDevV2,
+            old_school::probes::kProbeDevV3,
             probes.back().stable_id) == first_seed,
         "probe seed depends on iteration order");
     expect(first_seed != second_seed,
@@ -181,7 +181,7 @@ void test_seed_and_fingerprint_ignore_iteration_order() {
 
 void test_old_school_fingerprint_covers_new_public_state() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v2();
+        old_school::probes::make_probe_dev_v3();
     const std::string baseline =
         old_school::probe_runner::corpus_information_set_fingerprint(
             probes);
@@ -260,7 +260,7 @@ void test_old_school_fingerprint_covers_new_public_state() {
 }
 
 void test_candidate_mapping_is_descriptor_safe() {
-    const auto probes = old_school::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v3();
     const DecisionProbe& priority =
         first_probe_of_kind(probes, DecisionKind::Priority);
     LearnedActionSamples priority_rows;
@@ -304,7 +304,7 @@ void test_candidate_mapping_is_descriptor_safe() {
 }
 
 void test_reference_resource_bounds_reject_early() {
-    const auto probes = old_school::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v3();
     ProbeScoreConfig config;
     config.reference_worlds = 4097;
     (void)expect_invalid(
@@ -335,7 +335,7 @@ void test_reference_resource_bounds_reject_early() {
 }
 
 void test_cache_roundtrip_and_stale_rejection() {
-    const auto probes = old_school::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v3();
     ProbeScoreConfig config;
     config.training_games = 7;
     config.training_seed = 12345;
@@ -347,20 +347,20 @@ void test_cache_roundtrip_and_stale_rejection() {
             config, probes, "synthetic-model-fingerprint-v1");
     expect(
         metadata.schema ==
-            "old-school-probe-label-cache-v1",
+            "old-school-probe-label-cache-v2",
         "cache metadata did not use the Old School hard-cut schema");
     expect(
         metadata.corpus_id ==
-            "old-school-probe-dev-v2",
+            "old-school-probe-dev-v3",
         "cache metadata retained the pre-Old-School corpus identity");
     expect(
         metadata.semantic_revision ==
-            "old-school-probe-score-semantics-v1",
+            "old-school-probe-score-semantics-v2",
         "cache metadata retained the pre-Old-School semantics identity");
     expect(
         ProbeScoreConfig{}.cache_path ==
             std::filesystem::path(
-                "data/old-school-probe-dev-v2.labels.tsv"),
+                "data/old-school-probe-dev-v3.labels.tsv"),
         "default cache path can collide with the legacy cache");
     const auto samples = synthetic_samples(probes, 2);
     TemporaryDirectory directory;
@@ -374,7 +374,7 @@ void test_cache_roundtrip_and_stale_rejection() {
         std::string magic;
         std::getline(cache, magic);
         expect(
-            magic == "# old-school-probe-label-cache-v1",
+            magic == "# old-school-probe-label-cache-v2",
             "cache writer emitted the legacy magic header");
     }
     const std::string temporary_prefix =
@@ -448,11 +448,27 @@ void test_cache_roundtrip_and_stale_rejection() {
     expect(legacy_error.find("unknown magic header") !=
                std::string::npos,
            "legacy cache rejection did not identify its magic");
+
+    const auto v2_path =
+        directory.path() / "old-school-probe-dev-v2.labels.tsv";
+    {
+        std::ofstream v2(v2_path);
+        v2 << "# old-school-probe-label-cache-v1\n";
+    }
+    const std::string v2_error = expect_invalid(
+        [&]() {
+            (void)old_school::probe_runner::load_probe_label_cache(
+                v2_path, metadata, probes);
+        },
+        "probe-dev-v2 cache magic was accepted by v3");
+    expect(v2_error.find("unknown magic header") !=
+               std::string::npos,
+           "v2 cache rejection did not identify its magic");
 }
 
 void test_hidden_clone_preserves_information_set() {
     std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v2();
+        old_school::probes::make_probe_dev_v3();
     DecisionProbe clone_probe = probes.front();
     clone_probe.state =
         old_school::probe_runner::hidden_repartition_clone(
@@ -472,7 +488,7 @@ void test_hidden_clone_preserves_information_set() {
 }
 
 void test_tiny_reference_is_hidden_clone_invariant() {
-    const auto probes = old_school::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v3();
     ProbeScoreConfig config;
     config.training_games = 1;
     config.training_seed = 777;
@@ -497,7 +513,7 @@ void test_tiny_reference_is_hidden_clone_invariant() {
 }
 
 void test_value_attack_probe_scores_are_seed_independent() {
-    const auto probes = old_school::probes::make_probe_dev_v2();
+    const auto probes = old_school::probes::make_probe_dev_v3();
     const auto value_model =
         old_school::train_learned_value_champion(1, 778);
     for (const DecisionProbe& probe : probes) {
@@ -517,7 +533,7 @@ void test_value_attack_probe_scores_are_seed_independent() {
         }
         const std::uint64_t deployed_seed =
             old_school::probe_runner::reference_seed_for_probe(
-                old_school::probes::kProbeDevV2, probe.stable_id,
+                old_school::probes::kProbeDevV3, probe.stable_id,
                 old_school::probe_runner::kProbeProductionPolicySeed);
         const auto first =
             old_school::learned_value_attack_set_scores(
@@ -634,7 +650,7 @@ void test_report_contains_required_schema_and_caveats() {
             std::string(old_school::probe_runner::
                             kProbeSemanticRevision),
         .corpus_id =
-            std::string(old_school::probes::kProbeDevV2),
+            std::string(old_school::probes::kProbeDevV3),
         .reference_seed =
             old_school::probe_runner::kProbeReferenceSeed,
         .production_policy_seed =
@@ -644,7 +660,7 @@ void test_report_contains_required_schema_and_caveats() {
         .worlds = 128,
         .horizon_turns = 12,
         .rollouts_per_world = 1,
-        .probe_count = 16,
+        .probe_count = 20,
         .reference_model_fingerprint =
             "actor-model-fingerprint",
         .information_set_fingerprint = "0123456789abcdef",
@@ -656,7 +672,7 @@ void test_report_contains_required_schema_and_caveats() {
         "actor-candidate-fingerprint";
     report.value_model_fingerprint = "value-model-fingerprint";
     old_school::probe_eval::ProbeMetricSummary metrics;
-    metrics.probe_count = 16;
+    metrics.probe_count = 20;
     metrics.stable_pair_count = 9;
     metrics.top1_expected_agreement = 0.75;
     metrics.stable_pair_agreement = 0.8;
@@ -689,7 +705,7 @@ void test_report_contains_required_schema_and_caveats() {
                           "deep", metrics, true, std::nullopt},
     };
     old_school::probe_eval::CandidateQFitSummary q_fit;
-    q_fit.candidate_count = 32;
+    q_fit.candidate_count = 40;
     q_fit.mae = 0.03;
     q_fit.rmse = 0.04;
     for (std::size_t deck = 0; deck < q_fit.by_deck.size();
@@ -722,7 +738,7 @@ void test_report_contains_required_schema_and_caveats() {
     report.hidden_repartition = {
         .passed = true,
         .policy_count = 5,
-        .probe_count = 16,
+        .probe_count = 20,
     };
     for (std::size_t deck = 0;
          deck < report.low_margin.by_deck.size(); ++deck) {
@@ -751,8 +767,7 @@ void test_report_contains_required_schema_and_caveats() {
            "report did not distinguish reference and scoring Actor models");
     expect(output.find(
                "diagnostic only, 4 positions each for "
-               "Green/Red/Blue/White") != std::string::npos &&
-               output.find("RU Aggro is not represented") !=
+               "Green/Red/Blue/White/RU Aggro") !=
                    std::string::npos,
            "report omitted small-corpus warning");
     expect(output.find("top1") != std::string::npos &&
@@ -830,7 +845,7 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
             std::string(old_school::probe_runner::
                             kProbeSemanticRevision),
         .corpus_id =
-            std::string(old_school::probes::kProbeDevV2),
+            std::string(old_school::probes::kProbeDevV3),
         .reference_seed =
             old_school::probe_runner::kProbeReferenceSeed,
         .production_policy_seed =
@@ -996,10 +1011,10 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
     };
     std::ostringstream progress;
     const ProbeScoreReport generated =
-        old_school::probe_runner::score_probe_dev_v2_with_models(
+        old_school::probe_runner::score_probe_dev_with_models(
             config, progress, reference, reference, "Actor G0");
     const ProbeScoreReport loaded =
-        old_school::probe_runner::score_probe_dev_v2_with_models(
+        old_school::probe_runner::score_probe_dev_with_models(
             config, progress, reference, candidate, "Actor G1");
 
     expect(generated.cache_status == ProbeCacheStatus::Generated &&
@@ -1023,7 +1038,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
 
     const std::string null_error = expect_invalid(
         [&] {
-            old_school::probe_runner::score_probe_dev_v2_with_models(
+            old_school::probe_runner::score_probe_dev_with_models(
                 config, progress, nullptr, candidate, "Actor G1");
         },
         "null reference Actor was accepted");
@@ -1032,7 +1047,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
            "null model error was not actionable");
     const std::string name_error = expect_invalid(
         [&] {
-            old_school::probe_runner::score_probe_dev_v2_with_models(
+            old_school::probe_runner::score_probe_dev_with_models(
                 config, progress, reference, candidate,
                 "Actor\tG1");
         },
@@ -1052,7 +1067,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             old_school::learned_model_fingerprint(scoring_value),
         "tiny Value candidate unexpectedly aliases reference content");
     const ProbeScoreReport value_loaded =
-        old_school::probe_runner::score_probe_dev_v2_with_candidates(
+        old_school::probe_runner::score_probe_dev_with_candidates(
             config, progress,
             {
                 .reference_actor_model = reference,
@@ -1106,7 +1121,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
         old_school::train_learned_value_champion(
             1, 0xD00DULL);
     const ProbeScoreReport checkpoint_loaded =
-        old_school::probe_runner::score_probe_dev_v2_with_candidates(
+        old_school::probe_runner::score_probe_dev_with_candidates(
             config, progress,
             {
                 .reference_actor_model = reference,
@@ -1184,7 +1199,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             checkpoint_loaded.value_checkpoints[checkpoint];
         expect(row.fingerprint == expected_fingerprints[checkpoint],
                "Value checkpoint fingerprint order changed");
-        expect(row.decisions.size() == 16,
+        expect(row.decisions.size() == 20,
                "Value checkpoint lost a probe detail row");
         expect(
             std::is_sorted(

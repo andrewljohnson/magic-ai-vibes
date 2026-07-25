@@ -38,7 +38,7 @@ constexpr std::size_t kMaximumReferenceWorlds = 4096;
 constexpr std::size_t kMaximumReferenceHorizon = 128;
 constexpr std::size_t kMaximumReferenceRollouts = 256;
 constexpr std::string_view kProbeCacheMagic =
-    "# old-school-probe-label-cache-v1";
+    "# old-school-probe-label-cache-v2";
 
 class Fnv1a {
   public:
@@ -348,24 +348,17 @@ void validate_text_field(std::string_view value,
 }
 
 std::string deck_token(DeckId deck) {
-    if (deck == DeckId::RUAggro) {
-        throw std::invalid_argument(
-            "RU Aggro decision probes have not been authored");
-    }
     return std::string(deck_name(deck));
 }
 
 DeckId parse_deck_token(std::string_view token) {
-    constexpr std::array<DeckId, 4> kProbeDecks = {
-        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White};
+    constexpr std::array<DeckId, kDeckCount> kProbeDecks = {
+        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White,
+        DeckId::RUAggro};
     for (const DeckId id : kProbeDecks) {
         if (token == deck_name(id)) {
             return id;
         }
-    }
-    if (token == deck_name(DeckId::RUAggro)) {
-        throw std::invalid_argument(
-            "probe cache contains RU Aggro before RU probes exist");
     }
     throw std::invalid_argument(
         "probe cache has an invalid deck token");
@@ -865,7 +858,7 @@ std::vector<double> learned_search_scores(
     bool blend_shallow_prior) {
     const LearnedSearchConfig config{
         .seed = reference_seed_for_probe(
-            probes::kProbeDevV2, probe.stable_id),
+            probes::kProbeDevV3, probe.stable_id),
         .worlds = worlds,
         .rollouts_per_world = rollouts_per_world,
         .horizon_turns = horizon_turns,
@@ -945,7 +938,7 @@ LearnedValueAttackSetScores value_deployed_attack_scores(
                              : std::vector<PermanentId>{});
     }
     const std::uint64_t policy_seed = reference_seed_for_probe(
-        probes::kProbeDevV2, probe.stable_id,
+        probes::kProbeDevV3, probe.stable_id,
         kProbeProductionPolicySeed);
     return learned_value_attack_set_scores(
         probe.state, probe.root_player, attack_sets,
@@ -1529,7 +1522,7 @@ ProbeReferenceSamples generate_variant_reference_samples(
     bool verify_hidden_repartition) {
     const LearnedSearchConfig search{
         .seed = reference_seed_for_probe(
-            probes::kProbeDevV2, probe.stable_id),
+            probes::kProbeDevV3, probe.stable_id),
         .worlds = config.reference_worlds,
         .rollouts_per_world =
             config.reference_rollouts_per_world,
@@ -1578,7 +1571,7 @@ std::uint64_t reference_seed_for_probe(
 std::string corpus_information_set_fingerprint(
     const std::vector<probes::DecisionProbe>& corpus) {
     Fnv1a hash;
-    hash.text(probes::kProbeDevV2);
+    hash.text(probes::kProbeDevV3);
     const auto sorted = sorted_probes(corpus);
     hash.unsigned_integer(sorted.size());
     for (const probes::DecisionProbe* probe : sorted) {
@@ -1667,7 +1660,7 @@ ProbeCacheMetadata make_probe_cache_metadata(
     validate_text_field(reference_model_fingerprint,
                         "reference model fingerprint");
     const auto validation_errors =
-        probes::validate_probe_dev_v2(corpus);
+        probes::validate_probe_dev_v3(corpus);
     if (!validation_errors.empty()) {
         throw std::invalid_argument(
             "cannot label an invalid probe corpus: " +
@@ -1677,7 +1670,7 @@ ProbeCacheMetadata make_probe_cache_metadata(
         .schema = std::string(kProbeCacheSchema),
         .algorithm = std::string(kProbeReferenceAlgorithm),
         .semantic_revision = std::string(kProbeSemanticRevision),
-        .corpus_id = std::string(probes::kProbeDevV2),
+        .corpus_id = std::string(probes::kProbeDevV3),
         .reference_seed = kProbeReferenceSeed,
         .production_policy_seed = kProbeProductionPolicySeed,
         .training_seed = config.training_seed,
@@ -1706,7 +1699,7 @@ void write_probe_label_cache_atomic(
     if (metadata.schema != kProbeCacheSchema ||
         metadata.algorithm != kProbeReferenceAlgorithm ||
         metadata.semantic_revision != kProbeSemanticRevision ||
-        metadata.corpus_id != probes::kProbeDevV2 ||
+        metadata.corpus_id != probes::kProbeDevV3 ||
         metadata.reference_seed != kProbeReferenceSeed ||
         metadata.production_policy_seed !=
             kProbeProductionPolicySeed ||
@@ -1982,7 +1975,7 @@ ProbeReferenceSamples generate_probe_reference_samples(
         LearnedVariant::UnifiedActor, true);
 }
 
-ProbeScoreReport score_probe_dev_v2_with_candidates(
+ProbeScoreReport score_probe_dev_with_candidates(
     const ProbeScoreConfig& config, std::ostream& progress,
     ProbeScoringModels models) {
     validate_score_config(config);
@@ -2029,7 +2022,7 @@ ProbeScoreReport score_probe_dev_v2_with_candidates(
         }
     }
     const std::vector<probes::DecisionProbe> corpus =
-        probes::make_probe_dev_v2();
+        probes::make_probe_dev_v3();
     const std::string reference_actor_fingerprint =
         learned_model_fingerprint(models.reference_actor_model);
     const std::string scoring_actor_fingerprint =
@@ -2290,7 +2283,7 @@ ProbeScoreReport score_probe_dev_v2_with_candidates(
     return report;
 }
 
-ProbeScoreReport score_probe_dev_v2_with_models(
+ProbeScoreReport score_probe_dev_with_models(
     const ProbeScoreConfig& config, std::ostream& progress,
     std::shared_ptr<const LearnedModel> reference_actor_model,
     std::shared_ptr<const LearnedModel> scoring_actor_model,
@@ -2303,7 +2296,7 @@ ProbeScoreReport score_probe_dev_v2_with_models(
     auto value_model = train_learned_value_champion(
         config.training_games, config.training_seed);
     progress << " done\n";
-    return score_probe_dev_v2_with_candidates(
+    return score_probe_dev_with_candidates(
         config, progress,
         {
             .reference_actor_model =
@@ -2318,7 +2311,7 @@ ProbeScoreReport score_probe_dev_v2_with_models(
         });
 }
 
-ProbeScoreReport score_probe_dev_v2(
+ProbeScoreReport score_probe_dev(
     const ProbeScoreConfig& config, std::ostream& progress) {
     validate_score_config(config);
     progress << "Training frozen Actor reference/scoring model (seed "
@@ -2328,7 +2321,7 @@ ProbeScoreReport score_probe_dev_v2(
     auto actor_model = train_learned_actor_model(
         config.training_games, config.training_seed);
     progress << " done\n";
-    return score_probe_dev_v2_with_models(
+    return score_probe_dev_with_models(
         config, progress, actor_model, actor_model,
         "Actor");
 }
@@ -2338,9 +2331,9 @@ std::string format_probe_score_report(
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << std::fixed << std::setprecision(4)
-           << "\nProbe Dev-v2 Offline Score\n"
+           << "\nProbe Dev-v3 Offline Score\n"
            << "WARNING: diagnostic only, 4 positions each for "
-              "Green/Red/Blue/White; RU Aggro is not represented. "
+              "Green/Red/Blue/White/RU Aggro. "
               "This cannot establish playing strength or a champion.\n"
            << "Reference: Actor-mirror common worlds, K="
            << report.metadata.worlds << ", H="

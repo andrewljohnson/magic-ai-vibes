@@ -47,6 +47,18 @@ run_cli() {
     set -e
 }
 
+run_cli_input() {
+    cli_input=$1
+    shift
+    set +e
+    cli_output=$(
+        printf '%s\n' "$cli_input" |
+            "$simulator" "$@" 2>&1
+    )
+    cli_status=$?
+    set -e
+}
+
 expect_error() {
     expected=$1
     shift
@@ -69,7 +81,7 @@ expect_error() {
 help_output=$("$simulator" --help)
 case $help_output in
     *"RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate"*\
-"learned-value-g0..g8"*"learned-value-mix50-g8"*\
+"--interactive"*"learned-value-g0..g8"*"learned-value-mix50-g8"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
 "--refresh-value-g8-cache"*"--refresh-value-mix50-cache"*) ;;
@@ -78,6 +90,69 @@ case $help_output in
         exit 1
         ;;
 esac
+
+run_cli_input "q" --interactive --seed 1 \
+    --train-games 1 --train-seed 424242
+if [ "$cli_status" -ne 0 ]; then
+    printf 'interactive quit failed\n%s\n' "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Old School Magic Interactive"*\
+"Match: Human RU Aggro vs Learned Value RU Aggro"*\
+"Game seed: 1"*\
+"Training seed: 424242"*\
+"cards (hidden)"*\
+"Game abandoned."*) ;;
+    *)
+        printf 'interactive banner or hidden-state rendering missing\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+set +e
+cli_output=$(
+    "$simulator" --interactive --seed 1 \
+        --train-games 1 --train-seed 424242 </dev/null 2>&1
+)
+cli_status=$?
+set -e
+if [ "$cli_status" -ne 0 ]; then
+    printf 'interactive EOF failed\n%s\n' "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Input closed; game abandoned."*) ;;
+    *)
+        printf 'interactive EOF did not abandon cleanly\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+interactive_bad_input=$(printf 'not-a-number\n999\nq')
+run_cli_input "$interactive_bad_input" --interactive --seed 1 \
+    --train-games 1 --train-seed 424242
+if [ "$cli_status" -ne 0 ]; then
+    printf 'interactive invalid-input recovery failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Please enter a number from 0 to "*"or q to quit."*\
+"Game abandoned."*) ;;
+    *)
+        printf 'interactive invalid input did not reprompt\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+expect_error "--interactive only accepts" \
+    --interactive --games 1
+expect_error "cannot be combined" \
+    --interactive --benchmark
 
 run_cli --games 1 --seed 1 --bots random
 if [ "$cli_status" -ne 0 ]; then

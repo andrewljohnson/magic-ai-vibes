@@ -16,7 +16,13 @@ namespace {
 
 using old_school::CardId;
 using old_school::DeckId;
+using old_school::GameState;
+using old_school::PermanentId;
 using old_school::PriorityAction;
+using old_school::PriorityActionKind;
+using old_school::PriorityPassResult;
+using old_school::PriorityState;
+using old_school::TurnPhase;
 using old_school::probes::Category;
 using old_school::probes::DecisionProbe;
 using old_school::probes::Validation;
@@ -41,7 +47,8 @@ class TestRunner {
                       << " passed\n";
             return 1;
         }
-        std::cout << passed_ << " probe tests passed across 16 fixtures\n";
+        std::cout << passed_
+                  << " probe tests passed across 20 fixtures\n";
         return 0;
     }
 
@@ -69,6 +76,45 @@ const DecisionProbe& find_probe(
     return *found;
 }
 
+const PriorityAction& priority_candidate(
+    const DecisionProbe& probe, std::string_view descriptor) {
+    const auto found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [descriptor](const old_school::probes::Candidate& candidate) {
+            return candidate.descriptor == descriptor;
+        });
+    if (found == probe.candidates.end()) {
+        throw std::runtime_error(
+            "required priority candidate is missing");
+    }
+    const auto* action = std::get_if<PriorityAction>(&found->action);
+    if (action == nullptr) {
+        throw std::runtime_error(
+            "named candidate is not a priority action");
+    }
+    return *action;
+}
+
+PermanentId creature_id(const GameState& state, std::size_t player,
+                        CardId card) {
+    const auto& creatures = state.players.at(player).creatures;
+    const auto found = std::find_if(
+        creatures.begin(), creatures.end(),
+        [card](const old_school::CreaturePermanent& creature) {
+            return creature.card == card;
+        });
+    if (found == creatures.end()) {
+        throw std::runtime_error("required creature is missing");
+    }
+    return found->id;
+}
+
+bool contains_action(const std::vector<PriorityAction>& actions,
+                     const PriorityAction& wanted) {
+    return std::find(actions.begin(), actions.end(), wanted) !=
+           actions.end();
+}
+
 std::string validation_errors(const Validation& validation) {
     std::string joined;
     for (const std::string& error : validation.errors) {
@@ -80,24 +126,59 @@ std::string validation_errors(const Validation& validation) {
     return joined;
 }
 
+std::size_t expected_candidate_count(Category category) {
+    switch (category) {
+    case Category::GreenDevelop:
+    case Category::GreenGrowthSaveBolt:
+    case Category::GreenGrowthHold:
+    case Category::BlueCounterExpensiveSpell:
+    case Category::BlueConserveCounter:
+    case Category::BlueCounterLethal:
+    case Category::WhiteEmergencyMoat:
+    case Category::WhiteEstablishMillstone:
+    case Category::RUFlyingMoatAttack:
+        return 2;
+    case Category::GreenGrowthPushCombat:
+    case Category::RedStackRace:
+    case Category::BlueCounterWar:
+    case Category::WhiteMillBeforeDraw:
+    case Category::WhiteAvoidRedundantMoat:
+    case Category::RULandColor:
+    case Category::RUBlockerDevelopment:
+        return 3;
+    case Category::RedFaceLethal:
+    case Category::RedFinishDamagedThreat:
+        return 4;
+    case Category::RedClearBlocker:
+        return 5;
+    case Category::RUDisintegrateLethal:
+        return 9;
+    case Category::GreenTsunamiTiming:
+    case Category::GreenFavorableAttack:
+    case Category::GreenUnfavorableAttack:
+        break;
+    }
+    throw std::runtime_error(
+        "probe-dev-v3 contains a retired category");
+}
+
+void resolve_cast_spell(GameState& state) {
+    expect(old_school::resolve_top_of_stack(state),
+           "spell failed to resolve");
+}
+
 void test_corpus_shape_and_candidate_schema() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
-    expect(probes.size() == 16,
-           "probe-dev-v1 must contain exactly 16 fixtures");
+        old_school::probes::make_probe_dev_v3();
+    expect(probes.size() == 20,
+           "probe-dev-v3 must contain exactly 20 fixtures");
 
-    constexpr std::array<std::size_t, 16> kCandidateCounts = {
-        2, 3, 2, 2, 4, 5, 4, 3,
-        2, 2, 2, 3, 2, 2, 3, 3,
-    };
-    std::array<std::size_t, 4> deck_counts{};
+    std::array<std::size_t, old_school::kDeckCount> deck_counts{};
     for (const DecisionProbe& probe : probes) {
-        const std::size_t category =
-            static_cast<std::size_t>(probe.category);
-        expect(category < kCandidateCounts.size(),
-               "category is outside probe-dev-v1");
+        expect(probe.stable_id.ends_with(".v3"),
+               "probe-dev-v3 retained an old stable ID");
         expect(probe.candidates.size() ==
-                   kCandidateCounts[category],
+                   expected_candidate_count(probe.category),
                "fixture candidate count changed");
         ++deck_counts[static_cast<std::size_t>(probe.root_deck)];
         for (const auto& candidate : probe.candidates) {
@@ -112,7 +193,7 @@ void test_corpus_shape_and_candidate_schema() {
 
 void test_every_probe_passes_each_validation_dimension() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     for (const DecisionProbe& probe : probes) {
         const Validation validation =
             old_school::probes::validate_probe(probe);
@@ -130,13 +211,13 @@ void test_every_probe_passes_each_validation_dimension() {
         expect(validation.hidden_clone_invariant,
                "hidden clone invariance was not checked");
     }
-    expect(old_school::probes::validate_probe_dev_v1(probes).empty(),
+    expect(old_school::probes::validate_probe_dev_v3(probes).empty(),
            "valid corpus failed aggregate validation");
 }
 
 void test_card_conservation_rejects_missing_physical_card() {
     std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     DecisionProbe probe =
         find_probe(probes, Category::GreenDevelop);
     expect(!probe.state.players[0].library.empty(),
@@ -150,9 +231,9 @@ void test_card_conservation_rejects_missing_physical_card() {
 
 void test_exile_is_a_conserved_public_zone() {
     std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     DecisionProbe probe =
-        find_probe(probes, Category::GreenDevelop);
+        find_probe(probes, Category::RULandColor);
     expect(!probe.state.players[0].library.empty(),
            "test fixture unexpectedly has an empty library");
     const CardId exiled = probe.state.players[0].library.back();
@@ -162,34 +243,12 @@ void test_exile_is_a_conserved_public_zone() {
     const Validation validation =
         old_school::probes::validate_probe(probe);
     expect(validation.ok(),
-           "moving a physical card to public exile broke validation");
-}
-
-void test_ru_probe_is_rejected_until_ru_corpus_exists() {
-    std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
-    DecisionProbe probe =
-        find_probe(probes, Category::GreenDevelop);
-    probe.root_deck = DeckId::RUAggro;
-
-    const Validation validation =
-        old_school::probes::validate_probe(probe);
-    expect(!validation.exact_card_conservation,
-           "RU probe was accepted by the four-deck corpus");
-    expect(
-        std::any_of(
-            validation.errors.begin(), validation.errors.end(),
-            [](const std::string& error) {
-                return error.find(
-                           "RU Aggro decision probes have not been authored") !=
-                       std::string::npos;
-            }),
-        "RU rejection did not explain that its probes are not authored");
+           "moving an RU card to public exile broke validation");
 }
 
 void test_priority_validation_rejects_illegal_or_incomplete_set() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     DecisionProbe probe =
         find_probe(probes, Category::GreenDevelop);
     probe.candidates[1].action =
@@ -200,25 +259,26 @@ void test_priority_validation_rejects_illegal_or_incomplete_set() {
            "unpayable Treefolk replaced a legal action");
 }
 
-void test_attack_reachability_rejects_sickness_and_moat() {
+void test_attack_reachability_checks_flying_through_moat() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     DecisionProbe sick =
-        find_probe(probes, Category::GreenFavorableAttack);
+        find_probe(probes, Category::RUFlyingMoatAttack);
     sick.state.players[0].creatures[0].summoning_sick = true;
     expect(!old_school::probes::validate_probe(sick).reachable_state,
-           "summoning-sick binary attacker was accepted");
+           "summoning-sick Flying Men was accepted as an attacker");
 
-    DecisionProbe moated =
-        find_probe(probes, Category::GreenFavorableAttack);
-    moated.state.players[1].enchantments.push_back(CardId::Moat);
-    expect(!old_school::probes::validate_probe(moated).reachable_state,
-           "nonflying binary attacker was accepted through Moat");
+    DecisionProbe ground =
+        find_probe(probes, Category::RUFlyingMoatAttack);
+    ground.state.players[0].creatures[0].card =
+        CardId::IronclawOrcs;
+    expect(!old_school::probes::validate_probe(ground).reachable_state,
+           "nonflying attacker was accepted through Moat");
 }
 
 void test_hidden_zone_clones_are_observation_invariant() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     for (std::size_t index = 0; index < probes.size(); ++index) {
         expect(
             old_school::probes::hidden_clone_is_determinization_invariant(
@@ -228,56 +288,126 @@ void test_hidden_zone_clones_are_observation_invariant() {
     }
 }
 
-void test_red_damaged_threat_fixture_is_reachable() {
+void test_red_last_opportunity_timing() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
-    const DecisionProbe& probe =
+        old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& blocker =
+        find_probe(probes, Category::RedClearBlocker);
+    expect(blocker.phase == TurnPhase::BeginCombat,
+           "blocker-clearing Bolt can heal in a later precombat window");
+    GameState blocker_pass = blocker.state;
+    PriorityState blocker_priority{
+        .player = blocker.root_player,
+        .consecutive_passes = blocker.consecutive_passes,
+    };
+    expect(old_school::pass_priority(
+               blocker_pass, blocker_priority) ==
+               PriorityPassResult::Passed,
+           "blocker-clearing root Pass did not yield priority");
+    const auto blocker_responses =
+        old_school::legal_priority_actions(
+            blocker_pass, blocker_priority.player, false);
+    expect(blocker_responses ==
+               std::vector<PriorityAction>{PriorityAction::pass()} &&
+               old_school::pass_priority(
+                   blocker_pass, blocker_priority) ==
+                   PriorityPassResult::WindowEnded,
+           "opponent can reopen the blocker-clearing priority window");
+
+    const DecisionProbe& damaged =
         find_probe(probes, Category::RedFinishDamagedThreat);
-    const auto& root = probe.state.players[probe.root_player];
-    const auto& opponent = probe.state.players[1 - probe.root_player];
-    expect(root.hand == std::vector<CardId>{CardId::LightningBolt},
-           "R3 must retain the second Bolt");
-    expect(std::count(root.graveyard.begin(), root.graveyard.end(),
-                      CardId::LightningBolt) == 1,
-           "R3 must put the resolved first Bolt in the graveyard");
-    expect(root.lands.size() == 2,
-           "R3 must expose two Mountains");
-    expect(std::count_if(
-               root.lands.begin(), root.lands.end(),
-               [](const old_school::LandPermanent& land) {
-                   return land.tapped;
-               }) == 1,
-           "R3 must leave one Mountain after the first Bolt");
-    expect(opponent.creatures.size() == 1 &&
-               opponent.creatures[0].card ==
-                   CardId::WaterElemental &&
-               opponent.creatures[0].damage == 3,
-           "R3 must retain a live Water Elemental with 3 damage");
-    expect(old_school::probes::validate_probe(probe).reachable_state,
-           "corrected R3 fixture failed reachability validation");
+    expect(damaged.phase == TurnPhase::SecondMain &&
+               damaged.state.active_player == 1 &&
+               damaged.state.turn_number == 10 &&
+               damaged.consecutive_passes == 1,
+           "damaged-Water fixture is not the final cleanup opportunity");
+    GameState pass_state = damaged.state;
+    PriorityState priority{
+        .player = damaged.root_player,
+        .consecutive_passes = damaged.consecutive_passes,
+    };
+    expect(old_school::pass_priority(pass_state, priority) ==
+               PriorityPassResult::WindowEnded,
+           "passing damaged-Water fixture did not end the turn window");
+}
+
+void test_white_plan_passes_cannot_heal() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    for (const Category category :
+         {Category::WhiteEmergencyMoat,
+          Category::WhiteAvoidRedundantMoat}) {
+        const DecisionProbe& probe = find_probe(probes, category);
+        expect(probe.phase == TurnPhase::SecondMain,
+               "White plan probe can heal in a later main phase");
+        GameState state = probe.state;
+        PriorityState priority{
+            .player = probe.root_player,
+            .consecutive_passes = probe.consecutive_passes,
+        };
+        expect(old_school::pass_priority(state, priority) ==
+                   PriorityPassResult::Passed,
+               "White root Pass did not yield priority");
+        const auto responses =
+            old_school::legal_priority_actions(
+                state, priority.player, true);
+        expect(responses ==
+                   std::vector<PriorityAction>{
+                       PriorityAction::pass()} &&
+                   old_school::pass_priority(state, priority) ==
+                       PriorityPassResult::WindowEnded,
+               "opponent can reopen a White final-main plan probe");
+    }
+}
+
+void test_public_mana_supports_deployed_creatures() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& develop =
+        find_probe(probes, Category::GreenDevelop);
+    expect(develop.state.players[1].lands.size() >= 5,
+           "visible Fire Elemental has no plausible five-mana history");
+
+    const DecisionProbe& save =
+        find_probe(probes, Category::GreenGrowthSaveBolt);
+    expect(save.state.players[0].lands.size() >= 2,
+           "visible Grizzly Bears has no plausible two-mana history");
+
+    const DecisionProbe& push =
+        find_probe(probes, Category::GreenGrowthPushCombat);
+    expect(push.state.players[0].lands.size() >= 5,
+           "visible Ironroot Treefolk has no plausible five-mana history");
+
+    for (const Category category :
+         {Category::BlueConserveCounter,
+          Category::BlueCounterLethal}) {
+        const DecisionProbe& probe = find_probe(probes, category);
+        expect(probe.state.players[0].lands.size() >= 5,
+               "visible Water Elemental has no plausible "
+               "five-mana history");
+    }
 }
 
 void test_counter_war_lists_every_legal_spell_target() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     const DecisionProbe& probe =
         find_probe(probes, Category::BlueCounterWar);
     expect(probe.state.stack.size() == 2,
            "counter-war stack must contain two spells");
     expect(probe.consecutive_passes == 1,
            "counter-war responder must act after the caster passes");
-    const Validation validation =
-        old_school::probes::validate_probe(probe);
-    expect(validation.candidates_legal_and_complete,
+    expect(probe.candidates.size() == 3 &&
+               old_school::probes::validate_probe(probe)
+                   .candidates_legal_and_complete,
            "counter-war omitted a targetable stack spell");
-    expect(probe.candidates.size() == 3,
-           "counter-war requires pass plus two Counterspell targets");
 }
 
 void test_response_windows_record_the_casters_pass() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
-    constexpr std::array<Category, 5> kResponseCategories = {
+        old_school::probes::make_probe_dev_v3();
+    constexpr std::array<Category, 6> kResponseCategories = {
+        Category::GreenGrowthSaveBolt,
         Category::RedStackRace,
         Category::BlueCounterExpensiveSpell,
         Category::BlueConserveCounter,
@@ -298,178 +428,326 @@ void test_response_windows_record_the_casters_pass() {
 
 void test_corpus_rejects_duplicate_stable_id_and_category() {
     std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v1();
+        old_school::probes::make_probe_dev_v3();
     probes[1].stable_id = probes[0].stable_id;
     probes[1].category = probes[0].category;
-    expect(!old_school::probes::validate_probe_dev_v1(probes).empty(),
+    expect(!old_school::probes::validate_probe_dev_v3(probes).empty(),
            "duplicate stable ID/category was accepted");
 }
 
-void test_v2_plan_probes_are_root_irreversible() {
+void test_existing_lethal_stack_branches_apply_exactly() {
     const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v2();
-    expect(old_school::probes::validate_probe_dev_v2(probes).empty(),
-           "probe-dev-v2 failed aggregate validation");
-    for (const DecisionProbe& probe : probes) {
-        expect(probe.stable_id.ends_with(".v2"),
-               "probe-dev-v2 retained a v1 stable ID");
-    }
-
-    const DecisionProbe& green =
-        find_probe(probes, Category::GreenDevelop);
-    expect(green.phase == old_school::TurnPhase::SecondMain,
-           "Green develop Pass can still heal in a later main phase");
-    expect(std::all_of(
-               green.state.players[1].lands.begin(),
-               green.state.players[1].lands.end(),
-               [](const old_school::LandPermanent& land) {
-                   return land.tapped;
-               }),
-           "Green opponent can reopen the final priority window");
+        old_school::probes::make_probe_dev_v3();
 
     const DecisionProbe& red =
         find_probe(probes, Category::RedFaceLethal);
-    expect(red.phase == old_school::TurnPhase::SecondMain,
-           "Red lethal Pass can still heal in a later main phase");
-    old_school::GameState pass_state = red.state;
-    old_school::PriorityState pass_priority_state{
-        .player = red.root_player,
-        .consecutive_passes = red.consecutive_passes,
-    };
-    expect(old_school::pass_priority(pass_state, pass_priority_state) ==
-               old_school::PriorityPassResult::Passed,
-           "first Red Pass did not yield priority");
-    const auto opponent_actions = old_school::legal_priority_actions(
-        pass_state, pass_priority_state.player, true);
-    expect(opponent_actions ==
-               std::vector<PriorityAction>{PriorityAction::pass()},
-           "tapped-out opponent can reopen the Red branch");
-    expect(old_school::pass_priority(pass_state, pass_priority_state) ==
-               old_school::PriorityPassResult::WindowEnded,
-           "Red Pass did not end the final main-phase window");
-    expect(pass_state.players[0].hand ==
-               std::vector<CardId>{CardId::LightningBolt},
-           "Red Pass branch unexpectedly spent the Bolt");
-
-    const DecisionProbe& emergency =
-        find_probe(probes, Category::WhiteEmergencyMoat);
-    expect(emergency.state.players[1].creatures.size() == 1 &&
-               std::all_of(
-                   emergency.state.players[1].creatures.begin(),
-                   emergency.state.players[1].creatures.end(),
-                   [](const old_school::CreaturePermanent& creature) {
-                       return creature.card ==
-                                  CardId::FireElemental &&
-                              !creature.summoning_sick;
-                   }),
-           "emergency-Moat attacker is not an immediate threat");
-}
-
-void test_v2_lethal_priority_branches_apply_exactly() {
-    const std::vector<DecisionProbe> probes =
-        old_school::probes::make_probe_dev_v2();
-
-    const DecisionProbe& red =
-        find_probe(probes, Category::RedFaceLethal);
-    old_school::GameState bolt_state = red.state;
+    GameState bolt_state = red.state;
     const auto& bolt_action =
-        std::get<PriorityAction>(red.candidates[2].action);
+        priority_candidate(red, "bolt-opponent-player");
     expect(old_school::apply_priority_action(
                bolt_state, red.root_player, bolt_action, true),
            "Red lethal Bolt candidate failed to apply");
-    old_school::PriorityState bolt_priority{
-        .player = red.root_player,
-        .consecutive_passes = 0,
-    };
-    expect(old_school::pass_priority(bolt_state, bolt_priority) ==
-               old_school::PriorityPassResult::Passed &&
-               old_school::pass_priority(bolt_state, bolt_priority) ==
-                   old_school::PriorityPassResult::StackObjectResolved,
-           "Red lethal Bolt did not resolve after two passes");
+    resolve_cast_spell(bolt_state);
     expect(bolt_state.players[1].life == 0,
            "Red lethal Bolt did not produce its terminal branch");
 
     const DecisionProbe& blue =
         find_probe(probes, Category::BlueCounterLethal);
-    old_school::GameState blue_pass = blue.state;
-    old_school::PriorityState blue_pass_priority{
+    GameState blue_pass = blue.state;
+    PriorityState blue_pass_priority{
         .player = blue.root_player,
         .consecutive_passes = blue.consecutive_passes,
     };
     expect(old_school::pass_priority(
                blue_pass, blue_pass_priority) ==
-               old_school::PriorityPassResult::StackObjectResolved,
+               PriorityPassResult::StackObjectResolved &&
+               blue_pass.players[0].life == 0,
            "Blue Pass did not resolve the pending lethal Bolt");
-    expect(blue_pass.players[0].life == 0,
-           "Blue Pass was not an immediate terminal loss");
 
-    old_school::GameState blue_counter = blue.state;
+    GameState blue_counter = blue.state;
     const auto& counter_action =
-        std::get<PriorityAction>(blue.candidates[1].action);
+        priority_candidate(blue, "counter-lethal-lightning-bolt");
     expect(old_school::apply_priority_action(
-               blue_counter, blue.root_player, counter_action, false),
+               blue_counter, blue.root_player, counter_action, true),
            "Blue Counterspell candidate failed to apply");
-    expect(blue_counter.stack.size() == 2 &&
-               blue_counter.stack.back().card ==
-                   CardId::Counterspell,
-           "Counterspell was not placed above the lethal Bolt");
-    old_school::PriorityState counter_priority{
-        .player = blue.root_player,
-        .consecutive_passes = 0,
-    };
-    expect(old_school::pass_priority(
-               blue_counter, counter_priority) ==
-               old_school::PriorityPassResult::Passed &&
-               old_school::pass_priority(
-                   blue_counter, counter_priority) ==
-                   old_school::PriorityPassResult::StackObjectResolved,
-           "Counterspell did not resolve after two passes");
+    resolve_cast_spell(blue_counter);
     expect(blue_counter.stack.empty() &&
                blue_counter.players[0].life == 3,
            "Counterspell failed to remove the lethal Bolt");
-    expect(std::count(
-               blue_counter.players[0].graveyard.begin(),
-               blue_counter.players[0].graveyard.end(),
-               CardId::Counterspell) == 1 &&
-               std::count(
-                   blue_counter.players[1].graveyard.begin(),
-                   blue_counter.players[1].graveyard.end(),
-                   CardId::LightningBolt) == 1 &&
-               blue_counter.stats[0].spells_countered == 1,
-           "Counterspell resolution did not preserve stack accounting");
+}
+
+void test_giant_growth_saves_bolt_target() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& probe =
+        find_probe(probes, Category::GreenGrowthSaveBolt);
+
+    GameState pass_state = probe.state;
+    PriorityState pass_priority{
+        .player = probe.root_player,
+        .consecutive_passes = probe.consecutive_passes,
+    };
+    expect(old_school::pass_priority(pass_state, pass_priority) ==
+               PriorityPassResult::StackObjectResolved,
+           "passing did not resolve the pending Bolt");
+    expect(pass_state.players[0].creatures.empty(),
+           "unprotected Bear survived Lightning Bolt");
+
+    GameState growth_state = probe.state;
+    const PriorityAction& growth =
+        priority_candidate(probe, "growth-own-grizzly-bears");
+    expect(old_school::apply_priority_action(
+               growth_state, probe.root_player, growth, true),
+           "Giant Growth response failed to apply");
+    resolve_cast_spell(growth_state);
+    expect(growth_state.players[0].creatures.size() == 1 &&
+               growth_state.players[0]
+                       .creatures.front()
+                       .temporary_toughness_bonus == 3,
+           "Giant Growth did not resolve above Bolt");
+    resolve_cast_spell(growth_state);
+    expect(growth_state.players[0].creatures.size() == 1 &&
+               growth_state.players[0].creatures.front().damage == 3,
+           "grown Bear did not survive the resolved Bolt");
+}
+
+void test_giant_growth_push_and_hold_traces() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& push =
+        find_probe(probes, Category::GreenGrowthPushCombat);
+    const PermanentId treefolk =
+        creature_id(push.state, 0, CardId::IronrootTreefolk);
+
+    GameState eligible = push.state;
+    expect(old_school::apply_priority_action(
+               eligible, push.root_player,
+               priority_candidate(
+                   push, "growth-own-ironroot-treefolk"),
+               false),
+           "eligible Growth target failed to apply");
+    resolve_cast_spell(eligible);
+    expect(old_school::resolve_combat(
+               eligible, 0, {treefolk}, {}) &&
+               eligible.players[1].life == 0,
+           "Growth on the eligible attacker did not push lethal");
+
+    GameState sick = push.state;
+    expect(old_school::apply_priority_action(
+               sick, push.root_player,
+               priority_candidate(
+                   push,
+                   "growth-own-summoning-sick-grizzly-bears"),
+               false),
+           "summoning-sick Growth target failed to apply");
+    resolve_cast_spell(sick);
+    expect(old_school::resolve_combat(sick, 0, {treefolk}, {}) &&
+               sick.players[1].life == 3,
+           "Growth on the sick Bear changed Treefolk combat damage");
+
+    const DecisionProbe& hold =
+        find_probe(probes, Category::GreenGrowthHold);
+    GameState held = hold.state;
+    PriorityState held_priority{
+        .player = hold.root_player,
+        .consecutive_passes = 0,
+    };
+    expect(old_school::pass_priority(held, held_priority) ==
+               PriorityPassResult::Passed &&
+               old_school::pass_priority(held, held_priority) ==
+                   PriorityPassResult::WindowEnded &&
+               held.players[0].hand ==
+                   std::vector<CardId>{CardId::GiantGrowth},
+           "final-main Pass did not retain Giant Growth");
+
+    GameState wasted = hold.state;
+    expect(old_school::apply_priority_action(
+               wasted, hold.root_player,
+               priority_candidate(
+                   hold, "growth-own-grizzly-bears"),
+               true),
+           "final-main Growth failed to apply");
+    resolve_cast_spell(wasted);
+    old_school::cleanup_turn(wasted);
+    expect(wasted.players[0].hand.empty() &&
+               std::count(wasted.players[0].graveyard.begin(),
+                          wasted.players[0].graveyard.end(),
+                          CardId::GiantGrowth) == 1 &&
+               wasted.players[0]
+                       .creatures.front()
+                       .temporary_power_bonus == 0,
+           "wasted Growth survived cleanup or remained in hand");
+}
+
+void test_ru_land_color_and_blocker_traces() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& land =
+        find_probe(probes, Category::RULandColor);
+
+    GameState island = land.state;
+    expect(old_school::apply_priority_action(
+               island, land.root_player,
+               priority_candidate(land, "play-island"), true),
+           "Island land choice failed to apply");
+    const auto island_actions =
+        old_school::legal_priority_actions(island, land.root_player, true);
+    expect(contains_action(
+               island_actions,
+               PriorityAction::cast_creature(CardId::FlyingMen)),
+           "Island did not unlock Flying Men");
+
+    GameState mountain = land.state;
+    expect(old_school::apply_priority_action(
+               mountain, land.root_player,
+               priority_candidate(land, "play-mountain"), true),
+           "Mountain land choice failed to apply");
+    const auto mountain_actions =
+        old_school::legal_priority_actions(
+            mountain, land.root_player, true);
+    expect(!contains_action(
+               mountain_actions,
+               PriorityAction::cast_creature(CardId::FlyingMen)),
+           "Mountain incorrectly unlocked Flying Men");
+
+    const DecisionProbe& blocker =
+        find_probe(probes, Category::RUBlockerDevelopment);
+    const PermanentId bear =
+        creature_id(blocker.state, 1, CardId::GrizzlyBears);
+
+    GameState no_blocker = blocker.state;
+    expect(old_school::resolve_combat(
+               no_blocker, 1, {bear}, {}) &&
+               no_blocker.players[0].life == 0,
+           "visible Bear was not lethal without a blocker");
+
+    GameState ironclaw = blocker.state;
+    expect(old_school::apply_priority_action(
+               ironclaw, blocker.root_player,
+               priority_candidate(
+                   blocker, "cast-ironclaw-orcs"),
+               true),
+           "Ironclaw Orcs failed to cast");
+    resolve_cast_spell(ironclaw);
+    const PermanentId orcs =
+        creature_id(ironclaw, 0, CardId::IronclawOrcs);
+    expect(!old_school::resolve_combat(
+               ironclaw, 1, {bear}, {{bear, orcs}}),
+           "Ironclaw Orcs illegally blocked a power-2 Bear");
+
+    GameState gray = blocker.state;
+    expect(old_school::apply_priority_action(
+               gray, blocker.root_player,
+               priority_candidate(blocker, "cast-gray-ogre"), true),
+           "Gray Ogre failed to cast");
+    resolve_cast_spell(gray);
+    const PermanentId ogre =
+        creature_id(gray, 0, CardId::GrayOgre);
+    expect(old_school::resolve_combat(
+               gray, 1, {bear}, {{bear, ogre}}) &&
+               gray.players[0].life == 2,
+           "Gray Ogre did not legally block the Bear");
+}
+
+void test_ru_flying_and_disintegrate_traces() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& flying =
+        find_probe(probes, Category::RUFlyingMoatAttack);
+    const PermanentId flying_men =
+        creature_id(flying.state, 0, CardId::FlyingMen);
+    GameState attack = flying.state;
+    expect(old_school::resolve_combat(
+               attack, 0, {flying_men}, {}) &&
+               attack.players[1].life == 0,
+           "Flying Men did not attack through Moat for lethal");
+
+    const DecisionProbe& disintegrate =
+        find_probe(probes, Category::RUDisintegrateLethal);
+    const auto legal = old_school::legal_priority_actions(
+        disintegrate.state, disintegrate.root_player, true);
+    expect(legal.size() == 9,
+           "Disintegrate fixture does not have exactly nine actions");
+    for (int x_value = 0; x_value <= 3; ++x_value) {
+        for (std::size_t target = 0; target < 2; ++target) {
+            expect(contains_action(
+                       legal,
+                       PriorityAction::cast_disintegrate(
+                           x_value,
+                           old_school::Target::player_target(target))),
+                   "affordable player-targeted Disintegrate is missing");
+        }
+    }
+    expect(!contains_action(
+               legal,
+               PriorityAction::cast_disintegrate(
+                   4, old_school::Target::player_target(1))),
+           "unaffordable X=4 Disintegrate was legal");
+
+    GameState lethal = disintegrate.state;
+    expect(old_school::apply_priority_action(
+               lethal, disintegrate.root_player,
+               priority_candidate(
+                   disintegrate,
+                   "disintegrate-x3-opponent-player"),
+               true),
+           "lethal Disintegrate failed to apply");
+    resolve_cast_spell(lethal);
+    expect(lethal.players[1].life == 0,
+           "X=3 Disintegrate was not lethal");
+
+    GameState short_burn = disintegrate.state;
+    expect(old_school::apply_priority_action(
+               short_burn, disintegrate.root_player,
+               priority_candidate(
+                   disintegrate,
+                   "disintegrate-x2-opponent-player"),
+               true),
+           "X=2 Disintegrate failed to apply");
+    resolve_cast_spell(short_burn);
+    expect(short_burn.players[1].life == 1,
+           "X=2 Disintegrate dealt the wrong damage");
 }
 
 } // namespace
 
 int main() {
     TestRunner runner;
-    runner.run("corpus shape and candidate schema",
+    runner.run("v3 corpus shape and candidate schema",
                test_corpus_shape_and_candidate_schema);
-    runner.run("all fixtures validate",
+    runner.run("all v3 fixtures validate",
                test_every_probe_passes_each_validation_dimension);
     runner.run("exact physical conservation",
                test_card_conservation_rejects_missing_physical_card);
-    runner.run("public exile conservation",
+    runner.run("RU public exile conservation",
                test_exile_is_a_conserved_public_zone);
-    runner.run("RU corpus is explicitly absent",
-               test_ru_probe_is_rejected_until_ru_corpus_exists);
     runner.run("priority legality and completeness",
                test_priority_validation_rejects_illegal_or_incomplete_set);
-    runner.run("attack legality and Moat",
-               test_attack_reachability_rejects_sickness_and_moat);
+    runner.run("Flying Men attack reachability",
+               test_attack_reachability_checks_flying_through_moat);
     runner.run("hidden-zone clone invariance",
                test_hidden_zone_clones_are_observation_invariant);
-    runner.run("corrected reachable red R3",
-               test_red_damaged_threat_fixture_is_reachable);
+    runner.run("Red last-opportunity timing",
+               test_red_last_opportunity_timing);
+    runner.run("White plan passes cannot heal",
+               test_white_plan_passes_cannot_heal);
+    runner.run("public mana supports deployed creatures",
+               test_public_mana_supports_deployed_creatures);
     runner.run("Counterspell stack targets",
                test_counter_war_lists_every_legal_spell_target);
     runner.run("response priority context",
                test_response_windows_record_the_casters_pass);
-    runner.run("unique stable IDs and categories",
+    runner.run("unique v3 stable IDs and categories",
                test_corpus_rejects_duplicate_stable_id_and_category);
-    runner.run("v2 root-irreversible plans",
-               test_v2_plan_probes_are_root_irreversible);
-    runner.run("v2 lethal branch traces",
-               test_v2_lethal_priority_branches_apply_exactly);
+    runner.run("existing lethal stack traces",
+               test_existing_lethal_stack_branches_apply_exactly);
+    runner.run("Giant Growth saves Bolt target",
+               test_giant_growth_saves_bolt_target);
+    runner.run("Giant Growth push and hold traces",
+               test_giant_growth_push_and_hold_traces);
+    runner.run("RU land and blocker traces",
+               test_ru_land_color_and_blocker_traces);
+    runner.run("RU flying and Disintegrate traces",
+               test_ru_flying_and_disintegrate_traces);
     return runner.finish();
 }

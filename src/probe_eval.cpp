@@ -53,8 +53,7 @@ std::size_t deck_index(DeckId deck) {
     case DeckId::White:
         return 3;
     case DeckId::RUAggro:
-        throw std::invalid_argument(
-            "RU Aggro decision probes have not been authored");
+        return 4;
     }
     throw std::invalid_argument("root_deck is outside the probe corpus");
 }
@@ -637,7 +636,7 @@ ProbeMetricSummary evaluate_probe_predictions(
     }
 
     MetricAccumulator pooled;
-    std::array<MetricAccumulator, 4> by_deck;
+    std::array<MetricAccumulator, kDeckCount> by_deck;
     for (const ProbeLabel& label : labels) {
         const ProbePrediction& prediction =
             *predictions_by_id.at(label.stable_id);
@@ -649,8 +648,9 @@ ProbeMetricSummary evaluate_probe_predictions(
     ProbeMetricSummary summary;
     copy_pooled_metrics(
         finalize_deck_metrics(pooled, DeckId::Green), summary);
-    constexpr std::array<DeckId, 4> kDecks = {
-        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White};
+    constexpr std::array<DeckId, kDeckCount> kDecks = {
+        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White,
+        DeckId::RUAggro};
     for (std::size_t deck = 0; deck < kDecks.size(); ++deck) {
         summary.by_deck[deck] =
             finalize_deck_metrics(by_deck[deck], kDecks[deck]);
@@ -682,7 +682,7 @@ CandidateQFitSummary evaluate_candidate_q_fit(
         });
 
     CandidateQFitAccumulator pooled;
-    std::array<CandidateQFitAccumulator, 4> by_deck;
+    std::array<CandidateQFitAccumulator, kDeckCount> by_deck;
     for (const ProbeLabel* label : sorted_labels) {
         const ProbePrediction& prediction =
             *predictions_by_id.at(label->stable_id);
@@ -720,8 +720,9 @@ CandidateQFitSummary evaluate_candidate_q_fit(
     summary.candidate_count = pooled_metrics.candidate_count;
     summary.mae = pooled_metrics.mae;
     summary.rmse = pooled_metrics.rmse;
-    constexpr std::array<DeckId, 4> kDecks = {
-        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White};
+    constexpr std::array<DeckId, kDeckCount> kDecks = {
+        DeckId::Green, DeckId::Red, DeckId::Blue, DeckId::White,
+        DeckId::RUAggro};
     for (std::size_t deck = 0; deck < kDecks.size(); ++deck) {
         summary.by_deck[deck] =
             finalize_candidate_q_fit(by_deck[deck], kDecks[deck]);

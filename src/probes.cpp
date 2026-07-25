@@ -14,8 +14,32 @@ namespace {
 
 constexpr std::size_t kPlayerCount = 2;
 constexpr std::size_t kProbeCardCount = kCardCount;
-constexpr std::size_t kCategoryCount =
+constexpr std::size_t kLegacyCategoryCount =
     static_cast<std::size_t>(Category::WhiteAvoidRedundantMoat) + 1;
+constexpr std::size_t kProbeDevV3Count = 20;
+constexpr std::array<Category, kProbeDevV3Count>
+    kProbeDevV3Categories = {
+        Category::GreenDevelop,
+        Category::GreenGrowthSaveBolt,
+        Category::GreenGrowthPushCombat,
+        Category::GreenGrowthHold,
+        Category::RedFaceLethal,
+        Category::RedClearBlocker,
+        Category::RedFinishDamagedThreat,
+        Category::RedStackRace,
+        Category::BlueCounterExpensiveSpell,
+        Category::BlueConserveCounter,
+        Category::BlueCounterLethal,
+        Category::BlueCounterWar,
+        Category::WhiteEmergencyMoat,
+        Category::WhiteEstablishMillstone,
+        Category::WhiteMillBeforeDraw,
+        Category::WhiteAvoidRedundantMoat,
+        Category::RULandColor,
+        Category::RUBlockerDevelopment,
+        Category::RUFlyingMoatAttack,
+        Category::RUDisintegrateLethal,
+    };
 using CardCounts = std::array<std::size_t, kProbeCardCount>;
 
 std::vector<CardId> deck_for(DeckId deck) {
@@ -29,8 +53,7 @@ std::vector<CardId> deck_for(DeckId deck) {
     case DeckId::White:
         return white_control_deck();
     case DeckId::RUAggro:
-        throw std::invalid_argument(
-            "RU Aggro decision probes have not been authored");
+        return ru_aggro_deck();
     }
     throw std::invalid_argument("unknown probe deck");
 }
@@ -229,10 +252,8 @@ DecisionProbe green_develop_probe() {
     root.hand = {CardId::GrizzlyBears, CardId::IronrootTreefolk};
     root.lands = {land(CardId::Forest), land(CardId::Forest)};
     root.land_played_this_turn = true;
-    probe.state.players[1].lands = {
-        land(CardId::Mountain),
-        land(CardId::Mountain),
-    };
+    probe.state.players[1].lands.assign(
+        5, land(CardId::Mountain));
     probe.candidates = {
         priority_candidate("pass", PriorityAction::pass()),
         priority_candidate(
@@ -306,6 +327,108 @@ DecisionProbe green_unfavorable_attack_probe() {
     probe.candidates = {
         attack_candidate("skip-ironroot-treefolk", kTreefolk, false),
         attack_candidate("include-ironroot-treefolk", kTreefolk, true),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe green_growth_save_bolt_probe() {
+    constexpr PermanentId kBear = 1;
+    constexpr StackObjectId kBolt = 1;
+    DecisionProbe probe = make_base(
+        "green.bolt-on-bear-response.v3",
+        Category::GreenGrowthSaveBolt, DecisionKind::Priority,
+        DeckId::Green, DeckId::Red, TurnPhase::FirstMain, 10, 1);
+    PlayerState& root = probe.state.players[0];
+    root.hand = {CardId::GiantGrowth};
+    root.lands = {
+        land(CardId::Forest),
+        land(CardId::Forest),
+    };
+    root.creatures = {
+        creature(kBear, CardId::GrizzlyBears),
+    };
+    probe.state.players[1].lands = {
+        land(CardId::Mountain, true),
+    };
+    probe.state.stack = {
+        spell(kBolt, CardId::LightningBolt, 1,
+              Target::creature_target(0, kBear)),
+    };
+    // The Bolt caster has passed; passing now resolves it, so this is the
+    // last legal opportunity to save the Bear.
+    probe.consecutive_passes = 1;
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "growth-own-grizzly-bears",
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(0, kBear))),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe green_growth_push_probe() {
+    constexpr PermanentId kTreefolk = 1;
+    constexpr PermanentId kSickBear = 2;
+    DecisionProbe probe = make_base(
+        "green.begin-combat-growth-targets.v3",
+        Category::GreenGrowthPushCombat, DecisionKind::Priority,
+        DeckId::Green, DeckId::Red, TurnPhase::BeginCombat, 9);
+    PlayerState& root = probe.state.players[0];
+    root.hand = {CardId::GiantGrowth};
+    root.lands = {
+        land(CardId::Forest, true),
+        land(CardId::Forest, true),
+        land(CardId::Forest),
+        land(CardId::Forest),
+        land(CardId::Forest),
+    };
+    root.creatures = {
+        creature(kTreefolk, CardId::IronrootTreefolk),
+        creature(kSickBear, CardId::GrizzlyBears, false, true),
+    };
+    root.land_played_this_turn = true;
+    PlayerState& opponent = probe.state.players[1];
+    opponent.life = 6;
+    opponent.lands.assign(5, land(CardId::Mountain, true));
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "growth-own-ironroot-treefolk",
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(0, kTreefolk))),
+        priority_candidate(
+            "growth-own-summoning-sick-grizzly-bears",
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(0, kSickBear))),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe green_growth_hold_probe() {
+    constexpr PermanentId kBear = 1;
+    DecisionProbe probe = make_base(
+        "green.second-main-growth-options.v3",
+        Category::GreenGrowthHold, DecisionKind::Priority,
+        DeckId::Green, DeckId::Red, TurnPhase::SecondMain, 11);
+    PlayerState& root = probe.state.players[0];
+    root.hand = {CardId::GiantGrowth};
+    root.lands.assign(5, land(CardId::Forest));
+    root.creatures = {
+        creature(kBear, CardId::GrizzlyBears),
+    };
+    root.land_played_this_turn = true;
+    probe.state.players[1].lands.assign(
+        5, land(CardId::Mountain, true));
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "growth-own-grizzly-bears",
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(0, kBear))),
     };
     finish_hidden_zones(probe);
     return probe;
@@ -470,7 +593,7 @@ DecisionProbe blue_counter_expensive_probe() {
         Category::BlueCounterExpensiveSpell, DecisionKind::Priority,
         DeckId::Blue, DeckId::Red, TurnPhase::FirstMain, 10, 1);
     probe.state.players[0].hand = {CardId::Counterspell};
-    probe.state.players[0].lands.assign(2, land(CardId::Island));
+    probe.state.players[0].lands.assign(5, land(CardId::Island));
     probe.state.players[1].lands.assign(
         5, land(CardId::Mountain, true));
     probe.state.stack = {
@@ -495,7 +618,7 @@ DecisionProbe blue_conserve_counter_probe() {
         Category::BlueConserveCounter, DecisionKind::Priority,
         DeckId::Blue, DeckId::Red, TurnPhase::FirstMain, 10, 1);
     probe.state.players[0].hand = {CardId::Counterspell};
-    probe.state.players[0].lands.assign(2, land(CardId::Island));
+    probe.state.players[0].lands.assign(5, land(CardId::Island));
     probe.state.players[0].creatures = {
         creature(kWater, CardId::WaterElemental),
     };
@@ -523,7 +646,7 @@ DecisionProbe blue_counter_lethal_probe() {
         TurnPhase::FirstMain, 10, 1);
     probe.state.players[0].life = 3;
     probe.state.players[0].hand = {CardId::Counterspell};
-    probe.state.players[0].lands.assign(2, land(CardId::Island));
+    probe.state.players[0].lands.assign(5, land(CardId::Island));
     probe.state.players[1].lands = {land(CardId::Mountain, true)};
     probe.state.stack = {
         spell(kBolt, CardId::LightningBolt, 1,
@@ -684,6 +807,134 @@ DecisionProbe white_avoid_redundant_moat_probe() {
             "cast-redundant-moat",
             PriorityAction::cast_enchantment(CardId::Moat)),
     };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe ru_land_color_probe() {
+    constexpr PermanentId kBear = 1;
+    DecisionProbe probe = make_base(
+        "ru.second-main-land-colors.v3", Category::RULandColor,
+        DecisionKind::Priority, DeckId::RUAggro, DeckId::Green,
+        TurnPhase::SecondMain, 5);
+    PlayerState& root = probe.state.players[0];
+    root.life = 2;
+    root.hand = {
+        CardId::Mountain,
+        CardId::Island,
+        CardId::FlyingMen,
+    };
+    root.lands = {land(CardId::Mountain, true)};
+    PlayerState& opponent = probe.state.players[1];
+    opponent.lands.assign(2, land(CardId::Forest, true));
+    opponent.creatures = {
+        creature(kBear, CardId::GrizzlyBears),
+    };
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "play-mountain",
+            PriorityAction::play_land(CardId::Mountain)),
+        priority_candidate(
+            "play-island",
+            PriorityAction::play_land(CardId::Island)),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe ru_blocker_development_probe() {
+    constexpr PermanentId kBear = 1;
+    DecisionProbe probe = make_base(
+        "ru.second-main-blocker-development.v3",
+        Category::RUBlockerDevelopment, DecisionKind::Priority,
+        DeckId::RUAggro, DeckId::Green, TurnPhase::SecondMain, 7);
+    PlayerState& root = probe.state.players[0];
+    root.life = 2;
+    root.hand = {
+        CardId::IronclawOrcs,
+        CardId::GrayOgre,
+    };
+    root.lands = {
+        land(CardId::Mountain),
+        land(CardId::Mountain),
+        land(CardId::Island),
+    };
+    root.land_played_this_turn = true;
+    PlayerState& opponent = probe.state.players[1];
+    opponent.lands.assign(2, land(CardId::Forest, true));
+    opponent.creatures = {
+        creature(kBear, CardId::GrizzlyBears),
+    };
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "cast-ironclaw-orcs",
+            PriorityAction::cast_creature(CardId::IronclawOrcs)),
+        priority_candidate(
+            "cast-gray-ogre",
+            PriorityAction::cast_creature(CardId::GrayOgre)),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe ru_flying_moat_attack_probe() {
+    constexpr PermanentId kFlyingMen = 1;
+    DecisionProbe probe = make_base(
+        "ru.flying-men-moat-attack.v3",
+        Category::RUFlyingMoatAttack, DecisionKind::Attack,
+        DeckId::RUAggro, DeckId::White, TurnPhase::DeclareAttackers, 9);
+    probe.state.players[0].lands = {
+        land(CardId::Island),
+    };
+    probe.state.players[0].creatures = {
+        creature(kFlyingMen, CardId::FlyingMen),
+    };
+    PlayerState& opponent = probe.state.players[1];
+    opponent.life = 1;
+    opponent.lands.assign(4, land(CardId::Plains));
+    opponent.enchantments = {CardId::Moat};
+    probe.candidates = {
+        attack_candidate("skip-flying-men", kFlyingMen, false),
+        attack_candidate("include-flying-men", kFlyingMen, true),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe ru_disintegrate_lethal_probe() {
+    DecisionProbe probe = make_base(
+        "ru.disintegrate-player-x.v3",
+        Category::RUDisintegrateLethal, DecisionKind::Priority,
+        DeckId::RUAggro, DeckId::Blue, TurnPhase::SecondMain, 9);
+    PlayerState& root = probe.state.players[0];
+    root.hand = {CardId::Disintegrate};
+    root.lands = {
+        land(CardId::Mountain),
+        land(CardId::Mountain),
+        land(CardId::Mountain),
+        land(CardId::Island),
+    };
+    root.land_played_this_turn = true;
+    PlayerState& opponent = probe.state.players[1];
+    opponent.life = 3;
+    opponent.lands.assign(2, land(CardId::Island, true));
+
+    probe.candidates.push_back(
+        priority_candidate("pass", PriorityAction::pass()));
+    for (int x_value = 0; x_value <= 3; ++x_value) {
+        probe.candidates.push_back(priority_candidate(
+            "disintegrate-x" + std::to_string(x_value) +
+                "-self-player",
+            PriorityAction::cast_disintegrate(
+                x_value, Target::player_target(0))));
+        probe.candidates.push_back(priority_candidate(
+            "disintegrate-x" + std::to_string(x_value) +
+                "-opponent-player",
+            PriorityAction::cast_disintegrate(
+                x_value, Target::player_target(1))));
+    }
     finish_hidden_zones(probe);
     return probe;
 }
@@ -1112,7 +1363,7 @@ bool Validation::ok() const {
 
 std::vector<DecisionProbe> make_probe_dev_v1() {
     std::vector<DecisionProbe> probes;
-    probes.reserve(kCategoryCount);
+    probes.reserve(kLegacyCategoryCount);
     probes.push_back(green_develop_probe());
     probes.push_back(green_tsunami_probe());
     probes.push_back(green_favorable_attack_probe());
@@ -1225,6 +1476,96 @@ std::vector<DecisionProbe> make_probe_dev_v2() {
     return probes;
 }
 
+std::vector<DecisionProbe> make_probe_dev_v3() {
+    const std::vector<DecisionProbe> legacy = make_probe_dev_v2();
+    const auto v3_legacy_probe =
+        [&legacy](Category category) {
+            const auto found = std::find_if(
+                legacy.begin(), legacy.end(),
+                [category](const DecisionProbe& probe) {
+                    return probe.category == category;
+                });
+            if (found == legacy.end()) {
+                throw std::logic_error(
+                    "probe-dev-v3 legacy source fixture is missing");
+            }
+            DecisionProbe probe = *found;
+            const std::size_t suffix = probe.stable_id.rfind(".v2");
+            if (suffix == std::string::npos ||
+                suffix + 3 != probe.stable_id.size()) {
+                throw std::logic_error(
+                    "probe-dev-v3 source has an invalid stable ID");
+            }
+            probe.stable_id.replace(suffix, 3, ".v3");
+            return probe;
+        };
+
+    std::vector<DecisionProbe> probes;
+    probes.reserve(kProbeDevV3Count);
+    probes.push_back(v3_legacy_probe(Category::GreenDevelop));
+    probes.push_back(green_growth_save_bolt_probe());
+    probes.push_back(green_growth_push_probe());
+    probes.push_back(green_growth_hold_probe());
+
+    for (const Category category :
+         {Category::RedFaceLethal, Category::RedClearBlocker,
+          Category::RedFinishDamagedThreat, Category::RedStackRace}) {
+        DecisionProbe probe = v3_legacy_probe(category);
+        if (category == Category::RedClearBlocker) {
+            // Begin Combat is the final modeled priority window before the
+            // Bear can block the Fire Elemental. Green must be tapped out:
+            // otherwise a hidden Giant Growth can reopen priority and let
+            // Red heal the Pass branch by Bolting later in this window.
+            probe.phase = TurnPhase::BeginCombat;
+            for (LandPermanent& land :
+                 probe.state.players[1].lands) {
+                land.tapped = true;
+            }
+        } else if (category ==
+                   Category::RedFinishDamagedThreat) {
+            // The opponent has passed in its final main phase. Passing again
+            // ends the turn and cleanup removes the Water Elemental's marked
+            // damage, so the Bolt decision cannot heal later.
+            probe.phase = TurnPhase::SecondMain;
+            probe.state.active_player = 1;
+            probe.state.turn_number = 10;
+            probe.consecutive_passes = 1;
+        }
+        probes.push_back(std::move(probe));
+    }
+
+    for (const Category category :
+         {Category::BlueCounterExpensiveSpell,
+          Category::BlueConserveCounter,
+          Category::BlueCounterLethal, Category::BlueCounterWar,
+          Category::WhiteEmergencyMoat,
+          Category::WhiteEstablishMillstone,
+          Category::WhiteMillBeforeDraw,
+          Category::WhiteAvoidRedundantMoat}) {
+        DecisionProbe probe = v3_legacy_probe(category);
+        if (category == Category::WhiteEmergencyMoat) {
+            // Passing now ends White's turn; it cannot heal the branch by
+            // casting the same Moat after its otherwise-empty combat.
+            probe.phase = TurnPhase::SecondMain;
+        } else if (
+            category == Category::WhiteAvoidRedundantMoat) {
+            // A hidden Giant Growth must not reopen priority after White
+            // passes and permit the delayed Millstone/Moat cast.
+            for (LandPermanent& land :
+                 probe.state.players[1].lands) {
+                land.tapped = true;
+            }
+        }
+        probes.push_back(std::move(probe));
+    }
+
+    probes.push_back(ru_land_color_probe());
+    probes.push_back(ru_blocker_development_probe());
+    probes.push_back(ru_flying_moat_attack_probe());
+    probes.push_back(ru_disintegrate_lethal_probe());
+    return probes;
+}
+
 bool hidden_clone_is_determinization_invariant(
     const DecisionProbe& probe, std::uint64_t seed) {
     if (probe.root_player >= kPlayerCount) {
@@ -1283,31 +1624,42 @@ Validation validate_probe(const DecisionProbe& probe,
     return validation;
 }
 
-std::vector<std::string> validate_probe_dev_v1(
+std::vector<std::string> validate_probe_dev_v3(
     const std::vector<DecisionProbe>& probes,
     std::uint64_t hidden_seed) {
     std::vector<std::string> errors;
-    if (probes.size() != kCategoryCount) {
-        errors.push_back("probe-dev-v1 must contain exactly 16 probes");
+    if (probes.size() != kProbeDevV3Count) {
+        errors.push_back(
+            "probe-dev-v3 must contain exactly 20 probes");
     }
 
     std::unordered_set<std::string> stable_ids;
-    std::array<bool, kCategoryCount> categories{};
-    std::array<std::size_t, 4> root_deck_counts{};
+    std::unordered_set<std::size_t> categories;
+    std::array<std::size_t, kDeckCount> root_deck_counts{};
     for (const DecisionProbe& probe : probes) {
         if (probe.stable_id.empty() ||
             !stable_ids.insert(probe.stable_id).second) {
             errors.push_back(
                 "probe stable IDs must be nonempty and unique");
         }
+        if (!probe.stable_id.ends_with(".v3")) {
+            errors.push_back(
+                "probe-dev-v3 stable IDs must end in .v3");
+        }
+
+        const bool category_is_active =
+            std::find(kProbeDevV3Categories.begin(),
+                      kProbeDevV3Categories.end(),
+                      probe.category) !=
+            kProbeDevV3Categories.end();
         const std::size_t category =
             static_cast<std::size_t>(probe.category);
-        if (category >= categories.size() || categories[category]) {
+        if (!category_is_active ||
+            !categories.insert(category).second) {
             errors.push_back(
-                "probe categories must appear exactly once");
-        } else {
-            categories[category] = true;
+                "probe-dev-v3 categories must be active and unique");
         }
+
         const std::size_t deck =
             static_cast<std::size_t>(probe.root_deck);
         if (deck >= root_deck_counts.size()) {
@@ -1322,36 +1674,17 @@ std::vector<std::string> validate_probe_dev_v1(
             errors.push_back(probe.stable_id + ": " + error);
         }
     }
-    for (const bool present : categories) {
-        if (!present) {
-            errors.push_back("probe-dev-v1 omits a category");
+
+    for (const Category category : kProbeDevV3Categories) {
+        if (!categories.contains(
+                static_cast<std::size_t>(category))) {
+            errors.push_back("probe-dev-v3 omits a category");
         }
     }
     for (const std::size_t count : root_deck_counts) {
         if (count != 4) {
             errors.push_back(
-                "probe-dev-v1 requires four probes per root deck");
-        }
-    }
-    return errors;
-}
-
-std::vector<std::string> validate_probe_dev_v2(
-    const std::vector<DecisionProbe>& probes,
-    std::uint64_t hidden_seed) {
-    std::vector<std::string> errors =
-        validate_probe_dev_v1(probes, hidden_seed);
-    for (std::string& error : errors) {
-        const std::string old_name = "probe-dev-v1";
-        const std::size_t position = error.find(old_name);
-        if (position != std::string::npos) {
-            error.replace(position, old_name.size(), "probe-dev-v2");
-        }
-    }
-    for (const DecisionProbe& probe : probes) {
-        if (!probe.stable_id.ends_with(".v2")) {
-            errors.push_back(
-                "probe-dev-v2 stable IDs must end in .v2");
+                "probe-dev-v3 requires four probes per root deck");
         }
     }
     return errors;

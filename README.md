@@ -35,6 +35,24 @@ make
   --train-seed 424242
 ```
 
+Play an RU Aggro mirror against the frozen Learned Value bot:
+
+```sh
+./build/old-school-sim --interactive
+
+# A fast, reproducible model/game while inspecting the interface:
+./build/old-school-sim --interactive --seed 42 \
+  --train-games 100 --train-seed 424242
+```
+
+Interactive mode shows your hand and every public zone, but only the size of
+the Learned opponent's hidden hand and library. Every legal priority, attack,
+block, and combat-damage-order choice is presented as a numbered menu; enter
+`q` at any prompt to abandon the game. It uses the same rules and current
+Learned Value policy as simulation mode. The MVP timing limitation still
+applies interactively: there is no priority window after attackers or blockers
+are declared.
+
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
 `handcrafted`, `learned`/`learned-value`, or `learned-actor`. The default
 Learned bot and the Learned seat in `mixed` use the value-search policy;
@@ -273,31 +291,31 @@ and failed tuning and evaluation runs.
 
 ## Offline decision probes
 
-The probe CLI labels and scores a fixed 16-position development corpus without
+The probe CLI labels and scores a fixed 20-position development corpus without
 reading the opponent's hidden cards:
 
 ```sh
 ./build/old-school-sim --score-probes \
   --probe-worlds 128 --probe-horizon 0 \
   --train-games 800 --train-seed 424242 \
-  --probe-cache data/old-school-probe-dev-v2.labels.tsv
+  --probe-cache data/old-school-probe-dev-v3.labels.tsv
 
 ./build/old-school-sim --score-probes \
   --actor-generation 1 --probe-worlds 8 --probe-horizon 0 \
   --train-games 800 --train-seed 424242 \
-  --probe-cache data/old-school-probe-dev-v2-k8-h0-audit.labels.tsv
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
 
 ./build/old-school-sim --score-probes \
   --actor-generation 0 --value-generation 8 \
   --probe-worlds 8 --probe-horizon 0 \
   --train-games 800 --train-seed 424242 \
-  --probe-cache data/old-school-probe-dev-v2-k8-h0-audit.labels.tsv
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
 
 ./build/old-school-sim --score-probes \
   --actor-generation 0 --value-recipe mix50 --value-generation 8 \
   --probe-worlds 8 --probe-horizon 0 \
   --train-games 800 --train-seed 424242 \
-  --probe-cache data/old-school-probe-dev-v2-k8-h0-audit.labels.tsv
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
 ```
 
 Every candidate is evaluated on the same sampled information-set worlds and
@@ -318,17 +336,18 @@ and G1 through G8. Switching recipes changes only the scoring candidates:
 frozen Actor G0 remains the label/cache owner, and Value G0 remains the
 continuation-sensitivity reference.
 
-`probe-dev-v2` keeps its plan choices root-irreversible using ordinary game
+`probe-dev-v3` keeps its plan choices root-irreversible using ordinary game
 states; deployed Pass semantics are not altered. Horizon zero completes the
 current turn, prepares the next turn, and bootstraps from the frozen critic.
 Longer horizons are available, but the experiment notebook documents cases
 where terminal-outcome saturation erases a valid tactical signal.
 
 Probe agreement, regret, candidate-Q error, and calibration are development
-diagnostics only. The current corpus has four positions each for Green, Red,
-Blue, and White, but none for RU Aggro. It therefore cannot support a
-five-deck strength claim; the paired benchmark and multi-seed confidence gates
-remain the authority.
+diagnostics only. The corpus has four positions for each of Green, Red, Blue,
+White, and RU Aggro, including Giant Growth response/push/hold decisions and
+RU curve, flying, blocking, and Disintegrate-X decisions. It is still too
+small to establish playing strength; the paired benchmark and multi-seed
+confidence gates remain the authority.
 
 There are no mulligans, sideboards, concessions, or draw effects yet. A
 500-individual-turn safety limit is included, though these decks normally end

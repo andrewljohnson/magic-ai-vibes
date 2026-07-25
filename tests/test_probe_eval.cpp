@@ -304,6 +304,9 @@ void test_deck_grouping_and_pooled_calibration() {
     expect(summary.by_deck[3].root_deck == DeckId::White &&
                summary.by_deck[3].probe_count == 0,
            "empty White grouping");
+    expect(summary.by_deck[4].root_deck == DeckId::RUAggro &&
+               summary.by_deck[4].probe_count == 0,
+           "empty RU Aggro grouping");
 }
 
 void test_candidate_q_fit_is_keyed_and_uses_known_errors() {
@@ -361,7 +364,8 @@ void test_candidate_q_fit_is_keyed_and_uses_known_errors() {
     expect_near(summary.by_deck[1].rmse, std::sqrt(0.02),
                 1.0e-12, "Red candidate-Q RMSE");
     expect(summary.by_deck[2].candidate_count == 0 &&
-               summary.by_deck[3].candidate_count == 0,
+               summary.by_deck[3].candidate_count == 0 &&
+               summary.by_deck[4].candidate_count == 0,
            "empty deck Q fit grouping");
 
     expect(summary.candidate_count == reordered.candidate_count &&
@@ -489,15 +493,24 @@ void test_invalid_predictions_and_samples_are_rejected() {
         "out-of-range candidate-Q score was accepted");
 }
 
-void test_ru_metrics_reject_missing_probe_corpus() {
-    expect_invalid(
-        []() {
-            (void)old_school::probe_eval::make_probe_label(
-                "ru.not-authored", DeckId::RUAggro,
-                {CandidateSamples{"a", {0.2, 0.3}},
-                 CandidateSamples{"b", {0.4, 0.5}}});
-        },
-        "RU metrics silently treated the four-deck probes as complete");
+void test_ru_metrics_are_first_class() {
+    const ProbeLabel label =
+        old_school::probe_eval::make_probe_label(
+            "ru.curve", DeckId::RUAggro,
+            {CandidateSamples{"a", {0.2, 0.3}},
+             CandidateSamples{"b", {0.4, 0.5}}});
+    const auto summary =
+        old_school::probe_eval::evaluate_probe_predictions(
+            {label},
+            {ProbePrediction{
+                "ru.curve",
+                {PolicyScore{"a", 0.0}, PolicyScore{"b", 1.0}},
+                0.45}});
+    expect(summary.probe_count == 1 &&
+               summary.by_deck[4].root_deck ==
+                   DeckId::RUAggro &&
+               summary.by_deck[4].probe_count == 1,
+           "RU Aggro metrics were not grouped as the fifth deck");
 }
 
 } // namespace
@@ -524,7 +537,7 @@ int main() {
                test_invalid_label_schemas_are_rejected);
     runner.run("invalid predictions and samples",
                test_invalid_predictions_and_samples_are_rejected);
-    runner.run("RU corpus is required before RU metrics",
-               test_ru_metrics_reject_missing_probe_corpus);
+    runner.run("RU metrics are first-class",
+               test_ru_metrics_are_first_class);
     return runner.finish();
 }

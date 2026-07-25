@@ -8,28 +8,53 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-24 23:38 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 10:51 PDT — refreshed at the top of every review cycle.*
 
-- **Distance to goal:** far. Honest frozen-model baselines are ~41–43% vs
-  Handcrafted (gate needs >50% with confidence, in every deck). The old
-  54% "champion" turned out to be inflated by hidden-hand peeking.
-- **Mixed-field lift gate:** 1 of 4 decks passing. Green passes decisively
-  (Learned +41.7pp over Random vs Handcrafted's +20.0). Red and Blue fail
-  by real margins; White fails by 1.6pp, a statistical tie at 60
-  games/cell (±13pp). Matches the paired-benchmark profile: the value
-  variant is genuinely strong on Green, behind elsewhere.
+- **HEADLINE: the challenger beat Handcrafted with confidence.** 2,000
+  paired games on a virgin seed in the four-deck environment: 55.1%,
+  95% CI 53.0%–57.3%. First clean above-50% result in project history
+  (the old 54.1% was leakage-inflated). Green and Blue slices dominant,
+  White an exact tie; Red (35.2%) is the one unsolved deck.
+- **Environment FROZEN at `c64b80c`.** Five-deck Old School engine
+  committed with 122 passing tests and a zero-finding ASan/UBSan run.
+  Canonical lift-gate baseline: 2 of 5 (White +55.0 and Red +43.8 pass;
+  Green −1.3 and RU −5.0 are within one-cell noise; Blue −17.5 is the
+  one confirmed gap). Future table deltas now mean learning progress.
+- **Next big move (in progress):** port the challenger recipe (n-step
+  bootstrap, 16 generations, search-on collection, K=8) onto the frozen
+  five-deck engine — its old-world Blue transformation (64.6% vs 46.0%)
+  is the best lead on the Blue gap, and Codex has correctly required
+  five-deck revalidation before it affects any verdict.
+- **What Codex shipped:** the whole five-deck Old School engine in one
+  push — RU Aggro rules (flying, Ironclaw restriction, Disintegrate
+  X/exile), Giant Growth, frozen predeclared Handcrafted heuristics for
+  every new card, clean-break schema policy, a 30,000-game deck-balance
+  matrix with a 45-55% regression guard, 121 tests passing. Earlier in
+  the cycle: Mix50 rejected with a clean causal readout (search share
+  exonerated for the G4→G5 collapse).
+- **Claude challenger: crossed 50%.** G16 at K=8 scored 51.7% pooled vs
+  Handcrafted (49.5/53.0/52.5) on the frozen three-seed screen — the
+  program's monotone ladder is 43.3 → 46.7 → 48.7 → 51.7. Blue flipped
+  from worst slice to 65.3% pooled, beating Handcrafted's Blue — strong
+  confirmation of the stack-tactics hypothesis and directly relevant to
+  the five-deck Blue/Green gap. A 2,000-game confirmation on fresh seed
+  202 is in flight; win or lose, the old-environment program concludes
+  there and the recipe (bootstrapped targets, many short generations,
+  search-on late collection, K=8 deployment) ports to the five-deck
+  engine once Codex commits the refactor.
 - **What Codex is doing now:** building the offline probe instrument
   (deep-reference labels for held-out decisions) that will guide an
   iterated search-as-teacher training loop — the current best path to the
   gate.
-- **Latest review verdict:** harness works and reproduces exactly, but it
-  has a structural blind spot ("continuation healing" — most probe
-  comparisons score zero because the rollout policy redoes the action it
-  was forced to skip). Flagged as must-fix before training on its labels;
-  one possible sampler bug (`blue.counter-lethal-bolt`) sent for tracing.
-- **Watch next:** whether Codex fixes the probe semantics before running
-  the K=8/H=4 teacher comparison, and whether the first G0→G1 training
-  generation shows real improvement on fixed labels.
+- **Latest review verdict:** strongest Codex cycle yet — the healing
+  audit fixed what the review flagged and found a second defect
+  (terminal saturation) on its own. Remaining watch items: don't
+  iterate Mix50 against its own offline gates (Goodhart risk on 16
+  probes), keep the Value cross-check row when regenerating v2 labels,
+  and real-game probe harvesting is still owed.
+- **Watch next:** Mix50 results in both trees — it's the highest-value
+  experiment for the Blue gap, which is now the main obstacle to the
+  lift gate.
 - **Claude challenger** (branch `claude/challenger`, worktree
   `../magic-ai-vibes-claude`, plan/log in `CLAUDE-PLAN.md`): racing Codex
   toward the same gates. Monotone climb on the shared frozen 3-seed
@@ -58,6 +83,240 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 10:51 PDT
+
+State reviewed: commit `c64b80c` — the five-deck Old School engine is
+committed with the repaired deck counts, the honest 30-70 balance guard,
+122 passing tests, a clean strict build, and a recorded ASan/UBSan run
+with zero findings (executing the 10:09 entry's priority 4). The
+environment freeze the 10:45 entry asked for has effectively happened at
+this commit.
+
+### Verdict
+
+This is the right way to land an environment: verified, committed,
+verdicts stated honestly (2/5 lift gate, "no Learned-is-king claim"),
+and known debts listed (RU probes, Giant Growth probes). Codex's
+response to the stale numbers in the 10:12 review entry is also correct
+— the environment moved under that table, which is exactly why the
+freeze mattered. Their requirement that the challenger's four-deck
+result be revalidated on all five decks before affecting any verdict is
+the correct standard, and the port is now unblocked by this commit.
+
+### Lift table (seed 4242, commit c64b80c, 80 games/cell) — now stable
+
+Identical to the 10:45 table, as expected post-freeze: White PASS
+(+55.0 vs +53.8), Red PASS (+43.8 vs +40.0), Green FAIL by 1.3, RU
+Aggro FAIL by 5.0, Blue FAIL by 17.5. Gate: 2 of 5. This is now the
+canonical baseline table for the frozen environment; future deltas mean
+learning progress, not environment drift.
+
+### Priorities
+
+1. The challenger recipe port is now the highest-expected-value training
+   experiment (Blue is the largest gap at 17.5pp, and the recipe's Blue
+   result in the old world was its headline transformation). The
+   challenger thread is picking this up.
+2. Green (−1.3) and RU (−5.0) are inside one-cell noise (±11pp at 80
+   games); treat Blue as the only confirmed-failing deck until a bigger
+   sample says otherwise. Don't spend training experiments chasing the
+   two near-ties yet.
+3. RU and Giant Growth probes remain owed before the next learning
+   change, per Codex's own notebook — hold that line.
+4. Suggest tagging `c64b80c` (e.g. `env-oldschool-v1`) so future
+   environment changes are explicit version bumps rather than drift.
+
+## 2026-07-25 10:45 PDT
+
+State reviewed: Codex's predeclared deck-balance program (bounded
+1,800-list Random search producing candidate C1 — richer RU counts plus
+small Green/Blue trims — with honest reject-on-untouched-seed gates and a
+softer C2 fallback), now live in the working tree. Plus: the Claude
+challenger's milestone confirmation completed this cycle.
+
+### Verdict
+
+The C1/C2 design is good experiment discipline (selection on one seed
+family, validation on untouched seeds, explicit refusal to pretend the
+strict gate passed if only the soft one does). But the environment has
+now changed decklists twice in two hours, and every change invalidates
+every model, probe label, and comparison. Recommendation: finish C1/C2,
+then FREEZE the environment with a version tag (decklists + Handcrafted
+heuristics + schema) and declare training-comparison season open only
+after that freeze. Training recipes cannot be compared across a moving
+world.
+
+### Challenger milestone (four-deck environment, confirmed)
+
+2,000 paired games, virgin seed 202, frozen G16 model, K=8 deployment:
+**1103-897 (55.1%), 95% CI 53.0%-57.3% — beats Handcrafted at 95%
+confidence.** Green 47.0%/20.8% and Blue 64.6%/46.0% dominant, White an
+exact 73.8%/73.8% tie, Red 35.2%/38.8% still failing. The old 54.1%
+"champion" was leakage-inflated; this is the first clean, confirmed
+above-50% result in project history. The recipe (n-step bootstrap
+targets, 16 short generations, sliding replay window, search-on late
+collection, K=8 deployment) is documented in CLAUDE-PLAN.md and is the
+porting candidate for the five-deck world.
+
+### Lift table (seed 4242, C1 decklists, 80 games/cell) — env changed again
+
+| Deck | Learned lift | Best rival lift | Verdict | vs 10:09 table |
+| --- | ---: | ---: | --- | --- |
+| White | +55.0 pp | +53.8 (Handcrafted) | PASS | held |
+| Red | +43.8 pp | +40.0 (Handcrafted) | PASS | held |
+| Green | +32.5 pp | +33.8 (Handcrafted) | FAIL by 1.3 pp | recovered from −22.6 |
+| RU Aggro | +51.2 pp | +56.2 (Handcrafted) | FAIL by 5.0 pp | flipped from +12.4 PASS |
+| Blue | +27.5 pp | +45.0 (Handcrafted) | FAIL by 17.5 pp | worsened |
+
+Gate: 2 of 5. Every cell moved because the decklists moved — deltas here
+measure the environment, not learning progress. This is the concrete
+cost of comparing across an unfrozen world, and why the freeze
+recommendation above is priority one.
+
+### Priorities
+
+1. Freeze the environment (C1 or C2, decided by the predeclared gates),
+   tag it, and only then open training comparisons. All lift-table
+   deltas until then are environment noise.
+2. Port the challenger recipe onto the frozen five-deck engine as the
+   first post-freeze training experiment — its Blue result (64.6% vs
+   46.0% in the old world) is the best known lead on the five-deck
+   Blue gap, and generation/K scaling are the two knobs with five
+   monotone data points behind them.
+3. Red remains unsolved by every recipe in both trees (35-40% vs
+   Handcrafted across all configurations). After the freeze, Red-burn
+   probes (Bolt sequencing, face-vs-creature, Disintegrate X sizing in
+   RU) deserve the same treatment Giant Growth got.
+4. Codex's C2 "somewhat balanced" fallback honestly documents that the
+   requested tactical density cannot hit 40% against Green/Blue under
+   Random play — good; keep that documentation in the frozen
+   environment's README so future balance complaints re-read it.
+
+## 2026-07-25 10:12 PDT
+
+No-change cycle: no new EXPERIMENTS.md entries since 10:09; the heavy
+source churn (+3,643/−3,417) is the announced clean-break refactor with no
+functional delta yet — binary is unchanged, all 121 tests still pass, and
+the five-deck lift table is deterministic-identical to 10:09 (RU Aggro,
+White, Red PASS; Blue −15.0 and Green −22.6 FAIL; gate 3 of 5).
+
+Challenger status for context: the 16-generation K=8 screen's first seed
+came in at 49.5% vs Handcrafted (old four-deck environment; G8 at the
+same seed was 45.5%), with Blue at 64% on that seed. Two seeds remain;
+if the Blue jump holds across seeds it strengthens the
+deployment-K/stack-tactics hypothesis from the 10:09 entry.
+
+## 2026-07-25 10:09 PDT
+
+State reviewed: uncommitted five-deck Old School engine (+2,301 lines over
+`1f02b63`): RU Aggro as a full fifth metagame deck per the user's
+promotion, Giant Growth added to Green, frozen predeclared Handcrafted
+heuristics for all new cards, clean-break schema policy, 30,000-game deck
+balance matrix with a 45-55% band regression guard. All 121 tests pass
+and the five-deck mixed field runs end to end.
+
+### Verdict
+
+The environment expansion landed fast and clean, and the first five-deck
+lift table is the most informative single result of the project so far:
+Learned's best deck is now the richest one. RU Aggro — repeated curve
+decisions, flying evasion, an X-spell — is exactly where a card-agnostic
+learner was predicted to shine, and it does: 80% win rate, +66.2pp lift,
+12.4 points clear of Handcrafted. The environment-richness thesis is no
+longer speculative.
+
+### Lift table (seed 4242, NEW five-deck environment, 80 games/cell)
+
+| Deck | Learned lift | Best rival lift | Verdict |
+| --- | ---: | ---: | --- |
+| RU Aggro | +66.2 pp | +53.8 (Handcrafted) | PASS decisively |
+| White | +56.2 pp | +56.2 (Handcrafted) | PASS (exact tie) |
+| Red | +53.8 pp | +41.2 (Handcrafted) | PASS decisively |
+| Blue | +36.2 pp | +51.2 (Handcrafted) | FAIL by 15.0 pp |
+| Green | +6.2 pp | +28.8 (Handcrafted) | FAIL by 22.6 pp |
+
+Gate: 3 of 5. NOT comparable to any previous table — new environment,
+new decklists, rebaselined everything. Red flipped to a decisive pass.
+Green collapsed from the strongest deck to the weakest: its list swapped
+4 Ironroot Treefolk for 4 Giant Growth, and combat-trick timing on the
+stack is the single hardest decision class for a terminal-outcome value
+model — while Handcrafted received hand-tuned Giant Growth rules
+(9,000/9,500 lethal-prevention/lethal-push scores). This is the White
+lock-plan problem reborn in a sharper form.
+
+### Priorities
+
+1. Green/Giant Growth is the new critical slice. Before any training
+   experiment, add Giant Growth decision probes (pump-to-save vs
+   pump-to-push vs hold, in response to Bolt, in combat) — the existing
+   targeted stack-replay machinery records these states, but nothing
+   verifies the learner values them correctly.
+2. Blue's 15-point gap persists across environments and now has company:
+   both failing decks are the instant-speed/stack-tactical ones. That
+   pattern (values fine on sorcery-speed decks, behind on instant-speed
+   decks) is a sharper hypothesis than "Blue is hard": the K=2
+   determinization at stack decision points is likely the binding
+   constraint. The challenger's monotone deployment-K result (46.7→48.7%
+   pooled from K=2→K=8 in the old environment) is directly relevant —
+   test deployment K scaling on Blue/Green in the new environment.
+3. The frozen Handcrafted heuristics were predeclared exactly as the
+   09:47 review asked — good. Same discipline now needed for the
+   training budget: 800 games across 20 ordered deck pairs is 2.5x
+   thinner per pairing than the four-deck environment; predeclare
+   whether train-games scales with the pairing count before comparing
+   recipes across environments.
+4. Sanitizer verification (ASan/UBSan) on the new engine is declared as
+   a gate but not yet recorded in the notebook as run — run and record
+   it before the first preregistered five-deck benchmark.
+
+## 2026-07-25 09:47 PDT
+
+State reviewed: commit `1f02b63` (Mix50 rejection recorded) plus in-flight
+Old School scope expansion — AGENTS.md rules for the additive RU Aggro
+diagnostic deck, the declared decklist/rules contract, and the
+`old-school-sim` rebrand in the Makefile. All 106 tests pass.
+
+### Verdict
+
+Two strong pieces of science this cycle. (1) The Mix50 rejection is a
+model result: halving searched trajectories improved calibration (Brier
+0.0725 vs 0.1145) while *worsening* action regret (0.0203 vs 0.0138), and
+the G4→G5 Red/White collapse survived — so search-trajectory share is
+exonerated as the isolated root cause, and the follow-up (all-raw G5 from
+the exact G4 checkpoint) is the correct causal isolation. (2) The RU
+Aggro contract is exemplary environment engineering: exact card rules,
+enumerated engineering gates, fail-closed model-schema versioning, and an
+explicit no-strength-claims boundary. Note for the challenger thread:
+Mix50's rejection weakens the case for the challenger's own mix variant;
+its generation-ladder diagnostic (does the challenger recipe have a
+mid-ladder collapse at all?) is now the better next experiment.
+
+### Lift table (seed 4242, 60 games/cell) — unchanged from 09:27
+
+Green PASS (+48.3 vs +30.0), Red PASS (tie +30.0), White FAIL by 1.6pp
+(tie range), Blue FAIL by 13.4pp. Gate: 2 of 4. No learned-path changes
+landed, so the table is deterministic-identical.
+
+### Priorities
+
+1. Sequence the raw-G5 causal test BEFORE the schema migration lands in
+   the same tree. The feature-dimension change (exile zone, new card
+   identities) makes every existing artifact non-reproducible in the new
+   binary; running the G5 isolation after migration confounds it. Do it
+   now on the frozen Alpha environment, or on a pre-migration branch.
+2. The RU contract is silent on Handcrafted's new card values. Predeclare
+   them before any comparative RU reporting — an untuned Handcrafted
+   playing RU Aggro would make every "vs Handcrafted" RU number a
+   strawman win for Learned. (AGENTS.md already keeps RU out of the
+   gate; this is about honest diagnostics, not the gate.)
+3. Bound Disintegrate's action enumeration explicitly (X ranges over all
+   affordable values × all targets — the largest action space in the
+   pool) and include a determinization-cost regression so search budgets
+   stay comparable across decks.
+4. Probe corpus versioning: probe-dev-v1/v2 fixtures embed GameState;
+   the exile-zone addition changes state shape, so version the fixture
+   corpus alongside the model schema — same fail-closed rule.
 
 ## 2026-07-25 09:27 PDT
 

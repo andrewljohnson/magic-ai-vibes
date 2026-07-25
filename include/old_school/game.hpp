@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <random>
@@ -81,6 +82,8 @@ using PermanentId = std::uint64_t;
 struct LandPermanent {
     CardId card;
     bool tapped = false;
+
+    bool operator==(const LandPermanent&) const = default;
 };
 
 struct CreaturePermanent {
@@ -92,12 +95,16 @@ struct CreaturePermanent {
     int temporary_power_bonus = 0;
     int temporary_toughness_bonus = 0;
     bool exile_on_death_this_turn = false;
+
+    bool operator==(const CreaturePermanent&) const = default;
 };
 
 struct ArtifactPermanent {
     PermanentId id;
     CardId card;
     bool tapped = false;
+
+    bool operator==(const ArtifactPermanent&) const = default;
 };
 
 struct PlayerState {
@@ -150,6 +157,8 @@ struct StackObject {
     std::optional<Target> target;
     std::optional<StackObjectId> spell_target;
     int x_value = 0;
+
+    bool operator==(const StackObject&) const = default;
 };
 
 struct GameState {
@@ -235,6 +244,102 @@ enum class TurnPhase : std::uint8_t {
     DamageOrder,
     EndCombat,
     SecondMain,
+};
+
+// A perspective-safe snapshot for an interactive player. Public zones contain
+// card identities; hidden zones expose counts only. The observer's own hand is
+// the sole hidden zone whose card identities are present.
+struct PublicPlayerState {
+    int life = 20;
+    std::size_t library_size = 0;
+    std::size_t hand_size = 0;
+    std::vector<CardId> graveyard;
+    std::vector<CardId> exile;
+    std::vector<LandPermanent> lands;
+    std::vector<CreaturePermanent> creatures;
+    std::vector<ArtifactPermanent> artifacts;
+    std::vector<CardId> enchantments;
+    bool land_played_this_turn = false;
+
+    bool operator==(const PublicPlayerState&) const = default;
+};
+
+struct PlayerObservation {
+    std::size_t observer = 0;
+    std::array<PublicPlayerState, 2> players;
+    std::vector<CardId> hand;
+    std::vector<StackObject> stack;
+    std::size_t active_player = 0;
+    std::size_t starting_player = 0;
+    std::size_t turn_number = 0;
+
+    bool operator==(const PlayerObservation&) const = default;
+};
+
+PlayerObservation observe_game_state(const GameState& state,
+                                     std::size_t observer);
+
+// One entry per untapped defending creature that can block at least one
+// attacker. The creature may be left unassigned or assigned to exactly one of
+// `legal_attackers`.
+struct LegalBlockerChoice {
+    PermanentId blocker = 0;
+    std::vector<PermanentId> legal_attackers;
+};
+
+enum class GameEventKind : std::uint8_t {
+    TurnStarted,
+    PriorityActionSelected,
+    StackObjectResolved,
+    AttackersDeclared,
+    BlockersDeclared,
+    DamageOrderChosen,
+    CombatResolved,
+};
+
+// Event payloads contain public game information only. `blocks` uses
+// (attacker, blocker) pairs and its per-attacker order is combat damage order
+// for DamageOrderChosen and CombatResolved.
+struct GameEvent {
+    GameEventKind kind = GameEventKind::TurnStarted;
+    std::size_t player = 0;
+    TurnPhase phase = TurnPhase::FirstMain;
+    std::optional<PriorityAction> priority_action;
+    std::optional<StackObject> stack_object;
+    std::vector<PermanentId> attackers;
+    std::vector<std::pair<PermanentId, PermanentId>> blocks;
+
+    bool operator==(const GameEvent&) const = default;
+};
+
+struct HumanController {
+    // Return an index into the supplied legal action list.
+    std::function<std::size_t(
+        const PlayerObservation&, TurnPhase,
+        const std::vector<PriorityAction>&)>
+        choose_priority_action;
+    // Return a unique subset of the supplied eligible attacker IDs.
+    std::function<std::vector<PermanentId>(
+        const PlayerObservation&,
+        const std::vector<PermanentId>&)>
+        choose_attackers;
+    // Return (attacker, blocker) pairs. Each blocker may appear at most once
+    // and may only choose from its LegalBlockerChoice entry.
+    std::function<std::vector<std::pair<PermanentId, PermanentId>>(
+        const PlayerObservation&,
+        const std::vector<PermanentId>&,
+        const std::vector<LegalBlockerChoice>&)>
+        choose_blockers;
+    // Return an exact permutation of `blockers`, first to receive damage
+    // first. Called only when at least two creatures block one attacker.
+    std::function<std::vector<PermanentId>(
+        const PlayerObservation&, PermanentId,
+        const std::vector<PermanentId>&)>
+        choose_damage_order;
+    // Optional transcript hook. It receives this controller's observation
+    // after public state changes (or at the declaration point for passes).
+    std::function<void(const PlayerObservation&, const GameEvent&)>
+        observe;
 };
 
 enum class PriorityPassResult : std::uint8_t {
@@ -326,6 +431,9 @@ struct GameConfig {
     // Training-only sink. The concrete recorder is intentionally opaque so
     // runtime callers cannot inspect or provide hidden game state.
     std::shared_ptr<LearnedPolicyRecorder> learned_policy_recorder;
+    // A present controller overrides the corresponding BotConfig only for
+    // real-game decisions. Internal bot rollouts remove these callbacks.
+    std::array<std::optional<HumanController>, 2> human_controllers;
 };
 
 struct WhitePlanActionDiagnostic {
@@ -606,6 +714,10 @@ class Game {
     GameResult run_from_turn(std::size_t first_turn);
     std::optional<GameResult> life_total_result() const;
     GameResult make_result(int winner, EndReason reason) const;
+    const HumanController*
+    human_controller(std::size_t player) const;
+    bool has_human_observer() const;
+    void notify_human_observers(const GameEvent& event) const;
 
     std::array<std::vector<CardId>, 2> decks_;
     std::mt19937_64 random_;

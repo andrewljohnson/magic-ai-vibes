@@ -106,9 +106,7 @@ struct ProbeMetricSummary {
     double critic_log_loss = 0.0;
     double critic_bias = 0.0;
     double critic_ece = 0.0;
-    // The current fixed dev corpus covers Green, Red, Blue, and White.
-    // Evaluation rejects RU Aggro until its probes are authored.
-    std::array<DeckProbeMetrics, 4> by_deck{};
+    std::array<DeckProbeMetrics, kDeckCount> by_deck{};
 };
 
 struct DeckCandidateQFitMetrics {
@@ -122,8 +120,7 @@ struct CandidateQFitSummary {
     std::size_t candidate_count = 0;
     double mae = 0.0;
     double rmse = 0.0;
-    // Green, Red, Blue, and White only; see ProbeMetricSummary.
-    std::array<DeckCandidateQFitMetrics, 4> by_deck{};
+    std::array<DeckCandidateQFitMetrics, kDeckCount> by_deck{};
 };
 
 // Builds a deterministic reference label from aligned, per-action Q samples.

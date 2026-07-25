@@ -1,4 +1,5 @@
 #include "old_school/game.hpp"
+#include "old_school/interactive.hpp"
 #include "old_school/probe_runner.hpp"
 
 #include <algorithm>
@@ -127,6 +128,9 @@ void print_help(std::string_view executable) {
         << " [--games N] [--seed N] [--bots MODE] [--rollouts N]"
            " [--deep-rollouts N] [--train-games N] [--train-seed N]\n"
         << "       " << executable
+        << " --interactive [--seed N] [--train-games N]"
+           " [--train-seed N]\n"
+        << "       " << executable
         << " --benchmark [--games N] [--challenger BOT]"
            " [--baseline BOT] [--actor-policy-epochs N]"
            " [--actor-policy-rate X]"
@@ -174,6 +178,8 @@ void print_help(std::string_view executable) {
            "(default: 800)\n"
         << "  --train-seed N   Learned model seed, independent of --seed "
            "(default: 424242)\n"
+        << "  --interactive   Play one RU Aggro mirror against frozen "
+           "Learned Value\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
         << "  --challenger BOT  Benchmark challenger "
            "(default: handcrafted; learned generations: "
@@ -189,8 +195,8 @@ void print_help(std::string_view executable) {
            "rankings on a held-out White lock state\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
-        << "  --score-probes   Label/score the held-out 16-position "
-           "probe-dev-v2 development corpus\n"
+        << "  --score-probes   Label/score the held-out 20-position "
+           "probe-dev-v3 development corpus\n"
         << "  --probe-worlds N  Common worlds per reference candidate "
            "(default: 128; minimum: 2)\n"
         << "  --probe-horizon N  Actor-mirror reference horizon in turns "
@@ -206,7 +212,7 @@ void print_help(std::string_view executable) {
         << "  --actor-policy-rate X  G1 policy-fit learning rate "
            "(default: 0.001; requires a selected Actor G1)\n"
         << "  --probe-cache PATH  Deterministic label cache "
-           "(default: data/old-school-probe-dev-v2.labels.tsv)\n"
+           "(default: data/old-school-probe-dev-v3.labels.tsv)\n"
         << "  --refresh-probe-cache  Regenerate matching probe labels "
            "atomically\n"
         << "  --refresh-value-g8-cache  Retrain and atomically replace "
@@ -1537,6 +1543,8 @@ int main(int argc, char** argv) {
         std::uint64_t training_seed =
             old_school::kDefaultLearnedTrainingSeed;
         bool games_were_set = false;
+        bool interactive = false;
+        bool interactive_unsupported_option_used = false;
         bool benchmark = false;
         bool stability = false;
         bool evolve = false;
@@ -1557,7 +1565,7 @@ int main(int argc, char** argv) {
         old_school::LearnedActorGenerationConfig
             actor_generation_config;
         std::string probe_cache =
-            "data/old-school-probe-dev-v2.labels.tsv";
+            "data/old-school-probe-dev-v3.labels.tsv";
         std::size_t stability_runs = 8;
         std::size_t generations = 10;
         std::size_t population = 16;
@@ -1576,6 +1584,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--benchmark") {
                 benchmark = true;
+                continue;
+            }
+            if (option == "--interactive") {
+                interactive = true;
                 continue;
             }
             if (option == "--stability") {
@@ -1635,6 +1647,11 @@ int main(int argc, char** argv) {
             if (++argument >= argc) {
                 throw std::invalid_argument("missing value for " +
                                             std::string(option));
+            }
+            if (option != "--seed" &&
+                option != "--train-seed" &&
+                option != "--train-games") {
+                interactive_unsupported_option_used = true;
             }
             if (option == "--bots") {
                 const auto selection =
@@ -1774,16 +1791,25 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (static_cast<int>(benchmark) + static_cast<int>(stability) +
+        if (static_cast<int>(interactive) +
+                static_cast<int>(benchmark) +
+                static_cast<int>(stability) +
                 static_cast<int>(evolve) +
                 static_cast<int>(diagnose_white_plan) +
                 static_cast<int>(variance_study) +
                 static_cast<int>(score_probes) >
             1) {
             throw std::invalid_argument(
-                "--benchmark, --stability, --evolve-deck, and "
+                "--interactive, --benchmark, --stability, "
+                "--evolve-deck, and "
                 "--diagnose-white-plan, --variance-study, and "
                 "--score-probes cannot be combined");
+        }
+        if (interactive &&
+            interactive_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--interactive only accepts --seed, --train-seed, "
+                "and --train-games");
         }
         if (probe_option_used && !score_probes) {
             throw std::invalid_argument(
@@ -1870,6 +1896,22 @@ int main(int argc, char** argv) {
                 "--refresh-value-mix50-cache requires a benchmark "
                 "or probe route that selects Value G8 Late-Mix50");
         }
+        if (interactive) {
+            std::cout
+                << "Old School Magic Interactive\n"
+                << "Match: Human RU Aggro vs Learned Value RU Aggro\n"
+                << "Game seed: " << seed << '\n'
+                << "Training seed: " << training_seed << '\n'
+                << "Type q at any prompt to abandon the game.\n"
+                << "MVP timing note: there is no priority window after "
+                   "attackers or blockers are declared.\n";
+            const auto learned_model =
+                train_value_g0_with_progress(
+                    training_games, training_seed);
+            old_school::run_interactive_match(
+                std::cin, std::cout, seed, learned_model);
+            return 0;
+        }
         if (score_probes) {
             const old_school::probe_runner::ProbeScoreConfig config{
                 .training_games = training_games,
@@ -1942,7 +1984,7 @@ int main(int argc, char** argv) {
             }
             const auto report =
                 old_school::probe_runner::
-                    score_probe_dev_v2_with_candidates(
+                    score_probe_dev_with_candidates(
                         config, std::cout,
                         {
                             .reference_actor_model = actor_g0,

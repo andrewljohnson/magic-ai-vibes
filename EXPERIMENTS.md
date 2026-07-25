@@ -2956,3 +2956,60 @@ guard and 2/5 lift result above. Its separate finding that a 16-generation,
 K=8 challenger crossed 50% in the old four-deck environment is promising, but
 must be ported and revalidated across all five decks before it can affect the
 current verdict.
+
+## Five-deck probe-dev-v3 hard cut
+
+Declared against frozen Old School environment commit `c64b80c`, after reading
+the 2026-07-25 10:45 independent review and before changing probe code or
+generating any new reference labels. This is measurement infrastructure, not a
+Learned-strength experiment.
+
+Hypothesis: a 20-position corpus with exactly four root decisions for each of
+Green, Red, Blue, White, and RU Aggro can cover the new instant/X-spell/curve
+decisions without continuation healing, while retaining exact legality,
+physical-card conservation, and hidden-repartition invariance. The corpus will
+make a hard cache/schema cut; no v2 label is reusable and no old result needs
+compatibility.
+
+The v3 composition is fixed before implementation:
+
+- Green keeps the root-irreversible second-main Bear development fixture and
+  replaces the other three positions with (1) Giant Growth responding to Bolt
+  on a Bear, (2) Begin Combat Growth target choice between a lethal eligible
+  attacker and a summoning-sick Bear, and (3) Second Main hold-versus-waste
+  Growth.
+- Red keeps its four tactical fixtures, but the blocker-clearing fixture moves
+  to Begin Combat and the damaged-Water-Elemental fixture moves to the
+  opponent's final priority before cleanup so Pass cannot heal later.
+- Blue and White keep their four v2 positions with v3 identities.
+- RU adds (1) irreversible Mountain/Island sequencing that can unlock Flying
+  Men, (2) Ironclaw Orcs versus Gray Ogre blocker development, (3) Flying Men
+  attacking through Moat, and (4) every affordable player-targeted
+  Disintegrate size from X=0 through X=3.
+
+Candidate descriptors remain factual and carry no preferred-action labels.
+Reference labels remain Actor-mirror/common-world samples; Handcrafted remains
+diagnostic-only and cannot enter labels, training, cache identity, or
+acceptance.
+
+Predeclared engineering gates:
+
+1. exactly 20 unique fixture IDs/categories and exactly four root probes for
+   each of all five decks;
+2. exact original-deck card conservation, complete legal candidate sets,
+   reachable public states, and fixed-seed hidden-clone determinization
+   invariance for every fixture;
+3. trace tests establish the rules consequences only: Growth saves the Bolt
+   target, the eligible attacker alone can receive the lethal push, holding
+   Growth retains it while wasting it loses the cleanup bonus, Island alone
+   unlocks Flying Men, Gray Ogre but not Ironclaw Orcs can block a Bear,
+   Flying Men attacks through Moat, and X=3 opponent-targeted Disintegrate is
+   lethal while X=4 is unaffordable;
+4. every probe metric/report array covers `kDeckCount`, including RU, and a
+   legacy v2 cache fails closed under the new v3 schema/corpus identity;
+5. strict build, full tests, and ASan/UBSan pass before v3 is used to compare
+   Learned checkpoints.
+
+No offline policy score will be used to tune these fixtures. After the gates
+pass, generate one frozen v3 reference cache and score the existing G0–G8
+ladder once to establish the pre-G16 diagnostic baseline.

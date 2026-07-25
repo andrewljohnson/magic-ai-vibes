@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -4440,6 +4441,407 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     CHECK(first.best.total.wins == repeated.best.total.wins);
     CHECK(first.generation_best_win_rates ==
           repeated.generation_best_win_rates);
+}
+
+std::vector<old_school::CardId> two_card_deck(
+    old_school::CardId first, old_school::CardId second) {
+    std::vector<old_school::CardId> deck(20, first);
+    deck.insert(deck.end(), 20, second);
+    return deck;
+}
+
+std::size_t priority_action_index(
+    const std::vector<old_school::PriorityAction>& actions,
+    old_school::PriorityActionKind kind) {
+    const auto action = std::find_if(
+        actions.begin(), actions.end(),
+        [kind](const old_school::PriorityAction& candidate) {
+            return candidate.kind == kind;
+        });
+    if (action == actions.end()) {
+        throw std::runtime_error("scripted action is unavailable");
+    }
+    return static_cast<std::size_t>(
+        std::distance(actions.begin(), action));
+}
+
+old_school::HumanController developing_human_controller() {
+    return {
+        .choose_priority_action =
+            [](const old_school::PlayerObservation&,
+               old_school::TurnPhase,
+               const std::vector<old_school::PriorityAction>& actions) {
+                for (const auto kind : {
+                         old_school::PriorityActionKind::PlayLand,
+                         old_school::PriorityActionKind::CastCreature,
+                     }) {
+                    const auto action = std::find_if(
+                        actions.begin(), actions.end(),
+                        [kind](const old_school::PriorityAction& candidate) {
+                            return candidate.kind == kind;
+                        });
+                    if (action != actions.end()) {
+                        return static_cast<std::size_t>(
+                            std::distance(actions.begin(), action));
+                    }
+                }
+                return priority_action_index(
+                    actions,
+                    old_school::PriorityActionKind::Pass);
+            },
+        .choose_attackers =
+            [](const old_school::PlayerObservation&,
+               const std::vector<old_school::PermanentId>& attackers) {
+                return attackers;
+            },
+        .choose_blockers =
+            [](const old_school::PlayerObservation&,
+               const std::vector<old_school::PermanentId>&,
+               const std::vector<old_school::LegalBlockerChoice>&) {
+                return std::vector<std::pair<
+                    old_school::PermanentId,
+                    old_school::PermanentId>>{};
+            },
+        .choose_damage_order =
+            [](const old_school::PlayerObservation&,
+               old_school::PermanentId,
+               const std::vector<old_school::PermanentId>& blockers) {
+                return blockers;
+            },
+    };
+}
+
+old_school::HumanController burn_human_controller(
+    std::size_t player,
+    std::vector<old_school::GameEvent>* events = nullptr,
+    std::vector<old_school::PlayerObservation>* observations = nullptr) {
+    auto controller = developing_human_controller();
+    controller.choose_priority_action =
+        [player](
+            const old_school::PlayerObservation&,
+            old_school::TurnPhase,
+            const std::vector<old_school::PriorityAction>& actions) {
+            const auto land = std::find_if(
+                actions.begin(), actions.end(),
+                [](const old_school::PriorityAction& action) {
+                    return action.kind ==
+                           old_school::PriorityActionKind::PlayLand;
+                });
+            if (land != actions.end()) {
+                return static_cast<std::size_t>(
+                    std::distance(actions.begin(), land));
+            }
+            const auto bolt = std::find_if(
+                actions.begin(), actions.end(),
+                [player](const old_school::PriorityAction& action) {
+                    return action.kind ==
+                               old_school::PriorityActionKind::
+                                   CastLightningBolt &&
+                           action.target.has_value() &&
+                           !action.target->creature.has_value() &&
+                           action.target->player == 1 - player;
+                });
+            if (bolt != actions.end()) {
+                return static_cast<std::size_t>(
+                    std::distance(actions.begin(), bolt));
+            }
+            return priority_action_index(
+                actions, old_school::PriorityActionKind::Pass);
+        };
+    if (events != nullptr && observations != nullptr) {
+        controller.observe =
+            [events, observations](
+                const old_school::PlayerObservation& observation,
+                const old_school::GameEvent& event) {
+                events->push_back(event);
+                observations->push_back(observation);
+            };
+    }
+    return controller;
+}
+
+TEST(interactive_observation_hides_both_libraries_and_opponent_hand) {
+    old_school::GameState state;
+    state.active_player = 1;
+    state.starting_player = 0;
+    state.turn_number = 8;
+    state.players[0].hand = {
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt,
+    };
+    state.players[0].library = {
+        old_school::CardId::Disintegrate,
+        old_school::CardId::FlyingMen,
+    };
+    state.players[1].hand = {
+        old_school::CardId::Counterspell,
+        old_school::CardId::Island,
+    };
+    state.players[1].library = {
+        old_school::CardId::WaterElemental,
+        old_school::CardId::Counterspell,
+    };
+    state.players[1].graveyard = {
+        old_school::CardId::FlyingMen,
+    };
+
+    const auto observed =
+        old_school::observe_game_state(state, 0);
+    auto hidden_repartition = state;
+    std::swap(hidden_repartition.players[0].library[0],
+              hidden_repartition.players[0].library[1]);
+    std::swap(hidden_repartition.players[1].hand[0],
+              hidden_repartition.players[1].library[0]);
+    std::reverse(hidden_repartition.players[1].library.begin(),
+                 hidden_repartition.players[1].library.end());
+    const auto repeated =
+        old_school::observe_game_state(hidden_repartition, 0);
+
+    CHECK(observed == repeated);
+    CHECK(observed.hand == state.players[0].hand);
+    CHECK(observed.players[0].hand_size == 2);
+    CHECK(observed.players[0].library_size == 2);
+    CHECK(observed.players[1].hand_size == 2);
+    CHECK(observed.players[1].library_size == 2);
+    CHECK(observed.players[1].graveyard ==
+          state.players[1].graveyard);
+
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            old_school::observe_game_state(state, 2));
+    } catch (const std::out_of_range&) {
+        rejected = true;
+    }
+    CHECK(rejected);
+}
+
+TEST(scripted_human_game_is_deterministic_and_observes_public_stack) {
+    const auto deck = two_card_deck(
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt);
+    const auto run = [&deck] {
+        std::vector<old_school::GameEvent> events;
+        std::vector<old_school::PlayerObservation> observations;
+        old_school::GameConfig config;
+        config.max_turns = 40;
+        config.starting_player = 0;
+        config.human_controllers[0] =
+            burn_human_controller(0, &events, &observations);
+        config.human_controllers[1] =
+            burn_human_controller(1);
+        old_school::Game game(deck, deck, 0x1A7E2AC7ULL, config);
+        return std::tuple{
+            game.run(), std::move(events),
+            std::move(observations)};
+    };
+
+    const auto [first_result, first_events, first_observations] =
+        run();
+    const auto [second_result, second_events,
+                second_observations] = run();
+    CHECK(first_result.winner == second_result.winner);
+    CHECK(first_result.reason == second_result.reason);
+    CHECK(first_result.turns == second_result.turns);
+    CHECK(first_result.ending_life == second_result.ending_life);
+    CHECK(first_events == second_events);
+    CHECK(first_observations == second_observations);
+    CHECK(!first_events.empty());
+    CHECK(first_events.size() == first_observations.size());
+    CHECK(std::all_of(
+        first_observations.begin(), first_observations.end(),
+        [](const old_school::PlayerObservation& observation) {
+            return observation.observer == 0;
+        }));
+    CHECK(std::any_of(
+        first_events.begin(), first_events.end(),
+        [](const old_school::GameEvent& event) {
+            return event.kind ==
+                       old_school::GameEventKind::
+                           PriorityActionSelected &&
+                   event.player == 1 &&
+                   event.priority_action.has_value() &&
+                   event.priority_action->kind ==
+                       old_school::PriorityActionKind::
+                           CastLightningBolt;
+        }));
+    CHECK(std::any_of(
+        first_events.begin(), first_events.end(),
+        [](const old_school::GameEvent& event) {
+            return event.kind ==
+                       old_school::GameEventKind::
+                           StackObjectResolved &&
+                   event.stack_object.has_value() &&
+                   event.stack_object->card ==
+                       old_school::CardId::LightningBolt;
+        }));
+}
+
+TEST(human_priority_attack_block_and_damage_choices_are_validated) {
+    const auto lands =
+        std::vector<old_school::CardId>(
+            40, old_school::CardId::Forest);
+    const auto creatures = two_card_deck(
+        old_school::CardId::Forest,
+        old_school::CardId::GrizzlyBears);
+
+    {
+        auto invalid = developing_human_controller();
+        invalid.choose_priority_action =
+            [](const old_school::PlayerObservation&,
+               old_school::TurnPhase,
+               const std::vector<old_school::PriorityAction>& actions) {
+                return actions.size();
+            };
+        old_school::GameConfig config;
+        config.starting_player = 0;
+        config.human_controllers[0] = std::move(invalid);
+        bool rejected = false;
+        try {
+            old_school::Game game(lands, lands, 1, config);
+            static_cast<void>(game.run());
+        } catch (const std::invalid_argument& error) {
+            CHECK(std::string_view(error.what()).find(
+                      "priority action") != std::string_view::npos);
+            rejected = true;
+        }
+        CHECK(rejected);
+    }
+
+    {
+        auto invalid = developing_human_controller();
+        invalid.choose_attackers =
+            [](const old_school::PlayerObservation&,
+               const std::vector<old_school::PermanentId>& attackers) {
+                if (attackers.empty()) {
+                    return attackers;
+                }
+                return std::vector<old_school::PermanentId>{
+                    attackers.front(), attackers.front()};
+            };
+        old_school::GameConfig config;
+        config.max_turns = 40;
+        config.starting_player = 0;
+        config.human_controllers[0] = std::move(invalid);
+        bool rejected = false;
+        try {
+            old_school::Game game(creatures, lands, 2, config);
+            static_cast<void>(game.run());
+        } catch (const std::invalid_argument& error) {
+            CHECK(std::string_view(error.what()).find(
+                      "attacker set") != std::string_view::npos);
+            rejected = true;
+        }
+        CHECK(rejected);
+    }
+
+    {
+        auto attacker = developing_human_controller();
+        auto defender = developing_human_controller();
+        defender.choose_attackers =
+            [](const old_school::PlayerObservation&,
+               const std::vector<old_school::PermanentId>&) {
+                return std::vector<old_school::PermanentId>{};
+            };
+        defender.choose_blockers =
+            [](const old_school::PlayerObservation&,
+               const std::vector<old_school::PermanentId>&,
+               const std::vector<old_school::LegalBlockerChoice>& choices) {
+                if (choices.empty() ||
+                    choices.front().legal_attackers.empty()) {
+                    return std::vector<std::pair<
+                        old_school::PermanentId,
+                        old_school::PermanentId>>{};
+                }
+                return std::vector<std::pair<
+                    old_school::PermanentId,
+                    old_school::PermanentId>>{
+                    {999'999, choices.front().blocker}};
+            };
+        old_school::GameConfig config;
+        config.max_turns = 40;
+        config.starting_player = 0;
+        config.human_controllers[0] = std::move(attacker);
+        config.human_controllers[1] = std::move(defender);
+        bool rejected = false;
+        try {
+            old_school::Game game(
+                creatures, creatures, 3, config);
+            static_cast<void>(game.run());
+        } catch (const std::invalid_argument& error) {
+            CHECK(std::string_view(error.what()).find(
+                      "blocker assignment") !=
+                  std::string_view::npos);
+            rejected = true;
+        }
+        CHECK(rejected);
+    }
+
+    {
+        auto attacker = developing_human_controller();
+        attacker.choose_attackers =
+            [](const old_school::PlayerObservation& observation,
+               const std::vector<old_school::PermanentId>& attackers) {
+                if (attackers.empty() ||
+                    observation.players[1].creatures.size() < 2) {
+                    return std::vector<
+                        old_school::PermanentId>{};
+                }
+                return std::vector<old_school::PermanentId>{
+                    attackers.front()};
+            };
+        attacker.choose_damage_order =
+            [](const old_school::PlayerObservation&,
+               old_school::PermanentId,
+               const std::vector<old_school::PermanentId>& blockers) {
+                return std::vector<old_school::PermanentId>(
+                    blockers.size(), blockers.front());
+            };
+        auto defender = developing_human_controller();
+        defender.choose_attackers =
+            [](const old_school::PlayerObservation&,
+               const std::vector<old_school::PermanentId>&) {
+                return std::vector<old_school::PermanentId>{};
+            };
+        defender.choose_blockers =
+            [](const old_school::PlayerObservation&,
+               const std::vector<old_school::PermanentId>& attackers,
+               const std::vector<old_school::LegalBlockerChoice>& choices) {
+                std::vector<std::pair<
+                    old_school::PermanentId,
+                    old_school::PermanentId>> blocks;
+                if (attackers.empty()) {
+                    return blocks;
+                }
+                for (const auto& choice : choices) {
+                    if (std::find(
+                            choice.legal_attackers.begin(),
+                            choice.legal_attackers.end(),
+                            attackers.front()) !=
+                        choice.legal_attackers.end()) {
+                        blocks.emplace_back(
+                            attackers.front(), choice.blocker);
+                    }
+                }
+                return blocks;
+            };
+        old_school::GameConfig config;
+        config.max_turns = 40;
+        config.starting_player = 0;
+        config.human_controllers[0] = std::move(attacker);
+        config.human_controllers[1] = std::move(defender);
+        bool rejected = false;
+        try {
+            old_school::Game game(
+                creatures, creatures, 4, config);
+            static_cast<void>(game.run());
+        } catch (const std::invalid_argument& error) {
+            CHECK(std::string_view(error.what()).find(
+                      "damage order") != std::string_view::npos);
+            rejected = true;
+        }
+        CHECK(rejected);
+    }
 }
 
 TEST(all_ten_pairings_complete_a_seeded_smoke_run) {
