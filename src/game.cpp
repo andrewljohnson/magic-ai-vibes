@@ -139,7 +139,11 @@ constexpr std::string_view kValueContextChallengerRecipeId =
     "old-school.learned-value-context-s1."
     "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
 constexpr std::string_view kValueContextCriticSchemaId =
-    "old-school.learned-critic.decision-context-v1";
+    "decision-context-v1:"
+    "valid,"
+    "phase[first-main,begin-combat,declare-attackers,"
+    "declare-blockers,damage-order,end-combat,second-main],"
+    "priority[self,opponent],passes[0,1],sorcery";
 constexpr LearnedDecisionTraceMode
     kValueContextChallengerTraceMode =
         LearnedDecisionTraceMode::Sparse;
@@ -12214,6 +12218,270 @@ train_learned_value_challenger(
         model = make_ensemble();
     }
     return model;
+}
+
+namespace {
+
+LearnedValueContextTrainingResult
+train_learned_value_context_challenger_internal(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value context challenger training games "
+            "must be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value context challenger generations "
+            "must be positive");
+    }
+
+    std::mt19937_64 random(seed);
+    std::uniform_int_distribution<std::size_t> choose_deck(
+        0, kDeckCount - 1);
+    const auto choose_distinct_decks = [&] {
+        const std::size_t first = choose_deck(random);
+        std::size_t second = choose_deck(random);
+        while (second == first) {
+            second = choose_deck(random);
+        }
+        return std::pair{
+            static_cast<DeckId>(first),
+            static_cast<DeckId>(second),
+        };
+    };
+    const auto terminal_target =
+        [](const GameResult& result,
+           std::size_t perspective) {
+            if (result.winner < 0) {
+                return 0.5;
+            }
+            const double discounted_outcome =
+                0.5 * std::pow(
+                          0.985,
+                          static_cast<double>(result.turns));
+            return result.winner ==
+                           static_cast<int>(perspective)
+                       ? 0.5 + discounted_outcome
+                       : 0.5 - discounted_outcome;
+        };
+    const auto add_terminal_trace =
+        [&](const std::vector<LearnedDecisionTracePoint>& trace,
+            const GameResult& result,
+            std::vector<
+                LearnedContextualCriticTrainingExample>&
+                destination) {
+            for (const auto& point : trace) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    destination.push_back({
+                        .features = learned_observation(
+                            point.state, perspective),
+                        .context_features =
+                            learned_decision_context_features(
+                                point.context, perspective),
+                        .target = terminal_target(
+                            result, perspective),
+                    });
+                }
+            }
+        };
+
+    constexpr std::size_t kBootstrapStepStates = 4;
+    constexpr double kBootstrapWeight = 0.5;
+    const auto add_bootstrap_trace =
+        [&](const std::vector<LearnedDecisionTracePoint>& trace,
+            const GameResult& result,
+            const std::shared_ptr<const LearnedModel>& frozen,
+            std::vector<
+                LearnedContextualCriticTrainingExample>&
+                destination) {
+            if (frozen == nullptr) {
+                add_terminal_trace(trace, result, destination);
+                return;
+            }
+            for (std::size_t index = 0; index < trace.size();
+                 ++index) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    const double outcome =
+                        terminal_target(result, perspective);
+                    double target = outcome;
+                    const std::size_t bootstrap_index =
+                        index + kBootstrapStepStates;
+                    if (bootstrap_index < trace.size()) {
+                        const auto& future =
+                            trace[bootstrap_index];
+                        const double bootstrap =
+                            learned_contextual_critic_value(
+                                future.state, perspective,
+                                future.context, frozen);
+                        target = (1.0 - kBootstrapWeight) *
+                                     outcome +
+                                 kBootstrapWeight * bootstrap;
+                    }
+                    const auto& point = trace[index];
+                    destination.push_back({
+                        .features = learned_observation(
+                            point.state, perspective),
+                        .context_features =
+                            learned_decision_context_features(
+                                point.context, perspective),
+                        .target = target,
+                    });
+                }
+            }
+        };
+
+    LearnedValueContextRootCoverage root_coverage;
+    std::vector<LearnedContextualCriticTrainingExample>
+        examples;
+    examples.reserve(training_games * 120);
+    for (std::size_t game_index = 0;
+         game_index < training_games; ++game_index) {
+        const auto [first_deck, second_deck] =
+            choose_distinct_decks();
+        Game game(deck_cards(first_deck),
+                  deck_cards(second_deck), random());
+        std::vector<LearnedDecisionTracePoint> trace;
+        const GameResult result =
+            game.run_with_learned_decision_trace(
+                trace, LearnedDecisionTraceMode::Sparse);
+        add_value_context_root_coverage(
+            trace, first_deck, second_deck, false,
+            root_coverage);
+        add_terminal_trace(trace, result, examples);
+    }
+
+    constexpr std::size_t kEnsembleMembers = 2;
+    std::vector<std::shared_ptr<const LearnedModel>>
+        ensemble_members;
+    ensemble_members.reserve(kEnsembleMembers);
+    for (std::size_t member = 0;
+         member < kEnsembleMembers; ++member) {
+        ensemble_members.push_back(
+            std::make_shared<LearnedModel>(
+                seed ^
+                    (0x4D4F44454C000000ULL + member),
+                LearnedVariant::ValueSearchChampion));
+    }
+    std::shared_ptr<const LearnedModel> model =
+        with_learned_decision_context(
+            std::make_shared<LearnedModel>(
+                std::move(ensemble_members),
+                seed ^ 0x56414C5545534541ULL,
+                LearnedVariant::ValueSearchChampion));
+    model = update_learned_contextual_value_model(
+        model, examples,
+        {
+            .epochs = 8,
+            .learning_rate = 0.015,
+            .root_seed = seed,
+            .member_training_tag =
+                0x545241494E000000ULL,
+        });
+
+    constexpr std::size_t kReplayWindowGenerations = 3;
+    const std::size_t random_example_count = examples.size();
+    std::vector<std::vector<
+        LearnedContextualCriticTrainingExample>>
+        generation_blocks;
+    for (std::size_t generation = 0;
+         generation < self_play_generations; ++generation) {
+        std::vector<LearnedContextualCriticTrainingExample>
+            self_play_examples;
+        const std::size_t generation_games =
+            std::max<std::size_t>(1, training_games / 4);
+        self_play_examples.reserve(generation_games * 60);
+        for (std::size_t game_index = 0;
+             game_index < generation_games; ++game_index) {
+            GameConfig config;
+            config.learned_model = model;
+            const double exploration_rate =
+                generation < 2 ? 0.10 : 0.05;
+            const std::size_t collection_rollouts =
+                generation < self_play_generations / 2
+                    ? 0
+                    : 1;
+            config.learned_search_depth =
+                collection_rollouts == 0 ? 0 : 1;
+            config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action =
+                        collection_rollouts,
+                    .exploration_rate = exploration_rate,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action =
+                        collection_rollouts,
+                    .exploration_rate = exploration_rate,
+                },
+            };
+            const auto [first_deck, second_deck] =
+                choose_distinct_decks();
+            Game game(deck_cards(first_deck),
+                      deck_cards(second_deck), random(), config);
+            std::vector<LearnedDecisionTracePoint> trace;
+            const GameResult result =
+                game.run_with_learned_decision_trace(
+                    trace, LearnedDecisionTraceMode::Sparse);
+            add_value_context_root_coverage(
+                trace, first_deck, second_deck, true,
+                root_coverage);
+            add_bootstrap_trace(
+                trace, result, model, self_play_examples);
+        }
+        generation_blocks.push_back(
+            std::move(self_play_examples));
+        examples.resize(random_example_count);
+        const std::size_t window_begin =
+            generation_blocks.size() > kReplayWindowGenerations
+                ? generation_blocks.size() -
+                      kReplayWindowGenerations
+                : 0;
+        for (std::size_t block = window_begin;
+             block < generation_blocks.size(); ++block) {
+            examples.insert(
+                examples.end(),
+                generation_blocks[block].begin(),
+                generation_blocks[block].end());
+        }
+        model = update_learned_contextual_value_model(
+            model, examples,
+            {
+                .epochs = 3,
+                .learning_rate = 0.006,
+                .root_seed = seed,
+                .member_training_tag =
+                    0x53454C4600000000ULL +
+                    0x100ULL * generation,
+            });
+    }
+    validate_value_context_root_coverage(
+        root_coverage,
+        "Learned Value context S1 training");
+    return {
+        .model = std::move(model),
+        .root_coverage = std::move(root_coverage),
+    };
+}
+
+} // namespace
+
+std::shared_ptr<const LearnedModel>
+train_learned_value_context_challenger(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    return train_learned_value_context_challenger_internal(
+               training_games, seed, self_play_generations)
+        .model;
 }
 
 static LearnedValueG8Result train_learned_value_g8_recipe(

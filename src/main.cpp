@@ -207,7 +207,9 @@ void print_help(std::string_view executable) {
            " [--actor-policy-epochs N] [--actor-policy-rate X]\n"
         << "       " << executable
         << " --evolve-deck [--generations N] [--population N] "
-           "[--games N]\n\n"
+           "[--games N] [--evolve-pilot BOT]"
+           " [--learned-rollouts N] [--train-games N]"
+           " [--train-seed N]\n\n"
         << "Simulates an Old School Magic round robin with legal bot play.\n"
         << "  Green: 18 Forest, 9 Grizzly Bears, 8 Ironroot Treefolk, "
            "4 Giant Growth, 1 Tsunami\n"
@@ -300,6 +302,9 @@ void print_help(std::string_view executable) {
            "the selected Value G8 Late-Mix50 artifact\n"
         << "  --evolve-deck   Evolve a 40-card deck against the current "
            "metagame\n"
+        << "  --evolve-pilot BOT  Evolution pilot: handcrafted "
+           "(default), random, monte-carlo, deep-monte-carlo, or "
+           "learned-value-context-cN\n"
         << "  --generations N  Evolution generations (default: 10)\n"
         << "  --population N   Candidate decks per generation "
            "(default: 16)\n"
@@ -888,6 +893,7 @@ train_value_context_challenger_with_progress(
 
     const auto started = std::chrono::steady_clock::now();
     std::shared_ptr<const old_school::LearnedModel> model;
+    old_school::LearnedValueContextRootCoverage root_coverage;
     if (cache_exists && !refresh_cache) {
         std::cout
             << "Loading immutable Value Context C"
@@ -895,11 +901,13 @@ train_value_context_challenger_with_progress(
             << ", " << training_games << " initial games) from "
             << cache_path << "..." << std::flush;
         try {
-            model = old_school::
-                        load_learned_value_context_challenger_artifact(
-                            cache_path, training_games,
-                            training_seed, generations)
-                        .model();
+            const auto artifact =
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        cache_path, training_games,
+                        training_seed, generations);
+            model = artifact.model();
+            root_coverage = artifact.root_coverage();
         } catch (const std::exception& error) {
             throw std::runtime_error(
                 "Value Context C" +
@@ -919,6 +927,7 @@ train_value_context_challenger_with_progress(
                 train_learned_value_context_challenger_artifact(
                     training_games, training_seed, generations);
         model = artifact.model();
+        root_coverage = artifact.root_coverage();
         old_school::
             write_learned_value_context_challenger_artifact_atomic(
                 cache_path, artifact);
@@ -935,7 +944,42 @@ train_value_context_challenger_with_progress(
               << (cache_exists && !refresh_cache
                       ? "loaded "
                       : "generated ")
-              << cache_path << '\n';
+              << cache_path << '\n'
+              << "  S1 decision roots: total="
+              << root_coverage.total_roots()
+              << ", anchor=" << root_coverage.anchor_roots
+              << ", self-play=" << root_coverage.self_play_roots
+              << "\n  S1 roots by deck:";
+    for (std::size_t deck = 0; deck < old_school::kDeckCount;
+         ++deck) {
+        std::cout
+            << ' '
+            << old_school::deck_name(
+                   static_cast<old_school::DeckId>(deck))
+            << '=' << root_coverage.decision_player_decks[deck];
+    }
+    constexpr std::array<std::string_view, 7> phase_names = {
+        "first-main",
+        "begin-combat",
+        "declare-attackers",
+        "declare-blockers",
+        "damage-order",
+        "end-combat",
+        "second-main",
+    };
+    std::cout << "\n  S1 roots by phase:";
+    for (std::size_t phase = 0; phase < phase_names.size();
+         ++phase) {
+        std::cout << ' ' << phase_names[phase] << '='
+                  << root_coverage.phases[phase];
+    }
+    std::cout
+        << "\n  S1 roots by pass: 0="
+        << root_coverage.pass_counts[0]
+        << " 1=" << root_coverage.pass_counts[1]
+        << "\n  S1 roots by stack: empty="
+        << root_coverage.stack_status[0]
+        << " nonempty=" << root_coverage.stack_status[1] << '\n';
     return model;
 }
 
@@ -1922,10 +1966,13 @@ void run_variance_study(
 }
 
 void print_evolution(const old_school::DeckEvolutionSummary& result,
-                     std::uint64_t seed) {
+                     std::uint64_t seed,
+                     std::string_view pilot_name) {
     std::cout << std::fixed << std::setprecision(1)
               << "Old School Magic Deck Evolution\n"
-              << "Seed: " << seed << "\n\nGeneration best fitness\n";
+              << "Seed: " << seed << '\n'
+              << "Pilot: " << pilot_name
+              << "\n\nGeneration best fitness\n";
     for (std::size_t generation = 0;
          generation < result.generation_best_win_rates.size();
          ++generation) {
@@ -2000,6 +2047,7 @@ int main(int argc, char** argv) {
         bool value_continuation_epsilon_option_used = false;
         bool challenger_option_used = false;
         bool baseline_option_used = false;
+        bool evolve_pilot_option_used = false;
         old_school::probe_runner::ProbeCorpusKind probe_corpus =
             old_school::probe_runner::ProbeCorpusKind::DevV3;
         bool probe_cache_was_set = false;
@@ -2021,6 +2069,9 @@ int main(int argc, char** argv) {
         };
         BotSelection baseline = {
             .kind = old_school::BotKind::MonteCarlo,
+        };
+        BotSelection evolve_pilot = {
+            .kind = old_school::BotKind::Handcrafted,
         };
 
         for (int argument = 1; argument < argc; ++argument) {
@@ -2090,6 +2141,7 @@ int main(int argc, char** argv) {
                 option != "--stability-runs" &&
                 option != "--generations" &&
                 option != "--population" &&
+                option != "--evolve-pilot" &&
                 option != "--challenger" &&
                 option != "--baseline" &&
                 option != "--probe-corpus" &&
@@ -2135,6 +2187,11 @@ int main(int argc, char** argv) {
                     baseline = selection;
                     baseline_option_used = true;
                 }
+                continue;
+            }
+            if (option == "--evolve-pilot") {
+                evolve_pilot = parse_bot(argv[argument]);
+                evolve_pilot_option_used = true;
                 continue;
             }
             if (option == "--probe-cache") {
@@ -2346,6 +2403,10 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--baseline requires --benchmark");
         }
+        if (evolve_pilot_option_used && !evolve) {
+            throw std::invalid_argument(
+                "--evolve-pilot requires --evolve-deck");
+        }
         const auto selects_value_context_challenger =
             [](const BotSelection& selection) {
                 return selection.kind ==
@@ -2358,6 +2419,13 @@ int main(int argc, char** argv) {
                                ContextChallenger &&
                        selection.value_generation > 0;
             };
+        if (evolve &&
+            evolve_pilot.kind == old_school::BotKind::Learned &&
+            !selects_value_context_challenger(evolve_pilot)) {
+            throw std::invalid_argument(
+                "Learned --evolve-pilot currently requires "
+                "learned-value-context-cN");
+        }
         const bool probe_context_challenger_selected =
             score_probes && challenger_option_used &&
             selects_value_context_challenger(challenger);
@@ -2393,6 +2461,13 @@ int main(int argc, char** argv) {
             benchmark &&
             (challenger.kind == old_school::BotKind::Learned ||
              baseline.kind == old_school::BotKind::Learned);
+        const bool evolution_uses_learned =
+            evolve &&
+            evolve_pilot.kind == old_school::BotKind::Learned;
+        const bool evolution_uses_value =
+            evolution_uses_learned &&
+            evolve_pilot.learned_variant ==
+                old_school::LearnedVariant::ValueSearchChampion;
         const bool benchmark_challenger_uses_value =
             benchmark &&
             challenger.kind == old_school::BotKind::Learned &&
@@ -2414,12 +2489,14 @@ int main(int argc, char** argv) {
         if (value_continuation_epsilon_option_used &&
             !(interactive || stability || score_probes ||
               tournament_uses_value ||
-              benchmark_challenger_uses_value)) {
+              benchmark_challenger_uses_value ||
+              evolution_uses_value)) {
             throw std::invalid_argument(
                 "--value-continuation-epsilon requires "
                 "--interactive, --stability, --score-probes, a "
                 "mixed/learned-value simulation, or a benchmark "
-                "with a Learned Value challenger");
+                "with a Learned Value challenger, or Learned Value "
+                "deck evolution");
         }
         if (learned_generations_option_used &&
             !(interactive || stability || score_probes ||
@@ -2433,11 +2510,13 @@ int main(int argc, char** argv) {
         if (learned_rollouts_option_used &&
             !(interactive || stability || score_probes ||
               tournament_uses_any_learned ||
-              benchmark_uses_learned)) {
+              benchmark_uses_learned ||
+              evolution_uses_learned)) {
             throw std::invalid_argument(
                 "--learned-rollouts requires --interactive, "
                 "--stability, --score-probes, a benchmark with a "
-                "Learned bot, or a mixed/learned simulation");
+                "Learned bot, a mixed/learned simulation, or Learned "
+                "deck evolution");
         }
         if (score_probes && learned_rollouts < 2) {
             throw std::invalid_argument(
@@ -2520,7 +2599,9 @@ int main(int argc, char** argv) {
              (selects_value_challenger(challenger) ||
               selects_value_challenger(baseline) ||
               selects_value_context_challenger(challenger) ||
-              selects_value_context_challenger(baseline)));
+              selects_value_context_challenger(baseline))) ||
+            (evolve &&
+             selects_value_context_challenger(evolve_pilot));
         if (refresh_value_challenger_cache &&
             !value_challenger_will_be_used) {
             throw std::invalid_argument(
@@ -3033,22 +3114,45 @@ int main(int argc, char** argv) {
         if (evolve) {
             const std::size_t repetitions =
                 games_were_set ? games : 4;
+            auto evolution_pilot_config =
+                bot_config(
+                    evolve_pilot, rollouts, deep_rollouts,
+                    training_games, learned_rollouts,
+                    value_continuation_epsilon);
             old_school::GameConfig evolution_game_config;
             evolution_game_config.learned_training_seed =
                 training_seed;
+            std::string evolution_pilot_name =
+                old_school::bot_config_name(
+                    evolution_pilot_config);
+            if (evolution_uses_learned) {
+                const auto model =
+                    train_value_context_challenger_with_progress(
+                        training_games, training_seed,
+                        evolve_pilot.value_generation,
+                        refresh_value_challenger_cache);
+                evolution_pilot_config.learned_model = model;
+                evolution_game_config.learned_model = model;
+                evolution_pilot_name =
+                    "Learned Value Context C" +
+                    std::to_string(
+                        evolve_pilot.value_generation) +
+                    " (K=" +
+                    std::to_string(learned_rollouts) +
+                    ", training seed " +
+                    std::to_string(training_seed) + ", " +
+                    std::to_string(training_games) +
+                    " initial games)";
+            }
             const auto result = old_school::evolve_deck(
                 {
                     .generations = generations,
                     .population = population,
                     .repetitions_per_opponent = repetitions,
-                    .pilot =
-                        {
-                            .kind = old_school::BotKind::Handcrafted,
-                            .rollouts_per_action = 1,
-                        },
+                    .pilot = evolution_pilot_config,
                 },
                 seed, evolution_game_config);
-            print_evolution(result, seed);
+            print_evolution(result, seed, evolution_pilot_name);
             return 0;
         }
 

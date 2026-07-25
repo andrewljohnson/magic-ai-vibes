@@ -20,6 +20,7 @@ g8_t8_cache=build/model-cache/old-school-value-g8-v2-t8-s424242.bin
 mix50_cache=build/model-cache/old-school-value-g8-mix50-v2-t8-s424242.bin
 challenger_c1_cache=build/model-cache/old-school-value-challenger-v2-c1-t1-s424242.bin
 challenger_c2_cache=build/model-cache/old-school-value-challenger-v2-c2-t1-s424242.bin
+context_challenger_c1_cache=build/model-cache/old-school-value-context-s1-v2-c1-t1-s424242.bin
 probe_cache=
 mix50_probe_cache=
 validation_probe_cache=
@@ -27,7 +28,8 @@ probe_directory=
 
 cleanup() {
     rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
-        "$challenger_c1_cache" "$challenger_c2_cache"
+        "$challenger_c1_cache" "$challenger_c2_cache" \
+        "$context_challenger_c1_cache"
     if [ -n "$probe_cache" ]; then
         rm -f "$probe_cache"
     fi
@@ -45,7 +47,8 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
-    "$challenger_c1_cache" "$challenger_c2_cache"
+    "$challenger_c1_cache" "$challenger_c2_cache" \
+    "$context_challenger_c1_cache"
 
 run_cli() {
     set +e
@@ -96,7 +99,8 @@ case $help_output in
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
 "--refresh-value-challenger-cache"*\
-"--refresh-value-g8-cache"*"--refresh-value-mix50-cache"*) ;;
+"--refresh-value-g8-cache"*"--refresh-value-mix50-cache"*\
+"--evolve-pilot BOT"*"learned-value-context-cN"*) ;;
     *)
         printf 'learned-generation options missing from --help\n' >&2
         exit 1
@@ -483,6 +487,12 @@ expect_error "$value_epsilon_scope" \
 expect_error "$value_epsilon_scope" \
     --evolve-deck --games 1 \
     --value-continuation-epsilon 0.05
+expect_error "--evolve-pilot requires --evolve-deck" \
+    --evolve-pilot handcrafted
+expect_error "Learned --evolve-pilot currently requires learned-value-context-cN" \
+    --evolve-deck --evolve-pilot learned-value-c1
+expect_error "$learned_rollout_scope" \
+    --evolve-deck --evolve-pilot handcrafted --learned-rollouts 1
 expect_error "$value_epsilon_scope" \
     --diagnose-white-plan \
     --value-continuation-epsilon 0.05
@@ -529,6 +539,95 @@ expect_error "$scope_error" \
 expect_error "$scope_error" \
     --benchmark --games 1 --challenger learned-value-g0 \
     --baseline random --actor-policy-epochs 16
+
+run_cli --evolve-deck --generations 1 --population 5 \
+    --games 1 --seed 7
+if [ "$cli_status" -ne 0 ]; then
+    printf 'default deck-evolution pilot failed\n%s\n' "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Old School Magic Deck Evolution"*\
+"Pilot: Handcrafted Policy"*) ;;
+    *)
+        printf 'default deck-evolution pilot changed\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+context_evolve_args="--evolve-deck --evolve-pilot \
+learned-value-context-c1 --generations 1 --population 5 --games 1 \
+--seed 7 --learned-rollouts 1 --train-games 1 --train-seed 424242"
+
+# shellcheck disable=SC2086
+run_cli $context_evolve_args
+if [ "$cli_status" -ne 0 ]; then
+    printf 'Learned context deck-evolution pilot failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+context_evolve_first_output=$cli_output
+case $context_evolve_first_output in
+    *"Training frozen Value Context C1"*\
+"Value Context C1 fingerprint:"*\
+"Value Context C1 artifact cache: generated $context_challenger_c1_cache"*\
+"S1 decision roots: total="*\
+"S1 roots by deck: Green="*\
+"Pilot: Learned Value Context C1 (K=1, training seed 424242, 1 initial games)"*) ;;
+    *)
+        printf 'Learned context evolution generation/reporting missing\n%s\n' \
+            "$context_evolve_first_output" >&2
+        exit 1
+        ;;
+esac
+context_evolve_first_fingerprint=$(
+    printf '%s\n' "$context_evolve_first_output" |
+        sed -n 's/^  Value Context C1 fingerprint: //p'
+)
+context_evolve_first_report=$(
+    printf '%s\n' "$context_evolve_first_output" |
+        sed -n '/^Old School Magic Deck Evolution/,$p'
+)
+
+# shellcheck disable=SC2086
+run_cli $context_evolve_args
+if [ "$cli_status" -ne 0 ]; then
+    printf 'repeated Learned context deck evolution failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Loading immutable Value Context C1 artifact"*\
+"Value Context C1 artifact cache: loaded $context_challenger_c1_cache"*\
+"S1 decision roots: total="*\
+"Pilot: Learned Value Context C1 (K=1, training seed 424242, 1 initial games)"*) ;;
+    *)
+        printf 'Learned context evolution did not reuse its artifact\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+context_evolve_second_fingerprint=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Value Context C1 fingerprint: //p'
+)
+context_evolve_second_report=$(
+    printf '%s\n' "$cli_output" |
+        sed -n '/^Old School Magic Deck Evolution/,$p'
+)
+if [ -z "$context_evolve_first_fingerprint" ] ||
+    [ "$context_evolve_first_fingerprint" != \
+      "$context_evolve_second_fingerprint" ] ||
+    [ -z "$context_evolve_first_report" ] ||
+    [ "$context_evolve_first_report" != \
+      "$context_evolve_second_report" ]; then
+    printf 'Learned context evolution was not fixed-seed deterministic\n' >&2
+    printf 'fingerprints: %s / %s\n' \
+        "$context_evolve_first_fingerprint" \
+        "$context_evolve_second_fingerprint" >&2
+    exit 1
+fi
 
 run_cli --benchmark --games 1 --seed 1 --train-games 1 \
     --train-seed 424242 --challenger learned \

@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 16:07 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 16:10 PDT — refreshed at the top of every review cycle.*
 
 - **ENVIRONMENT v2 (user-directed):** Blue runs Power (Ancestral, Time
   Walk, Mox Sapphire, Sol Ring, Braingeyser) plus Force Spike and Air
@@ -56,6 +56,22 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 16:10 PDT
+
+The paired live/payable Force Spike report ran (`c53ce34`), and it
+sharpened the picture: both Value G0 and frozen S0 C16 cast Force
+Spike in BOTH states — correctly when Red is tapped out, wastefully
+when Red can pay the tax (C16 payable: Spike 0.2022 vs Pass 0.1534).
+The behavioral gate is honestly marked failed for both controls. This
+converts the S1 success condition into a single crisp behavioral flip:
+prefer Pass in the payable state while retaining the live-state cast.
+It is the cleanest operationalization of the hold-versus-spend defect
+so far — better than the X=0 metric because both branches are
+one-mana decisions on the same stack object.
+
+Lift table deterministic-identical (3 of 5). S1 training remains the
+next event; no new priorities.
 
 ## 2026-07-25 16:07 PDT
 

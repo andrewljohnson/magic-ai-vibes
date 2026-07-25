@@ -13,6 +13,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -318,6 +319,15 @@ small_value_challenger_c2_artifact() {
 std::shared_ptr<const old_school::LearnedModel>
 small_value_challenger_c2() {
     return small_value_challenger_c2_artifact().model();
+}
+
+const old_school::LearnedValueContextChallengerArtifact&
+small_value_context_challenger_c1_artifact() {
+    static const auto artifact =
+        old_school::
+            train_learned_value_context_challenger_artifact(
+                1, 0xC07E6751ULL, 1);
+    return artifact;
 }
 
 const old_school::LearnedValueG8Result& small_value_g8() {
@@ -1814,6 +1824,282 @@ TEST(value_challenger_artifact_is_versioned_bit_exact_and_fail_closed) {
     std::filesystem::remove(corrupt);
     std::filesystem::remove(canonical_path);
     std::filesystem::remove(mix50_path);
+}
+
+TEST(value_context_challenger_s1_is_deterministic_and_reports_roots) {
+    const auto& original =
+        small_value_context_challenger_c1_artifact();
+    const auto repeated =
+        old_school::
+            train_learned_value_context_challenger_artifact(
+                1, 0xC07E6751ULL, 1);
+    const auto changed_seed =
+        old_school::
+            train_learned_value_context_challenger_artifact(
+                1, 0xC07E6752ULL, 1);
+
+    const std::string fingerprint =
+        old_school::learned_model_fingerprint(
+            original.model());
+    CHECK(old_school::learned_model_fingerprint(
+              repeated.model()) == fingerprint);
+    CHECK(old_school::learned_model_fingerprint(
+              changed_seed.model()) != fingerprint);
+    CHECK(old_school::learned_critic_schema(
+              original.model()) ==
+          old_school::LearnedCriticSchema::
+              DecisionContextV1);
+    CHECK(original.critic_schema() ==
+          old_school::LearnedCriticSchema::
+              DecisionContextV1);
+    CHECK(original.trace_mode() ==
+          old_school::LearnedDecisionTraceMode::Sparse);
+    CHECK(original.trace_limit() == 0);
+    CHECK(original.training_games() == 1);
+    CHECK(original.seed() == 0xC07E6751ULL);
+    CHECK(original.self_play_generations() == 1);
+
+    const auto& coverage = original.root_coverage();
+    CHECK(coverage == repeated.root_coverage());
+    CHECK(coverage.anchor_roots > 0);
+    CHECK(coverage.self_play_roots > 0);
+    const std::size_t total = coverage.total_roots();
+    CHECK(total ==
+          coverage.anchor_roots +
+              coverage.self_play_roots);
+    CHECK(std::accumulate(
+              coverage.decision_player_decks.begin(),
+              coverage.decision_player_decks.end(),
+              std::size_t{0}) == total);
+    CHECK(std::accumulate(
+              coverage.phases.begin(),
+              coverage.phases.end(),
+              std::size_t{0}) == total);
+    CHECK(std::accumulate(
+              coverage.pass_counts.begin(),
+              coverage.pass_counts.end(),
+              std::size_t{0}) == total);
+    CHECK(std::accumulate(
+              coverage.stack_status.begin(),
+              coverage.stack_status.end(),
+              std::size_t{0}) == total);
+}
+
+TEST(value_context_challenger_artifact_roundtrips_and_fails_closed) {
+    const auto& original_artifact =
+        small_value_context_challenger_c1_artifact();
+    const auto original = original_artifact.model();
+    const std::filesystem::path directory =
+        "build/test-model-cache";
+    const std::filesystem::path good =
+        directory / "value-context-c1-good.bin";
+    const std::filesystem::path corrupt =
+        directory / "value-context-c1-corrupt.bin";
+    const std::filesystem::path trailing =
+        directory / "value-context-c1-trailing.bin";
+    const std::filesystem::path truncated =
+        directory / "value-context-c1-truncated.bin";
+    const std::filesystem::path legacy =
+        directory / "value-challenger-c2-context-cross.bin";
+    const std::filesystem::path canonical =
+        directory / "value-g8-context-cross.bin";
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(trailing);
+    std::filesystem::remove(truncated);
+    std::filesystem::remove(legacy);
+    std::filesystem::remove(canonical);
+
+    old_school::
+        write_learned_value_context_challenger_artifact_atomic(
+            good.string(), original_artifact);
+    const auto bytes = read_binary_file(good);
+    const std::array<std::uint8_t, 8> expected_magic = {
+        'O', 'S', 'M', 'V', 'C', 'T', 'X', '1',
+    };
+    CHECK(bytes.size() > expected_magic.size());
+    CHECK(std::equal(
+        expected_magic.begin(), expected_magic.end(),
+        bytes.begin()));
+
+    const auto loaded_artifact =
+        old_school::
+            load_learned_value_context_challenger_artifact(
+                good.string(), 1, 0xC07E6751ULL, 1);
+    const auto loaded = loaded_artifact.model();
+    const std::string fingerprint =
+        old_school::learned_model_fingerprint(original);
+    CHECK(old_school::learned_model_fingerprint(loaded) ==
+          fingerprint);
+    CHECK(loaded_artifact.root_coverage() ==
+          original_artifact.root_coverage());
+    CHECK(loaded_artifact.critic_schema() ==
+          old_school::LearnedCriticSchema::
+              DecisionContextV1);
+    CHECK(loaded_artifact.trace_mode() ==
+          old_school::LearnedDecisionTraceMode::Sparse);
+    CHECK(loaded_artifact.trace_limit() == 0);
+    CHECK(old_school::
+              learned_value_context_challenger_cache_path(
+                  800, 424242, 16) ==
+          "build/model-cache/"
+          "old-school-value-context-s1-v2-c16-t800-s424242.bin");
+
+    const old_school::GameState state =
+        determinization_fixture().state;
+    const std::array<old_school::LearnedDecisionContext, 2>
+        contexts = {
+            old_school::LearnedDecisionContext{
+                .valid = true,
+                .phase =
+                    old_school::TurnPhase::SecondMain,
+                .decision_player = 0,
+                .consecutive_passes = 0,
+                .sorcery_actions = false,
+            },
+            old_school::LearnedDecisionContext{
+                .valid = true,
+                .phase =
+                    old_school::TurnPhase::SecondMain,
+                .decision_player = 1,
+                .consecutive_passes = 1,
+                .sorcery_actions = false,
+            },
+        };
+    for (const auto& context : contexts) {
+        for (std::size_t perspective = 0;
+             perspective < 2; ++perspective) {
+            const double before =
+                old_school::learned_contextual_critic_value(
+                    state, perspective, context, original);
+            const double after =
+                old_school::learned_contextual_critic_value(
+                    state, perspective, context, loaded);
+            CHECK(std::bit_cast<std::uint64_t>(after) ==
+                  std::bit_cast<std::uint64_t>(before));
+        }
+    }
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        good.string(), 2,
+                        0xC07E6751ULL, 1));
+        },
+        "training_games mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        good.string(), 1,
+                        0xC07E6752ULL, 1));
+        },
+        "training seed mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        good.string(), 1,
+                        0xC07E6751ULL, 2));
+        },
+        "generation mismatch"));
+
+    old_school::write_learned_value_challenger_artifact_atomic(
+        legacy.string(),
+        small_value_challenger_c2_artifact());
+    old_school::write_learned_value_g8_bundle_atomic(
+        canonical.string(), small_value_g8());
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_challenger_artifact(
+                        good.string(), 1,
+                        0xC07E6751ULL, 1));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_value_g8_bundle(
+                    good.string(), 1, 0xC07E6751ULL));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        legacy.string(), 1, 424242, 2));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        canonical.string(), 1,
+                        0x68A11EADULL, 1));
+        },
+        "wrong magic"));
+
+    auto changed = bytes;
+    changed.back() ^= 0x01U;
+    write_binary_file(corrupt, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        corrupt.string(), 1,
+                        0xC07E6751ULL, 1));
+        },
+        "checksum"));
+
+    changed = bytes;
+    changed.push_back(0x00U);
+    write_binary_file(trailing, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        trailing.string(), 1,
+                        0xC07E6751ULL, 1));
+        },
+        "payload length"));
+
+    changed = bytes;
+    changed.pop_back();
+    write_binary_file(truncated, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        truncated.string(), 1,
+                        0xC07E6751ULL, 1));
+        },
+        "payload length"));
+
+    CHECK(throws_with_text(
+        [] {
+            static_cast<void>(
+                old_school::
+                    learned_value_context_challenger_cache_path(
+                        1, 424242, 0));
+        },
+        "generations"));
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(trailing);
+    std::filesystem::remove(truncated);
+    std::filesystem::remove(legacy);
+    std::filesystem::remove(canonical);
 }
 
 TEST(learned_value_update_deep_clones_without_mutating_parent) {

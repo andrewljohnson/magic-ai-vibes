@@ -1573,6 +1573,8 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 .reference_value_model = reference_value,
                 .reference_value_name = "Value G0",
                 .scoring_value_models = {
+                    {"Value State Control", scoring_value,
+                     "context-test"},
                     {"Value Context Test", contextual_value,
                      "context-test"},
                 },

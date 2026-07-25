@@ -111,13 +111,24 @@ make evolve
 
 ./build/old-school-sim --evolve-deck --generations 20 \
   --population 32 --games 8 --seed 42
+
+# Pilot every candidate with the frozen context-aware Learned model.
+./build/old-school-sim --evolve-deck \
+  --evolve-pilot learned-value-context-c16 \
+  --generations 20 --population 32 --games 8 --seed 42 \
+  --learned-rollouts 8 --train-games 800 --train-seed 424242
 ```
 
 Evolution starts from the five metagame decks, uses mutation plus elitism,
 and scores every candidate against all five decks with both deck seats and
 both starting-player assignments. `--games` is paired repetitions per opponent
-in this mode. The default pilot is Handcrafted Policy so searches stay fast
-and do not evaluate hybrid decks far outside the value model's training data.
+in this mode. The default pilot remains Handcrafted Policy. Set
+`--evolve-pilot learned-value-context-cN` to use that exact frozen context
+challenger instead; its immutable artifact is trained once (or loaded from the
+matching cache) using `--train-games` and `--train-seed`, while
+`--learned-rollouts` sets its search worlds per legal action. The evolution
+seed remains separate and reproducible. Learned-pilot evolution is much slower,
+and candidate decks can be well outside the model's training distribution.
 
 ## MVP rules implemented
 
