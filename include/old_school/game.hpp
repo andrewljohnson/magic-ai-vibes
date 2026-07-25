@@ -406,6 +406,10 @@ struct BotConfig {
     // Complete random continuations sampled for every legal action.
     std::size_t rollouts_per_action = 2;
     double exploration_rate = 0.0;
+    // Research-only epsilon-greedy exploration inside the bounded,
+    // depth-zero Value-mirror continuation. The real root remains greedy.
+    // Zero reproduces the historical Value policy bit-for-bit.
+    double value_continuation_epsilon = 0.0;
     std::size_t training_games = 800;
     // Optional per-seat frozen model. This permits a paired benchmark between
     // two Learned variants without sharing or silently retraining a model.
@@ -495,6 +499,9 @@ struct LearnedSearchConfig {
     // complete future turns and bootstraps after the final cleanup.
     std::size_t horizon_turns = 4;
     LearnedVariant continuation_variant = LearnedVariant::UnifiedActor;
+    // Applies only to depth-zero Value-mirror continuation decisions. Root
+    // candidates are still explicitly enumerated and scored greedily.
+    double value_continuation_epsilon = 0.0;
     // Reproduces the deployed Value selector's one aggregate shallow-prior
     // observation blended with all continuation samples.
     bool blend_shallow_prior = false;
@@ -581,7 +588,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t player, bool sorcery_actions, TurnPhase phase,
     int consecutive_passes, std::shared_ptr<const LearnedModel> model,
-    std::size_t rollouts_per_action, std::uint64_t seed);
+    std::size_t rollouts_per_action, std::uint64_t seed,
+    double value_continuation_epsilon = 0.0);
 
 // Focused evaluation-only seams for proving that generation-mode searched
 // choices are the actions actually applied by the engine.
@@ -639,7 +647,8 @@ class Game {
         std::size_t player, bool sorcery_actions, TurnPhase phase,
         int consecutive_passes,
         std::shared_ptr<const LearnedModel> model,
-        std::size_t rollouts_per_action, std::uint64_t seed);
+        std::size_t rollouts_per_action, std::uint64_t seed,
+        double value_continuation_epsilon);
     friend LearnedActionSamples learned_priority_action_samples(
         const GameState& state,
         const std::array<std::vector<CardId>, 2>& original_decks,
@@ -841,6 +850,7 @@ struct TournamentConfig {
     std::size_t monte_carlo_rollouts = 2;
     std::size_t deep_monte_carlo_rollouts = 8;
     std::size_t learned_rollouts = 2;
+    double value_continuation_epsilon = 0.0;
     std::size_t learned_training_games = 800;
 };
 

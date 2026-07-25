@@ -46,6 +46,10 @@ struct ProbeScoreConfig {
     // deliberately excluded from Actor-owned cache metadata: changing a
     // candidate's deployed search width must never relabel the reference.
     std::size_t scoring_value_worlds = 2;
+    // Research-only Value continuation epsilon. Like scoring width, this
+    // changes only scoring policies and is deliberately excluded from
+    // Actor-owned cache metadata and serialization.
+    double scoring_value_continuation_epsilon = 0.0;
     std::filesystem::path cache_path =
         "data/old-school-probe-dev-v3.labels.tsv";
     bool refresh_cache = false;

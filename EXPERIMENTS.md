@@ -3414,3 +3414,107 @@ Decision: accept the cache. It does not alter model weights, rollout policy, or
 benchmark results; it removes approximately five minutes of repeated C16
 training from each matching follow-up command and makes frozen-model reuse
 visible in CLI output.
+
+### C16 K=8 five-deck mixed-lift screen (result)
+
+Recorded after rereading the newest independent review. The review independently
+reproduced this fixed report and identifies the same single remaining failure.
+
+The exact preregistered command loaded C16 fingerprint
+`e4e9cc8869a9a501a68ba2c0e904acf43847564c935d032aa697562553d8c145`
+from the hardened artifact cache in `0.01s`, then completed 1,000 mixed-field
+games. C16 won 283-117 across its 400 seat-games (**70.8%**) versus
+Handcrafted's 274-126 (**68.5%**). Directly within the policy matrix, Learned
+beat Handcrafted 42-38.
+
+The per-deck lift-over-Random gate was:
+
+- Green: Learned `+38.8 pp`, best rival Handcrafted `+31.2 pp` — PASS;
+- Red: Learned `+41.2 pp`, best rival Handcrafted `+40.0 pp` — PASS;
+- Blue: Learned `+48.8 pp`, best rival Handcrafted `+45.0 pp` — PASS;
+- White: Learned `+55.0 pp`, best rival Handcrafted `+51.2 pp` — PASS;
+- RU Aggro: Learned `+47.5 pp`, Handcrafted `+52.5 pp` — **FAIL by 5.0 pp**.
+
+The preregistration incorrectly described 60 games per deck/policy cell; the
+actual fixed `--games 100` policy rotation yields 80. This correction is
+recorded here rather than rewriting the declaration. Eighty games still cannot
+resolve a five-point difference reliably, but the separate 2,040-game direct
+Handcrafted milestone also has RU behind, so the weakness is not dismissed as
+cell noise.
+
+Decision: reject the all-five hypothesis at **4/5**, the best lift result in
+project history. Blue's old 17.5-point gap is eliminated; RU Aggro is now the
+only deck between Learned and the all-five crown. Per preregistration, do not
+tune to this cell or hardcode Disintegrate/Bolt preferences. The next change
+must be a separately measured, card-agnostic learning/search experiment.
+
+### Continuation-only epsilon experiment (declared)
+
+Declared after rereading the newest independent review and before changing
+search behavior. The treatment is a single predeclared value,
+`epsilon=0.05`; it will not be swept or tuned against RU or validation-v1.
+
+Hypothesis: C16's deterministic depth-zero mirror continuation is
+self-confirming. After Pass retains an option, that same policy can waste the
+card later, causing the Pass and waste branches to heal together. Allowing
+both seats in the **inner continuation only** to choose a uniformly random
+legal action with probability 0.05 will represent some futures where a held
+option survives long enough to matter. The outer deployed root remains greedy.
+The same frozen C16 model, hidden-information worlds, and candidate-paired
+seeds are used; this adds no card names, handcrafted scores, opponent hidden
+cards, combat scoring, or new reward.
+
+Engineering gates:
+
+1. default continuation epsilon zero is bit-identical, including legacy G0 and
+   C2 golden fingerprints and fixed-seed benchmark records;
+2. epsilon must be finite and in `[0,1]`;
+3. only the two depth-zero Value-mirror continuation seats explore; the root
+   action remains greedy and Actor/Monte-Carlo policies are unchanged;
+4. common-world pairing, hidden-repartition invariance, rollout accounting,
+   and fixed-seed determinism remain exact;
+5. benchmark same-policy identity includes continuation epsilon, permitting a
+   causal same-model/K comparison without model aliasing;
+6. strict tests and ASan/UBSan pass.
+
+The CLI treatment name is
+`--value-continuation-epsilon 0.05`. First compare standard C16 and the
+treatment on validation-v1 at equal candidate K=128. The existing Actor cache
+must load unchanged because candidate epsilon cannot enter teacher-label cache
+identity:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-corpus validation-v1 \
+  --probe-worlds 128 --probe-horizon 0 \
+  --learned-generations 16 --learned-rollouts 128 \
+  --value-continuation-epsilon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-validation-v1-k128-h0-t800-s424242.labels.tsv
+
+./build/old-school-sim --score-probes \
+  --probe-corpus validation-v1 \
+  --probe-worlds 128 --probe-horizon 0 \
+  --learned-generations 16 --learned-rollouts 128 \
+  --value-continuation-epsilon 0.05 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-validation-v1-k128-h0-t800-s424242.labels.tsv
+```
+
+The behavioral treatment passes only if its C16
+`Q(Pass)-Q(X=0)` lower 95% bound is above zero and its point estimate is
+strictly higher than standard C16. This one state can reject but never promote.
+If it passes, run the causal five-deck screen using the identical frozen model
+at equal K=8:
+
+```sh
+./build/old-school-sim --benchmark --games 10 --seed 919 \
+  --challenger learned-value-c16 --baseline learned-value-c16 \
+  --learned-rollouts 8 --value-continuation-epsilon 0.05 \
+  --train-games 800 --train-seed 424242
+```
+
+That 600-paired-game screen passes only above 52.5% aggregate with the
+treatment ahead on every challenger deck. It is still a large-effect screen,
+not promotion evidence. A failure rejects epsilon 0.05 without trying nearby
+values; a pass permits a separately preregistered mixed-lift rerun.

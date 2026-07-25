@@ -136,6 +136,26 @@ constexpr std::size_t kMaximumValueG8ArtifactNodes = 128;
 constexpr std::size_t kMaximumValueG8ArtifactDepth = 8;
 constexpr std::size_t kMaximumValueG8EnsembleMembers = 16;
 
+void validate_value_continuation_epsilon(double epsilon) {
+    if (!std::isfinite(epsilon) || epsilon < 0.0 ||
+        epsilon > 1.0) {
+        throw std::invalid_argument(
+            "Value continuation epsilon must be finite and in [0, 1]");
+    }
+}
+
+void validate_bot_research_config(const BotConfig& bot) {
+    validate_value_continuation_epsilon(
+        bot.value_continuation_epsilon);
+    if (bot.value_continuation_epsilon != 0.0 &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion)) {
+        throw std::invalid_argument(
+            "Value continuation epsilon requires Learned Value");
+    }
+}
+
 static_assert(
     sizeof(double) == sizeof(std::uint64_t) &&
         std::numeric_limits<double>::is_iec559,
@@ -6014,6 +6034,7 @@ Game::Game(std::vector<CardId> player_zero_deck,
         throw std::invalid_argument("maximum turns must be positive");
     }
     for (const auto& bot : config_.bots) {
+        validate_bot_research_config(bot);
         if ((bot.kind == BotKind::MonteCarlo ||
              bot.kind == BotKind::DeepMonteCarlo) &&
             bot.rollouts_per_action == 0) {
@@ -6886,6 +6907,9 @@ double Game::learned_value_search_action_score(
             .learned_variant =
                 LearnedVariant::ValueSearchChampion,
             .rollouts_per_action = 0,
+            .exploration_rate =
+                config_.bots[player]
+                    .value_continuation_epsilon,
             .learned_model = root_model,
         },
         BotConfig{
@@ -6893,6 +6917,9 @@ double Game::learned_value_search_action_score(
             .learned_variant =
                 LearnedVariant::ValueSearchChampion,
             .rollouts_per_action = 0,
+            .exploration_rate =
+                config_.bots[player]
+                    .value_continuation_epsilon,
             .learned_model = root_model,
         },
     };
@@ -8122,6 +8149,8 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
                 : tournament_config.learned_variant,
         .rollouts_per_action =
             tournament_config.learned_rollouts,
+        .value_continuation_epsilon =
+            tournament_config.value_continuation_epsilon,
         .training_games = tournament_config.learned_training_games,
     };
 
@@ -8581,6 +8610,16 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
         tournament_config.learned_rollouts == 0) {
         throw std::invalid_argument(
             "Learned rollouts per action must be positive");
+    }
+    validate_value_continuation_epsilon(
+        tournament_config.value_continuation_epsilon);
+    if (uses_learned &&
+        tournament_config.value_continuation_epsilon != 0.0 &&
+        tournament_config.bot_field == BotField::Learned &&
+        tournament_config.learned_variant !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Value continuation epsilon requires a Value tournament");
     }
     if (uses_learned &&
         tournament_config.learned_training_games == 0 &&
@@ -10361,6 +10400,14 @@ void validate_search_config(
     const LearnedSearchConfig& config,
     const std::shared_ptr<const LearnedModel>& model) {
     validate_learned_model(model, config.continuation_variant);
+    validate_value_continuation_epsilon(
+        config.value_continuation_epsilon);
+    if (config.value_continuation_epsilon != 0.0 &&
+        config.continuation_variant !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Value continuation epsilon requires a Value-mirror search");
+    }
     if (config.worlds == 0 ||
         config.worlds > kMaximumEvaluationWorlds) {
         throw std::invalid_argument(
@@ -10431,7 +10478,8 @@ std::vector<LearnedEvaluationWorld> sample_evaluation_worlds(
 
 GameConfig learned_evaluation_game_config(
     const std::shared_ptr<const LearnedModel>& model,
-    LearnedVariant variant) {
+    LearnedVariant variant,
+    double value_continuation_epsilon) {
     GameConfig config;
     config.learned_model = model;
     config.learned_search_depth = 0;
@@ -10440,12 +10488,16 @@ GameConfig learned_evaluation_game_config(
             .kind = BotKind::Learned,
             .learned_variant = variant,
             .rollouts_per_action = 0,
+            .exploration_rate =
+                value_continuation_epsilon,
             .learned_model = model,
         },
         BotConfig{
             .kind = BotKind::Learned,
             .learned_variant = variant,
             .rollouts_per_action = 0,
+            .exploration_rate =
+                value_continuation_epsilon,
             .learned_model = model,
         },
     };
@@ -10498,7 +10550,8 @@ LearnedActionSamples learned_priority_action_samples(
         indexed_search_seed(
             config.seed, 0x4556414C55415445ULL, 0),
         learned_evaluation_game_config(
-            model, config.continuation_variant));
+            model, config.continuation_variant,
+            config.value_continuation_epsilon));
     evaluator.state_ = state;
 
     LearnedActionSamples result;
@@ -10614,7 +10667,8 @@ LearnedActionSamples learned_binary_attack_samples(
         indexed_search_seed(
             config.seed, 0x41545441434B4556ULL, 0),
         learned_evaluation_game_config(
-            model, config.continuation_variant));
+            model, config.continuation_variant,
+            config.value_continuation_epsilon));
     evaluator.state_ = state;
 
     LearnedActionSamples result;
@@ -10922,7 +10976,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t player, bool sorcery_actions, TurnPhase phase,
     int consecutive_passes, std::shared_ptr<const LearnedModel> model,
-    std::size_t rollouts_per_action, std::uint64_t seed) {
+    std::size_t rollouts_per_action, std::uint64_t seed,
+    double value_continuation_epsilon) {
     if (!model) {
         throw std::invalid_argument(
             "Learned Value diagnostic requires a frozen model");
@@ -10935,6 +10990,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
         throw std::out_of_range(
             "Learned Value diagnostic pass count must be zero or one");
     }
+    validate_value_continuation_epsilon(
+        value_continuation_epsilon);
 
     GameConfig config;
     config.learned_model = model;
@@ -10946,6 +11003,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .learned_variant =
                 LearnedVariant::ValueSearchChampion,
             .rollouts_per_action = rollouts_per_action,
+            .value_continuation_epsilon =
+                value_continuation_epsilon,
             .learned_model = model,
         },
         BotConfig{
@@ -10953,6 +11012,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .learned_variant =
                 LearnedVariant::ValueSearchChampion,
             .rollouts_per_action = rollouts_per_action,
+            .value_continuation_epsilon =
+                value_continuation_epsilon,
             .learned_model = model,
         },
     };
@@ -11269,6 +11330,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         throw std::invalid_argument(
             "benchmark repetitions must be positive");
     }
+    validate_bot_research_config(challenger);
+    validate_bot_research_config(baseline);
     const bool distinct_explicit_models =
         challenger.kind == BotKind::Learned &&
         baseline.kind == BotKind::Learned &&
@@ -11279,6 +11342,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         (challenger.kind != BotKind::Learned ||
          (challenger.learned_variant ==
               baseline.learned_variant &&
+          challenger.value_continuation_epsilon ==
+              baseline.value_continuation_epsilon &&
           !distinct_explicit_models));
     if (same_policy &&
         challenger.rollouts_per_action ==
