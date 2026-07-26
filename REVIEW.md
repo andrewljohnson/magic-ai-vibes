@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 09:17 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 09:40 PDT — refreshed every review cycle.*
 
 - **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
   current read (pooled 240 games/cell over seeds 4242+7801): **1 of
@@ -147,6 +147,21 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 09:40 PDT (review cycle)
+
+**The audit-common extraction declaration (74b18d3, user-requested
+dedup) is properly scoped: leaf-only mechanical cleanup with a
+before/after stdout-SHA equality contract on all four audit test
+binaries, no scientific surface touched.** The right way to
+refactor frozen instruments. PD0's sealed run queues behind it.
+Lift table: bit-identical, fifty-fifth cycle. All positions hold.
+
+## 2026-07-26 09:32 PDT (review cycle)
+
+**No-change cycle at the notebook level: PD0 smoke control frozen
+(e5a7461), sealed run still pending, working tree active.** Lift
+table: bit-identical, fifty-fourth cycle. All positions hold.
 
 ## 2026-07-26 09:17 PDT (review cycle)
 

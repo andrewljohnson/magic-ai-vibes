@@ -1,4 +1,5 @@
 #include "old_school/target_factorial_audit.hpp"
+#include "old_school/audit_common.hpp"
 
 #include <algorithm>
 #include <array>
@@ -23,10 +24,16 @@
 namespace old_school::target_factorial_audit {
 namespace {
 
-constexpr double kLogClamp = 1.0e-12;
 constexpr double kMaterialBias = 0.05;
 
 using ActorKey = std::pair<std::size_t, std::size_t>;
+using audit_common::bit_identical;
+using audit_common::format_real;
+using audit_common::is_lower_hex_digest;
+using audit_common::require_probability;
+using audit_common::same_strict_sign;
+using audit_common::sanitize_tsv;
+using audit_common::soft_log_loss;
 
 constexpr std::size_t arm_index(TargetArm arm) {
     return static_cast<std::size_t>(arm);
@@ -87,19 +94,6 @@ const std::optional<std::size_t>& future_index(
     throw std::invalid_argument("CT8 target arm is out of range");
 }
 
-bool bit_identical(double left, double right) {
-    return std::bit_cast<std::uint64_t>(left) ==
-           std::bit_cast<std::uint64_t>(right);
-}
-
-void require_probability(double value, std::string_view field) {
-    if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
-        throw std::invalid_argument(
-            std::string(field) +
-            " must be finite and in [0, 1]");
-    }
-}
-
 std::size_t deck_index(DeckId deck) {
     const std::size_t index = static_cast<std::size_t>(deck);
     if (index >= kDeckCount) {
@@ -137,13 +131,6 @@ RootTurnStratum root_stratum(std::size_t turn) {
 
 std::size_t stratum_index(RootTurnStratum stratum) {
     return static_cast<std::size_t>(stratum);
-}
-
-double soft_log_loss(double prediction, double outcome) {
-    prediction =
-        std::clamp(prediction, kLogClamp, 1.0 - kLogClamp);
-    return -outcome * std::log(prediction) -
-           (1.0 - outcome) * std::log(1.0 - prediction);
 }
 
 template <typename Function>
@@ -501,11 +488,6 @@ bool has_material_bias(const TargetMetrics& metrics) {
             metrics.signed_bias.confidence_upper_95 < 0.0);
 }
 
-bool same_sign(double first, double second) {
-    return (first > 0.0 && second > 0.0) ||
-           (first < 0.0 && second < 0.0);
-}
-
 bool no_new_material_bias_in_scope(
     const ScopeMetrics& scope) {
     const auto& metrics =
@@ -516,7 +498,7 @@ bool no_new_material_bias_in_scope(
         metrics.arms[arm_index(TargetArm::CalendarTurn8)];
     return !has_material_bias(treatment) ||
            (has_material_bias(control) &&
-            same_sign(
+            same_strict_sign(
                 treatment.signed_bias.mean,
                 control.signed_bias.mean));
 }
@@ -554,38 +536,6 @@ bool direction_and_shrink(
                actor.arms[treatment].signed_bias.mean) <
                std::abs(
                    actor.arms[control].signed_bias.mean);
-}
-
-bool is_hex_digest(std::string_view value) {
-    return value.size() == 64 &&
-           std::all_of(
-               value.begin(), value.end(),
-               [](char character) {
-                   return (character >= '0' &&
-                           character <= '9') ||
-                          (character >= 'a' &&
-                           character <= 'f');
-               });
-}
-
-std::string format_real(double value) {
-    std::ostringstream output;
-    output.imbue(std::locale::classic());
-    output << std::setprecision(
-                  std::numeric_limits<double>::max_digits10)
-           << value;
-    return output.str();
-}
-
-std::string sanitize_tsv(std::string_view value) {
-    std::string result(value);
-    for (char& character : result) {
-        if (character == '\t' || character == '\n' ||
-            character == '\r') {
-            character = ' ';
-        }
-    }
-    return result;
 }
 
 } // namespace
@@ -749,7 +699,7 @@ ScientificReport make_scientific_report(
              &capture.treatment_target_hash,
              &capture.calendar_turn8_target_hash,
              &capture.scoring_hash}) {
-        if (!is_hex_digest(*hash)) {
+        if (!is_lower_hex_digest(*hash)) {
             throw std::invalid_argument(
                 "CT8 capture contains a malformed digest");
         }

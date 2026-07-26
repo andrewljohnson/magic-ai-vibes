@@ -8103,6 +8103,7 @@ old_school::GameState pass_dominance_braingeyser_state() {
     state.players[0].lands = {
         {.card = old_school::CardId::Island, .tapped = false},
         {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
     };
     state.players[1].hand = {
         old_school::CardId::Mountain,
@@ -8112,6 +8113,9 @@ old_school::GameState pass_dominance_braingeyser_state() {
     remove_fixture_card(
         state.players[0].library,
         old_school::CardId::Braingeyser);
+    remove_fixture_card(
+        state.players[0].library,
+        old_school::CardId::Island);
     remove_fixture_card(
         state.players[0].library,
         old_school::CardId::Island);

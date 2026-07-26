@@ -1,4 +1,5 @@
 #include "old_school/turn_alignment_audit.hpp"
+#include "old_school/audit_common.hpp"
 
 #include <algorithm>
 #include <array>
@@ -26,125 +27,25 @@
 namespace old_school::turn_alignment_audit {
 namespace {
 
-constexpr double kLogClamp = 1.0e-12;
 constexpr double kMaterialBias = 0.05;
 
 using ActorKey = std::pair<std::size_t, std::size_t>;
 
-class ContentHash {
-  public:
-    void add_byte(std::uint8_t byte) {
-        static constexpr std::array<std::uint64_t, 4> salt = {
-            0x9e3779b97f4a7c15ULL,
-            0xd1b54a32d192ed03ULL,
-            0x94d049bb133111ebULL,
-            0xbf58476d1ce4e5b9ULL,
-        };
-        for (std::size_t index = 0; index < state_.size();
-             ++index) {
-            state_[index] = std::rotl(
-                state_[index] ^
-                    (static_cast<std::uint64_t>(byte) +
-                     salt[index]),
-                static_cast<int>(11 + 8 * index));
-            state_[index] =
-                state_[index] *
-                    (salt[(index + 1) % salt.size()] | 1ULL) +
-                count_;
-        }
-        ++count_;
-    }
-
-    void add_u64(std::uint64_t value) {
-        for (std::size_t byte = 0; byte < 8; ++byte) {
-            add_byte(static_cast<std::uint8_t>(
-                value >> (8 * byte)));
-        }
-    }
-
-    void add_size(std::size_t value) {
-        add_u64(static_cast<std::uint64_t>(value));
-    }
-
-    void add_double(double value) {
-        add_u64(std::bit_cast<std::uint64_t>(value));
-    }
-
-    void add_text(std::string_view value) {
-        add_size(value.size());
-        for (const unsigned char byte : value) {
-            add_byte(byte);
-        }
-    }
-
-    std::string finish() const {
-        static constexpr char hex[] = "0123456789abcdef";
-        std::array<std::uint64_t, 4> digest = state_;
-        for (std::size_t index = 0; index < digest.size();
-             ++index) {
-            digest[index] ^=
-                count_ +
-                0x9e3779b97f4a7c15ULL *
-                    static_cast<std::uint64_t>(index + 1);
-            digest[index] ^= digest[index] >> 30;
-            digest[index] *= 0xbf58476d1ce4e5b9ULL;
-            digest[index] ^= digest[index] >> 27;
-            digest[index] *= 0x94d049bb133111ebULL;
-            digest[index] ^= digest[index] >> 31;
-        }
-        std::string output(64, '0');
-        for (std::size_t word = 0; word < digest.size();
-             ++word) {
-            for (std::size_t nibble = 0; nibble < 16;
-                 ++nibble) {
-                const auto shift =
-                    static_cast<unsigned int>(60 - 4 * nibble);
-                output[word * 16 + nibble] =
-                    hex[(digest[word] >> shift) & 0xfULL];
-            }
-        }
-        return output;
-    }
-
-  private:
-    std::array<std::uint64_t, 4> state_ = {
-        0x6a09e667f3bcc909ULL,
-        0xbb67ae8584caa73bULL,
-        0x3c6ef372fe94f82bULL,
-        0xa54ff53a5f1d36f1ULL,
-    };
-    std::uint64_t count_ = 0;
-};
+using audit_common::bit_identical;
+using audit_common::ContentHash;
+using audit_common::format_real;
+using audit_common::hash_observation;
+using audit_common::hash_optional_index;
+using audit_common::is_lower_hex_digest;
+using audit_common::require_probability;
+using audit_common::same_strict_sign;
+using audit_common::sanitize_tsv;
+using audit_common::soft_log_loss;
 
 void hash_task(ContentHash& hash, const AuditTask& task) {
-    hash.add_size(task.physical_game);
-    hash.add_size(task.block);
-    hash.add_size(task.scheduled.schedule_index);
-    hash.add_size(task.scheduled.pairing_index);
-    hash.add_size(static_cast<std::size_t>(
-        task.scheduled.seat_decks[0]));
-    hash.add_size(static_cast<std::size_t>(
-        task.scheduled.seat_decks[1]));
-    hash.add_size(task.scheduled.starting_player);
-    hash.add_u64(task.scheduled.seed);
-}
-
-void hash_optional_index(
-    ContentHash& hash,
-    const std::optional<std::size_t>& value) {
-    hash.add_u64(value.has_value() ? 1U : 0U);
-    if (value.has_value()) {
-        hash.add_size(*value);
-    }
-}
-
-void hash_observation(
-    ContentHash& hash,
-    std::span<const double> observation) {
-    hash.add_size(observation.size());
-    for (const double value : observation) {
-        hash.add_double(value);
-    }
+    audit_common::hash_scheduled_task(
+        hash, task.physical_game, task.block,
+        task.scheduled);
 }
 
 void hash_record(ContentHash& hash, const AuditRecord& record) {
@@ -164,25 +65,6 @@ void hash_record(ContentHash& hash, const AuditRecord& record) {
     hash_optional_index(hash, record.treatment_future_index);
     hash_optional_index(hash, record.control_turn_distance);
     hash_optional_index(hash, record.treatment_turn_distance);
-}
-
-bool bit_identical(double left, double right) {
-    return std::bit_cast<std::uint64_t>(left) ==
-           std::bit_cast<std::uint64_t>(right);
-}
-
-bool bit_identical(
-    std::span<const double> left,
-    std::span<const double> right) {
-    if (left.size() != right.size()) {
-        return false;
-    }
-    for (std::size_t index = 0; index < left.size(); ++index) {
-        if (!bit_identical(left[index], right[index])) {
-            return false;
-        }
-    }
-    return true;
 }
 
 struct HiddenClone {
@@ -282,21 +164,6 @@ std::vector<CardId> cards_for_deck(DeckId deck) {
         return ru_aggro_deck();
     }
     throw std::invalid_argument("TA4 deck is out of range");
-}
-
-void require_probability(double value, std::string_view field) {
-    if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
-        throw std::invalid_argument(
-            std::string(field) +
-            " must be finite and in [0, 1]");
-    }
-}
-
-double soft_log_loss(double prediction, double target) {
-    prediction =
-        std::clamp(prediction, kLogClamp, 1.0 - kLogClamp);
-    return -target * std::log(prediction) -
-           (1.0 - target) * std::log(1.0 - prediction);
 }
 
 RootTurnStratum root_stratum(std::size_t turn) {
@@ -588,20 +455,6 @@ bool has_material_bias(const TargetMetrics& metrics) {
             metrics.signed_bias.confidence_upper_95 < 0.0);
 }
 
-bool same_sign(double first, double second) {
-    return (first > 0.0 && second > 0.0) ||
-           (first < 0.0 && second < 0.0);
-}
-
-std::string format_real(double value) {
-    std::ostringstream output;
-    output.imbue(std::locale::classic());
-    output << std::setprecision(
-                  std::numeric_limits<double>::max_digits10)
-           << value;
-    return output.str();
-}
-
 } // namespace
 
 std::vector<AuditTask> audit_schedule(
@@ -822,7 +675,7 @@ GateReport evaluate_gate(const ScientificReport& report) {
             has_material_bias(metrics.treatment);
         const bool inherited =
             has_material_bias(metrics.control) &&
-            same_sign(
+            same_strict_sign(
                 metrics.treatment.signed_bias.mean,
                 metrics.control.signed_bias.mean);
         if (treatment_material && !inherited) {
@@ -1539,29 +1392,6 @@ TaskCapture run_task(
     return output;
 }
 
-std::string sanitize_tsv(std::string_view value) {
-    std::string result(value);
-    for (char& character : result) {
-        if (character == '\t' || character == '\n' ||
-            character == '\r') {
-            character = ' ';
-        }
-    }
-    return result;
-}
-
-bool is_hex_digest(std::string_view value) {
-    return value.size() == 64 &&
-           std::all_of(
-               value.begin(), value.end(),
-               [](char character) {
-                   return (character >= '0' &&
-                           character <= '9') ||
-                          (character >= 'a' &&
-                           character <= 'f');
-               });
-}
-
 } // namespace
 
 Capture collect(
@@ -1762,7 +1592,7 @@ ScientificReport make_scientific_report(
              &capture.control_target_hash,
              &capture.treatment_target_hash,
              &capture.scoring_hash}) {
-        if (!is_hex_digest(*hash)) {
+        if (!is_lower_hex_digest(*hash)) {
             throw std::invalid_argument(
                 "TA4 capture contains a malformed digest");
         }

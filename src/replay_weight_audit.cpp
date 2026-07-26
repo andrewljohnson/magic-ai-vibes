@@ -1,4 +1,5 @@
 #include "old_school/replay_weight_audit.hpp"
+#include "old_school/audit_common.hpp"
 
 #include <algorithm>
 #include <array>
@@ -26,7 +27,6 @@
 namespace old_school::replay_weight_audit {
 namespace {
 
-constexpr double kLogClamp = 1.0e-12;
 constexpr double kMaterialBias = 0.05;
 constexpr double kBiasSafetyBand = 0.010;
 constexpr double kEarlyGreenEffect = -0.005;
@@ -39,117 +39,15 @@ using ActorKey = std::pair<std::size_t, std::size_t>;
 using ActorTurnKey =
     std::tuple<std::size_t, std::size_t, std::size_t>;
 
-class ContentHash {
-  public:
-    void add_byte(std::uint8_t byte) {
-        static constexpr std::array<std::uint64_t, 4> salt = {
-            0x9e3779b97f4a7c15ULL,
-            0xd1b54a32d192ed03ULL,
-            0x94d049bb133111ebULL,
-            0xbf58476d1ce4e5b9ULL,
-        };
-        for (std::size_t index = 0; index < state_.size();
-             ++index) {
-            state_[index] = std::rotl(
-                state_[index] ^
-                    (static_cast<std::uint64_t>(byte) +
-                     salt[index]),
-                static_cast<int>(11 + 8 * index));
-            state_[index] =
-                state_[index] *
-                    (salt[(index + 1) % salt.size()] | 1ULL) +
-                count_;
-        }
-        ++count_;
-    }
-
-    void add_u64(std::uint64_t value) {
-        for (std::size_t byte = 0; byte < 8; ++byte) {
-            add_byte(static_cast<std::uint8_t>(
-                value >> (8 * byte)));
-        }
-    }
-
-    void add_size(std::size_t value) {
-        add_u64(static_cast<std::uint64_t>(value));
-    }
-
-    void add_double(double value) {
-        add_u64(std::bit_cast<std::uint64_t>(value));
-    }
-
-    void add_text(std::string_view value) {
-        add_size(value.size());
-        for (const unsigned char byte : value) {
-            add_byte(byte);
-        }
-    }
-
-    std::string finish() const {
-        static constexpr char hex[] = "0123456789abcdef";
-        std::array<std::uint64_t, 4> digest = state_;
-        for (std::size_t index = 0; index < digest.size();
-             ++index) {
-            digest[index] ^=
-                count_ +
-                0x9e3779b97f4a7c15ULL *
-                    static_cast<std::uint64_t>(index + 1);
-            digest[index] ^= digest[index] >> 30;
-            digest[index] *= 0xbf58476d1ce4e5b9ULL;
-            digest[index] ^= digest[index] >> 27;
-            digest[index] *= 0x94d049bb133111ebULL;
-            digest[index] ^= digest[index] >> 31;
-        }
-        std::string output(64, '0');
-        for (std::size_t word = 0; word < digest.size();
-             ++word) {
-            for (std::size_t nibble = 0; nibble < 16;
-                 ++nibble) {
-                const auto shift =
-                    static_cast<unsigned int>(60 - 4 * nibble);
-                output[word * 16 + nibble] =
-                    hex[(digest[word] >> shift) & 0xfULL];
-            }
-        }
-        return output;
-    }
-
-  private:
-    std::array<std::uint64_t, 4> state_ = {
-        0x6a09e667f3bcc909ULL,
-        0xbb67ae8584caa73bULL,
-        0x3c6ef372fe94f82bULL,
-        0xa54ff53a5f1d36f1ULL,
-    };
-    std::uint64_t count_ = 0;
-};
-
-bool bit_identical(double left, double right) {
-    return std::bit_cast<std::uint64_t>(left) ==
-           std::bit_cast<std::uint64_t>(right);
-}
-
-bool bit_identical(
-    std::span<const double> left,
-    std::span<const double> right) {
-    if (left.size() != right.size()) {
-        return false;
-    }
-    for (std::size_t index = 0; index < left.size(); ++index) {
-        if (!bit_identical(left[index], right[index])) {
-            return false;
-        }
-    }
-    return true;
-}
-
-void require_probability(double value, std::string_view field) {
-    if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
-        throw std::invalid_argument(
-            std::string(field) +
-            " must be finite and in [0, 1]");
-    }
-}
+using audit_common::bit_identical;
+using audit_common::ContentHash;
+using audit_common::hash_observation;
+using audit_common::hash_optional_index;
+using audit_common::is_lower_hex_digest;
+using audit_common::mass_tolerance;
+using audit_common::require_probability;
+using audit_common::same_strict_sign;
+using audit_common::soft_log_loss;
 
 std::size_t deck_index(DeckId deck) {
     const std::size_t index = static_cast<std::size_t>(deck);
@@ -193,18 +91,9 @@ std::vector<CardId> cards_for_deck(DeckId deck) {
 }
 
 void hash_task(ContentHash& hash, const AuditTask& task) {
-    hash.add_size(task.physical_game);
-    hash.add_size(task.block);
-    hash.add_size(task.scheduled.schedule_index);
-    hash.add_size(task.scheduled.pairing_index);
-    hash.add_size(
-        static_cast<std::size_t>(
-            task.scheduled.seat_decks[0]));
-    hash.add_size(
-        static_cast<std::size_t>(
-            task.scheduled.seat_decks[1]));
-    hash.add_size(task.scheduled.starting_player);
-    hash.add_u64(task.scheduled.seed);
+    audit_common::hash_scheduled_task(
+        hash, task.physical_game, task.block,
+        task.scheduled);
 }
 
 std::string schedule_digest(
@@ -215,24 +104,6 @@ std::string schedule_digest(
         hash_task(hash, task);
     }
     return hash.finish();
-}
-
-void hash_optional_index(
-    ContentHash& hash,
-    const std::optional<std::size_t>& value) {
-    hash.add_u64(value.has_value() ? 1U : 0U);
-    if (value.has_value()) {
-        hash.add_size(*value);
-    }
-}
-
-void hash_observation(
-    ContentHash& hash,
-    std::span<const double> observation) {
-    hash.add_size(observation.size());
-    for (const double value : observation) {
-        hash.add_double(value);
-    }
 }
 
 void hash_record(ContentHash& hash, const AuditRecord& record) {
@@ -281,11 +152,6 @@ DistributionSummary summarize_values(
     result.mean = static_cast<double>(
         sum / static_cast<long double>(values.size()));
     return result;
-}
-
-double mass_tolerance(double expected) {
-    return 64.0 * std::numeric_limits<double>::epsilon() *
-           std::max(1.0, std::abs(expected));
 }
 
 WeightDiagnostics describe_weights(
@@ -427,13 +293,6 @@ RootTurnStratum root_stratum(std::size_t turn) {
 
 std::size_t stratum_index(RootTurnStratum value) {
     return static_cast<std::size_t>(value);
-}
-
-double soft_log_loss(double prediction, double target) {
-    prediction =
-        std::clamp(prediction, kLogClamp, 1.0 - kLogClamp);
-    return -target * std::log(prediction) -
-           (1.0 - target) * std::log(1.0 - prediction);
 }
 
 ClusteredEstimate estimate_from_cluster_scores(
@@ -1062,11 +921,6 @@ TaskCapture run_task(
     return output;
 }
 
-bool same_sign(double left, double right) {
-    return (left > 0.0 && right > 0.0) ||
-           (left < 0.0 && right < 0.0);
-}
-
 bool has_material_bias(const ClusteredEstimate& estimate) {
     return std::abs(estimate.mean) >= kMaterialBias &&
            (estimate.confidence_lower_95 > 0.0 ||
@@ -1078,15 +932,7 @@ std::string bool_text(bool value) {
 }
 
 void require_hash(std::string_view hash, std::string_view field) {
-    if (hash.size() != 64 ||
-        !std::all_of(
-            hash.begin(), hash.end(),
-            [](char character) {
-                return (character >= '0' &&
-                        character <= '9') ||
-                       (character >= 'a' &&
-                        character <= 'f');
-            })) {
+    if (!is_lower_hex_digest(hash)) {
         throw std::invalid_argument(
             std::string("RB0 malformed ") +
             std::string(field));

@@ -147,6 +147,20 @@ case $help_output in
         ;;
 esac
 case $help_output in
+    *"--diagnose-value-pass-dominance --seed 202607260947"*\
+"--value-pass-dominance"*\
+"Challenger-only exact Pass-dominance filter"*\
+"Exclusive PD0 mechanism check at seed 202607260947"*\
+"in-memory G0 T800/S424242/K2"*\
+"load-only exact C16 T800/S424242/K8"*\
+"accepts no other options"*\
+"exits 0/1/2 for pass/reject/infrastructure"*) ;;
+    *)
+        printf 'PD0 Pass-dominance contract missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+case $help_output in
     *"--diagnose-value-context"*\
 "Audit phase/pass context omitted from the current Value observation"*\
 "accepts no other options"*) ;;
@@ -325,6 +339,25 @@ expect_error "--diagnose-value-context accepts no other options" \
     --diagnose-value-context --seed 1
 expect_error "cannot be combined" \
     --diagnose-value-context --benchmark
+expect_error "--diagnose-value-pass-dominance accepts only --seed 202607260947" \
+    --diagnose-value-pass-dominance --seed 1
+expect_error "--diagnose-value-pass-dominance accepts only --seed 202607260947" \
+    --diagnose-value-pass-dominance --help
+expect_error "--diagnose-value-pass-dominance accepts only --seed 202607260947" \
+    --diagnose-value-pass-dominance --seed 202607260947 --games 1
+expect_error "reserved PD0 diagnostic seed 202607260947 may be used only by --diagnose-value-pass-dominance" \
+    --games 1 --seed 202607260947 --bots random
+expect_error "reserved PD0 diagnostic seed 202607260947 may be used only by --diagnose-value-pass-dominance" \
+    --games 1 --seed 1 --bots random --train-seed 202607260947
+expect_error "--value-pass-dominance requires --benchmark with a Learned Value challenger" \
+    --games 1 --seed 1 --value-pass-dominance
+expect_error "reserved PD0 smoke seed 202607260948 may be used only by the exact 240-game C16/K8-vs-C16/K8 paired control or challenger-only treatment" \
+    --benchmark --games 4 --seed 202607260948 \
+    --train-seed 424242 --train-games 800 \
+    --challenger learned-value-c16 --baseline learned-value-c16 \
+    --learned-rollouts 8 --value-continuation-epsilon 0
+expect_error "reserved PD0 smoke seed 202607260948 may be used only by the exact 240-game C16/K8-vs-C16/K8 paired control or challenger-only treatment" \
+    --games 1 --seed 1 --bots random --train-seed 202607260948
 expect_error "requires a positive --learned-generations N" \
     --diagnose-force-spike-teacher
 expect_error "accepts only --train-games, --train-seed, and --learned-generations" \

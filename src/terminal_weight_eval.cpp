@@ -1,4 +1,5 @@
 #include "old_school/terminal_weight_eval.hpp"
+#include "old_school/audit_common.hpp"
 #include "old_school/probe_runner.hpp"
 
 #include <algorithm>
@@ -32,9 +33,15 @@ constexpr std::size_t kControlIndex =
     static_cast<std::size_t>(CriticModel::TW50);
 constexpr std::size_t kTreatmentIndex =
     static_cast<std::size_t>(CriticModel::TW75);
-constexpr double kLogLossClamp = 1.0e-12;
 constexpr double kDeckLossGuard = 0.01;
 constexpr double kMaterialBias = 0.05;
+
+using audit_common::ContentHash;
+using audit_common::format_real;
+using audit_common::require_probability;
+using audit_common::same_strict_sign;
+using audit_common::sanitize_tsv;
+using audit_common::soft_log_loss;
 
 std::size_t deck_index(DeckId deck) {
     const std::size_t index = static_cast<std::size_t>(deck);
@@ -75,85 +82,6 @@ std::string_view critic_model_name(std::size_t model) {
         "terminal-weight critic model index is invalid");
 }
 
-std::string format_real(double value) {
-    std::ostringstream output;
-    output.imbue(std::locale::classic());
-    output << std::setprecision(
-                  std::numeric_limits<double>::max_digits10)
-           << value;
-    return output.str();
-}
-
-std::string sanitize_tsv(std::string_view value) {
-    std::string result(value);
-    for (char& character : result) {
-        if (character == '\t' || character == '\n' ||
-            character == '\r') {
-            character = ' ';
-        }
-    }
-    return result;
-}
-
-class ContentHash {
-  public:
-    void add(std::uint8_t byte) {
-        static constexpr std::array<std::uint64_t, 4> kSalt = {
-            0x9e3779b97f4a7c15ULL,
-            0xd1b54a32d192ed03ULL,
-            0x94d049bb133111ebULL,
-            0xbf58476d1ce4e5b9ULL,
-        };
-        for (std::size_t index = 0; index < state_.size(); ++index) {
-            state_[index] = std::rotl(
-                state_[index] ^
-                    (static_cast<std::uint64_t>(byte) +
-                     kSalt[index]),
-                static_cast<int>(11 + 8 * index));
-            state_[index] =
-                state_[index] *
-                    (kSalt[(index + 1) % kSalt.size()] | 1ULL) +
-                count_;
-        }
-        ++count_;
-    }
-
-    std::string finish() const {
-        static constexpr char kHex[] = "0123456789abcdef";
-        std::array<std::uint64_t, 4> digest = state_;
-        for (std::size_t index = 0; index < digest.size(); ++index) {
-            digest[index] ^= count_ +
-                             0x9e3779b97f4a7c15ULL *
-                                 static_cast<std::uint64_t>(
-                                     index + 1);
-            digest[index] ^= digest[index] >> 30;
-            digest[index] *= 0xbf58476d1ce4e5b9ULL;
-            digest[index] ^= digest[index] >> 27;
-            digest[index] *= 0x94d049bb133111ebULL;
-            digest[index] ^= digest[index] >> 31;
-        }
-        std::string output(64, '0');
-        for (std::size_t word = 0; word < digest.size(); ++word) {
-            for (std::size_t nibble = 0; nibble < 16; ++nibble) {
-                const auto shift =
-                    static_cast<unsigned int>(60 - 4 * nibble);
-                output[word * 16 + nibble] =
-                    kHex[(digest[word] >> shift) & 0xfULL];
-            }
-        }
-        return output;
-    }
-
-  private:
-    std::array<std::uint64_t, 4> state_ = {
-        0x6a09e667f3bcc909ULL,
-        0xbb67ae8584caa73bULL,
-        0x3c6ef372fe94f82bULL,
-        0xa54ff53a5f1d36f1ULL,
-    };
-    std::uint64_t count_ = 0;
-};
-
 ArtifactSnapshot snapshot_metadata(const std::string& path) {
     std::error_code error;
     const std::uintmax_t size =
@@ -177,14 +105,6 @@ ArtifactSnapshot snapshot_metadata(const std::string& path) {
             static_cast<std::int64_t>(
                 time.time_since_epoch().count()),
     };
-}
-
-void require_probability(double value, std::string_view field) {
-    if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
-        throw std::invalid_argument(
-            std::string(field) +
-            " must be finite and in [0, 1]");
-    }
 }
 
 std::vector<const HoldoutRecord*> select_records(
@@ -302,14 +222,9 @@ HoldoutScopeMetrics score_scope(
             });
         metrics.soft_log_loss = estimate_records(
             records, [model](const HoldoutRecord& record) {
-                const double prediction = std::clamp(
+                return soft_log_loss(
                     record.predictions[model],
-                    kLogLossClamp, 1.0 - kLogLossClamp);
-                const double target =
-                    record.discounted_terminal_target;
-                return -target * std::log(prediction) -
-                       (1.0 - target) *
-                           std::log(1.0 - prediction);
+                    record.discounted_terminal_target);
             });
         metrics.signed_bias = estimate_records(
             records, [model](const HoldoutRecord& record) {
@@ -362,16 +277,8 @@ HoldoutScopeMetrics score_scope(
                     record.discounted_terminal_target;
                 const auto loss =
                     [target](double raw_prediction) {
-                        const double prediction =
-                            std::clamp(
-                                raw_prediction,
-                                kLogLossClamp,
-                                1.0 - kLogLossClamp);
-                        return -target *
-                                   std::log(prediction) -
-                               (1.0 - target) *
-                                   std::log(
-                                       1.0 - prediction);
+                        return soft_log_loss(
+                            raw_prediction, target);
                     };
                 return loss(
                            record.predictions[
@@ -392,8 +299,7 @@ bool same_sign_material_bias(
     const ClusteredEstimate& treatment,
     const ClusteredEstimate& control) {
     return material_bias(control) &&
-           ((treatment.mean > 0.0 && control.mean > 0.0) ||
-            (treatment.mean < 0.0 && control.mean < 0.0));
+           same_strict_sign(treatment.mean, control.mean);
 }
 
 void append_failure(
@@ -770,7 +676,7 @@ ArtifactSnapshot snapshot_artifact(const std::string& path) {
         }
         bytes_read += static_cast<std::uintmax_t>(count);
         for (std::streamsize index = 0; index < count; ++index) {
-            hash.add(static_cast<std::uint8_t>(
+            hash.add_byte(static_cast<std::uint8_t>(
                 static_cast<unsigned char>(buffer[
                     static_cast<std::size_t>(index)])));
         }

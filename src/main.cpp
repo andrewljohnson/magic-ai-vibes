@@ -290,6 +290,10 @@ void print_help(std::string_view executable) {
            "the deployed root remains greedy (default: 0)\n"
         << "  --value-pass-dominance  Challenger-only exact "
            "Pass-dominance filter for Learned Value Priority choices\n"
+        << "  --diagnose-value-pass-dominance  Exclusive PD0 mechanism "
+           "check at seed 202607260947: in-memory G0 T800/S424242/K2 "
+           "and load-only exact C16 T800/S424242/K8; accepts no other "
+           "options and exits 0/1/2 for pass/reject/infrastructure\n"
         << "  --train-games N  Training games for the selected learned "
            "model "
            "(default: 800)\n"
@@ -4528,6 +4532,7 @@ Pd0Fixture pd0_braingeyser_fixture() {
     fixture.state.players[0].lands = {
         {.card = old_school::CardId::Island, .tapped = false},
         {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
     };
     fixture.state.players[1].hand = {
         old_school::CardId::Mountain,
@@ -5012,6 +5017,12 @@ int run_pd0_diagnostic(std::uint64_t seed) {
     std::cout << "  Exact frozen C16 fingerprint: "
               << (c16_identity ? "PASS" : "FAIL")
               << " (" << c16_fingerprint << ")\n";
+    if (!c16_identity) {
+        std::cout
+            << "\nPD0 mechanism verdict: INFRASTRUCTURE "
+               "(frozen C16 identity mismatch)\n";
+        return 2;
+    }
 
     const Pd0Fixture fixture = pd0_braingeyser_fixture();
     const bool g0_gate = print_pd0_model_row(
@@ -5035,22 +5046,44 @@ int main(int argc, char** argv) {
             "--audit-calendar-eight-targets";
         constexpr std::string_view replay_weight_audit_option =
             "--audit-replay-weights";
+        constexpr std::string_view pd0_diagnostic_option =
+            "--diagnose-value-pass-dominance";
+        constexpr std::string_view pd0_diagnostic_seed_text =
+            "202607260947";
+        constexpr std::string_view pd0_smoke_seed_text =
+            "202607260948";
         bool calendar_turn_audit_requested = false;
         bool calendar_eight_audit_requested = false;
         bool replay_weight_audit_requested = false;
+        bool pd0_diagnostic_requested = false;
+        bool pd0_diagnostic_seed_requested = false;
+        bool pd0_smoke_seed_requested = false;
         for (int argument = 1; argument < argc; ++argument) {
+            const std::string_view raw_argument = argv[argument];
             calendar_turn_audit_requested =
                 calendar_turn_audit_requested ||
-                std::string_view(argv[argument]) ==
-                    calendar_turn_audit_option;
+                raw_argument == calendar_turn_audit_option;
             calendar_eight_audit_requested =
                 calendar_eight_audit_requested ||
-                std::string_view(argv[argument]) ==
-                    calendar_eight_audit_option;
+                raw_argument == calendar_eight_audit_option;
             replay_weight_audit_requested =
                 replay_weight_audit_requested ||
-                std::string_view(argv[argument]) ==
-                    replay_weight_audit_option;
+                raw_argument == replay_weight_audit_option;
+            pd0_diagnostic_requested =
+                pd0_diagnostic_requested ||
+                raw_argument == pd0_diagnostic_option;
+            if ((raw_argument == "--seed" ||
+                 raw_argument == "--train-seed") &&
+                argument + 1 < argc) {
+                const std::string_view raw_seed =
+                    argv[argument + 1];
+                pd0_diagnostic_seed_requested =
+                    pd0_diagnostic_seed_requested ||
+                    raw_seed == pd0_diagnostic_seed_text;
+                pd0_smoke_seed_requested =
+                    pd0_smoke_seed_requested ||
+                    raw_seed == pd0_smoke_seed_text;
+            }
         }
         if (calendar_turn_audit_requested &&
             (argc != 2 ||
@@ -5170,6 +5203,27 @@ int main(int argc, char** argv) {
         for (int argument = 1; argument < argc; ++argument) {
             const std::string_view option = argv[argument];
             if (option == "--help" || option == "-h") {
+                if (pd0_diagnostic_requested) {
+                    throw std::invalid_argument(
+                        "--diagnose-value-pass-dominance accepts "
+                        "only --seed " +
+                        std::string(pd0_diagnostic_seed_text));
+                }
+                if (pd0_diagnostic_seed_requested) {
+                    throw std::invalid_argument(
+                        "reserved PD0 diagnostic seed " +
+                        std::string(pd0_diagnostic_seed_text) +
+                        " may be used only by "
+                        "--diagnose-value-pass-dominance");
+                }
+                if (pd0_smoke_seed_requested) {
+                    throw std::invalid_argument(
+                        "reserved PD0 smoke seed " +
+                        std::string(pd0_smoke_seed_text) +
+                        " may be used only by the exact 240-game "
+                        "C16/K8-vs-C16/K8 paired control or "
+                        "challenger-only treatment");
+                }
                 print_help(argv[0]);
                 return 0;
             }
@@ -5659,7 +5713,10 @@ int main(int argc, char** argv) {
                 "--seed 202607260947");
         }
         if (!diagnose_value_pass_dominance &&
-            seed_option_used && seed == pd0_diagnostic_seed) {
+            ((seed_option_used &&
+              seed == pd0_diagnostic_seed) ||
+             (training_seed_option_used &&
+              training_seed == pd0_diagnostic_seed))) {
             throw std::invalid_argument(
                 "reserved PD0 diagnostic seed 202607260947 may be "
                 "used only by --diagnose-value-pass-dominance");
@@ -5994,9 +6051,14 @@ int main(int argc, char** argv) {
                 "--value-pass-dominance requires --benchmark "
                 "with a Learned Value challenger");
         }
-        if (seed_option_used && seed == pd0_smoke_seed &&
+        const bool pd0_smoke_seed_used =
+            (seed_option_used && seed == pd0_smoke_seed) ||
+            (training_seed_option_used &&
+             training_seed == pd0_smoke_seed);
+        if (pd0_smoke_seed_used &&
             !(benchmark && is_pd0_c16(challenger) &&
               is_pd0_c16(baseline) &&
+              seed_option_used && seed == pd0_smoke_seed &&
               games_were_set && games == 4 &&
               training_games == 800 &&
               training_seed == 424242 &&
