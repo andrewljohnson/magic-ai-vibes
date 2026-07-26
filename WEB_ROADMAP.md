@@ -41,9 +41,9 @@ rendered checks at both target viewports.
 
 ### P1 — Complete, unambiguous game flow
 
-Status: **native targeted drag green at both target viewports; adapter journey,
-real-engine smoke, full rendered journey, and setup horizontal fit green at
-1280 × 720; 1440 × 900 full-journey repetition pending**
+Status: **complete — native targeted drag and the full rendered journey are
+green at both target viewports; adapter journey, real-engine smoke, and setup
+horizontal fit are also green**
 
 Acceptance criteria:
 
@@ -1243,3 +1243,26 @@ For each web issue:
   `make test-web-ui` 75/75 and `make test-web-rendered` 4/4. The first
   sandboxed rendered invocation was infrastructure-only `listen EPERM`;
   rerunning the identical target with localhost permission passed.
+- 2026-07-26 — Closed P1 with the pending real-browser full-journey repetition
+  at 1440 × 900 on the deterministic journey fixture (`PORT=4186 make
+  web-journey`). `Bluff mode` began unchecked. Double-clicking Forest logged
+  `You: Play Forest`; double-clicking Grizzly Bears auto-passed the empty
+  timing windows and reached turn-four attackers. Selecting permanent `#101`
+  and `Attack with 1` led to two opposing blockers. Moving `#201` later made
+  the visible damage order `#202`, then `#201`; confirming it advanced to the
+  opponent attack. Selecting blocker `#102`, then attacker `#201`, and
+  confirming the block produced the focused `You won` dialog with the
+  empty-library reason, 5 turns, and 13 public events. `Replay seed` returned
+  a fresh session to the exact turn-three First Main opening decision with a
+  seven-card hand, two playable cards, and the same seed/config; the Chronicle
+  reset from 13 entries to one. The opponent remained a seven-card hidden fan
+  with no identities. Viewport/body/document widths were
+  1440/1440/1440 with no horizontal overflow. Every fixed region remained
+  visible: Chronicle `{x:0,y:64,w:238,h:836}`, main
+  `{x:238,y:64,w:1202,h:836}`, opponent
+  `{x:258,y:120,w:1162,h:264}`, human
+  `{x:258,y:408,w:1162,h:264}`, hand
+  `{x:238,y:680,w:1202,h:142}`, decision dock
+  `{x:238,y:822,w:1202,h:78}`, and hidden-hand fan
+  `{x:893,y:117,w:103,h:43}`. Supporting gates on the same tree were
+  `make test-web-ui` 75/75 and `make test-web-rendered` 4/4.
