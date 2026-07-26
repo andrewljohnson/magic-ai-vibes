@@ -374,7 +374,7 @@ input:focus-visible {
 
 .game-shell {
   --player-hand-height: 142px;
-  --player-decision-height: 122px;
+  --player-decision-height: 140px;
   --player-console-height: var(--player-hand-height);
   height: 100vh;
   display: flex;
@@ -1283,6 +1283,20 @@ input:focus-visible {
   transform: none;
 }
 
+.hand-card-wrap.is-playable .card-face {
+  cursor: grab;
+}
+
+.hand-card-wrap.is-playable .card-face:active {
+  cursor: grabbing;
+}
+
+.hand-card-wrap.is-dragging {
+  z-index: 12;
+  opacity: 0.42;
+  transform: translateY(-5px) scale(1.04);
+}
+
 .hand-card-wrap.is-playable::after {
   content: "PLAY";
   position: absolute;
@@ -1459,6 +1473,7 @@ input:focus-visible {
   max-height: none;
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   border: 0;
   border-radius: 0;
   background: rgba(13, 19, 17, 0.96);
@@ -1506,6 +1521,7 @@ input:focus-visible {
 .decision-body {
   min-width: 0;
   min-height: 0;
+  height: 100%;
   max-height: none;
   overflow: auto;
   padding: 13px;
@@ -1589,10 +1605,38 @@ input:focus-visible {
     transform 140ms ease;
 }
 
+.action-card.no-card {
+  grid-template-columns: 22px minmax(0, 1fr);
+}
+
 .action-card:hover:not(:disabled) {
   border-color: rgba(241, 211, 138, 0.44);
   background: rgba(200, 167, 102, 0.07);
   transform: translateY(-2px);
+}
+
+.action-card.is-drop-target {
+  border: 2px solid var(--gold-bright);
+  background:
+    linear-gradient(rgba(241, 211, 138, 0.16), rgba(241, 211, 138, 0.08)),
+    rgba(255, 255, 255, 0.03);
+  box-shadow:
+    0 0 0 3px rgba(241, 211, 138, 0.16),
+    inset 0 0 20px rgba(241, 211, 138, 0.08);
+}
+
+.action-card.is-drop-target .action-copy {
+  padding-bottom: 16px;
+}
+
+.drop-cue {
+  position: absolute;
+  right: 8px;
+  bottom: 5px;
+  color: var(--gold-bright);
+  font-size: var(--type-floor);
+  font-weight: 800;
+  letter-spacing: 0.1em;
 }
 
 .action-card:disabled {
@@ -1633,7 +1677,7 @@ input:focus-visible {
 
 .action-copy strong {
   font-family: Georgia, serif;
-  font-size: 11px;
+  font-size: var(--type-label);
   font-weight: 400;
   line-height: 1.2;
 }
@@ -1641,6 +1685,7 @@ input:focus-visible {
 .action-copy span {
   color: var(--faint);
   font-size: var(--type-floor);
+  line-height: 1.25;
   text-transform: capitalize;
 }
 
@@ -2193,6 +2238,153 @@ select {
   backdrop-filter: blur(8px);
 }
 
+.card-inspect-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(4, 7, 6, 0.84);
+  backdrop-filter: blur(9px);
+}
+
+.card-inspector {
+  width: min(650px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 27px;
+  padding: 25px;
+  border: 1px solid rgba(200, 167, 102, 0.4);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(200, 167, 102, 0.12), transparent 18rem),
+    #111815;
+  box-shadow: 0 35px 100px rgba(0, 0, 0, 0.7);
+}
+
+.card-inspect-face {
+  align-self: center;
+}
+
+.card-inspect-face .card-face {
+  width: 220px;
+  height: 306px;
+  border-width: 2px;
+}
+
+.card-inspect-face .card-heading {
+  padding: 7px 7px 0;
+}
+
+.card-inspect-face .card-name {
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.card-inspect-face .mana-cost {
+  font-size: 15px;
+}
+
+.card-inspect-face .card-field {
+  margin: 8px 6px;
+}
+
+.card-inspect-face .card-glyph {
+  font-size: 44px;
+}
+
+.card-inspect-face .card-footer {
+  min-height: 28px;
+  padding: 0 7px 7px;
+}
+
+.card-inspect-face .card-type {
+  font-size: 12px;
+}
+
+.card-inspect-face .combat-stats {
+  min-width: 34px;
+  font-size: 16px;
+}
+
+.card-inspect-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-inspect-copy > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.card-inspect-copy h2 {
+  margin: 5px 0 0;
+  font-family: Georgia, serif;
+  font-size: 27px;
+  font-weight: 400;
+}
+
+.card-inspect-copy .icon-button {
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
+
+.card-inspect-copy > p {
+  margin: 17px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.card-inspect-actions {
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+}
+
+.card-inspect-actions button {
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.035);
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-inspect-actions button:hover {
+  border-color: rgba(241, 211, 138, 0.6);
+  background: rgba(200, 167, 102, 0.11);
+}
+
+.card-inspect-actions strong {
+  font-family: Georgia, serif;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.card-inspect-actions span,
+.card-inspect-copy > small {
+  color: var(--muted);
+  font-size: var(--type-floor);
+}
+
+.card-inspect-copy > small {
+  margin-top: 13px;
+}
+
 .game-over-layer > section {
   width: min(520px, calc(100vw - 40px));
   padding: 42px;
@@ -2286,7 +2478,7 @@ select {
 @media (max-height: 780px) {
   .game-shell {
     --player-hand-height: 112px;
-    --player-decision-height: 110px;
+    --player-decision-height: 140px;
   }
 
   .table-stage {

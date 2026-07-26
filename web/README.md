@@ -21,5 +21,18 @@ npm --prefix web test
 make test-web
 ```
 
+For a deterministic visual check of a multi-object stack, public permanent
+targets on both battlefields, and a legal instant response:
+
+```sh
+PORT=4174 make web-target-stack
+```
+
+Open <http://127.0.0.1:4174>, choose Green versus Red with seed `42`, and
+start the match. This uses a production-shaped test bridge rather than the
+game engine; it is only a rendering/interaction fixture. The first decision
+can cast Giant Growth in response, growing the stack from two objects to
+three while preserving the engine-shaped numeric permanent IDs.
+
 The normal view keeps the opponent hand hidden. The match setup has an
 explicitly labeled debug reveal for behavior inspection.

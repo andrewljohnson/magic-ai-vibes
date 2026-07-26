@@ -182,6 +182,28 @@ export interface PriorityDecision {
   options: PriorityOption[];
 }
 
+export function concisePriorityOptionLabel(option: PriorityOption): string {
+  if (option.target === undefined && option.spellTarget === undefined) {
+    return option.label;
+  }
+  const targetSeparator = option.label.indexOf(" → ");
+  return targetSeparator < 0
+    ? option.label
+    : option.label.slice(0, targetSeparator);
+}
+
+export function priorityOptionsForCard(
+  decision: PriorityDecision | undefined,
+  cardId: string | number,
+): PriorityOption[] {
+  if (!decision) return [];
+  const key = String(cardId);
+  return decision.options.filter(
+    (option) =>
+      option.card !== undefined && String(option.card.id) === key,
+  );
+}
+
 export interface AttackersDecision {
   kind: "attackers";
   decisionId: string | number;

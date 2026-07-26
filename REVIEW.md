@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 21:12 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 21:16 PDT — refreshed at the top of every review cycle.*
 
 - **P1R rejected: the outcome signal overcorrects.** With the
   optimizer fixed (all mechanism gates passed), the learned residual
@@ -91,6 +91,15 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 21:16 PDT
+
+No-result cycle: FT128 result still unrecorded (new wip commits landed;
+Codex may be running it in parallel with the reviewer's verbatim run,
+which is mid-scoring — 1,024 terminal worlds per fixture is the day's
+heaviest single computation). Lift table deterministic-identical (3 of
+5). If both runs complete, the bit-for-bit agreement check applies as
+usual.
 
 ## 2026-07-25 21:12 PDT
 

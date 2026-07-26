@@ -28,6 +28,7 @@ async function loadTargetFormatter() {
 
 test("production structured targets have stable readable labels", async () => {
   const {
+    concisePriorityOptionLabel,
     describeTopOfStack,
     formatStackEntryLabel,
     formatTargetLabel,
@@ -87,6 +88,32 @@ test("production structured targets have stable readable labels", async () => {
   assert.equal(formatTargetLabel({ unexpected: true }), "Unknown target");
   assert.equal(formatTargetLabel("   "), null);
   assert.equal(formatTargetLabel(null), null);
+  assert.equal(
+    concisePriorityOptionLabel({
+      index: 1,
+      label: "Cast Giant Growth → Grizzly Bears #110",
+      kind: "cast_giant_growth",
+      target: { player: 0, creature: 110, label: "Grizzly Bears #110" },
+    }),
+    "Cast Giant Growth",
+  );
+  assert.equal(
+    concisePriorityOptionLabel({
+      index: 2,
+      label: "Cast Counterspell → stack #302",
+      kind: "cast_counterspell",
+      spellTarget: 302,
+    }),
+    "Cast Counterspell",
+  );
+  assert.equal(
+    concisePriorityOptionLabel({
+      index: 0,
+      label: "Pass priority",
+      kind: "pass",
+    }),
+    "Pass priority",
+  );
 
   assert.deepEqual(describeTopOfStack(targetedStack), {
     label: "Braingeyser",
@@ -123,6 +150,9 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
     app,
     /continue toward resolving \$\{stackInteraction\.label\}/,
   );
+  assert.match(app, /concisePriorityOptionLabel\(option\)/);
+  assert.match(app, /target\s*\?\s*`Target → \$\{target\}`/);
+  assert.match(css, /\.action-card\.no-card\s*\{/);
   assert.match(app, /stackPermanentTargetIds\(stack\)/);
   assert.equal(
     app.match(/targetedPermanentIds=\{targetedPermanentIds\}/g)?.length,

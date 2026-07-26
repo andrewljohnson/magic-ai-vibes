@@ -98,7 +98,7 @@ Acceptance criteria:
 
 ### P5 — Rendered interaction harness
 
-Status: **planned**
+Status: **deterministic manual target/stack fixture available; automation planned**
 
 The current repository harness deliberately adds no browser dependency, but
 the hand regression shows that contract tests alone are insufficient. The next
@@ -106,6 +106,27 @@ harness increment should drive the deterministic journey through the rendered
 client at 1440 × 900 and 1280 × 720 using stable semantic selectors. It should
 assert visibility and interaction, not pixel snapshots. Tool choice remains
 open until the client selectors and game flow settle.
+
+The first manual fixture is launchable without waiting for a naturally
+occurring target stack:
+
+```sh
+PORT=4174 make web-target-stack
+```
+
+Open <http://127.0.0.1:4174>, select Green versus Red with seed `42`, and
+start the match. At both 1440 × 900 and 1280 × 720 verify:
+
+1. The human Grizzly Bears and opponent Ironclaw Orcs each show a readable
+   `TARGET` badge plus a non-color-only dashed outline.
+2. The two-object stack names Lightning Bolt as next and identifies Grizzly
+   Bears as its target.
+3. `Cast Giant Growth → Grizzly Bears #110` is a visible legal response.
+4. Activating that response adds the third stack object exactly once, keeps
+   both target badges visible, changes the hand from seven cards to six, and
+   taps the remaining Forest.
+5. Passing priority resolves the response and returns a fresh legal priority
+   decision.
 
 ## Deterministic journey gate
 
@@ -255,3 +276,28 @@ For each web issue:
   No controllable browser was available in this environment, so this is
   structural evidence only; the 1440 × 900 and 1280 × 720 rendered stack
   interaction remains open and P1 is not closed.
+- 2026-07-25 — Added `PORT=4174 make web-target-stack`, a deterministic
+  production-shaped Green-versus-Red browser fixture with two public
+  permanent targets, a two-object stack, and a legal Giant Growth response.
+  Its contract confirms hidden opponent cards, target-to-permanent ownership
+  on both sides, the response growing the stack from two objects to three,
+  hand and mana updates, and the subsequent stack resolution. This removes
+  the need to wait for a rare live-game stack before checking the rendered
+  target treatment.
+- 2026-07-25 — The rendered journey exposed a client-only opaque-ID bug that
+  the direct contract harness had missed: attacker, blocker, and damage-order
+  selections used normalized string keys as outbound IDs, so a numeric bridge
+  decision such as `[101, 102]` received `["101"]` and remained stuck while
+  advancing. Selection lookup now stays string-normalized only inside React,
+  then restores the exact engine-provided scalar before every request.
+  Browser-shaped regressions cover numeric and string attacker IDs, blocker
+  pairs, and untouched numeric damage order.
+- 2026-07-25 — Replaced pervasive microtext with an absolute 11px rendered
+  floor, 12px primary labels and deck rows, 12px base card names, and 13px
+  hand-card names. Enlarged battlefield card width and the stack rail/card
+  treatment, removed all down-scaling (including tapped permanents), and kept
+  the short-viewport hand/decision geometry fixed. The only zero-size
+  declaration is documented narrow-screen text hiding beside a 17px icon.
+  `make test-web-ui` passed the production build and all 43 layout, type-floor,
+  target-stack, opaque-ID, and 30-case journey checks. Rendered typography
+  verification at 1440 × 900 and 1280 × 720 remains required.

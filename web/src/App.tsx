@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   FormEvent,
   useCallback,
   useEffect,
@@ -16,10 +17,12 @@ import {
 } from "./api";
 import {
   blockerPairsFromKeys,
+  concisePriorityOptionLabel,
   describeTopOfStack,
   formatStackEntryLabel,
   formatStackTargets,
   formatTargetLabel,
+  priorityOptionsForCard,
   restoreOpaqueIds,
   stackPermanentTargetIds,
   type ActionRequest,
@@ -38,6 +41,7 @@ import {
   type PlayerState,
   type PolicyMeta,
   type PriorityDecision,
+  type PriorityOption,
   type StackInteraction,
   type StackEntry,
 } from "./types";
@@ -262,7 +266,10 @@ interface CardFaceProps {
   selected?: boolean;
   actionable?: boolean;
   targeted?: boolean;
+  draggable?: boolean;
   onClick?: () => void;
+  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: (event: ReactDragEvent<HTMLButtonElement>) => void;
 }
 
 function CardFace({
@@ -273,7 +280,10 @@ function CardFace({
   selected = false,
   actionable = false,
   targeted = false,
+  draggable = false,
   onClick,
+  onDragStart,
+  onDragEnd,
 }: CardFaceProps) {
   const power = permanent?.power ?? card.power;
   const toughness = permanent?.toughness ?? card.toughness;
@@ -302,7 +312,10 @@ function CardFace({
       type="button"
       title={title}
       onClick={onClick}
-      disabled={!onClick}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      disabled={!onClick && !draggable}
       aria-pressed={actionable ? selected : undefined}
       aria-label={`${card.name}${permanent?.tapped ? ", tapped" : ""}${
         targeted ? ", targeted by the stack" : ""
@@ -374,12 +387,22 @@ function FaceUpHand({
   debug = false,
   playableCardIds,
   onCardClick,
+  draggedCardKey,
+  onCardDragStart,
+  onCardDragEnd,
 }: {
   cards: Card[];
   label: string;
   debug?: boolean;
   playableCardIds?: ReadonlySet<string>;
-  onCardClick?: (card: Card) => void;
+  onCardClick?: (card: Card, renderKey: string) => void;
+  draggedCardKey?: string;
+  onCardDragStart?: (
+    card: Card,
+    renderKey: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => void;
+  onCardDragEnd?: () => void;
 }) {
   const playableCount = cards.filter((card) =>
     playableCardIds?.has(String(card.id)),
@@ -401,9 +424,12 @@ function FaceUpHand({
         {cards.map((card, index) => {
           const playable =
             !debug && (playableCardIds?.has(String(card.id)) ?? false);
+          const renderKey = `${String(card.id)}:${index}`;
           return (
           <div
-            className={`hand-card-wrap ${playable ? "is-playable" : ""}`}
+            className={`hand-card-wrap ${playable ? "is-playable" : ""} ${
+              draggedCardKey === renderKey ? "is-dragging" : ""
+            }`}
             key={`${card.id}-${index}`}
             role="listitem"
             style={
@@ -420,9 +446,18 @@ function FaceUpHand({
             <CardFace
               card={card}
               actionable={playable}
+              draggable={playable && Boolean(onCardDragStart)}
+              onDragStart={
+                playable && onCardDragStart
+                  ? (event) => onCardDragStart(card, renderKey, event)
+                  : undefined
+              }
+              onDragEnd={
+                playable && onCardDragEnd ? onCardDragEnd : undefined
+              }
               onClick={
                 playable && onCardClick
-                  ? () => onCardClick(card)
+                  ? () => onCardClick(card, renderKey)
                   : undefined
               }
             />
@@ -793,16 +828,106 @@ function StackRail({ stack }: { stack: StackEntry[] }) {
   );
 }
 
+function priorityOptionDetail(option: PriorityOption): string {
+  const target =
+    formatTargetLabel(option.target) ??
+    (option.spellTarget !== undefined
+      ? `Stack #${option.spellTarget}`
+      : null);
+  return target ? `Target → ${target}` : option.kind.replaceAll("_", " ");
+}
+
+function CardInspector({
+  card,
+  options,
+  onClose,
+  onFocusOption,
+}: {
+  card: Card;
+  options: PriorityOption[];
+  onClose: () => void;
+  onFocusOption: (option: PriorityOption) => void;
+}) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButton.current?.focus();
+  }, []);
+
+  return (
+    <div
+      className="card-inspect-layer"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="card-inspector"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="card-inspector-title"
+      >
+        <div className="card-inspect-face" aria-hidden="true">
+          <CardFace card={card} />
+        </div>
+        <div className="card-inspect-copy">
+          <header>
+            <div>
+              <span className="eyebrow">HAND CARD</span>
+              <h2 id="card-inspector-title">{card.name}</h2>
+            </div>
+            <button
+              ref={closeButton}
+              className="icon-button"
+              type="button"
+              onClick={onClose}
+            >
+              <span aria-hidden="true">×</span>
+              <span className="sr-only">Close card inspection</span>
+            </button>
+          </header>
+          <p>
+            Inspecting never plays a card. Choose an exact legal action below
+            to reveal it in the decision tray, or close and drag the card onto
+            one.
+          </p>
+          <div
+            className="card-inspect-actions"
+            aria-label={`Legal actions for ${card.name}`}
+          >
+            {options.map((option) => (
+              <button
+                type="button"
+                key={`${option.index}-${option.label}`}
+                title={option.label}
+                onClick={() => onFocusOption(option)}
+              >
+                <strong>{concisePriorityOptionLabel(option)}</strong>
+                <span>{priorityOptionDetail(option)}</span>
+              </button>
+            ))}
+          </div>
+          <small>Escape closes this view without taking an action.</small>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function PriorityControls({
   decision,
   stackInteraction,
   onSubmit,
   busy,
+  draggedCardId,
+  onDragComplete,
 }: {
   decision: PriorityDecision;
   stackInteraction: StackInteraction | null;
   onSubmit: (action: ActionRequest) => void;
   busy: boolean;
+  draggedCardId?: string;
+  onDragComplete: () => void;
 }) {
   return (
     <div
@@ -829,20 +954,50 @@ function PriorityControls({
               ? `Stack #${option.spellTarget}`
               : null);
           const detail =
-            option.kind === "pass" && stackInteraction
+            target
+              ? `Target → ${target}`
+              : option.kind === "pass" && stackInteraction
               ? `continue toward resolving ${stackInteraction.label}`
               : option.kind.replaceAll("_", " ");
+          const isDropTarget =
+            draggedCardId !== undefined &&
+            option.card !== undefined &&
+            String(option.card.id) === draggedCardId;
           return (
             <button
               id={priorityOptionElementId(decision.decisionId, option.index)}
-              className={`action-card action-${option.kind.toLowerCase()}`}
+              className={`action-card action-${option.kind.toLowerCase()} ${
+                option.card ? "has-card" : "no-card"
+              } ${isDropTarget ? "is-drop-target" : ""}`}
               type="button"
+              title={option.label}
               key={`${option.index}-${option.label}`}
               onClick={() =>
                 onSubmit({
                   decisionId: decision.decisionId,
                   index: option.index,
                 })
+              }
+              onDragOver={
+                isDropTarget && !busy
+                  ? (event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }
+                  : undefined
+              }
+              onDrop={
+                isDropTarget && !busy
+                  ? (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onDragComplete();
+                      onSubmit({
+                        decisionId: decision.decisionId,
+                        index: option.index,
+                      });
+                    }
+                  : undefined
               }
               disabled={busy}
             >
@@ -853,12 +1008,10 @@ function PriorityControls({
                 </span>
               )}
               <span className="action-copy">
-                <strong>{option.label}</strong>
-                <span>
-                  {detail}
-                  {target ? ` · ${target}` : ""}
-                </span>
+                <strong>{concisePriorityOptionLabel(option)}</strong>
+                <span>{detail}</span>
               </span>
+              {isDropTarget && <span className="drop-cue">DROP TO PLAY</span>}
             </button>
           );
         })}
@@ -1097,6 +1250,8 @@ function DecisionDock({
   selectedAttackers,
   setSelectedAttackers,
   onSubmit,
+  draggedCardId,
+  onDragComplete,
 }: {
   decision: Decision;
   state: NonNullable<GameSnapshot["state"]>;
@@ -1104,6 +1259,8 @@ function DecisionDock({
   selectedAttackers: Set<string>;
   setSelectedAttackers: (next: Set<string>) => void;
   onSubmit: (action: ActionRequest) => void;
+  draggedCardId?: string;
+  onDragComplete: () => void;
 }) {
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [damageOrder, setDamageOrder] = useState<Array<string | number>>([]);
@@ -1166,6 +1323,8 @@ function DecisionDock({
             stackInteraction={stackInteraction}
             onSubmit={onSubmit}
             busy={busy}
+            draggedCardId={draggedCardId}
+            onDragComplete={onDragComplete}
           />
         )}
         {decision.kind === "attackers" && (
@@ -1631,6 +1790,11 @@ export default function App() {
   const [acting, setActing] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [gameError, setGameError] = useState<string | null>(null);
+  const [inspectedHandCard, setInspectedHandCard] = useState<Card | null>(null);
+  const [draggedHandCard, setDraggedHandCard] = useState<{
+    renderKey: string;
+    cardId: string;
+  } | null>(null);
   const [selectedAttackers, setSelectedAttackers] = useState<Set<string>>(
     new Set(),
   );
@@ -1820,9 +1984,15 @@ export default function App() {
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && inspectedHandCard) {
+        event.preventDefault();
+        setInspectedHandCard(null);
+        return;
+      }
       if (event.key === "Escape" && setupOpen && snapshot) setSetupOpen(false);
       if (
         !setupOpen &&
+        !inspectedHandCard &&
         snapshot?.decision?.kind === "priority" &&
         !acting &&
         /^[1-9]$/.test(event.key)
@@ -1839,7 +2009,12 @@ export default function App() {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [act, acting, setupOpen, snapshot]);
+  }, [act, acting, inspectedHandCard, setupOpen, snapshot]);
+
+  useEffect(() => {
+    setInspectedHandCard(null);
+    setDraggedHandCard(null);
+  }, [snapshot?.id, snapshot?.decision?.decisionId]);
 
   const replay = () => {
     if (currentConfig) startGame(currentConfig);
@@ -1911,22 +2086,48 @@ export default function App() {
       .flatMap((option) => (option.card ? [String(option.card.id)] : [])) ??
       [],
   );
-  const focusCardAction = (card: Card) => {
+  const focusPriorityOption = (
+    decision: PriorityDecision,
+    option: PriorityOption,
+  ) => {
+    setInspectedHandCard(null);
+    window.requestAnimationFrame(() => {
+      const element = document.getElementById(
+        priorityOptionElementId(decision.decisionId, option.index),
+      );
+      element?.focus({ preventScroll: true });
+      element?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    });
+  };
+  const inspectHandCard = (card: Card) => {
+    if (priorityOptionsForCard(priorityDecision, card.id).length === 0) return;
+    setInspectedHandCard(card);
+  };
+  const startHandCardDrag = (
+    card: Card,
+    renderKey: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => {
+    if (priorityOptionsForCard(priorityDecision, card.id).length === 0) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", renderKey);
+    setInspectedHandCard(null);
+    setDraggedHandCard({ renderKey, cardId: String(card.id) });
+  };
+  const inspectedCardOptions = inspectedHandCard
+    ? priorityOptionsForCard(priorityDecision, inspectedHandCard.id)
+    : [];
+  const focusInspectedCardOption = (option: PriorityOption) => {
     const decision = priorityDecision;
     if (!decision) return;
-    const option = decision.options.find(
-      (candidate) => String(candidate.card?.id) === String(card.id),
-    );
-    if (!option) return;
-    const element = document.getElementById(
-      priorityOptionElementId(decision.decisionId, option.index),
-    );
-    element?.focus({ preventScroll: true });
-    element?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-      inline: "center",
-    });
+    focusPriorityOption(decision, option);
   };
   const toggleAttacker = (id: string) => {
     const next = new Set(selectedAttackers);
@@ -2001,7 +2202,10 @@ export default function App() {
                   cards={state.players[nearSeat].hand ?? []}
                   label={`${playerLabel(snapshot, nearSeat)} · hand`}
                   playableCardIds={playableHandCardIds}
-                  onCardClick={focusCardAction}
+                  draggedCardKey={draggedHandCard?.renderKey}
+                  onCardClick={inspectHandCard}
+                  onCardDragStart={startHandCardDrag}
+                  onCardDragEnd={() => setDraggedHandCard(null)}
                 />
                 {snapshot.decision && hasVisibleDecision && (
                   <DecisionDock
@@ -2011,6 +2215,8 @@ export default function App() {
                     selectedAttackers={selectedAttackers}
                     setSelectedAttackers={setSelectedAttackers}
                     onSubmit={act}
+                    draggedCardId={draggedHandCard?.cardId}
+                    onDragComplete={() => setDraggedHandCard(null)}
                   />
                 )}
               </div>
@@ -2029,6 +2235,15 @@ export default function App() {
           <span className="spinner" />
           Waiting for the battlefield…
         </div>
+      )}
+
+      {inspectedHandCard && inspectedCardOptions.length > 0 && (
+        <CardInspector
+          card={inspectedHandCard}
+          options={inspectedCardOptions}
+          onClose={() => setInspectedHandCard(null)}
+          onFocusOption={focusInspectedCardOption}
+        />
       )}
 
       <SetupDrawer
