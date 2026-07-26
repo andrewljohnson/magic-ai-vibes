@@ -23,7 +23,7 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-capture test-certify test-learned-iteration test-probes test-web test-web-ui web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-capture test-certify test-learned-iteration test-probes test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -90,6 +90,9 @@ test-web: $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 
 test-web-ui: $(WEB_DEPENDENCIES)
 	npm --prefix web run test:ui
+
+test-web-rendered: $(WEB_DEPENDENCIES)
+	npm --prefix web run test:rendered:target-stack
 
 web-build: $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 	npm --prefix web run build

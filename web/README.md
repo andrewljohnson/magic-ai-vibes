@@ -34,6 +34,18 @@ game engine; it is only a rendering/interaction fixture. The first decision
 can cast Giant Growth in response, growing the stack from two objects to
 three while preserving the engine-shaped numeric permanent IDs.
 
+The same targeted drag has an automated Chromium journey at both supported
+viewports. It binds only an ephemeral localhost port and does not touch the
+normal development server:
+
+```sh
+make test-web-rendered
+```
+
+Playwright first uses its installed Chromium build, then the local Chrome
+channel. Set `OLD_SCHOOL_WEB_CHROME_EXECUTABLE` when neither default is
+available.
+
 The normal view keeps the opponent hand hidden. The match setup has an
 explicitly labeled debug reveal for behavior inspection.
 

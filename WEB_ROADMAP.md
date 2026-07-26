@@ -41,8 +41,9 @@ rendered checks at both target viewports.
 
 ### P1 — Complete, unambiguous game flow
 
-Status: **adapter journey, real-engine smoke, full rendered journey, and setup
-horizontal fit green at 1280 × 720; 1440 × 900 repetition pending**
+Status: **native targeted drag green at both target viewports; adapter journey,
+real-engine smoke, full rendered journey, and setup horizontal fit green at
+1280 × 720; 1440 × 900 full-journey repetition pending**
 
 Acceptance criteria:
 
@@ -501,15 +502,16 @@ without moving focus or replacing the last authoritative game snapshot.
 
 ### P5 — Rendered interaction harness
 
-Status: **deterministic target/stack, cleanup/blocking, and full-flow browser
-fixtures available; automation planned**
+Status: **target/stack drag automated at both target viewports; deterministic
+cleanup/blocking and full-flow browser fixtures available; broader automation
+planned**
 
-The current repository harness deliberately adds no browser dependency, but
-the hand regression shows that contract tests alone are insufficient. The next
-harness increment should drive the deterministic journey through the rendered
-client at 1440 × 900 and 1280 × 720 using stable semantic selectors. It should
-assert visibility and interaction, not pixel snapshots. Tool choice remains
-open until the client selectors and game flow settle.
+The repository-pinned Playwright gate is intentionally separate from the fast
+port-free tests. `make test-web-rendered` currently drives the target-stack
+fixture through Chromium with stable semantic selectors and viewport geometry
+checks. The next harness increment should drive the deterministic full journey
+at 1440 × 900 and 1280 × 720 in the same way, asserting visibility and
+interaction rather than pixel snapshots.
 
 The first manual fixture is launchable without waiting for a naturally
 occurring target stack:
@@ -1174,3 +1176,24 @@ For each web issue:
   Because this is a browser-control limitation rather than evidence specific
   to the toast, no redundant key handler was added; the native-button source
   gate is green, while that rendered subgate remains open.
+- 2026-07-26 — Added the first automated rendered-interaction gate:
+  `make test-web-rendered` builds the production client, starts the existing
+  target-stack bridge on an ephemeral localhost port, and drives a stepped
+  native pointer drag in Chromium at both 1280 × 720 and 1440 × 900. The fixed
+  configuration is Green/human versus Red/Learned Value, game seed `42`,
+  training seed `424242`, 800 training games, Bluff mode off, and reveal off.
+  Before release, the legal Giant Growth became the selected dragging card and
+  Bears `#110` became the rendered exact destination. Release produced exactly
+  one action request, changed hand size 7→6, grew the stack 2→3, tapped Forest
+  `#102`, retained both public `TARGET` cues, and showed no alert. Passing
+  priority produced the second exact request, the fresh
+  `target-stack-priority-3` decision, and stack size 3→2. Both viewports kept
+  hand, decision dock, and stack rail wholly rendered, with zero hand/dock
+  intersection and document/body width exactly equal to the viewport.
+  The first rendered run also found that the console's fixed hand and decision
+  tracks plus its one-pixel top border extended the dock to y=721 and y=901.
+  Replacing that space-consuming border with the same inset divider fixed the
+  clipping without changing either track height; a focused structural
+  regression now preserves it. Final results: `make test-web-ui` 75/75,
+  `make test-web` 9/9 C++ bridge tests plus 82/82 Node tests, and
+  `make test-web-rendered` 2/2 rendered journeys. Port `4173` was untouched.

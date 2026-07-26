@@ -133,8 +133,16 @@ test("targeted-stack browser fixture has one stable make command", async () => {
     packageJson.scripts["fixture:target-stack"],
     "node fixture-server.mjs target-stack",
   );
+  assert.equal(
+    packageJson.scripts["test:rendered:target-stack"],
+    "npm run build && node --test tests/rendered/target-stack.test.mjs",
+  );
   assert.match(
     makefile,
     /web-target-stack:[^\n]*\n\tnpm --prefix web run build\n\tnpm --prefix web run fixture:target-stack/,
+  );
+  assert.match(
+    makefile,
+    /test-web-rendered:[^\n]*\n\tnpm --prefix web run test:rendered:target-stack/,
   );
 });

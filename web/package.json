@@ -16,6 +16,7 @@
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:contract": "node --test tests/journey-contract.test.mjs",
     "test:real-bridge": "node --test tests/real-bridge-session.test.mjs",
+    "test:rendered:target-stack": "npm run build && node --test tests/rendered/target-stack.test.mjs",
     "test:ui": "npm run build && node --test tests/game-flow.test.mjs tests/hand-layout.test.mjs tests/target-stack.test.mjs tests/target-stack-contract.test.mjs tests/interaction-fixture-contract.test.mjs tests/journey-contract.test.mjs"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "playwright": "1.62.0",
     "typescript": "5.9.3",
     "vite": "^8.1.5"
   },

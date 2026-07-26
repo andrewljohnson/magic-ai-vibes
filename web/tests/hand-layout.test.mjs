@@ -56,6 +56,8 @@ test("the player console reserves separate visible regions for hand and actions"
   assert.match(consoleRule, /display:\s*grid/);
   assert.match(consoleRule, /grid-template-rows:/);
   assert.match(consoleRule, /height:\s*var\(--player-console-height\)/);
+  assert.match(consoleRule, /border-top:\s*0/);
+  assert.match(consoleRule, /box-shadow:[\s\S]*inset 0 1px 0 var\(--line-strong\)/);
 
   const dockRule = cssRule(css, ".decision-dock");
   assert.doesNotMatch(dockRule, /position:\s*fixed/);
