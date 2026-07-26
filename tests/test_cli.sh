@@ -96,6 +96,33 @@ expect_error() {
     esac
 }
 
+expect_joint_load_only_failure() {
+    run_cli "$@"
+    if [ "$cli_status" -ne 2 ]; then
+        printf 'expected joint load failure status 2, got %s\n%s\n' \
+            "$cli_status" "$cli_output" >&2
+        exit 1
+    fi
+    case $cli_output in
+        *"bundle identity is not compiled"*|\
+        *"cannot inspect"*|\
+        *"No such file or directory"*)
+            ;;
+        *)
+            printf 'joint route did not fail at immutable load seam\n%s\n' \
+                "$cli_output" >&2
+            exit 1
+            ;;
+    esac
+    case $cli_output in
+        *"Training"*|*"Collecting"*)
+            printf 'joint load-only route trained or collected\n%s\n' \
+                "$cli_output" >&2
+            exit 1
+            ;;
+    esac
+}
+
 help_output=$("$simulator" --help)
 case $help_output in
     *"Red: 15 Mountain, 9 Lightning Bolt, 7 Ironclaw Orcs, 4 Gray Ogre, 3 Hill Giant, 2 Fire Elemental"*\
@@ -106,9 +133,13 @@ case $help_output in
 "learned-value-dense-masked-cN"*\
 "learned-value-dense-context-cN"*\
 "learned-value-tw50-c17"*"learned-value-tw75-c17"*\
+"learned-value-j1-control-c17"*\
+"learned-value-j1-treatment-c17"*\
 "learned-value-mix50-g8"*\
 "--train-terminal-weight-c17"*\
 "--evaluate-terminal-weight-c17"*\
+"--train-joint-c17"*\
+"--evaluate-joint-c17"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
 "--refresh-value-challenger-cache"*\
@@ -116,6 +147,77 @@ case $help_output in
 "--evolve-pilot BOT"*"learned-value-context-cN"*) ;;
     *)
         printf 'learned-generation options missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+expect_error "--train-joint-c17 is exclusive" \
+    --train-joint-c17 --seed 1
+expect_error "--evaluate-joint-c17 is exclusive" \
+    --evaluate-joint-c17 --seed 1
+expect_joint_load_only_failure --evaluate-joint-c17
+if [ -n "$(find . -type f -print -quit)" ]; then
+    printf 'unlicensed joint evaluator created a file\n' >&2
+    find . -type f -print >&2
+    exit 1
+fi
+expect_error "joint C17 policy tokens require exact" \
+    --benchmark --games 1 --seed 42 \
+    --train-games 1 --train-seed 424242 \
+    --challenger learned-value-j1-treatment-c17 --baseline random
+expect_error "joint C17 policy tokens have immutable" \
+    --benchmark --games 1 --seed 42 \
+    --train-games 800 --train-seed 424242 \
+    --learned-rollouts 2 \
+    --challenger learned-value-j1-treatment-c17 --baseline random
+expect_error "reserved C17-J1 experiment seeds" \
+    --benchmark --games 1 --seed 202607261149 \
+    --train-games 800 --train-seed 424242 \
+    --challenger learned-value-j1-treatment-c17 --baseline random
+expect_error "reserved C17-J1 experiment seeds" \
+    --games 1 --seed 202607261145 --bots random
+expect_error "reserved C17-J1 experiment seeds" \
+    --games 1 --seed 42 --train-seed 202607261146 --bots random
+expect_joint_load_only_failure \
+    --benchmark --games 1 --seed 42 \
+    --train-games 800 --train-seed 424242 \
+    --challenger learned-value-j1-control-c17 --baseline random
+expect_joint_load_only_failure \
+    --benchmark --games 1 --seed 42 \
+    --train-games 800 --train-seed 424242 \
+    --challenger learned-value-j1-treatment-c17 --baseline random
+expect_error "--stability --challenger accepts only" \
+    --stability --stability-runs 1 --games 1 --seed 42 \
+    --train-games 800 --train-seed 424242 \
+    --challenger learned-value-j1-control-c17
+expect_error "--stability --challenger accepts only" \
+    --stability --stability-runs 1 --games 1 --seed 42 \
+    --train-games 800 --train-seed 424242 \
+    --challenger random
+expect_error "joint C17 policy tokens require exact" \
+    --stability --stability-runs 1 --games 1 --seed 42 \
+    --train-games 1 --train-seed 424242 \
+    --challenger learned-value-j1-treatment-c17
+expect_error "joint C17 policy tokens have immutable" \
+    --stability --stability-runs 1 --games 1 --seed 42 \
+    --train-games 800 --train-seed 424242 \
+    --learned-rollouts 8 \
+    --challenger learned-value-j1-treatment-c17
+expect_error "would open a reserved C17-J1 evaluation seed" \
+    --stability --stability-runs 1 --games 1 \
+    --seed 202607261048 \
+    --train-games 800 --train-seed 424242 \
+    --challenger learned-value-j1-treatment-c17
+expect_error "would open a reserved C17-J1 evaluation seed" \
+    --stability --stability-runs 1 --games 1 \
+    --seed 202607261044 --train-games 1
+expect_joint_load_only_failure \
+    --stability --stability-runs 1 --games 1 --seed 42 \
+    --train-games 800 --train-seed 424242 \
+    --challenger learned-value-j1-treatment-c17
+case $cli_output in
+    *"Training fixed model"*|*"Value Challenger C"*)
+        printf 'joint stability silently trained another policy\n%s\n' \
+            "$cli_output" >&2
         exit 1
         ;;
 esac
@@ -921,9 +1023,9 @@ done
 expect_error "invalid bot name" \
     --benchmark --games 1 --challenger learned-value-mix50-g7 \
     --baseline random
-expect_error "--challenger requires --benchmark or --score-probes" \
+expect_error "--challenger requires --benchmark, --stability, or --score-probes" \
     --games 1 --challenger learned-value-context-c1
-expect_error "--challenger requires --benchmark or --score-probes" \
+expect_error "--challenger requires --benchmark, --stability, or --score-probes" \
     --games 1 --challenger learned-value-dense-masked-c1
 expect_error "--baseline requires --benchmark" \
     --games 1 --baseline learned-value-context-c1

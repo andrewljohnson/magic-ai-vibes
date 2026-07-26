@@ -1,5 +1,7 @@
 #include "old_school/game.hpp"
 #include "old_school/interactive.hpp"
+#include "old_school/joint_c17_orchestration.hpp"
+#include "old_school/joint_c17_training.hpp"
 #include "old_school/learned_iteration.hpp"
 #include "old_school/probe_runner.hpp"
 #include "old_school/probes.hpp"
@@ -190,6 +192,7 @@ void print_help(std::string_view executable) {
            " [--refresh-value-mix50-cache]\n"
         << "       " << executable
         << " --stability [--stability-runs N] [--games N]"
+           " [--challenger learned-value-j1-treatment-c17]"
            " [--value-continuation-epsilon X]"
            " [--refresh-value-challenger-cache]\n\n"
         << "       " << executable
@@ -216,6 +219,10 @@ void print_help(std::string_view executable) {
         << "       " << executable
         << " --train-terminal-weight-c17 --train-games 800"
            " --train-seed 424242\n"
+        << "       " << executable
+        << " --train-joint-c17\n"
+        << "       " << executable
+        << " --evaluate-joint-c17\n"
         << "       " << executable
         << " --audit-dc1-dominance --train-games 800"
            " --train-seed 424242 --learned-generations 16\n"
@@ -302,13 +309,17 @@ void print_help(std::string_view executable) {
         << "  --interactive   Play a seeded random five-deck matchup "
            "against frozen Learned Value\n"
         << "  --benchmark     Run the paired bot-strength harness\n"
-        << "  --challenger BOT  Benchmark challenger "
+        << "  --challenger BOT  Benchmark challenger; under "
+           "--stability, only the exact frozen "
+           "learned-value-j1-treatment-c17 policy is accepted "
            "(default: handcrafted; learned generations: "
            "learned-value-g0..g8, learned-value-cN, "
            "learned-value-context-cN, "
            "learned-value-dense-masked-cN, "
            "learned-value-dense-context-cN, "
            "learned-value-tw50-c17, learned-value-tw75-c17, "
+           "learned-value-j1-control-c17, "
+           "learned-value-j1-treatment-c17, "
            "learned-value-mix50-g8, "
            "learned-actor-g0/g1); under --score-probes, "
            "the context-ablation tokens add their ordered cells "
@@ -354,6 +365,10 @@ void print_help(std::string_view executable) {
            "TW-C17 gate: HOLD1 seed 202607260312, then conditional "
            "same-deck gameplay seed 202607260313; accepts no other "
            "options and exits 0/1/2 for pass/reject/infrastructure\n"
+        << "  --train-joint-c17  Exclusive one-shot training and "
+           "no-replace publication of the sealed C17-J1 paired family\n"
+        << "  --evaluate-joint-c17  Exclusive load-only execution of "
+           "the sealed C17-J1 staged five-deck evidence chain\n"
         << "  --audit-dc1-dominance  Evaluation-only Environment-v3 "
            "resource-dominance mining audit of exact C16; fixed "
            "all-five 2x40-game train/heldout blocks and K=8; trains "
@@ -435,6 +450,8 @@ struct BotSelection {
         DenseContextChallenger,
         TerminalWeight50,
         TerminalWeight75,
+        JointControlC17,
+        JointTreatmentC17,
         Canonical,
         Mix50,
     };
@@ -505,6 +522,24 @@ BotSelection parse_bot(std::string_view value) {
                           TerminalWeight50
                     : BotSelection::ValueFamily::
                           TerminalWeight75,
+            .value_generation = 17,
+        };
+    }
+    if (value == old_school::kLearnedJointC17ControlPolicyToken ||
+        value ==
+            old_school::kLearnedJointC17TreatmentPolicyToken) {
+        return {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .value_family =
+                value ==
+                        old_school::
+                            kLearnedJointC17ControlPolicyToken
+                    ? BotSelection::ValueFamily::
+                          JointControlC17
+                    : BotSelection::ValueFamily::
+                          JointTreatmentC17,
             .value_generation = 17,
         };
     }
@@ -2056,17 +2091,55 @@ void print_benchmark(const old_school::BotBenchmarkSummary& result,
     }
 }
 
-bool run_stability_panel(std::size_t runs,
-                         std::size_t repetitions_per_deck_pairing,
-                         std::uint64_t base_seed,
-                         std::uint64_t training_seed,
-                         std::size_t rollouts,
-                         std::size_t deep_rollouts,
-                         std::size_t training_games,
-                         std::size_t learned_rollouts,
-                         std::size_t learned_generations,
-                         bool refresh_challenger_cache,
-                         double value_continuation_epsilon) {
+struct FrozenJointC17Deployments {
+    old_school::LearnedJointC17Deployment control;
+    old_school::LearnedJointC17Deployment treatment;
+};
+
+FrozenJointC17Deployments load_frozen_joint_c17_deployments(
+    std::ostream& progress) {
+    if (!old_school::joint_c17_orchestration::
+            canonical_bundle_identity_is_pinned()) {
+        throw std::runtime_error(
+            "joint C17 bundle identity is not compiled; "
+            "run the one-shot fit, inspect it, and apply "
+            "the identity-only source patch first");
+    }
+    auto context =
+        old_school::joint_c17_execution::
+            load_canonical_joint_c17_context(progress);
+    const auto& bundle = context.provenance().bundle.before;
+    if (bundle.byte_size !=
+            old_school::joint_c17_orchestration::
+                kCanonicalBundleByteSize ||
+        bundle.sha256 !=
+            old_school::joint_c17_orchestration::
+                kCanonicalBundleSha256) {
+        throw std::runtime_error(
+            "joint C17 bundle does not match the compiled "
+            "frozen identity");
+    }
+    return {
+        .control = context.control_deployment(),
+        .treatment = context.treatment_deployment(),
+    };
+}
+
+bool run_stability_panel(
+    std::size_t runs,
+    std::size_t repetitions_per_deck_pairing,
+    std::uint64_t base_seed,
+    std::uint64_t training_seed,
+    std::size_t rollouts,
+    std::size_t deep_rollouts,
+    std::size_t training_games,
+    std::size_t learned_rollouts,
+    std::size_t learned_generations,
+    bool refresh_challenger_cache,
+    double value_continuation_epsilon,
+    std::optional<old_school::BotConfig> frozen_learned_bot =
+        std::nullopt,
+    std::string frozen_policy_name = {}) {
     constexpr std::array<old_school::BotKind, 4> baseline_kinds = {
         old_school::BotKind::Random,
         old_school::BotKind::MonteCarlo,
@@ -2074,11 +2147,23 @@ bool run_stability_panel(std::size_t runs,
         old_school::BotKind::Handcrafted,
     };
     constexpr std::size_t kHandcraftedBaselineIndex = 3;
+    const bool uses_frozen_policy =
+        frozen_learned_bot.has_value();
     old_school::BotConfig learned_config =
-        bot_config(old_school::BotKind::Learned, rollouts,
-                   deep_rollouts, training_games,
-                   learned_rollouts,
-                   value_continuation_epsilon);
+        uses_frozen_policy
+            ? *frozen_learned_bot
+            : bot_config(
+                  old_school::BotKind::Learned, rollouts,
+                  deep_rollouts, training_games,
+                  learned_rollouts,
+                  value_continuation_epsilon);
+    if (uses_frozen_policy &&
+        (learned_config.kind != old_school::BotKind::Learned ||
+         !learned_config.learned_model ||
+         frozen_policy_name.empty())) {
+        throw std::invalid_argument(
+            "frozen stability policy is incomplete");
+    }
     std::array<old_school::BotBenchmarkSummary, baseline_kinds.size()>
         pooled;
     std::array<std::size_t, baseline_kinds.size()> seed_wins{};
@@ -2129,15 +2214,22 @@ bool run_stability_panel(std::size_t runs,
     mixed_config.learned_training_games = training_games;
     mixed_config.learned_variant =
         old_school::LearnedVariant::ValueSearchChampion;
+    if (uses_frozen_policy) {
+        mixed_config.frozen_learned_bot = learned_config;
+    }
     old_school::TournamentSummary pooled_mixed;
     std::size_t mixed_seed_lift_passes = 0;
     std::size_t all_policy_seed_wins = 0;
 
     std::cout << std::fixed << std::setprecision(1)
-              << (learned_generations == 0
-                      ? "Learned Value G0 All-Policy Stability Panel\n"
-                      : "Learned Value Challenger All-Policy "
-                        "Stability Panel\n")
+              << (uses_frozen_policy
+                      ? frozen_policy_name +
+                            " All-Policy Stability Panel\n"
+                      : learned_generations == 0
+                            ? "Learned Value G0 All-Policy "
+                              "Stability Panel\n"
+                            : "Learned Value Challenger All-Policy "
+                              "Stability Panel\n")
               << "Runs: " << runs << '\n'
               << "Evaluation base seed: " << base_seed << '\n'
               << "Training seed: " << training_seed << '\n'
@@ -2149,33 +2241,49 @@ bool run_stability_panel(std::size_t runs,
               << "Training games for fixed model: "
               << training_games << '\n'
               << "Learned model: "
-              << (learned_generations == 0
-                      ? "Legacy G0"
-                      : "Challenger C" +
-                            std::to_string(learned_generations))
+              << (uses_frozen_policy
+                      ? frozen_policy_name
+                      : learned_generations == 0
+                            ? "Legacy G0"
+                            : "Challenger C" +
+                                  std::to_string(
+                                      learned_generations))
               << "\nLearned search worlds per legal action: "
-              << learned_rollouts;
-    if (value_continuation_epsilon != 0.0) {
+              << learned_config.rollouts_per_action;
+    if (learned_config.value_continuation_epsilon != 0.0) {
         std::cout << "\nValue continuation priority-action epsilon: "
-                  << format_real(value_continuation_epsilon);
+                  << format_real(
+                         learned_config
+                             .value_continuation_epsilon);
     }
-    std::cout
-              << "\nTraining fixed model..." << std::flush;
 
     old_school::GameConfig shared_config;
     shared_config.learned_training_seed = training_seed;
-    shared_config.learned_model =
-        train_frozen_learned_model(
-            old_school::LearnedVariant::ValueSearchChampion,
-            training_games, training_seed,
-            learned_generations,
-            refresh_challenger_cache);
-    learned_config.learned_model = shared_config.learned_model;
+    if (uses_frozen_policy) {
+        shared_config.learned_model =
+            learned_config.learned_model;
+        std::cout
+            << "\nFrozen model fingerprint: "
+            << old_school::learned_model_fingerprint(
+                   shared_config.learned_model)
+            << "\n\n";
+    } else {
+        std::cout << "\nTraining fixed model..." << std::flush;
+        shared_config.learned_model =
+            train_frozen_learned_model(
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+                training_games, training_seed,
+                learned_generations,
+                refresh_challenger_cache);
+        learned_config.learned_model =
+            shared_config.learned_model;
+        std::cout << " done\n\n";
+    }
     for (auto& result : pooled) {
         result.challenger.learned_model =
             shared_config.learned_model;
     }
-    std::cout << " done\n\n";
 
     for (std::size_t run = 0; run < runs; ++run) {
         const std::uint64_t evaluation_seed =
@@ -5046,6 +5154,10 @@ int main(int argc, char** argv) {
             "--audit-calendar-eight-targets";
         constexpr std::string_view replay_weight_audit_option =
             "--audit-replay-weights";
+        constexpr std::string_view train_joint_c17_option =
+            "--train-joint-c17";
+        constexpr std::string_view evaluate_joint_c17_option =
+            "--evaluate-joint-c17";
         constexpr std::string_view pd0_diagnostic_option =
             "--diagnose-value-pass-dominance";
         constexpr std::string_view pd0_diagnostic_seed_text =
@@ -5055,6 +5167,8 @@ int main(int argc, char** argv) {
         bool calendar_turn_audit_requested = false;
         bool calendar_eight_audit_requested = false;
         bool replay_weight_audit_requested = false;
+        bool train_joint_c17_requested = false;
+        bool evaluate_joint_c17_requested = false;
         bool pd0_diagnostic_requested = false;
         bool pd0_diagnostic_seed_requested = false;
         bool pd0_smoke_seed_requested = false;
@@ -5069,6 +5183,12 @@ int main(int argc, char** argv) {
             replay_weight_audit_requested =
                 replay_weight_audit_requested ||
                 raw_argument == replay_weight_audit_option;
+            train_joint_c17_requested =
+                train_joint_c17_requested ||
+                raw_argument == train_joint_c17_option;
+            evaluate_joint_c17_requested =
+                evaluate_joint_c17_requested ||
+                raw_argument == evaluate_joint_c17_option;
             pd0_diagnostic_requested =
                 pd0_diagnostic_requested ||
                 raw_argument == pd0_diagnostic_option;
@@ -5108,6 +5228,68 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--audit-replay-weights is exclusive and accepts no "
                 "other options");
+        }
+        if (train_joint_c17_requested &&
+            (argc != 2 ||
+             std::string_view(argv[1]) !=
+                 train_joint_c17_option)) {
+            throw std::invalid_argument(
+                "--train-joint-c17 is exclusive and accepts no "
+                "other options");
+        }
+        if (evaluate_joint_c17_requested &&
+            (argc != 2 ||
+             std::string_view(argv[1]) !=
+                 evaluate_joint_c17_option)) {
+            throw std::invalid_argument(
+                "--evaluate-joint-c17 is exclusive and accepts no "
+                "other options");
+        }
+        if (train_joint_c17_requested) {
+            const auto result =
+                old_school::joint_c17_training::
+                    train_and_publish_canonical_joint_c17(
+                        std::cout);
+            const auto& report = result.report;
+            std::cout
+                << "\nC17-J1 paired family frozen\n"
+                << "  Artifact: "
+                << result.publication.after.resolved_path << '\n'
+                << "  Bytes: "
+                << result.publication.after.byte_size << '\n'
+                << "  SHA-256: "
+                << result.publication.after.sha256 << '\n'
+                << "  Parent/control/treatment fingerprints: "
+                << report.parent_fingerprint << " / "
+                << report.control_fingerprint << " / "
+                << report.treatment_fingerprint << '\n'
+                << "  Shared schedule/raw/features/outcomes: "
+                << report.schedule_hash << " / "
+                << report.control_raw_shard_hash << " / "
+                << report.feature_hash << " / "
+                << report.outcome_hash << '\n'
+                << "  RO4/CT8 targets: "
+                << report.control_target_hash << " / "
+                << report.treatment_target_hash << '\n'
+                << "  Games/perspectives/examples: "
+                << report.scheduled_games << " / "
+                << report.actor_perspectives << " / "
+                << report.shard_examples << '\n'
+                << "  Publication gate: "
+                << (result.gate.passed ? "PASS" : "FAIL")
+                << '\n';
+            return result.gate.passed ? 0 : 2;
+        }
+        if (evaluate_joint_c17_requested) {
+            const auto outcome =
+                old_school::joint_c17_orchestration::
+                    run_production_evaluation(std::cout);
+            old_school::joint_c17_orchestration::
+                write_human_report(outcome, std::cout);
+            old_school::joint_c17_orchestration::
+                write_tsv_report(outcome, std::cout);
+            return old_school::joint_c17_orchestration::
+                evaluation_exit_code(outcome.disposition);
         }
 
         std::size_t games = 100;
@@ -5721,6 +5903,37 @@ int main(int argc, char** argv) {
                 "reserved PD0 diagnostic seed 202607260947 may be "
                 "used only by --diagnose-value-pass-dominance");
         }
+        constexpr std::array<std::uint64_t, 5>
+            joint_c17_reserved_experiment_seeds = {
+                old_school::kLearnedJointC17ShardSeed,
+                old_school::kLearnedJointC17HoldoutSeed,
+                old_school::
+                    kLearnedJointC17MatchedControlGameplaySeed,
+                old_school::
+                    kLearnedJointC17FrozenC16GameplaySeed,
+                old_school::
+                    kLearnedJointC17HandcodedGameplaySeed,
+            };
+        const auto is_joint_c17_reserved_experiment_seed =
+            [&](std::uint64_t candidate) {
+                return std::find(
+                           joint_c17_reserved_experiment_seeds
+                               .begin(),
+                           joint_c17_reserved_experiment_seeds
+                               .end(),
+                           candidate) !=
+                       joint_c17_reserved_experiment_seeds.end();
+            };
+        if ((seed_option_used &&
+             is_joint_c17_reserved_experiment_seed(seed)) ||
+            (training_seed_option_used &&
+             is_joint_c17_reserved_experiment_seed(
+                 training_seed))) {
+            throw std::invalid_argument(
+                "reserved C17-J1 experiment seeds "
+                "202607261145..202607261149 may be used only by "
+                "the exclusive sealed train/evaluate routes");
+        }
         if (train_p_family &&
             p_family_unsupported_option_used) {
             throw std::invalid_argument(
@@ -5897,10 +6110,10 @@ int main(int argc, char** argv) {
                 "--score-probes");
         }
         if (challenger_option_used &&
-            !benchmark && !score_probes) {
+            !benchmark && !stability && !score_probes) {
             throw std::invalid_argument(
-                "--challenger requires --benchmark or "
-                "--score-probes");
+                "--challenger requires --benchmark, --stability, "
+                "or --score-probes");
         }
         if (baseline_option_used && !benchmark) {
             throw std::invalid_argument(
@@ -5960,6 +6173,38 @@ int main(int argc, char** argv) {
                             BotSelection::ValueFamily::
                                 TerminalWeight75);
             };
+        const auto selects_joint_c17 =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           old_school::BotKind::Learned &&
+                       selection.learned_variant ==
+                           old_school::LearnedVariant::
+                               ValueSearchChampion &&
+                       (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                JointControlC17 ||
+                        selection.value_family ==
+                            BotSelection::ValueFamily::
+                                JointTreatmentC17);
+            };
+        const bool benchmark_selects_joint_c17 =
+            benchmark &&
+            (selects_joint_c17(challenger) ||
+             selects_joint_c17(baseline));
+        const bool stability_selects_joint_c17 =
+            stability && challenger_option_used &&
+            selects_joint_c17(challenger);
+        const bool stability_selects_joint_c17_treatment =
+            stability_selects_joint_c17 &&
+            challenger.value_family ==
+                BotSelection::ValueFamily::
+                    JointTreatmentC17;
+        if (stability && challenger_option_used &&
+            !stability_selects_joint_c17_treatment) {
+            throw std::invalid_argument(
+                "--stability --challenger accepts only "
+                "learned-value-j1-treatment-c17");
+        }
         if (benchmark &&
             (selects_terminal_weight_c17(challenger) ||
              selects_terminal_weight_c17(baseline)) &&
@@ -5978,6 +6223,90 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "reserved terminal-weight C17 seeds may be used "
                 "only by the sealed evaluator");
+        }
+        if ((benchmark_selects_joint_c17 ||
+             stability_selects_joint_c17) &&
+            (training_games !=
+                 old_school::joint_c17_runner::
+                     kCanonicalTrainingGames ||
+             training_seed !=
+                 old_school::kDefaultLearnedTrainingSeed)) {
+            throw std::invalid_argument(
+                "joint C17 policy tokens require exact "
+                "--train-games 800 --train-seed 424242");
+        }
+        if ((benchmark_selects_joint_c17 ||
+             stability_selects_joint_c17) &&
+            (learned_rollouts_option_used ||
+             learned_generations_option_used ||
+             value_continuation_epsilon_option_used ||
+             value_pass_dominance ||
+             refresh_value_challenger_cache)) {
+            throw std::invalid_argument(
+                "joint C17 policy tokens have immutable K8, "
+                "generation, epsilon-zero, PD0, and "
+                "continuation-controller metadata");
+        }
+        const auto is_reserved_joint_c17_evaluation_seed =
+            [](std::uint64_t candidate) {
+                if (candidate ==
+                        old_school::
+                            kLearnedJointC17ShardSeed ||
+                    candidate ==
+                        old_school::
+                            kLearnedJointC17HoldoutSeed ||
+                    candidate ==
+                        old_school::
+                            kLearnedJointC17MatchedControlGameplaySeed ||
+                    candidate ==
+                        old_school::
+                            kLearnedJointC17FrozenC16GameplaySeed ||
+                    candidate ==
+                        old_school::
+                            kLearnedJointC17HandcodedGameplaySeed) {
+                    return true;
+                }
+                return std::find(
+                           old_school::joint_c17_eval::
+                               kFixedSeedPanelSeeds.begin(),
+                           old_school::joint_c17_eval::
+                               kFixedSeedPanelSeeds.end(),
+                           candidate) !=
+                       old_school::joint_c17_eval::
+                           kFixedSeedPanelSeeds.end();
+            };
+        if (benchmark_selects_joint_c17 &&
+            is_reserved_joint_c17_evaluation_seed(seed)) {
+            throw std::invalid_argument(
+                "reserved joint C17 seeds may be used only by "
+                "--evaluate-joint-c17");
+        }
+        if (stability) {
+            for (std::size_t run = 0;
+                 run < stability_runs; ++run) {
+                constexpr std::uint64_t stride = 101ULL;
+                const std::uint64_t run_number =
+                    static_cast<std::uint64_t>(run) + 1ULL;
+                if (run_number >
+                    (std::numeric_limits<std::uint64_t>::max() -
+                     seed) /
+                        stride) {
+                    throw std::invalid_argument(
+                        "joint C17 stability evaluation seed "
+                        "overflows uint64");
+                }
+                const std::uint64_t evaluation_seed =
+                    seed + stride * run_number;
+                if (is_joint_c17_reserved_experiment_seed(
+                        evaluation_seed) ||
+                    (stability_selects_joint_c17 &&
+                     is_reserved_joint_c17_evaluation_seed(
+                         evaluation_seed))) {
+                    throw std::invalid_argument(
+                        "stability would open a reserved C17-J1 "
+                        "evaluation seed; choose another --seed");
+                }
+            }
         }
         if (evolve &&
             evolve_pilot.kind == old_school::BotKind::Learned &&
@@ -7114,16 +7443,53 @@ int main(int argc, char** argv) {
             std::optional<
                 old_school::LearnedTerminalWeightC17Artifact>
                 frozen_terminal_weight_bundle;
+            std::optional<FrozenJointC17Deployments>
+                frozen_joint_deployments;
             std::shared_ptr<const old_school::LearnedModel>
                 frozen_actor_g0;
             std::shared_ptr<const old_school::LearnedModel>
                 frozen_actor_g1;
+            const auto ensure_joint_c17_deployments = [&] {
+                if (frozen_joint_deployments.has_value()) {
+                    return;
+                }
+                frozen_joint_deployments =
+                    load_frozen_joint_c17_deployments(
+                        std::cout);
+            };
+            const auto exact_joint_c17_deployment =
+                [&](const BotSelection& selection)
+                -> const old_school::LearnedJointC17Deployment& {
+                ensure_joint_c17_deployments();
+                if (selection.value_family ==
+                    BotSelection::ValueFamily::
+                        JointControlC17) {
+                    return frozen_joint_deployments->control;
+                }
+                if (selection.value_family ==
+                    BotSelection::ValueFamily::
+                        JointTreatmentC17) {
+                    return frozen_joint_deployments->treatment;
+                }
+                throw std::logic_error(
+                    "selection is not a joint C17 policy");
+            };
             const auto resolve_frozen_model =
                 [&](const BotSelection& selection)
                 -> std::shared_ptr<const old_school::LearnedModel> {
                 if (selection.learned_variant ==
                     old_school::LearnedVariant::
                         ValueSearchChampion) {
+                    if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                JointControlC17 ||
+                        selection.value_family ==
+                            BotSelection::ValueFamily::
+                                JointTreatmentC17) {
+                        return exact_joint_c17_deployment(
+                                   selection)
+                            .model;
+                    }
                     if (selection.value_family ==
                             BotSelection::ValueFamily::
                                 TerminalWeight50 ||
@@ -7308,6 +7674,14 @@ int main(int argc, char** argv) {
                 }
                 return frozen_actor_g1;
             };
+            if (selects_joint_c17(challenger)) {
+                challenger_config =
+                    exact_joint_c17_deployment(challenger).bot;
+            }
+            if (selects_joint_c17(baseline)) {
+                baseline_config =
+                    exact_joint_c17_deployment(baseline).bot;
+            }
             const auto selections_share_model =
                 [](const BotSelection& left,
                    const BotSelection& right) {
@@ -7331,6 +7705,10 @@ int main(int argc, char** argv) {
                         TerminalWeight50:
                     case BotSelection::ValueFamily::
                         TerminalWeight75:
+                    case BotSelection::ValueFamily::
+                        JointControlC17:
+                    case BotSelection::ValueFamily::
+                        JointTreatmentC17:
                         return true;
                     case BotSelection::ValueFamily::Challenger:
                     case BotSelection::ValueFamily::
@@ -7447,6 +7825,20 @@ int main(int argc, char** argv) {
                                            .value_continuation_epsilon);
                         }
                         if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                JointControlC17) {
+                            return std::string(
+                                old_school::
+                                    kLearnedJointC17ControlPolicyToken);
+                        }
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                JointTreatmentC17) {
+                            return std::string(
+                                old_school::
+                                    kLearnedJointC17TreatmentPolicyToken);
+                        }
+                        if (selection.value_family ==
                             BotSelection::ValueFamily::Mix50) {
                             return std::string(
                                        "Learned Value Mix50 G8") +
@@ -7465,7 +7857,8 @@ int main(int argc, char** argv) {
                 };
             std::string challenger_name =
                 benchmark_name(challenger, challenger_config);
-            if (challenger_config.value_pass_dominance) {
+            if (challenger_config.value_pass_dominance &&
+                !selects_joint_c17(challenger)) {
                 challenger_name += " + exact Pass dominance";
             }
             print_benchmark(
@@ -7474,13 +7867,27 @@ int main(int argc, char** argv) {
             return result.challenger_is_better_95() ? 0 : 1;
         }
         if (stability) {
+            std::optional<old_school::BotConfig>
+                frozen_stability_bot;
+            std::string frozen_stability_name;
+            if (challenger_option_used) {
+                auto deployments =
+                    load_frozen_joint_c17_deployments(
+                        std::cout);
+                frozen_stability_bot =
+                    deployments.treatment.bot;
+                frozen_stability_name =
+                    deployments.treatment.policy_token;
+            }
             return run_stability_panel(
                        stability_runs, games, seed,
                        training_seed, rollouts, deep_rollouts,
                        training_games, learned_rollouts,
                        learned_generations,
                        refresh_value_challenger_cache,
-                       value_continuation_epsilon)
+                       value_continuation_epsilon,
+                       std::move(frozen_stability_bot),
+                       std::move(frozen_stability_name))
                        ? 0
                        : 1;
         }

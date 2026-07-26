@@ -9312,3 +9312,115 @@ as pre-fit mechanism/integrity evidence only. It is not a bot-strength result
 and changes no champion. Next: finish and freeze the atomic train/load-only
 runner and true artifact snapshots; only then open raw shard seed
 `202607261145` once.
+
+#### C17-J1 complete pre-fit source and executable freeze
+
+Completed 2026-07-26 before any C17-J1 fit or reserved-seed use.
+`REVIEW.md` was reread through its newest 15:51 PDT entry before recording
+this result. That entry rejects the separate OSC-3 pass mechanism and still
+identifies the unopened C17-J1 construction-attribution fit as the next
+informative event; it neither changes nor conflicts with this experiment's
+frozen hypothesis, components, or gates.
+
+The falsifiable C17-J1 hypothesis remains exactly the declaration above:
+on one byte-identical balanced shard, the combined CT8 target plus
+`PublicStackPassV1` continuation controller plus root PD0 treatment will pass
+the staged held-out, deep-reference, user-field, matched-control, frozen-C16,
+Handcoded, fixed-seed, and all-five mixed-field gates. No threshold,
+component, seed, or sample size changed during implementation.
+
+The production path is now complete and fail-closed:
+
+- `--train-joint-c17` is an exclusive, argument-free one-shot route. It
+  validates the exact 3,111,437-byte frozen C16 parent with SHA-256
+  `53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`
+  and the exact 276,387-byte label cache with SHA-256
+  `949ea2fda448fa76b31a61927721629cfba9e6addee2da383cfbb68450b04770`,
+  trains only the canonical recipe, re-snapshots both prerequisites before
+  publication, atomically publishes without replacement, reloads and
+  validates the written bundle, and returns its true byte size and SHA-256.
+- `--evaluate-joint-c17` is an exclusive load-only route. Until the
+  publication identity is copied into the two compiled placeholder constants,
+  it exits with infrastructure status 2 before inspecting an artifact or
+  opening an evaluation seed. After that identity-only patch, the loader
+  requires the compiled byte size/SHA, exact parent/cache identities, complete
+  serialized report and deployments, and unchanged pre/post snapshots.
+- The one public production scheduler owns the exact lazy stage order. A
+  scientific rejection suppresses every later producer; callers cannot inject
+  a model, report, schedule, evidence summary, or out-of-order reserved stage.
+  Human and eleven-column TSV output now expose every pooled and all-five
+  held-out loss/bias estimate, action-ranking and critic-calibration metric,
+  Force Spike control, field fixture, direct/fixed clustered estimate,
+  final-pool deck count, and mixed-field rate/lift required to independently
+  recompute the verdict.
+- Exact tokens `learned-value-j1-control-c17` and
+  `learned-value-j1-treatment-c17` load their serialized deployments for
+  nonreserved ad-hoc benchmarks. The declared stability selection accepts
+  only the treatment token, never trains, and propagates its complete frozen
+  `BotConfig` through both direct and mixed-field games.
+- Seeds `202607261145..202607261149` are quarantined from every ordinary
+  explicit evaluation/training input, both roles of the miniature training
+  seam, and every derived stability seed. The fixed panel `101..808` remains
+  available to unrelated historical commands but is quarantined from typed
+  C17-J1 ad-hoc benchmark/stability use.
+- `make clean` now preserves `build/model-cache`; a regression test prevents
+  routine cleanup from deleting the one-shot bundle or its frozen parent.
+
+Exact verification:
+
+```sh
+git diff --check
+make -j4
+make -j4 test-artifact-integrity test-joint-c17-runner \
+  test-joint-c17-execution test-joint-c17-training \
+  test-joint-c17-orchestration
+make test
+make -j2 BUILD_DIR=/private/tmp/old-school-c17-asan.JY07gI \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer' \
+  /private/tmp/old-school-c17-asan.JY07gI/old-school-joint-c17-training-tests \
+  /private/tmp/old-school-c17-asan.JY07gI/old-school-joint-c17-orchestration-tests
+/private/tmp/old-school-c17-asan.JY07gI/old-school-joint-c17-training-tests
+/private/tmp/old-school-c17-asan.JY07gI/old-school-joint-c17-orchestration-tests
+```
+
+Results: 150/150 engine, 27/27 learner-iteration, 45/45 probe, 11/11
+probe-metric, 31/31 probe-runner, 8/8 audit-common, 6/6 artifact-integrity,
+11/11 terminal-weight evaluator, 21/21 joint evaluator, 18/18 sealed runner,
+7/7 load-only execution, 8/8 one-shot training, 7/7 orchestration/reporting,
+10/10 turn-alignment, 7/7 target-factorial, 15/15 replay-weight, 7/7 RB0
+preflight, and 13/13 web-bridge tests passed. CLI, capture-once,
+model-cache-preserving clean, representative five-game CLI simulation,
+93/93 web tests, and 48/48 certification tests also passed. Focused
+ASan/UBSan training and orchestration binaries passed 8/8 and 7/7.
+Everything compiled under `-Wall -Wextra -Wpedantic -Werror`.
+
+An independent adversarial freeze review rechecked the exact recipes,
+artifact fences, atomic no-replace writer, lazy no-salvage order, all-five
+accounting, information isolation, seed quarantine, stability deployment, and
+complete reporting and found no remaining P0/P1 blocker. The canonical target
+`build/model-cache/old-school-value-joint-c17-v1-t800-p424242-r202607261145.bin`
+is still absent. Decision: accept the implementation as mechanical pre-fit
+evidence only; it makes no bot-strength claim and changes no champion. After
+committing and pushing this exact reviewed source, the next and only licensed
+fit command is:
+
+```sh
+./build/old-school-sim --train-joint-c17
+```
+
+#### Post-freeze qualitative Flying Men attack report
+
+After the C17-J1 hypothesis and gates were frozen, the user reported another
+manual Learned failure: it attacked Flying Men into an opposing untapped Air
+Elemental. No seed or complete state was retained, so this is not benchmark
+evidence and must not retroactively amend the sealed C17-J1 gate. Unless an
+unrecorded lethal or forced line existed, it is a dominated-looking attack and
+extends the earlier block-side Flying Men/Air Elemental report to attack
+selection.
+
+After the sealed C17-J1 verdict, add a deterministic information-safe Attack
+fixture that compares no attack with every legal attacker set in this public
+state, labels it with bounded common-world Learned-mirror continuations, and
+records parent/candidate selections and regret. This is a card-agnostic
+action-ranking diagnostic: do not add a combat score, Flying-Men exception,
+Air-Elemental value, Handcoded label, or opponent hidden information.

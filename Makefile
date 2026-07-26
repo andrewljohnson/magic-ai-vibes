@@ -10,8 +10,13 @@ PROBE_SOURCE := src/probes.cpp
 PROBE_EVAL_SOURCE := src/probe_eval.cpp
 PROBE_RUNNER_SOURCE := src/probe_runner.cpp
 AUDIT_COMMON_SOURCE := src/audit_common.cpp
+ARTIFACT_INTEGRITY_SOURCE := src/artifact_integrity.cpp
 TERMINAL_WEIGHT_EVAL_SOURCE := src/terminal_weight_eval.cpp
 JOINT_C17_EVAL_SOURCE := src/joint_c17_eval.cpp
+JOINT_C17_RUNNER_SOURCE := src/joint_c17_runner.cpp
+JOINT_C17_EXECUTION_SOURCE := src/joint_c17_execution.cpp
+JOINT_C17_TRAINING_SOURCE := src/joint_c17_training.cpp
+JOINT_C17_ORCHESTRATION_SOURCE := src/joint_c17_orchestration.cpp
 TURN_ALIGNMENT_AUDIT_SOURCE := src/turn_alignment_audit.cpp
 TARGET_FACTORIAL_AUDIT_SOURCE := src/target_factorial_audit.cpp
 REPLAY_WEIGHT_AUDIT_SOURCE := src/replay_weight_audit.cpp
@@ -24,8 +29,13 @@ PROBE_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-tests
 PROBE_EVAL_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-eval-tests
 PROBE_RUNNER_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-runner-tests
 AUDIT_COMMON_TEST_RUNNER := $(BUILD_DIR)/old-school-audit-common-tests
+ARTIFACT_INTEGRITY_TEST_RUNNER := $(BUILD_DIR)/old-school-artifact-integrity-tests
 TERMINAL_WEIGHT_EVAL_TEST_RUNNER := $(BUILD_DIR)/old-school-terminal-weight-eval-tests
 JOINT_C17_EVAL_TEST_RUNNER := $(BUILD_DIR)/old-school-joint-c17-eval-tests
+JOINT_C17_RUNNER_TEST_RUNNER := $(BUILD_DIR)/old-school-joint-c17-runner-tests
+JOINT_C17_EXECUTION_TEST_RUNNER := $(BUILD_DIR)/old-school-joint-c17-execution-tests
+JOINT_C17_TRAINING_TEST_RUNNER := $(BUILD_DIR)/old-school-joint-c17-training-tests
+JOINT_C17_ORCHESTRATION_TEST_RUNNER := $(BUILD_DIR)/old-school-joint-c17-orchestration-tests
 TURN_ALIGNMENT_AUDIT_TEST_RUNNER := $(BUILD_DIR)/old-school-turn-alignment-audit-tests
 TARGET_FACTORIAL_AUDIT_TEST_RUNNER := $(BUILD_DIR)/old-school-target-factorial-audit-tests
 REPLAY_WEIGHT_AUDIT_TEST_RUNNER := $(BUILD_DIR)/old-school-replay-weight-audit-tests
@@ -38,15 +48,15 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-capture test-certify test-learned-iteration test-probes test-audit-common test-terminal-weight-eval test-joint-c17-eval test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(SIMULATOR): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/turn_alignment_audit.hpp include/old_school/target_factorial_audit.hpp include/old_school/replay_weight_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp -o $@
+$(SIMULATOR): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_execution.hpp include/old_school/joint_c17_training.hpp include/old_school/joint_c17_orchestration.hpp include/old_school/turn_alignment_audit.hpp include/old_school/target_factorial_audit.hpp include/old_school/replay_weight_audit.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp -o $@
 
 $(TEST_RUNNER): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp -o $@
@@ -66,11 +76,26 @@ $(PROBE_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROB
 $(AUDIT_COMMON_TEST_RUNNER): $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp include/old_school/audit_common.hpp include/old_school/learned_iteration.hpp include/old_school/game.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp -o $@
 
+$(ARTIFACT_INTEGRITY_TEST_RUNNER): $(ARTIFACT_INTEGRITY_SOURCE) tests/test_artifact_integrity.cpp include/old_school/artifact_integrity.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ARTIFACT_INTEGRITY_SOURCE) tests/test_artifact_integrity.cpp -o $@
+
 $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) tests/test_terminal_weight_eval.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) tests/test_terminal_weight_eval.cpp -o $@
 
 $(JOINT_C17_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) tests/test_joint_c17_eval.cpp include/old_school/game.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) tests/test_joint_c17_eval.cpp -o $@
+
+$(JOINT_C17_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) tests/test_joint_c17_runner.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) tests/test_joint_c17_runner.cpp -o $@
+
+$(JOINT_C17_EXECUTION_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) tests/test_joint_c17_execution.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_execution.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) tests/test_joint_c17_execution.cpp -o $@
+
+$(JOINT_C17_TRAINING_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_TRAINING_SOURCE) tests/test_joint_c17_training.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_training.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_TRAINING_SOURCE) tests/test_joint_c17_training.cpp -o $@
+
+$(JOINT_C17_ORCHESTRATION_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) tests/test_joint_c17_orchestration.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_execution.hpp include/old_school/joint_c17_orchestration.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) tests/test_joint_c17_orchestration.cpp -o $@
 
 $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) tests/test_turn_alignment_audit.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/turn_alignment_audit.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) tests/test_turn_alignment_audit.cpp -o $@
@@ -96,15 +121,20 @@ $(WEB_BRIDGE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BR
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
 	./$(PROBE_EVAL_TEST_RUNNER)
 	./$(PROBE_RUNNER_TEST_RUNNER)
 	./$(AUDIT_COMMON_TEST_RUNNER)
+	./$(ARTIFACT_INTEGRITY_TEST_RUNNER)
 	./$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER)
 	./$(JOINT_C17_EVAL_TEST_RUNNER)
+	./$(JOINT_C17_RUNNER_TEST_RUNNER)
+	./$(JOINT_C17_EXECUTION_TEST_RUNNER)
+	./$(JOINT_C17_TRAINING_TEST_RUNNER)
+	./$(JOINT_C17_ORCHESTRATION_TEST_RUNNER)
 	./$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER)
 	./$(TARGET_FACTORIAL_AUDIT_TEST_RUNNER)
 	./$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER)
@@ -112,6 +142,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(WEB_BRIDGE_TEST_RUNNER)
 	sh tests/test_cli.sh ./$(SIMULATOR)
 	sh tests/test_capture_once.sh
+	sh tests/test_make_clean.sh
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
 	npm --prefix web test
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_certify.py
@@ -121,6 +152,9 @@ test-certify:
 
 test-capture:
 	sh tests/test_capture_once.sh
+
+test-clean-contract:
+	sh tests/test_make_clean.sh
 
 test-learned-iteration: $(LEARNED_ITERATION_TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
@@ -133,11 +167,26 @@ test-probes: $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_
 test-audit-common: $(AUDIT_COMMON_TEST_RUNNER)
 	./$(AUDIT_COMMON_TEST_RUNNER)
 
+test-artifact-integrity: $(ARTIFACT_INTEGRITY_TEST_RUNNER)
+	./$(ARTIFACT_INTEGRITY_TEST_RUNNER)
+
 test-terminal-weight-eval: $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER)
 	./$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER)
 
 test-joint-c17-eval: $(JOINT_C17_EVAL_TEST_RUNNER)
 	./$(JOINT_C17_EVAL_TEST_RUNNER)
+
+test-joint-c17-runner: $(JOINT_C17_RUNNER_TEST_RUNNER)
+	./$(JOINT_C17_RUNNER_TEST_RUNNER)
+
+test-joint-c17-execution: $(JOINT_C17_EXECUTION_TEST_RUNNER)
+	./$(JOINT_C17_EXECUTION_TEST_RUNNER)
+
+test-joint-c17-training: $(JOINT_C17_TRAINING_TEST_RUNNER)
+	./$(JOINT_C17_TRAINING_TEST_RUNNER)
+
+test-joint-c17-orchestration: $(JOINT_C17_ORCHESTRATION_TEST_RUNNER)
+	./$(JOINT_C17_ORCHESTRATION_TEST_RUNNER)
 
 test-turn-alignment-audit: $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER)
 	./$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER)
@@ -221,4 +270,7 @@ run: $(SIMULATOR)
 	./$(SIMULATOR) --seed 4242 --learned-rollouts $(LEARNED_ROLLOUTS) --learned-generations $(LEARNED_GENERATIONS)
 
 clean:
-	rm -rf $(BUILD_DIR)
+	@if [ -d "$(BUILD_DIR)" ]; then \
+		find "$(BUILD_DIR)" -mindepth 1 -maxdepth 1 \
+			! -name model-cache -exec rm -rf -- {} +; \
+	fi
