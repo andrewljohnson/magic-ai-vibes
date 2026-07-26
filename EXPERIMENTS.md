@@ -7420,3 +7420,166 @@ constant-0.50 targets; no new experiment is active yet.
 `REVIEW.md` was reread through its 07:02 cycle before recording this result.
 That entry verified the frozen implementation but still described the seed as
 unopened; it contains no post-result evidence that changes the sealed verdict.
+
+### RB0-0: actor-game / exact-calendar-turn replay-weight census (declared)
+
+Declared at 2026-07-26 07:22 PDT, before implementation and before opening a
+new seed. `REVIEW.md` was reread through its 07:17 cycle. Its independent
+reproduction verifies CT8-0's rejection and correctly identifies a
+forward-looking gate-design lesson: a uniform card-agnostic correction should
+not fail merely because a nearly unbiased deck crosses zero within a small
+tolerance band. RB0-0 adopts that lesson prospectively with a fixed `0.010`
+bias-safety band. It does not reopen or salvage CT8-0. The CT8 declaration
+explicitly required user authorization to reopen its closed target family,
+none has been given, and the review agrees that replay weighting therefore has
+the floor. The review's FEAT-0 result also rejects castability as the next
+representation candidate if RB0-0 fails.
+
+#### Falsifiable hypothesis
+
+The canonical critic currently gives every recorded trace state one training
+unit. Long actor-games and turns with many priority/state records therefore
+receive more gradient mass than short actor-games and sparse turns. On a
+fresh, balanced frozen-C16 mirror corpus, this density imbalance materially
+overweights optimistic early-Green canonical RO4 labels. Giving every
+actor-game equal mass and every exact calendar turn within that actor-game
+equal mass will reduce early-Green `RO4 - discounted-terminal` signed bias by
+at least `0.005`, while remaining safe on Green, Red, Blue, White, and RU
+Aggro.
+
+RB0-0 is deliberately a load-only, zero-training mechanism test. A pass says
+that the proposed training objective contains useful leverage; it does not
+license a model, bot-strength claim, probe claim, or gameplay benchmark.
+
+#### Frozen source and schedule
+
+- Parent: the exact immutable Environment-v3 C16 artifact, T800, training seed
+  `424242`, fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+  The canonical artifact loader must load it rather than retrain it.
+- Audit seed: `202607260731`. It and generation coordinate `20` were searched
+  in the working tree and all Git history and were unused at declaration.
+- Schedule: 60 exact 40-game balanced blocks, or 2,400 physical games, 4,800
+  actor-game perspectives, and exactly 960 actor-games for each of the five
+  decks. Play/draw, seat, and ordered distinct-deck pairing remain balanced.
+- Both seats use frozen C16 Value mirrors with K=1, H=4, exploration `0.05`,
+  and a 500-turn maximum. No Handcrafted action, label, feature, state, or
+  continuation enters the corpus.
+- The only target is canonical
+  `RO4 = 0.50*z + 0.50*V_parent(i+4 recorded states)`. The final four records
+  of a trace, or every record of a shorter trace, retain discounted terminal
+  target `z`.
+- CT4, RO8, CT8, collection horizon, target reach, terminal weight, search
+  policy, model features, and card rules are unchanged. The route may not call
+  a trainer, write or refresh an artifact, score probes, or benchmark gameplay.
+
+Each trace is viewed from both perspectives. For actor-game `a`, let `T_a` be
+the number of distinct exact public `turn_number` values represented in its
+trace, and let `n_(a,t)` be its number of records at turn `t`. With `N` total
+rows and `A` actor-games, the two fixed weights are:
+
+```text
+control:   w_i = 1
+treatment: w_i = N / (A * T_a * n_(a,t))
+```
+
+Mathematically, treatment mass is `N`, every actor-game receives `N/A`, and
+each represented calendar turn within actor-game `a` receives
+`N/(A*T_a)`. No clipping, cap, exponent, blend, dropping, resampling, phase
+bin, deck weight, outcome weight, target-dependent weight, or other
+normalization is permitted. Actor/game/turn identifiers are grouping metadata
+only and may not enter critic features.
+
+#### Fixed estimands, uncertainty, and qualification
+
+Score `RO4 - z` signed bias, squared error, and soft log loss. Report control,
+treatment, and treatment-minus-control on all rows and separately on rows with
+an actual RO4 bootstrap future; report them pooled, for all five decks, and at
+root turns `<=3`, `4-7`, and `>=8`. Also report actor-game length, distinct-turn
+count, within-turn record multiplicity, terminal-tail accounting, weight
+minimum/quantiles/maximum, Kish effective sample size, target and weight
+distributions, and stable hashes.
+
+Treatment weights are computed once on the complete corpus. For a reporting
+scope `S`, they are renormalized only in that scope's mean: if `n=|S|` and
+`W=sum_S(w_i)`, a metric contrast is
+`sum_S(w_i*m_i)/W - sum_S(m_i)/n`. Its per-row paired contribution is
+`(n*w_i/W - 1)*m_i`; those contributions are formed before CR1 clustering.
+Both perspectives cluster on their globally unique physical-game ID. This
+keeps the reported contrast equal to the exact change in training-population
+weight rather than silently recomputing new actor or turn weights per slice.
+
+Evidence is incomplete unless at least 4,560 actor-games, 912 actor-games for
+every deck, and 2,280 physical games contribute an RO4-eligible row. Early
+Green must contain at least 2,500 eligible rows from 900 actor-games. Control
+early-Green eligible signed bias must be positive with its physical-game CR1
+95% lower bound above zero. All weights must be finite and positive; global,
+per-actor, and per-turn mass identities must hold within
+`64 * epsilon * max(1, expected_mass)`. Pooled Kish ESS must be at least half
+the row count and every deck's ESS at least 40% of its row count.
+
+The audit fixes 2,400 independent physical-game clusters and a `0.005`
+minimum scientifically meaningful early-Green point effect before data. It
+does not borrow CT8's cluster variance: this weighting/standardization
+contrast has a different influence function. The report must publish its
+achieved clustered SE and `2.802 * SE`, the approximate two-sided-95%,
+80%-power detectable effect under a normal approximation. The point-effect gate
+and interval-sign gate remain separate; no post-result sample-size or
+threshold revision is allowed.
+
+#### Fixed scientific gates
+
+Every gate must pass:
+
+1. On RO4-eligible early-Green rows, the treatment-minus-control signed-bias
+   delta is at most `-0.005`, its clustered 95% upper bound is below zero, and
+   treatment absolute bias is smaller.
+2. Whole-Green absolute signed bias strictly shrinks on both all rows and
+   RO4-eligible rows.
+3. On pooled all rows, the Brier and soft-log-loss contrast upper 95% bounds
+   are below `+0.001`.
+4. For every deck, on both all and RO4-eligible rows:
+   - treatment absolute bias is at most
+     `max(control absolute bias, 0.010)`;
+   - Brier point delta is at most `+0.002` and its upper 95% bound is below
+     `+0.003`; and
+   - treatment creates no material bias (`abs(bias) >= 0.05` with its
+     interval excluding zero) unless control already has material bias of the
+     same sign.
+5. Every schedule, target identity, terminal-tail, weight identity, hidden
+   information, artifact, repeated-construction, and deterministic-reduction
+   safeguard passes.
+
+#### Required implementation safeguards and decision rule
+
+- A synthetic balanced fixture with equal turn counts and one row per turn
+  produces treatment weights bit-identical to `1.0`.
+- A generic weighted reducer forced to unit weights is bit-identical to the
+  legacy record-weighted reducer.
+- Synthetic uneven fixtures prove exact equal actor-game mass, equal
+  within-actor turn mass, global normalization, and scope-fixed weighting.
+- Two complete fresh constructions from new `Game` instances must have
+  bit-identical schedule, trace, outcome, feature, RO4-target, weight, and
+  scoring hashes.
+- Repartitioning the opponent's hidden hand/library must preserve the public
+  observation, critic features and value, targets, grouping metadata, weights,
+  and hashes.
+- Reversing collector input and reducing with one versus N workers must
+  produce the identical canonical report.
+- The parent artifact's path, size, timestamp, and content digest are bound
+  before and after. The exclusive CLI rejects training, writing, benchmark,
+  probe, alternate-seed, and conflicting-mode options.
+- Exit `0` means a complete scientific pass, `1` a complete scientific
+  rejection, and `2` incomplete infrastructure/evidence.
+
+Any completed run retires seed `202607260731`. A pass licenses only a
+separately preregistered paired critic fit on a new common training shard and
+a different held-out corpus: identical rows, targets, initialization,
+ordering, optimizer, and RNG, with unit versus hierarchical weights as the
+sole arm difference. The weighted update forced to all ones must reproduce
+the legacy update fingerprint bit-for-bit, and no gameplay opens before the
+held-out all-five/probe gates pass. A valid RB0-0 failure closes this replay
+weight family and moves to a card-agnostic representation audit of removal
+exposure or trajectory; FEAT-0 forbids reviving castability without new
+evidence. Exit `2` consumes and quarantines the seed but supports no mechanism
+claim; a corrected declaration must use a new seed.
