@@ -6824,6 +6824,68 @@ Failure rejects calendar alignment as the immediate training target without
 changing the four-turn endpoint, retrying a seed, or inspecting gameplay.
 No benchmark or training run is licensed by this declaration itself.
 
+#### TA4-0 implementation freeze
+
+Recorded at 2026-07-26 05:49 PDT after rereading `REVIEW.md` through its
+05:47 PDT cycle and before opening audit seed `202607260501`.
+
+The exclusive load-only `--audit-calendar-turn-targets` route is now
+implemented. It loads and fingerprints only the exact Environment-v3 C16
+artifact; constructs the fixed 50-block shard twice from fresh games; reduces
+worker slots in semantic schedule order; checks the existing record-offset
+helper bit-for-bit; checks earliest exact four-turn treatment indices, terminal
+tails, Time Walk turn numbering, common eligibility, and hidden-zone
+repartitions; emits pooled/per-deck record-weighted and equal-actor-game CR1
+metrics plus all three root-turn strata; snapshots the parent before, during,
+and after collection; and implements the frozen exit taxonomy (`0` pass, `1`
+valid scientific rejection, `2` infrastructure/incomplete evidence).
+
+The hidden-zone check compares public observations, encoded critic features,
+critic values, control/treatment target arrays, eligibility/future-index
+records, and a reconstructed scoring hash bit-for-bit after changing only the
+opponent hand/library partition. A compile-time assertion binds the audit's
+reported four-turn horizon to the production Learned search-horizon constant.
+No trainer symbol is called by the audit route.
+
+Verification before the one-shot run:
+
+```sh
+make test
+```
+
+passed 128 engine, 27 learned-iteration, 40 probe, 11 probe-metric, 25 probe
+runner, 10 terminal-weight evaluator, 8 TA4 audit, and 9 web-bridge tests;
+the CLI and capture-once scripts passed; the representative simulator smoke
+completed; all 82 web unit/contract tests passed; and all 48 certification
+harness tests passed.
+
+```sh
+c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/probe_eval.cpp src/probe_runner.cpp \
+  src/terminal_weight_eval.cpp src/turn_alignment_audit.cpp \
+  tests/test_turn_alignment_audit.cpp \
+  -o build/old-school-turn-alignment-audit-tests-sanitize
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  ./build/old-school-turn-alignment-audit-tests-sanitize
+```
+
+passed all 8 TA4 tests under AddressSanitizer and UndefinedBehaviorSanitizer.
+The focused suite covers exact schedule balance, ordinary/same-turn priority
+roots, Time Walk extra-turn sequencing, terminal tails, invalid trace helpers,
+uneven record counts, directly paired clustering, zero-common actor-games,
+synthetic pass/reject gates, exact `0/1/2` status mapping, missing-artifact
+fail-before-collection, and nonreserved 1-versus-2-worker bit determinism.
+
+An independent read-only implementation review found no blocking issue after
+the hidden scoring-hash and horizon assertions were added. `git diff --check`
+and strict `-Werror` builds are clean. The reserved seed and canonical command
+remain unopened. The next and only licensed action is to commit this frozen
+implementation and invoke the canonical audit once through
+`tools/capture_once.sh`; its registered gate determines whether same-shard
+calendar-turn C17 training is licensed.
+
 #### TA4-0 preimplementation statistical clarification
 
 Recorded at 2026-07-26 04:57 PDT before implementation and before audit seed

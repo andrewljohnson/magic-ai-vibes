@@ -4,6 +4,7 @@
 #include "old_school/probe_runner.hpp"
 #include "old_school/probes.hpp"
 #include "old_school/terminal_weight_eval.hpp"
+#include "old_school/turn_alignment_audit.hpp"
 
 #include <algorithm>
 #include <array>
@@ -221,6 +222,8 @@ void print_help(std::string_view executable) {
         << " --audit-v3-blue-stack-regret --train-games 800"
            " --train-seed 424242 --learned-generations 16\n"
         << "       " << executable
+        << " --audit-calendar-turn-targets\n"
+        << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
@@ -349,6 +352,11 @@ void print_help(std::string_view executable) {
            "actual Blue-held opponent-stack choices from 200 balanced "
            "loss-source games; fixed C16, K64+64/H8 Learned-mirror "
            "reference, hidden clone, and 40-root rare-error gate\n"
+        << "  --audit-calendar-turn-targets  Exclusive load-only TA4-0 "
+           "audit of record-offset-4 versus calendar-turn-4 bootstrap "
+           "targets; fixed seed 202607260501 and frozen C16, accepts no "
+           "other options, and exits 0/1/2 for "
+           "pass/reject/infrastructure\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
         << "  --score-probes   Label/score an offline decision-probe "
@@ -4421,8 +4429,27 @@ bool evaluate_p1r_offline_gate(
 
 int main(int argc, char** argv) {
     try {
+        constexpr std::string_view calendar_turn_audit_option =
+            "--audit-calendar-turn-targets";
+        bool calendar_turn_audit_requested = false;
+        for (int argument = 1; argument < argc; ++argument) {
+            calendar_turn_audit_requested =
+                calendar_turn_audit_requested ||
+                std::string_view(argv[argument]) ==
+                    calendar_turn_audit_option;
+        }
+        if (calendar_turn_audit_requested &&
+            (argc != 2 ||
+             std::string_view(argv[1]) !=
+                 calendar_turn_audit_option)) {
+            throw std::invalid_argument(
+                "--audit-calendar-turn-targets is exclusive and "
+                "accepts no other options");
+        }
+
         std::size_t games = 100;
         std::uint64_t seed = random_seed();
+        bool seed_option_used = false;
         old_school::BotField bot_field = old_school::BotField::Mixed;
         old_school::LearnedVariant bot_field_learned_variant =
             old_school::LearnedVariant::ValueSearchChampion;
@@ -4434,6 +4461,7 @@ int main(int argc, char** argv) {
         std::size_t training_games = 800;
         std::uint64_t training_seed =
             old_school::kDefaultLearnedTrainingSeed;
+        bool training_seed_option_used = false;
         bool games_were_set = false;
         bool interactive = false;
         bool interactive_unsupported_option_used = false;
@@ -4462,6 +4490,7 @@ int main(int argc, char** argv) {
         bool dc1_census_unsupported_option_used = false;
         bool audit_v3_blue_stack_regret = false;
         bool bsr0_unsupported_option_used = false;
+        bool audit_calendar_turn_targets = false;
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
@@ -4618,6 +4647,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--audit-v3-blue-stack-regret") {
                 audit_v3_blue_stack_regret = true;
+                continue;
+            }
+            if (option == "--audit-calendar-turn-targets") {
+                audit_calendar_turn_targets = true;
                 continue;
             }
             if (option == "--variance-study") {
@@ -4779,8 +4812,10 @@ int main(int argc, char** argv) {
                 games_were_set = true;
             } else if (option == "--seed") {
                 seed = value;
+                seed_option_used = true;
             } else if (option == "--train-seed") {
                 training_seed = value;
+                training_seed_option_used = true;
             } else if (option == "--rollouts") {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -4899,6 +4934,7 @@ int main(int argc, char** argv) {
                 static_cast<int>(audit_dc1_dominance) +
                 static_cast<int>(audit_dc1_action_census) +
                 static_cast<int>(audit_v3_blue_stack_regret) +
+                static_cast<int>(audit_calendar_turn_targets) +
                 static_cast<int>(variance_study) +
                 static_cast<int>(score_probes) >
             1) {
@@ -4914,6 +4950,7 @@ int main(int argc, char** argv) {
                 "--audit-dc1-dominance, "
                 "--audit-dc1-action-census, "
                 "--audit-v3-blue-stack-regret, "
+                "--audit-calendar-turn-targets, "
                 "--variance-study, and "
                 "--score-probes cannot be "
                 "combined");
@@ -4984,6 +5021,22 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--evaluate-terminal-weight-c17 is exclusive and "
                 "accepts no other options");
+        }
+        if (audit_calendar_turn_targets && argc != 2) {
+            throw std::invalid_argument(
+                "--audit-calendar-turn-targets is exclusive and "
+                "accepts no other options");
+        }
+        constexpr std::uint64_t calendar_turn_audit_seed =
+            202607260501ULL;
+        if (!audit_calendar_turn_targets &&
+            ((seed_option_used &&
+              seed == calendar_turn_audit_seed) ||
+             (training_seed_option_used &&
+              training_seed == calendar_turn_audit_seed))) {
+            throw std::invalid_argument(
+                "reserved TA4-0 audit seed 202607260501 may be used "
+                "only by --audit-calendar-turn-targets");
         }
         if (audit_dc1_dominance &&
             dc1_unsupported_option_used) {
@@ -5214,6 +5267,7 @@ int main(int argc, char** argv) {
             !audit_dc1_dominance &&
             !audit_dc1_action_census &&
             !audit_v3_blue_stack_regret &&
+            !audit_calendar_turn_targets &&
             !variance_study && !score_probes &&
             (bot_field == old_school::BotField::Mixed ||
              bot_field == old_school::BotField::Learned);
@@ -5390,6 +5444,26 @@ int main(int argc, char** argv) {
                        "failure: "
                     << error.what() << '\n';
                 return 2;
+            }
+        }
+        if (audit_calendar_turn_targets) {
+            try {
+                const auto report =
+                    old_school::turn_alignment_audit::
+                        run_canonical_ta4_audit(std::cout);
+                old_school::turn_alignment_audit::
+                    write_human_report(report, std::cout);
+                old_school::turn_alignment_audit::
+                    write_tsv_report(report, std::cout);
+                return old_school::turn_alignment_audit::
+                    audit_exit_code(true, report.passed);
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "TA4-0 infrastructure/incomplete-evidence "
+                       "failure: "
+                    << error.what() << '\n';
+                return old_school::turn_alignment_audit::
+                    audit_exit_code(false, false);
             }
         }
         if (diagnose_p1_fit) {

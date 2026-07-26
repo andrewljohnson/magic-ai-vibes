@@ -24,6 +24,7 @@ context_challenger_c1_cache=build/model-cache/old-school-value-context-s1-v3-c1-
 dense_masked_c1_cache=build/model-cache/old-school-value-context-d0-v3-c1-t1-s424242.bin
 dense_context_c1_cache=build/model-cache/old-school-value-context-d1-v3-c1-t1-s424242.bin
 terminal_weight_cache=build/model-cache/old-school-value-terminal-weight-c17-v1-t800-p424242-r202607260311.bin
+ta4_parent_cache=build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin
 probe_cache=
 mix50_probe_cache=
 validation_probe_cache=
@@ -34,7 +35,7 @@ cleanup() {
         "$challenger_c1_cache" "$challenger_c2_cache" \
         "$context_challenger_c1_cache" \
         "$dense_masked_c1_cache" "$dense_context_c1_cache" \
-        "$terminal_weight_cache"
+        "$terminal_weight_cache" "$ta4_parent_cache"
     if [ -n "$probe_cache" ]; then
         rm -f "$probe_cache"
     fi
@@ -55,7 +56,7 @@ rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
     "$challenger_c1_cache" "$challenger_c2_cache" \
     "$context_challenger_c1_cache" \
     "$dense_masked_c1_cache" "$dense_context_c1_cache" \
-    "$terminal_weight_cache"
+    "$terminal_weight_cache" "$ta4_parent_cache"
 
 run_cli() {
     set +e
@@ -243,6 +244,19 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--audit-calendar-turn-targets"*\
+"Exclusive load-only TA4-0 audit"*\
+"record-offset-4 versus calendar-turn-4 bootstrap targets"*\
+"fixed seed 202607260501 and frozen C16"*\
+"accepts no other options"*\
+"exits 0/1/2 for pass/reject/infrastructure"*) ;;
+    *)
+        printf 'TA4-0 calendar-turn audit contract missing from --help\n' \
+            >&2
+        exit 1
+        ;;
+esac
 
 run_cli --diagnose-value-context
 if [ "$cli_status" -ne 0 ]; then
@@ -358,6 +372,40 @@ case $cli_output in
         exit 1
         ;;
 esac
+expect_error "--audit-calendar-turn-targets is exclusive and accepts no other options" \
+    --audit-calendar-turn-targets --seed 1
+expect_error "--audit-calendar-turn-targets is exclusive and accepts no other options" \
+    --audit-calendar-turn-targets --benchmark
+expect_error "--audit-calendar-turn-targets is exclusive and accepts no other options" \
+    --audit-calendar-turn-targets --help
+expect_error "reserved TA4-0 audit seed 202607260501 may be used only by --audit-calendar-turn-targets" \
+    --games 1 --seed 202607260501 --bots random
+expect_error "reserved TA4-0 audit seed 202607260501 may be used only by --audit-calendar-turn-targets" \
+    --games 1 --seed 1 --bots random --train-seed 202607260501
+ta4_files_before=$(find . -type f -print | sort)
+expect_error "TA4-0 infrastructure/incomplete-evidence failure" \
+    --audit-calendar-turn-targets
+ta4_files_after=$(find . -type f -print | sort)
+case $cli_output in
+    *"Training"*|*"training games"*)
+        printf 'TA4-0 load-only audit tried to train\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+case $cli_output in
+    *"Constructing TA4-0 audit corpus"*)
+        printf 'TA4-0 missing-artifact route began collection\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+if [ "$ta4_files_before" != "$ta4_files_after" ] ||
+    [ -e "$ta4_parent_cache" ]; then
+    printf 'TA4-0 load-only audit created an artifact\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
 expect_error "terminal-weight C17 benchmark tokens require exact --train-games 800 --train-seed 424242" \
     --benchmark --games 1 --seed 1 \
     --challenger learned-value-tw75-c17 \
