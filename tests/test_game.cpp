@@ -341,6 +341,24 @@ small_terminal_weight_family() {
     return artifact;
 }
 
+const old_school::LearnedJointC17Artifact&
+small_joint_c17_family() {
+    static const auto artifact = [] {
+        old_school::LearnedJointC17Config config;
+        config.training_games = 1;
+        config.parent_training_seed = 424242;
+        config.parent_generations = 2;
+        config.shard_seed = 0x7A17C18ULL;
+        config.balanced_blocks = 1;
+        config.max_game_turns = 12;
+        config.required_parent_fingerprint =
+            "8b9696870ca43087cddb3987a3d80759ac0528b552f1ead5447091d526cf2e06";
+        return old_school::train_learned_joint_c17_family(
+            std::move(config));
+    }();
+    return artifact;
+}
+
 const old_school::LearnedValueContextChallengerArtifact&
 small_value_context_challenger_c1_artifact() {
     static const auto artifact =
@@ -2475,6 +2493,440 @@ TEST(terminal_weight_c17_artifact_is_distinct_atomic_and_fail_closed) {
     std::filesystem::remove(good);
     std::filesystem::remove(corrupt);
     std::filesystem::remove(challenger);
+}
+
+TEST(joint_c17_family_is_deterministic_shared_and_critic_only) {
+    const auto& artifact = small_joint_c17_family();
+    const auto& report = artifact.report();
+    CHECK(report.training_games == 1);
+    CHECK(report.parent_training_seed == 424242);
+    CHECK(report.parent_generations == 2);
+    CHECK(report.shard_seed == 0x7A17C18ULL);
+    CHECK(report.shard_generation == 3);
+    CHECK(report.balanced_blocks == 1);
+    CHECK(report.scheduled_games == 40);
+    CHECK(report.actor_perspectives == 80);
+    CHECK(report.control_record_bootstrap_distance == 4);
+    CHECK(report.treatment_turn_bootstrap_advances == 8);
+    CHECK(report.collection_search_worlds == 1);
+    CHECK(report.collection_horizon_turns ==
+          old_school::kLearnedValueSearchHorizonTurns);
+    CHECK(report.collection_max_game_turns == 12);
+    CHECK(report.collection_exploration_rate == 0.05);
+    CHECK(report.collection_value_continuation_epsilon == 0.0);
+    CHECK(report.collection_value_priority_residual_weight == 0.0);
+    CHECK(report.collection_blend_shallow_prior);
+    CHECK(!report.collection_value_pass_dominance);
+    CHECK(report.collection_continuation_controller ==
+          old_school::LearnedContinuationController::Legacy);
+    CHECK(report.control_terminal_weight == 0.5);
+    CHECK(report.treatment_terminal_weight == 0.5);
+    CHECK(report.fit_epochs == 3);
+    CHECK(report.fit_learning_rate == 0.006);
+    CHECK(report.fit_example_weight == 1.0);
+    CHECK(report.fit_root_seed == 424242);
+    CHECK(report.fit_member_training_tag ==
+          0x53454C4600000200ULL);
+    CHECK(report.parent_fingerprint ==
+          "8b9696870ca43087cddb3987a3d80759ac0528b552f1ead5447091d526cf2e06");
+    CHECK(report.control_fingerprint ==
+          old_school::learned_model_fingerprint(
+              artifact.control_model()));
+    CHECK(report.treatment_fingerprint ==
+          old_school::learned_model_fingerprint(
+              artifact.treatment_model()));
+    CHECK(artifact.control_model().get() !=
+          artifact.treatment_model().get());
+    CHECK(report.control_fingerprint !=
+          report.treatment_fingerprint);
+    CHECK(report.control_historical_replay_hash ==
+          report.treatment_historical_replay_hash);
+    CHECK(report.control_fit_feature_order_hash ==
+          report.treatment_fit_feature_order_hash);
+    CHECK(report.control_fit_order_hash ==
+          report.treatment_fit_order_hash);
+    CHECK(report.control_raw_shard_hash ==
+          report.treatment_raw_shard_hash);
+    CHECK(report.control_future_index_hash !=
+          report.treatment_future_index_hash);
+    CHECK(report.control_target_hash !=
+          report.treatment_target_hash);
+    CHECK(report.control_fit_target_hash !=
+          report.treatment_fit_target_hash);
+    CHECK(report.historical_replay_examples ==
+          report.anchor_examples +
+              report.penultimate_generation_examples +
+              report.last_generation_examples);
+    CHECK(report.fit_examples ==
+          report.historical_replay_examples +
+              report.shard_examples);
+    CHECK(report.control_bootstrapped_examples +
+              report.control_terminal_tail_examples ==
+          report.shard_examples);
+    CHECK(report.treatment_bootstrapped_examples +
+              report.treatment_terminal_tail_examples ==
+          report.shard_examples);
+    CHECK(report.treatment_bootstrapped_examples > 0);
+    CHECK(report.treatment_terminal_tail_examples > 0);
+    CHECK(report.maximum_control_target_error == 0.0);
+    CHECK(report.maximum_treatment_target_error == 0.0);
+
+    std::size_t perspectives = 0;
+    std::size_t examples = 0;
+    std::size_t control_bootstrapped = 0;
+    std::size_t control_tail = 0;
+    std::size_t treatment_bootstrapped = 0;
+    std::size_t treatment_tail = 0;
+    for (const auto& deck : report.decks) {
+        CHECK(deck.perspectives == 16);
+        CHECK(deck.examples > 0);
+        CHECK(deck.control_bootstrapped_examples +
+                  deck.control_terminal_tail_examples ==
+              deck.examples);
+        CHECK(deck.treatment_bootstrapped_examples +
+                  deck.treatment_terminal_tail_examples ==
+              deck.examples);
+        perspectives += deck.perspectives;
+        examples += deck.examples;
+        control_bootstrapped +=
+            deck.control_bootstrapped_examples;
+        control_tail +=
+            deck.control_terminal_tail_examples;
+        treatment_bootstrapped +=
+            deck.treatment_bootstrapped_examples;
+        treatment_tail +=
+            deck.treatment_terminal_tail_examples;
+    }
+    CHECK(perspectives == report.actor_perspectives);
+    CHECK(examples == report.shard_examples);
+    CHECK(control_bootstrapped ==
+          report.control_bootstrapped_examples);
+    CHECK(control_tail ==
+          report.control_terminal_tail_examples);
+    CHECK(treatment_bootstrapped ==
+          report.treatment_bootstrapped_examples);
+    CHECK(treatment_tail ==
+          report.treatment_terminal_tail_examples);
+
+    for (const auto& candidate :
+         {report.control_components,
+          report.treatment_components}) {
+        CHECK(candidate.critic !=
+              report.parent_components.critic);
+        CHECK(candidate.priority ==
+              report.parent_components.priority);
+        CHECK(candidate.attack ==
+              report.parent_components.attack);
+        CHECK(candidate.block ==
+              report.parent_components.block);
+        CHECK(candidate.damage_order ==
+              report.parent_components.damage_order);
+    }
+    CHECK(report.control_components.critic !=
+          report.treatment_components.critic);
+
+    const auto control =
+        artifact.control_deployment(0xC017ULL);
+    CHECK(control.arm ==
+          old_school::LearnedJointC17Arm::Control);
+    CHECK(control.policy_token ==
+          old_school::kLearnedJointC17ControlPolicyToken);
+    CHECK(control.model == artifact.control_model());
+    CHECK(control.bot.kind == old_school::BotKind::Learned);
+    CHECK(control.bot.rollouts_per_action == 8);
+    CHECK(control.bot.exploration_rate == 0.0);
+    CHECK(!control.bot.value_pass_dominance);
+    CHECK(control.bot.value_continuation_controller ==
+          old_school::LearnedContinuationController::Legacy);
+    CHECK(control.search.seed == 0xC017ULL);
+    CHECK(control.search.worlds == 8);
+    CHECK(control.search.rollouts_per_world == 1);
+    CHECK(control.search.horizon_turns == 4);
+    CHECK(control.search.blend_shallow_prior);
+    CHECK(!control.search.value_pass_dominance);
+    CHECK(control.search.value_continuation_controller ==
+          old_school::LearnedContinuationController::Legacy);
+
+    const auto treatment =
+        artifact.treatment_deployment(0xC018ULL);
+    CHECK(treatment.arm ==
+          old_school::LearnedJointC17Arm::Treatment);
+    CHECK(treatment.policy_token ==
+          old_school::kLearnedJointC17TreatmentPolicyToken);
+    CHECK(treatment.model == artifact.treatment_model());
+    CHECK(treatment.bot.rollouts_per_action == 8);
+    CHECK(treatment.bot.value_pass_dominance);
+    CHECK(treatment.bot.value_continuation_controller ==
+          old_school::LearnedContinuationController::
+              PublicStackPassV1);
+    CHECK(treatment.search.seed == 0xC018ULL);
+    CHECK(treatment.search.worlds == 8);
+    CHECK(treatment.search.horizon_turns == 4);
+    CHECK(treatment.search.blend_shallow_prior);
+    CHECK(treatment.search.value_pass_dominance);
+    CHECK(treatment.search.value_continuation_controller ==
+          old_school::LearnedContinuationController::
+              PublicStackPassV1);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(artifact.deployment(
+                static_cast<
+                    old_school::LearnedJointC17Arm>(0xFFU)));
+        },
+        "arm is invalid"));
+
+    old_school::LearnedJointC17Config repeated_config;
+    repeated_config.training_games = 1;
+    repeated_config.parent_training_seed = 424242;
+    repeated_config.parent_generations = 2;
+    repeated_config.shard_seed = 0x7A17C18ULL;
+    repeated_config.balanced_blocks = 1;
+    repeated_config.max_game_turns = 12;
+    repeated_config.required_parent_fingerprint =
+        report.parent_fingerprint;
+    const auto repeated =
+        old_school::train_learned_joint_c17_family(
+            std::move(repeated_config));
+    CHECK(repeated.report() == report);
+    CHECK(old_school::learned_model_fingerprint(
+              repeated.control_model()) ==
+          report.control_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(
+              repeated.treatment_model()) ==
+          report.treatment_fingerprint);
+}
+
+TEST(joint_c17_artifact_is_no_replace_and_cross_family_closed) {
+    const auto& original = small_joint_c17_family();
+    const std::filesystem::path directory =
+        "build/test-model-cache";
+    const std::filesystem::path good =
+        directory / "joint-c17-family-good.bin";
+    const std::filesystem::path corrupt =
+        directory / "joint-c17-family-corrupt.bin";
+    const std::filesystem::path trailing =
+        directory / "joint-c17-family-trailing.bin";
+    const std::filesystem::path existing =
+        directory / "joint-c17-family-existing.bin";
+    const std::filesystem::path existing_directory =
+        directory / "joint-c17-family-existing-directory";
+    const std::filesystem::path sentinel =
+        directory / "joint-c17-family-sentinel.bin";
+    const std::filesystem::path symlink =
+        directory / "joint-c17-family-symlink.bin";
+    const std::filesystem::path terminal_weight =
+        directory / "joint-c17-family-terminal-weight.bin";
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(trailing);
+    std::filesystem::remove(existing);
+    std::filesystem::remove(existing_directory);
+    std::filesystem::remove(sentinel);
+    std::filesystem::remove(symlink);
+    std::filesystem::remove(terminal_weight);
+
+    old_school::write_learned_joint_c17_artifact_atomic(
+        good.string(), original);
+    const auto first_bytes = read_binary_file(good);
+    const auto loaded =
+        old_school::load_learned_joint_c17_artifact(
+            good.string(), 1, 424242, 0x7A17C18ULL);
+    CHECK(loaded.report() == original.report());
+    CHECK(old_school::learned_model_fingerprint(
+              loaded.control_model()) ==
+          original.report().control_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(
+              loaded.treatment_model()) ==
+          original.report().treatment_fingerprint);
+    CHECK(old_school::learned_joint_c17_cache_path(
+              800, 424242) ==
+          "build/model-cache/"
+          "old-school-value-joint-c17-v1-t800-p424242-"
+          "r202607261145.bin");
+    const std::filesystem::path canonical_destination =
+        std::filesystem::absolute(
+            std::filesystem::path(".") /
+            old_school::learned_joint_c17_cache_path(
+                800, 424242))
+            .lexically_normal();
+    CHECK(throws_with_text(
+        [&] {
+            old_school::
+                write_learned_joint_c17_artifact_atomic(
+                    canonical_destination.string(), original);
+        },
+        "canonical joint C17 cache path"));
+
+    CHECK(throws_with_text(
+        [&] {
+            old_school::
+                write_learned_joint_c17_artifact_atomic(
+                    good.string(), original);
+        },
+        "already exists"));
+    CHECK(read_binary_file(good) == first_bytes);
+
+    const std::vector<std::uint8_t> sentinel_bytes = {
+        0x11U, 0x22U, 0x33U, 0x44U,
+    };
+    write_binary_file(existing, sentinel_bytes);
+    CHECK(throws_with_text(
+        [&] {
+            old_school::
+                write_learned_joint_c17_artifact_atomic(
+                    existing.string(), original);
+        },
+        "already exists"));
+    CHECK(read_binary_file(existing) == sentinel_bytes);
+
+    std::filesystem::create_directory(existing_directory);
+    CHECK(throws_with_text(
+        [&] {
+            old_school::
+                write_learned_joint_c17_artifact_atomic(
+                    existing_directory.string(), original);
+        },
+        "already exists"));
+    CHECK(std::filesystem::is_directory(existing_directory));
+
+    write_binary_file(sentinel, sentinel_bytes);
+    std::filesystem::create_symlink(
+        std::filesystem::absolute(sentinel), symlink);
+    CHECK(throws_with_text(
+        [&] {
+            old_school::
+                write_learned_joint_c17_artifact_atomic(
+                    symlink.string(), original);
+        },
+        "already exists"));
+    CHECK(std::filesystem::is_symlink(
+        std::filesystem::symlink_status(symlink)));
+    CHECK(read_binary_file(sentinel) == sentinel_bytes);
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_joint_c17_artifact(
+                    good.string(), 2, 424242,
+                    0x7A17C18ULL));
+        },
+        "training_games mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_joint_c17_artifact(
+                    good.string(), 1, 424243,
+                    0x7A17C18ULL));
+        },
+        "parent training seed mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_joint_c17_artifact(
+                    good.string(), 1, 424242,
+                    0x7A17C19ULL));
+        },
+        "shard seed mismatch"));
+
+    auto changed = first_bytes;
+    CHECK(changed.size() > 64);
+    changed.back() ^= 0x01U;
+    write_binary_file(corrupt, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_joint_c17_artifact(
+                    corrupt.string(), 1, 424242,
+                    0x7A17C18ULL));
+        },
+        "checksum"));
+    changed = first_bytes;
+    changed.push_back(0x00U);
+    write_binary_file(trailing, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_joint_c17_artifact(
+                    trailing.string(), 1, 424242,
+                    0x7A17C18ULL));
+        },
+        "invalid payload length"));
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_terminal_weight_c17_artifact(
+                        good.string(), 1, 424242,
+                        0x7A17C18ULL));
+        },
+        "wrong magic"));
+    old_school::
+        write_learned_terminal_weight_c17_artifact_atomic(
+            terminal_weight.string(),
+            small_terminal_weight_family());
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::load_learned_joint_c17_artifact(
+                    terminal_weight.string(), 1, 424242,
+                    0x7A17C17ULL));
+        },
+        "wrong magic"));
+
+    old_school::LearnedJointC17Config canonical;
+    canonical.required_parent_fingerprint.clear();
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_joint_c17_family(
+                    canonical));
+        },
+        "exact frozen C16 fingerprint"));
+    canonical.required_parent_fingerprint =
+        old_school::kLearnedJointC17ParentFingerprint;
+    canonical.parent_generations = 15;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_joint_c17_family(
+                    canonical));
+        },
+        "canonical joint C17 coordinates"));
+    canonical.parent_generations = 16;
+    canonical.balanced_blocks = 4;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_joint_c17_family(
+                    canonical));
+        },
+        "canonical joint C17 coordinates"));
+    canonical.balanced_blocks = 5;
+    canonical.max_game_turns = 499;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_joint_c17_family(
+                    canonical));
+        },
+        "canonical joint C17 coordinates"));
+    CHECK(throws_with_text(
+        [] {
+            static_cast<void>(
+                old_school::learned_joint_c17_cache_path(
+                    0, 424242));
+        },
+        "positive"));
+
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(trailing);
+    std::filesystem::remove(existing);
+    std::filesystem::remove(existing_directory);
+    std::filesystem::remove(symlink);
+    std::filesystem::remove(sentinel);
+    std::filesystem::remove(terminal_weight);
 }
 
 TEST(value_context_challenger_s1_is_deterministic_and_reports_roots) {

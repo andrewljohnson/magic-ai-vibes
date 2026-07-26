@@ -143,6 +143,18 @@ constexpr std::string_view kTerminalWeightC17RecipeId =
 void validate_terminal_weight_report(
     const LearnedTerminalWeightC17Report& report);
 constexpr std::array<std::uint8_t, 8>
+    kLearnedJointC17ArtifactMagic = {
+        'O', 'S', 'M', 'V', 'J', 'C', '1', '1',
+    };
+constexpr std::uint32_t
+    kLearnedJointC17ArtifactSchema = 1;
+constexpr std::string_view kLearnedJointC17RecipeId =
+    "old-school.learned-value-joint-c17."
+    "same-shard-ro4-calendar8-w50-replay3-k1h4-"
+    "public-stack-pass-pd0.v1";
+void validate_learned_joint_c17_report(
+    const LearnedJointC17Report& report);
+constexpr std::array<std::uint8_t, 8>
     kValueContextChallengerArtifactMagic = {
         'O', 'S', 'M', 'V', 'C', 'T', 'X', '1',
     };
@@ -686,6 +698,159 @@ void write_value_g8_file_atomic(
         const std::string detail = std::strerror(errno);
         throw std::runtime_error(
             "cannot close published Value G8 artifact directory: " +
+            detail);
+    }
+}
+
+void write_value_g8_file_atomic_no_replace(
+    const std::string& path,
+    std::span<const std::uint8_t> bytes) {
+    reject_embedded_nul_in_value_g8_path(path);
+    const std::filesystem::path target(path);
+    if (path.empty() || target.filename().empty()) {
+        throw std::invalid_argument(
+            "joint C17 artifact path must name a file");
+    }
+    const std::filesystem::path directory =
+        target.has_parent_path()
+            ? target.parent_path()
+            : std::filesystem::path(".");
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+        directory, directory_error);
+    if (directory_error) {
+        throw std::runtime_error(
+            "cannot create joint C17 artifact directory '" +
+            directory.string() + "': " +
+            directory_error.message());
+    }
+
+    static std::atomic<std::uint64_t> temporary_counter{0};
+    std::filesystem::path temporary;
+    int descriptor = -1;
+    for (std::size_t attempt = 0; attempt < 128; ++attempt) {
+        temporary =
+            directory /
+            (target.filename().string() + ".tmp." +
+             std::to_string(
+                 static_cast<unsigned long long>(::getpid())) +
+             "." +
+             std::to_string(
+                 temporary_counter.fetch_add(
+                     1, std::memory_order_relaxed)));
+        descriptor = ::open(
+            temporary.c_str(),
+            O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+        if (descriptor >= 0) {
+            break;
+        }
+        if (errno != EEXIST) {
+            throw std::runtime_error(
+                "cannot create temporary joint C17 artifact '" +
+                temporary.string() + "': " +
+                std::strerror(errno));
+        }
+    }
+    if (descriptor < 0) {
+        throw std::runtime_error(
+            "could not reserve a temporary joint C17 artifact");
+    }
+
+    const auto cleanup = [&] {
+        if (descriptor >= 0) {
+            static_cast<void>(::close(descriptor));
+            descriptor = -1;
+        }
+        static_cast<void>(::unlink(temporary.c_str()));
+    };
+    std::size_t cursor = 0;
+    while (cursor < bytes.size()) {
+        const ssize_t written = ::write(
+            descriptor, bytes.data() + cursor,
+            bytes.size() - cursor);
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            const std::string detail = std::strerror(errno);
+            cleanup();
+            throw std::runtime_error(
+                "cannot write temporary joint C17 artifact: " +
+                detail);
+        }
+        if (written == 0) {
+            cleanup();
+            throw std::runtime_error(
+                "temporary joint C17 artifact write made no "
+                "progress");
+        }
+        cursor += static_cast<std::size_t>(written);
+    }
+    if (::fsync(descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        cleanup();
+        throw std::runtime_error(
+            "cannot sync temporary joint C17 artifact: " +
+            detail);
+    }
+    if (::close(descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        descriptor = -1;
+        static_cast<void>(::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot close temporary joint C17 artifact: " +
+            detail);
+    }
+    descriptor = -1;
+
+    const int directory_descriptor = ::open(
+        directory.c_str(), O_RDONLY | O_CLOEXEC);
+    if (directory_descriptor < 0) {
+        const std::string detail = std::strerror(errno);
+        static_cast<void>(::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot open joint C17 artifact directory for sync: " +
+            detail);
+    }
+    if (::link(temporary.c_str(), target.c_str()) != 0) {
+        const int link_error = errno;
+        std::error_code status_error;
+        const auto status =
+            std::filesystem::symlink_status(
+                target, status_error);
+        const bool target_exists =
+            !status_error &&
+            status.type() !=
+                std::filesystem::file_type::not_found;
+        static_cast<void>(::close(directory_descriptor));
+        static_cast<void>(::unlink(temporary.c_str()));
+        if (link_error == EEXIST || target_exists) {
+            throw std::runtime_error(
+                "joint C17 artifact destination already exists: '" +
+                path + "'");
+        }
+        throw std::runtime_error(
+            "cannot atomically publish joint C17 artifact '" +
+            path + "': " + std::strerror(link_error));
+    }
+    if (::unlink(temporary.c_str()) != 0) {
+        const std::string detail = std::strerror(errno);
+        static_cast<void>(::close(directory_descriptor));
+        throw std::runtime_error(
+            "cannot remove linked joint C17 temporary artifact: " +
+            detail);
+    }
+    if (::fsync(directory_descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        static_cast<void>(::close(directory_descriptor));
+        throw std::runtime_error(
+            "cannot sync published joint C17 artifact directory: " +
+            detail);
+    }
+    if (::close(directory_descriptor) != 0) {
+        const std::string detail = std::strerror(errno);
+        throw std::runtime_error(
+            "cannot close published joint C17 artifact directory: " +
             detail);
     }
 }
@@ -1839,6 +2004,16 @@ class LearnedModel {
         std::uint64_t expected_parent_training_seed,
         std::uint64_t expected_shard_seed);
     friend void
+    write_learned_joint_c17_artifact_atomic(
+        const std::string& path,
+        const LearnedJointC17Artifact& artifact);
+    friend LearnedJointC17Artifact
+    load_learned_joint_c17_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_parent_training_seed,
+        std::uint64_t expected_shard_seed);
+    friend void
     write_learned_value_context_challenger_artifact_atomic(
         const std::string& path,
         const LearnedValueContextChallengerArtifact& artifact);
@@ -2671,6 +2846,21 @@ std::string learned_terminal_weight_c17_cache_path(
     }
     return "build/model-cache/"
            "old-school-value-terminal-weight-c17-v1-t" +
+           std::to_string(training_games) + "-p" +
+           std::to_string(parent_training_seed) + "-r" +
+           std::to_string(shard_seed) + ".bin";
+}
+
+std::string learned_joint_c17_cache_path(
+    std::size_t training_games,
+    std::uint64_t parent_training_seed,
+    std::uint64_t shard_seed) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "joint C17 cache training_games must be positive");
+    }
+    return "build/model-cache/"
+           "old-school-value-joint-c17-v1-t" +
            std::to_string(training_games) + "-p" +
            std::to_string(parent_training_seed) + "-r" +
            std::to_string(shard_seed) + ".bin";
@@ -3603,6 +3793,691 @@ load_learned_terminal_weight_c17_artifact(
     }
     validate_terminal_weight_report(report);
     return LearnedTerminalWeightC17Artifact(
+        std::move(control), std::move(treatment),
+        std::move(report));
+}
+
+void write_learned_joint_c17_artifact_atomic(
+    const std::string& path,
+    const LearnedJointC17Artifact& artifact) {
+    const auto& control = artifact.control_model_;
+    const auto& treatment = artifact.treatment_model_;
+    const auto& report = artifact.report_;
+    if (!control || !treatment) {
+        throw std::invalid_argument(
+            "joint C17 artifact models must not be null");
+    }
+    if (control->variant_ !=
+            LearnedVariant::ValueSearchChampion ||
+        treatment->variant_ !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "joint C17 artifact requires Value models");
+    }
+    validate_learned_joint_c17_report(report);
+    const std::filesystem::path canonical_destination =
+        std::filesystem::absolute(
+            learned_joint_c17_cache_path(
+                800, kDefaultLearnedTrainingSeed,
+                kLearnedJointC17ShardSeed))
+            .lexically_normal();
+    const std::filesystem::path requested_destination =
+        std::filesystem::absolute(
+            std::filesystem::path(path))
+            .lexically_normal();
+    const bool canonical_recipe =
+        report.training_games == 800 &&
+        report.parent_training_seed ==
+            kDefaultLearnedTrainingSeed &&
+        report.parent_generations == 16 &&
+        report.shard_seed == kLearnedJointC17ShardSeed &&
+        report.shard_generation == 17 &&
+        report.balanced_blocks == 5 &&
+        report.collection_max_game_turns == 500 &&
+        report.parent_fingerprint ==
+            kLearnedJointC17ParentFingerprint;
+    if (requested_destination == canonical_destination &&
+        !canonical_recipe) {
+        throw std::invalid_argument(
+            "canonical joint C17 cache path requires the exact "
+            "frozen recipe");
+    }
+    if (learned_model_fingerprint(control) !=
+            report.control_fingerprint ||
+        learned_model_fingerprint(treatment) !=
+            report.treatment_fingerprint ||
+        learned_model_component_fingerprints(control) !=
+            report.control_components ||
+        learned_model_component_fingerprints(treatment) !=
+            report.treatment_components) {
+        throw std::invalid_argument(
+            "joint C17 artifact model provenance mismatch");
+    }
+
+    ValueG8BinaryWriter payload;
+    payload.text(kValueChallengerEngineSchemaId);
+    payload.text(kLearnedJointC17RecipeId);
+    payload.size(kLearnedCardCount);
+    payload.size(LearnedModel::kScalarFeatureCount);
+    payload.size(LearnedModel::kCardPlanes);
+    payload.size(LearnedModel::kFeatureCount);
+    payload.size(LearnedModel::kHiddenCount);
+    payload.size(LearnedModel::kPolicyDecisionCount);
+    payload.size(LearnedModel::kPolicyPhaseCount);
+    payload.size(LearnedModel::kPolicyVerbCount);
+    payload.size(LearnedModel::kPolicyCardPlanes);
+    payload.size(LearnedModel::kPolicyScalarCount);
+    payload.size(LearnedModel::kPolicyFeatureCount);
+    payload.size(LearnedModel::kPolicyHiddenCount);
+
+    payload.size(report.training_games);
+    payload.unsigned64(report.parent_training_seed);
+    payload.size(report.parent_generations);
+    payload.unsigned64(report.shard_seed);
+    payload.size(report.shard_generation);
+    payload.size(report.balanced_blocks);
+    payload.size(report.scheduled_games);
+    payload.size(report.actor_perspectives);
+    payload.size(report.control_record_bootstrap_distance);
+    payload.size(report.treatment_turn_bootstrap_advances);
+    payload.size(report.collection_search_worlds);
+    payload.size(report.collection_horizon_turns);
+    payload.size(report.collection_max_game_turns);
+    payload.real(report.collection_exploration_rate);
+    payload.real(
+        report.collection_value_continuation_epsilon);
+    payload.real(
+        report.collection_value_priority_residual_weight);
+    payload.unsigned32(
+        report.collection_blend_shallow_prior ? 1U : 0U);
+    payload.unsigned32(
+        report.collection_value_pass_dominance ? 1U : 0U);
+    payload.unsigned32(static_cast<std::uint32_t>(
+        report.collection_continuation_controller));
+    payload.real(report.control_terminal_weight);
+    payload.real(report.treatment_terminal_weight);
+    payload.size(report.fit_epochs);
+    payload.real(report.fit_learning_rate);
+    payload.real(report.fit_example_weight);
+    payload.unsigned64(report.fit_root_seed);
+    payload.unsigned64(report.fit_member_training_tag);
+    payload.size(report.anchor_examples);
+    payload.size(report.penultimate_generation_examples);
+    payload.size(report.last_generation_examples);
+    payload.size(report.historical_replay_examples);
+    payload.size(report.fit_examples);
+    payload.size(report.shard_examples);
+    payload.size(report.control_bootstrapped_examples);
+    payload.size(report.control_terminal_tail_examples);
+    payload.size(report.treatment_bootstrapped_examples);
+    payload.size(report.treatment_terminal_tail_examples);
+    payload.real(report.maximum_control_target_error);
+    payload.real(report.maximum_treatment_target_error);
+
+    const auto write_policy =
+        [&payload](
+            const LearnedJointC17PolicyMetadata& policy) {
+            payload.text(policy.policy_token);
+            payload.size(policy.rollouts_per_action);
+            payload.size(policy.horizon_turns);
+            payload.real(
+                policy.value_continuation_epsilon);
+            payload.real(
+                policy.value_priority_residual_weight);
+            payload.unsigned32(
+                policy.blend_shallow_prior ? 1U : 0U);
+            payload.unsigned32(
+                policy.value_pass_dominance ? 1U : 0U);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(
+                    policy.continuation_controller));
+        };
+    write_policy(report.control_policy);
+    write_policy(report.treatment_policy);
+
+    payload.text(report.parent_fingerprint);
+    payload.text(report.control_fingerprint);
+    payload.text(report.treatment_fingerprint);
+    const auto write_components =
+        [&payload](
+            const LearnedModelComponentFingerprints& components) {
+            payload.text(components.critic);
+            payload.text(components.priority);
+            payload.text(components.attack);
+            payload.text(components.block);
+            payload.text(components.damage_order);
+        };
+    write_components(report.parent_components);
+    payload.text(report.anchor_hash);
+    payload.text(report.penultimate_generation_hash);
+    payload.text(report.last_generation_hash);
+    payload.text(report.control_historical_replay_hash);
+    payload.text(report.treatment_historical_replay_hash);
+    payload.text(report.control_fit_feature_order_hash);
+    payload.text(report.treatment_fit_feature_order_hash);
+    payload.text(report.control_fit_order_hash);
+    payload.text(report.treatment_fit_order_hash);
+    payload.text(report.control_raw_shard_hash);
+    payload.text(report.treatment_raw_shard_hash);
+    payload.text(report.schedule_hash);
+    payload.text(report.feature_hash);
+    payload.text(report.outcome_hash);
+    payload.text(report.turn_number_hash);
+    payload.text(report.control_future_index_hash);
+    payload.text(report.treatment_future_index_hash);
+    payload.text(report.control_target_hash);
+    payload.text(report.treatment_target_hash);
+    payload.text(report.control_fit_target_hash);
+    payload.text(report.treatment_fit_target_hash);
+    for (const auto& deck : report.decks) {
+        payload.size(deck.perspectives);
+        payload.size(deck.examples);
+        payload.size(deck.control_bootstrapped_examples);
+        payload.size(deck.control_terminal_tail_examples);
+        payload.size(deck.treatment_bootstrapped_examples);
+        payload.size(deck.treatment_terminal_tail_examples);
+    }
+
+    std::size_t node_count = 0;
+    std::function<void(
+        const std::shared_ptr<const LearnedModel>&,
+        std::size_t)>
+        write_model;
+    write_model =
+        [&](const std::shared_ptr<const LearnedModel>& node,
+            std::size_t depth) {
+            if (!node) {
+                throw std::runtime_error(
+                    "joint C17 artifact contains a null model node");
+            }
+            if (depth > kMaximumValueG8ArtifactDepth ||
+                ++node_count > kMaximumValueG8ArtifactNodes) {
+                throw std::runtime_error(
+                    "joint C17 artifact model graph exceeds its bound");
+            }
+            if (node->variant_ !=
+                    LearnedVariant::ValueSearchChampion ||
+                node->critic_schema_ !=
+                    LearnedCriticSchema::LegacyStateOnly) {
+                throw std::runtime_error(
+                    "joint C17 artifact contains an incompatible model");
+            }
+            if (node->ensemble_.size() >
+                kMaximumValueG8EnsembleMembers) {
+                throw std::runtime_error(
+                    "joint C17 artifact ensemble exceeds its bound");
+            }
+            payload.unsigned32(0x4D4F444C);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(node->variant_));
+            write_value_g8_fixed(
+                payload, node->input_weights_);
+            write_value_g8_fixed(
+                payload, node->hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->output_weights_);
+            write_value_g8_fixed(
+                payload, node->direct_output_weights_);
+            payload.real(node->output_bias_);
+            write_value_g8_fixed(
+                payload, node->policy_input_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->policy_output_weights_);
+            write_value_g8_fixed(
+                payload,
+                node->policy_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_output_bias_);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(
+                    node->ensemble_.size()));
+            for (const auto& member : node->ensemble_) {
+                write_model(member, depth + 1);
+            }
+        };
+    write_model(control, 0);
+    write_model(treatment, 0);
+
+    ValueG8BinaryWriter file;
+    file.bytes(kLearnedJointC17ArtifactMagic);
+    file.unsigned32(kLearnedJointC17ArtifactSchema);
+    file.size(payload.data().size());
+    file.unsigned64(
+        value_g8_payload_checksum(payload.data()));
+    file.bytes(payload.data());
+    write_value_g8_file_atomic_no_replace(
+        path, file.data());
+}
+
+LearnedJointC17Artifact
+load_learned_joint_c17_artifact(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_parent_training_seed,
+    std::uint64_t expected_shard_seed) {
+    if (expected_training_games == 0) {
+        throw std::invalid_argument(
+            "expected joint C17 training_games must be positive");
+    }
+    const std::vector<std::uint8_t> file_bytes =
+        read_bounded_value_g8_file(path);
+    ValueG8BinaryReader file(file_bytes);
+    for (const std::uint8_t expected :
+         kLearnedJointC17ArtifactMagic) {
+        if (file.byte("file magic") != expected) {
+            throw std::runtime_error(
+                "joint C17 artifact '" + path +
+                "' has the wrong magic");
+        }
+    }
+    const std::uint32_t schema = file.unsigned32("schema");
+    if (schema != kLearnedJointC17ArtifactSchema) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' uses unsupported schema " +
+            std::to_string(schema));
+    }
+    const std::size_t payload_size =
+        file.size("payload length");
+    if (file.remaining() < 8 ||
+        payload_size > kMaximumValueG8ArtifactBytes ||
+        payload_size != file.remaining() - 8) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' has an invalid payload length");
+    }
+    const std::uint64_t stored_checksum =
+        file.unsigned64("payload checksum");
+    const auto payload_bytes =
+        file.take(payload_size, "payload");
+    if (!file.at_end()) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' has trailing bytes");
+    }
+    if (value_g8_payload_checksum(payload_bytes) !=
+        stored_checksum) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' failed its payload checksum");
+    }
+
+    ValueG8BinaryReader payload(payload_bytes);
+    const std::string engine_schema =
+        payload.text("engine schema ID");
+    if (engine_schema != kValueChallengerEngineSchemaId) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' engine schema mismatch");
+    }
+    const std::string recipe = payload.text("recipe ID");
+    if (recipe != kLearnedJointC17RecipeId) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' recipe mismatch");
+    }
+    const auto require_dimension =
+        [&](std::string_view name, std::size_t expected) {
+            const std::size_t actual = payload.size(name);
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "joint C17 artifact '" + path +
+                    "' dimension '" + std::string(name) +
+                    "' mismatch");
+            }
+        };
+    require_dimension("card count", kLearnedCardCount);
+    require_dimension(
+        "scalar feature count",
+        LearnedModel::kScalarFeatureCount);
+    require_dimension(
+        "card planes", LearnedModel::kCardPlanes);
+    require_dimension(
+        "feature count", LearnedModel::kFeatureCount);
+    require_dimension(
+        "hidden count", LearnedModel::kHiddenCount);
+    require_dimension(
+        "policy decision count",
+        LearnedModel::kPolicyDecisionCount);
+    require_dimension(
+        "policy phase count",
+        LearnedModel::kPolicyPhaseCount);
+    require_dimension(
+        "policy verb count",
+        LearnedModel::kPolicyVerbCount);
+    require_dimension(
+        "policy card planes",
+        LearnedModel::kPolicyCardPlanes);
+    require_dimension(
+        "policy scalar count",
+        LearnedModel::kPolicyScalarCount);
+    require_dimension(
+        "policy feature count",
+        LearnedModel::kPolicyFeatureCount);
+    require_dimension(
+        "policy hidden count",
+        LearnedModel::kPolicyHiddenCount);
+
+    const auto read_bool =
+        [&payload, &path](std::string_view field) {
+            const std::uint32_t raw =
+                payload.unsigned32(field);
+            if (raw > 1U) {
+                throw std::runtime_error(
+                    "joint C17 artifact '" + path +
+                    "' has invalid boolean metadata");
+            }
+            return raw != 0U;
+        };
+    const auto read_controller =
+        [&payload, &path](std::string_view field) {
+            const std::uint32_t raw =
+                payload.unsigned32(field);
+            if (raw >
+                static_cast<std::uint32_t>(
+                    LearnedContinuationController::
+                        PublicStackPassV1)) {
+                throw std::runtime_error(
+                    "joint C17 artifact '" + path +
+                    "' has invalid controller metadata");
+            }
+            return static_cast<
+                LearnedContinuationController>(raw);
+        };
+
+    LearnedJointC17Report report;
+    report.training_games =
+        payload.size("metadata training_games");
+    report.parent_training_seed =
+        payload.unsigned64("metadata parent training seed");
+    report.parent_generations =
+        payload.size("metadata parent generations");
+    report.shard_seed =
+        payload.unsigned64("metadata shard seed");
+    report.shard_generation =
+        payload.size("metadata shard generation");
+    report.balanced_blocks =
+        payload.size("metadata balanced blocks");
+    report.scheduled_games =
+        payload.size("metadata scheduled games");
+    report.actor_perspectives =
+        payload.size("metadata actor perspectives");
+    report.control_record_bootstrap_distance =
+        payload.size("metadata control record distance");
+    report.treatment_turn_bootstrap_advances =
+        payload.size("metadata treatment turn advances");
+    report.collection_search_worlds =
+        payload.size("metadata collection worlds");
+    report.collection_horizon_turns =
+        payload.size("metadata collection horizon");
+    report.collection_max_game_turns =
+        payload.size("metadata max game turns");
+    report.collection_exploration_rate =
+        payload.real("metadata exploration rate");
+    report.collection_value_continuation_epsilon =
+        payload.real(
+            "metadata collection continuation epsilon");
+    report.collection_value_priority_residual_weight =
+        payload.real("metadata collection residual weight");
+    report.collection_blend_shallow_prior =
+        read_bool("metadata collection shallow-prior blend");
+    report.collection_value_pass_dominance =
+        read_bool("metadata collection pass dominance");
+    report.collection_continuation_controller =
+        read_controller(
+            "metadata collection continuation controller");
+    report.control_terminal_weight =
+        payload.real("metadata control terminal weight");
+    report.treatment_terminal_weight =
+        payload.real("metadata treatment terminal weight");
+    report.fit_epochs =
+        payload.size("metadata fit epochs");
+    report.fit_learning_rate =
+        payload.real("metadata fit learning rate");
+    report.fit_example_weight =
+        payload.real("metadata fit example weight");
+    report.fit_root_seed =
+        payload.unsigned64("metadata fit root seed");
+    report.fit_member_training_tag =
+        payload.unsigned64("metadata fit member training tag");
+    report.anchor_examples =
+        payload.size("metadata anchor examples");
+    report.penultimate_generation_examples =
+        payload.size("metadata penultimate examples");
+    report.last_generation_examples =
+        payload.size("metadata last examples");
+    report.historical_replay_examples =
+        payload.size("metadata historical replay examples");
+    report.fit_examples =
+        payload.size("metadata fit examples");
+    report.shard_examples =
+        payload.size("metadata shard examples");
+    report.control_bootstrapped_examples =
+        payload.size("metadata control bootstrapped examples");
+    report.control_terminal_tail_examples =
+        payload.size("metadata control tail examples");
+    report.treatment_bootstrapped_examples =
+        payload.size("metadata treatment bootstrapped examples");
+    report.treatment_terminal_tail_examples =
+        payload.size("metadata treatment tail examples");
+    report.maximum_control_target_error =
+        payload.real("metadata control target error");
+    report.maximum_treatment_target_error =
+        payload.real("metadata treatment target error");
+    if (report.training_games != expected_training_games) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' training_games mismatch");
+    }
+    if (report.parent_training_seed !=
+        expected_parent_training_seed) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' parent training seed mismatch");
+    }
+    if (report.shard_seed != expected_shard_seed) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' shard seed mismatch");
+    }
+
+    const auto read_policy =
+        [&payload, &read_bool, &read_controller]() {
+            LearnedJointC17PolicyMetadata policy;
+            policy.policy_token =
+                payload.text("policy token");
+            policy.rollouts_per_action =
+                payload.size("policy rollouts");
+            policy.horizon_turns =
+                payload.size("policy horizon");
+            policy.value_continuation_epsilon =
+                payload.real("policy continuation epsilon");
+            policy.value_priority_residual_weight =
+                payload.real("policy residual weight");
+            policy.blend_shallow_prior =
+                read_bool("policy shallow-prior blend");
+            policy.value_pass_dominance =
+                read_bool("policy pass dominance");
+            policy.continuation_controller =
+                read_controller("policy continuation controller");
+            return policy;
+        };
+    report.control_policy = read_policy();
+    report.treatment_policy = read_policy();
+    report.parent_fingerprint =
+        payload.text("parent fingerprint");
+    report.control_fingerprint =
+        payload.text("control fingerprint");
+    report.treatment_fingerprint =
+        payload.text("treatment fingerprint");
+    const auto read_components =
+        [&payload]() {
+            return LearnedModelComponentFingerprints{
+                .critic =
+                    payload.text("component critic fingerprint"),
+                .priority =
+                    payload.text("component priority fingerprint"),
+                .attack =
+                    payload.text("component attack fingerprint"),
+                .block =
+                    payload.text("component block fingerprint"),
+                .damage_order =
+                    payload.text(
+                        "component damage-order fingerprint"),
+            };
+        };
+    report.parent_components = read_components();
+    report.anchor_hash = payload.text("anchor hash");
+    report.penultimate_generation_hash =
+        payload.text("penultimate-generation hash");
+    report.last_generation_hash =
+        payload.text("last-generation hash");
+    report.control_historical_replay_hash =
+        payload.text("control historical-replay hash");
+    report.treatment_historical_replay_hash =
+        payload.text("treatment historical-replay hash");
+    report.control_fit_feature_order_hash =
+        payload.text("control fit-feature-order hash");
+    report.treatment_fit_feature_order_hash =
+        payload.text("treatment fit-feature-order hash");
+    report.control_fit_order_hash =
+        payload.text("control fit-order hash");
+    report.treatment_fit_order_hash =
+        payload.text("treatment fit-order hash");
+    report.control_raw_shard_hash =
+        payload.text("control raw-shard hash");
+    report.treatment_raw_shard_hash =
+        payload.text("treatment raw-shard hash");
+    report.schedule_hash = payload.text("schedule hash");
+    report.feature_hash = payload.text("feature hash");
+    report.outcome_hash = payload.text("outcome hash");
+    report.turn_number_hash =
+        payload.text("turn-number hash");
+    report.control_future_index_hash =
+        payload.text("control future-index hash");
+    report.treatment_future_index_hash =
+        payload.text("treatment future-index hash");
+    report.control_target_hash =
+        payload.text("control target hash");
+    report.treatment_target_hash =
+        payload.text("treatment target hash");
+    report.control_fit_target_hash =
+        payload.text("control fit-target hash");
+    report.treatment_fit_target_hash =
+        payload.text("treatment fit-target hash");
+    for (auto& deck : report.decks) {
+        deck.perspectives =
+            payload.size("deck perspectives");
+        deck.examples = payload.size("deck examples");
+        deck.control_bootstrapped_examples =
+            payload.size("deck control bootstrapped examples");
+        deck.control_terminal_tail_examples =
+            payload.size("deck control tail examples");
+        deck.treatment_bootstrapped_examples =
+            payload.size("deck treatment bootstrapped examples");
+        deck.treatment_terminal_tail_examples =
+            payload.size("deck treatment tail examples");
+    }
+
+    std::size_t node_count = 0;
+    std::function<std::shared_ptr<const LearnedModel>(
+        std::size_t)>
+        read_model;
+    read_model = [&](std::size_t depth)
+        -> std::shared_ptr<const LearnedModel> {
+        if (depth > kMaximumValueG8ArtifactDepth ||
+            ++node_count > kMaximumValueG8ArtifactNodes) {
+            throw std::runtime_error(
+                "joint C17 artifact '" + path +
+                "' model graph exceeds its bound");
+        }
+        if (payload.unsigned32("model marker") !=
+            0x4D4F444C) {
+            throw std::runtime_error(
+                "joint C17 artifact '" + path +
+                "' has an invalid model marker");
+        }
+        const std::uint32_t raw_variant =
+            payload.unsigned32("model variant");
+        if (raw_variant !=
+            static_cast<std::uint32_t>(
+                LearnedVariant::ValueSearchChampion)) {
+            throw std::runtime_error(
+                "joint C17 artifact '" + path +
+                "' contains a non-Value model");
+        }
+        auto node = std::shared_ptr<LearnedModel>(
+            new LearnedModel(
+                0, LearnedVariant::ValueSearchChampion));
+        read_value_g8_fixed(
+            payload, node->input_weights_,
+            "critic input weight");
+        read_value_g8_fixed(
+            payload, node->hidden_biases_,
+            "critic hidden bias");
+        read_value_g8_fixed(
+            payload, node->output_weights_,
+            "critic output weight");
+        read_value_g8_fixed(
+            payload, node->direct_output_weights_,
+            "critic direct weight");
+        node->output_bias_ =
+            payload.real("critic output bias");
+        read_value_g8_fixed(
+            payload, node->policy_input_weights_,
+            "policy input weight");
+        read_value_g8_fixed(
+            payload, node->policy_hidden_biases_,
+            "policy hidden bias");
+        read_value_g8_fixed(
+            payload, node->policy_output_weights_,
+            "policy output weight");
+        read_value_g8_fixed(
+            payload,
+            node->policy_direct_output_weights_,
+            "policy direct weight");
+        read_value_g8_fixed(
+            payload, node->policy_output_bias_,
+            "policy output bias");
+        const std::uint32_t member_count =
+            payload.unsigned32("ensemble member count");
+        if (member_count >
+            kMaximumValueG8EnsembleMembers) {
+            throw std::runtime_error(
+                "joint C17 artifact '" + path +
+                "' ensemble exceeds its bound");
+        }
+        node->ensemble_.reserve(member_count);
+        for (std::uint32_t member = 0;
+             member < member_count; ++member) {
+            node->ensemble_.push_back(
+                read_model(depth + 1));
+        }
+        return node;
+    };
+    auto control = read_model(0);
+    auto treatment = read_model(0);
+    if (!payload.at_end()) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' has trailing payload bytes");
+    }
+    report.control_components =
+        learned_model_component_fingerprints(control);
+    report.treatment_components =
+        learned_model_component_fingerprints(treatment);
+    if (learned_model_fingerprint(control) !=
+            report.control_fingerprint ||
+        learned_model_fingerprint(treatment) !=
+            report.treatment_fingerprint) {
+        throw std::runtime_error(
+            "joint C17 artifact '" + path +
+            "' model fingerprint mismatch");
+    }
+    validate_learned_joint_c17_report(report);
+    return LearnedJointC17Artifact(
         std::move(control), std::move(treatment),
         std::move(report));
 }
@@ -17258,6 +18133,1159 @@ train_learned_terminal_weight_c17_family(
         learned_model_component_fingerprints(treatment);
     validate_terminal_weight_report(report);
     return LearnedTerminalWeightC17Artifact(
+        control, treatment, std::move(report));
+}
+
+namespace {
+
+struct JointC17TargetRecord {
+    std::size_t fit_example_index = 0;
+    double treatment_target = 0.5;
+};
+
+std::string joint_c17_schedule_hash(
+    std::uint64_t shard_seed,
+    std::size_t parent_generations,
+    std::size_t balanced_blocks) {
+    ModelFingerprintHash hash;
+    hash.add(0x4A43313753434844ULL);
+    for (std::size_t block = 0;
+         block < balanced_blocks; ++block) {
+        const auto schedule =
+            learned_iteration::balanced_schedule(
+                shard_seed, parent_generations + 1, block);
+        for (const auto& game : schedule) {
+            hash.add(block);
+            hash.add(game.schedule_index);
+            hash.add(game.pairing_index);
+            hash.add(static_cast<std::uint64_t>(
+                game.seat_decks[0]));
+            hash.add(static_cast<std::uint64_t>(
+                game.seat_decks[1]));
+            hash.add(game.starting_player);
+            hash.add(game.seed);
+        }
+    }
+    return hash.finish();
+}
+
+std::string joint_c17_fit_order_hash(
+    std::size_t historical_examples,
+    std::size_t fit_examples) {
+    ModelFingerprintHash hash;
+    hash.add(0x4A4331374649544FULL);
+    hash.add(historical_examples);
+    hash.add(fit_examples);
+    for (std::size_t index = 0; index < fit_examples; ++index) {
+        hash.add(index);
+        hash.add(index < historical_examples ? 0ULL : 1ULL);
+    }
+    return hash.finish();
+}
+
+std::string joint_c17_feature_order_hash(
+    std::span<const LearnedModel::TrainingExample> examples) {
+    ModelFingerprintHash hash;
+    hash.add(0x4A43313746454154ULL);
+    hash.add(examples.size());
+    for (const auto& [features, target] : examples) {
+        static_cast<void>(target);
+        add_model_fingerprint_value(hash, features);
+    }
+    return hash.finish();
+}
+
+std::string joint_c17_target_hash(
+    std::span<const LearnedModel::TrainingExample> examples) {
+    ModelFingerprintHash hash;
+    hash.add(0x4A43313746495454ULL);
+    hash.add(examples.size());
+    for (const auto& [features, target] : examples) {
+        static_cast<void>(features);
+        add_model_fingerprint_value(hash, target);
+    }
+    return hash.finish();
+}
+
+void require_joint_c17_policy_unchanged(
+    const LearnedModelComponentFingerprints& parent,
+    const LearnedModelComponentFingerprints& candidate,
+    std::string_view arm) {
+    if (candidate.critic == parent.critic ||
+        candidate.priority != parent.priority ||
+        candidate.attack != parent.attack ||
+        candidate.block != parent.block ||
+        candidate.damage_order != parent.damage_order) {
+        throw std::runtime_error(
+            "joint C17 " + std::string(arm) +
+            " must change only the critic component");
+    }
+}
+
+void validate_learned_joint_c17_config(
+    const LearnedJointC17Config& config) {
+    constexpr std::uint64_t kFitTagBase =
+        0x53454C4600000000ULL;
+    if (config.training_games == 0 ||
+        config.parent_generations < 2 ||
+        config.balanced_blocks == 0 ||
+        config.balanced_blocks > 64 ||
+        config.max_game_turns == 0 ||
+        config.parent_generations >
+            (std::numeric_limits<std::uint64_t>::max() -
+             kFitTagBase) /
+                0x100ULL) {
+        throw std::invalid_argument(
+            "invalid joint C17 training configuration");
+    }
+    if (!config.required_parent_fingerprint.empty() &&
+        !is_lower_hex_fingerprint(
+            config.required_parent_fingerprint)) {
+        throw std::invalid_argument(
+            "joint C17 required parent fingerprint is malformed");
+    }
+    const bool canonical_coordinates =
+        config.training_games == 800 &&
+        config.parent_training_seed ==
+            kDefaultLearnedTrainingSeed &&
+        config.shard_seed == kLearnedJointC17ShardSeed;
+    if (canonical_coordinates &&
+        (config.parent_generations != 16 ||
+         config.balanced_blocks != 5 ||
+         config.max_game_turns != 500 ||
+         config.required_parent_fingerprint !=
+             kLearnedJointC17ParentFingerprint)) {
+        throw std::invalid_argument(
+            "canonical joint C17 coordinates require G16, five "
+            "balanced blocks, max 500 turns, and the exact frozen "
+            "C16 fingerprint");
+    }
+}
+
+void validate_learned_joint_c17_report(
+    const LearnedJointC17Report& report) {
+    constexpr std::size_t kControlDistance = 4;
+    constexpr std::size_t kTreatmentAdvances = 8;
+    constexpr std::size_t kCollectionWorlds = 1;
+    constexpr std::size_t kCollectionHorizon =
+        kLearnedValueSearchHorizonTurns;
+    constexpr double kCollectionExploration = 0.05;
+    constexpr double kZero = 0.0;
+    constexpr double kTerminalWeight = 0.50;
+    constexpr std::size_t kFitEpochs = 3;
+    constexpr double kFitRate = 0.006;
+    constexpr double kFitExampleWeight = 1.0;
+    constexpr std::uint64_t kFitTagBase =
+        0x53454C4600000000ULL;
+    constexpr std::size_t kDeploymentWorlds = 8;
+    constexpr std::size_t kDeploymentHorizon =
+        kLearnedValueSearchHorizonTurns;
+
+    if (report.training_games == 0 ||
+        report.parent_generations < 2 ||
+        report.parent_generations >
+            (std::numeric_limits<std::uint64_t>::max() -
+             kFitTagBase) /
+                0x100ULL ||
+        report.shard_generation !=
+            report.parent_generations + 1 ||
+        report.balanced_blocks == 0 ||
+        report.balanced_blocks > 64 ||
+        report.scheduled_games !=
+            report.balanced_blocks *
+                learned_iteration::kBalancedScheduleGames ||
+        report.actor_perspectives !=
+            2 * report.scheduled_games ||
+        report.control_record_bootstrap_distance !=
+            kControlDistance ||
+        report.treatment_turn_bootstrap_advances !=
+            kTreatmentAdvances ||
+        report.collection_search_worlds !=
+            kCollectionWorlds ||
+        report.collection_horizon_turns !=
+            kCollectionHorizon ||
+        report.collection_max_game_turns == 0 ||
+        std::bit_cast<std::uint64_t>(
+            report.collection_exploration_rate) !=
+            std::bit_cast<std::uint64_t>(
+                kCollectionExploration) ||
+        std::bit_cast<std::uint64_t>(
+            report.collection_value_continuation_epsilon) !=
+            std::bit_cast<std::uint64_t>(kZero) ||
+        std::bit_cast<std::uint64_t>(
+            report.collection_value_priority_residual_weight) !=
+            std::bit_cast<std::uint64_t>(kZero) ||
+        !report.collection_blend_shallow_prior ||
+        report.collection_value_pass_dominance ||
+        report.collection_continuation_controller !=
+            LearnedContinuationController::Legacy ||
+        std::bit_cast<std::uint64_t>(
+            report.control_terminal_weight) !=
+            std::bit_cast<std::uint64_t>(kTerminalWeight) ||
+        std::bit_cast<std::uint64_t>(
+            report.treatment_terminal_weight) !=
+            std::bit_cast<std::uint64_t>(kTerminalWeight) ||
+        report.fit_epochs != kFitEpochs ||
+        std::bit_cast<std::uint64_t>(
+            report.fit_learning_rate) !=
+            std::bit_cast<std::uint64_t>(kFitRate) ||
+        std::bit_cast<std::uint64_t>(
+            report.fit_example_weight) !=
+            std::bit_cast<std::uint64_t>(
+                kFitExampleWeight) ||
+        report.fit_root_seed !=
+            report.parent_training_seed ||
+        report.fit_member_training_tag !=
+            kFitTagBase +
+                0x100ULL * report.parent_generations ||
+        report.anchor_examples == 0 ||
+        report.penultimate_generation_examples == 0 ||
+        report.last_generation_examples == 0 ||
+        report.historical_replay_examples !=
+            report.anchor_examples +
+                report.penultimate_generation_examples +
+                report.last_generation_examples ||
+        report.fit_examples !=
+            report.historical_replay_examples +
+                report.shard_examples ||
+        report.shard_examples == 0 ||
+        report.control_bootstrapped_examples +
+                report.control_terminal_tail_examples !=
+            report.shard_examples ||
+        report.treatment_bootstrapped_examples +
+                report.treatment_terminal_tail_examples !=
+            report.shard_examples ||
+        !std::isfinite(report.maximum_control_target_error) ||
+        !std::isfinite(
+            report.maximum_treatment_target_error) ||
+        report.maximum_control_target_error < 0.0 ||
+        report.maximum_treatment_target_error < 0.0 ||
+        report.maximum_control_target_error >
+            8.0 * std::numeric_limits<double>::epsilon() ||
+        report.maximum_treatment_target_error >
+            8.0 * std::numeric_limits<double>::epsilon()) {
+        throw std::runtime_error(
+            "joint C17 report has invalid paired-fit recipe "
+            "accounting");
+    }
+
+    const auto policy_matches =
+        [&](const LearnedJointC17PolicyMetadata& policy,
+           std::string_view token, bool pass_dominance,
+           LearnedContinuationController controller) {
+            return policy.policy_token == token &&
+                   policy.rollouts_per_action ==
+                       kDeploymentWorlds &&
+                   policy.horizon_turns ==
+                       kDeploymentHorizon &&
+                   std::bit_cast<std::uint64_t>(
+                       policy.value_continuation_epsilon) ==
+                       std::bit_cast<std::uint64_t>(kZero) &&
+                   std::bit_cast<std::uint64_t>(
+                       policy
+                           .value_priority_residual_weight) ==
+                       std::bit_cast<std::uint64_t>(kZero) &&
+                   policy.blend_shallow_prior &&
+                   policy.value_pass_dominance ==
+                       pass_dominance &&
+                   policy.continuation_controller ==
+                       controller;
+        };
+    if (!policy_matches(
+            report.control_policy,
+            kLearnedJointC17ControlPolicyToken, false,
+            LearnedContinuationController::Legacy) ||
+        !policy_matches(
+            report.treatment_policy,
+            kLearnedJointC17TreatmentPolicyToken, true,
+            LearnedContinuationController::
+                PublicStackPassV1)) {
+        throw std::runtime_error(
+            "joint C17 report has invalid deployment metadata");
+    }
+
+    const auto require_hash =
+        [](std::string_view value, std::string_view field) {
+            if (!is_lower_hex_fingerprint(value)) {
+                throw std::runtime_error(
+                    "joint C17 report has malformed " +
+                    std::string(field));
+            }
+        };
+    require_hash(report.parent_fingerprint, "parent fingerprint");
+    require_hash(
+        report.control_fingerprint, "control fingerprint");
+    require_hash(
+        report.treatment_fingerprint,
+        "treatment fingerprint");
+    const auto require_components =
+        [&require_hash](
+            const LearnedModelComponentFingerprints& components,
+            std::string_view arm) {
+            require_hash(
+                components.critic,
+                std::string(arm) + " critic fingerprint");
+            require_hash(
+                components.priority,
+                std::string(arm) + " priority fingerprint");
+            require_hash(
+                components.attack,
+                std::string(arm) + " attack fingerprint");
+            require_hash(
+                components.block,
+                std::string(arm) + " block fingerprint");
+            require_hash(
+                components.damage_order,
+                std::string(arm) +
+                    " damage-order fingerprint");
+        };
+    require_components(report.parent_components, "parent");
+    require_components(report.control_components, "control");
+    require_components(report.treatment_components, "treatment");
+    const bool canonical_coordinates =
+        report.training_games == 800 &&
+        report.parent_training_seed ==
+            kDefaultLearnedTrainingSeed &&
+        report.shard_seed == kLearnedJointC17ShardSeed;
+    if (canonical_coordinates &&
+        (report.parent_generations != 16 ||
+         report.shard_generation != 17 ||
+         report.balanced_blocks != 5 ||
+         report.collection_max_game_turns != 500 ||
+         report.parent_fingerprint !=
+             kLearnedJointC17ParentFingerprint)) {
+        throw std::runtime_error(
+            "canonical joint C17 report does not bind the exact "
+            "frozen recipe");
+    }
+    const std::array<std::pair<std::string_view, std::string_view>,
+                     21>
+        hashes = {{
+            {report.anchor_hash, "anchor hash"},
+            {report.penultimate_generation_hash,
+             "penultimate-generation hash"},
+            {report.last_generation_hash,
+             "last-generation hash"},
+            {report.control_historical_replay_hash,
+             "control historical-replay hash"},
+            {report.treatment_historical_replay_hash,
+             "treatment historical-replay hash"},
+            {report.control_fit_feature_order_hash,
+             "control fit-feature-order hash"},
+            {report.treatment_fit_feature_order_hash,
+             "treatment fit-feature-order hash"},
+            {report.control_fit_order_hash,
+             "control fit-order hash"},
+            {report.treatment_fit_order_hash,
+             "treatment fit-order hash"},
+            {report.control_raw_shard_hash,
+             "control raw-shard hash"},
+            {report.treatment_raw_shard_hash,
+             "treatment raw-shard hash"},
+            {report.schedule_hash, "schedule hash"},
+            {report.feature_hash, "feature hash"},
+            {report.outcome_hash, "outcome hash"},
+            {report.turn_number_hash, "turn-number hash"},
+            {report.control_future_index_hash,
+             "control future-index hash"},
+            {report.treatment_future_index_hash,
+             "treatment future-index hash"},
+            {report.control_target_hash,
+             "control target hash"},
+            {report.treatment_target_hash,
+             "treatment target hash"},
+            {report.control_fit_target_hash,
+             "control fit-target hash"},
+            {report.treatment_fit_target_hash,
+             "treatment fit-target hash"},
+        }};
+    for (const auto& [value, field] : hashes) {
+        require_hash(value, field);
+    }
+
+    if (report.parent_fingerprint ==
+            report.control_fingerprint ||
+        report.parent_fingerprint ==
+            report.treatment_fingerprint ||
+        report.control_fingerprint ==
+            report.treatment_fingerprint ||
+        report.control_components.critic ==
+            report.treatment_components.critic ||
+        report.control_historical_replay_hash !=
+            report.treatment_historical_replay_hash ||
+        report.control_fit_feature_order_hash !=
+            report.treatment_fit_feature_order_hash ||
+        report.control_fit_order_hash !=
+            report.treatment_fit_order_hash ||
+        report.control_raw_shard_hash !=
+            report.treatment_raw_shard_hash ||
+        report.control_future_index_hash ==
+            report.treatment_future_index_hash ||
+        report.control_target_hash ==
+            report.treatment_target_hash ||
+        report.control_fit_target_hash ==
+            report.treatment_fit_target_hash) {
+        throw std::runtime_error(
+            "joint C17 paired-arm identity constraints failed");
+    }
+    require_joint_c17_policy_unchanged(
+        report.parent_components, report.control_components,
+        "control");
+    require_joint_c17_policy_unchanged(
+        report.parent_components, report.treatment_components,
+        "treatment");
+
+    if (report.schedule_hash !=
+        joint_c17_schedule_hash(
+            report.shard_seed, report.parent_generations,
+            report.balanced_blocks)) {
+        throw std::runtime_error(
+            "joint C17 report schedule hash mismatch");
+    }
+
+    std::size_t deck_perspectives = 0;
+    std::size_t deck_examples = 0;
+    std::size_t deck_control_bootstrapped = 0;
+    std::size_t deck_control_tail = 0;
+    std::size_t deck_treatment_bootstrapped = 0;
+    std::size_t deck_treatment_tail = 0;
+    for (const auto& deck : report.decks) {
+        if (deck.perspectives !=
+                16 * report.balanced_blocks ||
+            deck.examples == 0 ||
+            deck.control_bootstrapped_examples +
+                    deck.control_terminal_tail_examples !=
+                deck.examples ||
+            deck.treatment_bootstrapped_examples +
+                    deck.treatment_terminal_tail_examples !=
+                deck.examples) {
+            throw std::runtime_error(
+                "joint C17 report has invalid per-deck "
+                "accounting");
+        }
+        deck_perspectives += deck.perspectives;
+        deck_examples += deck.examples;
+        deck_control_bootstrapped +=
+            deck.control_bootstrapped_examples;
+        deck_control_tail +=
+            deck.control_terminal_tail_examples;
+        deck_treatment_bootstrapped +=
+            deck.treatment_bootstrapped_examples;
+        deck_treatment_tail +=
+            deck.treatment_terminal_tail_examples;
+    }
+    if (deck_perspectives != report.actor_perspectives ||
+        deck_examples != report.shard_examples ||
+        deck_control_bootstrapped !=
+            report.control_bootstrapped_examples ||
+        deck_control_tail !=
+            report.control_terminal_tail_examples ||
+        deck_treatment_bootstrapped !=
+            report.treatment_bootstrapped_examples ||
+        deck_treatment_tail !=
+            report.treatment_terminal_tail_examples) {
+        throw std::runtime_error(
+            "joint C17 report deck totals mismatch");
+    }
+}
+
+} // namespace
+
+LearnedJointC17Artifact::LearnedJointC17Artifact(
+    std::shared_ptr<const LearnedModel> control_model,
+    std::shared_ptr<const LearnedModel> treatment_model,
+    LearnedJointC17Report report)
+    : control_model_(std::move(control_model)),
+      treatment_model_(std::move(treatment_model)),
+      report_(std::move(report)) {}
+
+std::shared_ptr<const LearnedModel>
+LearnedJointC17Artifact::control_model() const {
+    return control_model_;
+}
+
+std::shared_ptr<const LearnedModel>
+LearnedJointC17Artifact::treatment_model() const {
+    return treatment_model_;
+}
+
+const LearnedJointC17Report&
+LearnedJointC17Artifact::report() const {
+    return report_;
+}
+
+LearnedJointC17Deployment
+LearnedJointC17Artifact::deployment(
+    LearnedJointC17Arm arm, std::uint64_t search_seed) const {
+    validate_learned_joint_c17_report(report_);
+    bool treatment = false;
+    switch (arm) {
+        case LearnedJointC17Arm::Control:
+            break;
+        case LearnedJointC17Arm::Treatment:
+            treatment = true;
+            break;
+        default:
+            throw std::invalid_argument(
+                "joint C17 deployment arm is invalid");
+    }
+    const auto& policy =
+        treatment ? report_.treatment_policy
+                  : report_.control_policy;
+    const auto& model =
+        treatment ? treatment_model_ : control_model_;
+    if (!model) {
+        throw std::logic_error(
+            "joint C17 deployment has a null model");
+    }
+
+    LearnedJointC17Deployment result;
+    result.arm = arm;
+    result.policy_token = policy.policy_token;
+    result.model = model;
+    result.bot = BotConfig{
+        .kind = BotKind::Learned,
+        .learned_variant =
+            LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action =
+            policy.rollouts_per_action,
+        .exploration_rate = 0.0,
+        .value_continuation_epsilon =
+            policy.value_continuation_epsilon,
+        .value_priority_residual_weight =
+            policy.value_priority_residual_weight,
+        .value_pass_dominance =
+            policy.value_pass_dominance,
+        .value_continuation_controller =
+            policy.continuation_controller,
+        .training_games = report_.training_games,
+        .learned_model = model,
+    };
+    result.search = LearnedSearchConfig{
+        .seed = search_seed,
+        .worlds = policy.rollouts_per_action,
+        .rollouts_per_world = 1,
+        .horizon_turns = policy.horizon_turns,
+        .continuation_variant =
+            LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon =
+            policy.value_continuation_epsilon,
+        .blend_shallow_prior =
+            policy.blend_shallow_prior,
+        .value_priority_residual_weight =
+            policy.value_priority_residual_weight,
+        .value_pass_dominance =
+            policy.value_pass_dominance,
+        .value_continuation_controller =
+            policy.continuation_controller,
+        .evaluation_threads = 1,
+    };
+    return result;
+}
+
+LearnedJointC17Deployment
+LearnedJointC17Artifact::control_deployment(
+    std::uint64_t search_seed) const {
+    return deployment(
+        LearnedJointC17Arm::Control, search_seed);
+}
+
+LearnedJointC17Deployment
+LearnedJointC17Artifact::treatment_deployment(
+    std::uint64_t search_seed) const {
+    return deployment(
+        LearnedJointC17Arm::Treatment, search_seed);
+}
+
+LearnedJointC17Artifact
+train_learned_joint_c17_family(
+    LearnedJointC17Config config) {
+    validate_learned_joint_c17_config(config);
+
+    constexpr std::size_t kControlDistance = 4;
+    constexpr std::size_t kTreatmentAdvances = 8;
+    constexpr std::size_t kCollectionWorlds = 1;
+    constexpr std::size_t kCollectionHorizon =
+        kLearnedValueSearchHorizonTurns;
+    constexpr double kCollectionExploration = 0.05;
+    constexpr double kTerminalWeight = 0.50;
+    constexpr std::size_t kFitEpochs = 3;
+    constexpr double kFitLearningRate = 0.006;
+    constexpr double kFitExampleWeight = 1.0;
+    constexpr std::uint64_t kFitTagBase =
+        0x53454C4600000000ULL;
+
+    LearnedValueChallengerCapture capture;
+    const auto parent =
+        train_learned_value_challenger_internal(
+            config.training_games,
+            config.parent_training_seed,
+            config.parent_generations, &capture);
+    const std::string parent_fingerprint =
+        learned_model_fingerprint(parent);
+    if (!config.required_parent_fingerprint.empty() &&
+        parent_fingerprint !=
+            config.required_parent_fingerprint) {
+        throw std::runtime_error(
+            "joint C17 parent fingerprint mismatch: expected " +
+            config.required_parent_fingerprint + ", got " +
+            parent_fingerprint);
+    }
+    if (capture.anchor.empty() ||
+        capture.penultimate_generation.empty() ||
+        capture.last_generation.empty()) {
+        throw std::logic_error(
+            "joint C17 canonical replay capture is incomplete");
+    }
+
+    LearnedJointC17Report report;
+    report.training_games = config.training_games;
+    report.parent_training_seed =
+        config.parent_training_seed;
+    report.parent_generations = config.parent_generations;
+    report.shard_seed = config.shard_seed;
+    report.shard_generation =
+        config.parent_generations + 1;
+    report.balanced_blocks = config.balanced_blocks;
+    report.control_record_bootstrap_distance =
+        kControlDistance;
+    report.treatment_turn_bootstrap_advances =
+        kTreatmentAdvances;
+    report.collection_search_worlds =
+        kCollectionWorlds;
+    report.collection_horizon_turns =
+        kCollectionHorizon;
+    report.collection_max_game_turns =
+        config.max_game_turns;
+    report.collection_exploration_rate =
+        kCollectionExploration;
+    report.collection_value_continuation_epsilon = 0.0;
+    report.collection_value_priority_residual_weight = 0.0;
+    report.collection_blend_shallow_prior = true;
+    report.collection_value_pass_dominance = false;
+    report.collection_continuation_controller =
+        LearnedContinuationController::Legacy;
+    report.control_terminal_weight = kTerminalWeight;
+    report.treatment_terminal_weight = kTerminalWeight;
+    report.fit_epochs = kFitEpochs;
+    report.fit_learning_rate = kFitLearningRate;
+    report.fit_example_weight = kFitExampleWeight;
+    report.fit_root_seed = config.parent_training_seed;
+    report.fit_member_training_tag =
+        kFitTagBase +
+        0x100ULL * config.parent_generations;
+    report.anchor_examples = capture.anchor.size();
+    report.penultimate_generation_examples =
+        capture.penultimate_generation.size();
+    report.last_generation_examples =
+        capture.last_generation.size();
+    report.parent_fingerprint = parent_fingerprint;
+    report.parent_components =
+        learned_model_component_fingerprints(parent);
+    report.anchor_hash = hash_terminal_weight_examples(
+        capture.anchor, 0x4A433137414E4348ULL);
+    report.penultimate_generation_hash =
+        hash_terminal_weight_examples(
+            capture.penultimate_generation,
+            0x4A43313750454E55ULL);
+    report.last_generation_hash =
+        hash_terminal_weight_examples(
+            capture.last_generation,
+            0x4A4331374C415354ULL);
+    report.schedule_hash =
+        joint_c17_schedule_hash(
+            config.shard_seed, config.parent_generations,
+            config.balanced_blocks);
+
+    report.control_policy = {
+        .policy_token =
+            std::string(kLearnedJointC17ControlPolicyToken),
+        .rollouts_per_action = 8,
+        .horizon_turns =
+            kLearnedValueSearchHorizonTurns,
+        .value_continuation_epsilon = 0.0,
+        .value_priority_residual_weight = 0.0,
+        .blend_shallow_prior = true,
+        .value_pass_dominance = false,
+        .continuation_controller =
+            LearnedContinuationController::Legacy,
+    };
+    report.treatment_policy = {
+        .policy_token =
+            std::string(kLearnedJointC17TreatmentPolicyToken),
+        .rollouts_per_action = 8,
+        .horizon_turns =
+            kLearnedValueSearchHorizonTurns,
+        .value_continuation_epsilon = 0.0,
+        .value_priority_residual_weight = 0.0,
+        .blend_shallow_prior = true,
+        .value_pass_dominance = true,
+        .continuation_controller =
+            LearnedContinuationController::
+                PublicStackPassV1,
+    };
+
+    std::vector<LearnedModel::TrainingExample> fit_examples;
+    const std::size_t historical_examples =
+        capture.anchor.size() +
+        capture.penultimate_generation.size() +
+        capture.last_generation.size();
+    fit_examples.reserve(
+        historical_examples +
+        config.balanced_blocks *
+            learned_iteration::kBalancedScheduleGames * 120);
+    const auto move_examples =
+        [&fit_examples](
+            std::vector<LearnedModel::TrainingExample>& source) {
+            for (auto& example : source) {
+                fit_examples.push_back(std::move(example));
+            }
+            source.clear();
+        };
+    move_examples(capture.anchor);
+    move_examples(capture.penultimate_generation);
+    move_examples(capture.last_generation);
+    if (fit_examples.size() != historical_examples) {
+        throw std::logic_error(
+            "joint C17 historical replay accounting mismatch");
+    }
+    report.historical_replay_examples =
+        fit_examples.size();
+    const std::string historical_hash =
+        hash_terminal_weight_examples(
+            fit_examples, 0x4A43313748495354ULL);
+    report.control_historical_replay_hash =
+        historical_hash;
+    report.treatment_historical_replay_hash =
+        historical_hash;
+
+    std::vector<JointC17TargetRecord> target_records;
+    ModelFingerprintHash raw_hash;
+    ModelFingerprintHash feature_hash;
+    ModelFingerprintHash outcome_hash;
+    ModelFingerprintHash turn_hash;
+    ModelFingerprintHash control_future_hash;
+    ModelFingerprintHash treatment_future_hash;
+    ModelFingerprintHash control_target_hash;
+    ModelFingerprintHash treatment_target_hash;
+    raw_hash.add(0x4A43313752415753ULL);
+    feature_hash.add(0x4A43313746454153ULL);
+    outcome_hash.add(0x4A4331374F555443ULL);
+    turn_hash.add(0x4A4331375455524EULL);
+    control_future_hash.add(0x4A43313746555452ULL);
+    treatment_future_hash.add(0x4A43313746555452ULL);
+    control_target_hash.add(0x4A43313754415247ULL);
+    treatment_target_hash.add(0x4A43313754415247ULL);
+
+    for (std::size_t block = 0;
+         block < config.balanced_blocks; ++block) {
+        const auto schedule =
+            learned_iteration::balanced_schedule(
+                config.shard_seed,
+                config.parent_generations + 1, block);
+        for (const auto& scheduled : schedule) {
+            GameConfig game_config;
+            game_config.max_turns =
+                config.max_game_turns;
+            game_config.starting_player =
+                scheduled.starting_player;
+            game_config.learned_model = parent;
+            game_config.learned_search_depth = 1;
+            game_config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::
+                            ValueSearchChampion,
+                    .rollouts_per_action =
+                        kCollectionWorlds,
+                    .exploration_rate =
+                        kCollectionExploration,
+                    .value_continuation_epsilon = 0.0,
+                    .value_priority_residual_weight = 0.0,
+                    .value_pass_dominance = false,
+                    .value_continuation_controller =
+                        LearnedContinuationController::
+                            Legacy,
+                    .training_games =
+                        config.training_games,
+                    .learned_model = parent,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::
+                            ValueSearchChampion,
+                    .rollouts_per_action =
+                        kCollectionWorlds,
+                    .exploration_rate =
+                        kCollectionExploration,
+                    .value_continuation_epsilon = 0.0,
+                    .value_priority_residual_weight = 0.0,
+                    .value_pass_dominance = false,
+                    .value_continuation_controller =
+                        LearnedContinuationController::
+                            Legacy,
+                    .training_games =
+                        config.training_games,
+                    .learned_model = parent,
+                },
+            };
+            Game game(
+                deck_cards(scheduled.seat_decks[0]),
+                deck_cards(scheduled.seat_decks[1]),
+                scheduled.seed, game_config);
+            std::vector<GameState> trace;
+            const GameResult result =
+                game.run_with_trace(trace);
+            if (trace.empty()) {
+                throw std::logic_error(
+                    "joint C17 collection produced an empty "
+                    "trace");
+            }
+            if (result.starting_player !=
+                scheduled.starting_player) {
+                throw std::logic_error(
+                    "joint C17 starting-player schedule "
+                    "mismatch");
+            }
+
+            ++report.scheduled_games;
+            report.actor_perspectives += 2;
+            for (const DeckId deck : scheduled.seat_decks) {
+                ++report.decks[
+                    static_cast<std::size_t>(deck)]
+                      .perspectives;
+            }
+            raw_hash.add(block);
+            raw_hash.add(scheduled.schedule_index);
+            raw_hash.add(scheduled.pairing_index);
+            raw_hash.add(static_cast<std::uint64_t>(
+                scheduled.seat_decks[0]));
+            raw_hash.add(static_cast<std::uint64_t>(
+                scheduled.seat_decks[1]));
+            raw_hash.add(scheduled.starting_player);
+            raw_hash.add(scheduled.seed);
+            raw_hash.add(static_cast<std::uint64_t>(
+                result.winner + 1));
+            raw_hash.add(result.turns);
+            raw_hash.add(trace.size());
+            outcome_hash.add(block);
+            outcome_hash.add(scheduled.schedule_index);
+            outcome_hash.add(static_cast<std::uint64_t>(
+                result.winner + 1));
+            outcome_hash.add(result.turns);
+            outcome_hash.add(result.starting_player);
+
+            std::vector<std::size_t> turn_numbers;
+            turn_numbers.reserve(trace.size());
+            for (std::size_t index = 0;
+                 index < trace.size(); ++index) {
+                turn_numbers.push_back(
+                    trace[index].turn_number);
+                raw_hash.add(trace[index].turn_number);
+                turn_hash.add(block);
+                turn_hash.add(scheduled.schedule_index);
+                turn_hash.add(index);
+                turn_hash.add(trace[index].turn_number);
+            }
+            const auto treatment_indices =
+                learned_iteration::
+                    turn_aligned_bootstrap_indices(
+                        turn_numbers, kTreatmentAdvances);
+
+            std::array<std::vector<double>, 2>
+                parent_values;
+            std::array<std::vector<double>, 2>
+                control_targets;
+            std::array<std::vector<double>, 2>
+                treatment_targets;
+            std::array<double, 2> terminal_targets;
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                terminal_targets[perspective] =
+                    learned_discounted_terminal_target(
+                        result, perspective);
+                outcome_hash.add(perspective);
+                add_model_fingerprint_value(
+                    outcome_hash,
+                    terminal_targets[perspective]);
+                parent_values[perspective].reserve(
+                    trace.size());
+                for (const auto& state : trace) {
+                    parent_values[perspective].push_back(
+                        parent->predict(
+                            learned_features(
+                                state, perspective)));
+                }
+                control_targets[perspective] =
+                    learned_iteration::
+                        weighted_n_state_bootstrap_targets(
+                            parent_values[perspective],
+                            terminal_targets[perspective],
+                            kControlDistance,
+                            kTerminalWeight);
+                treatment_targets[perspective] =
+                    learned_iteration::
+                        weighted_turn_aligned_bootstrap_targets(
+                            parent_values[perspective],
+                            turn_numbers,
+                            terminal_targets[perspective],
+                            kTreatmentAdvances,
+                            kTerminalWeight);
+            }
+
+            for (std::size_t index = 0;
+                 index < trace.size(); ++index) {
+                const std::optional<std::size_t>
+                    control_index =
+                        index + kControlDistance <
+                                trace.size()
+                            ? std::optional<std::size_t>(
+                                  index +
+                                  kControlDistance)
+                            : std::nullopt;
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    const auto features =
+                        learned_features(
+                            trace[index], perspective);
+                    const double terminal_target =
+                        terminal_targets[perspective];
+                    const double control_target =
+                        control_targets[perspective][index];
+                    const double treatment_target =
+                        treatment_targets[perspective][index];
+                    const double direct_control =
+                        control_index.has_value()
+                            ? kTerminalWeight *
+                                      terminal_target +
+                                  (1.0 - kTerminalWeight) *
+                                      parent_values[perspective]
+                                                   [*control_index]
+                            : terminal_target;
+                    const double direct_treatment =
+                        treatment_indices[index].has_value()
+                            ? kTerminalWeight *
+                                      terminal_target +
+                                  (1.0 - kTerminalWeight) *
+                                      parent_values[perspective]
+                                          [*treatment_indices[index]]
+                            : terminal_target;
+                    if (std::bit_cast<std::uint64_t>(
+                            control_target) !=
+                            std::bit_cast<std::uint64_t>(
+                                direct_control) ||
+                        std::bit_cast<std::uint64_t>(
+                            treatment_target) !=
+                            std::bit_cast<std::uint64_t>(
+                                direct_treatment)) {
+                        throw std::logic_error(
+                            "joint C17 target helper does not "
+                            "match the frozen formula");
+                    }
+                    report.maximum_control_target_error =
+                        std::max(
+                            report
+                                .maximum_control_target_error,
+                            std::abs(
+                                control_target -
+                                direct_control));
+                    report.maximum_treatment_target_error =
+                        std::max(
+                            report
+                                .maximum_treatment_target_error,
+                            std::abs(
+                                treatment_target -
+                                direct_treatment));
+
+                    const std::size_t fit_index =
+                        fit_examples.size();
+                    fit_examples.emplace_back(
+                        features, control_target);
+                    target_records.push_back({
+                        .fit_example_index = fit_index,
+                        .treatment_target =
+                            treatment_target,
+                    });
+                    const DeckId deck =
+                        scheduled
+                            .seat_decks[perspective];
+                    auto& deck_report =
+                        report.decks[
+                            static_cast<std::size_t>(
+                                deck)];
+                    ++deck_report.examples;
+                    if (control_index.has_value()) {
+                        ++report
+                              .control_bootstrapped_examples;
+                        ++deck_report
+                              .control_bootstrapped_examples;
+                    } else {
+                        ++report
+                              .control_terminal_tail_examples;
+                        ++deck_report
+                              .control_terminal_tail_examples;
+                    }
+                    if (treatment_indices[index].has_value()) {
+                        ++report
+                              .treatment_bootstrapped_examples;
+                        ++deck_report
+                              .treatment_bootstrapped_examples;
+                    } else {
+                        ++report
+                              .treatment_terminal_tail_examples;
+                        ++deck_report
+                              .treatment_terminal_tail_examples;
+                    }
+
+                    raw_hash.add(block);
+                    raw_hash.add(
+                        scheduled.schedule_index);
+                    raw_hash.add(index);
+                    raw_hash.add(perspective);
+                    raw_hash.add(static_cast<std::uint64_t>(
+                        deck));
+                    add_model_fingerprint_value(
+                        raw_hash, features);
+                    add_model_fingerprint_value(
+                        raw_hash, terminal_target);
+                    add_model_fingerprint_value(
+                        raw_hash,
+                        parent_values[perspective][index]);
+                    add_model_fingerprint_value(
+                        feature_hash, features);
+
+                    control_future_hash.add(block);
+                    control_future_hash.add(
+                        scheduled.schedule_index);
+                    control_future_hash.add(index);
+                    control_future_hash.add(perspective);
+                    control_future_hash.add(
+                        control_index.has_value() ? 1ULL : 0ULL);
+                    if (control_index.has_value()) {
+                        control_future_hash.add(
+                            *control_index);
+                    }
+                    treatment_future_hash.add(block);
+                    treatment_future_hash.add(
+                        scheduled.schedule_index);
+                    treatment_future_hash.add(index);
+                    treatment_future_hash.add(perspective);
+                    treatment_future_hash.add(
+                        treatment_indices[index].has_value()
+                            ? 1ULL
+                            : 0ULL);
+                    if (treatment_indices[index].has_value()) {
+                        treatment_future_hash.add(
+                            *treatment_indices[index]);
+                    }
+                    add_model_fingerprint_value(
+                        control_target_hash,
+                        control_target);
+                    add_model_fingerprint_value(
+                        treatment_target_hash,
+                        treatment_target);
+                }
+            }
+        }
+    }
+
+    report.shard_examples = target_records.size();
+    report.fit_examples = fit_examples.size();
+    const std::string feature_order_hash =
+        joint_c17_feature_order_hash(fit_examples);
+    report.control_fit_feature_order_hash =
+        feature_order_hash;
+    report.treatment_fit_feature_order_hash =
+        feature_order_hash;
+    const std::string fit_order_hash =
+        joint_c17_fit_order_hash(
+            report.historical_replay_examples,
+            report.fit_examples);
+    report.control_fit_order_hash = fit_order_hash;
+    report.treatment_fit_order_hash = fit_order_hash;
+
+    raw_hash.add(report.scheduled_games);
+    raw_hash.add(report.actor_perspectives);
+    raw_hash.add(report.shard_examples);
+    feature_hash.add(report.shard_examples);
+    outcome_hash.add(report.scheduled_games);
+    turn_hash.add(report.scheduled_games);
+    control_future_hash.add(report.shard_examples);
+    treatment_future_hash.add(report.shard_examples);
+    control_target_hash.add(report.shard_examples);
+    treatment_target_hash.add(report.shard_examples);
+    const std::string raw_shard_hash =
+        raw_hash.finish();
+    report.control_raw_shard_hash = raw_shard_hash;
+    report.treatment_raw_shard_hash = raw_shard_hash;
+    report.feature_hash = feature_hash.finish();
+    report.outcome_hash = outcome_hash.finish();
+    report.turn_number_hash = turn_hash.finish();
+    report.control_future_index_hash =
+        control_future_hash.finish();
+    report.treatment_future_index_hash =
+        treatment_future_hash.finish();
+    report.control_target_hash =
+        control_target_hash.finish();
+    report.treatment_target_hash =
+        treatment_target_hash.finish();
+    report.control_fit_target_hash =
+        joint_c17_target_hash(fit_examples);
+
+    const LearnedValueUpdateConfig fit_config = {
+        .epochs = kFitEpochs,
+        .learning_rate = kFitLearningRate,
+        .root_seed = report.fit_root_seed,
+        .member_training_tag =
+            report.fit_member_training_tag,
+    };
+    const auto control =
+        update_learned_value_model_encoded(
+            parent, fit_examples, fit_config);
+    if (learned_model_fingerprint(parent) !=
+        parent_fingerprint) {
+        throw std::logic_error(
+            "joint C17 control fit mutated its frozen parent");
+    }
+    for (const auto& record : target_records) {
+        if (record.fit_example_index >=
+            fit_examples.size()) {
+            throw std::logic_error(
+                "joint C17 treatment target index is out of "
+                "range");
+        }
+        fit_examples[record.fit_example_index].second =
+            record.treatment_target;
+    }
+    report.treatment_fit_target_hash =
+        joint_c17_target_hash(fit_examples);
+    const auto treatment =
+        update_learned_value_model_encoded(
+            parent, fit_examples, fit_config);
+    if (learned_model_fingerprint(parent) !=
+        parent_fingerprint) {
+        throw std::logic_error(
+            "joint C17 treatment fit mutated its frozen parent");
+    }
+    if (control.get() == treatment.get() ||
+        control.get() == parent.get() ||
+        treatment.get() == parent.get()) {
+        throw std::logic_error(
+            "joint C17 fits must use independent model copies");
+    }
+
+    report.control_fingerprint =
+        learned_model_fingerprint(control);
+    report.treatment_fingerprint =
+        learned_model_fingerprint(treatment);
+    report.control_components =
+        learned_model_component_fingerprints(control);
+    report.treatment_components =
+        learned_model_component_fingerprints(treatment);
+    validate_learned_joint_c17_report(report);
+    return LearnedJointC17Artifact(
         control, treatment, std::move(report));
 }
 

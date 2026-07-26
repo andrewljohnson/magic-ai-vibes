@@ -2014,6 +2014,213 @@ load_learned_terminal_weight_c17_artifact(
     std::uint64_t expected_shard_seed =
         kTerminalWeightC17ShardSeed);
 
+inline constexpr std::uint64_t
+    kLearnedJointC17ShardSeed = 202607261145ULL;
+inline constexpr std::uint64_t
+    kLearnedJointC17HoldoutSeed = 202607261146ULL;
+inline constexpr std::uint64_t
+    kLearnedJointC17MatchedControlGameplaySeed =
+        202607261147ULL;
+inline constexpr std::uint64_t
+    kLearnedJointC17FrozenC16GameplaySeed =
+        202607261148ULL;
+inline constexpr std::uint64_t
+    kLearnedJointC17HandcodedGameplaySeed =
+        202607261149ULL;
+inline constexpr std::string_view
+    kLearnedJointC17ParentFingerprint =
+        "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
+inline constexpr std::string_view
+    kLearnedJointC17ControlPolicyToken =
+        "learned-value-j1-control-c17";
+inline constexpr std::string_view
+    kLearnedJointC17TreatmentPolicyToken =
+        "learned-value-j1-treatment-c17";
+
+enum class LearnedJointC17Arm : std::uint8_t {
+    Control,
+    Treatment,
+};
+
+struct LearnedJointC17PolicyMetadata {
+    std::string policy_token;
+    std::size_t rollouts_per_action = 0;
+    std::size_t horizon_turns = 0;
+    double value_continuation_epsilon = 0.0;
+    double value_priority_residual_weight = 0.0;
+    bool blend_shallow_prior = false;
+    bool value_pass_dominance = false;
+    LearnedContinuationController continuation_controller =
+        LearnedContinuationController::Legacy;
+
+    bool operator==(
+        const LearnedJointC17PolicyMetadata&) const = default;
+};
+
+struct LearnedJointC17DeckReport {
+    std::size_t perspectives = 0;
+    std::size_t examples = 0;
+    std::size_t control_bootstrapped_examples = 0;
+    std::size_t control_terminal_tail_examples = 0;
+    std::size_t treatment_bootstrapped_examples = 0;
+    std::size_t treatment_terminal_tail_examples = 0;
+
+    bool operator==(
+        const LearnedJointC17DeckReport&) const = default;
+};
+
+struct LearnedJointC17Report {
+    std::size_t training_games = 0;
+    std::uint64_t parent_training_seed = 0;
+    std::size_t parent_generations = 0;
+    std::uint64_t shard_seed = 0;
+    std::size_t shard_generation = 0;
+    std::size_t balanced_blocks = 0;
+    std::size_t scheduled_games = 0;
+    std::size_t actor_perspectives = 0;
+    std::size_t control_record_bootstrap_distance = 0;
+    std::size_t treatment_turn_bootstrap_advances = 0;
+    std::size_t collection_search_worlds = 0;
+    std::size_t collection_horizon_turns = 0;
+    std::size_t collection_max_game_turns = 0;
+    double collection_exploration_rate = 0.0;
+    double collection_value_continuation_epsilon = 0.0;
+    double collection_value_priority_residual_weight = 0.0;
+    bool collection_blend_shallow_prior = false;
+    bool collection_value_pass_dominance = false;
+    LearnedContinuationController
+        collection_continuation_controller =
+            LearnedContinuationController::Legacy;
+    double control_terminal_weight = 0.0;
+    double treatment_terminal_weight = 0.0;
+    std::size_t fit_epochs = 0;
+    double fit_learning_rate = 0.0;
+    double fit_example_weight = 0.0;
+    std::uint64_t fit_root_seed = 0;
+    std::uint64_t fit_member_training_tag = 0;
+    std::size_t anchor_examples = 0;
+    std::size_t penultimate_generation_examples = 0;
+    std::size_t last_generation_examples = 0;
+    std::size_t historical_replay_examples = 0;
+    std::size_t fit_examples = 0;
+    std::size_t shard_examples = 0;
+    std::size_t control_bootstrapped_examples = 0;
+    std::size_t control_terminal_tail_examples = 0;
+    std::size_t treatment_bootstrapped_examples = 0;
+    std::size_t treatment_terminal_tail_examples = 0;
+    double maximum_control_target_error = 0.0;
+    double maximum_treatment_target_error = 0.0;
+    std::array<LearnedJointC17DeckReport, kDeckCount> decks{};
+    LearnedJointC17PolicyMetadata control_policy;
+    LearnedJointC17PolicyMetadata treatment_policy;
+    std::string parent_fingerprint;
+    std::string control_fingerprint;
+    std::string treatment_fingerprint;
+    LearnedModelComponentFingerprints parent_components;
+    LearnedModelComponentFingerprints control_components;
+    LearnedModelComponentFingerprints treatment_components;
+    std::string anchor_hash;
+    std::string penultimate_generation_hash;
+    std::string last_generation_hash;
+    std::string control_historical_replay_hash;
+    std::string treatment_historical_replay_hash;
+    std::string control_fit_feature_order_hash;
+    std::string treatment_fit_feature_order_hash;
+    std::string control_fit_order_hash;
+    std::string treatment_fit_order_hash;
+    std::string control_raw_shard_hash;
+    std::string treatment_raw_shard_hash;
+    std::string schedule_hash;
+    std::string feature_hash;
+    std::string outcome_hash;
+    std::string turn_number_hash;
+    std::string control_future_index_hash;
+    std::string treatment_future_index_hash;
+    std::string control_target_hash;
+    std::string treatment_target_hash;
+    std::string control_fit_target_hash;
+    std::string treatment_fit_target_hash;
+
+    bool operator==(
+        const LearnedJointC17Report&) const = default;
+};
+
+struct LearnedJointC17Deployment {
+    LearnedJointC17Arm arm = LearnedJointC17Arm::Control;
+    std::string policy_token;
+    std::shared_ptr<const LearnedModel> model;
+    BotConfig bot;
+    LearnedSearchConfig search;
+};
+
+struct LearnedJointC17Config {
+    std::size_t training_games = 800;
+    std::uint64_t parent_training_seed =
+        kDefaultLearnedTrainingSeed;
+    std::size_t parent_generations = 16;
+    std::uint64_t shard_seed = kLearnedJointC17ShardSeed;
+    std::size_t balanced_blocks = 5;
+    std::size_t max_game_turns = 500;
+    std::string required_parent_fingerprint =
+        std::string(kLearnedJointC17ParentFingerprint);
+};
+
+class LearnedJointC17Artifact {
+  public:
+    std::shared_ptr<const LearnedModel> control_model() const;
+    std::shared_ptr<const LearnedModel> treatment_model() const;
+    const LearnedJointC17Report& report() const;
+    LearnedJointC17Deployment deployment(
+        LearnedJointC17Arm arm,
+        std::uint64_t search_seed = 0) const;
+    LearnedJointC17Deployment control_deployment(
+        std::uint64_t search_seed = 0) const;
+    LearnedJointC17Deployment treatment_deployment(
+        std::uint64_t search_seed = 0) const;
+
+  private:
+    LearnedJointC17Artifact(
+        std::shared_ptr<const LearnedModel> control_model,
+        std::shared_ptr<const LearnedModel> treatment_model,
+        LearnedJointC17Report report);
+
+    std::shared_ptr<const LearnedModel> control_model_;
+    std::shared_ptr<const LearnedModel> treatment_model_;
+    LearnedJointC17Report report_;
+
+    friend LearnedJointC17Artifact
+    train_learned_joint_c17_family(
+        LearnedJointC17Config config);
+    friend void
+    write_learned_joint_c17_artifact_atomic(
+        const std::string& path,
+        const LearnedJointC17Artifact& artifact);
+    friend LearnedJointC17Artifact
+    load_learned_joint_c17_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_parent_training_seed,
+        std::uint64_t expected_shard_seed);
+};
+
+LearnedJointC17Artifact
+train_learned_joint_c17_family(
+    LearnedJointC17Config config = {});
+std::string learned_joint_c17_cache_path(
+    std::size_t training_games,
+    std::uint64_t parent_training_seed,
+    std::uint64_t shard_seed = kLearnedJointC17ShardSeed);
+void write_learned_joint_c17_artifact_atomic(
+    const std::string& path,
+    const LearnedJointC17Artifact& artifact);
+LearnedJointC17Artifact
+load_learned_joint_c17_artifact(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_parent_training_seed,
+    std::uint64_t expected_shard_seed =
+        kLearnedJointC17ShardSeed);
+
 struct LearnedValuePolicyFamilyConfig {
     std::size_t generations = 1;
     std::size_t search_worlds = 8;

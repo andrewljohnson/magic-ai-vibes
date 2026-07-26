@@ -9073,3 +9073,88 @@ Results were 44/44 probe tests, 11/11 probe-metric tests, and 27/27 probe-runner
 tests under `-Werror`. Decision: accept the scoring seam as mechanical
 instrumentation only. It opens no C17-J1 seed and makes no playing-strength
 claim. Next remains the paired artifact/evaluator source freeze.
+
+#### C17-J1 paired artifact implementation freeze
+
+`REVIEW.md` was reread through the 13:02 PDT cycle before recording this
+implementation result. It reports no change in the legacy lift table and calls
+the paired one-shot fit the next sealed event. The fit is still unopened.
+
+The typed paired family now reconstructs one frozen parent and collects one
+shared balanced shard. Its report binds the exact schedule, collection policy,
+features, outcomes, physical turn numbers, RO4/CT8 future indices, targets,
+historical replay, fit feature/order/target streams, optimizer, unit example
+weight, per-deck bootstrap/tail accounting, component fingerprints, and both
+deployment recipes. Control and treatment use the same anchor/G15/G16 replay,
+example order, root seed, member tag, three epochs, and `0.006` rate. Only the
+new shard targets differ. Both resulting models differ from the parent and one
+another only in the critic component.
+
+The bundle has a distinct magic/schema/recipe and a checksummed, bounded
+loader. Publication uses an atomic no-replace link and rejects an existing
+file, directory, or symlink without changing it. Canonical coordinates
+T800/P424242/R202607261145 now imply G16, five balanced blocks, maximum 500
+turns, and the exact frozen parent in both training-config and loaded-report
+validation. A noncanonical artifact is also forbidden from occupying the
+absolute lexically normalized canonical destination. This closes an
+independent-review finding where path/load identity previously bound only
+T/P/R.
+
+The nonreserved miniature family runs to physical turn 12 and proves that CT8
+actually produces both bootstrapped and terminal-tail rows. This closes a
+second independent-review finding: the initial eight-turn test exercised only
+the CT8 terminal-tail branch even though the standalone alignment helper was
+tested. Deterministic repeat fitting, exact report equality, typed K8/H4
+deployment, invalid-arm rejection, round-trip identity, corruption/trailing
+bytes, cross-family loads, metadata mismatches, and no-overwrite behavior are
+all covered.
+
+Verification:
+
+```sh
+make build/old-school-tests
+./build/old-school-tests
+make -j4
+git diff --check -- include/old_school/game.hpp src/game.cpp \
+  tests/test_game.cpp
+```
+
+Results were 144/144 engine tests and a full `-Werror` simulator build.
+Decision: accept this as pre-fit mechanism/integrity implementation only. No
+reserved seed was opened and no production bundle was created.
+
+#### C17-J1 user-field reference semantics clarification
+
+The 13:02 review calls the fit next, but the prospective user-field amendment
+above explicitly requires deterministic diagnostics for all three reports
+before C17-J1 training. The Block scorer is the one remaining pre-fit
+instrument, so it will be implemented and frozen before the shard is opened.
+This does not add a treatment component or tune from results.
+
+For the six frozen `old-school-field-regressions-v1` positions, the independent
+deep reference is the exact frozen parent C16 Value model, not either paired
+arm and not a newly trained Actor. It uses a hidden-information-safe Value
+mirror, K64/H8, one rollout per world, epsilon/residual zero, Legacy
+continuations, PD0 off, and no shallow-prior blend. This choice is frozen
+prospectively because the amendment asks for a bounded common-world
+Learned-mirror continuation and the sealed evaluator has an immutable C16
+artifact but no frozen Actor artifact. It cannot train or consult Handcoded.
+
+Priority, Attack, and Block alternatives use the same determinized world and
+same continuation RNG at each paired sample index. The Block adapter has
+canonical rows `no block` then `block`, observes from the defender's
+information set, delegates legality and combat consequences to
+`resolve_combat`, executes End Combat priority, Second Main, and cleanup, then
+continues for the bounded horizon. It adds no creature value, combat score,
+card identity switch, or target heuristic. Exact control/treatment deployed
+rows remain K8/H4 with their serialized shallow blend, PD0, and controller
+metadata.
+
+A field probe is stable under the same prospective common-world rule as the
+dev-v3 gate: at least one reference-best action beats every action outside the
+best set by an absolute paired delta of at least `0.03` and more than `1.96`
+paired standard errors. The field slice rejects only if control selects a
+stable reference-best action and treatment does not; a treatment gain cannot
+cancel a loss. Rules validation, exact evaluation accounting, and hidden-zone
+repartition invariance are conjunctive. These six positions can reject but
+never promote the composite.
