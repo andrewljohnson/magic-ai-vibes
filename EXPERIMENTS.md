@@ -6495,3 +6495,43 @@ Review coordination: the 03:18 PDT entry independently endorsed TW-C17 as the
 clean one-shard attribution arm. Its separate full-recipe 0.50-to-0.80 anneal
 uses reserved seed `1471`; the designs and seeds do not collide. Both results
 must read out before any combined form is declared.
+
+#### TW-C17 implementation freeze (no experiment run)
+
+Recorded after rereading `REVIEW.md` through 03:47 PDT. Commit `2379443`
+implements the declared shared-shard family without opening seeds
+`202607260311`, `202607260312`, or `202607260313`.
+
+- C16 is reconstructed once and rejected unless its exact frozen fingerprint
+  matches. The capture retains the random anchor plus G15 and G16, which is
+  the canonical replay window that a C17 update consumes.
+- One five-block balanced C17 schedule supplies both arms. TW50 and TW75 use
+  identical encoded features, order, parent, optimizer, epochs, learning
+  rate, member seeds, and shuffle seeds. Runtime checks enforce the declared
+  row-level target relation, terminal-tail identity, frozen parent, distinct
+  target/model fingerprints, and critic-only component changes.
+- The two models and compact provenance live in one separate-magic,
+  checksummed, atomic artifact. Generic C16/C17 loaders reject it, and the
+  TW loader rejects generic artifacts, corruption, mismatched dimensions,
+  seeds, recipe, model fingerprints, or accounting.
+- `--train-terminal-weight-c17` is canonical-only and refuses to retrain or
+  overwrite an existing one-shot bundle. The selectable TW50/TW75 benchmark
+  tokens are load-only. Generic benchmark use of all three reserved seeds is
+  prohibited so only the sealed evaluator can open HOLD1/gameplay.
+
+Verification:
+
+```sh
+make build/old-school-sim build/old-school-tests
+./build/old-school-tests
+sh tests/test_cli.sh ./build/old-school-sim
+git diff --check
+```
+
+Results: strict C++20 `-Werror` builds passed; engine tests passed 128/128; CLI
+tests passed; diff check passed. An independent read-only code review found
+the original overwrite gap, which was fixed and regression-tested, then
+reported no remaining material findings. The implementation milestone is
+accepted; this is not evidence for either scientific arm. Next: implement and
+freeze the exclusive load-only evaluator, then open raw-shard seed
+`202607260311` exactly once.
