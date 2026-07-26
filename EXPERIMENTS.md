@@ -6982,3 +6982,77 @@ actor-games, 1-versus-N worker determinism on a small nonreserved schedule,
 hidden repartition, missing artifact fail-before-collection, option
 exclusivity, artifact immutability, and the `0/1/2` taxonomy. No canonical
 audit execution is part of implementation verification.
+
+#### TA4-0 sealed result: rejected at the registered Green MDE
+
+Run once at 2026-07-26 05:50 PDT from frozen implementation commit `9e422f9`.
+Immediately before interpreting the result, `REVIEW.md` was reread through its
+05:47 PDT cycle. Exact invocation:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/ta4-0-sealed-audit-9e422f9 \
+  ./build/old-school-sim --audit-calendar-turn-targets
+```
+
+The process exited `1`, a valid scientific rejection. The immutable transcript
+is
+`build/experiments/ta4-0-sealed-audit-9e422f9.complete.txt`
+(66,014 bytes, 420 lines), SHA-256
+`1755cf33fc63f3115af7d40bbd29f627f4aea495d43e5ad13b2a1bfd02777278`.
+Wall time was 62.43 seconds. The fixed seed was `202607260501`, generation
+coordinate 18, with 50 balanced blocks: 2,000 physical games, 4,000
+perspectives, and 800 perspectives per deck. It produced 106,942
+trace-perspective rows, of which 84,232 were common eligible.
+
+All evidence and mechanical checks passed: all 4,000 actor-games and 2,000
+physical games contributed common rows; each deck contributed all 800
+actor-games; the two complete fresh constructions were bit-identical; 106,577
+actual hidden-zone repartitions preserved public observations, features,
+values, eligibility, targets, and scoring hashes; and the C16 artifact was
+unchanged. The frozen parent fingerprint remained
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+its evaluator content hash was
+`ee89a4aa1e91bbfc3d1ca6144139a86910bbe3e7d465de369f3b5e52471132fe`.
+
+Primary common-row results (control record-offset four to treatment
+calendar-turn four):
+
+| Scope | signed bias, control -> treatment (delta; 95% delta CI) | Brier delta | soft-log-loss delta |
+| --- | --- | ---: | ---: |
+| Pooled | -0.006554 -> -0.005887 (+0.000667; [+0.000542, +0.000792]) | -0.001316 | -0.003503 |
+| Green | +0.027097 -> +0.019316 (-0.007781; [-0.008537, -0.007025]) | -0.001171 | -0.003184 |
+| Red | -0.009065 -> -0.011712 (-0.002647; [-0.003447, -0.001848]) | -0.001186 | -0.003218 |
+| Blue | -0.019293 -> -0.015390 (+0.003903; [+0.002778, +0.005028]) | -0.001898 | -0.005105 |
+| White | -0.029755 -> -0.020294 (+0.009461; [+0.008742, +0.010181]) | -0.001343 | -0.003429 |
+| RU Aggro | +0.007803 -> +0.004174 (-0.003628; [-0.004406, -0.002851]) | -0.000965 | -0.002598 |
+
+Equal-actor-game sensitivity agreed with the registered directions: Green
+`-0.006035`, Blue `+0.004517`, and RU Aggro `-0.002567`. All-record pooled
+Brier also improved by `-0.001556`; every deck's all-record Brier delta was
+negative. Blue and RU both satisfied the corroboration condition, pooled
+common-row Brier was strictly better rather than merely noninferior, Red and
+White acquired no new material bias, and every other registered gate passed.
+
+The sole failed gate was deliberately decisive: Green's common-row bias moved
+by `-0.007781`, precisely in the predicted direction with its interval below
+zero, but it did not reach the preregistered `-0.010` minimum effect. The
+calendar alignment is therefore rejected as the immediate training target.
+Its broad loss improvements are scientifically useful but do not permit
+lowering the MDE after seeing the data, retrying another seed, fitting the
+calendar-turn C17 pair, or opening gameplay.
+
+Interpretation: record-offset target semantics were genuinely lossy—calendar
+alignment improved Brier and log loss on all five decks and repaired the
+registered Blue/RU bias directions—but they explain only about 0.78 points of
+Green's optimistic common-row target error. The correction was smallest at
+Green root turns `<=3` (`-0.001433`) and largest at `>=8` (`-0.009726`).
+Combined with the independently published finding that Green optimism is
+concentrated early, this says calendar alignment is insufficient rather than
+inert and leaves the early-game target problem substantially intact.
+
+Result: **REJECT TA4-0**. Seed `202607260501` is retired. No model was trained
+or promoted, and C16 remains the champion/control. The next experiment must be
+a separately preregistered axis; the standing candidate is the independently
+preregistered horizon-eight collection-target axis using verified inert,
+card-agnostic plumbing, not a post-hoc calendar-alignment retry.
