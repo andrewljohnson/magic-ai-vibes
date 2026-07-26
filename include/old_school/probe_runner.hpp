@@ -476,6 +476,17 @@ struct NamedValueScoringModel {
         LearnedContinuationController::Legacy;
 };
 
+// Candidate-only, cache-free comparison against an already-loaded frozen
+// label set. The control is the transition parent for the treatment. This
+// path constructs the named frozen corpus internally and has no Actor,
+// reference-Value, cache-path, refresh, or training input.
+struct ValueProbePairAgainstLabelsReport {
+    ProbeCorpusKind corpus_kind = ProbeCorpusKind::DevV3;
+    ValueCheckpointProbeReport control;
+    ValueCheckpointProbeReport treatment;
+    HiddenRepartitionSummary hidden_repartition;
+};
+
 struct ValueProbeDeploymentDiagnostic {
     std::string stable_id;
     std::vector<probe_eval::PolicyScore> raw_candidate_q;
@@ -506,6 +517,19 @@ struct ProbeScoringModels {
 HiddenRepartitionSummary verify_value_hidden_repartition(
     ProbeCorpusKind corpus_kind,
     const std::vector<NamedValueScoringModel>& models,
+    std::size_t scoring_value_worlds = 8,
+    double value_continuation_epsilon = 0.0);
+
+// Sealed Dev-v3 scorer for one immutable control/treatment pair. Labels must
+// exactly cover the internally constructed corpus by stable ID, deck, and
+// candidate descriptor. It never reads, writes, or regenerates a cache.
+// Block decisions are deliberately unsupported.
+ValueProbePairAgainstLabelsReport
+score_value_probe_pair_against_labels(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<probe_eval::ProbeLabel>& labels,
+    const NamedValueScoringModel& control,
+    const NamedValueScoringModel& treatment,
     std::size_t scoring_value_worlds = 8,
     double value_continuation_epsilon = 0.0);
 

@@ -90,6 +90,26 @@ class TemporaryDirectory {
     std::filesystem::path path_;
 };
 
+class ScopedCurrentPath {
+  public:
+    explicit ScopedCurrentPath(
+        const std::filesystem::path& path)
+        : previous_(std::filesystem::current_path()) {
+        std::filesystem::current_path(path);
+    }
+
+    ~ScopedCurrentPath() {
+        std::error_code ignored;
+        std::filesystem::current_path(previous_, ignored);
+    }
+
+    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
+    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
+
+  private:
+    std::filesystem::path previous_;
+};
+
 void expect(bool condition, std::string_view message) {
     if (!condition) {
         throw std::runtime_error(std::string(message));
@@ -213,6 +233,21 @@ std::vector<ProbeReferenceSamples> synthetic_samples(
         result.push_back(std::move(probe_samples));
     }
     return result;
+}
+
+std::vector<old_school::probe_eval::ProbeLabel> synthetic_labels(
+    const std::vector<DecisionProbe>& probes,
+    std::size_t samples_per_candidate) {
+    const auto samples =
+        synthetic_samples(probes, samples_per_candidate);
+    std::vector<old_school::probe_eval::ProbeLabel> labels;
+    labels.reserve(samples.size());
+    for (const ProbeReferenceSamples& sample : samples) {
+        labels.push_back(old_school::probe_eval::make_probe_label(
+            sample.stable_id, sample.root_deck,
+            sample.candidates));
+    }
+    return labels;
 }
 
 void test_seed_and_fingerprint_ignore_iteration_order() {
@@ -842,6 +877,232 @@ void test_cache_free_value_hidden_repartition_audit() {
             "hidden-repartition audit accepted no models")
                 .find("configuration") != std::string::npos,
         "hidden-repartition validation error was not actionable");
+}
+
+void test_sealed_value_pair_label_coverage_is_fail_closed() {
+    const auto corpus =
+        old_school::probes::make_probe_dev_v3();
+    const auto labels = synthetic_labels(corpus, 2);
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x5345414C45444C42ULL);
+    const old_school::probe_runner::NamedValueScoringModel control{
+        .name = "sealed control",
+        .model = model,
+    };
+    const old_school::probe_runner::NamedValueScoringModel treatment{
+        .name = "sealed treatment",
+        .model = model,
+    };
+    const auto score =
+        [&](const std::vector<old_school::probe_eval::ProbeLabel>&
+                candidate_labels) {
+            return old_school::probe_runner::
+                score_value_probe_pair_against_labels(
+                    ProbeCorpusKind::DevV3, candidate_labels,
+                    control, treatment, 1, 0.0);
+        };
+
+    auto missing = labels;
+    missing.pop_back();
+    expect(
+        expect_invalid(
+            [&] { static_cast<void>(score(missing)); },
+            "sealed Value pair accepted a missing label")
+                .find("missing") != std::string::npos,
+        "missing-label failure was not actionable");
+
+    auto duplicate = labels;
+    duplicate.back() = duplicate.front();
+    expect(
+        expect_invalid(
+            [&] { static_cast<void>(score(duplicate)); },
+            "sealed Value pair accepted duplicate stable IDs")
+                .find("unique") != std::string::npos,
+        "duplicate-label failure was not actionable");
+
+    auto foreign = labels;
+    foreign.back().stable_id =
+        "foreign.probe-not-in-dev-v3";
+    expect(
+        expect_invalid(
+            [&] { static_cast<void>(score(foreign)); },
+            "sealed Value pair accepted a foreign stable ID")
+                .find("foreign") != std::string::npos,
+        "foreign-label failure was not actionable");
+}
+
+void test_sealed_value_pair_is_cache_free_and_deployment_exact() {
+    const auto corpus =
+        old_school::probes::make_probe_dev_v3();
+    auto labels = synthetic_labels(corpus, 2);
+    std::reverse(labels.begin(), labels.end());
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x5345414C45445633ULL);
+    const old_school::probe_runner::NamedValueScoringModel control{
+        .name = "C16 control",
+        .model = model,
+    };
+    const old_school::probe_runner::NamedValueScoringModel treatment{
+        .name = "C17-J1 treatment",
+        .model = model,
+        .value_priority_residual_weight = 0.125,
+        .value_pass_dominance = true,
+        .value_continuation_controller =
+            old_school::LearnedContinuationController::
+                PublicStackPassV1,
+    };
+
+    TemporaryDirectory temporary;
+    const std::filesystem::path sentinel =
+        temporary.path() /
+        old_school::probe_runner::default_probe_cache_path(
+            ProbeCorpusKind::DevV3);
+    expect(!std::filesystem::exists(sentinel),
+           "cache sentinel unexpectedly existed before scoring");
+    const auto report = [&] {
+        // Resolve the library's default relative cache path inside an empty
+        // directory. The sealed labels-only path must neither consult nor
+        // create it.
+        const ScopedCurrentPath scoped(temporary.path());
+        return old_school::probe_runner::
+            score_value_probe_pair_against_labels(
+                ProbeCorpusKind::DevV3, labels, control,
+                treatment, 1, 0.125);
+    }();
+    expect(!std::filesystem::exists(sentinel),
+           "sealed labels-only scoring touched its default cache path");
+
+    expect(
+        report.corpus_kind == ProbeCorpusKind::DevV3 &&
+            report.hidden_repartition.passed &&
+            report.hidden_repartition.policy_count == 2 &&
+            report.hidden_repartition.probe_count == corpus.size(),
+        "sealed Value pair did not report exact hidden-clone coverage");
+    expect(
+        report.control.name == control.name &&
+            report.control.fingerprint ==
+                old_school::learned_model_fingerprint(model) &&
+            report.control.transition_parent_name.empty() &&
+            report.control.value_priority_residual_weight == 0.0 &&
+            !report.control.value_pass_dominance &&
+            report.control.value_continuation_controller ==
+                old_school::LearnedContinuationController::Legacy &&
+            !report.control
+                 .policy_scores_adjusted_for_deployment,
+        "sealed Value control metadata drifted from its deployed "
+        "selector");
+    expect(
+        report.treatment.name == treatment.name &&
+            report.treatment.fingerprint ==
+                old_school::learned_model_fingerprint(model) &&
+            report.treatment.transition_parent_name ==
+                control.name &&
+            report.treatment.value_priority_residual_weight ==
+                treatment.value_priority_residual_weight &&
+            report.treatment.value_pass_dominance &&
+            report.treatment.value_continuation_controller ==
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1 &&
+            report.treatment
+                .policy_scores_adjusted_for_deployment,
+        "sealed Value treatment metadata drifted from its deployed "
+        "selector");
+    expect(
+        report.control.metrics.probe_count == corpus.size() &&
+            report.treatment.metrics.probe_count == corpus.size() &&
+            report.control.decisions.size() == corpus.size() &&
+            report.treatment.decisions.size() == corpus.size(),
+        "sealed Value pair omitted a labeled decision");
+
+    std::vector<std::string> expected_ids;
+    expected_ids.reserve(corpus.size());
+    for (const DecisionProbe& probe : corpus) {
+        expected_ids.push_back(probe.stable_id);
+    }
+    std::sort(expected_ids.begin(), expected_ids.end());
+    for (std::size_t index = 0; index < expected_ids.size();
+         ++index) {
+        expect(
+            report.control.decisions[index].stable_id ==
+                    expected_ids[index] &&
+                report.treatment.decisions[index].stable_id ==
+                    expected_ids[index],
+            "sealed Value decisions were not in stable-ID order");
+        expect(
+            !report.control.decisions[index]
+                 .selection_changed_from_reference &&
+                !report.control.decisions[index]
+                     .selection_changed_from_previous &&
+                report.treatment.decisions[index]
+                        .selection_changed_from_reference ==
+                    report.treatment.decisions[index]
+                        .selection_changed_from_previous,
+            "control/treatment decision attribution was not exact");
+    }
+
+    const DecisionProbe& priority =
+        first_probe_of_kind(corpus, DecisionKind::Priority);
+    const auto control_diagnostic =
+        old_school::probe_runner::diagnose_value_probe_deployment(
+            priority, control, old_school::probes::kProbeDevV3,
+            1, 0.125);
+    const auto treatment_diagnostic =
+        old_school::probe_runner::diagnose_value_probe_deployment(
+            priority, treatment, old_school::probes::kProbeDevV3,
+            1, 0.125);
+    const auto control_detail = std::find_if(
+        report.control.decisions.begin(),
+        report.control.decisions.end(),
+        [&priority](const auto& detail) {
+            return detail.stable_id == priority.stable_id;
+        });
+    const auto treatment_detail = std::find_if(
+        report.treatment.decisions.begin(),
+        report.treatment.decisions.end(),
+        [&priority](const auto& detail) {
+            return detail.stable_id == priority.stable_id;
+        });
+    expect(
+        control_detail != report.control.decisions.end() &&
+            treatment_detail != report.treatment.decisions.end() &&
+            control_detail->selected_keys ==
+                control_diagnostic.selected_keys &&
+            treatment_detail->selected_keys ==
+                treatment_diagnostic.selected_keys &&
+            !control_detail->deterministic_selection &&
+            !treatment_detail->deterministic_selection,
+        "sealed Value pair did not use the exact deployed Priority "
+        "selector");
+
+    for (const DecisionProbe& probe : corpus) {
+        if (probe.decision_kind != DecisionKind::Attack) {
+            continue;
+        }
+        const auto control_attack = std::find_if(
+            report.control.decisions.begin(),
+            report.control.decisions.end(),
+            [&probe](const auto& detail) {
+                return detail.stable_id == probe.stable_id;
+            });
+        const auto treatment_attack = std::find_if(
+            report.treatment.decisions.begin(),
+            report.treatment.decisions.end(),
+            [&probe](const auto& detail) {
+                return detail.stable_id == probe.stable_id;
+            });
+        expect(
+            control_attack != report.control.decisions.end() &&
+                treatment_attack !=
+                    report.treatment.decisions.end() &&
+                control_attack->deterministic_selection &&
+                treatment_attack->deterministic_selection &&
+                control_attack->selected_keys ==
+                    treatment_attack->selected_keys,
+            "sealed pair did not preserve the exact deployed Attack "
+            "selector");
+    }
 }
 
 void test_value_deployment_metadata_pd0_and_controller() {
@@ -3315,6 +3576,10 @@ int main() {
                test_tiny_reference_is_hidden_clone_invariant);
     runner.run("cache-free Value hidden-repartition audit",
                test_cache_free_value_hidden_repartition_audit);
+    runner.run("sealed Value pair label coverage",
+               test_sealed_value_pair_label_coverage_is_fail_closed);
+    runner.run("sealed Value pair deployed scoring",
+               test_sealed_value_pair_is_cache_free_and_deployment_exact);
     runner.run("Value deployment metadata and PD0 ranking",
                test_value_deployment_metadata_pd0_and_controller);
     runner.run("unsupported Block probe scoring",

@@ -464,6 +464,81 @@ std::vector<const probes::DecisionProbe*> sorted_probes(
     return sorted;
 }
 
+std::vector<probe_eval::ProbeLabel>
+exact_labels_in_stable_id_order(
+    const std::vector<probes::DecisionProbe>& corpus,
+    const std::vector<probe_eval::ProbeLabel>& labels) {
+    probe_eval::validate_probe_labels(labels);
+
+    std::unordered_map<std::string, const probes::DecisionProbe*>
+        corpus_by_id;
+    corpus_by_id.reserve(corpus.size());
+    for (const probes::DecisionProbe& probe : corpus) {
+        if (!corpus_by_id.emplace(probe.stable_id, &probe).second) {
+            throw std::logic_error(
+                "frozen probe corpus stable IDs are not unique");
+        }
+    }
+
+    std::unordered_map<std::string, const probe_eval::ProbeLabel*>
+        labels_by_id;
+    labels_by_id.reserve(labels.size());
+    for (const probe_eval::ProbeLabel& label : labels) {
+        if (!corpus_by_id.contains(label.stable_id)) {
+            throw std::invalid_argument(
+                "probe labels contain a foreign stable_id: " +
+                label.stable_id);
+        }
+        labels_by_id.emplace(label.stable_id, &label);
+    }
+
+    std::vector<probe_eval::ProbeLabel> ordered;
+    ordered.reserve(corpus.size());
+    for (const probes::DecisionProbe* probe :
+         sorted_probes(corpus)) {
+        const auto found = labels_by_id.find(probe->stable_id);
+        if (found == labels_by_id.end()) {
+            throw std::invalid_argument(
+                "probe labels are missing frozen corpus stable_id: " +
+                probe->stable_id);
+        }
+        const probe_eval::ProbeLabel& label = *found->second;
+        if (label.root_deck != probe->root_deck) {
+            throw std::invalid_argument(
+                "probe label root deck does not match frozen corpus: " +
+                probe->stable_id);
+        }
+
+        std::vector<std::string> corpus_keys;
+        corpus_keys.reserve(probe->candidates.size());
+        for (const probes::Candidate& candidate :
+             probe->candidates) {
+            corpus_keys.push_back(candidate.descriptor);
+        }
+        std::sort(corpus_keys.begin(), corpus_keys.end());
+
+        std::vector<std::string> label_keys;
+        label_keys.reserve(label.candidates.size());
+        for (const probe_eval::CandidateLabel& candidate :
+             label.candidates) {
+            label_keys.push_back(candidate.key);
+        }
+        std::sort(label_keys.begin(), label_keys.end());
+        if (label_keys != corpus_keys) {
+            throw std::invalid_argument(
+                "probe label candidate coverage does not match frozen "
+                "corpus: " +
+                probe->stable_id);
+        }
+        ordered.push_back(label);
+    }
+    if (ordered.size() != labels.size()) {
+        throw std::invalid_argument(
+            "probe labels must cover the frozen corpus exactly once");
+    }
+    return ordered;
+}
+
 void validate_text_field(std::string_view value,
                          std::string_view field) {
     if (value.empty() ||
@@ -3584,6 +3659,138 @@ HiddenRepartitionSummary verify_value_hidden_repartition(
         .policy_count = models.size(),
         .probe_count = corpus.size(),
     };
+}
+
+ValueProbePairAgainstLabelsReport
+score_value_probe_pair_against_labels(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<probe_eval::ProbeLabel>& labels,
+    const NamedValueScoringModel& control,
+    const NamedValueScoringModel& treatment,
+    std::size_t scoring_value_worlds,
+    double value_continuation_epsilon) {
+    if (corpus_kind != ProbeCorpusKind::DevV3) {
+        throw std::invalid_argument(
+            "sealed Value probe-pair scoring requires DevV3");
+    }
+    if (scoring_value_worlds == 0 ||
+        scoring_value_worlds > kMaximumReferenceWorlds ||
+        !std::isfinite(value_continuation_epsilon) ||
+        value_continuation_epsilon < 0.0 ||
+        value_continuation_epsilon > 1.0) {
+        throw std::invalid_argument(
+            "sealed Value probe-pair search configuration is invalid");
+    }
+    validate_named_value_scoring_model(
+        control, "sealed Value probe-pair control");
+    validate_named_value_scoring_model(
+        treatment, "sealed Value probe-pair treatment");
+    if (control.name == treatment.name) {
+        throw std::invalid_argument(
+            "sealed Value probe-pair model names must be unique");
+    }
+
+    const ProbeCorpusDefinition definition =
+        corpus_definition(corpus_kind);
+    std::vector<probes::DecisionProbe> corpus =
+        make_corpus(corpus_kind);
+    const std::vector<std::string> validation_errors =
+        validate_corpus(corpus_kind, corpus);
+    if (!validation_errors.empty()) {
+        throw std::runtime_error(
+            "frozen DevV3 corpus is invalid: " +
+            validation_errors.front());
+    }
+    for (const probes::DecisionProbe& probe : corpus) {
+        if (probe.decision_kind == probes::DecisionKind::Block) {
+            throw std::invalid_argument(
+                "sealed Value probe-pair scoring does not support "
+                "Block decisions");
+        }
+    }
+    std::sort(
+        corpus.begin(), corpus.end(),
+        [](const probes::DecisionProbe& left,
+           const probes::DecisionProbe& right) {
+            return left.stable_id < right.stable_id;
+        });
+    const std::vector<probe_eval::ProbeLabel> ordered_labels =
+        exact_labels_in_stable_id_order(corpus, labels);
+    const std::vector<probes::DecisionProbe> hidden_clones =
+        hidden_clone_corpus(corpus);
+    if (corpus_information_set_fingerprint(
+            corpus_kind, corpus) !=
+        corpus_information_set_fingerprint(
+            corpus_kind, hidden_clones)) {
+        throw std::runtime_error(
+            "hidden clone changed corpus information-set fingerprint");
+    }
+
+    const auto score_candidate =
+        [&](const NamedValueScoringModel& candidate,
+            bool& adjusted, bool& clone_adjusted) {
+            auto predictions = score_value_deployed(
+                corpus, candidate.model, definition.corpus_id,
+                scoring_value_worlds,
+                value_continuation_epsilon,
+                candidate.value_priority_residual_weight,
+                candidate.value_pass_dominance,
+                candidate.value_continuation_controller,
+                &adjusted);
+            auto clone_predictions = score_value_deployed(
+                hidden_clones, candidate.model,
+                definition.corpus_id, scoring_value_worlds,
+                value_continuation_epsilon,
+                candidate.value_priority_residual_weight,
+                candidate.value_pass_dominance,
+                candidate.value_continuation_controller,
+                &clone_adjusted);
+            if (adjusted != clone_adjusted) {
+                throw std::runtime_error(
+                    candidate.name +
+                    ": hidden repartition changed PD0 root "
+                    "eligibility");
+            }
+            return std::pair{
+                std::move(predictions),
+                std::move(clone_predictions),
+            };
+        };
+
+    bool control_adjusted = false;
+    bool control_clone_adjusted = false;
+    auto control_predictions = score_candidate(
+        control, control_adjusted, control_clone_adjusted);
+    bool treatment_adjusted = false;
+    bool treatment_clone_adjusted = false;
+    auto treatment_predictions = score_candidate(
+        treatment, treatment_adjusted, treatment_clone_adjusted);
+
+    ValueProbePairAgainstLabelsReport report;
+    report.corpus_kind = corpus_kind;
+    report.control = make_value_checkpoint_report(
+        control.name, learned_model_fingerprint(control.model),
+        control.value_priority_residual_weight,
+        control.value_pass_dominance,
+        control.value_continuation_controller,
+        control_adjusted, ordered_labels,
+        control_predictions.first, control_predictions.second,
+        nullptr, nullptr);
+    report.treatment = make_value_checkpoint_report(
+        treatment.name, learned_model_fingerprint(treatment.model),
+        treatment.value_priority_residual_weight,
+        treatment.value_pass_dominance,
+        treatment.value_continuation_controller,
+        treatment_adjusted, ordered_labels,
+        treatment_predictions.first,
+        treatment_predictions.second,
+        &report.control, &report.control);
+    report.hidden_repartition = {
+        .passed = true,
+        .policy_count = 2,
+        .probe_count = corpus.size(),
+    };
+    return report;
 }
 
 ValueProbeDeploymentDiagnostic diagnose_value_probe_deployment(
