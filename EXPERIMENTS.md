@@ -7503,11 +7503,15 @@ distributions, and stable hashes.
 Treatment weights are computed once on the complete corpus. For a reporting
 scope `S`, they are renormalized only in that scope's mean: if `n=|S|` and
 `W=sum_S(w_i)`, a metric contrast is
-`sum_S(w_i*m_i)/W - sum_S(m_i)/n`. Its per-row paired contribution is
-`(n*w_i/W - 1)*m_i`; those contributions are formed before CR1 clustering.
-Both perspectives cluster on their globally unique physical-game ID. This
-keeps the reported contrast equal to the exact change in training-population
-weight rather than silently recomputing new actor or turn weights per slice.
+`mu_w - mu_u = sum_S(w_i*m_i)/W - sum_S(m_i)/n`. For physical game `g`, the
+paired ratio-estimator cluster score is formed directly as
+`U_g = sum_(i in g)[(w_i/W)*(m_i-mu_w) -
+(1/n)*(m_i-mu_u)]`; CR1 is applied to the physical-game scores `{U_g}`.
+Both perspectives share their globally unique physical-game cluster. This
+uses the correct two-ratio influence function even when row counts and
+treatment mass differ by game, and keeps the reported contrast equal to the
+exact change in training-population weight rather than silently recomputing
+new actor or turn weights per slice.
 
 Evidence is incomplete unless at least 4,560 actor-games, 912 actor-games for
 every deck, and 2,280 physical games contribute an RO4-eligible row. Early
@@ -7520,12 +7524,13 @@ the row count and every deck's ESS at least 40% of its row count.
 
 The audit fixes 2,400 independent physical-game clusters and a `0.005`
 minimum scientifically meaningful early-Green point effect before data. It
-does not borrow CT8's cluster variance: this weighting/standardization
-contrast has a different influence function. The report must publish its
-achieved clustered SE and `2.802 * SE`, the approximate two-sided-95%,
-80%-power detectable effect under a normal approximation. The point-effect gate
-and interval-sign gate remain separate; no post-result sample-size or
-threshold revision is allowed.
+is a fixed-resource audit and makes no prospective power claim because this
+weighting/standardization contrast has a different influence function from
+CT8 and therefore cannot borrow CT8's cluster variance. The report must
+publish its achieved clustered SE and `2.802 * SE`, labeled only as the
+post-run approximate detectable effect under a normal approximation. The
+point-effect gate and interval-sign gate remain separate; no post-result
+sample-size or threshold revision is allowed.
 
 #### Fixed scientific gates
 
@@ -7542,7 +7547,9 @@ Every gate must pass:
    - treatment absolute bias is at most
      `max(control absolute bias, 0.010)`;
    - Brier point delta is at most `+0.002` and its upper 95% bound is below
-     `+0.003`; and
+     `+0.003`;
+   - soft-log-loss point delta is at most `+0.002` and its upper 95% bound is
+     below `+0.003`; and
    - treatment creates no material bias (`abs(bias) >= 0.05` with its
      interval excluding zero) unless control already has material bias of the
      same sign.
@@ -7569,8 +7576,11 @@ Every gate must pass:
 - The parent artifact's path, size, timestamp, and content digest are bound
   before and after. The exclusive CLI rejects training, writing, benchmark,
   probe, alternate-seed, and conflicting-mode options.
-- Exit `0` means a complete scientific pass, `1` a complete scientific
-  rejection, and `2` incomplete infrastructure/evidence.
+- Exit `0` means a complete scientific pass. Exit `1` means a complete
+  scientific rejection, including a complete mechanically valid corpus that
+  misses any declared coverage, positive-control, ESS, or scientific gate.
+  Exit `2` is reserved for corruption, implementation failure, missing or
+  changed artifact, or failed determinism/hash/mechanical validation.
 
 Any completed run retires seed `202607260731`. A pass licenses only a
 separately preregistered paired critic fit on a new common training shard and
@@ -7581,5 +7591,8 @@ the legacy update fingerprint bit-for-bit, and no gameplay opens before the
 held-out all-five/probe gates pass. A valid RB0-0 failure closes this replay
 weight family and moves to a card-agnostic representation audit of removal
 exposure or trajectory; FEAT-0 forbids reviving castability without new
-evidence. Exit `2` consumes and quarantines the seed but supports no mechanism
-claim; a corrected declaration must use a new seed.
+evidence. Any complete mechanically valid corpus that misses qualification is
+an unqualified scientific rejection: it retires the seed and closes this
+declared replay-weight family rather than permitting a larger rerun. Exit `2`
+still consumes and quarantines the seed but supports no mechanism claim; only
+a corrected implementation or declaration may use a new seed.
