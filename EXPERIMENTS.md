@@ -9475,3 +9475,76 @@ the declared identity-only source patch setting
 `kCanonicalBundleByteSize=6225107` and
 `kCanonicalBundleSha256=adb9404bbdd57c92c2a6a3ad759c385d8d9a81389db02faf2b74e0695afca1ba`,
 rebuild, rerun load/report/CLI gates, commit, and push that two-constant patch.
+
+#### C17-J1 sealed verdict: rejected at held-out critic gate
+
+Executed 2026-07-26 after the artifact identity was pinned by the
+identity-only commit `f42649d`, pushed to `origin/main`, and the post-pin
+build, execution/orchestration tests, and CLI lifecycle suite passed.
+`REVIEW.md` was reread immediately before and after the run through its latest
+16:11 entry. That entry had countersigned the pre-fit freeze and had not yet
+observed this result; it contains no conflicting C17-J1 evidence.
+
+Exact command:
+
+```sh
+./build/old-school-sim --evaluate-joint-c17
+```
+
+The immutable bundle, parent, and five-deck labels loaded and passed
+provenance preflight. Stage 1 then opened held-out seed `202607261146` and
+collected the exact preregistered 200 frozen-parent mirror games: 400
+perspectives, 10,946 trace-perspective records, 9,346 bootstrapped records,
+and 1,600 terminal-tail records. The scientific gate rejected, and the lazy
+no-salvage scheduler stopped immediately. It did **not** run the deep-reference
+stage, field regressions, seeds `202607261147..202607261149`, fixed panel
+`101..808`, or mixed field.
+
+Pooled treatment-minus-control loss evidence:
+
+| Metric | Control | Treatment | Delta | CR1 95% interval |
+| --- | ---: | ---: | ---: | ---: |
+| Brier | 0.0795827901 | 0.0794556537 | -0.0001271363 | [-0.0003128713, +0.0000585986] |
+| Soft log loss | 0.5916982153 | 0.5913959327 | -0.0003022826 | [-0.0007026032, +0.0000980380] |
+| Signed bias | +0.0139482849 | +0.0164731950 | +0.0025249101 | descriptive |
+
+Both point losses improved, but both upper confidence bounds remained slightly
+above zero. Therefore the preregistered requirement that both upper bounds be
+strictly below zero failed; this is not evidence of a robust critic
+improvement.
+
+Per-deck treatment-minus-control diagnostics:
+
+| Deck | Brier delta | Log-loss delta | Control bias | Treatment bias | Bias gate |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Green | -0.0002981079 | -0.0006683183 | +0.0443208081 | +0.0442652012 | PASS, strictly shrank |
+| Red | +0.0004044358 | +0.0008505018 | +0.0825797142 | +0.0867278985 | PASS under declared material-bias rule |
+| Blue | +0.0000777781 | +0.0001429792 | +0.0115866587 | +0.0154190973 | **REJECT**, absolute bias grew |
+| White | -0.0008810766 | -0.0019278858 | -0.0831856562 | -0.0806896192 | PASS |
+| RU Aggro | +0.0004379437 | +0.0009028703 | +0.0615151547 | +0.0637572384 | **REJECT**, exceeded control/floor guard |
+
+Exact gate ledger:
+
+```text
+preflight: PASS
+heldout accounting: PASS
+finite inputs: PASS
+pooled losses improved with both CR1 upper bounds below zero: REJECT
+every-deck +0.005 loss guard: PASS
+Green absolute bias strictly shrank: PASS
+Blue absolute bias strictly shrank: REJECT
+RU control/floor bias guard: REJECT
+no new material signed bias: PASS
+terminal stage: heldout
+disposition: SCIENTIFIC_REJECTION
+```
+
+Decision: reject C17-J1. Exact C16 remains champion. Do not loosen the
+confidence or all-five bias gates, do not run the suppressed gameplay stages,
+and do not use this near-zero pooled point improvement as a win. The
+construction did not make the calendar-8 critic change reliably beneficial:
+its strongest signal is concentrated in White and modest Green improvement,
+while Red, Blue, and RU move in the wrong loss direction and Blue/RU preserve
+the known optimism problem. The next experiment must introduce a new
+card-agnostic credit or action-evaluation mechanism rather than recombining
+this exhausted target/controller/PD0 stack.
