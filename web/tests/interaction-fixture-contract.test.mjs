@@ -26,6 +26,55 @@ function makeHarness(t) {
   return harness;
 }
 
+function makeForcedEmptyBlockersHarness(t) {
+  const harness = createGameContractHarness({
+    bridgePath: process.execPath,
+    bridgeArgsPrefix: [INTERACTION_BRIDGE, "--forced-empty-blockers"],
+    initialTimeoutMs: 5_000,
+    actionTimeoutMs: 5_000,
+    idFactory: () => "forced-empty-blockers-fixture",
+  });
+  t.after(() => harness.shutdown());
+  return harness;
+}
+
+test("interaction fixture exposes one exact forced empty blocker declaration", async (t) => {
+  const harness = makeForcedEmptyBlockersHarness(t);
+  const { game: initial } = await harness.create({
+    players: [
+      { deckId: "white", policyId: "human" },
+      { deckId: "red", policyId: "learned-value" },
+    ],
+    seed: 42,
+    trainGames: 800,
+    trainSeed: 424242,
+    debugReveal: false,
+    bluffMode: true,
+  });
+  t.after(() => {
+    try {
+      harness.delete(initial.id);
+    } catch {
+      // A failed assertion may observe an already-stopped child.
+    }
+  });
+
+  assert.equal(initial.decision.kind, "blockers");
+  assert.equal(initial.decision.id, "forced-empty-blockers:opaque/17");
+  assert.deepEqual(initial.decision.attackers, [210]);
+  assert.deepEqual(initial.decision.choices, []);
+  assert.deepEqual(initial.snapshot.players[0].creatures, []);
+
+  const { game: progressed } = await harness.action(initial.id, {
+    decisionId: initial.decision.id,
+    pairs: [],
+  });
+  assert.equal(progressed.events.at(-1).kind, "blockers_declared");
+  assert.deepEqual(progressed.events.at(-1).pairs, []);
+  assert.equal(progressed.decision.kind, "priority");
+  assert.equal(progressed.decision.id, "forced-empty-blockers:next-priority");
+});
+
 test("interaction fixture advances duplicate cleanup into numeric board blocks", async (t) => {
   const harness = makeHarness(t);
   const { game: initial } = await harness.create({

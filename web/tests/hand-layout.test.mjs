@@ -347,7 +347,7 @@ test("Bluff mode is explicit and suppresses forced empty-combat advance", async 
   assert.match(autoAdvance, /currentConfig\?\.bluffMode/);
   assert.match(
     app,
-    /const hasVisibleDecision =\s*Boolean\(currentConfig\?\.bluffMode\) \|\|/,
+    /const hasVisibleDecision =\s*\(Boolean\(currentConfig\?\.bluffMode\) \|\|/,
   );
 });
 
@@ -784,7 +784,7 @@ test("combat skips empty attacker decisions without duplicate controls", async (
   );
   assert.match(
     app,
-    /const emptyAttackDecisionKey =[\s\S]+?attackerDecision\?\.eligible\.length === 0[\s\S]+?const hasVisibleDecision =[\s\S]+?autoAdvanceFailedDecision === emptyAttackDecisionKey;/,
+    /const emptyAttackDecisionKey =[\s\S]+?attackerDecision\?\.eligible\.length === 0[\s\S]+?const hasVisibleDecision =[\s\S]+?autoAdvanceFailedDecision === emptyAttackDecisionKey\)/,
   );
   assert.match(
     app,
@@ -797,5 +797,42 @@ test("combat skips empty attacker decisions without duplicate controls", async (
   assert.match(
     app,
     /bluffMode=\{Boolean\(currentConfig\?\.bluffMode\)\}/,
+  );
+});
+
+test("combat auto-submits an engine-forced empty blocker declaration", async () => {
+  const app = await source("App.tsx");
+  const blockerAutoAdvanceStart = app.indexOf(
+    'decision?.kind !== "blockers"',
+  );
+  const blockerAutoAdvanceEnd = app.indexOf(
+    "useEffect(() => {",
+    blockerAutoAdvanceStart,
+  );
+  const blockerAutoAdvance = app.slice(
+    blockerAutoAdvanceStart,
+    blockerAutoAdvanceEnd,
+  );
+
+  assert.ok(blockerAutoAdvanceStart >= 0, "missing blocker auto-advance effect");
+  assert.match(
+    app,
+    /const autoSubmittedBlockerDecision = useRef<string \| null>\(null\);/,
+  );
+  assert.match(
+    blockerAutoAdvance,
+    /decision\.choices\.length !== 0/,
+  );
+  assert.doesNotMatch(
+    blockerAutoAdvance,
+    /card|creature|battlefield|currentConfig\?\.bluffMode/,
+  );
+  assert.match(
+    blockerAutoAdvance,
+    /if \(autoSubmittedBlockerDecision\.current === decisionKey\) return;[\s\S]+?decisionId: decision\.decisionId, pairs: \[\][\s\S]+?setAutoAdvanceFailedDecision\(decisionKey\)/,
+  );
+  assert.match(
+    app,
+    /const emptyBlockDecisionKey =[\s\S]+?blockerDecision\?\.choices\.length === 0[\s\S]+?\(emptyBlockDecisionKey === null \|\|[\s\S]+?autoAdvanceFailedDecision === emptyBlockDecisionKey\)/,
   );
 });

@@ -2499,6 +2499,7 @@ export default function App() {
     string | null
   >(null);
   const autoSubmittedAttackerDecision = useRef<string | null>(null);
+  const autoSubmittedBlockerDecision = useRef<string | null>(null);
   const draggedPriorityOriginRef = useRef<PriorityOriginSelection | null>(
     null,
   );
@@ -2712,6 +2713,26 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    const decision = snapshot?.decision;
+    if (
+      snapshot?.status !== "playing" ||
+      decision?.kind !== "blockers" ||
+      decision.choices.length !== 0 ||
+      acting
+    )
+      return;
+
+    const decisionKey = `${snapshot.id}:${String(decision.decisionId)}`;
+    if (autoAdvanceFailedDecision === decisionKey) return;
+    if (autoSubmittedBlockerDecision.current === decisionKey) return;
+    autoSubmittedBlockerDecision.current = decisionKey;
+    act(
+      { decisionId: decision.decisionId, pairs: [] },
+      () => setAutoAdvanceFailedDecision(decisionKey),
+    );
+  }, [act, acting, autoAdvanceFailedDecision, snapshot]);
+
+  useEffect(() => {
     if (
       !snapshot ||
       snapshot.status !== "playing" ||
@@ -2831,10 +2852,6 @@ export default function App() {
     attackerDecision?.eligible.length === 0
       ? `${snapshot.id}:${String(attackerDecision.decisionId)}`
       : null;
-  const hasVisibleDecision =
-    Boolean(currentConfig?.bluffMode) ||
-    emptyAttackDecisionKey === null ||
-    autoAdvanceFailedDecision === emptyAttackDecisionKey;
   const priorityDecision =
     snapshot.decision?.kind === "priority"
       ? snapshot.decision
@@ -2847,6 +2864,16 @@ export default function App() {
     snapshot.decision?.kind === "blockers"
       ? snapshot.decision
       : undefined;
+  const emptyBlockDecisionKey =
+    blockerDecision?.choices.length === 0
+      ? `${snapshot.id}:${String(blockerDecision.decisionId)}`
+      : null;
+  const hasVisibleDecision =
+    (Boolean(currentConfig?.bluffMode) ||
+      emptyAttackDecisionKey === null ||
+      autoAdvanceFailedDecision === emptyAttackDecisionKey) &&
+    (emptyBlockDecisionKey === null ||
+      autoAdvanceFailedDecision === emptyBlockDecisionKey);
   const blockerOriginIds = new Set(
     blockerDecision?.choices.map((choice) => String(choice.blocker)) ?? [],
   );

@@ -2,6 +2,9 @@
 
 import readline from "node:readline";
 
+const forcedEmptyBlockers = process.argv.includes("--forced-empty-blockers");
+const forcedEmptyBlockersDecisionId = "forced-empty-blockers:opaque/17";
+
 function manaCost({ generic = 0, green = 0, red = 0, white = 0 } = {}) {
   return { generic, green, red, blue: 0, white };
 }
@@ -176,21 +179,41 @@ function state(phase, hand = openingHand) {
   };
 }
 
+function forcedEmptyBlockerState(phase = "declare_blockers") {
+  const next = state(phase, keptHand);
+  next.players[0].creatures = [];
+  next.players[1].creatures = [attackers[0]];
+  return next;
+}
+
 function write(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
 write({ type: "status", message: "Loading interaction fixture" });
-write({
-  type: "decision",
-  state: state("cleanup"),
-  decision: {
-    id: "interaction-cleanup-1",
-    kind: "cleanup_discard",
-    count: 2,
-    options: openingHand.map((card, index) => ({ index, card })),
-  },
-});
+if (forcedEmptyBlockers) {
+  write({
+    type: "decision",
+    state: forcedEmptyBlockerState(),
+    decision: {
+      id: forcedEmptyBlockersDecisionId,
+      kind: "blockers",
+      attackers: [210],
+      choices: [],
+    },
+  });
+} else {
+  write({
+    type: "decision",
+    state: state("cleanup"),
+    decision: {
+      id: "interaction-cleanup-1",
+      kind: "cleanup_discard",
+      count: 2,
+      options: openingHand.map((card, index) => ({ index, card })),
+    },
+  });
+}
 
 const input = readline.createInterface({
   input: process.stdin,
@@ -210,6 +233,39 @@ input.on("line", (line) => {
   }
 
   if (
+    forcedEmptyBlockers &&
+    step === 0 &&
+    action.decisionId === forcedEmptyBlockersDecisionId &&
+    Array.isArray(action.pairs) &&
+    action.pairs.length === 0
+  ) {
+    step = 1;
+    write({
+      type: "event",
+      state: forcedEmptyBlockerState(),
+      event: {
+        kind: "blockers_declared",
+        player: 0,
+        phase: "declare_blockers",
+        pairs: [],
+        label: "You declared no blockers",
+      },
+    });
+    write({
+      type: "decision",
+      state: forcedEmptyBlockerState("second_main"),
+      decision: {
+        id: "forced-empty-blockers:next-priority",
+        kind: "priority",
+        phase: "second_main",
+        options: [{ index: 0, label: "Pass priority", kind: "pass" }],
+      },
+    });
+    return;
+  }
+
+  if (
+    !forcedEmptyBlockers &&
     step === 0 &&
     action.decisionId === "interaction-cleanup-1" &&
     Array.isArray(action.indices) &&
@@ -244,6 +300,7 @@ input.on("line", (line) => {
   }
 
   if (
+    !forcedEmptyBlockers &&
     step === 1 &&
     String(action.decisionId) === "7002" &&
     Array.isArray(action.pairs)

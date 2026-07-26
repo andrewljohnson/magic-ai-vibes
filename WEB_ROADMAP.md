@@ -170,6 +170,29 @@ shrinking any match control.
   rendered check on the deterministic `4176` journey. No server or action
   contract changes are in scope.
 
+#### Preregistered forced-empty-blockers slice
+
+Hypothesis: when the authoritative engine emits a `blockers` decision with no
+legal blocker choices, submitting its exact empty declaration immediately will
+remove a meaningless `No blocks` click without hiding any genuine player
+choice.
+
+- The trigger is only `decision.kind === "blockers"` with an empty
+  engine-provided `choices` array. The browser does not inspect card names,
+  card types, battlefield contents, or reconstruct blocking legality.
+- The automatic request preserves the engine's opaque `decisionId` byte for
+  byte and sends exactly `pairs: []`, at most once for that decision.
+- Bluff mode does not pause this declaration because an empty blocker choice
+  set has no alternative action. A failed automatic request exposes the
+  original blocker decision and recoverable error instead of retrying in a
+  loop.
+- Reproduce and verify with a fixed interaction fixture at seed `42`, no human
+  creatures, one opposing attacker, and an opaque string decision ID.
+  Acceptance requires a focused source/contract regression, `make test-web-ui`,
+  `make test-web` because the fixture changes, and a real-browser 1280 × 720
+  smoke proving there is one exact action request and no visible `No blocks`
+  control.
+
 ### P2 — Arena-quality board readability
 
 Status: **stack controller/targets rendered at both target viewports; setup
@@ -1302,3 +1325,21 @@ For each web issue:
   green. Final results: `make test-web-ui` 75/75 and
   `make test-web-rendered` 4/4. The rendered server used ephemeral localhost
   ports; port `4173` was untouched.
+- 2026-07-26 — Implemented and rendered the preregistered
+  forced-empty-blockers slice. A fixed seed-42 interaction fixture exposes one
+  opposing attacker, no human creatures, `choices: []`, and opaque decision ID
+  `forced-empty-blockers:opaque/17`; its pre-fix rendered reproduction failed
+  after receiving zero action requests and leaving `No blocks` visible. The
+  client now reads only that authoritative empty choice set, submits exactly
+  `{decisionId: "forced-empty-blockers:opaque/17", pairs: []}` once, and does
+  so even with Bluff mode enabled. The corrected 1280 × 720 Chromium journey
+  reached the fixture's second-main priority, showed one enabled
+  `Pass priority`, no `No blocks`, no alert, and no horizontal overflow.
+  `make test-web-ui` passed 77/77; `make test-web` passed 9/9 C++ bridge tests
+  and 84/84 Node tests. The first complete rendered run had a transient timeout
+  in the unchanged 1440 × 900 Giant Growth journey; that exact journey passed
+  alone in 2.33 seconds, and an identical full rerun passed all 5/5 rendered
+  journeys in 8.23 seconds. The in-app browser had no available browser
+  binding, so the required render evidence comes from the repository's real
+  Chromium/Playwright gate on ephemeral localhost ports; port `4173` was
+  untouched.

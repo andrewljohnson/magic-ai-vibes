@@ -14,6 +14,12 @@ const TARGET_STACK_BRIDGE = path.join(
   "fixtures",
   "target-stack-bridge.mjs",
 );
+const INTERACTION_BRIDGE = path.join(
+  TEST_DIRECTORY,
+  "..",
+  "fixtures",
+  "interaction-bridge.mjs",
+);
 const REAL_ENGINE_BRIDGE = path.resolve(
   TEST_DIRECTORY,
   "..",
@@ -72,6 +78,24 @@ async function startFixture() {
   };
 }
 
+async function startForcedEmptyBlockersFixture() {
+  const server = await startServer({
+    port: 0,
+    host: "127.0.0.1",
+    bridgePath: process.execPath,
+    bridgeArgsPrefix: [INTERACTION_BRIDGE, "--forced-empty-blockers"],
+  });
+  const address = server.address();
+  assert.ok(
+    typeof address === "object" && address !== null,
+    "empty-blockers fixture server must expose a TCP address",
+  );
+  return {
+    server,
+    url: `http://127.0.0.1:${address.port}`,
+  };
+}
+
 async function startRealEngine() {
   const server = await startServer({
     port: 0,
@@ -96,7 +120,7 @@ async function closeServer(server) {
   });
 }
 
-async function configureFixedMatch(page) {
+async function configureFixedMatch(page, { bluffMode = false } = {}) {
   const setup = page.getByRole("dialog", { name: "Set the table" });
   await setup.waitFor();
   const nearSeat = setup.locator(".seat-0");
@@ -116,6 +140,14 @@ async function configureFixedMatch(page) {
     "debug reveal must be off",
   );
   assert.equal(await toggles.nth(1).isChecked(), false, "Bluff mode must be off");
+  if (bluffMode) {
+    await setup.getByText("Bluff mode", { exact: true }).click();
+    assert.equal(
+      await toggles.nth(1).isChecked(),
+      true,
+      "visible Bluff mode label must enable the checkbox",
+    );
+  }
 
   await setup.getByRole("button", { name: "Start match" }).click();
   await setup.waitFor({ state: "hidden" });
@@ -390,6 +422,70 @@ function assertStackControllerCues(cues, expected) {
     );
   });
 }
+
+test(
+  "forced empty blockers auto-submit exactly once even in Bluff mode",
+  { timeout: 60_000 },
+  async (t) => {
+    const { server, url } = await startForcedEmptyBlockersFixture();
+    t.after(() => closeServer(server));
+    const browser = await launchBrowser();
+    t.after(() => browser.close());
+    const context = await browser.newContext({ viewport: REAL_ENGINE_VIEWPORT });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const actionPayloads = [];
+    page.on("request", (request) => {
+      if (isActionRequest(request)) {
+        actionPayloads.push(request.postDataJSON());
+      }
+    });
+
+    await page.goto(url, { waitUntil: "networkidle" });
+    const [progressed] = await captureActionResponses(page, 1, () =>
+      configureFixedMatch(page, { bluffMode: true }),
+    );
+
+    assert.equal(progressed.game.config.seed, "42");
+    assert.equal(progressed.game.config.bluffMode, true);
+    assert.equal(progressed.game.decision.kind, "priority");
+    assert.equal(
+      progressed.game.decision.id,
+      "forced-empty-blockers:next-priority",
+    );
+    assert.deepEqual(actionPayloads, [
+      {
+        decisionId: "forced-empty-blockers:opaque/17",
+        pairs: [],
+      },
+    ]);
+    assert.equal(
+      await page.getByRole("button", { name: "No blocks" }).count(),
+      0,
+    );
+    assert.equal(
+      await page.getByRole("button", { name: "Pass priority" }).count(),
+      1,
+    );
+    assert.equal(await page.getByRole("alert").count(), 0);
+
+    const geometry = await renderedGeometry(page);
+    assert.equal(geometry.viewport.width, REAL_ENGINE_VIEWPORT.width);
+    assert.equal(geometry.viewport.height, REAL_ENGINE_VIEWPORT.height);
+    assert.equal(geometry.documentWidth, REAL_ENGINE_VIEWPORT.width);
+    assert.equal(geometry.bodyWidth, REAL_ENGINE_VIEWPORT.width);
+    assertVisibleRectangle(
+      geometry.dock,
+      geometry.viewport,
+      "post-block priority dock",
+    );
+
+    t.diagnostic(
+      "The opaque empty-blocker decision auto-submitted exactly once and " +
+        "settled on second-main priority while Bluff mode remained enabled",
+    );
+  },
+);
 
 test(
   "real engine auto-passes forced priority and empty attackers with Bluff off",
