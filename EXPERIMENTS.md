@@ -6441,3 +6441,57 @@ It does not itself promote a bot. Failure rejects this 0.75 endpoint without
 seed retries; the next axis must be declared separately. All seeds
 `202607260311`, `202607260312`, and `202607260313` are now consumed for this
 single experiment regardless of outcome.
+
+#### TW-C17 pre-run metric and accounting clarifications
+
+Committed before training, HOLD1, or gameplay opened any of the three reserved
+seeds. These definitions close ambiguities in the declaration; they do not
+change either arm or select a result.
+
+- HOLD1 uses five exact calls to
+  `balanced_schedule(202607260312, 17, block)`: 200 physical games, 400
+  seat-game perspectives, 80 perspectives per deck, and exact seat/play-draw
+  balance. Both pilots are frozen C16 K1/H4 with exploration 0.05 and a
+  500-turn bound. Candidate models never choose a HOLD1 action.
+- Losses are record-weighted to match critic training. Uncertainty clusters by
+  physical game: for record metric `x`, compute the overall record mean, each
+  game's sum of centered record residuals, and the CR1 variance
+  `G/(G-1) * sum(U_g^2) / N^2`. Use
+  `1.959963984540054 * SE` for the paired 95% interval.
+- Signed calibration bias is `prediction - discounted_terminal_target`.
+  Green and Blue satisfy the registered shrink condition only when
+  `abs(TW75 bias)` is strictly below both TW50 and C16. A material bias is
+  absolute bias at least 0.05 with its game-clustered 95% interval excluding
+  zero. Reject a newly material TW75 deck bias when neither control already
+  has a same-sign material bias.
+- Prediction saturation means `p <= 0.01 || p >= 0.99`; it is reported only
+  and is not a gate.
+- The tracked source fixtures do not currently have a qualified immutable
+  Environment-v3 deep-reference cache. Older v2 caches are forbidden. Unless
+  a new cache is independently declared, qualified, generated, and frozen
+  before HOLD1, action diagnostics are limited to selection changes and exact
+  hidden-repartition invariance; no reference agreement/regret claim or gate
+  may be fabricated from stale labels.
+- Each gameplay panel uses 50 common-seed quartets per deck: challenger in
+  each seat crossed with each starting player, for exactly 200 games per deck,
+  1,000 total, 100 play/100 draw, and 50 in every seat-by-play/draw quadrant.
+  Aggregate passes at at least 501 wins. A deck is “not losing” when its wins
+  are greater than or equal to its losses; a draw does not turn an otherwise
+  tied head-to-head deck into a loss.
+- The earlier “roughly three points” wording is a nominal independent-binomial
+  95% half-width (3.10 points), not an 80%-power MDE. The corresponding
+  two-sided 80%-power MDE is approximately 4.43 points pooled and 9.91 points
+  for a 200-game deck row. Because four games share each base seed, report
+  quartet-clustered uncertainty and do not claim those independent-binomial
+  scales as achieved paired power.
+
+The only permitted evaluation route is exclusive and load-only: it must
+require exact frozen C16 and TW bundle artifacts, hash/size/mtime them before
+and after, run HOLD1 first, suppress panel 1 after an offline rejection,
+suppress panel 2 after a panel-1 rejection, and distinguish scientific
+rejection (exit 1) from incomplete evidence (exit 2).
+
+Review coordination: the 03:18 PDT entry independently endorsed TW-C17 as the
+clean one-shard attribution arm. Its separate full-recipe 0.50-to-0.80 anneal
+uses reserved seed `1471`; the designs and seeds do not collide. Both results
+must read out before any combined form is declared.
