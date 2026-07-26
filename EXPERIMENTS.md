@@ -7882,6 +7882,55 @@ schedule, trace, RO4, target, feature, grouping, scoring, and artifact hashes
 remain those printed above. A clean result licenses only a fresh RB0-0 sealed
 seed declaration.
 
+#### Post-fix result: mechanical preflight passed
+
+Run 2026-07-26 from committed repair `e484fd3` after independent code review
+and after rereading `REVIEW.md` through its 10:32 RB0-diagnosis cycle. The
+exact prospectively frozen command was:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/rb0-e1-arm64-mechanics-after-compensated \
+  ./build/rb0-mechanical-preflight
+```
+
+The route exited `0` with all 97 named mechanical records passing. In every
+capture, compensated global mass error is exactly `0` against the unchanged
+`1.8320918115932727e-09` tolerance; actor error is
+`3.5527136788005009e-15` against
+`3.8168579408193183e-13`; turn error remains
+`4.4408920985006262e-16` against
+`2.2452105534231285e-14`. All artifact snapshots, accounting, schedule,
+trace/RO4/tail, hidden-repartition, finite-weight, repeat, reverse, and worker
+flags pass.
+
+Configuration, artifact metadata, all four count rows, and all 32
+schedule/trace/outcome/feature/grouping/RO4/weight/scoring hash rows are
+byte-identical to the pre-fix transcript. Independent SHA-256s over each
+capture's eight hash rows match before and after:
+
+- canonical:
+  `179d55c0f2ec64284d0a4765d31005f8809b979134e8ef76d6545e615eb53631`;
+- repeat:
+  `48c64d73bb8469dcd7e6dc30064e0e61656f6127279ed3edce4f5934dc1d10e9`;
+- reverse:
+  `6c2970c5da865886d093537f36739397b6c844f318e10f6f49c14a40ec2975c5`;
+- single-worker:
+  `a62f46faa3d0261ccd8a22f6d4a52a5ade94c70e6dc13f705961e79f685e2df4`.
+
+The immutable post-fix transcript is
+`build/experiments/rb0-e1-arm64-mechanics-after-compensated.complete.txt`,
+SHA-256
+`4432f4a20da98588aac5de58b6339fbdeb3a1029e946dab5d62b38eaf1a0e871`;
+the independent sidecar matches and records exit `0`. Wall time was 524.11
+seconds (`user 1177.10`, `sys 6.62`).
+
+Decision: the observability/numerical defect is repaired. This licenses
+declaration of one fresh RB0-0 sealed seed with the original hypothesis,
+estimands, weights, scopes, gates, thresholds, qualifications, sample size,
+and analysis unchanged. It does not itself support replay weighting or any
+Learned-policy change.
+
 ### Calendar-8 composite authorization (user delegated; accepted)
 
 Recorded 2026-07-26 after rereading `REVIEW.md` through its 08:32 cycle. The
