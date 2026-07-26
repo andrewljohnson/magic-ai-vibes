@@ -6169,3 +6169,69 @@ at a true 53% win rate and a 3.111-point MDE at 80% power. It loads only the
 existing artifact, binds source/artifact/toolchain integrity, runs the full
 archived test and sanitizer gates, and preserves the fixed all-five
 definition. This control certification does not tune or select a policy.
+
+### Environment-v3 C16 replacement certification (result: valid rejection)
+
+Executed the declaration exactly once from committed source `40b96a8`:
+
+```sh
+sh tools/certify.sh 202607260219 \
+  68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+```
+
+The run completed as a scientifically valid **NOT CERTIFIED** result with
+exit `1`; the predeclared rejection hypothesis was confirmed. This was not an
+infrastructure failure. The primary balanced benchmark used evaluation seed
+`202607260219`, training seed `424242`, 34 repetitions, and 2,040 games. Frozen
+C16 went `978-1062-0`, or 47.94%, with Wilson 95% interval
+45.78%--50.11%. Consequently the aggregate-over-50 and Wilson-lower-over-50
+criteria both failed.
+
+The exact challenger-deck rows and the corresponding Handcrafted
+baseline-deck-column wins were:
+
+| Challenger deck | C16 row record | C16 wins | Handcrafted column wins | Direct sign |
+| --- | ---: | ---: | ---: | --- |
+| Green | 129-279-0 | 129 | 173 | fail |
+| Red | 184-224-0 | 184 | 222 | fail |
+| Blue | 273-135-0 | 273 | 279 | fail |
+| White | 223-185-0 | 223 | 186 | pass |
+| RU Aggro | 169-239-0 | 169 | 202 | fail |
+
+Thus only White passed the five-deck direct sign. The fixed eight-seed panel,
+mixed-field lift panel, and probe stage were not run because the immutable
+primary gate rejected. This is consistent with the independent 47.5% and
+46.8% committed-v3 controls rather than evidence of a new regression.
+
+All prerequisite engineering evidence passed before gameplay: 42/42
+certification self-tests, the complete archived `make -B test`, the release
+build, the sanitizer build, and 126/126 AddressSanitizer/UndefinedBehaviorSanitizer
+engine tests. The principal stage durations were 4.303 s for certification
+self-tests, 320.792 s for the full archived test, 29.760 s for the release
+build, 49.253 s for the sanitizer build, 217.473 s for sanitizer tests,
+12.203 s for artifact load, and 189.228 s for the primary benchmark. Source,
+toolchain, simulator, and artifact integrity checks passed before and after
+the benchmark. The loaded artifact retained fingerprint `68126afc...` and
+SHA-256 `53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`
+before and after load.
+
+Evidence is immutable under:
+
+```text
+certification-runs/runs/20260726T092249Z-40b96a827400-s202607260219-p32666
+```
+
+The primary log is 59 lines / 2,796 bytes with SHA-256
+`28e71514e9c13273f000a4c1fc458b85d7c9316e236ff5cc1baa9840fa15ac46`.
+`report.json` is 1,034 lines / 39,338 bytes with SHA-256
+`bb5c6ed5f01bf74f5856d91a60930a9b0da0568fbd311ef2490c8869f6663ce5`.
+
+Review reconciliation before recording this conclusion: the newest
+independent entry remained 02:34 PDT and endorsed this rejection-expected
+declaration. Its VC-1 evidence points specifically at four-record bootstrap
+target myopia, but its committed-v3 confirmation VC-1v3 was still running.
+Decision: retain C16 as the immutable rejected control; do not retry or reuse
+seed `202607260219`. Await VC-1v3 before preregistering a target-distance
+challenger. If it transfers, isolate the label distance with same-shard
+TD4-C17 and TD8-C17 siblings rather than confounding a TD8 C17 treatment with
+an extra generation.
