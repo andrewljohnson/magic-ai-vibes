@@ -50,6 +50,8 @@ struct AuditTask {
 std::vector<AuditTask> audit_schedule(
     std::uint64_t seed, std::size_t generation,
     std::size_t balanced_blocks);
+std::string audit_schedule_hash(
+    std::span<const AuditTask> tasks);
 
 // Card-agnostic grouping coordinates. `physical_game` is globally unique
 // within a corpus. A perspective identifies one actor-game; repeated rows at

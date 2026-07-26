@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 08:32 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 09:17 PDT — refreshed every review cycle.*
 
 - **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
   current read (pooled 240 games/cell over seeds 4242+7801): **1 of
@@ -36,6 +36,12 @@ binary, never from extrapolation.
   Blue -15pp / Green +18pp in self-play). First recipe fork
   C17-DB8 (bootstrap 4->8) is TRAINING in the challenger tree,
   seed 8629 reserved.**
+- **AUTHORIZATION ACCEPTED (user-delegated): calendar-8 reopens as
+  a COMPOSITE COMPONENT ONLY — the joint multi-family declaration
+  is now unblocked pending PD0's diagnostic and the repaired RB0.
+  PD0 (exact Pass-dominance filter via the DC1 comparator)
+  supersedes OSC-2's hardcoded class prune; OSC-2's in-flight gate
+  (seed 6871) provides the class-level prior.**
 - **OSC-1 (continuation prune): rejected standalone at 47.8% BUT
   the registered instrument hit the night's best Blue mirror
   (55.9% vs ~49%). SIX single-change forms, six instrument
@@ -141,6 +147,110 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 09:17 PDT (review cycle)
+
+**No-change cycle: PD0 implementation continues (8 working-tree
+files, fixture in), sealed run pending.** Lift table:
+bit-identical, fifty-third cycle. My side staged the instrument
+panel runbook (tools/instrument-panel.sh: one command per
+candidate for waste/mirror/calibration profiles). All positions
+hold on the two-event path: PD0 sealed diagnostic, repaired RB0,
+then the joint composite.
+
+## 2026-07-26 09:11 PDT (review cycle)
+
+**Verdict: the redundant-counter fixture is IN (5ba1ef1) — the
+user's Air Elemental game became a PD0 test case inside the freeze
+window. Exactly how the three-party loop should work.** PD0
+implementation continues (8 working-tree files); sealed run next.
+Lift table: bit-identical, fifty-second cycle. My side added the
+permanent OS_WASTE_CENSUS instrument (three dominated-line classes,
+inert default) for the composite's before/after waste measurement.
+Path unchanged: PD0 sealed diagnostic -> repaired RB0 -> joint
+composite declaration.
+
+## 2026-07-26 09:03 PDT (review cycle)
+
+**PD0's diagnostic route is frozen (baae44f); implementation
+continues in the working tree; the sealed run is next.** Lift
+table: bit-identical, fifty-first cycle. One timing note: my 09:02
+delivery (redundant-counter class, ~6/run at K=8, with the
+settle-first-counter implementation flag) landed alongside your
+freeze — if the focused tests haven't sealed yet, a
+redundant-counter fixture is the one addition the field evidence
+begs for; if they have, the class still serves as post-hoc
+validation data. Composite path unchanged: PD0 -> repaired RB0 ->
+joint declaration.
+
+## 2026-07-26 09:02 PDT (research thread — field report #5: redundant counters)
+
+**The user caught the bot stacking TWO Counterspells on one Air
+Elemental. Census: ~6 real-game redundant counters per 20-game run
+at K=8 (hundreds per turn bucket in continuations) — the THIRD
+dominated-line class, and the best validation case yet for PD0's
+general filter over any hardcode:** a redundant counter fizzles on
+settlement, so Pass strictly dominates by your exact comparator —
+but only if the bounded forced-pass settlement resolves the FIRST
+counter before comparison. Your declared procedure settles the full
+stack/window, which should cover it; flagging explicitly so the
+implementation and its focused tests include a
+redundant-counter fixture.
+
+Dominated-line ledger (real-game, per 20-game mixed run): X=0 casts
+11, redundant counters 6, own-spell counters 1 — ~18 wasted cards
+per run, one general mechanism, one filter. The composite's
+dominated-line component now has three independent field-confirmed
+classes behind it.
+
+## 2026-07-26 08:56 PDT (research thread — OSC-2 verdict)
+
+**OSC-2 (X=0 class prune): REJECTED standalone at 48.5% (CI
+46.4-50.7) — the SEVENTH single-change form with the identical
+signature: +1.7pp point movement, mild instrument gains (Blue
+mirror +3pp), no gate pass.** The class prior for PD0 is set:
+dominated-line removal carries the same individual point mass as
+every other confirmed component. Your general settlement filter
+inherits this evidence and replaces my hardcode in the composite.
+Seven-for-seven now says the composite is not optional — no single
+knob will cross 50% alone; the summed point masses of the
+confirmed components (~+1.5pp x 3-4 disjoint mechanisms, if they
+stack even sublinearly) are exactly the size of the 2.6pp gap.
+Awaiting your PD0 diagnostic and repaired RB0 for the joint
+declaration.
+
+## 2026-07-26 08:50 PDT (review cycle — authorization accepted; PD0 endorsed; composite is GO-pending-declaration)
+
+**Verdict: two excellent moves. (1) The authorization record
+(a687ef9) handles the user's delegation exactly right — calendar-8
+reopens ONLY as a fixed component of the jointly preregistered
+multi-family composite, with no standalone retry, no salvage, and
+replay weighting admitted only behind a repaired sealed RB0. That
+matches my C19-conditional structure precisely; consider this my
+countersignature-in-principle for the composite frame. (2) PD0 is
+the RIGHT formulation of the X=0 defect and supersedes my OSC-2
+mechanism: exact-settlement Pass-dominance via the DC1 comparator
+is general and card-agnostic where my census-driven prune hardcodes
+the Braingeyser/Disintegrate class — and it already correctly
+distinguishes dominated X=0 from incomparable payable Force Spike.**
+
+Coordination note: my OSC-2 class-prune gate is IN FLIGHT
+(seed 6871, unobserved, declared before your PD0 landed). It stays
+— it reads out within the hour and provides the class-level
+aggregate prior that PD0's general filter inherits; long-term the
+COMPOSITE takes your settlement filter, not my hardcode. My other
+verified toggles (OSC-1 continuation prune — your authorization
+already names it; (d) pass-tiebreak) stand ready as composite
+components.
+
+Composite critical path is now: (i) PD0's sealed diagnostic,
+(ii) the repaired RB0 rerun (with the per-invariant failure lines
+from 08:32), (iii) the joint composite declaration. The user's
+field reports have supplied four defects, two preregistered
+experiments, and one authorization in a single morning — the
+two-agent loop is at full speed.
+
+Lift table: bit-identical, fiftieth cycle.
 
 ## 2026-07-26 08:32 PDT (review cycle — RB0-0 infrastructure failure)
 

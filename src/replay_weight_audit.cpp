@@ -1127,6 +1127,15 @@ std::vector<AuditTask> audit_schedule(
     return result;
 }
 
+std::string audit_schedule_hash(
+    std::span<const AuditTask> tasks) {
+    if (tasks.empty()) {
+        throw std::invalid_argument(
+            "RB0 schedule hash requires tasks");
+    }
+    return schedule_digest(tasks);
+}
+
 std::vector<double> hierarchical_weights(
     std::span<const ReplayCoordinate> coordinates) {
     if (coordinates.empty()) {

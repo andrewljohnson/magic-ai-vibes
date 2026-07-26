@@ -8091,6 +8091,403 @@ std::size_t priority_action_index(
         std::distance(actions.begin(), action));
 }
 
+old_school::GameState pass_dominance_braingeyser_state() {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 8;
+    state.next_stack_object_id = 20;
+    state.players[0].hand = {
+        old_school::CardId::Braingeyser,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    state.players[1].hand = {
+        old_school::CardId::Mountain,
+    };
+
+    state.players[0].library = old_school::blue_deck();
+    remove_fixture_card(
+        state.players[0].library,
+        old_school::CardId::Braingeyser);
+    remove_fixture_card(
+        state.players[0].library,
+        old_school::CardId::Island);
+    remove_fixture_card(
+        state.players[0].library,
+        old_school::CardId::Island);
+    state.players[1].library = old_school::red_deck();
+    remove_fixture_card(
+        state.players[1].library,
+        old_school::CardId::Mountain);
+    return state;
+}
+
+const old_school::ValuePassDominanceActionDiagnostic&
+pass_dominance_action(
+    const old_school::ValuePassDominanceDiagnostic& diagnostic,
+    const std::function<bool(
+        const old_school::PriorityAction&)>& predicate) {
+    const auto found = std::find_if(
+        diagnostic.actions.begin(), diagnostic.actions.end(),
+        [&](const auto& action) {
+            return predicate(action.action);
+        });
+    if (found == diagnostic.actions.end()) {
+        throw std::runtime_error(
+            "Pass-dominance action is unavailable");
+    }
+    return *found;
+}
+
+TEST(pass_dominance_filters_x_zero_and_preserves_productive_x) {
+    const auto state = pass_dominance_braingeyser_state();
+    const auto diagnostic =
+        old_school::diagnose_value_pass_dominance(
+            state, 0, true,
+            old_school::TurnPhase::SecondMain, 0);
+    const auto is_braingeyser =
+        [](const old_school::PriorityAction& action,
+           int x_value, std::size_t target) {
+            return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastBraingeyser &&
+                   action.x_value == x_value &&
+                   action.target.has_value() &&
+                   !action.target->creature.has_value() &&
+                   action.target->player == target;
+        };
+
+    CHECK(diagnostic.pass_settled);
+    CHECK(diagnostic.failed_comparisons == 0);
+    CHECK(diagnostic.actions.size() ==
+          old_school::legal_priority_actions(state, 0, true).size());
+    for (const std::size_t target : {std::size_t{0},
+                                     std::size_t{1}}) {
+        const auto& x_zero = pass_dominance_action(
+            diagnostic,
+            [&](const old_school::PriorityAction& action) {
+                return is_braingeyser(action, 0, target);
+            });
+        CHECK(x_zero.comparison_settled);
+        CHECK(x_zero.strictly_dominated_by_pass);
+
+        const auto& x_one = pass_dominance_action(
+            diagnostic,
+            [&](const old_school::PriorityAction& action) {
+                return is_braingeyser(action, 1, target);
+            });
+        CHECK(x_one.comparison_settled);
+        CHECK(!x_one.strictly_dominated_by_pass);
+    }
+    CHECK(diagnostic.retained_actions().size() + 2 ==
+          diagnostic.actions.size());
+
+    const auto hidden =
+        hidden_repartition(state, 0);
+    auto own_library_hidden = state;
+    std::reverse(
+        own_library_hidden.players[0].library.begin(),
+        own_library_hidden.players[0].library.end());
+    auto opponent_hidden = state;
+    std::swap(
+        opponent_hidden.players[1].hand.front(),
+        opponent_hidden.players[1].library.front());
+    CHECK(old_school::diagnose_value_pass_dominance(
+              hidden, 0, true,
+              old_school::TurnPhase::SecondMain, 0) ==
+          diagnostic);
+    CHECK(old_school::diagnose_value_pass_dominance(
+              own_library_hidden, 0, true,
+              old_school::TurnPhase::SecondMain, 0) ==
+          diagnostic);
+    CHECK(old_school::diagnose_value_pass_dominance(
+              opponent_hidden, 0, true,
+              old_school::TurnPhase::SecondMain, 0) ==
+          diagnostic);
+
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::blue_deck(),
+        old_school::red_deck(),
+    };
+    constexpr std::uint64_t kSeed = 0x504430425241494EULL;
+    const auto default_off =
+        old_school::diagnose_learned_value_priority(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 0,
+            small_value_model(), 2, kSeed);
+    const auto explicit_off =
+        old_school::diagnose_learned_value_priority(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 0,
+            small_value_model(), 2, kSeed, 0.0, 0.0, false);
+    CHECK(default_off == explicit_off);
+    CHECK(default_off.legal_actions == default_off.actions);
+    CHECK(default_off.pass_dominated_actions.empty());
+
+    const auto treatment =
+        old_school::diagnose_learned_value_priority(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 0,
+            small_value_model(), 2, kSeed, 0.0, 0.0, true);
+    CHECK(treatment.legal_actions == default_off.legal_actions);
+    CHECK(treatment.actions.size() + 2 ==
+          treatment.legal_actions.size());
+    CHECK(treatment.pass_dominated_actions.size() == 2);
+    CHECK(std::find(
+              treatment.pass_dominated_actions.begin(),
+              treatment.pass_dominated_actions.end(),
+              treatment.selected_action) ==
+          treatment.pass_dominated_actions.end());
+    CHECK(old_school::diagnose_learned_value_priority(
+              hidden, decks, 0, true,
+              old_school::TurnPhase::SecondMain, 0,
+              small_value_model(), 2, kSeed, 0.0, 0.0, true) ==
+          treatment);
+}
+
+TEST(pass_dominance_preserves_declared_tradeoff_controls) {
+    old_school::GameState disintegrate;
+    disintegrate.active_player = 0;
+    disintegrate.turn_number = 8;
+    disintegrate.players[0].hand = {
+        old_school::CardId::Disintegrate,
+    };
+    disintegrate.players[0].lands = {
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+    };
+    const auto disintegrate_diagnostic =
+        old_school::diagnose_value_pass_dominance(
+            disintegrate, 0, true,
+            old_school::TurnPhase::SecondMain, 0);
+    const auto& x_zero = pass_dominance_action(
+        disintegrate_diagnostic,
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastDisintegrate &&
+                   action.x_value == 0;
+        });
+    const auto& x_one = pass_dominance_action(
+        disintegrate_diagnostic,
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastDisintegrate &&
+                   action.x_value == 1;
+        });
+    CHECK(x_zero.strictly_dominated_by_pass);
+    CHECK(!x_one.strictly_dominated_by_pass);
+
+    const auto force_spike_state = [](bool payable) {
+        old_school::GameState state;
+        state.active_player = 1;
+        state.turn_number = 6;
+        state.next_permanent_id = 2;
+        state.next_stack_object_id = 2;
+        state.players[0].hand = {
+            old_school::CardId::ForceSpike,
+        };
+        state.players[0].lands = {
+            {.card = old_school::CardId::Island,
+             .tapped = false},
+        };
+        if (payable) {
+            state.players[1].lands.push_back(
+                {.card = old_school::CardId::Mountain,
+                 .tapped = false});
+        }
+        state.stack = {
+            {
+                .kind = old_school::StackObjectKind::Spell,
+                .id = 1,
+                .card = old_school::CardId::GrayOgre,
+                .controller = 1,
+            },
+        };
+        return state;
+    };
+    for (const bool payable : {false, true}) {
+        const auto force_spike =
+            old_school::diagnose_value_pass_dominance(
+                force_spike_state(payable), 0, false,
+                old_school::TurnPhase::FirstMain, 0);
+        const auto& spike = pass_dominance_action(
+            force_spike,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastForceSpike;
+            });
+        CHECK(spike.comparison_settled);
+        CHECK(!spike.strictly_dominated_by_pass);
+    }
+
+    old_school::GameState own_spell;
+    own_spell.active_player = 0;
+    own_spell.turn_number = 5;
+    own_spell.next_stack_object_id = 2;
+    own_spell.players[0].hand = {
+        old_school::CardId::Counterspell,
+    };
+    own_spell.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    own_spell.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::FlyingMen,
+            .controller = 0,
+        },
+    };
+    const auto own_counter =
+        old_school::diagnose_value_pass_dominance(
+            own_spell, 0, false,
+            old_school::TurnPhase::FirstMain, 0);
+    const auto& counter = pass_dominance_action(
+        own_counter,
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastCounterspell;
+        });
+    CHECK(counter.comparison_settled);
+    CHECK(!counter.strictly_dominated_by_pass);
+}
+
+TEST(pass_dominance_filters_only_redundant_same_target_counter) {
+    old_school::GameState state;
+    state.active_player = 1;
+    state.starting_player = 1;
+    state.turn_number = 7;
+    state.next_stack_object_id = 4;
+    state.players[0].hand = {
+        old_school::CardId::Counterspell,
+        old_school::CardId::Island,
+    };
+    state.players[0].library = {
+        old_school::CardId::FlyingMen,
+        old_school::CardId::Island,
+    };
+    state.players[1].hand = {
+        old_school::CardId::Mountain,
+    };
+    state.players[1].library = {
+        old_school::CardId::LightningBolt,
+        old_school::CardId::Mountain,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    state.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::AirElemental,
+            .controller = 1,
+        },
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 2,
+            .card = old_school::CardId::Counterspell,
+            .controller = 0,
+            .spell_target = 1,
+        },
+    };
+
+    const auto diagnostic =
+        old_school::diagnose_value_pass_dominance(
+            state, 0, false,
+            old_school::TurnPhase::FirstMain, 0);
+    const auto& redundant = pass_dominance_action(
+        diagnostic,
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastCounterspell &&
+                   action.spell_target == 1;
+        });
+    const auto& counter_own_counter = pass_dominance_action(
+        diagnostic,
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastCounterspell &&
+                   action.spell_target == 2;
+        });
+    CHECK(redundant.comparison_settled);
+    CHECK(redundant.strictly_dominated_by_pass);
+    CHECK(counter_own_counter.comparison_settled);
+    CHECK(!counter_own_counter.strictly_dominated_by_pass);
+    CHECK(old_school::diagnose_value_pass_dominance(
+              hidden_repartition(state, 0), 0, false,
+              old_school::TurnPhase::FirstMain, 0) ==
+          diagnostic);
+
+    old_school::GameState opposing_counter = state;
+    opposing_counter.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::FlyingMen,
+            .controller = 0,
+        },
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 2,
+            .card = old_school::CardId::Counterspell,
+            .controller = 1,
+            .spell_target = 1,
+        },
+    };
+    const auto productive =
+        old_school::diagnose_value_pass_dominance(
+            opposing_counter, 0, false,
+            old_school::TurnPhase::FirstMain, 0);
+    const auto& answer = pass_dominance_action(
+        productive,
+        [](const old_school::PriorityAction& action) {
+            return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastCounterspell &&
+                   action.spell_target == 2;
+        });
+    CHECK(answer.comparison_settled);
+    CHECK(!answer.strictly_dominated_by_pass);
+
+    old_school::GameState counter_war = state;
+    counter_war.next_stack_object_id = 5;
+    counter_war.stack.push_back({
+        .kind = old_school::StackObjectKind::Spell,
+        .id = 3,
+        .card = old_school::CardId::Counterspell,
+        .controller = 1,
+        .spell_target = 2,
+    });
+    const auto counter_war_diagnostic =
+        old_school::diagnose_value_pass_dominance(
+            counter_war, 0, false,
+            old_school::TurnPhase::FirstMain, 0);
+    const auto& counter_war_same_target =
+        pass_dominance_action(
+            counter_war_diagnostic,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                           old_school::PriorityActionKind::
+                               CastCounterspell &&
+                       action.spell_target == 1;
+            });
+    CHECK(counter_war_same_target.comparison_settled);
+    CHECK(!counter_war_same_target
+               .strictly_dominated_by_pass);
+}
+
 old_school::HumanController developing_human_controller() {
     return {
         .choose_priority_action =

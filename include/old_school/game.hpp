@@ -471,6 +471,34 @@ enum class PriorityPassResult : std::uint8_t {
 PriorityPassResult pass_priority(GameState& state,
                                  PriorityState& priority);
 
+// A deterministic, rules-only proof that a legal Priority action is strictly
+// worse than Pass. Both branches are force-passed until the current
+// stack/window settles. Malformed or nonsettling comparisons fail closed by
+// retaining the candidate.
+struct ValuePassDominanceActionDiagnostic {
+    PriorityAction action;
+    bool comparison_settled = false;
+    bool strictly_dominated_by_pass = false;
+
+    bool operator==(
+        const ValuePassDominanceActionDiagnostic&) const = default;
+};
+
+struct ValuePassDominanceDiagnostic {
+    std::vector<ValuePassDominanceActionDiagnostic> actions;
+    std::size_t pass_index = 0;
+    bool pass_settled = false;
+    std::size_t failed_comparisons = 0;
+
+    std::vector<PriorityAction> retained_actions() const;
+
+    bool operator==(const ValuePassDominanceDiagnostic&) const = default;
+};
+
+ValuePassDominanceDiagnostic diagnose_value_pass_dominance(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes);
+
 // Attackers and blockers are identified by permanent ID. A repeated attacker in
 // blocks represents multiple creatures blocking it; block order is damage order.
 bool resolve_combat(
@@ -531,6 +559,10 @@ struct BotConfig {
     //   weight * tanh(logit - mean legal logit)
     // after the unchanged production Value score has been computed.
     double value_priority_residual_weight = 0.0;
+    // Research-only exact Pass-dominance filter for Learned Value Priority
+    // choices. It changes neither legal actions nor any other policy. False
+    // preserves the historical selector and RNG stream bit-for-bit.
+    bool value_pass_dominance = false;
     std::size_t training_games = 800;
     // Optional per-seat frozen model. This permits a paired benchmark between
     // two Learned variants without sharing or silently retraining a model.
@@ -608,7 +640,9 @@ WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
     std::shared_ptr<const LearnedModel> model, std::uint64_t seed);
 
 struct LearnedValuePriorityDiagnostic {
+    std::vector<PriorityAction> legal_actions;
     std::vector<PriorityAction> actions;
+    std::vector<PriorityAction> pass_dominated_actions;
     std::vector<double> base_scores;
     std::vector<double> policy_logits;
     std::vector<double> centered_policy_logits;
@@ -616,6 +650,11 @@ struct LearnedValuePriorityDiagnostic {
     std::vector<double> scores;
     std::size_t sampled_worlds = 0;
     std::size_t rollout_evaluations = 0;
+    std::size_t selected = 0;
+    PriorityAction selected_action;
+
+    bool operator==(const LearnedValuePriorityDiagnostic&) const =
+        default;
 };
 
 struct LearnedValuePriorityResidualDiagnostic {
@@ -781,7 +820,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     int consecutive_passes, std::shared_ptr<const LearnedModel> model,
     std::size_t rollouts_per_action, std::uint64_t seed,
     double value_continuation_epsilon = 0.0,
-    double value_priority_residual_weight = 0.0);
+    double value_priority_residual_weight = 0.0,
+    bool value_pass_dominance = false);
 
 // Evaluation-only decomposition of the bounded Value Priority residual.
 // Inputs are the same hidden-information-safe observation/action features
@@ -892,7 +932,8 @@ class Game {
         std::shared_ptr<const LearnedModel> model,
         std::size_t rollouts_per_action, std::uint64_t seed,
         double value_continuation_epsilon,
-        double value_priority_residual_weight);
+        double value_priority_residual_weight,
+        bool value_pass_dominance);
     friend LearnedActionSamples learned_priority_action_samples(
         const GameState& state,
         const std::array<std::vector<CardId>, 2>& original_decks,

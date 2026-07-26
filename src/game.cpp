@@ -9479,6 +9479,588 @@ PriorityPassResult pass_priority(GameState& state,
     return PriorityPassResult::StackObjectResolved;
 }
 
+namespace {
+
+enum class PassDominanceSourceKind : std::uint8_t {
+    Land,
+    Artifact,
+};
+
+struct PassDominanceManaSource {
+    PassDominanceSourceKind kind = PassDominanceSourceKind::Land;
+    std::uint64_t key = 0;
+    CardId card = CardId::Forest;
+
+    bool operator==(const PassDominanceManaSource&) const = default;
+    auto operator<=>(const PassDominanceManaSource&) const = default;
+};
+
+struct PassDominanceResourceCost {
+    std::array<std::size_t, kCardCount> hand_cards_consumed{};
+    ManaCost mana_depleted;
+    std::vector<PassDominanceManaSource>
+        preexisting_sources_newly_tapped;
+    bool land_play_entitlement_consumed = false;
+
+    bool operator==(const PassDominanceResourceCost&) const = default;
+};
+
+struct PassDominanceSettlement {
+    GameState state;
+    std::array<PassDominanceResourceCost, 2> resources;
+    TurnPhase phase = TurnPhase::FirstMain;
+    std::size_t final_priority_player = 0;
+    int final_consecutive_passes = 0;
+    bool terminal = false;
+    bool window_ended = false;
+};
+
+void add_pass_dominance_mana(ManaCost& destination,
+                             const ManaCost& value) {
+    destination.generic += value.generic;
+    destination.green += value.green;
+    destination.red += value.red;
+    destination.blue += value.blue;
+    destination.white += value.white;
+}
+
+ManaCost pass_dominance_available_mana(
+    const PlayerState& player) {
+    ManaCost available = player.mana_pool;
+    for (const LandPermanent& land : player.lands) {
+        if (land.tapped) {
+            continue;
+        }
+        switch (land.card) {
+        case CardId::Forest:
+            ++available.green;
+            break;
+        case CardId::Mountain:
+            ++available.red;
+            break;
+        case CardId::Island:
+            ++available.blue;
+            break;
+        case CardId::Plains:
+            ++available.white;
+            break;
+        default:
+            break;
+        }
+    }
+    for (const ArtifactPermanent& artifact : player.artifacts) {
+        if (artifact.tapped) {
+            continue;
+        }
+        if (artifact.card == CardId::MoxSapphire) {
+            ++available.blue;
+        } else if (artifact.card == CardId::SolRing) {
+            available.generic += 2;
+        }
+    }
+    return available;
+}
+
+ManaCost pass_dominance_positive_mana_difference(
+    const ManaCost& before, const ManaCost& after) {
+    return {
+        .generic = std::max(0, before.generic - after.generic),
+        .green = std::max(0, before.green - after.green),
+        .red = std::max(0, before.red - after.red),
+        .blue = std::max(0, before.blue - after.blue),
+        .white = std::max(0, before.white - after.white),
+    };
+}
+
+std::array<std::size_t, kCardCount>
+pass_dominance_hand_counts(const PlayerState& player) {
+    std::array<std::size_t, kCardCount> counts{};
+    for (const CardId card : player.hand) {
+        ++counts[static_cast<std::size_t>(card)];
+    }
+    return counts;
+}
+
+void add_pass_dominance_newly_tapped_sources(
+    const GameState& root, const GameState& before,
+    const GameState& after, std::size_t player,
+    std::vector<PassDominanceManaSource>& destination) {
+    const auto add_unique =
+        [&](PassDominanceManaSource source) {
+            if (std::find(destination.begin(), destination.end(),
+                          source) == destination.end()) {
+                destination.push_back(source);
+            }
+        };
+
+    const auto& root_player = root.players[player];
+    const auto& before_player = before.players[player];
+    const auto& after_player = after.players[player];
+    const std::size_t land_count =
+        std::min({root_player.lands.size(),
+                  before_player.lands.size(),
+                  after_player.lands.size()});
+    for (std::size_t index = 0; index < land_count; ++index) {
+        if (root_player.lands[index].card ==
+                before_player.lands[index].card &&
+            root_player.lands[index].card ==
+                after_player.lands[index].card &&
+            !root_player.lands[index].tapped &&
+            !before_player.lands[index].tapped &&
+            after_player.lands[index].tapped) {
+            add_unique({
+                .kind = PassDominanceSourceKind::Land,
+                .key = static_cast<std::uint64_t>(index),
+                .card = root_player.lands[index].card,
+            });
+        }
+    }
+
+    for (const ArtifactPermanent& root_artifact :
+         root_player.artifacts) {
+        if (root_artifact.tapped) {
+            continue;
+        }
+        const auto before_artifact = std::find_if(
+            before_player.artifacts.begin(),
+            before_player.artifacts.end(),
+            [&](const ArtifactPermanent& candidate) {
+                return candidate.id == root_artifact.id &&
+                       candidate.card == root_artifact.card;
+            });
+        const auto after_artifact = std::find_if(
+            after_player.artifacts.begin(),
+            after_player.artifacts.end(),
+            [&](const ArtifactPermanent& candidate) {
+                return candidate.id == root_artifact.id &&
+                       candidate.card == root_artifact.card;
+            });
+        if (before_artifact != before_player.artifacts.end() &&
+            after_artifact != after_player.artifacts.end() &&
+            !before_artifact->tapped && after_artifact->tapped) {
+            add_unique({
+                .kind = PassDominanceSourceKind::Artifact,
+                .key = root_artifact.id,
+                .card = root_artifact.card,
+            });
+        }
+    }
+}
+
+void accumulate_pass_dominance_operation(
+    const GameState& root, const GameState& before,
+    const GameState& after,
+    std::array<PassDominanceResourceCost, 2>& resources,
+    bool include_hand_and_land_costs) {
+    for (std::size_t player = 0;
+         player < root.players.size(); ++player) {
+        add_pass_dominance_mana(
+            resources[player].mana_depleted,
+            pass_dominance_positive_mana_difference(
+                pass_dominance_available_mana(
+                    before.players[player]),
+                pass_dominance_available_mana(
+                    after.players[player])));
+        add_pass_dominance_newly_tapped_sources(
+            root, before, after, player,
+            resources[player].preexisting_sources_newly_tapped);
+
+        if (!include_hand_and_land_costs) {
+            continue;
+        }
+        const auto before_hand =
+            pass_dominance_hand_counts(before.players[player]);
+        const auto after_hand =
+            pass_dominance_hand_counts(after.players[player]);
+        for (std::size_t card = 0; card < kCardCount; ++card) {
+            if (before_hand[card] > after_hand[card]) {
+                resources[player].hand_cards_consumed[card] +=
+                    before_hand[card] - after_hand[card];
+            }
+        }
+        if (!before.players[player].land_played_this_turn &&
+            after.players[player].land_played_this_turn) {
+            resources[player].land_play_entitlement_consumed = true;
+        }
+    }
+}
+
+bool pass_dominance_terminal(const GameState& state) {
+    return state.players[0].life <= 0 ||
+           state.players[1].life <= 0 ||
+           state.failed_draw[0] || state.failed_draw[1];
+}
+
+std::optional<PassDominanceSettlement>
+settle_pass_dominance_action(
+    const GameState& root, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const PriorityAction& action) {
+    PassDominanceSettlement settlement{
+        .state = root,
+        .phase = phase,
+    };
+    PriorityState priority{
+        .player = player,
+        .consecutive_passes = consecutive_passes,
+    };
+
+    const auto take_pass =
+        [&]() -> std::optional<PriorityPassResult> {
+            try {
+                const GameState before = settlement.state;
+                const PriorityPassResult result =
+                    pass_priority(settlement.state, priority);
+                if (result ==
+                    PriorityPassResult::StackObjectResolved) {
+                    accumulate_pass_dominance_operation(
+                        root, before, settlement.state,
+                        settlement.resources, false);
+                    settlement.terminal =
+                        pass_dominance_terminal(settlement.state);
+                } else if (result ==
+                           PriorityPassResult::WindowEnded) {
+                    settlement.window_ended = true;
+                }
+                return result;
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
+        };
+
+    if (action.kind == PriorityActionKind::Pass) {
+        if (!take_pass().has_value()) {
+            return std::nullopt;
+        }
+    } else {
+        const GameState before = settlement.state;
+        try {
+            if (!apply_priority_action(
+                    settlement.state, player, action,
+                    sorcery_actions)) {
+                return std::nullopt;
+            }
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+        accumulate_pass_dominance_operation(
+            root, before, settlement.state,
+            settlement.resources, true);
+        priority = {
+            .player = player,
+            .consecutive_passes = 0,
+        };
+    }
+
+    constexpr std::size_t kMaximumPassSteps = 1024;
+    std::size_t steps = 0;
+    while (!settlement.terminal && !settlement.window_ended) {
+        if (++steps > kMaximumPassSteps ||
+            !take_pass().has_value()) {
+            return std::nullopt;
+        }
+    }
+    for (auto& resource : settlement.resources) {
+        std::sort(
+            resource.preexisting_sources_newly_tapped.begin(),
+            resource.preexisting_sources_newly_tapped.end());
+    }
+    settlement.final_priority_player = priority.player;
+    settlement.final_consecutive_passes =
+        priority.consecutive_passes;
+    return settlement;
+}
+
+void remove_pass_dominance_graveyard_cost(
+    std::vector<CardId>& graveyard,
+    const std::vector<CardId>& root_graveyard, CardId card,
+    std::size_t maximum) {
+    const std::size_t root_count =
+        static_cast<std::size_t>(std::count(
+            root_graveyard.begin(), root_graveyard.end(), card));
+    const std::size_t current_count =
+        static_cast<std::size_t>(std::count(
+            graveyard.begin(), graveyard.end(), card));
+    std::size_t removable =
+        std::min(maximum, current_count > root_count
+                              ? current_count - root_count
+                              : std::size_t{0});
+    while (removable > 0) {
+        const auto found =
+            std::find(graveyard.rbegin(), graveyard.rend(), card);
+        if (found == graveyard.rend()) {
+            break;
+        }
+        graveyard.erase(std::next(found).base());
+        --removable;
+    }
+}
+
+void restore_pass_dominance_source(
+    PlayerState& player, const PlayerState& root,
+    const PassDominanceManaSource& source) {
+    if (source.kind == PassDominanceSourceKind::Land) {
+        const std::size_t index =
+            static_cast<std::size_t>(source.key);
+        if (index < player.lands.size() &&
+            index < root.lands.size() &&
+            player.lands[index].card == source.card &&
+            root.lands[index].card == source.card) {
+            player.lands[index].tapped =
+                root.lands[index].tapped;
+        }
+        return;
+    }
+
+    const auto root_artifact = std::find_if(
+        root.artifacts.begin(), root.artifacts.end(),
+        [&](const ArtifactPermanent& candidate) {
+            return candidate.id == source.key &&
+                   candidate.card == source.card;
+        });
+    const auto artifact = std::find_if(
+        player.artifacts.begin(), player.artifacts.end(),
+        [&](const ArtifactPermanent& candidate) {
+            return candidate.id == source.key &&
+                   candidate.card == source.card;
+        });
+    if (root_artifact != root.artifacts.end() &&
+        artifact != player.artifacts.end()) {
+        artifact->tapped = root_artifact->tapped;
+    }
+}
+
+GameState normalized_pass_dominance_observation(
+    const GameState& root,
+    const PassDominanceSettlement& settlement,
+    std::size_t observer) {
+    GameState normalized = settlement.state;
+    for (std::size_t player = 0;
+         player < normalized.players.size(); ++player) {
+        PlayerState& state = normalized.players[player];
+        const PlayerState& root_state = root.players[player];
+        const auto& resource = settlement.resources[player];
+        for (std::size_t card = 0; card < kCardCount; ++card) {
+            const std::size_t consumed =
+                resource.hand_cards_consumed[card];
+            const CardId card_id = static_cast<CardId>(card);
+            state.hand.insert(
+                state.hand.end(), consumed, card_id);
+            remove_pass_dominance_graveyard_cost(
+                state.graveyard, root_state.graveyard,
+                card_id, consumed);
+        }
+        for (const PassDominanceManaSource& source :
+             resource.preexisting_sources_newly_tapped) {
+            restore_pass_dominance_source(
+                state, root_state, source);
+        }
+        state.mana_pool = root_state.mana_pool;
+        state.land_played_this_turn =
+            root_state.land_played_this_turn;
+
+        // Libraries and the opponent's hand are hidden. Their sizes remain
+        // observable; their identities and ordering cannot enter the proof.
+        state.library.assign(
+            state.library.size(), CardId::Forest);
+        if (player != observer) {
+            state.hand.assign(
+                state.hand.size(), CardId::Forest);
+        }
+        std::sort(state.hand.begin(), state.hand.end());
+        std::sort(state.graveyard.begin(), state.graveyard.end());
+        std::sort(state.exile.begin(), state.exile.end());
+        std::sort(
+            state.enchantments.begin(),
+            state.enchantments.end());
+        std::sort(
+            state.lands.begin(), state.lands.end(),
+            [](const LandPermanent& left,
+               const LandPermanent& right) {
+                return std::tie(left.card, left.tapped) <
+                       std::tie(right.card, right.tapped);
+            });
+        std::sort(
+            state.creatures.begin(), state.creatures.end(),
+            [](const CreaturePermanent& left,
+               const CreaturePermanent& right) {
+                return left.id < right.id;
+            });
+        std::sort(
+            state.artifacts.begin(), state.artifacts.end(),
+            [](const ArtifactPermanent& left,
+               const ArtifactPermanent& right) {
+                return left.id < right.id;
+            });
+    }
+    normalized.stats = {};
+    normalized.next_permanent_id = 0;
+    normalized.next_stack_object_id = 0;
+    return normalized;
+}
+
+bool pass_dominance_mana_leq(
+    const ManaCost& left, const ManaCost& right) {
+    return left.generic <= right.generic &&
+           left.green <= right.green &&
+           left.red <= right.red &&
+           left.blue <= right.blue &&
+           left.white <= right.white;
+}
+
+bool pass_dominance_source_leq(
+    const std::vector<PassDominanceManaSource>& left,
+    const std::vector<PassDominanceManaSource>& right) {
+    return std::includes(
+        right.begin(), right.end(), left.begin(), left.end());
+}
+
+bool pass_dominance_resource_leq(
+    const PassDominanceResourceCost& left,
+    const PassDominanceResourceCost& right) {
+    for (std::size_t card = 0; card < kCardCount; ++card) {
+        if (left.hand_cards_consumed[card] >
+            right.hand_cards_consumed[card]) {
+            return false;
+        }
+    }
+    return pass_dominance_mana_leq(
+               left.mana_depleted, right.mana_depleted) &&
+           pass_dominance_source_leq(
+               left.preexisting_sources_newly_tapped,
+               right.preexisting_sources_newly_tapped) &&
+           (!left.land_play_entitlement_consumed ||
+            right.land_play_entitlement_consumed);
+}
+
+bool pass_strictly_dominates_candidate(
+    const GameState& root, std::size_t actor,
+    const PassDominanceSettlement& pass,
+    const PassDominanceSettlement& candidate) {
+    if (pass.phase != candidate.phase ||
+        pass.final_priority_player !=
+            candidate.final_priority_player ||
+        pass.final_consecutive_passes !=
+            candidate.final_consecutive_passes ||
+        pass.terminal != candidate.terminal ||
+        pass.window_ended != candidate.window_ended ||
+        normalized_pass_dominance_observation(
+            root, pass, actor) !=
+            normalized_pass_dominance_observation(
+                root, candidate, actor)) {
+        return false;
+    }
+
+    const std::size_t opponent = opponent_of(actor);
+    return pass.resources[opponent] ==
+               candidate.resources[opponent] &&
+           pass_dominance_resource_leq(
+               pass.resources[actor],
+               candidate.resources[actor]) &&
+           pass.resources[actor] != candidate.resources[actor];
+}
+
+GameState pass_dominance_information_state(
+    const GameState& state, std::size_t observer) {
+    GameState information = state;
+    for (auto& player : information.players) {
+        player.library.assign(
+            player.library.size(), CardId::Forest);
+    }
+    const std::size_t opponent = opponent_of(observer);
+    information.players[opponent].hand.assign(
+        information.players[opponent].hand.size(),
+        CardId::Forest);
+    return information;
+}
+
+ValuePassDominanceDiagnostic
+value_pass_dominance_for_actions(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& actions) {
+    ValuePassDominanceDiagnostic diagnostic;
+    diagnostic.actions.reserve(actions.size());
+    for (const PriorityAction& action : actions) {
+        diagnostic.actions.push_back({.action = action});
+    }
+    const auto pass = std::find_if(
+        actions.begin(), actions.end(),
+        [](const PriorityAction& action) {
+            return action.kind == PriorityActionKind::Pass;
+        });
+    if (pass == actions.end()) {
+        diagnostic.failed_comparisons = actions.size();
+        return diagnostic;
+    }
+    diagnostic.pass_index = static_cast<std::size_t>(
+        std::distance(actions.begin(), pass));
+    const GameState information_state =
+        pass_dominance_information_state(state, player);
+    const auto pass_settlement =
+        settle_pass_dominance_action(
+            information_state, player, sorcery_actions, phase,
+            consecutive_passes, *pass);
+    if (!pass_settlement.has_value()) {
+        diagnostic.failed_comparisons = actions.size();
+        return diagnostic;
+    }
+    diagnostic.pass_settled = true;
+    diagnostic.actions[diagnostic.pass_index]
+        .comparison_settled = true;
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        if (index == diagnostic.pass_index) {
+            continue;
+        }
+        const auto candidate =
+            settle_pass_dominance_action(
+                information_state, player, sorcery_actions, phase,
+                consecutive_passes, actions[index]);
+        if (!candidate.has_value()) {
+            ++diagnostic.failed_comparisons;
+            continue;
+        }
+        diagnostic.actions[index].comparison_settled = true;
+        diagnostic.actions[index]
+            .strictly_dominated_by_pass =
+            pass_strictly_dominates_candidate(
+                information_state, player, *pass_settlement,
+                *candidate);
+    }
+    return diagnostic;
+}
+
+} // namespace
+
+std::vector<PriorityAction>
+ValuePassDominanceDiagnostic::retained_actions() const {
+    std::vector<PriorityAction> retained;
+    retained.reserve(actions.size());
+    for (const auto& action : actions) {
+        if (!action.strictly_dominated_by_pass) {
+            retained.push_back(action.action);
+        }
+    }
+    return retained;
+}
+
+ValuePassDominanceDiagnostic diagnose_value_pass_dominance(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes) {
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "Pass-dominance player must be 0 or 1");
+    }
+    if (consecutive_passes < 0 || consecutive_passes > 1) {
+        throw std::out_of_range(
+            "Pass-dominance pass count must be zero or one");
+    }
+    return value_pass_dominance_for_actions(
+        state, player, sorcery_actions, phase,
+        consecutive_passes,
+        legal_priority_actions(state, player, sorcery_actions));
+}
+
 std::size_t advance_turn_player(GameState& state) {
     if (state.active_player >= state.players.size()) {
         throw std::out_of_range("active player must be 0 or 1");
@@ -10411,10 +10993,37 @@ PriorityAction Game::choose_priority_action(
             return actions[chosen];
         }
 
+        std::vector<std::size_t> pass_dominance_retained;
+        if (bot.value_pass_dominance) {
+            const auto dominance =
+                value_pass_dominance_for_actions(
+                    state_, player, sorcery_actions, phase,
+                    consecutive_passes, actions);
+            pass_dominance_retained.reserve(actions.size());
+            for (std::size_t index = 0;
+                 index < dominance.actions.size(); ++index) {
+                if (!dominance.actions[index]
+                         .strictly_dominated_by_pass) {
+                    pass_dominance_retained.push_back(index);
+                }
+            }
+            if (pass_dominance_retained.empty()) {
+                throw std::logic_error(
+                    "Pass-dominance filter removed every action");
+            }
+        }
+
         if (bot.exploration_rate > 0.0) {
             std::bernoulli_distribution explore(
                 bot.exploration_rate);
             if (explore(random_)) {
+                if (bot.value_pass_dominance) {
+                    std::uniform_int_distribution<std::size_t>
+                        choose_action(
+                            0, pass_dominance_retained.size() - 1);
+                    return actions[pass_dominance_retained[
+                        choose_action(random_)]];
+                }
                 std::uniform_int_distribution<std::size_t>
                     choose_action(0, actions.size() - 1);
                 return actions[choose_action(random_)];
@@ -10445,6 +11054,14 @@ PriorityAction Game::choose_priority_action(
         std::vector<double> scores(actions.size(), 0.0);
         for (std::size_t action_index = 0;
              action_index < actions.size(); ++action_index) {
+            if (bot.value_pass_dominance &&
+                std::find(
+                    pass_dominance_retained.begin(),
+                    pass_dominance_retained.end(),
+                    action_index) ==
+                    pass_dominance_retained.end()) {
+                continue;
+            }
             // The historical champion blended a one-ply value prior with
             // complete continuations. This prior never force-resolves hidden
             // state: its mean is evaluated over the same common worlds.
@@ -10473,7 +11090,10 @@ PriorityAction Game::choose_priority_action(
         }
         if (root_search) {
             state_.stats[player].monte_carlo_rollouts +=
-                actions.size() * bot.rollouts_per_action;
+                (bot.value_pass_dominance
+                     ? pass_dominance_retained.size()
+                     : actions.size()) *
+                bot.rollouts_per_action;
         }
         if (bot.value_priority_residual_weight != 0.0) {
             const auto residual =
@@ -10486,6 +11106,24 @@ PriorityAction Game::choose_priority_action(
                  index < scores.size(); ++index) {
                 scores[index] += residual.residuals[index];
             }
+        }
+
+        if (bot.value_pass_dominance) {
+            double best = -std::numeric_limits<double>::infinity();
+            for (const std::size_t index :
+                 pass_dominance_retained) {
+                best = std::max(best, scores[index]);
+            }
+            std::vector<std::size_t> best_actions;
+            for (const std::size_t index :
+                 pass_dominance_retained) {
+                if (scores[index] == best) {
+                    best_actions.push_back(index);
+                }
+            }
+            std::uniform_int_distribution<std::size_t> break_tie(
+                0, best_actions.size() - 1);
+            return actions[best_actions[break_tie(random_)]];
         }
 
         const double best =
@@ -10946,6 +11584,8 @@ double Game::learned_value_search_action_score(
             .value_priority_residual_weight =
                 config_.bots[player]
                     .value_priority_residual_weight,
+            .value_pass_dominance =
+                config_.bots[player].value_pass_dominance,
             .learned_model = root_model,
         },
         BotConfig{
@@ -10959,6 +11599,8 @@ double Game::learned_value_search_action_score(
             .value_priority_residual_weight =
                 config_.bots[player]
                     .value_priority_residual_weight,
+            .value_pass_dominance =
+                config_.bots[player].value_pass_dominance,
             .learned_model = root_model,
         },
     };
@@ -17913,7 +18555,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     int consecutive_passes, std::shared_ptr<const LearnedModel> model,
     std::size_t rollouts_per_action, std::uint64_t seed,
     double value_continuation_epsilon,
-    double value_priority_residual_weight) {
+    double value_priority_residual_weight,
+    bool value_pass_dominance) {
     if (!model) {
         throw std::invalid_argument(
             "Learned Value diagnostic requires a frozen model");
@@ -17945,6 +18588,7 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
                 value_continuation_epsilon,
             .value_priority_residual_weight =
                 value_priority_residual_weight,
+            .value_pass_dominance = value_pass_dominance,
             .learned_model = model,
         },
         BotConfig{
@@ -17956,6 +18600,7 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
                 value_continuation_epsilon,
             .value_priority_residual_weight =
                 value_priority_residual_weight,
+            .value_pass_dominance = value_pass_dominance,
             .learned_model = model,
         },
     };
@@ -17965,8 +18610,24 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     evaluator.state_ = state;
 
     LearnedValuePriorityDiagnostic diagnostic;
-    diagnostic.actions =
+    diagnostic.legal_actions =
         legal_priority_actions(state, player, sorcery_actions);
+    diagnostic.actions = diagnostic.legal_actions;
+    if (value_pass_dominance) {
+        const auto dominance =
+            value_pass_dominance_for_actions(
+                state, player, sorcery_actions, phase,
+                consecutive_passes, diagnostic.legal_actions);
+        diagnostic.actions.clear();
+        for (const auto& action : dominance.actions) {
+            if (action.strictly_dominated_by_pass) {
+                diagnostic.pass_dominated_actions.push_back(
+                    action.action);
+            } else {
+                diagnostic.actions.push_back(action.action);
+            }
+        }
+    }
     diagnostic.sampled_worlds =
         std::max<std::size_t>(1, rollouts_per_action);
     diagnostic.rollout_evaluations =
@@ -18033,6 +18694,14 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
                 diagnostic.priority_residuals[index];
         }
     }
+    diagnostic.selected = static_cast<std::size_t>(
+        std::distance(
+            diagnostic.scores.begin(),
+            std::max_element(
+                diagnostic.scores.begin(),
+                diagnostic.scores.end())));
+    diagnostic.selected_action =
+        diagnostic.actions[diagnostic.selected];
     return diagnostic;
 }
 

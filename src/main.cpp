@@ -200,6 +200,8 @@ void print_help(std::string_view executable) {
         << " --diagnose-force-spike-teacher --learned-generations N"
            " [--train-games N] [--train-seed N]\n"
         << "       " << executable
+        << " --diagnose-value-pass-dominance --seed 202607260947\n"
+        << "       " << executable
         << " --train-p-family N [--seed N] [--train-games 800]"
            " [--train-seed 424242]\n"
         << "       " << executable
@@ -286,6 +288,8 @@ void print_help(std::string_view executable) {
         << "  --value-continuation-epsilon X  Research-only epsilon "
            "for Value-mirror continuation priority actions in [0,1]; "
            "the deployed root remains greedy (default: 0)\n"
+        << "  --value-pass-dominance  Challenger-only exact "
+           "Pass-dominance filter for Learned Value Priority choices\n"
         << "  --train-games N  Training games for the selected learned "
            "model "
            "(default: 800)\n"
@@ -4441,6 +4445,586 @@ bool evaluate_p1r_offline_gate(
     return passed;
 }
 
+struct Pd0Fixture {
+    old_school::GameState state;
+    std::array<std::vector<old_school::CardId>, 2> decks;
+    std::size_t player = 0;
+    bool sorcery_actions = false;
+    old_school::TurnPhase phase =
+        old_school::TurnPhase::FirstMain;
+    int consecutive_passes = 0;
+};
+
+void pd0_remove_one(
+    std::vector<old_school::CardId>& cards,
+    old_school::CardId card) {
+    const auto found = std::find(cards.begin(), cards.end(), card);
+    if (found == cards.end()) {
+        throw std::logic_error(
+            "PD0 fixture exceeds its original deck");
+    }
+    cards.erase(found);
+}
+
+void pd0_complete_libraries(Pd0Fixture& fixture) {
+    for (std::size_t player = 0;
+         player < fixture.state.players.size(); ++player) {
+        std::vector<old_school::CardId> remaining =
+            fixture.decks[player];
+        const auto remove = [&](old_school::CardId card) {
+            pd0_remove_one(remaining, card);
+        };
+        const auto& state = fixture.state.players[player];
+        for (const auto card : state.hand) {
+            remove(card);
+        }
+        for (const auto card : state.graveyard) {
+            remove(card);
+        }
+        for (const auto card : state.exile) {
+            remove(card);
+        }
+        for (const auto& land : state.lands) {
+            remove(land.card);
+        }
+        for (const auto& creature : state.creatures) {
+            remove(creature.card);
+        }
+        for (const auto& artifact : state.artifacts) {
+            remove(artifact.card);
+        }
+        for (const auto card : state.enchantments) {
+            remove(card);
+        }
+        for (const auto& object : fixture.state.stack) {
+            if (object.kind ==
+                    old_school::StackObjectKind::Spell &&
+                object.controller == player) {
+                remove(object.card);
+            }
+        }
+        fixture.state.players[player].library =
+            std::move(remaining);
+    }
+}
+
+Pd0Fixture pd0_braingeyser_fixture() {
+    Pd0Fixture fixture{
+        .decks = {
+            old_school::blue_deck(),
+            old_school::red_deck(),
+        },
+        .player = 0,
+        .sorcery_actions = true,
+        .phase = old_school::TurnPhase::SecondMain,
+    };
+    fixture.state.active_player = 0;
+    fixture.state.starting_player = 0;
+    fixture.state.turn_number = 8;
+    fixture.state.next_stack_object_id = 20;
+    fixture.state.players[0].hand = {
+        old_school::CardId::Braingeyser,
+    };
+    fixture.state.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    fixture.state.players[1].hand = {
+        old_school::CardId::Mountain,
+    };
+    pd0_complete_libraries(fixture);
+    return fixture;
+}
+
+old_school::GameState pd0_hidden_repartition(
+    const old_school::GameState& state, std::size_t observer) {
+    old_school::GameState changed = state;
+    std::reverse(
+        changed.players[observer].library.begin(),
+        changed.players[observer].library.end());
+    const std::size_t opponent = 1 - observer;
+    auto& hand = changed.players[opponent].hand;
+    auto& library = changed.players[opponent].library;
+    std::vector<old_school::CardId> hidden = hand;
+    hidden.insert(hidden.end(), library.begin(), library.end());
+    if (hidden.size() > 1) {
+        std::rotate(hidden.begin(), hidden.begin() + 1,
+                    hidden.end());
+        std::reverse(hidden.begin(), hidden.end());
+    }
+    const std::size_t hand_size = hand.size();
+    hand.assign(
+        hidden.begin(),
+        hidden.begin() + static_cast<std::ptrdiff_t>(hand_size));
+    library.assign(
+        hidden.begin() + static_cast<std::ptrdiff_t>(hand_size),
+        hidden.end());
+    return changed;
+}
+
+std::string pd0_action_name(
+    const old_school::PriorityAction& action) {
+    if (action.kind == old_school::PriorityActionKind::Pass) {
+        return "Pass";
+    }
+    std::string name(
+        old_school::card_definition(action.card).name);
+    if (action.kind ==
+            old_school::PriorityActionKind::CastDisintegrate ||
+        action.kind ==
+            old_school::PriorityActionKind::CastBraingeyser) {
+        name += " X=" + std::to_string(action.x_value);
+    }
+    if (action.target.has_value()) {
+        name += action.target->creature.has_value()
+                    ? " -> creature #" +
+                          std::to_string(*action.target->creature)
+                    : " -> player " +
+                          std::to_string(action.target->player);
+    }
+    if (action.spell_target.has_value()) {
+        name += " -> stack #" +
+                std::to_string(*action.spell_target);
+    }
+    return name;
+}
+
+bool pd0_is_dominated(
+    const old_school::ValuePassDominanceDiagnostic& diagnostic,
+    const std::function<bool(
+        const old_school::PriorityAction&)>& predicate) {
+    const auto found = std::find_if(
+        diagnostic.actions.begin(), diagnostic.actions.end(),
+        [&](const auto& action) {
+            return predicate(action.action);
+        });
+    return found != diagnostic.actions.end() &&
+           found->comparison_settled &&
+           found->strictly_dominated_by_pass;
+}
+
+bool pd0_is_retained(
+    const old_school::ValuePassDominanceDiagnostic& diagnostic,
+    const std::function<bool(
+        const old_school::PriorityAction&)>& predicate) {
+    const auto found = std::find_if(
+        diagnostic.actions.begin(), diagnostic.actions.end(),
+        [&](const auto& action) {
+            return predicate(action.action);
+        });
+    return found != diagnostic.actions.end() &&
+           found->comparison_settled &&
+           !found->strictly_dominated_by_pass;
+}
+
+std::uint64_t pd0_diagnostic_hash(
+    const old_school::LearnedValuePriorityDiagnostic& diagnostic) {
+    constexpr std::uint64_t kOffset = 1469598103934665603ULL;
+    constexpr std::uint64_t kPrime = 1099511628211ULL;
+    std::uint64_t hash = kOffset;
+    const auto add = [&](std::uint64_t value) {
+        for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+            hash ^= static_cast<std::uint8_t>(
+                value >> (8U * byte));
+            hash *= kPrime;
+        }
+    };
+    const auto add_action =
+        [&](const old_school::PriorityAction& action) {
+            add(static_cast<std::uint64_t>(action.kind));
+            add(static_cast<std::uint64_t>(action.card));
+            add(static_cast<std::uint64_t>(action.x_value));
+            add(action.target.has_value());
+            if (action.target.has_value()) {
+                add(action.target->player);
+                add(action.target->creature.has_value());
+                if (action.target->creature.has_value()) {
+                    add(*action.target->creature);
+                }
+            }
+            add(action.spell_target.has_value());
+            if (action.spell_target.has_value()) {
+                add(*action.spell_target);
+            }
+            add(action.source_permanent.has_value());
+            if (action.source_permanent.has_value()) {
+                add(*action.source_permanent);
+            }
+        };
+    add(diagnostic.legal_actions.size());
+    for (const auto& action : diagnostic.legal_actions) {
+        add_action(action);
+    }
+    add(diagnostic.actions.size());
+    for (const auto& action : diagnostic.actions) {
+        add_action(action);
+    }
+    for (const double score : diagnostic.scores) {
+        add(std::bit_cast<std::uint64_t>(score));
+    }
+    add_action(diagnostic.selected_action);
+    return hash;
+}
+
+bool run_pd0_exact_controls() {
+    bool passed = true;
+    const auto print_gate =
+        [&](std::string_view name, bool gate) {
+            std::cout << "  " << name << ": "
+                      << (gate ? "PASS" : "FAIL") << '\n';
+            passed = passed && gate;
+        };
+
+    const Pd0Fixture braingeyser = pd0_braingeyser_fixture();
+    const auto braingeyser_result =
+        old_school::diagnose_value_pass_dominance(
+            braingeyser.state, braingeyser.player,
+            braingeyser.sorcery_actions, braingeyser.phase,
+            braingeyser.consecutive_passes);
+    const auto braingeyser_hidden =
+        old_school::diagnose_value_pass_dominance(
+            pd0_hidden_repartition(
+                braingeyser.state, braingeyser.player),
+            braingeyser.player, braingeyser.sorcery_actions,
+            braingeyser.phase, braingeyser.consecutive_passes);
+    std::size_t dominated_x_zero = 0;
+    bool productive_x_one = false;
+    for (const auto& action : braingeyser_result.actions) {
+        if (action.action.kind !=
+            old_school::PriorityActionKind::CastBraingeyser) {
+            continue;
+        }
+        if (action.action.x_value == 0 &&
+            action.strictly_dominated_by_pass) {
+            ++dominated_x_zero;
+        }
+        if (action.action.x_value == 1 &&
+            action.action.target.has_value() &&
+            action.action.target->player ==
+                braingeyser.player &&
+            !action.strictly_dominated_by_pass) {
+            productive_x_one = true;
+        }
+    }
+    print_gate(
+        "Braingeyser both X=0 branches dominated",
+        dominated_x_zero == 2);
+    print_gate(
+        "Braingeyser productive X=1 retained",
+        productive_x_one);
+    print_gate(
+        "Braingeyser hidden repartition exact",
+        braingeyser_result == braingeyser_hidden);
+
+    old_school::GameState disintegrate;
+    disintegrate.active_player = 0;
+    disintegrate.turn_number = 8;
+    disintegrate.players[0].hand = {
+        old_school::CardId::Disintegrate,
+    };
+    disintegrate.players[0].lands = {
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+    };
+    const auto disintegrate_result =
+        old_school::diagnose_value_pass_dominance(
+            disintegrate, 0, true,
+            old_school::TurnPhase::SecondMain, 0);
+    print_gate(
+        "Disintegrate X=0 dominated",
+        pd0_is_dominated(
+            disintegrate_result,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                           old_school::PriorityActionKind::
+                               CastDisintegrate &&
+                       action.x_value == 0;
+            }));
+    print_gate(
+        "Disintegrate productive X retained",
+        pd0_is_retained(
+            disintegrate_result,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                           old_school::PriorityActionKind::
+                               CastDisintegrate &&
+                       action.x_value == 1;
+            }));
+
+    const auto force_spike_state = [](bool payable) {
+        old_school::GameState state;
+        state.active_player = 1;
+        state.turn_number = 6;
+        state.next_permanent_id = 2;
+        state.next_stack_object_id = 2;
+        state.players[0].hand = {
+            old_school::CardId::ForceSpike,
+        };
+        state.players[0].lands = {
+            {.card = old_school::CardId::Island,
+             .tapped = false},
+        };
+        if (payable) {
+            state.players[1].lands.push_back(
+                {.card = old_school::CardId::Mountain,
+                 .tapped = false});
+        }
+        state.stack = {
+            {
+                .kind = old_school::StackObjectKind::Spell,
+                .id = 1,
+                .card = old_school::CardId::GrayOgre,
+                .controller = 1,
+            },
+        };
+        return state;
+    };
+    for (const bool payable : {false, true}) {
+        const auto result =
+            old_school::diagnose_value_pass_dominance(
+                force_spike_state(payable), 0, false,
+                old_school::TurnPhase::FirstMain, 0);
+        print_gate(
+            payable ? "payable Force Spike retained"
+                    : "live Force Spike retained",
+            pd0_is_retained(
+                result,
+                [](const old_school::PriorityAction& action) {
+                    return action.kind ==
+                           old_school::PriorityActionKind::
+                               CastForceSpike;
+                }));
+    }
+
+    old_school::GameState own_spell;
+    own_spell.active_player = 0;
+    own_spell.turn_number = 5;
+    own_spell.next_stack_object_id = 2;
+    own_spell.players[0].hand = {
+        old_school::CardId::Counterspell,
+    };
+    own_spell.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    own_spell.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::FlyingMen,
+            .controller = 0,
+        },
+    };
+    const auto own_counter =
+        old_school::diagnose_value_pass_dominance(
+            own_spell, 0, false,
+            old_school::TurnPhase::FirstMain, 0);
+    print_gate(
+        "own useful-spell Counterspell retained",
+        pd0_is_retained(
+            own_counter,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                       old_school::PriorityActionKind::
+                           CastCounterspell;
+            }));
+
+    old_school::GameState redundant = own_spell;
+    redundant.active_player = 1;
+    redundant.next_stack_object_id = 4;
+    redundant.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::AirElemental,
+            .controller = 1,
+        },
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 2,
+            .card = old_school::CardId::Counterspell,
+            .controller = 0,
+            .spell_target = 1,
+        },
+    };
+    const auto redundant_result =
+        old_school::diagnose_value_pass_dominance(
+            redundant, 0, false,
+            old_school::TurnPhase::FirstMain, 0);
+    print_gate(
+        "redundant same-target Counterspell dominated",
+        pd0_is_dominated(
+            redundant_result,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                           old_school::PriorityActionKind::
+                               CastCounterspell &&
+                       action.spell_target == 1;
+            }));
+    print_gate(
+        "materially distinct Counterspell retained",
+        pd0_is_retained(
+            redundant_result,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                           old_school::PriorityActionKind::
+                               CastCounterspell &&
+                       action.spell_target == 2;
+            }));
+
+    old_school::GameState counter_war = redundant;
+    counter_war.next_stack_object_id = 5;
+    counter_war.stack.push_back({
+        .kind = old_school::StackObjectKind::Spell,
+        .id = 3,
+        .card = old_school::CardId::Counterspell,
+        .controller = 1,
+        .spell_target = 2,
+    });
+    const auto counter_war_result =
+        old_school::diagnose_value_pass_dominance(
+            counter_war, 0, false,
+            old_school::TurnPhase::FirstMain, 0);
+    print_gate(
+        "same-target counter with intervening response retained",
+        pd0_is_retained(
+            counter_war_result,
+            [](const old_school::PriorityAction& action) {
+                return action.kind ==
+                           old_school::PriorityActionKind::
+                               CastCounterspell &&
+                       action.spell_target == 1;
+            }));
+    return passed;
+}
+
+bool print_pd0_model_row(
+    std::string_view name, const Pd0Fixture& fixture,
+    std::shared_ptr<const old_school::LearnedModel> model,
+    std::size_t worlds, std::uint64_t seed) {
+    const auto control =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, fixture.player,
+            fixture.sorcery_actions, fixture.phase,
+            fixture.consecutive_passes, model, worlds, seed);
+    const auto explicit_control =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, fixture.player,
+            fixture.sorcery_actions, fixture.phase,
+            fixture.consecutive_passes, model, worlds, seed,
+            0.0, 0.0, false);
+    const auto treatment =
+        old_school::diagnose_learned_value_priority(
+            fixture.state, fixture.decks, fixture.player,
+            fixture.sorcery_actions, fixture.phase,
+            fixture.consecutive_passes, model, worlds, seed,
+            0.0, 0.0, true);
+    const auto hidden_treatment =
+        old_school::diagnose_learned_value_priority(
+            pd0_hidden_repartition(
+                fixture.state, fixture.player),
+            fixture.decks, fixture.player,
+            fixture.sorcery_actions, fixture.phase,
+            fixture.consecutive_passes, model, worlds, seed,
+            0.0, 0.0, true);
+
+    const bool default_off_identity =
+        control == explicit_control;
+    const bool legal_actions_unchanged =
+        control.legal_actions == treatment.legal_actions;
+    const bool exact_filter =
+        treatment.pass_dominated_actions.size() == 2 &&
+        treatment.actions.size() + 2 ==
+            treatment.legal_actions.size();
+    const bool selected_retained =
+        std::find(
+            treatment.pass_dominated_actions.begin(),
+            treatment.pass_dominated_actions.end(),
+            treatment.selected_action) ==
+        treatment.pass_dominated_actions.end();
+    const bool hidden_exact =
+        treatment == hidden_treatment;
+
+    std::cout << "\n" << name << " K=" << worlds << '\n'
+              << "  before:";
+    for (const auto& action : control.legal_actions) {
+        std::cout << " [" << pd0_action_name(action) << ']';
+    }
+    std::cout << "\n  filtered:";
+    for (const auto& action :
+         treatment.pass_dominated_actions) {
+        std::cout << " [" << pd0_action_name(action) << ']';
+    }
+    std::cout << "\n  after:";
+    for (const auto& action : treatment.actions) {
+        std::cout << " [" << pd0_action_name(action) << ']';
+    }
+    std::cout << "\n  control selected: "
+              << pd0_action_name(control.selected_action)
+              << "\n  treatment selected: "
+              << pd0_action_name(treatment.selected_action)
+              << "\n  control hash: 0x" << std::hex
+              << pd0_diagnostic_hash(control)
+              << "\n  treatment hash: 0x"
+              << pd0_diagnostic_hash(treatment)
+              << std::dec
+              << "\n  default-off identity: "
+              << (default_off_identity ? "PASS" : "FAIL")
+              << "\n  legal actions unchanged: "
+              << (legal_actions_unchanged ? "PASS" : "FAIL")
+              << "\n  exact filter: "
+              << (exact_filter ? "PASS" : "FAIL")
+              << "\n  selected action retained: "
+              << (selected_retained ? "PASS" : "FAIL")
+              << "\n  hidden repartition exact: "
+              << (hidden_exact ? "PASS" : "FAIL") << '\n';
+    return default_off_identity && legal_actions_unchanged &&
+           exact_filter && selected_retained && hidden_exact;
+}
+
+int run_pd0_diagnostic(std::uint64_t seed) {
+    constexpr std::size_t kTrainingGames = 800;
+    constexpr std::uint64_t kTrainingSeed = 424242;
+    constexpr std::size_t kGenerations = 16;
+    constexpr std::string_view kC16Fingerprint =
+        "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
+
+    std::cout
+        << "PD0 exact Pass-dominance diagnostic\n"
+        << "Diagnostic seed: " << seed
+        << "\nG0: T800/S424242, K=2"
+        << "\nC16: load-only T800/S424242/C16, K=8"
+        << "\nTreatment: Learned Value roots and K=0 "
+           "Value-mirror continuations only\n\n"
+        << "Exact comparator controls\n";
+    const bool controls = run_pd0_exact_controls();
+
+    const auto g0 =
+        train_value_g0_with_progress(
+            kTrainingGames, kTrainingSeed);
+    const auto c16 =
+        load_value_challenger_with_progress(
+            kTrainingGames, kTrainingSeed, kGenerations);
+    const std::string c16_fingerprint =
+        old_school::learned_model_fingerprint(c16);
+    const bool c16_identity =
+        c16_fingerprint == kC16Fingerprint;
+    std::cout << "  Exact frozen C16 fingerprint: "
+              << (c16_identity ? "PASS" : "FAIL")
+              << " (" << c16_fingerprint << ")\n";
+
+    const Pd0Fixture fixture = pd0_braingeyser_fixture();
+    const bool g0_gate = print_pd0_model_row(
+        "Legacy Value G0", fixture, g0, 2, seed);
+    const bool c16_gate = print_pd0_model_row(
+        "Frozen Value C16", fixture, c16, 8, seed);
+    const bool passed =
+        controls && c16_identity && g0_gate && c16_gate;
+    std::cout << "\nPD0 mechanism verdict: "
+              << (passed ? "PASS" : "REJECT") << '\n';
+    return passed ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -4518,6 +5102,10 @@ int main(int argc, char** argv) {
         bool diagnose_value_context = false;
         bool diagnose_force_spike_teacher = false;
         bool teacher_audit_unsupported_option_used = false;
+        bool diagnose_value_pass_dominance = false;
+        bool pd0_diagnostic_unsupported_option_used = false;
+        bool pd0_smoke_unsupported_option_used = false;
+        bool value_pass_dominance = false;
         bool train_p_family = false;
         std::size_t p_family_generations = 0;
         bool p_family_unsupported_option_used = false;
@@ -4637,6 +5225,21 @@ int main(int argc, char** argv) {
                 option != "--learned-generations") {
                 teacher_audit_unsupported_option_used = true;
             }
+            if (option != "--diagnose-value-pass-dominance" &&
+                option != "--seed") {
+                pd0_diagnostic_unsupported_option_used = true;
+            }
+            if (option != "--benchmark" &&
+                option != "--games" &&
+                option != "--seed" &&
+                option != "--train-seed" &&
+                option != "--train-games" &&
+                option != "--challenger" &&
+                option != "--baseline" &&
+                option != "--learned-rollouts" &&
+                option != "--value-pass-dominance") {
+                pd0_smoke_unsupported_option_used = true;
+            }
             if (option == "--benchmark") {
                 benchmark = true;
                 continue;
@@ -4663,6 +5266,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--diagnose-force-spike-teacher") {
                 diagnose_force_spike_teacher = true;
+                continue;
+            }
+            if (option == "--diagnose-value-pass-dominance") {
+                diagnose_value_pass_dominance = true;
                 continue;
             }
             if (option == "--diagnose-p1-fit") {
@@ -4733,6 +5340,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--refresh-value-mix50-cache") {
                 refresh_value_mix50_cache = true;
+                continue;
+            }
+            if (option == "--value-pass-dominance") {
+                value_pass_dominance = true;
                 continue;
             }
             if (option != "--games" && option != "--seed" &&
@@ -4981,6 +5592,7 @@ int main(int argc, char** argv) {
                 static_cast<int>(diagnose_white_plan) +
                 static_cast<int>(diagnose_value_context) +
                 static_cast<int>(diagnose_force_spike_teacher) +
+                static_cast<int>(diagnose_value_pass_dominance) +
                 static_cast<int>(train_p_family) +
                 static_cast<int>(diagnose_p1_fit) +
                 static_cast<int>(score_p1r_probes) +
@@ -5000,7 +5612,8 @@ int main(int argc, char** argv) {
                 "--interactive, --benchmark, --stability, "
                 "--evolve-deck, and "
                 "--diagnose-white-plan, --diagnose-value-context, "
-                "--diagnose-force-spike-teacher, --train-p-family, "
+                "--diagnose-force-spike-teacher, "
+                "--diagnose-value-pass-dominance, --train-p-family, "
                 "--diagnose-p1-fit, --score-p1r-probes, "
                 "--diagnose-terminal-credit, "
                 "--train-terminal-weight-c17, "
@@ -5032,6 +5645,24 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--diagnose-force-spike-teacher requires a positive "
                 "--learned-generations N");
+        }
+        constexpr std::uint64_t pd0_diagnostic_seed =
+            202607260947ULL;
+        constexpr std::uint64_t pd0_smoke_seed =
+            202607260948ULL;
+        if (diagnose_value_pass_dominance &&
+            (pd0_diagnostic_unsupported_option_used ||
+             !seed_option_used ||
+             seed != pd0_diagnostic_seed)) {
+            throw std::invalid_argument(
+                "--diagnose-value-pass-dominance accepts only "
+                "--seed 202607260947");
+        }
+        if (!diagnose_value_pass_dominance &&
+            seed_option_used && seed == pd0_diagnostic_seed) {
+            throw std::invalid_argument(
+                "reserved PD0 diagnostic seed 202607260947 may be "
+                "used only by --diagnose-value-pass-dominance");
         }
         if (train_p_family &&
             p_family_unsupported_option_used) {
@@ -5346,10 +5977,41 @@ int main(int argc, char** argv) {
             challenger.learned_variant ==
                 old_school::LearnedVariant::
                     ValueSearchChampion;
+        const auto is_pd0_c16 =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           old_school::BotKind::Learned &&
+                       selection.learned_variant ==
+                           old_school::LearnedVariant::
+                               ValueSearchChampion &&
+                       selection.value_family ==
+                           BotSelection::ValueFamily::Challenger &&
+                       selection.value_generation == 16;
+            };
+        if (value_pass_dominance &&
+            !benchmark_challenger_uses_value) {
+            throw std::invalid_argument(
+                "--value-pass-dominance requires --benchmark "
+                "with a Learned Value challenger");
+        }
+        if (seed_option_used && seed == pd0_smoke_seed &&
+            !(benchmark && is_pd0_c16(challenger) &&
+              is_pd0_c16(baseline) &&
+              games_were_set && games == 4 &&
+              training_games == 800 &&
+              training_seed == 424242 &&
+              learned_rollouts == 8 &&
+              !pd0_smoke_unsupported_option_used)) {
+            throw std::invalid_argument(
+                "reserved PD0 smoke seed 202607260948 may be used "
+                "only by the exact 240-game C16/K8-vs-C16/K8 "
+                "paired control or challenger-only treatment");
+        }
         const bool tournament_uses_any_learned =
             !interactive && !benchmark && !stability && !evolve &&
             !diagnose_white_plan && !diagnose_value_context &&
             !diagnose_force_spike_teacher &&
+            !diagnose_value_pass_dominance &&
             !train_p_family &&
             !diagnose_p1_fit &&
             !score_p1r_probes &&
@@ -6015,6 +6677,9 @@ int main(int argc, char** argv) {
             print_value_context_alias_diagnostic(result);
             return result.demonstrated() ? 0 : 1;
         }
+        if (diagnose_value_pass_dominance) {
+            return run_pd0_diagnostic(seed);
+        }
         if (diagnose_force_spike_teacher) {
             const auto value_s0 =
                 train_value_challenger_with_progress(
@@ -6338,6 +7003,8 @@ int main(int argc, char** argv) {
                 bot_config(challenger, rollouts, deep_rollouts,
                            training_games, learned_rollouts,
                            value_continuation_epsilon);
+            challenger_config.value_pass_dominance =
+                value_pass_dominance;
             auto baseline_config =
                 bot_config(baseline, rollouts, deep_rollouts,
                            training_games, learned_rollouts);
@@ -6715,9 +7382,13 @@ int main(int argc, char** argv) {
                     }
                     return old_school::bot_config_name(config);
                 };
+            std::string challenger_name =
+                benchmark_name(challenger, challenger_config);
+            if (challenger_config.value_pass_dominance) {
+                challenger_name += " + exact Pass dominance";
+            }
             print_benchmark(
-                result, seed,
-                benchmark_name(challenger, challenger_config),
+                result, seed, challenger_name,
                 benchmark_name(baseline, baseline_config));
             return result.challenger_is_better_95() ? 0 : 1;
         }
