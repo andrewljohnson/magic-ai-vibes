@@ -6108,3 +6108,25 @@ replacement local certification, compare that retrain's fingerprint with the
 current artifact. If it differs, the committed-source retrain becomes the
 required new frozen control. If it is bit-identical, proceed from the current
 artifact with a fresh, noncolliding primary seed.
+
+Review reconciliation at 02:17 PDT (no local experiment): the committed-v3
+retrain reproduced fingerprint `68126afc...` bit-for-bit and a second virgin
+2,040-game control scored 46.8% (95% interval `44.6%--48.9%`) at seed `6733`.
+Thus the existing artifact is already the exact committed-source retrain;
+same-seed retraining cannot improve it.
+
+The review's preregistered DP-0 attribution also rejected cleanup discard as
+the cause. Delegating only Learned's cleanup choices to Handcrafted's
+heuristic scored 45.3% (95% interval `43.2%--47.5%`) at virgin seed `5077`,
+within noise of and directionally below the 46.8% control. The Red and RU
+mirror deficits persisted. This Handcrafted surface swap was evaluation-only
+and is neither training data nor a permitted Learned policy change.
+
+Decision: do not build a discard-policy treatment from DP-0. Together with
+the rejected shallow-blend, rollout-world, and stack-horizon treatments, this
+exonerates four deployment-side explanations. The next challenger must
+change clean Learned self-play/training quality, remain balanced across all
+five decks, and use the especially weak Red/RU mirrors only as sensitive
+diagnostics rather than as card- or deck-specific training inputs. Await the
+already-preregistered VC-1 self-consistent-realization result to choose
+between value-target quality and richer strong-pilot data.
