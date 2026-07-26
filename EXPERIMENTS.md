@@ -6604,3 +6604,57 @@ milestone is accepted; it is not evidence for TW75. Next: commit this freeze,
 open raw-shard seed `202607260311` exactly once under `capture_once.sh`, bind
 the resulting artifact hash, reread `REVIEW.md`, and only then run the sealed
 evaluator.
+
+#### TW-C17 one-shot shared-shard training result
+
+Recorded after rereading `REVIEW.md` through 04:32 PDT. Commit `b737e28`
+was the frozen source. The exact command was:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/tw-c17-train-b737e28-s202607260311 \
+  ./build/old-school-sim --train-terminal-weight-c17 \
+  --train-games 800 --train-seed 424242
+```
+
+The process exited 0 in 290.86 seconds. The immutable complete-transcript
+SHA-256 is
+`fa79ef62388b16c65aa9cfc4904634c1608c913571a9d47f107c24ddf02ceb52`;
+the recorded exit file contains `0`. The resulting 6,224,082-byte paired
+bundle is
+`build/model-cache/old-school-value-terminal-weight-c17-v1-t800-p424242-r202607260311.bin`
+with SHA-256
+`7df4c122b46ca5256ea09c48831bb04dbfe472e2f27eae9bc5c251884f031ec0`.
+
+Embedded identities and shared-shard accounting:
+
+- parent C16:
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+- TW50-C17:
+  `46afe9c63fb4ca49984eb93b74299721508cc47191fae8a4792da2488be1a94b`;
+- TW75-C17:
+  `247eae8467a955015377486235af4968b4691fd13c1594000403eb5ce3983fd3`;
+- schedule/raw/features/outcomes:
+  `ae63290d0d830552468c4191878b2d6aefe13a7139e126d11423e868aac3386c` /
+  `0b96ebfa6d999fc5d96f9203a4cd370541a31d3f545529981d724177252926f2` /
+  `18419407ac5e68f812657b960a0965e0e4d8260cd920ab920064036a16f8dae0` /
+  `3c2bca6f4989f1c8b81d20ec94a305b2b8be4489472dd464c5141726c7a926e7`;
+- TW50/TW75 target hashes:
+  `89609007c43ffc8fd5753114117a791c32e63c5457eb001476a6254cb0b4a323` /
+  `868413bd385465c973cb7a92a9a9632f6db840594bf2d4e007536b55c6930027`;
+- examples historical/shard/bootstrap/tail:
+  `81228 / 10936 / 9336 / 1600`.
+
+Every deck appeared in exactly 80 physical games. Per-deck
+examples/bootstrap/tail were Green `2143/1823/320`, Red
+`2006/1686/320`, Blue `1914/1594/320`, White `2936/2616/320`, and RU
+Aggro `1937/1617/320`.
+
+Artifact construction passes all preregistered identity/accounting invariants:
+one balanced shard, distinct arm targets and fingerprints, exact frozen
+parent, and complete all-five-deck balance. This accepts the training run as a
+valid paired artifact only; it provides no performance evidence and neither
+arm is accepted or rejected yet. Raw-shard seed `202607260311` is now
+consumed. HOLD1 seed `202607260312` and gameplay seed `202607260313` remain
+unopened. Next: commit this provenance, then invoke the exclusive sealed
+evaluator once; it will stop after HOLD1 unless every offline gate passes.
