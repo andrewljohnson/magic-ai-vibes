@@ -258,6 +258,13 @@ void validate_bot_research_config(const BotConfig& bot) {
         throw std::invalid_argument(
             "Value Priority residual requires Learned Value");
     }
+    if (bot.value_pass_dominance &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion)) {
+        throw std::invalid_argument(
+            "Value Pass dominance requires Learned Value");
+    }
 }
 
 static_assert(
@@ -18954,7 +18961,8 @@ bool BotBenchmarkSummary::challenger_is_better_95() const {
 BotBenchmarkSummary
 run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
                   std::uint64_t seed, BotConfig challenger,
-                  BotConfig baseline, GameConfig game_config) {
+                  BotConfig baseline, GameConfig game_config,
+                  bool allow_identical_policy_control) {
     if (repetitions_per_deck_pairing == 0) {
         throw std::invalid_argument(
             "benchmark repetitions must be positive");
@@ -18975,10 +18983,13 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
               baseline.value_continuation_epsilon &&
           challenger.value_priority_residual_weight ==
               baseline.value_priority_residual_weight &&
+          challenger.value_pass_dominance ==
+              baseline.value_pass_dominance &&
           !distinct_explicit_models));
     if (same_policy &&
         challenger.rollouts_per_action ==
-            baseline.rollouts_per_action) {
+            baseline.rollouts_per_action &&
+        !allow_identical_policy_control) {
         throw std::invalid_argument(
             "benchmark bots must use different policies or rollout counts");
     }

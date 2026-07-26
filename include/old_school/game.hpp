@@ -1242,7 +1242,8 @@ struct BotBenchmarkSummary {
 BotBenchmarkSummary
 run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
                   std::uint64_t seed, BotConfig challenger,
-                  BotConfig baseline, GameConfig game_config = {});
+                  BotConfig baseline, GameConfig game_config = {},
+                  bool allow_identical_policy_control = false);
 
 std::shared_ptr<const LearnedModel>
 train_learned_model(std::size_t training_games, std::uint64_t seed);

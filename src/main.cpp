@@ -6055,20 +6055,26 @@ int main(int argc, char** argv) {
             (seed_option_used && seed == pd0_smoke_seed) ||
             (training_seed_option_used &&
              training_seed == pd0_smoke_seed);
+        const bool exact_pd0_smoke_configuration =
+            benchmark && is_pd0_c16(challenger) &&
+            is_pd0_c16(baseline) &&
+            seed_option_used && seed == pd0_smoke_seed &&
+            games_were_set && games == 4 &&
+            training_games == 800 &&
+            training_seed == 424242 &&
+            learned_rollouts == 8 &&
+            !pd0_smoke_unsupported_option_used;
         if (pd0_smoke_seed_used &&
-            !(benchmark && is_pd0_c16(challenger) &&
-              is_pd0_c16(baseline) &&
-              seed_option_used && seed == pd0_smoke_seed &&
-              games_were_set && games == 4 &&
-              training_games == 800 &&
-              training_seed == 424242 &&
-              learned_rollouts == 8 &&
-              !pd0_smoke_unsupported_option_used)) {
+            !exact_pd0_smoke_configuration) {
             throw std::invalid_argument(
                 "reserved PD0 smoke seed 202607260948 may be used "
                 "only by the exact 240-game C16/K8-vs-C16/K8 "
                 "paired control or challenger-only treatment");
         }
+        const bool allow_pd0_identical_policy_control =
+            pd0_smoke_seed_used &&
+            exact_pd0_smoke_configuration &&
+            !value_pass_dominance;
         const bool tournament_uses_any_learned =
             !interactive && !benchmark && !stability && !evolve &&
             !diagnose_white_plan && !diagnose_value_context &&
@@ -7352,7 +7358,8 @@ int main(int argc, char** argv) {
             }
             const auto result = old_school::run_bot_benchmark(
                 games, seed, challenger_config,
-                baseline_config, shared_config);
+                baseline_config, shared_config,
+                allow_pd0_identical_policy_control);
             const auto benchmark_name =
                 [](const BotSelection& selection,
                    const old_school::BotConfig& config) {

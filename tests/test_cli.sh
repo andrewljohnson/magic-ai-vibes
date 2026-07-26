@@ -351,6 +351,10 @@ expect_error "reserved PD0 diagnostic seed 202607260947 may be used only by --di
     --games 1 --seed 1 --bots random --train-seed 202607260947
 expect_error "--value-pass-dominance requires --benchmark with a Learned Value challenger" \
     --games 1 --seed 1 --value-pass-dominance
+expect_error "benchmark bots must use different policies or rollout counts" \
+    --benchmark --games 1 --seed 17 --train-seed 19 --train-games 1 \
+    --challenger learned-value-g0 --baseline learned-value-g0 \
+    --learned-rollouts 1
 expect_error "reserved PD0 smoke seed 202607260948 may be used only by the exact 240-game C16/K8-vs-C16/K8 paired control or challenger-only treatment" \
     --benchmark --games 4 --seed 202607260948 \
     --train-seed 424242 --train-games 800 \

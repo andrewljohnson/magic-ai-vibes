@@ -7909,6 +7909,86 @@ TEST(benchmark_policy_identity_includes_value_continuation_epsilon) {
     CHECK(rejected_identical);
 }
 
+TEST(benchmark_identical_policy_control_requires_explicit_permission) {
+    const old_school::BotConfig random = {
+        .kind = old_school::BotKind::Random,
+        .rollouts_per_action = 1,
+    };
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+
+    bool rejected_by_default = false;
+    try {
+        static_cast<void>(old_school::run_bot_benchmark(
+            1, 0x1D3A71CA1ULL, random, random, bounded));
+    } catch (const std::invalid_argument&) {
+        rejected_by_default = true;
+    }
+    CHECK(rejected_by_default);
+
+    const auto control = old_school::run_bot_benchmark(
+        1, 0x1D3A71CA1ULL, random, random, bounded, true);
+    CHECK(control.total_games == 60);
+    CHECK(control.challenger_stats.games == 60);
+    CHECK(control.baseline_stats.games == 60);
+    CHECK(control.challenger_stats.draws == 60);
+    CHECK(control.baseline_stats.draws == 60);
+}
+
+TEST(benchmark_policy_identity_includes_value_pass_dominance) {
+    const auto model = small_value_model();
+    const old_school::BotConfig control = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .training_games = 1,
+        .learned_model = model,
+    };
+    old_school::BotConfig treatment = control;
+    treatment.value_pass_dominance = true;
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+    bounded.learned_model = model;
+
+    const auto result = old_school::run_bot_benchmark(
+        1, 0x5044301D3A71ULL, treatment, control, bounded);
+    CHECK(result.total_games == 60);
+    CHECK(result.challenger.value_pass_dominance);
+    CHECK(!result.baseline.value_pass_dominance);
+}
+
+TEST(value_pass_dominance_rejects_non_value_bots) {
+    const std::array<old_school::BotConfig, 2> invalid = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Random,
+            .rollouts_per_action = 1,
+            .value_pass_dominance = true,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .value_pass_dominance = true,
+        },
+    };
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::Handcrafted,
+        .rollouts_per_action = 1,
+    };
+    for (const auto& challenger : invalid) {
+        bool rejected = false;
+        try {
+            static_cast<void>(old_school::run_bot_benchmark(
+                1, 0xBAD504430ULL, challenger, baseline));
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        CHECK(rejected);
+    }
+}
+
 TEST(actor_and_value_champion_use_distinct_frozen_models_in_benchmark) {
     constexpr std::uint64_t kTrainingSeed = 424242;
     const auto actor_model =
