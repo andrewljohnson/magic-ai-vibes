@@ -1962,8 +1962,25 @@ TEST(value_challenger_is_explicit_deterministic_and_generation_bound) {
           generation_one_fingerprint);
     CHECK(old_school::learned_model_fingerprint(generation_two) !=
           generation_one_fingerprint);
+    // Captured from the inline distance-four production target path before
+    // it was routed through n_state_bootstrap_targets.
     CHECK(old_school::learned_model_fingerprint(generation_two) ==
           "8b9696870ca43087cddb3987a3d80759ac0528b552f1ead5447091d526cf2e06");
+    const old_school::LearnedModelComponentFingerprints
+        expected_components = {
+            .critic =
+                "0f571aab9098cb25613fd1d9e06496cad9248d4520d035a3cd1540237d50fd24",
+            .priority =
+                "32dc6688a5c970e3eda4325bea5ee419077027e160697899e3b00c963fa1bb22",
+            .attack =
+                "dfd3aaa16755bee5d0c2c40956851b94ef5676a271a602eb23a57719f7358b01",
+            .block =
+                "d64e40796bd1587958b7386996e6a1e5660778d40ec7b40b0ee6324b8e39adbb",
+            .damage_order =
+                "f0a84ed549bbf95197dd00c13ab04c0a4f6b1771f14bdb30a7dca937d2d79c76",
+        };
+    CHECK(old_school::learned_model_component_fingerprints(
+              generation_two) == expected_components);
 
     bool rejected_zero_generations = false;
     try {
@@ -2128,6 +2145,25 @@ TEST(value_context_challenger_s1_is_deterministic_and_reports_roots) {
     const std::string fingerprint =
         old_school::learned_model_fingerprint(
             original.model());
+    // Captured from the inline contextual distance-four target path before
+    // it was routed through n_state_bootstrap_targets.
+    CHECK(fingerprint ==
+          "79fd1e93b5a6103fc6b27ff779aeb63f3ba21d9c1aff80b552a7ae78e4cf3b67");
+    const old_school::LearnedModelComponentFingerprints
+        expected_components = {
+            .critic =
+                "b1ff81db63126f3ce68580e1e2ba6f0151b7ab1943bb95f45dbeb455d2bec563",
+            .priority =
+                "82e63faa3724d9909e9215289e38feec7af6cc405e90c0c95ad39e1709efc104",
+            .attack =
+                "f152ae09d7abeab9f467c5876a45884b85b101c29d3c28f74ac4a8665368335e",
+            .block =
+                "1e91c76d1906ee90fec3f461b109c57ed5d7d80bb1618e490e186a12eaef526d",
+            .damage_order =
+                "fdf0e08528639c9f20df779623f54023cc4a652d6d7696add5252a7d4d5f5a37",
+        };
+    CHECK(old_school::learned_model_component_fingerprints(
+              original.model()) == expected_components);
     CHECK(old_school::learned_model_fingerprint(
               repeated.model()) == fingerprint);
     CHECK(old_school::learned_model_fingerprint(

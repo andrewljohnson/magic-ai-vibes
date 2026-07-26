@@ -14795,8 +14795,7 @@ train_learned_value_challenger(
             }
         };
 
-    constexpr std::size_t kBootstrapStepStates = 4;
-    constexpr double kBootstrapWeight = 0.5;
+    constexpr std::size_t kBootstrapDistance = 4;
     const auto add_bootstrap_trace =
         [&add_trace](
             const std::vector<GameState>& trace,
@@ -14807,38 +14806,60 @@ train_learned_value_challenger(
                 add_trace(trace, result, destination);
                 return;
             }
+
+            std::array<double, 2> terminal_targets = {
+                0.5, 0.5,
+            };
+            if (result.winner >= 0) {
+                const double discounted_outcome =
+                    0.5 * std::pow(
+                              0.985,
+                              static_cast<double>(result.turns));
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    terminal_targets[perspective] =
+                        result.winner ==
+                                static_cast<int>(perspective)
+                            ? 0.5 + discounted_outcome
+                            : 0.5 - discounted_outcome;
+                }
+            }
+
+            std::array<std::vector<double>, 2> parent_values;
+            std::array<std::vector<double>, 2> targets;
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                parent_values[perspective].assign(
+                    trace.size(),
+                    terminal_targets[perspective]);
+            }
+            for (std::size_t future_index = kBootstrapDistance;
+                 future_index < trace.size(); ++future_index) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    parent_values[perspective][future_index] =
+                        frozen->predict(
+                            learned_features(
+                                trace[future_index],
+                                perspective));
+                }
+            }
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                targets[perspective] =
+                    learned_iteration::n_state_bootstrap_targets(
+                        parent_values[perspective],
+                        terminal_targets[perspective],
+                        kBootstrapDistance);
+            }
+
             for (std::size_t index = 0; index < trace.size();
                  ++index) {
                 for (std::size_t perspective = 0;
                      perspective < 2; ++perspective) {
-                    double terminal_target = 0.5;
-                    if (result.winner >= 0) {
-                        const double discounted_outcome =
-                            0.5 * std::pow(
-                                      0.985,
-                                      static_cast<double>(
-                                          result.turns));
-                        terminal_target =
-                            result.winner ==
-                                    static_cast<int>(perspective)
-                                ? 0.5 + discounted_outcome
-                                : 0.5 - discounted_outcome;
-                    }
-                    double target = terminal_target;
-                    const std::size_t bootstrap_index =
-                        index + kBootstrapStepStates;
-                    if (bootstrap_index < trace.size()) {
-                        const double bootstrap = frozen->predict(
-                            learned_features(
-                                trace[bootstrap_index],
-                                perspective));
-                        target = (1.0 - kBootstrapWeight) *
-                                     terminal_target +
-                                 kBootstrapWeight * bootstrap;
-                    }
                     destination.emplace_back(
                         learned_features(trace[index], perspective),
-                        target);
+                        targets[perspective][index]);
                 }
             }
         };
@@ -15058,8 +15079,7 @@ train_learned_value_context_challenger_internal(
             }
         };
 
-    constexpr std::size_t kBootstrapStepStates = 4;
-    constexpr double kBootstrapWeight = 0.5;
+    constexpr std::size_t kBootstrapDistance = 4;
     const auto add_bootstrap_trace =
         [&add_terminal_trace, &context_features,
          &terminal_target,
@@ -15074,31 +15094,48 @@ train_learned_value_context_challenger_internal(
                 add_terminal_trace(trace, result, destination);
                 return;
             }
-            for (std::size_t index = 0; index < trace.size();
-                 ++index) {
+
+            std::array<double, 2> terminal_targets;
+            std::array<std::vector<double>, 2> parent_values;
+            std::array<std::vector<double>, 2> targets;
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                terminal_targets[perspective] =
+                    terminal_target(result, perspective);
+                parent_values[perspective].assign(
+                    trace.size(),
+                    terminal_targets[perspective]);
+            }
+            for (std::size_t future_index = kBootstrapDistance;
+                 future_index < trace.size(); ++future_index) {
+                const auto& future = trace[future_index];
                 for (std::size_t perspective = 0;
                      perspective < 2; ++perspective) {
-                    const double outcome =
-                        terminal_target(result, perspective);
-                    double target = outcome;
-                    const std::size_t bootstrap_index =
-                        index + kBootstrapStepStates;
-                    if (bootstrap_index < trace.size()) {
-                        const auto& future =
-                            trace[bootstrap_index];
-                        const double bootstrap = context_masked
+                    parent_values[perspective][future_index] =
+                        context_masked
                             ? frozen->predict(
                                   learned_features(
                                       future.state,
                                       perspective),
                                   LearnedDecisionContextFeatures{})
                             : learned_contextual_critic_value(
-                                future.state, perspective,
-                                future.context, frozen);
-                        target = (1.0 - kBootstrapWeight) *
-                                     outcome +
-                                 kBootstrapWeight * bootstrap;
-                    }
+                                  future.state, perspective,
+                                  future.context, frozen);
+                }
+            }
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                targets[perspective] =
+                    learned_iteration::n_state_bootstrap_targets(
+                        parent_values[perspective],
+                        terminal_targets[perspective],
+                        kBootstrapDistance);
+            }
+
+            for (std::size_t index = 0; index < trace.size();
+                 ++index) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
                     const auto& point = trace[index];
                     destination.push_back({
                         .features = learned_observation(
@@ -15106,7 +15143,7 @@ train_learned_value_context_challenger_internal(
                         .context_features =
                             context_features(
                                 point.context, perspective),
-                        .target = target,
+                        .target = targets[perspective][index],
                     });
                 }
             }
