@@ -207,6 +207,39 @@ export interface DamageOrderDecision {
   blockers: Array<string | number>;
 }
 
+export function restoreOpaqueIds(
+  selectedKeys: Iterable<string>,
+  legalIds: readonly (string | number)[],
+): Array<string | number> {
+  const byKey = new Map(legalIds.map((id) => [String(id), id]));
+  return [...selectedKeys].flatMap((key) => {
+    const id = byKey.get(key);
+    return id === undefined ? [] : [id];
+  });
+}
+
+export function blockerPairsFromKeys(
+  assignments: Readonly<Record<string, string>>,
+  choices: readonly BlockerChoice[],
+): Array<[string | number, string | number]> {
+  return Object.entries(assignments).flatMap(
+    ([blockerKey, attackerKey]) => {
+      if (attackerKey === "") return [];
+      const choice = choices.find(
+        ({ blocker }) => String(blocker) === blockerKey,
+      );
+      if (!choice) return [];
+      const [attacker] = restoreOpaqueIds(
+        [attackerKey],
+        choice.legalAttackers,
+      );
+      return attacker === undefined
+        ? []
+        : [[attacker, choice.blocker] as [string | number, string | number]];
+    },
+  );
+}
+
 export type Decision =
   | PriorityDecision
   | AttackersDecision

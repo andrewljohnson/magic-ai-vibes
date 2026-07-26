@@ -663,10 +663,11 @@ struct LearnedSearchConfig {
     // Value-mirror continuation seats. It is invalid for Unified Actor
     // continuations.
     double value_priority_residual_weight = 0.0;
-    // Evaluation-only worker count. One preserves the historical serial
-    // execution path exactly. Values above one may evaluate independent,
-    // preindexed candidate/world/rollout cells concurrently; sample order,
-    // seeds, scores, and accounting remain unchanged.
+    // Evaluation-only Priority-sampler worker count. One preserves the
+    // historical serial execution path exactly. Values above one may
+    // evaluate independent, preindexed candidate/world/rollout cells
+    // concurrently; sample order, seeds, scores, and accounting remain
+    // unchanged. Binary-attack samples remain serial.
     std::size_t evaluation_threads = 1;
 };
 

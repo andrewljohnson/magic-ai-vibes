@@ -137,3 +137,40 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   assert.doesNotMatch(app, /\{entry\.target\}/);
   assert.doesNotMatch(app, /entry\.targets\?\.join/);
 });
+
+test("browser selections preserve opaque numeric IDs in every combat request", async () => {
+  const { blockerPairsFromKeys, restoreOpaqueIds } =
+    await loadTargetFormatter();
+  const app = await source("src/App.tsx");
+
+  assert.deepEqual(restoreOpaqueIds(new Set(["101"]), [101, 102]), [101]);
+  assert.deepEqual(restoreOpaqueIds(new Set(["bear-a"]), ["bear-a"]), [
+    "bear-a",
+  ]);
+  assert.deepEqual(
+    blockerPairsFromKeys(
+      { 102: "202" },
+      [{ blocker: 102, legalAttackers: [202] }],
+    ),
+    [[202, 102]],
+  );
+  assert.deepEqual(
+    blockerPairsFromKeys(
+      { "bear-a": "orc-b" },
+      [{ blocker: "bear-a", legalAttackers: ["orc-b"] }],
+    ),
+    [["orc-b", "bear-a"]],
+  );
+
+  assert.match(
+    app,
+    /ids: restoreOpaqueIds\(selected, decision\.eligible\)/,
+  );
+  assert.match(
+    app,
+    /blockerPairsFromKeys\(assignments, decision\.choices\)/,
+  );
+  assert.match(app, /\? \[\.\.\.decision\.blockers\]\s*: \[\]/);
+  assert.match(app, /decisionId: decision\.decisionId, ids: order/);
+  assert.doesNotMatch(app, /decision\.blockers\.map\(\(id\) => String\(id\)\)/);
+});

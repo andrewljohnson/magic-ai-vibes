@@ -15,10 +15,12 @@ import {
   submitAction,
 } from "./api";
 import {
+  blockerPairsFromKeys,
   describeTopOfStack,
   formatStackEntryLabel,
   formatStackTargets,
   formatTargetLabel,
+  restoreOpaqueIds,
   stackPermanentTargetIds,
   type ActionRequest,
   type AttackersDecision,
@@ -938,7 +940,7 @@ function AttackersControls({
           onClick={() =>
             onSubmit({
               decisionId: decision.decisionId,
-              ids: Array.from(selected),
+              ids: restoreOpaqueIds(selected, decision.eligible),
             })
           }
           disabled={busy || selected.size === 0}
@@ -1010,9 +1012,7 @@ function BlockersControls({
         type="button"
         className="button-primary"
         onClick={() => {
-          const pairs = Object.entries(assignments)
-            .filter(([, attacker]) => attacker !== "")
-            .map(([blocker, attacker]) => [attacker, blocker] as [string, string]);
+          const pairs = blockerPairsFromKeys(assignments, decision.choices);
           onSubmit({ decisionId: decision.decisionId, pairs });
         }}
         disabled={busy}
@@ -1033,8 +1033,8 @@ function DamageOrderControls({
 }: {
   decision: DamageOrderDecision;
   opponent: PlayerState;
-  order: string[];
-  setOrder: (next: string[]) => void;
+  order: Array<string | number>;
+  setOrder: (next: Array<string | number>) => void;
   onSubmit: (action: ActionRequest) => void;
   busy: boolean;
 }) {
@@ -1106,14 +1106,14 @@ function DecisionDock({
   onSubmit: (action: ActionRequest) => void;
 }) {
   const [assignments, setAssignments] = useState<Record<string, string>>({});
-  const [damageOrder, setDamageOrder] = useState<string[]>([]);
+  const [damageOrder, setDamageOrder] = useState<Array<string | number>>([]);
 
   useEffect(() => {
     setAssignments({});
     setSelectedAttackers(new Set());
     setDamageOrder(
       decision.kind === "damage_order"
-        ? decision.blockers.map((id) => String(id))
+        ? [...decision.blockers]
         : [],
     );
   }, [decision.decisionId, decision.kind, setSelectedAttackers]);

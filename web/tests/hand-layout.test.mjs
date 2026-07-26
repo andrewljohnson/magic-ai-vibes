@@ -107,6 +107,69 @@ test("hand hover keeps card headings inside 1440x900 and 1280x720 layouts", asyn
   }
 });
 
+test("match typography keeps a readable floor without enlarging fixed regions", async () => {
+  const css = await source("styles.css");
+  const rootRule = cssRule(css, ":root");
+  assert.match(rootRule, /--type-floor:\s*10px/);
+  assert.match(rootRule, /--card-type-floor:\s*9px/);
+
+  const uiFloorSelectors = [
+    ".event-index",
+    ".event-turn",
+    ".turn-marker span",
+    ".phase-steps li",
+    ".priority-marker span",
+    ".zone-badge",
+    ".row-label",
+    ".hand-label",
+    ".stack-entry > span:not(.stack-order)",
+    ".decision-heading p",
+    ".stack-choice-context > small",
+    ".action-copy span",
+  ];
+  for (const selector of uiFloorSelectors) {
+    assert.match(
+      cssRule(css, selector),
+      /font-size:\s*var\(--type-floor\)/,
+      `${selector} must use the 10px interface floor`,
+    );
+  }
+
+  const cardFloorSelectors = [
+    ".card-name",
+    ".mana-cost",
+    ".card-type",
+    ".combat-stats",
+    ".status-token",
+  ];
+  for (const selector of cardFloorSelectors) {
+    assert.match(
+      cssRule(css, selector),
+      /font-size:\s*var\(--card-type-floor\)/,
+      `${selector} must use the 9px embedded-card floor`,
+    );
+  }
+
+  const undersizedLiterals = [...css.matchAll(/font-size:\s*(\d+)px/g)]
+    .map(([, value]) => Number(value))
+    .filter((value) => value > 0 && value < 9);
+  assert.deepEqual(
+    undersizedLiterals,
+    [],
+    "content text must not bypass the 9px absolute floor",
+  );
+
+  const shellRule = cssRule(css, ".game-shell");
+  const compactViewport = css.match(
+    /@media \(max-height:\s*780px\)\s*\{([\s\S]+?)\n\}/,
+  );
+  assert.ok(compactViewport, "missing 1280x720 compact-height layout");
+  const compactShellRule = cssRule(compactViewport[1], ".game-shell");
+  assert.equal(pixels(shellRule, "--player-hand-height"), 142);
+  assert.equal(pixels(compactShellRule, "--player-hand-height"), 112);
+  assert.equal(pixels(compactShellRule, "--player-decision-height"), 110);
+});
+
 test("landing metadata includes and advertises every bot policy", async () => {
   const app = await source("App.tsx");
 
