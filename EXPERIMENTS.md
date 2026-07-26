@@ -6535,3 +6535,72 @@ reported no remaining material findings. The implementation milestone is
 accepted; this is not evidence for either scientific arm. Next: implement and
 freeze the exclusive load-only evaluator, then open raw-shard seed
 `202607260311` exactly once.
+
+#### TW-C17 sealed-evaluator freeze (no experiment run)
+
+Recorded after rereading `REVIEW.md` through 04:23 PDT. The new Red
+mispricing result refutes the reviewer's earlier Red-bias prediction but does
+not alter this experiment's preregistered Green/Blue calibration gates. We
+accept its interpretation as a readout aid: a Red gameplay change without a
+Red calibration shift can be a policy effect rather than a contradiction.
+
+The exclusive `--evaluate-terminal-weight-c17` route is now frozen before any
+reserved seed is opened. It:
+
+- loads the exact frozen Environment-v3 C16 and the distinct paired TW bundle,
+  then verifies full fingerprints, independently recomputed component
+  fingerprints, and critic-only TW50/TW75 deltas;
+- snapshots content digest, byte size, and modification time for both
+  artifacts before and after every completed or exceptional route;
+- runs a cache-free, label-free deployed-policy hidden-repartition audit for
+  C16, TW50, and TW75 over all 20 immutable dev-v3 probes before HOLD1;
+- implements the declared five-block HOLD1 schedule, record-weighted Brier and
+  soft-label log loss, physical-game CR1 intervals, signed bias/materiality,
+  saturation, trace-distance reporting, and every preregistered offline gate;
+- conditionally runs the two exact 50-quartet-per-deck K8/H4 gameplay panels,
+  with raw-win `>=501`, every-deck `W>=L`, quartet-clustered intervals, and
+  strict suppression after a failed preceding gate;
+- emits both a human report and a fixed 13-column TSV containing seeds,
+  configurations, artifact/model identities, pooled and five-deck metrics,
+  W/L/D rows, and explicit unavailable/suppressed states; and
+- accepts no other CLI options and returns 0 for scientific pass, 1 for a
+  valid scientific rejection, and 2 for infrastructure or incomplete
+  evidence. The CLI regression invokes it only from an isolated temporary
+  directory with no artifacts, proving fail-closed load-only behavior without
+  opening HOLD1.
+
+Exact verification on the frozen source:
+
+```sh
+make build/old-school-sim \
+  build/old-school-terminal-weight-eval-tests \
+  build/old-school-probe-runner-tests
+./build/old-school-terminal-weight-eval-tests
+./build/old-school-probe-runner-tests
+sh tests/test_cli.sh ./build/old-school-sim
+make test
+c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/probe_eval.cpp src/probe_runner.cpp \
+  src/terminal_weight_eval.cpp tests/test_terminal_weight_eval.cpp \
+  -o build/old-school-terminal-weight-eval-tests-sanitize
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  ./build/old-school-terminal-weight-eval-tests-sanitize
+git diff --check -- ':!REVIEW.md'
+```
+
+Results: evaluator 10/10, probe runner 25/25, engine 128/128, learned
+iteration 25/25, probes 40/40, probe metrics 11/11, web bridge 9/9, web
+client 82/82, certification 48/48, full CLI and capture-once suites passed,
+strict simulator build passed, and the evaluator sanitizer passed 10/10 with
+no ASan/UBSan finding. A separate read-only agent rechecked the final formulas,
+gates, provenance, isolation, output schema, and conditional execution against
+the preregistration and reported no material findings.
+
+No canonical trainer or evaluator was run. Seeds `202607260311`,
+`202607260312`, and `202607260313` remain unopened. This implementation
+milestone is accepted; it is not evidence for TW75. Next: commit this freeze,
+open raw-shard seed `202607260311` exactly once under `capture_once.sh`, bind
+the resulting artifact hash, reread `REVIEW.md`, and only then run the sealed
+evaluator.

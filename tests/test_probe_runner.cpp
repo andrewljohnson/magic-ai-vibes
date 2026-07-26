@@ -770,6 +770,49 @@ void test_tiny_reference_is_hidden_clone_invariant() {
     }
 }
 
+void test_cache_free_value_hidden_repartition_audit() {
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x48494444454e5457ULL);
+    const auto first =
+        old_school::probe_runner::
+            verify_value_hidden_repartition(
+                ProbeCorpusKind::DevV3,
+                {{
+                    .name = "tiny Value",
+                    .model = model,
+                }},
+                1, 0.0);
+    const auto second =
+        old_school::probe_runner::
+            verify_value_hidden_repartition(
+                ProbeCorpusKind::DevV3,
+                {{
+                    .name = "tiny Value",
+                    .model = model,
+                }},
+                1, 0.0);
+    expect(
+        first.passed && second.passed &&
+            first.policy_count == second.policy_count &&
+            first.probe_count == second.probe_count &&
+            first.policy_count == 1 &&
+            first.probe_count == 20,
+        "cache-free Value hidden-repartition audit was not exact "
+        "and deterministic");
+    expect(
+        expect_invalid(
+            [] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        verify_value_hidden_repartition(
+                            ProbeCorpusKind::DevV3, {}, 1, 0.0));
+            },
+            "hidden-repartition audit accepted no models")
+                .find("configuration") != std::string::npos,
+        "hidden-repartition validation error was not actionable");
+}
+
 void test_priority_evaluation_threads_are_bit_identical() {
     const auto controls =
         old_school::probes::make_force_spike_policy_controls_v1();
@@ -2869,6 +2912,8 @@ int main() {
                test_hidden_clone_preserves_information_set);
     runner.run("tiny hidden-safe reference",
                test_tiny_reference_is_hidden_clone_invariant);
+    runner.run("cache-free Value hidden-repartition audit",
+               test_cache_free_value_hidden_repartition_audit);
     runner.run("Priority evaluation thread identity",
                test_priority_evaluation_threads_are_bit_identical);
     runner.run("deployed Value attack seed independence",

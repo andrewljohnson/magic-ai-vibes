@@ -467,6 +467,17 @@ struct ProbeScoringModels {
     std::vector<NamedValueScoringModel> scoring_value_models;
 };
 
+// Cache-free, label-free invariance audit for immutable Value candidates.
+// It scores the deployed selector on the requested corpus and an
+// information-equivalent hidden-zone repartition using identical semantic
+// seeds, then requires every critic value, action score, and selected-key set
+// to be bit-identical. This makes no agreement or regret claim.
+HiddenRepartitionSummary verify_value_hidden_repartition(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<NamedValueScoringModel>& models,
+    std::size_t scoring_value_worlds = 8,
+    double value_continuation_epsilon = 0.0);
+
 // Scores explicit immutable Actor and ordered Value candidates. Actor cache
 // identity depends only on `reference_actor_model`; the reference Value is
 // used for continuation-sensitivity diagnostics and as checkpoint G0.

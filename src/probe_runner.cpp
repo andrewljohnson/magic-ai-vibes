@@ -3295,6 +3295,69 @@ ProbeReferenceSamples generate_probe_reference_samples(
         LearnedVariant::UnifiedActor, true);
 }
 
+HiddenRepartitionSummary verify_value_hidden_repartition(
+    ProbeCorpusKind corpus_kind,
+    const std::vector<NamedValueScoringModel>& models,
+    std::size_t scoring_value_worlds,
+    double value_continuation_epsilon) {
+    if (models.empty() || scoring_value_worlds == 0 ||
+        scoring_value_worlds > kMaximumReferenceWorlds ||
+        !std::isfinite(value_continuation_epsilon) ||
+        value_continuation_epsilon < 0.0 ||
+        value_continuation_epsilon > 1.0) {
+        throw std::invalid_argument(
+            "hidden-repartition audit configuration is invalid");
+    }
+    for (std::size_t index = 0; index < models.size(); ++index) {
+        const auto& model = models[index];
+        if (!model.model || model.name.empty() ||
+            !std::isfinite(
+                model.value_priority_residual_weight) ||
+            model.value_priority_residual_weight < 0.0 ||
+            model.value_priority_residual_weight > 1.0) {
+            throw std::invalid_argument(
+                "hidden-repartition audit model is invalid");
+        }
+        validate_text_field(
+            model.name, "hidden-repartition model name");
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            if (models[prior].name == model.name) {
+                throw std::invalid_argument(
+                    "hidden-repartition model names must be unique");
+            }
+        }
+    }
+
+    const auto definition = corpus_definition(corpus_kind);
+    const auto corpus = make_corpus(corpus_kind);
+    const auto hidden_clones = hidden_clone_corpus(corpus);
+    if (corpus_information_set_fingerprint(
+            corpus_kind, corpus) !=
+        corpus_information_set_fingerprint(
+            corpus_kind, hidden_clones)) {
+        throw std::runtime_error(
+            "hidden clone changed corpus information-set fingerprint");
+    }
+    for (const auto& candidate : models) {
+        const auto original = score_value_deployed(
+            corpus, candidate.model, definition.corpus_id,
+            scoring_value_worlds, value_continuation_epsilon,
+            candidate.value_priority_residual_weight);
+        const auto clone = score_value_deployed(
+            hidden_clones, candidate.model,
+            definition.corpus_id, scoring_value_worlds,
+            value_continuation_epsilon,
+            candidate.value_priority_residual_weight);
+        require_predictions_bit_identical(
+            original, clone, candidate.name);
+    }
+    return {
+        .passed = true,
+        .policy_count = models.size(),
+        .probe_count = corpus.size(),
+    };
+}
+
 ProbeScoreReport score_probe_corpus_with_candidates(
     ProbeCorpusKind corpus_kind,
     const ProbeScoreConfig& requested_config,

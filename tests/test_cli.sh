@@ -107,6 +107,7 @@ case $help_output in
 "learned-value-tw50-c17"*"learned-value-tw75-c17"*\
 "learned-value-mix50-g8"*\
 "--train-terminal-weight-c17"*\
+"--evaluate-terminal-weight-c17"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
 "--refresh-value-challenger-cache"*\
@@ -344,6 +345,19 @@ expect_error "--train-terminal-weight-c17 requires exact --train-games 800 --tra
 expect_error "--train-terminal-weight-c17 requires exact --train-games 800 --train-seed 424242" \
     --train-terminal-weight-c17 \
     --train-games 800 --train-seed 1
+expect_error "--evaluate-terminal-weight-c17 is exclusive and accepts no other options" \
+    --evaluate-terminal-weight-c17 --seed 1
+expect_error "cannot be combined" \
+    --evaluate-terminal-weight-c17 --benchmark
+expect_error "TW-C17 infrastructure/incomplete-evidence failure" \
+    --evaluate-terminal-weight-c17
+case $cli_output in
+    *"Training canonical same-shard"*)
+        printf 'sealed terminal-weight evaluator tried to train\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
 expect_error "terminal-weight C17 benchmark tokens require exact --train-games 800 --train-seed 424242" \
     --benchmark --games 1 --seed 1 \
     --challenger learned-value-tw75-c17 \

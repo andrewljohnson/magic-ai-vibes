@@ -3,6 +3,7 @@
 #include "old_school/learned_iteration.hpp"
 #include "old_school/probe_runner.hpp"
 #include "old_school/probes.hpp"
+#include "old_school/terminal_weight_eval.hpp"
 
 #include <algorithm>
 #include <array>
@@ -332,6 +333,10 @@ void print_help(std::string_view executable) {
            "TW50/TW75 C17 family from exact C16 using raw seed "
            "202607260311; accepts only --train-games 800 and "
            "--train-seed 424242 and writes a distinct atomic bundle\n"
+        << "  --evaluate-terminal-weight-c17  Exclusive load-only "
+           "TW-C17 gate: HOLD1 seed 202607260312, then conditional "
+           "same-deck gameplay seed 202607260313; accepts no other "
+           "options and exits 0/1/2 for pass/reject/infrastructure\n"
         << "  --audit-dc1-dominance  Evaluation-only Environment-v3 "
            "resource-dominance mining audit of exact C16; fixed "
            "all-five 2x40-game train/heldout blocks and K=8; trains "
@@ -4450,6 +4455,7 @@ int main(int argc, char** argv) {
         bool terminal_credit_unsupported_option_used = false;
         bool train_terminal_weight_c17 = false;
         bool terminal_weight_unsupported_option_used = false;
+        bool evaluate_terminal_weight_c17 = false;
         bool audit_dc1_dominance = false;
         bool dc1_unsupported_option_used = false;
         bool audit_dc1_action_census = false;
@@ -4596,6 +4602,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--train-terminal-weight-c17") {
                 train_terminal_weight_c17 = true;
+                continue;
+            }
+            if (option == "--evaluate-terminal-weight-c17") {
+                evaluate_terminal_weight_c17 = true;
                 continue;
             }
             if (option == "--audit-dc1-dominance") {
@@ -4885,6 +4895,7 @@ int main(int argc, char** argv) {
                 static_cast<int>(score_p1r_probes) +
                 static_cast<int>(diagnose_terminal_credit) +
                 static_cast<int>(train_terminal_weight_c17) +
+                static_cast<int>(evaluate_terminal_weight_c17) +
                 static_cast<int>(audit_dc1_dominance) +
                 static_cast<int>(audit_dc1_action_census) +
                 static_cast<int>(audit_v3_blue_stack_regret) +
@@ -4899,6 +4910,7 @@ int main(int argc, char** argv) {
                 "--diagnose-p1-fit, --score-p1r-probes, "
                 "--diagnose-terminal-credit, "
                 "--train-terminal-weight-c17, "
+                "--evaluate-terminal-weight-c17, "
                 "--audit-dc1-dominance, "
                 "--audit-dc1-action-census, "
                 "--audit-v3-blue-stack-regret, "
@@ -4967,6 +4979,11 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--train-terminal-weight-c17 requires exact "
                 "--train-games 800 --train-seed 424242");
+        }
+        if (evaluate_terminal_weight_c17 && argc != 2) {
+            throw std::invalid_argument(
+                "--evaluate-terminal-weight-c17 is exclusive and "
+                "accepts no other options");
         }
         if (audit_dc1_dominance &&
             dc1_unsupported_option_used) {
@@ -5193,6 +5210,7 @@ int main(int argc, char** argv) {
             !score_p1r_probes &&
             !diagnose_terminal_credit &&
             !train_terminal_weight_c17 &&
+            !evaluate_terminal_weight_c17 &&
             !audit_dc1_dominance &&
             !audit_dc1_action_census &&
             !audit_v3_blue_stack_regret &&
@@ -5354,6 +5372,25 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--refresh-value-mix50-cache requires a benchmark "
                 "or probe route that selects Value G8 Late-Mix50");
+        }
+        if (evaluate_terminal_weight_c17) {
+            try {
+                const auto report =
+                    old_school::terminal_weight_eval::
+                        run_sealed_terminal_weight_c17_evaluation(
+                            std::cout);
+                old_school::terminal_weight_eval::
+                    write_human_report(report, std::cout);
+                old_school::terminal_weight_eval::
+                    write_tsv_report(report, std::cout);
+                return report.passed ? 0 : 1;
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "TW-C17 infrastructure/incomplete-evidence "
+                       "failure: "
+                    << error.what() << '\n';
+                return 2;
+            }
         }
         if (diagnose_p1_fit) {
             std::cout
