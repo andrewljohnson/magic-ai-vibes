@@ -7324,3 +7324,99 @@ later axis, but it does not replace the already frozen failure branch:
 actor-game/calendar-turn-balanced replay weighting will be tested first
 because record-density imbalance is independently measured. Representation
 work remains next if that weighting axis is falsified.
+
+#### CT8-0 sealed result: rejected on RU absolute-bias shrink
+
+Run exactly once at 2026-07-26 06:56 PDT from frozen implementation commit
+`d6f4e2e`. Exact invocation:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/ct8-0-sealed-audit-d6f4e2e \
+  ./build/old-school-sim --audit-calendar-eight-targets
+```
+
+The process exited `1`, a complete scientific rejection rather than an
+infrastructure failure. The immutable 470,034-byte, 2,776-line transcript is
+`build/experiments/ct8-0-sealed-audit-d6f4e2e.complete.txt`, SHA-256
+`33540418d0362241430399269e9e1d31fe0545be88b9261d336119da47cacfa6`.
+Wall time was 82.36 seconds. The reserved seed was `202607260621`, generation
+coordinate 19, with 50 balanced blocks: 2,000 physical games, 4,000
+perspectives, and 800 perspectives per deck.
+
+The exact parent fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+Its artifact remained unchanged with evaluator content digest
+`ee89a4aa1e91bbfc3d1ca6144139a86910bbe3e7d465de369f3b5e52471132fe`
+and raw-file SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+
+All qualification and mechanical evidence passed. The two fresh complete
+constructions were bit-identical. The corpus contained 107,804
+trace-perspective rows; the four-arm-common set contained 63,018 rows from
+3,998 actor-games and 1,999 physical games. Common actor-games by deck were
+Green 799, Red 799, Blue 800, White 800, and RU Aggro 800. Early Green
+contained 2,448 rows from 799 actor-games. All schedule, exact landing,
+earliest-index, target-identity, terminal-tail, hidden-information, artifact,
+and deterministic-reduction checks passed; 107,382 changed hidden-zone
+repartitions preserved every observed quantity and hash.
+
+Four-arm-common record-weighted Brier / signed bias:
+
+| Scope | RO4 | RO8 | CT4 | CT8 |
+| --- | ---: | ---: | ---: | ---: |
+| Pooled | 0.020922 / -0.007240 | 0.016678 / -0.006202 | 0.019602 / -0.006695 | **0.014297 / -0.004429** |
+| Green | 0.020618 / +0.030859 | 0.015318 / +0.019809 | 0.019261 / +0.024190 | **0.012957 / +0.006503** |
+| Red | 0.025420 / +0.014130 | 0.020366 / +0.006265 | 0.024435 / +0.009687 | **0.018208 / -0.002784** |
+| Blue | 0.021410 / -0.026451 | 0.017353 / -0.017318 | 0.019545 / -0.023882 | **0.013656 / -0.008429** |
+| White | 0.015249 / -0.042497 | 0.012406 / -0.026420 | 0.013815 / -0.032292 | **0.010415 / -0.007243** |
+| RU Aggro | 0.025598 / +0.007014 | 0.020823 / -0.002683 | 0.024707 / +0.002479 | **0.018853 / -0.009385** |
+
+The primary early-Green hypothesis passed strongly. Record-weighted biases
+were RO4 `+0.032105`, RO8 `+0.016445`, CT4 `+0.030960`, and CT8
+`+0.007353`. `CT8-RO4` was `-0.024752`, 95% CI
+`[-0.028520, -0.020985]`; the equal-actor estimate was `-0.024963`.
+The registered row-level interaction was `-0.007946`, CI
+`[-0.009889, -0.006004]`; its equal-actor estimate was `-0.008065`.
+Thus CT8 cleared the one-point MDE, precision, constituent-advantage,
+equal-actor, interaction, and whole-Green gates.
+
+Pooled common-row loss also passed decisively:
+
+- versus RO4, CT8 Brier delta `-0.006625`
+  `[-0.007030, -0.006221]` and soft-log-loss delta `-0.017742`
+  `[-0.018742, -0.016742]`;
+- versus CT4, Brier `-0.005305` and log loss `-0.014191`, with both
+  intervals wholly below zero; and
+- versus RO8, Brier `-0.002382` and log loss `-0.006473`, again with both
+  intervals wholly below zero.
+
+On all rows, CT8's pooled Brier was `0.008357`, versus RO8 `0.010751`,
+CT4 `0.013528`, and RO4 `0.014953`. The all-five Brier guard,
+no-new-material-bias guard, whole-Green shrink, and Blue direction/shrink
+gates passed. Blue common bias improved from `-0.026451` to `-0.008429`
+under record weighting and from `-0.025564` to `-0.005570` under
+equal-actor weighting.
+
+The sole failed gate was preregistered and decisive. RU moved in the predicted
+downward direction, but crossed zero far enough that absolute bias grew:
+
+- record weighting: `+0.007014 -> -0.009385`, delta `-0.016399`;
+- equal-actor weighting: `+0.004383 -> -0.008522`, delta `-0.012906`.
+
+An independent result audit recomputed the transcript and artifact hashes,
+checked every threshold, and confirmed that this was the only failed gate and
+that exit `1` was correct.
+
+Result: **REJECT CT8-0** and retire seed `202607260621`. The target-reach
+hypothesis receives strong diagnostic support, but the conjunctive all-five
+safety claim does not pass. Per the frozen decision rule, there is no CT8
+model fit, C19 promotion, best-cell salvage, mixture, anneal add-on, H6/H12
+retry, or further record/calendar-horizon/terminal-weight/collection-horizon
+search. The next experiment will be separately preregistered
+actor-game/calendar-turn-balanced replay weighting with canonical RO4,
+constant-0.50 targets; no new experiment is active yet.
+
+`REVIEW.md` was reread through its 07:02 cycle before recording this result.
+That entry verified the frozen implementation but still described the seed as
+unopened; it contains no post-result evidence that changes the sealed verdict.
