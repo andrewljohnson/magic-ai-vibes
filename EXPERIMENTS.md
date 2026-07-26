@@ -8266,3 +8266,66 @@ shim or rewrite historical commands.
 Decision: accept this only as a source cleanup. Exact frozen evidence output
 and all scientific semantics are unchanged. The next research events remain
 the cleared RB0-E1 mechanical capture and the frozen PD0 diagnostic/smoke.
+
+### PD0 frozen large-regression/runtime smoke result
+
+Completed 2026-07-26 from committed source `c599c18`, after the mechanism
+diagnostic passed and its exact selections were independently reproduced in
+`REVIEW.md` through the 10:54 PDT entry. The reserved smoke seed
+`202607260948` was consumed exactly once by each of the two configurations and
+in the predeclared order.
+
+The unfiltered C16/K8 fixed-work control command was:
+
+```sh
+/usr/bin/time -p ./build/old-school-sim --benchmark --games 4 \
+  --seed 202607260948 --train-seed 424242 --train-games 800 \
+  --challenger learned-value-c16 --baseline learned-value-c16 \
+  --learned-rollouts 8
+```
+
+The command completed all 240 paired games with no draws and exited `1`, the
+expected scientific-inconclusive status for an intentionally identical-policy
+control. It finished 120-120 (50.0%, Wilson 95% CI 43.7%-56.3%) in 65.46
+seconds wall time (`user 298.55`, `sys 1.88`). Both seats averaged 24.3
+decisions and 591.7 rollouts per game. Challenger-deck results were identical
+between the two policies: Green 18-30 (37.5%), Red 17-31 (35.4%), Blue 34-14
+(70.8%), White 26-22 (54.2%), and RU Aggro 25-23 (52.1%).
+
+The challenger-only treatment command was:
+
+```sh
+/usr/bin/time -p ./build/old-school-sim --benchmark --games 4 \
+  --seed 202607260948 --train-seed 424242 --train-games 800 \
+  --challenger learned-value-c16 --baseline learned-value-c16 \
+  --learned-rollouts 8 --value-pass-dominance
+```
+
+It likewise completed all 240 paired games with no draws and exited `1` only
+because its aggregate confidence interval still crosses 50%. The filtered
+challenger finished 123-117 (51.2%, Wilson 95% CI 45.0%-57.5%), clearing the
+predeclared 40% large-regression floor. It took 70.27 seconds wall time
+(`user 329.83`, `sys 2.08`), a 7.35% increase over the fixed-work control and
+well below the 25% rejection threshold. The challenger averaged 24.1
+decisions and 563.6 rollouts per game; the unfiltered baseline averaged 23.8
+decisions and 571.9 rollouts.
+
+Treatment results by challenger deck, with the corresponding unfiltered
+baseline result, were:
+
+- Green: 17-31 (35.4%) versus 19-29 (39.6%);
+- Red: 18-30 (37.5%) versus 17-31 (35.4%);
+- Blue: 36-12 (75.0%) versus 32-16 (66.7%);
+- White: 26-22 (54.2%) versus 26-22 (54.2%);
+- RU Aggro: 26-22 (54.2%) versus 23-25 (47.9%).
+
+These 48-game deck slices are reported for completeness and cannot accept,
+reject, or rank a per-deck effect. The smoke was preregistered only to catch a
+large aggregate regression and excessive runtime cost.
+
+Decision: PD0 passes its complete mechanism, hidden-information,
+default-off, large-regression, and runtime gates. Accept exact pass dominance
+only as a candidate component for the jointly declared composite. This is not
+a Learned promotion or a bot-strength claim. The next scientific event is the
+fresh-seed repaired RB0-0 sealed audit; replay weighting enters the composite
+only if that audit passes its unchanged frozen gates.
