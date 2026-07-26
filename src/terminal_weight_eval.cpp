@@ -315,15 +315,15 @@ struct HoldoutGame {
     std::vector<HoldoutRecord> records;
 };
 
-std::vector<HoldoutRecord> collect_holdout(
+std::vector<HoldoutRecord> collect_holdout_impl(
     std::shared_ptr<const LearnedModel> parent,
     std::shared_ptr<const LearnedModel> control,
     std::shared_ptr<const LearnedModel> treatment,
+    const HoldoutCollectionConfig& collection,
     std::ostream& progress) {
     const auto schedule = holdout_schedule(
-        kTerminalWeightC17HoldoutSeed,
-        kHoldoutGeneration,
-        kHoldoutBalancedBlocks);
+        collection.seed, collection.generation,
+        collection.balanced_blocks);
     std::vector<HoldoutGame> games(schedule.size());
     std::vector<std::exception_ptr> errors(schedule.size());
     std::atomic_size_t next_game = 0;
@@ -334,7 +334,8 @@ std::vector<HoldoutRecord> collect_holdout(
                 1U, std::thread::hardware_concurrency()));
 
     progress
-        << "Running HOLD1: 200 frozen-C16 mirror games "
+        << "Running HOLD1: " << schedule.size()
+        << " frozen-parent mirror games "
            "(K=1/H=4, epsilon=0.05)..."
         << std::flush;
     std::vector<std::thread> workers;
@@ -352,7 +353,8 @@ std::vector<HoldoutRecord> collect_holdout(
                 try {
                     const HoldoutTask& task = schedule[index];
                     GameConfig config;
-                    config.max_turns = 500;
+                    config.max_turns =
+                        collection.max_game_turns;
                     config.starting_player =
                         task.scheduled.starting_player;
                     config.learned_model = parent;
@@ -366,7 +368,8 @@ std::vector<HoldoutRecord> collect_holdout(
                         .exploration_rate = 0.05,
                         .value_continuation_epsilon = 0.0,
                         .value_priority_residual_weight = 0.0,
-                        .training_games = 800,
+                        .training_games =
+                            collection.pilot_training_games,
                         .learned_model = parent,
                     };
                     config.bots = {pilot, pilot};
@@ -655,6 +658,27 @@ void require_canonical_artifacts(
 }
 
 } // namespace
+
+std::vector<HoldoutRecord> collect_holdout_records(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> control,
+    std::shared_ptr<const LearnedModel> treatment,
+    HoldoutCollectionConfig config,
+    std::ostream& progress) {
+    if (!parent || !control || !treatment) {
+        throw std::invalid_argument(
+            "HOLD1 collection requires three non-null models");
+    }
+    if (config.balanced_blocks == 0 ||
+        config.max_game_turns == 0 ||
+        config.pilot_training_games == 0) {
+        throw std::invalid_argument(
+            "HOLD1 collection limits must be positive");
+    }
+    return collect_holdout_impl(
+        std::move(parent), std::move(control),
+        std::move(treatment), config, progress);
+}
 
 ArtifactSnapshot snapshot_artifact(const std::string& path) {
     const ArtifactSnapshot before = snapshot_metadata(path);
@@ -1210,8 +1234,17 @@ run_sealed_terminal_weight_c17_evaluation(
                  << " probes, bit-identical)\n";
 
         const auto records =
-            collect_holdout(
-                parent, control, treatment, progress);
+            collect_holdout_records(
+                parent, control, treatment,
+                {
+                    .seed = kTerminalWeightC17HoldoutSeed,
+                    .generation = kHoldoutGeneration,
+                    .balanced_blocks =
+                        kHoldoutBalancedBlocks,
+                    .max_game_turns = 500,
+                    .pilot_training_games = 800,
+                },
+                progress);
         output.holdout =
             score_holdout_records(records);
         output.offline_gate =

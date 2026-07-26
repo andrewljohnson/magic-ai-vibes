@@ -515,6 +515,7 @@ struct FieldRegressionPolicyDecision {
     std::size_t deployment_horizon_turns =
         kFieldDeploymentHorizonTurns;
     bool blend_shallow_prior = true;
+    double value_continuation_epsilon = 0.0;
     double value_priority_residual_weight = 0.0;
     bool value_pass_dominance = false;
     LearnedContinuationController value_continuation_controller =

@@ -94,6 +94,28 @@ struct HoldoutRecord {
     bool operator==(const HoldoutRecord&) const = default;
 };
 
+struct HoldoutCollectionConfig {
+    std::uint64_t seed = 0;
+    std::size_t generation = 0;
+    std::size_t balanced_blocks = 0;
+    std::size_t max_game_turns = 500;
+    std::size_t pilot_training_games = 800;
+
+    bool operator==(
+        const HoldoutCollectionConfig&) const = default;
+};
+
+// Runs a frozen-parent Learned mirror in both seats (K=1/H=4,
+// exploration=0.05, Legacy continuation, PD0 off), then scores every traced
+// state from both perspectives with parent/control/treatment critics. The
+// schedule and output order are deterministic for a fixed configuration.
+std::vector<HoldoutRecord> collect_holdout_records(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> control,
+    std::shared_ptr<const LearnedModel> treatment,
+    HoldoutCollectionConfig config,
+    std::ostream& progress);
+
 struct CriticMetrics {
     ClusteredEstimate brier;
     ClusteredEstimate soft_log_loss;

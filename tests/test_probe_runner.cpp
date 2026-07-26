@@ -1,4 +1,5 @@
 #include "old_school/probe_runner.hpp"
+#include "old_school/joint_c17_eval.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1598,6 +1599,7 @@ void test_field_report_is_cache_free_hidden_safe_and_deployment_exact() {
 
     const std::string fingerprint =
         old_school::learned_model_fingerprint(model);
+    std::size_t fixture_index = 0;
     for (const DecisionProbe& probe : corpus) {
         const auto& decision =
             report_for(probe.stable_id);
@@ -1646,10 +1648,12 @@ void test_field_report_is_cache_free_hidden_safe_and_deployment_exact() {
                             .descriptor ==
                         descriptors[candidate] &&
                     decision.forced_consequences[candidate]
-                            .public_state_fingerprint.size() ==
-                        16,
+                            .public_state_fingerprint ==
+                        old_school::joint_c17_eval::
+                            kRequiredFieldConsequenceFingerprints
+                                [fixture_index][candidate],
                 "field rows or forced public consequence "
-                "fingerprints lost descriptor order");
+                "fingerprints lost canonical order");
         }
 
         const std::array<
@@ -1671,6 +1675,7 @@ void test_field_report_is_cache_free_hidden_safe_and_deployment_exact() {
                         old_school::probe_runner::
                             kFieldDeploymentHorizonTurns &&
                     policy->blend_shallow_prior &&
+                    policy->value_continuation_epsilon == 0.0 &&
                     policy->scores.size() ==
                         descriptors.size() &&
                     !policy->selected_keys.empty(),
@@ -1759,6 +1764,7 @@ void test_field_report_is_cache_free_hidden_safe_and_deployment_exact() {
                         PublicStackPassV1,
             "field report changed parent/control/treatment "
             "deployment metadata");
+        ++fixture_index;
     }
 
     const DecisionProbe& priority =

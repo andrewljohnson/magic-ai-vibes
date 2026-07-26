@@ -22,6 +22,11 @@ using old_school::BotKind;
 using old_school::DeckId;
 using old_school::TournamentSummary;
 
+const joint::JointC17ExpectedModelFingerprints kFingerprints{
+    .control = std::string(64, 'a'),
+    .treatment = std::string(64, 'b'),
+};
+
 class TestRunner {
   public:
     void run(
@@ -285,6 +290,116 @@ void add_stats(
     destination.draws += source.draws;
 }
 
+old_school::BotConfig learned_bot(bool treatment) {
+    old_school::BotConfig bot;
+    bot.kind = BotKind::Learned;
+    bot.learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    bot.rollouts_per_action = 8;
+    bot.value_pass_dominance = treatment;
+    bot.value_continuation_controller =
+        treatment
+            ? old_school::LearnedContinuationController::
+                  PublicStackPassV1
+            : old_school::LearnedContinuationController::Legacy;
+    bot.training_games = 800;
+    return bot;
+}
+
+old_school::BotConfig handcoded_bot() {
+    old_school::BotConfig bot;
+    bot.kind = BotKind::Handcrafted;
+    bot.rollouts_per_action = 1;
+    bot.training_games = 800;
+    return bot;
+}
+
+joint::PolicyRecipeEvidence learned_recipe(bool treatment) {
+    return {
+        .policy_token =
+            std::string(
+                treatment
+                    ? old_school::
+                          kLearnedJointC17TreatmentPolicyToken
+                    : old_school::
+                          kLearnedJointC17ControlPolicyToken),
+        .horizon_turns =
+            old_school::kLearnedValueSearchHorizonTurns,
+        .blend_shallow_prior = true,
+    };
+}
+
+joint::PolicyRecipeEvidence parent_recipe() {
+    return {
+        .policy_token =
+            std::string(
+                joint::kFrozenC16EvidencePolicyToken),
+        .horizon_turns =
+            old_school::kLearnedValueSearchHorizonTurns,
+        .blend_shallow_prior = true,
+    };
+}
+
+joint::PolicyRecipeEvidence handcoded_recipe() {
+    return {
+        .policy_token =
+            std::string(
+                joint::kHandcodedEvidencePolicyToken),
+        .horizon_turns = 0,
+        .blend_shallow_prior = false,
+    };
+}
+
+void distribute_quadrants(
+    const std::array<
+        old_school::DeckSimulationStats,
+        old_school::kDeckCount>& decks,
+    std::size_t games_per_quadrant,
+    joint::OutcomeQuadrants& quadrants,
+    std::array<
+        old_school::DeckSimulationStats,
+        old_school::kDeckCount>& mutable_decks) {
+    quadrants = {};
+    for (std::size_t deck = 0;
+         deck < old_school::kDeckCount; ++deck) {
+        std::size_t wins = decks[deck].wins;
+        std::size_t losses = decks[deck].losses;
+        std::size_t draws = decks[deck].draws;
+        for (std::size_t seat = 0; seat < 2; ++seat) {
+            for (std::size_t play_draw = 0;
+                 play_draw < 2; ++play_draw) {
+                auto& cell =
+                    quadrants[deck][seat][play_draw];
+                cell.games = games_per_quadrant;
+                cell.wins =
+                    std::min(wins, games_per_quadrant);
+                wins -= cell.wins;
+                const std::size_t after_wins =
+                    games_per_quadrant - cell.wins;
+                cell.losses =
+                    std::min(losses, after_wins);
+                losses -= cell.losses;
+                cell.draws =
+                    games_per_quadrant -
+                    cell.wins - cell.losses;
+                draws -= cell.draws;
+            }
+        }
+        expect(
+            wins == 0 && losses == 0 && draws == 0,
+            "quadrant distribution");
+        auto& stats = mutable_decks[deck];
+        stats.on_play_games = 2 * games_per_quadrant;
+        stats.on_draw_games = 2 * games_per_quadrant;
+        stats.on_play_wins =
+            quadrants[deck][0][0].wins +
+            quadrants[deck][1][0].wins;
+        stats.on_draw_wins =
+            quadrants[deck][0][1].wins +
+            quadrants[deck][1][1].wins;
+    }
+}
+
 void recompute_benchmark_totals(
     BotBenchmarkSummary& summary) {
     summary.challenger_stats = {};
@@ -308,6 +423,36 @@ void recompute_benchmark_totals(
         }
     }
     summary.total_games = summary.challenger_stats.games;
+    const std::size_t games_per_quadrant =
+        summary.challenger_decks[0].games / 4;
+    const auto challenger_decks = summary.challenger_decks;
+    const auto baseline_decks = summary.baseline_decks;
+    distribute_quadrants(
+        challenger_decks, games_per_quadrant,
+        summary.challenger_outcome_quadrants,
+        summary.challenger_decks);
+    distribute_quadrants(
+        baseline_decks, games_per_quadrant,
+        summary.baseline_outcome_quadrants,
+        summary.baseline_decks);
+    const double mean =
+        (static_cast<double>(
+             summary.challenger_stats.wins) +
+         0.5 * static_cast<double>(
+                   summary.challenger_stats.draws)) /
+        static_cast<double>(summary.total_games);
+    constexpr double standard_error = 0.01;
+    constexpr double z = 1.959963984540054;
+    summary.challenger_quartet_cr1 = {
+        .clusters = summary.total_games / 4,
+        .records = summary.total_games,
+        .mean = mean,
+        .standard_error = standard_error,
+        .confidence_low_95 =
+            mean - z * standard_error,
+        .confidence_high_95 =
+            mean + z * standard_error,
+    };
 }
 
 BotBenchmarkSummary benchmark_fixture(
@@ -337,14 +482,78 @@ BotBenchmarkSummary benchmark_fixture(
     return summary;
 }
 
-BotBenchmarkSummary passing_direct_panel() {
-    return benchmark_fixture(
-        joint::kDirectPanelRepetitions, 84, 37);
+joint::DirectPanelEvidence panel_evidence(
+    joint::DirectPanelRole role,
+    BotBenchmarkSummary summary,
+    std::size_t fixed_seed_index = 0) {
+    joint::DirectPanelEvidence evidence{
+        .role = role,
+        .challenger_policy = learned_recipe(true),
+        .summary = std::move(summary),
+    };
+    auto& panel = evidence.summary;
+    panel.challenger = learned_bot(true);
+    panel.challenger_model_fingerprint =
+        kFingerprints.treatment;
+    panel.learned_training_seed =
+        old_school::kDefaultLearnedTrainingSeed;
+    switch (role) {
+    case joint::DirectPanelRole::TreatmentVsControl:
+        evidence.baseline_policy = learned_recipe(false);
+        panel.baseline = learned_bot(false);
+        panel.baseline_model_fingerprint =
+            kFingerprints.control;
+        panel.evaluation_seed =
+            old_school::
+                kLearnedJointC17MatchedControlGameplaySeed;
+        break;
+    case joint::DirectPanelRole::TreatmentVsParent:
+        evidence.baseline_policy = parent_recipe();
+        panel.baseline = learned_bot(false);
+        panel.baseline_model_fingerprint =
+            std::string(
+                old_school::
+                    kLearnedJointC17ParentFingerprint);
+        panel.evaluation_seed =
+            old_school::
+                kLearnedJointC17FrozenC16GameplaySeed;
+        break;
+    case joint::DirectPanelRole::TreatmentVsHandcodedPrimary:
+        evidence.baseline_policy = handcoded_recipe();
+        panel.baseline = handcoded_bot();
+        panel.evaluation_seed =
+            old_school::
+                kLearnedJointC17HandcodedGameplaySeed;
+        break;
+    case joint::DirectPanelRole::TreatmentVsHandcodedFixedSeed:
+        evidence.baseline_policy = handcoded_recipe();
+        panel.baseline = handcoded_bot();
+        panel.evaluation_seed =
+            joint::kFixedSeedPanelSeeds.at(
+                fixed_seed_index);
+        break;
+    }
+    return evidence;
 }
 
-BotBenchmarkSummary passing_fixed_seed_panel() {
-    return benchmark_fixture(
-        joint::kFixedSeedPanelRepetitions, 10, 5);
+joint::DirectPanelEvidence passing_direct_panel(
+    joint::DirectPanelRole role =
+        joint::DirectPanelRole::
+            TreatmentVsHandcodedPrimary) {
+    return panel_evidence(
+        role,
+        benchmark_fixture(
+            joint::kDirectPanelRepetitions, 84, 37));
+}
+
+joint::DirectPanelEvidence passing_fixed_seed_panel(
+    std::size_t seed_index = 0) {
+    return panel_evidence(
+        joint::DirectPanelRole::
+            TreatmentVsHandcodedFixedSeed,
+        benchmark_fixture(
+            joint::kFixedSeedPanelRepetitions, 10, 5),
+        seed_index);
 }
 
 void transfer_cell_wins(
@@ -386,40 +595,530 @@ void recompute_count_totals(
         }
     }
     summary.total_games = summary.challenger.games;
+    const std::size_t games_per_quadrant =
+        summary.challenger_decks[0].games / 4;
+    auto distribute =
+        [games_per_quadrant](
+            const std::array<
+                joint::OutcomeCounts,
+                old_school::kDeckCount>& decks,
+            joint::OutcomeQuadrants& quadrants) {
+            quadrants = {};
+            for (std::size_t deck = 0;
+                 deck < old_school::kDeckCount; ++deck) {
+                std::size_t wins = decks[deck].wins;
+                std::size_t losses = decks[deck].losses;
+                std::size_t draws = decks[deck].draws;
+                for (std::size_t seat = 0;
+                     seat < 2; ++seat) {
+                    for (std::size_t play_draw = 0;
+                         play_draw < 2; ++play_draw) {
+                        auto& cell =
+                            quadrants[deck][seat][play_draw];
+                        cell.games = games_per_quadrant;
+                        cell.wins =
+                            std::min(
+                                wins,
+                                games_per_quadrant);
+                        wins -= cell.wins;
+                        cell.losses =
+                            std::min(
+                                losses,
+                                games_per_quadrant -
+                                    cell.wins);
+                        losses -= cell.losses;
+                        cell.draws =
+                            games_per_quadrant -
+                            cell.wins - cell.losses;
+                        draws -= cell.draws;
+                    }
+                }
+                expect(
+                    wins == 0 && losses == 0 &&
+                        draws == 0,
+                    "count quadrant distribution");
+            }
+        };
+    distribute(
+        summary.challenger_decks,
+        summary.challenger_outcome_quadrants);
+    distribute(
+        summary.baseline_decks,
+        summary.baseline_outcome_quadrants);
 }
 
-std::vector<BotBenchmarkSummary> passing_fixed_seed_panels() {
-    return std::vector<BotBenchmarkSummary>(
-        joint::kFixedSeedPanelCount,
-        passing_fixed_seed_panel());
+std::vector<joint::DirectPanelEvidence>
+passing_fixed_seed_panels() {
+    std::vector<joint::DirectPanelEvidence> panels;
+    panels.reserve(joint::kFixedSeedPanelCount);
+    for (std::size_t index = 0;
+         index < joint::kFixedSeedPanelCount; ++index) {
+        panels.push_back(passing_fixed_seed_panel(index));
+    }
+    return panels;
 }
 
 joint::BenchmarkCountSummary passing_final_pool() {
     const auto direct = passing_direct_panel();
     const auto fixed = passing_fixed_seed_panels();
     const auto merged =
-        joint::merge_final_direct_panels(direct, fixed);
+        joint::merge_final_direct_panels(
+            direct, fixed, kFingerprints);
     expect(merged.has_value(), "passing panels must merge");
     return *merged;
 }
 
-TournamentSummary passing_mixed_field_pool() {
-    TournamentSummary summary;
-    summary.total_games = joint::kMixedFieldTotalGames;
-    constexpr std::array<std::size_t, old_school::kBotKindCount>
-        wins = {200, 280, 320, 340, 460};
-    for (std::size_t deck = 0;
-         deck < old_school::kDeckCount; ++deck) {
-        for (std::size_t bot = 0;
-             bot < old_school::kBotKindCount; ++bot) {
-            auto& stats = summary.deck_bots[deck][bot];
-            stats.games =
-                joint::kMixedFieldGamesPerDeckPolicy;
-            stats.wins = wins[bot];
-            stats.losses = stats.games - stats.wins;
+void add_deck_stats_for_fixture(
+    old_school::DeckSimulationStats& destination,
+    const old_school::DeckSimulationStats& source) {
+    destination.games += source.games;
+    destination.wins += source.wins;
+    destination.losses += source.losses;
+    destination.draws += source.draws;
+    destination.on_play_games += source.on_play_games;
+    destination.on_play_wins += source.on_play_wins;
+    destination.on_draw_games += source.on_draw_games;
+    destination.on_draw_wins += source.on_draw_wins;
+}
+
+void add_bot_stats_for_fixture(
+    old_school::BotSimulationStats& destination,
+    const old_school::BotSimulationStats& source) {
+    destination.games += source.games;
+    destination.wins += source.wins;
+    destination.losses += source.losses;
+    destination.draws += source.draws;
+}
+
+std::array<
+    old_school::BotMatchupStats,
+    old_school::kBotMatchupCount>
+canonical_bot_matchups_fixture() {
+    std::array<
+        old_school::BotMatchupStats,
+        old_school::kBotMatchupCount>
+        result{};
+    std::size_t index = 0;
+    for (std::size_t first = 0;
+         first < old_school::kBotKindCount; ++first) {
+        for (std::size_t second = first + 1;
+             second < old_school::kBotKindCount;
+             ++second) {
+            result[index++] = {
+                .first_bot =
+                    static_cast<BotKind>(first),
+                .second_bot =
+                    static_cast<BotKind>(second),
+            };
         }
     }
+    return result;
+}
+
+TournamentSummary passing_mixed_field_seed_panel(
+    std::size_t seed_index) {
+    TournamentSummary summary;
+    summary.games_per_matchup =
+        joint::kMixedFieldGamesPerMatchup;
+    summary.total_games =
+        joint::kMixedFieldGamesPerSeed;
+    summary.evaluation_seed =
+        joint::kFixedSeedPanelSeeds.at(seed_index);
+    summary.learned_training_seed =
+        old_school::kDefaultLearnedTrainingSeed;
+    summary.effective_learned_bot =
+        learned_bot(true);
+    summary.effective_learned_model_fingerprint =
+        kFingerprints.treatment;
+    summary.bot_matchups =
+        canonical_bot_matchups_fixture();
+
+    constexpr std::array<
+        std::pair<DeckId, DeckId>,
+        old_school::kDistinctDeckPairingCount>
+        pairings = {{
+            {DeckId::Green, DeckId::Red},
+            {DeckId::Green, DeckId::Blue},
+            {DeckId::Green, DeckId::White},
+            {DeckId::Green, DeckId::RUAggro},
+            {DeckId::Red, DeckId::Blue},
+            {DeckId::Red, DeckId::White},
+            {DeckId::Red, DeckId::RUAggro},
+            {DeckId::Blue, DeckId::White},
+            {DeckId::Blue, DeckId::RUAggro},
+            {DeckId::White, DeckId::RUAggro},
+        }};
+    constexpr std::array<
+        std::size_t,
+        old_school::kBotKindCount>
+        wins = {4, 7, 8, 9, 12};
+    constexpr std::array<
+        std::size_t,
+        old_school::kBotKindCount>
+        losses = {12, 9, 8, 7, 4};
+
+    for (std::size_t matchup_index = 0;
+         matchup_index < pairings.size();
+         ++matchup_index) {
+        auto& matchup = summary.matchups[matchup_index];
+        matchup.first_deck =
+            pairings[matchup_index].first;
+        matchup.second_deck =
+            pairings[matchup_index].second;
+        auto& result = matchup.result;
+        result.games =
+            joint::kMixedFieldGamesPerMatchup;
+        result.draws = 20;
+        result.life_total_finishes = 80;
+        result.turn_limit_draws = 20;
+        result.bot_matchups =
+            canonical_bot_matchups_fixture();
+        constexpr std::array<
+            std::size_t,
+            old_school::kBotMatchupCount>
+            first_wins = {
+                1, 1, 1, 1, 1, 2, 2, 1, 1, 0,
+            };
+        for (std::size_t bot_matchup = 0;
+             bot_matchup <
+                 result.bot_matchups.size();
+             ++bot_matchup) {
+            auto& stats =
+                result.bot_matchups[bot_matchup];
+            stats.games = 8;
+            stats.first_wins =
+                first_wins[bot_matchup];
+            stats.second_wins =
+                6 - stats.first_wins;
+            stats.draws = 2;
+        }
+
+        for (std::size_t seat = 0;
+             seat < 2; ++seat) {
+            auto& deck = result.decks[seat];
+            deck.games = 100;
+            deck.wins = 40;
+            deck.losses = 40;
+            deck.draws = 20;
+            deck.on_play_games = 50;
+            deck.on_play_wins = 19;
+            deck.on_draw_games = 50;
+            deck.on_draw_wins = 21;
+            for (std::size_t bot = 0;
+                 bot < old_school::kBotKindCount;
+                 ++bot) {
+                auto& cell =
+                    result.deck_bots[seat][bot];
+                cell.games = 20;
+                cell.wins = wins[bot];
+                cell.losses = losses[bot];
+                cell.draws =
+                    20 - wins[bot] - losses[bot];
+                cell.on_play_games = 10;
+                cell.on_play_wins = wins[bot] / 2;
+                cell.on_draw_games = 10;
+                cell.on_draw_wins =
+                    wins[bot] - cell.on_play_wins;
+                add_stats(result.bots[bot], cell);
+            }
+        }
+
+        const auto first =
+            static_cast<std::size_t>(
+                matchup.first_deck);
+        const auto second =
+            static_cast<std::size_t>(
+                matchup.second_deck);
+        add_deck_stats_for_fixture(
+            summary.decks[first],
+            result.decks[0]);
+        add_deck_stats_for_fixture(
+            summary.decks[second],
+            result.decks[1]);
+        for (std::size_t bot = 0;
+             bot < old_school::kBotKindCount;
+             ++bot) {
+            add_bot_stats_for_fixture(
+                summary.bots[bot],
+                result.bots[bot]);
+            add_deck_stats_for_fixture(
+                summary.deck_bots[first][bot],
+                result.deck_bots[0][bot]);
+            add_deck_stats_for_fixture(
+                summary.deck_bots[second][bot],
+                result.deck_bots[1][bot]);
+        }
+        for (std::size_t bot_matchup = 0;
+             bot_matchup <
+                 old_school::kBotMatchupCount;
+             ++bot_matchup) {
+            auto& destination =
+                summary.bot_matchups[bot_matchup];
+            const auto& source =
+                result.bot_matchups[bot_matchup];
+            destination.games += source.games;
+            destination.first_wins +=
+                source.first_wins;
+            destination.second_wins +=
+                source.second_wins;
+            destination.draws += source.draws;
+        }
+        summary.draws += result.draws;
+        summary.life_total_finishes +=
+            result.life_total_finishes;
+        summary.turn_limit_draws +=
+            result.turn_limit_draws;
+    }
     return summary;
+}
+
+std::vector<joint::MixedFieldSeedPanelEvidence>
+passing_mixed_field_panels() {
+    std::vector<joint::MixedFieldSeedPanelEvidence> panels;
+    panels.reserve(joint::kFixedSeedPanelCount);
+    for (std::size_t index = 0;
+         index < joint::kFixedSeedPanelCount; ++index) {
+        panels.push_back({
+            .learned_policy = learned_recipe(true),
+            .summary =
+                passing_mixed_field_seed_panel(index),
+        });
+    }
+    return panels;
+}
+
+std::vector<std::string> field_candidates(
+    std::size_t fixture) {
+    if (fixture < 2) {
+        return {
+            "no-blocks",
+            "block-air-elemental-with-flying-men",
+        };
+    }
+    if (fixture == 2) {
+        return {
+            "pass",
+            "growth-own-summoning-sick-grizzly-bears",
+        };
+    }
+    if (fixture == 3) {
+        return {
+            "pass",
+            "growth-own-ironroot-treefolk",
+            "growth-opponent-tapped-air-elemental",
+        };
+    }
+    return {
+        "skip-ironroot-treefolk",
+        "include-ironroot-treefolk",
+    };
+}
+
+old_school::probes::DecisionKind field_kind(
+    std::size_t fixture) {
+    if (fixture < 2) {
+        return old_school::probes::DecisionKind::Block;
+    }
+    if (fixture < 4) {
+        return old_school::probes::DecisionKind::Priority;
+    }
+    return old_school::probes::DecisionKind::Attack;
+}
+
+std::vector<probe::CandidateSamples> field_samples(
+    const std::vector<std::string>& candidates,
+    std::size_t worlds, bool stable) {
+    std::vector<probe::CandidateSamples> samples;
+    samples.reserve(candidates.size());
+    for (std::size_t candidate = 0;
+         candidate < candidates.size(); ++candidate) {
+        const double value =
+            candidate == 0
+                ? 0.60
+                : 0.60 -
+                      (stable ? 0.10 : 0.005) *
+                          static_cast<double>(candidate);
+        samples.push_back({
+            .key = candidates[candidate],
+            .q_samples =
+                std::vector<double>(worlds, value),
+        });
+    }
+    return samples;
+}
+
+runner::FieldRegressionPolicyDecision field_policy(
+    std::size_t fixture,
+    const std::vector<std::string>& candidates,
+    std::string name, std::string fingerprint,
+    bool treatment, std::size_t selected) {
+    const bool priority =
+        field_kind(fixture) ==
+        old_school::probes::DecisionKind::Priority;
+    runner::FieldRegressionPolicyDecision policy{
+        .name = std::move(name),
+        .fingerprint = std::move(fingerprint),
+        .score_kind =
+            priority
+                ? runner::FieldRegressionScoreKind::
+                      DeployedPrioritySearch
+                : runner::FieldRegressionScoreKind::
+                      ImmediateCombat,
+        .deployment_worlds =
+            runner::kFieldDeploymentWorlds,
+        .deployment_horizon_turns =
+            runner::kFieldDeploymentHorizonTurns,
+        .blend_shallow_prior = true,
+        .value_continuation_epsilon = 0.0,
+        .value_priority_residual_weight = 0.0,
+        .value_pass_dominance = treatment,
+        .value_continuation_controller =
+            treatment
+                ? old_school::
+                      LearnedContinuationController::
+                          PublicStackPassV1
+                : old_school::
+                      LearnedContinuationController::Legacy,
+    };
+    if (priority) {
+        policy.samples = field_samples(
+            candidates,
+            runner::kFieldDeploymentWorlds, true);
+        policy.accounting = {
+            .sampled_worlds =
+                runner::kFieldDeploymentWorlds,
+            .rollout_evaluations =
+                candidates.size() *
+                runner::kFieldDeploymentWorlds,
+            .terminal_evaluations = 0,
+            .bootstrapped_evaluations =
+                candidates.size() *
+                runner::kFieldDeploymentWorlds,
+        };
+    } else {
+        policy.deterministic_selection = true;
+    }
+    for (std::size_t candidate = 0;
+         candidate < candidates.size(); ++candidate) {
+        policy.scores.push_back({
+            .key = candidates[candidate],
+            .score =
+                candidate == selected ? 1.0 : 0.0,
+        });
+    }
+    policy.selected_keys = {candidates.at(selected)};
+    return policy;
+}
+
+runner::FieldRegressionReport passing_field_report() {
+    runner::FieldRegressionReport report{
+        .corpus_id =
+            std::string(
+                old_school::probes::
+                    kFieldRegressionsV1),
+        .reference_model_fingerprint =
+            std::string(
+                old_school::
+                    kLearnedJointC17ParentFingerprint),
+        .reference_worlds =
+            runner::kFieldReferenceWorlds,
+        .reference_horizon_turns =
+            runner::kFieldReferenceHorizonTurns,
+        .reference_rollouts_per_world = 1,
+        .reference_blend_shallow_prior = false,
+        .reference_value_continuation_epsilon = 0.0,
+        .reference_value_priority_residual_weight = 0.0,
+        .reference_value_pass_dominance = false,
+        .reference_value_continuation_controller =
+            old_school::
+                LearnedContinuationController::Legacy,
+        .hidden_repartition = {
+            .passed = true,
+            .policy_count = 4,
+            .probe_count =
+                joint::kFieldRegressionFixtureCount,
+        },
+        .rules_contract_passed = true,
+    };
+    report.decisions.reserve(
+        joint::kFieldRegressionFixtureCount);
+    for (std::size_t fixture = 0;
+         fixture <
+         joint::kFieldRegressionFixtureCount;
+         ++fixture) {
+        const auto candidates =
+            field_candidates(fixture);
+        runner::FieldRegressionDecisionReport decision{
+            .stable_id =
+                std::string(
+                    joint::
+                        kRequiredFieldRegressionIds[
+                            fixture]),
+            .root_deck =
+                fixture < 2
+                    ? DeckId::RUAggro
+                    : DeckId::Green,
+            .decision_kind = field_kind(fixture),
+            .candidate_descriptors = candidates,
+            .reference_samples =
+                field_samples(
+                    candidates,
+                    runner::kFieldReferenceWorlds,
+                    true),
+            .reference_accounting = {
+                .sampled_worlds =
+                    runner::kFieldReferenceWorlds,
+                .rollout_evaluations =
+                    candidates.size() *
+                    runner::kFieldReferenceWorlds,
+                .terminal_evaluations = 0,
+                .bootstrapped_evaluations =
+                    candidates.size() *
+                    runner::kFieldReferenceWorlds,
+            },
+            .parent =
+                field_policy(
+                    fixture, candidates,
+                    std::string(
+                        joint::
+                            kFrozenC16EvidencePolicyToken),
+                    std::string(
+                        old_school::
+                            kLearnedJointC17ParentFingerprint),
+                    false, 0),
+            .control =
+                field_policy(
+                    fixture, candidates,
+                    std::string(
+                        old_school::
+                            kLearnedJointC17ControlPolicyToken),
+                    kFingerprints.control,
+                    false, 0),
+            .treatment =
+                field_policy(
+                    fixture, candidates,
+                    std::string(
+                        old_school::
+                            kLearnedJointC17TreatmentPolicyToken),
+                    kFingerprints.treatment,
+                    true, 0),
+        };
+        for (std::size_t candidate = 0;
+             candidate < candidates.size();
+             ++candidate) {
+            decision.forced_consequences.push_back({
+                .descriptor = candidates[candidate],
+                .public_state_fingerprint =
+                    std::string(
+                        joint::
+                            kRequiredFieldConsequenceFingerprints
+                                [fixture][candidate]),
+            });
+        }
+        report.decisions.push_back(
+            std::move(decision));
+    }
+    return report;
 }
 
 void test_heldout_gate_accepts_exact_inclusive_guards() {
@@ -492,6 +1191,15 @@ void test_heldout_pooled_and_deck_boundaries_are_exact() {
     expect(
         !gate.accounting_exact && !gate.passed,
         "held-out deck perspective undercount must fail");
+
+    report = passing_holdout_report();
+    report.by_deck[0].records =
+        std::numeric_limits<std::size_t>::max();
+    report.by_deck[1].records = 1;
+    gate = joint::evaluate_heldout_gate(report);
+    expect(
+        !gate.accounting_exact && !gate.passed,
+        "held-out deck-record sum overflow must fail closed");
 }
 
 void test_heldout_bias_boundaries_and_inheritance() {
@@ -897,207 +1605,339 @@ void test_deep_gate_rejects_missing_or_nonfinite_rows() {
         "hidden repartition must be conjunctive");
 }
 
+void test_field_regression_gate_is_reject_only() {
+    auto report = passing_field_report();
+    auto gate =
+        joint::evaluate_field_regression_gate(
+            report, kFingerprints);
+    expect(
+        gate.metadata_exact &&
+            gate.fixture_count_exact &&
+            gate.every_fixture_valid &&
+            gate.stable_fixture_count ==
+                joint::kFieldRegressionFixtureCount &&
+            gate.control_agreements ==
+                joint::kFieldRegressionFixtureCount &&
+            gate.treatment_agreements ==
+                joint::kFieldRegressionFixtureCount &&
+            gate.treatment_losses == 0 &&
+            gate.passed,
+        "passing six-fixture field gate");
+
+    report = passing_field_report();
+    report.decisions[0].treatment =
+        field_policy(
+            0, field_candidates(0),
+            std::string(
+                old_school::
+                    kLearnedJointC17TreatmentPolicyToken),
+            kFingerprints.treatment, true, 1);
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        gate.every_fixture_valid &&
+            gate.treatment_losses == 1 &&
+            !gate.passed,
+        "stable treatment loss must reject");
+
+    report = passing_field_report();
+    report.decisions[0].control =
+        field_policy(
+            0, field_candidates(0),
+            std::string(
+                old_school::
+                    kLearnedJointC17ControlPolicyToken),
+            kFingerprints.control, false, 1);
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        gate.treatment_gains == 1 &&
+            gate.treatment_losses == 0 &&
+            gate.passed,
+        "treatment gain passes but does not promote");
+
+    report = passing_field_report();
+    const auto candidates = field_candidates(0);
+    report.decisions[0].reference_samples =
+        field_samples(
+            candidates,
+            runner::kFieldReferenceWorlds,
+            false);
+    report.decisions[0].treatment =
+        field_policy(
+            0, candidates,
+            std::string(
+                old_school::
+                    kLearnedJointC17TreatmentPolicyToken),
+            kFingerprints.treatment, true, 1);
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        gate.every_fixture_valid &&
+            !gate.fixtures[0]
+                 .stable_reference_best_set &&
+            gate.treatment_losses == 0 &&
+            gate.passed,
+        "unstable treatment difference cannot reject");
+}
+
+void test_field_regression_evidence_fails_closed() {
+    auto report = passing_field_report();
+    report.corpus_id = "wrong-corpus";
+    report.rules_contract_passed = false;
+    report.hidden_repartition.policy_count = 3;
+    auto gate =
+        joint::evaluate_field_regression_gate(
+            report, kFingerprints);
+    expect(
+        !gate.metadata_exact && !gate.passed,
+        "corpus/rules/hidden metadata must be exact");
+
+    report = passing_field_report();
+    std::swap(
+        report.decisions[0],
+        report.decisions[1]);
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        !gate.every_fixture_valid && !gate.passed,
+        "reordered field identities must fail");
+
+    report = passing_field_report();
+    --report.decisions[2]
+          .reference_accounting
+          .rollout_evaluations;
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        !gate.fixtures[2].reference_valid &&
+            !gate.passed,
+        "reference accounting must be exact");
+
+    report = passing_field_report();
+    report.decisions[3]
+        .treatment.deployment_worlds = 7;
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        !gate.fixtures[3].deployment_valid &&
+            !gate.passed,
+        "deployment config must be exact");
+
+    report = passing_field_report();
+    report.decisions[3]
+        .treatment.value_continuation_epsilon = 0.1;
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        !gate.fixtures[3].deployment_valid &&
+            !gate.passed,
+        "deployment continuation epsilon must be exact");
+
+    report = passing_field_report();
+    report.decisions[4]
+        .forced_consequences[0]
+        .public_state_fingerprint =
+        "0000000000000000";
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        !gate.fixtures[4].reference_valid &&
+            !gate.passed,
+        "forced public consequence evidence must be canonical");
+
+    report = passing_field_report();
+    report.decisions[5]
+        .reference_samples[0]
+        .q_samples.pop_back();
+    gate = joint::evaluate_field_regression_gate(
+        report, kFingerprints);
+    expect(
+        !gate.fixtures[5].reference_valid &&
+            !gate.passed,
+        "misaligned reference samples must fail closed");
+}
+
 void test_direct_gameplay_gate_uses_challenger_own_deck_outcomes() {
-    auto summary = passing_direct_panel();
-    transfer_cell_wins(summary, 0, 0, 1, 30);
+    auto evidence = passing_direct_panel();
+    transfer_cell_wins(
+        evidence.summary, 0, 0, 1, 30);
     for (std::size_t deck = 1;
          deck < old_school::kDeckCount; ++deck) {
-        transfer_cell_wins(summary, deck, 0, deck, 10);
+        transfer_cell_wins(
+            evidence.summary, deck, 0, deck, 10);
     }
 
     const auto green =
         static_cast<std::size_t>(DeckId::Green);
     expect(
-        summary.challenger_decks[green].wins <
-            summary.baseline_decks[green].wins,
-        "fixture must trigger the historical baseline-deck trap");
+        evidence.summary.challenger_decks[green].wins <
+            evidence.summary.baseline_decks[green].wins,
+        "fixture must trigger the baseline-deck trap");
     const auto gate =
-        joint::evaluate_direct_gameplay_panel(summary);
-    expect(gate.accounting_exact, "direct exact accounting");
-    expect(gate.rates_finite, "direct finite rates");
+        joint::evaluate_direct_gameplay_panel(
+            evidence, kFingerprints);
     expect(
-        gate.aggregate_strict_win &&
-            gate.wilson_lower_above_half,
-        "direct aggregate strength gates");
-    expect(
-        gate.challenger_deck_strict_wins[green] &&
-            gate.every_challenger_deck_strict_win,
-        "deck wins must be compared with that challenger's losses");
-    expect(gate.passed, "skewed baseline buckets must not reject");
+        gate.identity_exact &&
+            gate.accounting_exact &&
+            gate.clustered_estimate_valid &&
+            gate.aggregate_strict_win &&
+            gate.wilson_lower_above_half &&
+            gate.challenger_deck_strict_wins[green] &&
+            gate.every_challenger_deck_strict_win &&
+            gate.passed,
+        "direct deck gate must use challenger wins/losses");
 }
 
 void test_direct_gameplay_strict_wilson_and_count_boundaries() {
+    auto evidence = passing_direct_panel(
+        joint::DirectPanelRole::TreatmentVsControl);
     auto gate =
         joint::evaluate_direct_gameplay_panel(
-            passing_direct_panel());
-    expect(gate.passed, "passing direct fixture");
+            evidence, kFingerprints);
+    expect(gate.passed, "exact direct evidence must pass");
 
-    auto summary = benchmark_fixture(
-        joint::kDirectPanelRepetitions, 68, 34);
-    gate = joint::evaluate_direct_gameplay_panel(summary);
+    auto wrong_seed = evidence;
+    ++wrong_seed.summary.evaluation_seed;
+    gate = joint::evaluate_direct_gameplay_panel(
+        wrong_seed, kFingerprints);
     expect(
-        gate.accounting_exact &&
-            !gate.aggregate_strict_win &&
-            !gate.every_challenger_deck_strict_win &&
-            !gate.passed,
-        "direct equality must fail strict win gates");
+        !gate.identity_exact && !gate.passed,
+        "wrong direct evaluation seed must fail");
 
-    summary = benchmark_fixture(
-        joint::kDirectPanelRepetitions, 69, 34);
-    gate = joint::evaluate_direct_gameplay_panel(summary);
+    auto wrong_policy = evidence;
+    wrong_policy.challenger_policy.policy_token =
+        "same-marginals-different-policy";
+    gate = joint::evaluate_direct_gameplay_panel(
+        wrong_policy, kFingerprints);
     expect(
-        gate.accounting_exact &&
+        !gate.identity_exact && !gate.passed,
+        "wrong challenger policy token must fail");
+
+    auto wrong_model = evidence;
+    wrong_model.summary.challenger_model_fingerprint =
+        kFingerprints.control;
+    gate = joint::evaluate_direct_gameplay_panel(
+        wrong_model, kFingerprints);
+    expect(
+        !gate.identity_exact && !gate.passed,
+        "wrong challenger model must fail");
+
+    auto wrong_quadrant = evidence;
+    auto& short_cell =
+        wrong_quadrant.summary
+            .challenger_outcome_quadrants[0][0][0];
+    auto& long_cell =
+        wrong_quadrant.summary
+            .challenger_outcome_quadrants[0][0][1];
+    --short_cell.games;
+    --short_cell.losses;
+    ++long_cell.games;
+    ++long_cell.losses;
+    gate = joint::evaluate_direct_gameplay_panel(
+        wrong_quadrant, kFingerprints);
+    expect(
+        !gate.accounting_exact && !gate.passed,
+        "marginal-preserving quadrant redistribution must fail");
+
+    auto wrong_cluster = evidence;
+    --wrong_cluster.summary.challenger_quartet_cr1.clusters;
+    gate = joint::evaluate_direct_gameplay_panel(
+        wrong_cluster, kFingerprints);
+    expect(
+        !gate.clustered_estimate_valid && !gate.passed,
+        "wrong quartet cluster count must fail");
+
+    wrong_cluster = evidence;
+    wrong_cluster.summary.challenger_quartet_cr1.mean +=
+        1.0e-6;
+    gate = joint::evaluate_direct_gameplay_panel(
+        wrong_cluster, kFingerprints);
+    expect(
+        !gate.clustered_estimate_valid && !gate.passed,
+        "clustered mean inconsistent with outcomes must fail");
+
+    auto weak = panel_evidence(
+        joint::DirectPanelRole::TreatmentVsControl,
+        benchmark_fixture(
+            joint::kDirectPanelRepetitions, 69, 34));
+    gate = joint::evaluate_direct_gameplay_panel(
+        weak, kFingerprints);
+    expect(
+        gate.identity_exact &&
+            gate.accounting_exact &&
             gate.aggregate_strict_win &&
-            gate.every_challenger_deck_strict_win &&
             !gate.wilson_lower_above_half &&
             !gate.passed,
-        "small strict edge must still fail Wilson lower bound");
-
-    summary = passing_direct_panel();
-    --summary.repetitions_per_deck_pairing;
-    gate = joint::evaluate_direct_gameplay_panel(summary);
-    expect(
-        !gate.accounting_exact && !gate.passed,
-        "33 repetitions must fail exact accounting");
-
-    summary = passing_direct_panel();
-    --summary.total_games;
-    gate = joint::evaluate_direct_gameplay_panel(summary);
-    expect(
-        !gate.accounting_exact && !gate.passed,
-        "2,039 reported games must fail exact accounting");
-
-    summary = passing_direct_panel();
-    auto& diagonal_zero =
-        summary.challenger_deck_matchups[0][0];
-    auto& diagonal_one =
-        summary.challenger_deck_matchups[1][1];
-    auto& off_zero_one =
-        summary.challenger_deck_matchups[0][1];
-    auto& off_one_zero =
-        summary.challenger_deck_matchups[1][0];
-    --diagonal_zero.games;
-    --diagonal_zero.losses;
-    --diagonal_one.games;
-    --diagonal_one.losses;
-    ++off_zero_one.games;
-    ++off_zero_one.losses;
-    ++off_one_zero.games;
-    ++off_one_zero.losses;
-    recompute_benchmark_totals(summary);
-    gate = joint::evaluate_direct_gameplay_panel(summary);
-    expect(
-        summary.total_games == joint::kDirectPanelGames &&
-            !gate.accounting_exact && !gate.passed,
-        "wrong diagonal/off-diagonal matrix must fail");
-
-    summary = passing_direct_panel();
-    summary.total_games =
-        std::numeric_limits<std::size_t>::max();
-    summary.challenger_stats.games =
-        std::numeric_limits<std::size_t>::max();
-    summary.challenger_stats.wins =
-        std::numeric_limits<std::size_t>::max();
-    summary.challenger_stats.losses = 1;
-    gate = joint::evaluate_direct_gameplay_panel(summary);
-    expect(
-        !gate.accounting_exact &&
-            !gate.rates_finite && !gate.passed,
-        "overflowing outcome counts must fail closed");
+        "small strict edge must fail Wilson lower bound");
 }
 
 void test_fixed_seed_panels_are_exact_and_non_losing() {
-    const auto tie_panel = passing_fixed_seed_panel();
-    auto gate = joint::evaluate_fixed_seed_panel(tie_panel);
-    expect(
-        gate.accounting_exact &&
-            gate.aggregate_non_losing && gate.passed,
-        "fixed panel equality must pass non-losing gate");
-
-    auto losing_panel = tie_panel;
-    auto& cell =
-        losing_panel.challenger_deck_matchups[0][0];
-    --cell.wins;
-    ++cell.losses;
-    recompute_benchmark_totals(losing_panel);
-    gate = joint::evaluate_fixed_seed_panel(losing_panel);
-    expect(
-        gate.accounting_exact &&
-            !gate.aggregate_non_losing && !gate.passed,
-        "149-151 fixed panel must fail");
-
-    auto malformed_panel = tie_panel;
-    auto& diagonal_zero =
-        malformed_panel.challenger_deck_matchups[0][0];
-    auto& diagonal_one =
-        malformed_panel.challenger_deck_matchups[1][1];
-    auto& off_zero_one =
-        malformed_panel.challenger_deck_matchups[0][1];
-    auto& off_one_zero =
-        malformed_panel.challenger_deck_matchups[1][0];
-    --diagonal_zero.games;
-    --diagonal_zero.losses;
-    --diagonal_one.games;
-    --diagonal_one.losses;
-    ++off_zero_one.games;
-    ++off_zero_one.losses;
-    ++off_one_zero.games;
-    ++off_one_zero.losses;
-    recompute_benchmark_totals(malformed_panel);
-    gate = joint::evaluate_fixed_seed_panel(malformed_panel);
-    expect(
-        malformed_panel.total_games ==
-                joint::kFixedSeedPanelGames &&
-            !gate.accounting_exact && !gate.passed,
-        "19/11 fixed matrix cells must fail");
-
-    malformed_panel = tie_panel;
-    --malformed_panel.total_games;
-    gate = joint::evaluate_fixed_seed_panel(malformed_panel);
-    expect(
-        !gate.accounting_exact && !gate.passed,
-        "299 reported fixed games must fail");
-
-    malformed_panel = tie_panel;
-    --malformed_panel.repetitions_per_deck_pairing;
-    gate = joint::evaluate_fixed_seed_panel(malformed_panel);
-    expect(
-        !gate.accounting_exact && !gate.passed,
-        "four fixed repetitions must fail");
-
     auto panels = passing_fixed_seed_panels();
     auto set_gate =
-        joint::evaluate_fixed_seed_panel_set(panels);
+        joint::evaluate_fixed_seed_panel_set(
+            panels, kFingerprints);
     expect(
         set_gate.panel_count_exact &&
-            set_gate.panels.size() ==
-                joint::kFixedSeedPanelCount &&
+            set_gate.seeds_exact &&
             set_gate.every_panel_passed &&
             set_gate.passed,
-        "all eight fixed panels must pass");
+        "ordered fixed-seed set must pass");
 
-    panels.pop_back();
-    set_gate = joint::evaluate_fixed_seed_panel_set(panels);
+    std::swap(panels[2], panels[3]);
+    set_gate =
+        joint::evaluate_fixed_seed_panel_set(
+            panels, kFingerprints);
     expect(
-        !set_gate.panel_count_exact && !set_gate.passed,
-        "seven fixed panels must fail");
+        !set_gate.seeds_exact && !set_gate.passed,
+        "reordered fixed seeds must fail");
 
     panels = passing_fixed_seed_panels();
-    panels[3] = losing_panel;
-    set_gate = joint::evaluate_fixed_seed_panel_set(panels);
+    panels[3].summary.evaluation_seed =
+        panels[2].summary.evaluation_seed;
+    set_gate =
+        joint::evaluate_fixed_seed_panel_set(
+            panels, kFingerprints);
     expect(
-        set_gate.panel_count_exact &&
-            !set_gate.every_panel_passed &&
-            !set_gate.passed,
-        "one losing evaluation seed must fail the set");
+        !set_gate.seeds_exact && !set_gate.passed,
+        "duplicate fixed seed must fail");
+
+    auto losing = passing_fixed_seed_panel();
+    auto& cell =
+        losing.summary
+            .challenger_deck_matchups[0][0];
+    --cell.wins;
+    ++cell.losses;
+    recompute_benchmark_totals(losing.summary);
+    auto panel_gate =
+        joint::evaluate_fixed_seed_panel(
+            losing, kFingerprints);
+    expect(
+        panel_gate.identity_exact &&
+            panel_gate.accounting_exact &&
+            !panel_gate.aggregate_non_losing &&
+            !panel_gate.passed,
+        "149-151 fixed panel must fail");
+
+    auto wrong_cluster = passing_fixed_seed_panel();
+    ++wrong_cluster.summary
+          .challenger_quartet_cr1.records;
+    panel_gate =
+        joint::evaluate_fixed_seed_panel(
+            wrong_cluster, kFingerprints);
+    expect(
+        !panel_gate.clustered_estimate_valid &&
+            !panel_gate.passed,
+        "fixed panel CR1 record mismatch must fail");
 }
 
 void test_final_pool_merge_and_exact_accounting() {
-    const auto direct = passing_direct_panel();
+    const auto primary = passing_direct_panel();
     auto fixed = passing_fixed_seed_panels();
     const auto merged =
-        joint::merge_final_direct_panels(direct, fixed);
-    expect(merged.has_value(), "exact final panels must merge");
+        joint::merge_final_direct_panels(
+            primary, fixed, kFingerprints);
+    expect(merged.has_value(), "exact panels must merge");
     expect(
         merged->panel_count ==
                 joint::kFinalDirectPanelCount &&
@@ -1105,67 +1945,68 @@ void test_final_pool_merge_and_exact_accounting() {
                 joint::kFinalDirectRepetitions &&
             merged->total_games ==
                 joint::kFinalDirectGames,
-        "final aggregate counts");
-    for (std::size_t deck = 0;
-         deck < old_school::kDeckCount; ++deck) {
-        expect(
-            merged->challenger_decks[deck].games ==
-                joint::kFinalDirectGamesPerDeck,
-            "888 games per challenger deck");
-        for (std::size_t opponent = 0;
-             opponent < old_school::kDeckCount;
-             ++opponent) {
-            const auto expected =
-                deck == opponent
-                    ? joint::kFinalDirectDiagonalGames
-                    : joint::kFinalDirectOffDiagonalGames;
-            expect(
-                merged->challenger_deck_matchups
-                    [deck][opponent]
-                        .games == expected,
-                "final matrix cell count");
+        "final aggregate schedule");
+    for (const auto& deck :
+         merged->challenger_outcome_quadrants) {
+        for (const auto& seat : deck) {
+            for (const auto& play_draw : seat) {
+                expect(
+                    play_draw.games ==
+                        joint::
+                            kFinalDirectQuadrantGames,
+                    "final exact quadrant count");
+            }
         }
     }
-    expect(
-        joint::evaluate_final_direct_pool(*merged).passed,
-        "passing final pool");
 
-    fixed.pop_back();
+    const auto composite =
+        joint::evaluate_final_direct_gate(
+            primary, fixed, kFingerprints);
+    expect(
+        composite.primary.passed &&
+            composite.fixed_seed_panels.passed &&
+            composite.merge_succeeded &&
+            composite.pooled.passed &&
+            composite.passed,
+        "mandatory final direct gate");
+
+    fixed[4].summary.evaluation_seed =
+        fixed[3].summary.evaluation_seed;
     expect(
         !joint::merge_final_direct_panels(
-             direct, fixed)
+             primary, fixed, kFingerprints)
              .has_value(),
-        "seven panels must not merge");
-
-    fixed = passing_fixed_seed_panels();
-    --fixed[2].repetitions_per_deck_pairing;
-    expect(
-        !joint::merge_final_direct_panels(
-             direct, fixed)
-             .has_value(),
-        "malformed fixed panel must not merge");
+        "duplicated seed must not merge");
 }
 
 void test_final_pool_strength_and_matrix_boundaries() {
     auto summary = passing_final_pool();
     auto gate =
         joint::evaluate_final_direct_pool(summary);
-    expect(
-        gate.accounting_exact &&
-            gate.aggregate_strict_win &&
-            gate.wilson_lower_above_half &&
-            gate.every_challenger_deck_strict_win &&
-            gate.passed,
-        "final pool passing strength gates");
+    expect(gate.passed, "passing final pool");
 
-    auto wilson_failure = summary;
+    auto wrong_quadrant = summary;
+    --wrong_quadrant
+          .challenger_outcome_quadrants[0][0][0]
+          .games;
+    ++wrong_quadrant
+          .challenger_outcome_quadrants[0][0][1]
+          .games;
+    gate =
+        joint::evaluate_final_direct_pool(
+            wrong_quadrant);
+    expect(
+        !gate.accounting_exact && !gate.passed,
+        "pooled quadrant redistribution must fail");
+
+    auto weak = summary;
     for (std::size_t deck = 0;
          deck < old_school::kDeckCount; ++deck) {
         for (std::size_t opponent = 0;
              opponent < old_school::kDeckCount;
              ++opponent) {
             auto& cell =
-                wilson_failure.challenger_deck_matchups
+                weak.challenger_deck_matchups
                     [deck][opponent];
             if (deck == opponent) {
                 cell.wins = 149;
@@ -1176,256 +2017,310 @@ void test_final_pool_strength_and_matrix_boundaries() {
             }
         }
     }
-    recompute_count_totals(wilson_failure);
-    gate =
-        joint::evaluate_final_direct_pool(wilson_failure);
+    recompute_count_totals(weak);
+    gate = joint::evaluate_final_direct_pool(weak);
     expect(
         gate.accounting_exact &&
             gate.aggregate_strict_win &&
             gate.every_challenger_deck_strict_win &&
             !gate.wilson_lower_above_half &&
             !gate.passed,
-        "final small strict edge must fail pooled Wilson gate");
+        "small pooled edge must fail Wilson gate");
+}
 
-    auto deck_tie = summary;
-    auto& tie_cell =
-        deck_tie.challenger_deck_matchups[0][0];
-    tie_cell.wins -= 28;
-    tie_cell.losses += 28;
-    recompute_count_totals(deck_tie);
-    gate = joint::evaluate_final_direct_pool(deck_tie);
-    expect(
-        gate.accounting_exact &&
-            gate.aggregate_strict_win &&
-            gate.wilson_lower_above_half &&
-            !gate.challenger_deck_strict_wins[0] &&
-            !gate.every_challenger_deck_strict_win &&
-            !gate.passed,
-        "one 444-444 challenger deck must fail strictly");
-
-    auto wrong_matrix = summary;
-    auto& diagonal_zero =
-        wrong_matrix.challenger_deck_matchups[0][0];
-    auto& diagonal_one =
-        wrong_matrix.challenger_deck_matchups[1][1];
-    auto& off_zero_one =
-        wrong_matrix.challenger_deck_matchups[0][1];
-    auto& off_one_zero =
-        wrong_matrix.challenger_deck_matchups[1][0];
-    --diagonal_zero.games;
-    --diagonal_zero.losses;
-    --diagonal_one.games;
-    --diagonal_one.losses;
-    ++off_zero_one.games;
-    ++off_zero_one.losses;
-    ++off_one_zero.games;
-    ++off_one_zero.losses;
-    recompute_count_totals(wrong_matrix);
-    gate = joint::evaluate_final_direct_pool(wrong_matrix);
-    expect(
-        wrong_matrix.total_games ==
-                joint::kFinalDirectGames &&
-            !gate.accounting_exact && !gate.passed,
-        "295/149 matrix cells must fail exact final layout");
-
-    summary.panel_count =
-        joint::kFinalDirectPanelCount - 1;
-    gate = joint::evaluate_final_direct_pool(summary);
-    expect(
-        !gate.accounting_exact && !gate.passed,
-        "eight merged panels must fail final accounting");
-
-    summary = passing_final_pool();
-    --summary.repetitions_per_deck_pairing;
-    gate = joint::evaluate_final_direct_pool(summary);
-    expect(
-        !gate.accounting_exact && !gate.passed,
-        "73 final repetitions must fail accounting");
-
-    summary = passing_final_pool();
-    --summary.total_games;
-    gate = joint::evaluate_final_direct_pool(summary);
-    expect(
-        !gate.accounting_exact && !gate.passed,
-        "4,439 reported final games must fail accounting");
+void swap_learned_and_handcoded(
+    TournamentSummary& summary) {
+    const auto handcoded =
+        static_cast<std::size_t>(
+            BotKind::Handcrafted);
+    const auto learned =
+        static_cast<std::size_t>(BotKind::Learned);
+    const auto swap_matchups =
+        [](
+            std::array<
+                old_school::BotMatchupStats,
+                old_school::kBotMatchupCount>& matchups) {
+            const auto original = matchups;
+            matchups =
+                canonical_bot_matchups_fixture();
+            for (const auto& source : original) {
+                auto first =
+                    static_cast<std::size_t>(
+                        source.first_bot);
+                auto second =
+                    static_cast<std::size_t>(
+                        source.second_bot);
+                first =
+                    first == handcoded
+                        ? learned
+                        : first == learned
+                              ? handcoded
+                              : first;
+                second =
+                    second == handcoded
+                        ? learned
+                        : second == learned
+                              ? handcoded
+                              : second;
+                const auto low =
+                    std::min(first, second);
+                const auto high =
+                    std::max(first, second);
+                const auto destination =
+                    std::find_if(
+                        matchups.begin(),
+                        matchups.end(),
+                        [low, high](
+                            const old_school::
+                                BotMatchupStats&
+                                    candidate) {
+                            return static_cast<
+                                       std::size_t>(
+                                       candidate
+                                           .first_bot) ==
+                                       low &&
+                                   static_cast<
+                                       std::size_t>(
+                                       candidate
+                                           .second_bot) ==
+                                       high;
+                        });
+                expect(
+                    destination != matchups.end(),
+                    "permuted bot matchup identity");
+                destination->games = source.games;
+                destination->draws = source.draws;
+                const bool same_orientation =
+                    first < second;
+                destination->first_wins =
+                    same_orientation
+                        ? source.first_wins
+                        : source.second_wins;
+                destination->second_wins =
+                    same_orientation
+                        ? source.second_wins
+                        : source.first_wins;
+            }
+        };
+    std::swap(
+        summary.bots[handcoded],
+        summary.bots[learned]);
+    for (auto& deck : summary.deck_bots) {
+        std::swap(deck[handcoded], deck[learned]);
+    }
+    for (auto& matchup : summary.matchups) {
+        swap_matchups(
+            matchup.result.bot_matchups);
+        std::swap(
+            matchup.result.bots[handcoded],
+            matchup.result.bots[learned]);
+        for (auto& seat :
+             matchup.result.deck_bots) {
+            std::swap(
+                seat[handcoded], seat[learned]);
+        }
+    }
+    swap_matchups(summary.bot_matchups);
 }
 
 void test_mixed_field_gate_covers_all_decks_and_policies() {
-    const auto summary = passing_mixed_field_pool();
-    const auto gate =
-        joint::evaluate_mixed_field_pool(summary);
+    auto panels = passing_mixed_field_panels();
+    auto gate =
+        joint::evaluate_mixed_field_pool(
+            panels, kFingerprints);
+    expect(gate.panel_count_exact, "mixed panel count");
+    expect(gate.seeds_exact, "mixed seeds");
     expect(
-        gate.accounting_exact &&
-            gate.rates_finite &&
-            gate.learned_lift_best_on_every_deck &&
-            gate.passed,
-        "passing mixed-field pool");
-    for (std::size_t deck = 0;
-         deck < old_school::kDeckCount; ++deck) {
-        const auto& deck_gate = gate.by_deck[deck];
+        gate.policy_identity_exact,
+        "mixed policy identity");
+    expect(gate.accounting_exact, "mixed accounting");
+    expect(gate.rates_finite, "mixed rates");
+    expect(
+        gate.learned_lift_best_on_every_deck,
+        "mixed lift");
+    expect(gate.passed, "passing eight-seed mixed field");
+    for (const auto& deck : gate.by_deck) {
         expect(
-            deck_gate.deck == static_cast<DeckId>(deck) &&
-                deck_gate.rates_finite &&
-                deck_gate.learned_lift_is_best &&
-                deck_gate.best_other ==
+            deck.rates_finite &&
+                deck.learned_lift_is_best &&
+                deck.best_other ==
                     BotKind::Handcrafted,
-            "all five deck lift reports");
+            "all five deck lifts");
         expect_near(
-            deck_gate.learned_lift_percentage_points,
-            40.625, 1e-12,
-            "Learned lift percentage points");
+            deck.learned_lift_percentage_points,
+            40.0, 1e-12,
+            "Learned lift");
     }
 
-    const auto learned =
-        static_cast<std::size_t>(BotKind::Learned);
-    for (std::size_t deck = 0;
-         deck < old_school::kDeckCount; ++deck) {
-        for (std::size_t bot = 0;
-             bot < old_school::kBotKindCount; ++bot) {
-            if (bot == learned) {
-                continue;
-            }
-            auto challenger = passing_mixed_field_pool();
-            auto& other = challenger.deck_bots[deck][bot];
-            auto& donor = challenger.deck_bots
-                [deck][bot == 0 ? 1 : 0];
-            const std::size_t increase =
-                challenger.deck_bots[deck][learned].wins +
-                1 - other.wins;
-            other.wins += increase;
-            other.losses -= increase;
-            donor.wins -= increase;
-            donor.losses += increase;
-            const auto challenged =
-                joint::evaluate_mixed_field_pool(challenger);
-            expect(
-                challenged.accounting_exact &&
-                    !challenged.by_deck[deck]
-                         .learned_lift_is_best &&
-                    !challenged.passed,
-                "each other policy can defeat Learned lift");
-        }
+    for (auto& panel : panels) {
+        swap_learned_and_handcoded(panel.summary);
     }
+    gate = joint::evaluate_mixed_field_pool(
+        panels, kFingerprints);
+    expect(
+        gate.accounting_exact &&
+            !gate.learned_lift_best_on_every_deck &&
+            !gate.passed,
+        "stronger Handcoded field must reject Learned");
 }
 
 void test_mixed_field_ties_counts_and_overflow_fail_closed() {
-    auto summary = passing_mixed_field_pool();
-    const auto random =
-        static_cast<std::size_t>(BotKind::Random);
-    const auto handcoded =
-        static_cast<std::size_t>(BotKind::Handcrafted);
-    const auto learned =
-        static_cast<std::size_t>(BotKind::Learned);
-    auto& random_stats = summary.deck_bots[0][random];
-    auto& handcoded_stats = summary.deck_bots[0][handcoded];
-    const std::size_t tie_increase =
-        summary.deck_bots[0][learned].wins -
-        handcoded_stats.wins;
-    handcoded_stats.wins += tie_increase;
-    handcoded_stats.losses -= tie_increase;
-    random_stats.wins -= tie_increase;
-    random_stats.losses += tie_increase;
-    auto gate = joint::evaluate_mixed_field_pool(summary);
+    auto panels = passing_mixed_field_panels();
+    auto anonymous = panels;
+    anonymous.resize(1);
+    auto gate =
+        joint::evaluate_mixed_field_pool(
+            anonymous, kFingerprints);
     expect(
-        gate.accounting_exact &&
-            gate.by_deck[0].learned_lift_is_best &&
-            gate.passed,
-        "exact lift equality must pass 1e-12 tolerance");
+        !gate.panel_count_exact &&
+            !gate.accounting_exact &&
+            !gate.passed,
+        "anonymous pooled marginals must fail");
 
-    summary = passing_mixed_field_pool();
-    --summary.total_games;
-    gate = joint::evaluate_mixed_field_pool(summary);
+    auto wrong_seed = panels;
+    std::swap(
+        wrong_seed[0].summary.evaluation_seed,
+        wrong_seed[1].summary.evaluation_seed);
+    gate = joint::evaluate_mixed_field_pool(
+        wrong_seed, kFingerprints);
     expect(
-        !gate.accounting_exact && !gate.passed,
-        "7,999 mixed games must fail");
+        !gate.seeds_exact && !gate.passed,
+        "reordered mixed seeds must fail");
 
-    summary = passing_mixed_field_pool();
-    auto& short_cell = summary.deck_bots[0][0];
-    auto& long_cell = summary.deck_bots[0][1];
-    --short_cell.games;
-    --short_cell.losses;
-    ++long_cell.games;
-    ++long_cell.losses;
-    gate = joint::evaluate_mixed_field_pool(summary);
+    auto wrong_identity = panels;
+    wrong_identity[0]
+        .summary.effective_learned_model_fingerprint =
+        kFingerprints.control;
+    gate = joint::evaluate_mixed_field_pool(
+        wrong_identity, kFingerprints);
     expect(
-        !gate.accounting_exact && !gate.passed,
-        "639/641 cell redistribution must fail");
+        !gate.policy_identity_exact && !gate.passed,
+        "wrong mixed frozen model must fail");
 
-    summary = passing_mixed_field_pool();
-    summary.draws = 1;
-    gate = joint::evaluate_mixed_field_pool(summary);
+    auto top_only = panels;
+    --top_only[0].summary.deck_bots[0][0].games;
+    --top_only[0].summary.deck_bots[0][0].losses;
+    ++top_only[0].summary.deck_bots[0][1].games;
+    ++top_only[0].summary.deck_bots[0][1].losses;
+    gate = joint::evaluate_mixed_field_pool(
+        top_only, kFingerprints);
     expect(
         !gate.accounting_exact && !gate.passed,
-        "physical draw count must match seat draws");
+        "top-level marginal redistribution must fail child reconciliation");
 
-    summary = passing_mixed_field_pool();
-    auto& overflow = summary.deck_bots[0][0];
-    overflow.games =
+    auto wrong_pair = panels;
+    wrong_pair[0].summary.matchups[0].second_deck =
+        DeckId::Blue;
+    gate = joint::evaluate_mixed_field_pool(
+        wrong_pair, kFingerprints);
+    expect(
+        !gate.accounting_exact && !gate.passed,
+        "wrong deck-matchup identity must fail");
+
+    auto wrong_play_draw = panels;
+    auto& cell =
+        wrong_play_draw[0].summary
+            .matchups[0].result.deck_bots[0][0];
+    --cell.on_play_games;
+    ++cell.on_draw_games;
+    gate = joint::evaluate_mixed_field_pool(
+        wrong_play_draw, kFingerprints);
+    expect(
+        !gate.accounting_exact && !gate.passed,
+        "39/41 play-draw redistribution must fail");
+
+    auto wrong_bot_outcomes = panels;
+    auto& matchup_bot =
+        wrong_bot_outcomes[0].summary
+            .matchups[0].result.bot_matchups[0];
+    auto& panel_bot =
+        wrong_bot_outcomes[0].summary
+            .bot_matchups[0];
+    ++matchup_bot.first_wins;
+    --matchup_bot.second_wins;
+    ++panel_bot.first_wins;
+    --panel_bot.second_wins;
+    gate = joint::evaluate_mixed_field_pool(
+        wrong_bot_outcomes, kFingerprints);
+    expect(
+        !gate.accounting_exact && !gate.passed,
+        "bot-pair outcomes must reconcile with bot totals");
+
+    auto overflow = panels;
+    overflow[0].summary.deck_bots[0][0].games =
         std::numeric_limits<std::size_t>::max();
-    overflow.wins =
+    overflow[0].summary.deck_bots[0][0].wins =
         std::numeric_limits<std::size_t>::max();
-    overflow.losses = 1;
-    gate = joint::evaluate_mixed_field_pool(summary);
+    overflow[0].summary.deck_bots[0][0].losses = 1;
+    gate = joint::evaluate_mixed_field_pool(
+        overflow, kFingerprints);
     expect(
         !gate.accounting_exact &&
-            !gate.rates_finite && !gate.passed,
-        "mixed-field overflow must fail closed");
+            !gate.rates_finite &&
+            !gate.passed,
+        "mixed overflow must fail closed");
 }
 
 void test_stage_decision_suppresses_every_later_stage() {
     joint::StageOutcomes outcomes{
-        .heldout_passed = false,
+        .heldout_passed = true,
         .deep_reference_passed = true,
+        .field_regression_passed = true,
         .treatment_vs_control_passed = true,
         .treatment_vs_parent_passed = true,
         .treatment_vs_handcoded_passed = true,
         .fixed_seed_panel_passed = true,
+        .final_direct_pool_passed = std::nullopt,
         .mixed_field_passed = true,
     };
     auto decision =
         joint::evaluation_stage_decision(outcomes);
     expect(
-        !decision.run_deep_reference &&
-            !decision.run_treatment_vs_control &&
+        decision.run_final_direct_pool &&
             !decision.run_mixed_field &&
-            !decision.complete && !decision.passed,
-        "held-out failure must suppress supplied later wins");
+            !decision.complete &&
+            !decision.passed,
+        "mixed gate cannot run before pooled direct result");
 
-    outcomes = {.heldout_passed = true};
-    decision = joint::evaluation_stage_decision(outcomes);
+    outcomes.final_direct_pool_passed = false;
+    decision =
+        joint::evaluation_stage_decision(outcomes);
     expect(
-        decision.run_deep_reference &&
-            !decision.run_treatment_vs_control,
-        "absent deep result must suppress gameplay");
+        decision.run_final_direct_pool &&
+            !decision.run_mixed_field &&
+            !decision.complete,
+        "failed final direct pool suppresses mixed field");
 
-    outcomes.deep_reference_passed = true;
-    outcomes.treatment_vs_control_passed = true;
-    outcomes.treatment_vs_parent_passed = false;
-    outcomes.treatment_vs_handcoded_passed = true;
-    outcomes.fixed_seed_panel_passed = true;
-    outcomes.mixed_field_passed = true;
-    decision = joint::evaluation_stage_decision(outcomes);
+    outcomes.final_direct_pool_passed = true;
+    decision =
+        joint::evaluation_stage_decision(outcomes);
     expect(
-        decision.run_treatment_vs_parent &&
-            !decision.run_treatment_vs_handcoded &&
-            !decision.run_fixed_seed_panel &&
-            !decision.run_mixed_field,
-        "parent failure must suppress all later stages");
+        decision.run_mixed_field &&
+            decision.complete &&
+            decision.passed,
+        "all stages including final pool must pass");
 
-    outcomes.treatment_vs_parent_passed = true;
-    decision = joint::evaluation_stage_decision(outcomes);
+    outcomes.field_regression_passed = false;
+    decision =
+        joint::evaluation_stage_decision(outcomes);
     expect(
-        decision.run_treatment_vs_handcoded &&
-            decision.run_fixed_seed_panel &&
-            decision.run_mixed_field &&
-            decision.complete && decision.passed,
-        "all passing stages must complete");
+        decision.run_field_regression &&
+            !decision.run_treatment_vs_control &&
+            !decision.run_final_direct_pool &&
+            !decision.run_mixed_field &&
+            !decision.complete,
+        "field rejection suppresses all gameplay");
 
-    outcomes.mixed_field_passed = false;
-    decision = joint::evaluation_stage_decision(outcomes);
+    outcomes.field_regression_passed = true;
+    outcomes.heldout_passed = false;
+    decision =
+        joint::evaluation_stage_decision(outcomes);
     expect(
-        decision.complete && !decision.passed,
-        "final rejection is complete but not passing");
+        !decision.run_deep_reference &&
+            !decision.run_final_direct_pool &&
+            !decision.run_mixed_field &&
+            !decision.complete,
+        "early failure suppresses supplied later wins");
 }
 
 } // namespace
@@ -1465,6 +2360,12 @@ int main() {
     tests.run(
         "deep accounting and finiteness",
         test_deep_gate_rejects_missing_or_nonfinite_rows);
+    tests.run(
+        "field reject-only stable losses",
+        test_field_regression_gate_is_reject_only);
+    tests.run(
+        "field exact evidence",
+        test_field_regression_evidence_fails_closed);
     tests.run(
         "direct challenger-deck semantics",
         test_direct_gameplay_gate_uses_challenger_own_deck_outcomes);

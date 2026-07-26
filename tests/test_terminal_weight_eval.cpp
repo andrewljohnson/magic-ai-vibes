@@ -134,6 +134,24 @@ void test_cr1_uses_record_weighted_game_residuals() {
         "CR1 must reject one cluster");
 }
 
+void test_holdout_collection_rejects_invalid_inputs_before_running() {
+    std::ostringstream progress;
+    expect_throws<std::invalid_argument>(
+        [&] {
+            tw::collect_holdout_records(
+                nullptr, nullptr, nullptr,
+                {
+                    .seed = 17,
+                    .generation = 3,
+                    .balanced_blocks = 1,
+                    .max_game_turns = 12,
+                    .pilot_training_games = 8,
+                },
+                progress);
+        },
+        "holdout collection accepted null models");
+}
+
 void test_holdout_schedule_is_exactly_balanced() {
     constexpr std::uint64_t seed = 918273645ULL;
     const auto first = tw::holdout_schedule(seed, 9, 2);
@@ -641,6 +659,9 @@ void test_canonical_route_is_load_only_in_source() {
 
 int main() {
     TestRunner tests;
+    tests.run(
+        "holdout collection input validation",
+        test_holdout_collection_rejects_invalid_inputs_before_running);
     tests.run(
         "CR1 clustered estimator",
         test_cr1_uses_record_weighted_game_residuals);

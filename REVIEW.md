@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 13:32 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 14:11 PDT — refreshed every review cycle.*
 
 - **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
   current read (pooled 240 games/cell over seeds 4242+7801): **1 of
@@ -150,6 +150,29 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 14:11 PDT (review cycle)
+
+**No-change cycle: HEAD unchanged, fit pending.** Lift table:
+bit-identical, eighty-second cycle. Armed.
+
+## 2026-07-26 14:02 PDT (review cycle)
+
+**Two more sealed-machinery commits: benchmark schedules balanced
+and bound (6e1fef1), field regression scoring verified (9cc6968).
+The scheduler repair chain is resolving; the fit remains next.**
+Lift table: bit-identical, eighty-first cycle. Armed.
+
+## 2026-07-26 13:47 PDT (review cycle)
+
+**No-change cycle: scheduler repair in flight, one simulator
+process active, fit pending.** Lift table: bit-identical,
+eightieth cycle. Armed.
+
+## 2026-07-26 13:41 PDT (review cycle)
+
+**No-change cycle: scheduler repair continuing (wip HEAD), fit
+pending.** Lift table: bit-identical, seventy-ninth cycle. Armed.
 
 ## 2026-07-26 13:32 PDT (review cycle)
 

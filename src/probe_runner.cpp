@@ -2956,6 +2956,7 @@ FieldRegressionPolicyDecision score_field_deployment(
         .deployment_horizon_turns =
             kFieldDeploymentHorizonTurns,
         .blend_shallow_prior = true,
+        .value_continuation_epsilon = 0.0,
         .value_priority_residual_weight =
             scoring.value_priority_residual_weight,
         .value_pass_dominance =
@@ -3038,6 +3039,9 @@ void require_field_policy_bit_identical(
             hidden.deployment_horizon_turns ||
         original.blend_shallow_prior !=
             hidden.blend_shallow_prior ||
+        !bit_identical(
+            original.value_continuation_epsilon,
+            hidden.value_continuation_epsilon) ||
         !bit_identical(
             original.value_priority_residual_weight,
             hidden.value_priority_residual_weight) ||
