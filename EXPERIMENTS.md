@@ -8329,3 +8329,94 @@ only as a candidate component for the jointly declared composite. This is not
 a Learned promotion or a bot-strength claim. The next scientific event is the
 fresh-seed repaired RB0-0 sealed audit; replay weighting enters the composite
 only if that audit passes its unchanged frozen gates.
+
+### RB0-0 repaired fresh-seed sealed rerun (declared; no data opened)
+
+Declared 2026-07-26 after the RB0-E1 post-fix preflight passed every named
+mechanical invariant, after PD0 completed its frozen smoke, and after rereading
+`REVIEW.md` through its 10:54 PDT independent PD0 verification. No scientific
+RB0 output has been opened since the original exit-`2` infrastructure failure.
+
+Fresh audit seed `202607261047` was searched in the tracked worktree, the
+`build/experiments` capture namespace, and all Git history and was absent at
+declaration. Seed `202607260731` remains consumed and permanently quarantined.
+The implementation must retain it as a separately named quarantined constant;
+changing the canonical audit seed must not erase its CLI or preflight fence.
+
+#### Frozen rerun hypothesis and scope
+
+The original RB0-0 hypothesis remains unchanged: uniform record weighting
+overweights long actor-games and dense priority turns, especially optimistic
+early-Green canonical RO4 labels. On a fresh balanced frozen-C16 mirror
+corpus, exact actor-game/calendar-turn-balanced replay weighting will reduce
+RO4-eligible early-Green `RO4 - discounted-terminal` signed bias by at least
+`0.005`, with a clustered 95% upper confidence bound below zero and smaller
+absolute bias, while remaining safe on Green, Red, Blue, White, and RU Aggro.
+
+This rerun changes only:
+
+- the sealed scientific seed from the quarantined `202607260731` to fresh
+  `202607261047`;
+- the already verified compensated accumulation used solely by global,
+  actor, and actor-turn mass diagnostics; and
+- seed provenance, help text, CLI fencing, and focused tests required to bind
+  both the fresh reserved seed and the old quarantined seed.
+
+It does not change a row weight, target, scientific reducer, estimand, scope,
+gate, threshold, qualification, model, artifact, game count, schedule shape,
+search policy, or analysis. In particular, the frozen corpus remains:
+
+- exact immutable Environment-v3 C16 T800/S424242, fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+- generation coordinate `20`, 60 balanced 40-game blocks, 2,400 physical
+  games, 4,800 actor perspectives, and 960 actor-games per deck;
+- Value mirrors in both seats, K=1/H=4, exploration `0.05`, and 500-turn
+  maximum;
+- canonical RO4 only:
+  `0.50*z + 0.50*V_parent(i+4 recorded states)`, with terminal `z` in the
+  final four records;
+- unit control weights versus exact treatment
+  `N / (A * T_a * n_(a,t))`; and
+- the same paired two-ratio physical-game CR1 estimators, coverage/positive
+  control/ESS qualifications, early-Green effect and interval gates, pooled
+  loss gates, per-deck all-row and RO4-eligible safety gates, and every
+  artifact, schedule, target, hidden-zone, repeat, reverse, worker, and
+  deterministic-reduction safeguard declared in the original RB0-0 section.
+
+Exit `0` remains a complete scientific pass, exit `1` a complete scientific
+rejection or failed qualification, and exit `2` an infrastructure or
+incomplete-evidence failure. There is no best-slice salvage, threshold
+revision, seed retry, or post-result sample-size change.
+
+#### Required seed/provenance freeze
+
+Before opening the seed:
+
+- expose separate canonical and quarantined RB0 seed constants;
+- make the exclusive audit route use only `202607261047`;
+- reject both `202607261047` and `202607260731` as ordinary simulation or
+  training seeds;
+- make the mechanical preflight reject both scientific seeds while retaining
+  its nonreserved engineering seed;
+- update exact help/CLI contract tests and add focused constant/fence tests;
+- rebuild `-Werror` clean, run the replay-audit and mechanical-preflight
+  suites, the CLI suite, the full test gate, and ASan/UBSan for the affected
+  audit path; and
+- commit the resulting tree before the one-shot capture.
+
+The collision-safe capture prefix is reserved now. The exact and only
+scientific command will be:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/rb0-0-sealed-audit-repaired-s202607261047 \
+  ./build/old-school-sim --audit-replay-weights
+```
+
+After the command completes, retain its exit status without reinterpretation,
+reread the newest `REVIEW.md`, independently verify the immutable transcript
+and sidecars, and record the complete aggregate and all-five-deck result. A
+pass licenses replay weighting only as a component of a separately declared
+paired composite fit. A valid rejection closes the replay-weight family and
+excludes it from that composite. An exit-`2` consumes and quarantines the fresh
+seed without a scientific conclusion.
