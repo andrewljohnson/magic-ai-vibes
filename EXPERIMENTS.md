@@ -6323,3 +6323,121 @@ Review reconciliation before this conclusion: the 02:47 PDT independent entry
 explicitly endorsed the v4 pooling discipline as sound and not threshold
 weakening. The newer 02:55 PDT research entry reported C17-DB8 separately; it
 does not alter this measurement-only decision.
+
+### Production bootstrap-helper equivalence audit (accepted)
+
+After commit `c1b790a` routed both production challenger label paths through
+`n_state_bootstrap_targets(..., 4)`, a fresh full-size C16 retrain was run in
+an isolated working directory and cache:
+
+```sh
+/Users/andrewjohnson/proj/magic-ai-vibes/build/old-school-sim \
+  --benchmark --games 1 --seed 919191 \
+  --train-games 800 --train-seed 424242 \
+  --challenger learned-value-c16 --baseline random \
+  --learned-rollouts 1 --refresh-value-challenger-cache
+```
+
+Training completed in 291.22 seconds. The regenerated T800/C16 model reproduced
+fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+More strongly, its 3,111,437-byte artifact was byte-identical to the frozen
+control: both have SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+The incidental one-repetition/60-game Random benchmark scored 53-7 and is not
+bot-strength evidence; seed `919191` belongs only to this equivalence audit.
+
+Together with the exact small C2 and contextual-C1 component goldens and the
+independent review's bit-identical 2,000-game lift-table replay, this accepts
+the refactor as behavior-preserving. Distance 4 remains the immutable C16
+recipe, and a future non-4 treatment must produce a different target hash and
+artifact fingerprint before evaluation.
+
+### TW-C17 terminal-credit endpoint experiment (declared)
+
+Declared after rereading `REVIEW.md` through 03:03 PDT. VC-1v3 reproduced the
+four-record target's signed self-play miscalibration under Environment v3
+(approximately Blue -9 points and Green +17 points). The independent C17-DB8
+distance-8 fork then rejected at 48.7% over 2,040 games, but its preregistered
+sensitive rows moved in the predicted direction (Red mirror +9 points, Green
++12, RU Aggro +4). This licenses the value-target surface while rejecting
+distance 8 as a sufficient standalone recipe.
+
+We take the terminal-credit side of the reviewer's proposed bracket; the
+reviewer may test distance 6 independently. Hypothesis: on one shared C17
+shard, increasing terminal outcome weight from 0.50 to 0.75 will improve
+held-out terminal calibration and paired gameplay across all five decks
+relative to an otherwise bit-identical 0.50 control. The 0.75 endpoint is
+fixed a priori as the midpoint between the canonical equal blend and
+terminal-only supervision: it halves inherited-parent bias while retaining
+25% bootstrap signal. No endpoint tuning is permitted on these seeds.
+
+#### Shared training construction
+
+- Immutable parent: exact Environment-v3 C16, training seed `424242`, T800,
+  fingerprint `68126afc...`.
+- Reconstruct C16 once and abort unless its fingerprint and captured canonical
+  replay accounting match. Retain the terminal-only random anchor plus the
+  original G15 and G16 blocks.
+- Raw C17 seed: `202607260311`, repository-searched and unused before this
+  declaration.
+- Collect exactly five 40-game balanced blocks (200 games) using
+  `balanced_schedule(seed, 17, block)`. Every unordered deck pairing appears
+  in both seat orientations and with each seat starting; every deck appears
+  80 times.
+- Both seats are frozen C16 Learned mirrors with canonical late-stage
+  collection: K=1, horizon 4, exploration 0.05, no Handcrafted actions,
+  labels, features, or continuation policy.
+- For each chronological trace and perspective, let `z` be the unchanged
+  discounted terminal target and `v4 = V_C16(s[i+4])`. The final four records
+  remain `z`. Earlier TW50 targets are `0.50*z + 0.50*v4`; TW75 targets are
+  `0.75*z + 0.25*v4`.
+- Fit TW50-C17 and TW75-C17 from recursive deep clones of the exact same C16
+  using the identical anchor + G15 + G16 + shared C17 feature order, three
+  epochs, learning rate 0.006, and identical member/training/shuffle seeds.
+  Historical replay labels retain their original 0.50 blend; only the new C17
+  target bits may differ.
+
+Hard pre-evaluation invariants: one raw shard is generated exactly once;
+feature, outcome, ordering, schedule, and replay hashes match across arms;
+terminal-tail targets match; every bootstrapped row satisfies exactly
+`TW75 - TW50 = 0.25 * (z - v4)`; the two target hashes and candidate
+fingerprints differ; the parent fingerprint remains unchanged; and only
+critic components change. Either candidate must use a separate versioned
+terminal-weight artifact family and can never overwrite or load as generic
+C16/C17.
+
+#### Sealed offline and gameplay gates
+
+Holdout seed `202607260312` is reserved for a separate 200-game, five-block
+balanced C16-mirror corpus and may not enter fitting. Report game-clustered
+paired Brier loss, soft-label log loss, calibration bias, target variance,
+prediction saturation, and actual trace-record-to-turn distance pooled and
+for Green, Red, Blue, White, and RU Aggro. TW75 must beat TW50 and frozen C16
+on pooled Brier and log loss with the paired game-cluster 95% upper bound on
+each loss difference below zero; neither loss may worsen by more than 0.01 on
+any deck, and the VC-1v3 signed biases must shrink without creating a new
+material deck bias. Existing immutable Learned-reference action probes remain
+diagnostic and hidden-repartition invariance must be exact. Fitting the target
+formula itself is only a wiring check, never evidence of quality.
+
+If and only if the offline gate passes, evaluation seed `202607260313` is
+reserved for two load-only, deployment-identical K=8/H4 panels:
+
+1. TW75-C17 versus TW50-C17, 200 same-deck paired games per deck (1,000 total),
+   exactly balancing policy seat and play/draw.
+2. If the first passes, TW75-C17 versus frozen C16 under the identical panel.
+
+The license gate is aggregate strictly above 50% and no losing deck in both
+panels. The 1,000-game aggregate can resolve only effects of roughly three
+points; 200-game deck rows are directional screens, not small-effect claims.
+Red, Green, and RU Aggro are registered sensitive diagnostics but receive no
+special training weight or easier acceptance rule.
+
+Passing licenses a separately preregistered full-recipe comparison:
+constant-0.50 C16 versus a linear generation schedule
+`a_g = 0.50 + 0.25*(g-1)/15`, so G1 is exactly 0.50 and G16 exactly 0.75.
+It does not itself promote a bot. Failure rejects this 0.75 endpoint without
+seed retries; the next axis must be declared separately. All seeds
+`202607260311`, `202607260312`, and `202607260313` are now consumed for this
+single experiment regardless of outcome.
