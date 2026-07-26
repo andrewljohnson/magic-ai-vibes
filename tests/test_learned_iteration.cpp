@@ -1158,6 +1158,245 @@ void test_p16_mechanism_metrics_reject_malformed_observations() {
         "out-of-range mechanism advantage must be rejected");
 }
 
+std::vector<double> scores_with_centered_tanh_residual(
+    const std::vector<double>& base_scores,
+    const std::vector<double>& centered_logits) {
+    expect(
+        base_scores.size() == centered_logits.size(),
+        "test residual vectors must have equal size");
+    std::vector<double> scores = base_scores;
+    for (std::size_t option = 0; option < scores.size();
+         ++option) {
+        scores[option] +=
+            0.10 * std::tanh(centered_logits[option]);
+    }
+    return scores;
+}
+
+void test_centered_tanh_oracle_recovers_feasible_root() {
+    const std::vector<double> base = {0.02, -0.01, 0.0};
+    const std::vector<double> centered = {0.7, -0.2, -0.5};
+    const auto target =
+        iteration::p16_exploration_distribution(
+            scores_with_centered_tanh_residual(
+                base, centered));
+    const std::array observations = {
+        iteration::CenteredTanhOracleObservation{
+            .base_scores = base,
+            .target_probabilities = target,
+            .weight = 2.0,
+        },
+    };
+    const auto first =
+        iteration::evaluate_centered_tanh_rootwise_oracle(
+            observations);
+    const auto repeated =
+        iteration::evaluate_centered_tanh_rootwise_oracle(
+            observations);
+
+    expect(first == repeated,
+           "rootwise oracle must be bit-deterministic");
+    expect(first.observation_count == 1,
+           "rootwise oracle observation count");
+    expect_near(first.total_weight, 2.0, 0.0,
+                "rootwise oracle total weight");
+    expect(first.reduction_defined,
+           "nonstationary oracle target defines reduction");
+    expect(first.parent_kl > 0.0,
+           "feasible oracle target differs from parent");
+    expect(first.full_range.numerical_best_kl < 1.0e-12,
+           "full-range oracle must recover feasible target");
+    expect(
+        first.zero_saturation.numerical_best_kl < 1.0e-12,
+        "zero-saturation oracle must recover unsaturated target");
+    expect(
+        first.full_range.certified_kl_lower_bound <=
+            first.full_range.numerical_best_kl + 1.0e-12,
+        "certified full-range KL must lower-bound feasible KL");
+    expect(
+        first.zero_saturation.certified_kl_lower_bound <=
+            first.zero_saturation.numerical_best_kl + 1.0e-12,
+        "certified zero-saturation KL must lower-bound feasible KL");
+    expect(
+        first.zero_saturation
+                .maximum_abs_squashed_residual <
+            iteration::kP16ResidualSaturationThreshold,
+        "zero-saturation solution must remain strictly unsaturated");
+    expect(
+        first.full_range.achievable_reduction_fraction >
+            0.999999,
+        "feasible full-range reduction must approach one");
+    expect(
+        first.zero_saturation.achievable_reduction_fraction >
+            0.999999,
+        "feasible zero-saturation reduction must approach one");
+}
+
+void test_centered_tanh_oracle_brackets_unreachable_tilt() {
+    const std::vector<double> base = {0.0, 0.0};
+    const auto parent =
+        iteration::p16_exploration_distribution(base);
+    const auto target =
+        iteration::p16_all_action_target(
+            parent, 0, iteration::kP16AdvantageLimit);
+    const iteration::CenteredTanhOracleObservation tilted = {
+        .base_scores = base,
+        .target_probabilities = target,
+        .weight = 3.0,
+    };
+    const iteration::CenteredTanhOracleObservation stationary = {
+        .base_scores = {0.1, -0.1},
+        .target_probabilities =
+            iteration::p16_exploration_distribution(
+                std::vector<double>{0.1, -0.1}),
+        .weight = 1.0,
+    };
+    const std::array observations = {tilted, stationary};
+    const auto metrics =
+        iteration::evaluate_centered_tanh_rootwise_oracle(
+            observations);
+
+    expect(metrics.observation_count == 2,
+           "aggregate oracle observation count");
+    expect_near(metrics.total_weight, 4.0, 0.0,
+                "aggregate oracle weight");
+    expect(metrics.parent_kl > 0.0,
+           "maximum tilt must differ from parent");
+    expect(
+        metrics.full_range.numerical_best_kl > 1.0e-5,
+        "bounded residual plus exploration floor cannot fit max tilt");
+    expect(
+        metrics.full_range.numerical_best_kl <
+            metrics.parent_kl,
+        "full-range oracle must improve the max tilt");
+    expect(
+        metrics.zero_saturation.numerical_best_kl >
+            metrics.full_range.numerical_best_kl,
+        "zero-saturation constraint must tighten the max-tilt fit");
+    const auto full_boundary =
+        iteration::p16_exploration_distribution(
+            std::vector<double>{
+                0.10 * std::tanh(12.0),
+                -0.10 * std::tanh(12.0),
+            });
+    const auto zero_saturation_boundary =
+        iteration::p16_exploration_distribution(
+            std::vector<double>{0.095, -0.095});
+    expect_near(
+        metrics.full_range.numerical_best_kl,
+        0.75 * test_distribution_kl(
+                   target, full_boundary),
+        1.0e-12,
+        "binary full-range oracle reaches its exact box boundary");
+    expect_near(
+        metrics.zero_saturation.numerical_best_kl,
+        0.75 * test_distribution_kl(
+                   target, zero_saturation_boundary),
+        1.0e-12,
+        "binary zero-saturation oracle reaches its strict boundary");
+    expect(
+        metrics.full_range.certified_kl_lower_bound <=
+            metrics.full_range.numerical_best_kl + 1.0e-10,
+        "full-range certificate must bracket numerical fit");
+    expect(
+        metrics.zero_saturation.certified_kl_lower_bound <=
+            metrics.zero_saturation.numerical_best_kl +
+                1.0e-10,
+        "zero-saturation certificate must bracket numerical fit");
+    expect(
+        metrics.full_range.achievable_reduction_fraction <=
+            metrics.full_range
+                .certified_reduction_upper_bound +
+                1.0e-10,
+        "full-range reduction bracket must be ordered");
+    expect(
+        metrics.zero_saturation
+                .achievable_reduction_fraction <=
+            metrics.zero_saturation
+                    .certified_reduction_upper_bound +
+                1.0e-10,
+        "zero-saturation reduction bracket must be ordered");
+    expect(
+        metrics.zero_saturation
+                .maximum_abs_squashed_residual <
+            iteration::kP16ResidualSaturationThreshold,
+        "constrained max-tilt solution must not saturate");
+}
+
+void test_centered_tanh_oracle_validates_inputs() {
+    const iteration::CenteredTanhOracleObservation valid = {
+        .base_scores = {0.0, 0.0},
+        .target_probabilities = {0.5, 0.5},
+        .weight = 1.0,
+    };
+    const std::array valid_observations = {valid};
+    const std::vector<
+        iteration::CenteredTanhOracleObservation>
+        empty;
+    expect(
+        iteration::evaluate_centered_tanh_rootwise_oracle(
+            empty) ==
+            iteration::CenteredTanhRootwiseOracleMetrics{},
+        "empty oracle corpus must return zero metrics");
+
+    expect_invalid(
+        [&] {
+            auto malformed = valid;
+            malformed.base_scores.pop_back();
+            const std::array observations = {malformed};
+            static_cast<void>(
+                iteration::
+                    evaluate_centered_tanh_rootwise_oracle(
+                        observations));
+        },
+        "oracle must reject mismatched vectors");
+    expect_invalid(
+        [&] {
+            auto malformed = valid;
+            malformed.target_probabilities = {0.4, 0.4};
+            const std::array observations = {malformed};
+            static_cast<void>(
+                iteration::
+                    evaluate_centered_tanh_rootwise_oracle(
+                        observations));
+        },
+        "oracle must reject unnormalized targets");
+    expect_invalid(
+        [&] {
+            auto malformed = valid;
+            malformed.weight = 0.0;
+            const std::array observations = {malformed};
+            static_cast<void>(
+                iteration::
+                    evaluate_centered_tanh_rootwise_oracle(
+                        observations));
+        },
+        "oracle must reject zero weight");
+    expect_invalid(
+        [&] {
+            auto config =
+                iteration::CenteredTanhOracleConfig{};
+            config.policy_mixture_weight = 1.0;
+            static_cast<void>(
+                iteration::
+                    evaluate_centered_tanh_rootwise_oracle(
+                        valid_observations, config));
+        },
+        "oracle must reject a mixture without exploration floor");
+    expect_invalid(
+        [&] {
+            auto config =
+                iteration::CenteredTanhOracleConfig{};
+            config.saturation_threshold =
+                std::numeric_limits<double>::quiet_NaN();
+            static_cast<void>(
+                iteration::
+                    evaluate_centered_tanh_rootwise_oracle(
+                        valid_observations, config));
+        },
+        "oracle must reject non-finite saturation threshold");
+}
+
 void test_four_state_bootstrap_is_exact_and_terminal_at_tail() {
     const std::vector<double> parent_values = {
         0.10, 0.20, 0.30, 0.40,
@@ -1370,6 +1609,15 @@ int main() {
     runner.run(
         "P16 malformed mechanism observations",
         test_p16_mechanism_metrics_reject_malformed_observations);
+    runner.run(
+        "centered-tanh oracle feasible-root recovery",
+        test_centered_tanh_oracle_recovers_feasible_root);
+    runner.run(
+        "centered-tanh oracle unreachable-target bracket",
+        test_centered_tanh_oracle_brackets_unreachable_tilt);
+    runner.run(
+        "centered-tanh oracle input validation",
+        test_centered_tanh_oracle_validates_inputs);
     runner.run(
         "exact four-state Value bootstrap",
         test_four_state_bootstrap_is_exact_and_terminal_at_tail);

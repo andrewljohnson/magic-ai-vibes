@@ -178,6 +178,90 @@ struct P16MechanismMetrics {
 P16MechanismMetrics evaluate_p16_mechanism_metrics(
     std::span<const P16MechanismObservation> observations);
 
+// One root for the diagnostic centered-tanh capacity oracle. `base_scores`
+// are the frozen scores before adding a residual. The target and inverse-root
+// weight are the same quantities used by P-family cross-entropy fitting.
+struct CenteredTanhOracleObservation {
+    std::vector<double> base_scores;
+    std::vector<double> target_probabilities;
+    double weight = 1.0;
+
+    bool operator==(
+        const CenteredTanhOracleObservation&) const = default;
+};
+
+struct CenteredTanhOracleConfig {
+    double residual_weight = 0.10;
+    double policy_temperature = 0.10;
+    double policy_mixture_weight = 0.90;
+    double saturation_threshold =
+        kP16ResidualSaturationThreshold;
+
+    bool operator==(
+        const CenteredTanhOracleConfig&) const = default;
+};
+
+struct CenteredTanhOracleBound {
+    // Best feasible weighted KL found by the deterministic multistart
+    // projected-gradient solver. This supplies a constructive lower bound on
+    // the reduction achievable by independent per-root residuals.
+    double numerical_best_kl = 0.0;
+    double achievable_reduction_fraction = 0.0;
+
+    // A data-processing lower bound on every feasible KL, after relaxing the
+    // centered residuals to independent box-constrained score shifts. This
+    // supplies a certified upper bound on achievable reduction.
+    double certified_kl_lower_bound = 0.0;
+    double certified_reduction_upper_bound = 0.0;
+
+    double maximum_abs_squashed_residual = 0.0;
+    std::size_t roots_reaching_iteration_limit = 0;
+
+    bool operator==(
+        const CenteredTanhOracleBound&) const = default;
+};
+
+struct CenteredTanhRootwiseOracleMetrics {
+    std::size_t observation_count = 0;
+    double total_weight = 0.0;
+    double parent_kl = 0.0;
+    bool reduction_defined = false;
+
+    // `full_range` permits centered logits in [-12,+12], where tanh is within
+    // 8e-11 of its mathematical range. `zero_saturation` additionally
+    // requires every abs(tanh(centered_logit)) to be strictly below the
+    // configured saturation threshold.
+    CenteredTanhOracleBound full_range;
+    CenteredTanhOracleBound zero_saturation;
+
+    bool operator==(
+        const CenteredTanhRootwiseOracleMetrics&) const = default;
+};
+
+// Diagnostic-only capacity bracket for a frozen P-family shard. Each root is
+// solved independently, so the result excludes shared-head interference.
+//
+// The numerical side is exactly reproducible: fixed deterministic starts,
+// Euclidean projection onto the zero-sum centered-logit box by 96 bisections,
+// at most 512 projected-gradient iterations per start, and a 48-step Armijo
+// backtrack (initial step 1, factor 1/2, coefficient 1e-4). The full-range
+// centered-logit box is [-12,+12]. No RNG is used.
+//
+// The certified side relaxes centering and uses the maximum possible
+// per-action probability interval under independent bounded score shifts.
+// Bernoulli data processing then lower-bounds the root KL. Consequently:
+//
+//   achievable_reduction_fraction
+//       <= true independent-root optimum
+//       <= certified_reduction_upper_bound.
+//
+// Empty input returns zero metrics with undefined reductions. Malformed input
+// or configuration fails closed with invalid_argument.
+CenteredTanhRootwiseOracleMetrics
+evaluate_centered_tanh_rootwise_oracle(
+    std::span<const CenteredTanhOracleObservation> observations,
+    CenteredTanhOracleConfig config = {});
+
 // Value G8's exact four-recorded-state bootstrap. For state i, when state
 // i+4 exists, the target is the equal blend of terminal_z and V_parent(i+4).
 // The final four states retain the terminal target alone.

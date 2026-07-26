@@ -74,6 +74,43 @@ uses the same rules and current Learned Value policy as simulation mode. The
 MVP timing limitation still applies interactively: there is no priority
 window after attackers or blockers are declared.
 
+## Local web game
+
+Play the same engine in a wide-screen browser battlefield:
+
+```sh
+make web
+```
+
+Open <http://127.0.0.1:4173>. The setup drawer offers all five decks and
+Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned Value, and
+Learned Actor opponents, plus deterministic game/training seeds. Learned
+opponents are prepared while a new game opens; lower `train games` in
+the drawer for a faster behavior-inspection match.
+
+The Node server starts one structured C++ engine session per match. Game state
+and clickable choices come directly from the engine's legal-action callbacks;
+the browser does not parse terminal output or recreate rules. Opponent hand
+identities stay hidden unless the clearly labeled debug reveal is enabled.
+The battlefield shows life, mana, all public zones, tapped and summoning-sick
+permanents, the stack, phase/priority, combat selection, and the event log.
+`Ctrl-C` stops the server and all active game processes.
+
+Run only the bridge, API, and frontend checks with:
+
+```sh
+make test-web
+```
+
+For the fast, port-free client journey gate:
+
+```sh
+make test-web-ui
+```
+
+The standing browser-game priorities, acceptance criteria, and verification
+evidence live in [WEB_ROADMAP.md](WEB_ROADMAP.md).
+
 `--bots` accepts `mixed`, `random`, `monte-carlo`, `deep-monte-carlo`,
 `handcrafted`, `learned`/`learned-value`, or `learned-actor`. The default
 Learned bot and the Learned seat in `mixed` use the frozen legacy Value G0
@@ -421,6 +458,64 @@ row reports the oriented paired Q difference, standard error and 95% interval,
 the complete exact-max key set, and how many of 32 ordered K=8 blocks have the
 correct sign. It verifies bit-identical hidden repartitions and never reads or
 writes a probe-label cache.
+
+Train the preregistered outcome-tilted Priority policy family from the exact
+frozen Value Challenger C16 parent:
+
+```sh
+./build/old-school-sim --train-p-family 1 \
+  --seed 577215 \
+  --train-games 800 --train-seed 424242
+```
+
+Set `--train-p-family N` from 1 through 16 to construct P1 through PN with the
+same immutable recipe. This exclusive research mode accepts only `--seed`,
+`--train-games`, and `--train-seed`; it fails closed unless P0 has fingerprint
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`.
+Each generation uses the full balanced 40-game/five-deck schedule and fixed
+K=8/H=4 search, 32-root cap, 500-turn game cap, replay, and Adam settings.
+H=4 bounds each decision's search rollout; it does not truncate the training
+game, which still plays to a normal result or the separate 500-turn safety
+limit.
+
+The report prints enough information to reconstruct and audit each generation:
+root and training seeds, parent/candidate fingerprints, 40-game/80-seat
+balance, total and per-deck roots/rollouts/weights, positive and negative
+outcome signal, search/outcome conflict, replay occupancy, target sums, KL
+reduction, signed movement by advantage sign, argmax changes, residual
+saturation, and bit-exact component isolation. A failed scientific mechanism
+gate is reported as `REJECT` but exits successfully so a falsified experiment
+is not confused with a broken run; malformed accounting, changed frozen
+components, or a P0 fingerprint mismatch exits nonzero.
+
+After a P1 mechanism rejection, diagnose whether the fixed Priority-head fit
+budget is simply too small without recollecting five different self-play
+datasets:
+
+```sh
+./build/old-school-sim --diagnose-p1-fit \
+  --seed 577215 \
+  --train-games 800 --train-seed 424242
+```
+
+This exclusive, measurement-only route accepts only `--seed`, `--train-games`,
+and `--train-seed`. It loads the same fingerprint-bound C16 P0, collects the
+canonical K=8/H=4 P1 shard exactly once, and independently fits five candidates
+from that same frozen parent and fit seed: E8/rate 0.001 (the canonical
+control), E32/0.001, E128/0.001, E512/0.001, and E128/0.003. Every other Adam
+field is unchanged. The control must reproduce canonical P1 exactly, and every
+cell must retain bit-exact critic, Attack, Block, and DamageOrder components.
+
+Its compact table reports pooled plus Green, Red, Blue, White, and RU Aggro
+KL reduction, signed chosen-probability movement in both advantage strata,
+argmax changes, residual saturation, and candidate fingerprints. These are
+same-shard capacity measurements, not independently trained checkpoints or a
+strength claim; the diagnostic candidates are never published into the
+P-family. It also reports two independent-root capacity brackets: the full
+bounded residual range and the zero-saturation subrange. Each row includes the
+numerical best KL/reduction and the certified KL-lower/reduction-upper bounds,
+which separates shared-head interference from a limit inherent in the bounded
+per-root objective.
 
 ## Offline decision probes
 

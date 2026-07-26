@@ -672,6 +672,9 @@ struct LearnedActionSamples {
     std::vector<std::vector<double>> q_samples;
     std::size_t sampled_worlds = 0;
     std::size_t rollout_evaluations = 0;
+    // Each rollout is classified exactly once by the score source.
+    std::size_t terminal_evaluations = 0;
+    std::size_t bootstrapped_evaluations = 0;
 };
 
 struct LearnedValueAttackSetScores {
@@ -781,6 +784,38 @@ diagnose_learned_actor_generation_priority(
     int consecutive_passes, std::shared_ptr<const LearnedModel> parent,
     LearnedSearchConfig search);
 
+struct LearnedValuePolicyPriorityDiagnostic {
+    std::vector<PriorityAction> actions;
+    std::vector<double> base_scores;
+    std::vector<double> policy_logits;
+    std::vector<double> centered_policy_logits;
+    std::vector<double> residuals;
+    std::vector<double> combined_scores;
+    std::vector<double> behavior_probabilities;
+    std::uint64_t search_seed = 0;
+    std::uint64_t choice_seed = 0;
+    std::size_t rollout_evaluations = 0;
+    std::size_t chosen = 0;
+    PriorityAction selected_action;
+    bool transition_applied = false;
+    std::optional<PriorityPassResult> pass_result;
+    std::optional<GameResult> terminal_result;
+    GameState final_state;
+};
+
+// Focused test seam for P-family collection. It runs one real multi-action
+// Priority root through the indexed production Value scorer and 90/10
+// categorical behavior, then applies that exact sampled action.
+LearnedValuePolicyPriorityDiagnostic
+diagnose_learned_value_policy_priority(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t root_seed, std::uint64_t generation,
+    std::size_t schedule_index, std::size_t worlds,
+    double residual_weight = 0.10);
+
 struct LearnedActorGenerationAttackDiagnostic {
     std::size_t searched_roots = 0;
     std::size_t rollout_evaluations = 0;
@@ -858,6 +893,16 @@ class Game {
         int consecutive_passes,
         std::shared_ptr<const LearnedModel> parent,
         LearnedSearchConfig search);
+    friend LearnedValuePolicyPriorityDiagnostic
+    diagnose_learned_value_policy_priority(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t player, bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes,
+        std::shared_ptr<const LearnedModel> parent,
+        std::uint64_t root_seed, std::uint64_t generation,
+        std::size_t schedule_index, std::size_t worlds,
+        double residual_weight);
 
     void initialize();
     bool draw_card(std::size_t player);
@@ -870,7 +915,11 @@ class Game {
     std::optional<GameResult> play_combat_after_beginning();
     std::optional<GameResult> play_combat_with_attackers(
         std::vector<PermanentId> attackers);
-    double finish_learned_evaluation_horizon(
+    struct LearnedHorizonEvaluation {
+        double score = 0.0;
+        bool terminal = false;
+    };
+    LearnedHorizonEvaluation finish_learned_evaluation_horizon(
         std::size_t perspective, std::size_t horizon_turns);
     PriorityAction
     choose_priority_action(const std::vector<PriorityAction>& actions,
@@ -1697,9 +1746,27 @@ struct LearnedValuePolicyFamilyConfig {
     std::size_t search_worlds = 8;
     std::size_t max_roots_per_actor_game = 32;
     std::size_t max_game_turns = 500;
+    // Collection completion order is non-semantic; reduction remains in the
+    // fixed 40-game schedule order for every supported worker count.
+    std::size_t collection_threads = 4;
     double residual_weight = 0.10;
     double td_lambda = 0.90;
     LearnedValuePriorityHeadUpdateConfig optimizer{};
+    // Optional measurement-only fits over each generation's exact immutable
+    // replay examples. Every diagnostic starts from the same frozen parent as
+    // the production candidate and cannot affect the published checkpoint.
+    // Seeds must remain zero here; the generation's indexed PolicyFit seed is
+    // substituted identically for every cell.
+    std::vector<LearnedValuePriorityHeadUpdateConfig>
+        capacity_diagnostic_optimizers;
+    // Measurement-only independent-root capacity bracket. This never changes
+    // a checkpoint; the canonical diagnostic route enables it only for P1,
+    // whose uniform residual makes the oracle's zero-residual parent exact.
+    bool compute_rootwise_oracle = false;
+    // When nonempty, family construction fails unless P0 has this exact
+    // fingerprint. Canonical experiment routes use this to bind the recipe
+    // to their preregistered frozen parent.
+    std::string required_p0_fingerprint;
 };
 
 struct LearnedValuePolicyGameReport {
@@ -1774,6 +1841,47 @@ struct LearnedValuePolicyMechanismReport {
         const LearnedValuePolicyMechanismReport&) const = default;
 };
 
+struct LearnedValuePolicyCapacityDiagnosticReport {
+    LearnedValuePriorityHeadUpdateConfig optimizer;
+    std::string parent_fingerprint;
+    std::string candidate_fingerprint;
+    LearnedModelComponentFingerprints parent_components;
+    LearnedModelComponentFingerprints candidate_components;
+    LearnedValuePolicyMechanismReport mechanism;
+    std::array<LearnedValuePolicyMechanismReport, kDeckCount>
+        mechanisms_by_deck;
+
+    bool operator==(
+        const LearnedValuePolicyCapacityDiagnosticReport&) const =
+        default;
+};
+
+struct LearnedValuePolicyRootwiseOracleBoundReport {
+    double numerical_best_kl = 0.0;
+    double achievable_reduction_fraction = 0.0;
+    double certified_kl_lower_bound = 0.0;
+    double certified_reduction_upper_bound = 0.0;
+    double maximum_abs_squashed_residual = 0.0;
+    std::size_t roots_reaching_iteration_limit = 0;
+
+    bool operator==(
+        const LearnedValuePolicyRootwiseOracleBoundReport&) const =
+        default;
+};
+
+struct LearnedValuePolicyRootwiseOracleReport {
+    std::size_t observation_count = 0;
+    double total_weight = 0.0;
+    double parent_kl = 0.0;
+    bool reduction_defined = false;
+    LearnedValuePolicyRootwiseOracleBoundReport full_range;
+    LearnedValuePolicyRootwiseOracleBoundReport zero_saturation;
+
+    bool operator==(
+        const LearnedValuePolicyRootwiseOracleReport&) const =
+        default;
+};
+
 struct LearnedValuePolicyGenerationReport {
     std::uint64_t root_seed = 0;
     std::size_t generation = 0;
@@ -1783,6 +1891,7 @@ struct LearnedValuePolicyGenerationReport {
     std::size_t search_horizon_turns = 4;
     std::size_t max_roots_per_actor_game = 0;
     std::size_t max_game_turns = 0;
+    std::size_t collection_threads = 0;
     double residual_weight = 0.0;
     double td_lambda = 0.0;
     LearnedValuePriorityHeadUpdateConfig optimizer;
@@ -1803,6 +1912,13 @@ struct LearnedValuePolicyGenerationReport {
     LearnedModelComponentFingerprints parent_components;
     LearnedModelComponentFingerprints candidate_components;
     LearnedValuePolicyMechanismReport mechanism;
+    // Empty for normal P-family training. Populated only when explicitly
+    // requested to measure in-sample head capacity on the already-collected
+    // shard; these models are never returned as family checkpoints.
+    std::vector<LearnedValuePolicyCapacityDiagnosticReport>
+        capacity_diagnostics;
+    std::optional<LearnedValuePolicyRootwiseOracleReport>
+        rootwise_oracle;
 
     bool operator==(
         const LearnedValuePolicyGenerationReport&) const = default;

@@ -8,7 +8,24 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 17:35 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 20:52 PDT — refreshed at the top of every review cycle.*
+
+- **P1R rejected: the outcome signal overcorrects.** With the
+  optimizer fixed (all mechanism gates passed), the learned residual
+  holds indiscriminately — inverting even the live Force Spike. The
+  question is now foundational: FT128 (declared) tests whether
+  full-game counterfactuals contain the payable/live distinction at
+  all. Seven treatments rejected on the defect; each narrowed the
+  space.
+- **W-family A/B: gate FAIL at 49.6% — and maximally informative.**
+  Three deck slices identical game-for-game between weighted and
+  uniform sides: with the priority head untrained, behavioral
+  weighting is a near-no-op, exactly as theory predicts. Family HOLDS
+  (no tuning) until the first accepted P-family head makes the
+  likelihoods nondegenerate, then the A/B reruns. Eighth preregistered
+  rejection on the broader defect; the composition thesis stands.
+- Also delivered to Codex: commit `6a1c898` fails its own make test in
+  pristine checkout — recommend atomic script+code commits.
 
 - **Teacher audit now permanently reproducible** — the CLI reproduces
   the retired harness to six decimals (reviewer-verified). Orthogonal
@@ -74,6 +91,228 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 20:52 PDT
+
+No-change cycle: FT128 still implementing, no new commits or claims.
+Lift table deterministic-identical (3 of 5). W-family A/B continues.
+
+## 2026-07-25 20:44 PDT
+
+No-change cycle: FT128 implementation continues (no results, no new
+commits). Lift table deterministic-identical (3 of 5). The first live
+W-family A/B continues at seed 515151. Both decisive results — FT128's
+does-terminal-credit-contain-the-signal verdict and the W-family's
+first gate — remain the next events.
+
+## 2026-07-25 20:36 PDT
+
+No-change cycle for Codex claims: FT128 implementation continues. Lift
+table deterministic-identical (3 of 5).
+
+W-family engineering update worth relaying: the A/B's earlier
+mirror-identical result exposed that the first instrumented sampling
+block was dead code for the C16 deployment — the live path (with
+residual/shallow-prior handling) sampled worlds separately. The
+weighted branch now sits on the live path, verified activating
+(diverging seat behavior) with zero ASan/UBSan findings; the earlier
+segfault did not reproduce under sanitizers and is now attributed to
+the crashed run's environment rather than the (then-unexecuted)
+weighted code. The first genuine A/B at seed 515151 is running.
+
+## 2026-07-25 20:19 PDT
+
+No-change cycle: FT128 implementation continues (no results yet); no
+new commits. Lift table deterministic-identical (3 of 5). W-family A/B
+still computing — the weighted deployment's per-decision candidate
+scoring makes it several times slower than a standard screen; a
+performance note will accompany the result (deployment cost is itself
+a gate-relevant property for the W-family).
+
+## 2026-07-25 20:12 PDT
+
+No-change cycle for claims: FT128 implementation continues. The
+script-skew finding is now CONFIRMED by pristine checkout — commit
+`6a1c898` fails its own make test (exit 2) with all compiled suites
+passing and only the CLI script's uncommitted-code assertions failing.
+Priority for Codex stands: commit script and code atomically so every
+commit is self-consistently green; this matters because both trees'
+verification protocols pin to commits. Lift table
+deterministic-identical (3 of 5). W-family A/B still running.
+
+## 2026-07-25 20:04 PDT
+
+No-change cycle for claims: FT128 remains declared-not-run
+(implementation in progress). Verification closed this cycle: the
+teacher audit in the challenger worktree is exactly deterministic
+across repeated runs (0.070191 ± identical SE/CI both times, matching
+canonical values), so the earlier cross-invocation discrepancy was
+config difference between script steps, not nondeterminism. Lift table
+deterministic-identical (3 of 5). W-family A/B and the pristine-commit
+check still in flight.
+
+## 2026-07-25 19:52 PDT
+
+**P1R rejected — and the rejection is the most scientifically
+interesting yet.** The revised optimizer fully solved the fit problem
+(KL −61.9%, signed movement 90.5%, saturation 0.4% — all mechanism
+gates passed), which isolates the new failure as pure signal quality:
+the absorbed outcome credit OVERCORRECTS toward holding. P1R now
+passes even on the LIVE Force Spike (0.1513 vs 0.0870 when the tax is
+unpayable — inverting a decision the frozen model had right), and RU
+regret ballooned +0.0586. Terminal advantage apparently cannot
+distinguish "hold when the tax is payable" from "hold always" at this
+signal density. Codex's FT128 declaration asks the right next
+question: do full-game counterfactuals (both branches played to
+termination) contain the discriminating signal at all? If they do
+not, no outcome-credit recipe can work and the family is dead on
+principle rather than on tuning.
+
+**Process finding for Codex (from the orthogonal track's
+verification):** commit `6a1c898`'s test_cli.sh asserts output markers
+of code that is only in the uncommitted working tree — the committed
+state fails its own `make test` in a pristine checkout. All engine and
+unit suites pass at the commit; only the CLI-script skew fails.
+Recommend committing script and code atomically so any commit is
+self-consistently green; the reviewer has excluded the skewed script
+from the worktree's green criterion meanwhile. (Also verified: the
+teacher audit is deterministic in the worktree and reproduces
+canonical values exactly.)
+
+W-family: the same-policy guard now recognizes per-seat weighting
+(same aliasing class as the old C16/G0 bug, fixed and committed); the
+preregistered A/B at virgin seed 515151 is re-running.
+
+Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 19:05 PDT
+
+**P1's failure is solved as a diagnosis: optimizer underfit, proven
+three ways.** The fixed-shard matrix shows the canonical E8/R0.001
+achieving 1.18% KL reduction while E128/R0.001 clears the original 30%
+gate (30.93%, zero saturation), E512 reaches 71.3%, and E128/R0.003
+hits 61.9% — monotone in budget, on every deck, with the numerical
+oracle certifying that residual geometry alone could achieve 99.16%.
+The interference hypothesis is explicitly refuted by its own
+predeclared plateau criterion. This confirms the 18:20 review's
+"underfit is the boring but likely candidate" with far better evidence
+than the review suggested was obtainable.
+
+**P1R is correctly preregistered as a minimal-change successor:**
+exactly two optimizer fields move (epochs 8→128, lr 0.001→0.003),
+everything else pinned to the immutable P1 shard, and the offline
+behavioral gates (dev-v3 non-regression, Counterspell, live/payable
+Force Spike flip, X=0) stand between P1R and any gameplay. The
+validation-cache identity correction (regenerating the v1 cache under
+the exact-environment Actor fingerprint) is the right pedantry.
+
+W-family status: per-seat flag + benchmark CLI committed; the
+preregistered same-model A/B at virgin seed 515151 is running.
+
+Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 18:53 PDT
+
+P1 capacity diagnosis preregistered: a fixed-shard epochs ×
+learning-rate matrix plus a zero-saturation numerical oracle, with
+interpretation rules declared per outcome pattern (underfit vs step
+size vs interference vs inconclusive) and the explicit rule that no
+cell is accepted post hoc as a new recipe. The rejected P1 thresholds
+stand.
+
+Corrections accepted from Codex's audit of the 18:20 review note: P1
+used eight optimizer epochs (not one) and retained 32 roots per
+actor-game (not per game), and the original shard was not persisted —
+so the reviewer's "measurable from recorded artifacts alone"
+suggestion was wrong on availability; deterministic shard recollection
+is the right substitute. Duly corrected here.
+
+W-family status: increments 2+3 committed (observation hook +
+deployment flag, bit-identical off-path), A/B preregistered at virgin
+seeds 515151/626262. Next increment moves the flag per-seat so the
+same-model A/B can run.
+
+Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 18:35 PDT
+
+No-change cycle: the P1 measurement-only diagnosis is in progress (11
+files in flux, no new notebook sections since the rejection). Lift
+table deterministic-identical (3 of 5).
+
+Orthogonal track progress for the dashboard: W-family increment 2
+landed — each player's last public priority action is now recorded at
+the engine's priority chokepoint, outside GameState (all 116 engine
+tests unchanged, proving behavior neutrality). The deployment flag is
+the next increment; after that, the W-family's uniform-vs-weighted A/B
+becomes runnable and could matter for the same counter-war/tax
+decisions the P-family is fighting.
+
+## 2026-07-25 18:20 PDT
+
+**P1 rejected at the mechanism gate — the cheapest possible failure.**
+The AWR fit ran to completion with exact accounting (schedule, roots,
+bit-identical non-Priority heads, per-deck conflict coverage,
+saturation all passing), but the two learning-effect gates failed
+decisively: newest-shard KL fell 1.18% against a preregistered minimum
+of 30%, and signed chosen-probability movement was 54.94% against a
+required >60%. The residual head is nearly inert under the declared
+optimizer/budget. Correctly, no probes were scored, no P4 trained, no
+gameplay run — and the thresholds stand. Next per preregistration: a
+measurement-only diagnosis distinguishing optimizer underfit,
+shared-feature interference between contradictory roots, and objective
+error, before any new recipe is hypothesized.
+
+Reviewer's observation for the diagnosis: with 40 games/generation, 32
+roots/game, one epoch, and a ±0.10 bounded residual, the gradient
+budget per legal action is tiny — underfit is the boring but likely
+candidate, and it is measurable without retraining (loss-curve slope
+and gradient norms on the recorded shard). Interference would show as
+per-deck KL movement anticorrelated across strata. Both are
+distinguishable from the recorded run artifacts alone.
+
+Today's tally on the hold-versus-spend defect: S1, D0, D1, pure
+distillation, and now P1's first fit — five rejections, every one
+cheap, preregistered, and informative. The defect is the hardest
+problem the project has faced; the process is handling it exactly
+right.
+
+Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 18:14 PDT
+
+No-change cycle: P1 implementation still in flux (same 8 files, no new
+notebook sections). Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 18:10 PDT
+
+No-change cycle: P1 implementation continues (8 files in flux, no new
+notebook sections since the execution-identity declaration). Lift
+table deterministic-identical (3 of 5). Both tracks proceeding: P1
+training on Codex's side; W-family engine hook and deployment flag on
+the orthogonal track's next wakeup.
+
+## 2026-07-25 18:05 PDT
+
+Declaration-only cycle: P1's canonical execution identity is now fully
+preregistered — exact schedule/root/rollout accounting with no
+rootless actor-game, bit-identical critic and non-Priority heads,
+per-deck advantage and search/outcome-conflict coverage, newest-shard
+KL down ≥30%, signed chosen-probability movement >60%, saturation <5%
+— with the explicit framing that a completed run missing a threshold
+is a valid rejection, not a process error. The mechanism gates come
+BEFORE any probe scoring, which comes before P4. Nothing to critique;
+P1 training is the next event.
+
+Orthogonal track update (for the dashboard): the W-family core landed
+green in the challenger worktree — behavior-consistent world sampling
+with rules-level illegality exclusion and priority-head likelihood
+weighting, deployment-only, four unit tests. Notable discovered
+property: even an untrained head discriminates on a Pass observation
+(1/|legal actions| — option-rich hands are downweighted). The W and P
+families share the same priority head and compose by construction.
+
+Lift table deterministic-identical (3 of 5).
 
 ## 2026-07-25 17:35 PDT
 

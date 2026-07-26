@@ -4432,3 +4432,514 @@ weights:
 
 These definitions are fixed before P1 collection. They are mechanism
 diagnostics, not knobs and not substitutes for the offline behavioral gates.
+
+### P1 canonical execution identity (declared)
+
+Declared after rereading the independent review timestamped
+2026-07-25 17:35 PDT and before the first canonical P1 collection. This pins
+the remaining run identity that the P-family recipe had described only as
+fixed-seed.
+
+The immutable P0 input is Value Challenger S0 C16 trained with seed `424242`
+and 800 initial games. The canonical route must load fingerprint
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`
+and fail closed on any mismatch. The P-family self-play root seed is the
+separate fixed value `577215`. The exact command is:
+
+```sh
+./build/old-school-sim --train-p-family 1 --seed 577215 \
+  --train-games 800 --train-seed 424242
+```
+
+The CLI route locks K=8, one rollout per world, the production H=4 Value
+horizon, 32 evenly retained Priority roots per actor-game, a 500-turn game
+limit, residual weight 0.10, TD(lambda)=0.90, the already declared Adam
+configuration, and the exact 40-game five-deck schedule. H=4 is retained to
+isolate the outcome-learning operator against P0; this run cannot establish
+that four turns is an optimal search horizon.
+
+P1 passes its mechanism gate only if all exact schedule/root/rollout/target
+accounting holds with no rootless actor-game; the critic and all three
+non-Priority heads are bit-identical; every deck has nonzero positive
+advantage, negative advantage, and search/outcome conflict weight; newest-shard
+KL falls by at least 30%; signed chosen-probability movement is strictly above
+60%; changed-argmax weight is nonzero; and option-balanced residual saturation
+is below 5%. A completed run that misses a scientific threshold is a valid
+rejection, not a process error. If any mechanism conjunct fails, stop without
+probe scoring or P4. If all pass, run the already declared residual-aware
+dev-v3, Counterspell, live/payable Force Spike, and validation-v1 X=0 gates
+before continuing to P4.
+
+### P1 canonical mechanism run (result: rejected)
+
+Recorded after rereading the independent review timestamped
+2026-07-25 18:14 PDT. The exact preregistered command completed successfully:
+
+```sh
+./build/old-school-sim --train-p-family 1 --seed 577215 \
+  --train-games 800 --train-seed 424242
+```
+
+The immutable P0 fingerprint matched
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`;
+P1 produced fingerprint
+`8efccd2272b7bd11807081e7e7d7d67e73afbb4e66bba3d5cd8b19915cdd6131`.
+The run used the declared 40 balanced games, 80 seat-games, K=8/H=4,
+one rollout per world, 32-root cap, four deterministic collection threads,
+residual weight 0.10, TD(lambda)=0.90, and fixed Adam recipe. It completed in
+143.211 seconds.
+
+All schedule and isolation invariants passed: zero rootless seat-games, 2,280
+raw roots, 2,015 retained roots, 6,854 retained options, 54,832 rollout
+evaluations, total policy weight 80, normalized targets, and a one-generation
+replay window. Per-deck newest-shard accounting was:
+
+| Deck | Raw / retained roots | Options / rollout evaluations | +A / -A weight | Conflict weight |
+| --- | ---: | ---: | ---: | ---: |
+| Green | 411 / 389 | 1,036 / 8,288 | 11 / 5 | 7.160232 |
+| Red | 404 / 382 | 1,243 / 9,944 | 4 / 12 | 7.378268 |
+| Blue | 415 / 409 | 1,019 / 8,152 | 10 / 6 | 7.803909 |
+| White | 679 / 482 | 2,069 / 16,552 | 8 / 8 | 7.736905 |
+| RU Aggro | 371 / 353 | 1,487 / 11,896 | 7 / 9 | 7.293609 |
+
+Every deck had the required positive advantage, negative advantage, and
+search/outcome conflict signal. The critic, Attack, Block, and DamageOrder
+components were bit-identical to P0; only Priority changed. Residual
+saturation was exactly zero. Changed-argmax weight was 15.406764/80
+(19.2585%), so both of those gates passed.
+
+The two learning-effect gates failed:
+
+- weighted newest-shard KL moved from `0.1118335933` to `0.1105178315`, only
+  a 1.1765% reduction versus the preregistered minimum of 30%;
+- signed chosen-probability movement was 43.948167/80 = 54.9352%, versus the
+  required strictly above 60%. The positive-advantage stratum was 54.8395%
+  and the negative-advantage stratum was 55.0309%.
+
+Decision: reject P1. This was a mechanism-only gate, so there are deliberately
+no gameplay win rates or per-deck strength claims. Per the preregistration,
+do not score behavioral probes, run P4, or benchmark this checkpoint. The
+next step is a measurement-only diagnosis of whether the failure comes from
+optimizer underfit, shared-feature interference between contradictory roots,
+or an error/mismatch in the reported gradient objective. Any changed training
+recipe will be separately hypothesized and preregistered before another fit;
+the failed thresholds will not be weakened post hoc.
+
+### P1 fixed-shard capacity diagnosis (declared)
+
+Declared after rereading the independent review timestamped
+2026-07-25 18:35 PDT and before running the full diagnostic. This is a
+measurement-only decomposition of the rejected P1 fit, not a new challenger,
+probe gate, gameplay screen, or endpoint selection. The exact command is:
+
+```sh
+./build/old-school-sim --diagnose-p1-fit \
+  --seed 577215 \
+  --train-games 800 --train-seed 424242
+```
+
+The route must load the exact fingerprint-bound C16 P0 and reproduce the
+canonical K=8/H=4, 40-game, 80-seat-game P1 collection once. It then fits five
+independent cells from the same frozen parent, immutable shard, and indexed
+PolicyFit seed; no cell is chained or published:
+
+| Cell | Epochs | Learning rate |
+| --- | ---: | ---: |
+| E8/R0.001 control | 8 | 0.001 |
+| E32/R0.001 | 32 | 0.001 |
+| E128/R0.001 | 128 | 0.001 |
+| E512/R0.001 | 512 | 0.001 |
+| E128/R0.003 | 128 | 0.003 |
+
+Batch size, Adam betas/epsilon, clipping, residual weight, temperature, and
+fit seed remain identical to P1. The E8 control must reproduce the canonical
+P1 model, component fingerprints, and mechanism metrics exactly. Every cell
+must leave the frozen parent and the critic, Attack, Block, and DamageOrder
+components bit-identical. Pooled and all-five-deck KL, signed movement by
+advantage sign, argmax change, saturation, and fingerprints are reported.
+
+The same shard also receives a card-agnostic independent-root capacity
+bracket. For each root it minimizes
+
+```text
+KL(y || 0.9 * softmax((Q + 0.1*tanh(c))/0.1) + 0.1/N)
+```
+
+subject to `sum(c)=0`. The numerical solver has no RNG: zero, directed
+log-ratio, and positive/negative focus starts; Euclidean zero-sum box
+projection by exactly 96 bisections; at most 512 projected-gradient
+iterations; and at most 48 Armijo backtracks with initial step 1, factor 1/2,
+and coefficient 1e-4. Full range uses `c` in `[-12,12]`; the second result
+restricts every `abs(tanh(c))` strictly below 0.95. A separate relaxation plus
+Bernoulli data processing certifies a KL lower bound. Therefore each reported
+range has the interpretation:
+
+```text
+constructively achieved reduction
+    <= true independent-root optimum
+    <= certified reduction upper bound
+```
+
+Interpretation is fixed before seeing the output:
+
+1. Any control mismatch, changed frozen component, malformed bracket, or
+   shard-identity mismatch is a process failure, not a scientific result.
+2. If the zero-saturation certified reduction upper bound is below 30%, the
+   original KL gate was impossible under its own no-saturation constraint.
+   If the zero-saturation numerical achievable reduction is at least 30%,
+   residual geometry is constructively sufficient. A bracket spanning 30%
+   is inconclusive on geometry.
+3. Optimizer underfit is supported if a higher-budget shared-head cell clears
+   the original pooled KL reduction of at least 30%, signed movement strictly
+   above 60%, and saturation below 5%. E128/R0.003 clearing when
+   E128/R0.001 does not specifically implicates step size.
+4. Shared-head interference or noisy contradictory credit is supported if
+   the zero-saturation numerical oracle clears 30%, no shared-head cell
+   clears the original mechanism gates, and E128 to E512 at rate 0.001
+   changes both KL reduction and signed movement by less than two percentage
+   points. Per-deck and positive/negative strata then identify where the
+   compromise occurs.
+5. Any other pattern is inconclusive and requires a separately declared
+   diagnostic. No cell is accepted post hoc as a new P recipe.
+
+Correction to the review note: canonical P1 used eight optimizer epochs, not
+one, and retained up to 32 roots per actor-game, not per whole game. The
+original run did not persist its shard, so the new route deterministically
+recollects that shard once rather than claiming it can inspect unavailable
+artifacts. Whatever this diagnosis shows, the rejected P1 thresholds remain
+unchanged and any successor recipe must be preregistered separately.
+
+### P1 fixed-shard capacity diagnosis (result: optimizer underfit)
+
+Recorded after rereading the independent review timestamped
+2026-07-25 18:35 PDT. The exact declared command completed successfully in
+787.115 seconds:
+
+```sh
+./build/old-school-sim --diagnose-p1-fit \
+  --seed 577215 \
+  --train-games 800 --train-seed 424242
+```
+
+The route reproduced the exact P1 shard: 40 games, 80 seat-games, 2,015
+retained roots, 54,832 K=8/H=4 rollout evaluations, total inverse-root weight
+80, P0 fingerprint `bda1ea44...`, and canonical E8 candidate fingerprint
+`8efccd22...`. Control equivalence, same-parent fitting, all component-isolation
+checks, and oracle shard identity passed.
+
+The independent-root capacity bracket decisively showed that the bounded
+residual geometry can express the target:
+
+| Range | Numerical best KL | Achievable reduction | Certified KL lower | Certified reduction upper | Iteration-limit roots |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full | 0.0004472792 | 99.6000% | 0.0003984361 | 99.6437% | 1,455 |
+| Strict zero-saturation | 0.0009374711 | 99.1617% | 0.0005186790 | 99.5362% | 1,457 |
+
+The parent KL was `0.1118335933`. The zero-saturation numerical solver alone
+constructively clears the original 30% requirement by more than 69 points, so
+residual geometry is not the P1 failure. Many roots exhausted the conservative
+512-iteration numerical budget, but this cannot weaken the constructive
+99.16% result; the certified upper bracket remained properly ordered.
+
+Pooled same-shard fit results were:
+
+| Cell | KL reduction | Signed movement | +A / -A movement | Argmax change | Saturation |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| E8/R0.001 control | 1.1765% | 54.9352% | 54.8395% / 55.0309% | 19.2585% | 0% |
+| E32/R0.001 | 4.1987% | 59.0216% | 57.8236% / 60.2197% | 29.9293% | 0% |
+| E128/R0.001 | 30.9265% | 77.5594% | 77.6196% / 77.4991% | 43.1335% | 0% |
+| E512/R0.001 | 71.3016% | 94.4170% | 95.1122% / 93.7219% | 47.5529% | 1.2063% |
+| E128/R0.003 | 61.9172% | 90.5125% | 91.4322% / 89.5929% | 46.1637% | 0.3963% |
+
+Per-deck KL-reduction / signed-movement / saturation results were:
+
+| Cell | Green | Red | Blue | White | RU Aggro |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| E8/R0.001 | 1.61 / 56.46 / 0 | 0.95 / 58.13 / 0 | 1.95 / 57.34 / 0 | 1.43 / 51.32 / 0 | 0.16 / 51.43 / 0 |
+| E32/R0.001 | 4.70 / 59.42 / 0 | 3.37 / 61.31 / 0 | 6.38 / 60.29 / 0 | 4.21 / 56.29 / 0 | 2.68 / 57.79 / 0 |
+| E128/R0.001 | 32.37 / 78.49 / 0 | 25.32 / 73.97 / 0 | 42.23 / 81.91 / 0 | 25.11 / 72.76 / 0 | 29.62 / 80.67 / 0 |
+| E512/R0.001 | 73.36 / 95.56 / 1.97 | 67.12 / 92.66 / 0.80 | 82.40 / 97.97 / 2.31 | 64.27 / 92.33 / 0.07 | 69.04 / 93.57 / 0.89 |
+| E128/R0.003 | 66.24 / 90.31 / 0.64 | 57.92 / 89.34 / 0 | 73.26 / 94.64 / 1.20 | 54.62 / 86.87 / 0.05 | 57.35 / 91.40 / 0.09 |
+
+Table entries are percentages in the order named by the heading. The full
+machine output also reported positive and negative strata separately for every
+deck; neither pooled stratum is the limiting case at the two stronger cells.
+
+Decision: the preregistered optimizer-underfit diagnosis is supported.
+E128/R0.001 clears the original pooled mechanism gates with zero saturation;
+E128/R0.003 and E512/R0.001 clear them by wide margins on every deck as well.
+The E128-to-E512 movement is far above the predeclared two-point plateau
+criterion, so the shared-head-interference diagnosis is not supported.
+E128/R0.003 greatly outperforming E128/R0.001 at equal epochs also supports
+step-size underfit.
+
+No diagnostic model is promoted or scored post hoc. The next step is to
+separately preregister one revised optimizer recipe, reconstruct it from the
+same immutable P1 collection, and subject it first to the already declared
+residual-aware dev-v3, Counterspell, Force Spike, validation-v1 X=0, and hidden
+invariance gates. Gameplay remains forbidden until those offline gates pass.
+
+### P1R revised-optimizer offline behavioral gate (declared)
+
+Declared after rereading the independent review timestamped 2026-07-25
+18:53 PDT and before implementing or running the P1R probe route. The
+fixed-shard capacity experiment was hypothesis generation only. This is a new,
+separately named recipe and does not retroactively promote a diagnostic cell.
+
+Hypothesis: the outcome residual's first failure was optimizer underfit.
+Refitting the exact P1 shard for 128 epochs at learning rate `0.003` will turn
+the available outcome signal into behaviorally useful hold-versus-spend
+changes, while the bounded residual preserves the frozen S0 critic, combat
+heads, and the existing strong stack decisions.
+
+P1R changes exactly two canonical optimizer fields: epochs `8 -> 128` and
+learning rate `0.001 -> 0.003`. Batch size 64, Adam betas/epsilon, gradient
+clip, indexed fit seed, P0, root seed `577215`, 40-game five-deck schedule,
+K=8/H=4 collection, one rollout/world, 32-root cap, residual weight 0.10,
+TD(lambda) 0.90, and every other recipe field remain fixed. E128/R0.003 was
+chosen because it was the cheapest diagnostic cell with wide all-five
+mechanism margins and substantially less saturation than E512/R0.001; no
+named behavioral probe or gameplay result was consulted. Deterministic
+reconstruction must yield the already measured same-shard fingerprint
+`a17814d6cca71c95ab937d162e8fd183679b8e88c0fd175a7d1f750d4cd06a9b`;
+any mismatch is a process failure.
+
+The permanent command will be:
+
+```sh
+./build/old-school-sim --score-p1r-probes \
+  --seed 577215 --train-games 800 --train-seed 424242
+```
+
+It must fail closed on the exact P0, Actor G0, cache, P1R, optimizer, schedule,
+root/rollout, target, replay, component-isolation, and hidden-repartition
+identities. Before scoring probes, P1R must still clear the original mechanism
+thresholds: pooled KL reduction at least 30%, signed movement strictly above
+60%, nonzero argmax movement, residual saturation below 5%, and nonzero
+positive, negative, and search/outcome-conflict weight for every deck.
+
+The offline data are fixed and never refreshed by this route:
+
+- deck-balanced dev-v3 uses the immutable Actor G0 K=8/H=0 cache
+  `data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv`, candidate Value
+  scoring K=8/H=4, and exact Actor fingerprint `76391764...`;
+- focused validation-v1 uses its immutable Actor G0 K=128/H=0 cache
+  `data/old-school-probe-validation-v1-k128-h0-t800-s424242.labels.tsv` and
+  fresh candidate Value scoring K=256/H=4.
+
+Both P0 and P1R deploy with residual weight 0.10 in one ordered transition
+family; uniform-head P0 must be decision- and metric-identical to residual-off
+S0. P1R passes only if all of the following hold:
+
+1. pooled dev-v3 mean regret is strictly below P0 and no deck's mean regret is
+   more than P0 plus 0.01;
+2. the selected action remains inside the Actor-reference best set on all
+   three Counterspell fixtures (expensive spell, lethal Bolt, and counter
+   war), and on the live Force Spike fixture;
+3. the supplemental deployed controls uniquely select Force Spike when its
+   tax is unpayable and Pass when the opponent can pay;
+4. on validation-v1, P1R uniquely selects Pass over opponent-targeted
+   Disintegrate X=0, its fresh common-world `Q(Pass)-Q(X=0)` point estimate
+   strictly improves on P0, and its own 95% lower confidence bound is above
+   zero;
+5. hidden-repartition invariance passes everywhere; and
+6. because the critic is frozen, its prediction is bit-identical to P0 on
+   every state. Calibration scores are reported but are not required to be
+   identical: this evaluator conditions their target on the action selected
+   by each policy, so a genuine policy change can change Brier/log-loss even
+   when the critic tensor and every state prediction are unchanged.
+
+These small fixtures are reject-only. Passing them cannot promote P1R or
+establish playing strength. If any conjunct fails, stop without P4 or
+gameplay and diagnose the residual signal from the reported transition rows.
+If every conjunct passes, separately preregister P4R with the same revised
+optimizer and replay semantics before training it.
+
+#### P1R validation-cache identity correction (declared)
+
+Declared immediately after the filesystem metadata audit above and before
+building or running the P1R route. The historical validation-v1 cache named in
+the declaration is bound to Actor fingerprint `41a1be59...`; the current
+five-deck exact-environment Actor G0 is `76391764...`. Loading it would
+correctly fail closed. It must not be overwritten or mislabeled as current.
+
+Before P1R exists, generate one new cache with the existing generic probe
+route, current frozen Actor G0, K=128/H=0, training seed 424242, and a new
+environment-qualified path:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-corpus validation-v1 \
+  --probe-worlds 128 --probe-horizon 0 \
+  --actor-generation 0 --value-generation 0 \
+  --learned-rollouts 2 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-validation-v1-exact-v2-k128-h0-t800-s424242.labels.tsv \
+  --refresh-probe-cache
+```
+
+This is an artifact-identity correction, not a behavioral experiment: P1R is
+not trained or scored by the command, the old cache remains intact, and the
+new cache must report exact Actor fingerprint `76391764...`. The permanent
+P1R route then loads this new cache without refresh and uses candidate K=256
+exactly as otherwise declared. All gates and stopping rules remain unchanged.
+
+#### Exact-environment validation cache (result)
+
+Recorded after rereading the independent review timestamped 2026-07-25
+19:05 PDT. The exact declared cache-generation command completed
+successfully. Actor G0 trained in 74.76 seconds and reproduced exact
+fingerprint
+`7639176465b7b7c240e9d0d0067d352b0cac052a7083b47e6504073206068a84`;
+diagnostic Value G0 reproduced
+`c900b03b9b66e788c5a0d1efadea038c526968c229b7ab626b3d603dc43496a0`.
+
+The new immutable file is
+`data/old-school-probe-validation-v1-exact-v2-k128-h0-t800-s424242.labels.tsv`
+with SHA-256
+`98b1018c7204e9ec1f98a3bd79e7d621296cf90a60cf24cb020eb92a998a13ed`.
+Its metadata binds K=128/H=0, one rollout/world, training seed 424242,
+800 games, one validation-v1 fixture, current Actor fingerprint `76391764...`,
+and information-set fingerprint `9bb67ff6e8b476b2`. The historical
+`41a1be59...` cache remains untouched.
+
+All five diagnostic policy views were bit-identical under hidden-zone
+repartition. The newly frozen Actor reference estimates
+`Q(Pass)-Q(X=0)=-0.0290`, paired SE `0.0010`, 95% interval
+`[-0.0309,-0.0271]`. That wrong teacher preference is diagnostic context, not
+a correctness label or a P1R result.
+
+Decision: accept only the corrected cache identity. P1R has still not been
+scored. The next action is the already preregistered exact P1R route; it must
+load this cache without refresh and measure its own K=256 Value pair.
+
+### P1R revised-optimizer offline behavioral gate (result: rejected)
+
+Recorded after rereading the independent review timestamped 2026-07-25
+19:05 PDT. The exact preregistered command completed and exited one for a
+scientific rejection:
+
+```sh
+./build/old-school-sim --score-p1r-probes \
+  --seed 577215 --train-games 800 --train-seed 424242
+```
+
+The route loaded exact P0 `bda1ea44...`, rebuilt exact Actor G0 `76391764...`,
+and deterministically reconstructed P1R fingerprint
+`a17814d6cca71c95ab937d162e8fd183679b8e88c0fd175a7d1f750d4cd06a9b`
+in 168.80 seconds. The revised optimizer did solve the original fit problem:
+newest-shard KL fell 61.9172%, signed movement was 90.5125%, argmax weight
+changed 46.1637%, and saturation was 0.3963%. All 40 games, 80 seat-games,
+2,015 retained roots, 54,832 evaluations, per-deck outcome-signal, target,
+replay, optimizer, fingerprint, and component-isolation gates passed.
+
+The immutable dev-v3 result rejected the behavioral hypothesis:
+
+| Metric | P0 | P1R | Result |
+| --- | ---: | ---: | --- |
+| Pooled mean regret | 0.0085 | 0.0277 | worse, reject |
+| Green regret | 0.0368 | 0.0425 | within +0.01 |
+| Red regret | 0.0000 | 0.0000 | pass |
+| Blue regret | 0.0000 | 0.0072 | within +0.01 |
+| White regret | 0.0013 | 0.0259 | +0.0246, reject |
+| RU Aggro regret | 0.0045 | 0.0631 | +0.0586, reject |
+
+P0 residual-on was bit-identical to residual-off, P1R critic predictions were
+bit-identical to P0, both caches loaded rather than regenerated, and every
+hidden repartition passed. P1R retained the three actual Counterspell
+fixtures, but inverted the live Force Spike choice: it selected Pass with
+scores `Pass 0.1513` versus `Spike 0.0870` when the tax was unpayable, and
+correctly selected Pass `0.1751` versus `Spike 0.0757` when payable. Thus the
+combined four-state Blue stack gate and the live/payable gate both failed.
+
+The transition rows show a broad overcorrection toward holding:
+
+- live Force Spike changed from the correct counter to Pass;
+- Green second-main Growth changed from Growth to Pass;
+- RU's lethal Disintegrate fixture changed from X=3 lethal to Pass;
+- White avoid-redundant-Moat changed to casting the redundant Moat; and
+- the useful RU colored-land choice did improve from Mountain to Island.
+
+Validation-v1 supplied one real success and one literal-gate failure. At
+K=256, P1R moved `Q(Pass)-Q(X=0)` from P0's `-0.118985`
+(`[-0.130564,-0.107405]`) to `+0.059624`
+(`95% CI [0.049549,0.069699]`). It therefore learned a statistically clean
+preference against wasting Disintegrate for zero. However, its unique global
+selection was casting Ironclaw Orcs (`kind-2.card-14.x-0`), not Pass, so the
+predeclared literal unique-Pass conjunct failed. In retrospect that conjunct
+is stricter than the user's actual bug—productive creature development is not
+an X=0 error—but it was fixed before the run and is not weakened after seeing
+the result. The candidate is already rejected independently by regret and
+live-Force-Spike failures.
+
+Decision: reject P1R and do not train P4R or run gameplay. The optimizer now
+fits the noisy outcome targets well enough to expose their next limitation:
+one sampled action with long-horizon outcome credit can learn a coarse
+"preserve resources" direction but does not reliably distinguish live,
+productive spending from waste. The next experiment should reduce
+outcome-target overfit or improve credit assignment, while preserving the
+newly demonstrated positive X=0 direction; it must be separately declared
+before another fit.
+
+### FT128 full-terminal counterfactual credit audit (declared)
+
+Declared at 2026-07-25 19:32 PDT after rereading `AGENTS.md`, the independent
+review timestamped 2026-07-25 19:05 PDT, and the P1R rejection above. This is a
+measurement-only signal-sufficiency experiment. It trains no candidate,
+changes no deployed policy, reads or writes no probe-label cache, and makes no
+playing-strength claim.
+
+Hypothesis: same-world, all-action terminal counterfactual returns under the
+frozen clean P0 Value-mirror continuation distinguish productive spending from
+waste even though the H=4 bootstrapped teacher and P1's sampled-action outcome
+labels do not. Specifically, the terminal reference will prefer Force Spike
+over Pass when the opponent cannot pay the tax, while preferring Pass over
+Force Spike when the opponent can pay it.
+
+The permanent exclusive command will be:
+
+```sh
+./build/old-school-sim --diagnose-terminal-credit \
+  --train-games 800 --train-seed 424242
+```
+
+It must load or deterministically reconstruct exact frozen P0 fingerprint
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`.
+The audit uses the existing live and payable Force Spike fixtures, stable
+probe/world seed derivation, `K=1024` information-set worlds, one continuation
+per world, horizon 128 complete future turns, Value-search mirror
+continuations, epsilon zero, residual weight zero, and no shallow-prior blend.
+Every legal root action is forced in every common world; action differences
+therefore remain paired. Hidden-zone repartition clones must produce
+bit-identical samples.
+
+Terminality is fail-closed rather than assumed. Before scoring, each fixture
+must satisfy the conservative library bound
+`library[0].size() + library[1].size() + 1 <= 128`. The sampling path must
+record whether each continuation ended in a natural game result before any
+critic bootstrap. Every one of the expected candidate/world evaluations must
+be terminal; a single bootstrapped or missing sample invalidates the run.
+
+Primary gates are fixed before implementation:
+
+1. live Force Spike has `Q(Force Spike)-Q(Pass)` with a strictly positive
+   lower 95% paired-confidence bound and at least 96 of 128 disjoint K=8
+   blocks correctly signed;
+2. payable Force Spike has `Q(Pass)-Q(Force Spike)` with the same confidence
+   and block gates;
+3. both fixtures satisfy exact sample, configuration, fingerprint, terminal,
+   and hidden-repartition accounting.
+
+The existing Disintegrate-X=0 validation fixture is reported as corroborating
+diagnostic only, not a primary gate: Pass can be healed by a later priority
+choice, whereas both Force Spike branches become irreversible immediately at
+their current priority state. If reported, the useful criterion is
+`Q(Pass)-Q(X=0)>0` and exclusion of X=0 from the global best set; productive
+development such as casting Ironclaw Orcs must not be mislabeled as a failure.
+
+Passing this audit establishes only that full-terminal counterfactuals contain
+the missing causal signal. The next separately declared step would extend the
+same terminal scorer to mirrored Giant Growth and lethal/zero Disintegrate
+contrasts before fitting an all-action counterfactual target. Any primary gate
+failure rejects this terminal teacher as the immediate training signal; it
+must not be repaired by tuning on these fixtures.

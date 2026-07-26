@@ -124,3 +124,19 @@ bot validation harness, and AddressSanitizer/UndefinedBehaviorSanitizer.
 - Add tests for new engine behavior and regression tests for fixed bugs.
 - Never weaken a test or acceptance threshold merely to make an experiment
   pass.
+
+## Web client workflow
+
+`WEB_ROADMAP.md` is the standing browser-game backlog and evidence log. Read it
+before changing the web client, follow its highest-priority open milestone, and
+update its status/evidence after every web behavior or layout change.
+
+- Reproduce UI bugs with a fixed matchup and seeds.
+- Run `make test-web-ui` for every client change.
+- Run `make test-web` whenever the bridge, server, session lifetime, or action
+  contract changes.
+- Contract and source-layout tests cannot close a visual milestone. Rendered
+  interaction changes also require a real-browser smoke at the target
+  viewports recorded in `WEB_ROADMAP.md`.
+- Preserve engine-authoritative legal actions and hidden opponent information;
+  the browser must not recreate rules or expose private card identities.

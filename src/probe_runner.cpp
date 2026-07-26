@@ -1945,6 +1945,9 @@ bool action_samples_bit_identical(
     const LearnedActionSamples& second) {
     if (first.sampled_worlds != second.sampled_worlds ||
         first.rollout_evaluations != second.rollout_evaluations ||
+        first.terminal_evaluations != second.terminal_evaluations ||
+        first.bootstrapped_evaluations !=
+            second.bootstrapped_evaluations ||
         first.q_samples.size() != second.q_samples.size()) {
         return false;
     }
@@ -1980,6 +1983,53 @@ const probe_eval::CandidateSamples& candidate_samples_for(
             std::string(key));
     }
     return *found;
+}
+
+std::size_t conservative_terminal_bound_turns(
+    const probes::DecisionProbe& probe) {
+    const std::size_t first =
+        probe.state.players[0].library.size();
+    const std::size_t second =
+        probe.state.players[1].library.size();
+    if (second ==
+            std::numeric_limits<std::size_t>::max() ||
+        first >
+            std::numeric_limits<std::size_t>::max() -
+                second - 1) {
+        throw std::overflow_error(
+            "teacher audit conservative terminal bound overflows "
+            "size_t");
+    }
+    return first + second + 1;
+}
+
+std::size_t total_candidate_samples(
+    const LearnedActionSamples& samples) {
+    std::size_t total = 0;
+    for (const auto& candidate : samples.q_samples) {
+        if (candidate.size() >
+            std::numeric_limits<std::size_t>::max() - total) {
+            throw std::overflow_error(
+                "teacher audit candidate sample count overflows "
+                "size_t");
+        }
+        total += candidate.size();
+    }
+    return total;
+}
+
+std::size_t expected_teacher_evaluations(
+    std::size_t candidate_count,
+    const TeacherSufficiencyAuditConfig& config) {
+    if (candidate_count != 0 &&
+        config.worlds >
+            std::numeric_limits<std::size_t>::max() /
+                candidate_count) {
+        throw std::overflow_error(
+            "teacher audit expected evaluation count overflows "
+            "size_t");
+    }
+    return candidate_count * config.worlds;
 }
 
 TeacherOptionComparison score_teacher_option_comparison(
@@ -2018,6 +2068,8 @@ TeacherOptionComparison score_teacher_option_comparison(
         candidate_samples_for(candidates, second_key);
     const auto prediction = make_prediction(
         probe, means_of(original), probe_critic_value(probe, model));
+    const std::size_t terminal_bound =
+        conservative_terminal_bound_turns(probe);
     return {
         .description = std::move(description),
         .estimate = oriented_pair_estimate(
@@ -2029,6 +2081,20 @@ TeacherOptionComparison score_teacher_option_comparison(
             first.q_samples, second.q_samples),
         .hidden_repartition_bit_identical =
             action_samples_bit_identical(original, hidden),
+        .candidate_count = original.q_samples.size(),
+        .recorded_candidate_samples =
+            total_candidate_samples(original),
+        .expected_evaluations = expected_teacher_evaluations(
+            probe.candidates.size(), config),
+        .rollout_evaluations =
+            original.rollout_evaluations,
+        .terminal_evaluations =
+            original.terminal_evaluations,
+        .bootstrapped_evaluations =
+            original.bootstrapped_evaluations,
+        .conservative_terminal_bound_turns = terminal_bound,
+        .conservative_terminal_bound_satisfied =
+            config.horizon_turns >= terminal_bound,
     };
 }
 
@@ -2098,11 +2164,52 @@ bool TeacherOptionComparison::gate_passed() const {
            confidence_gate_passed() && block_gate_passed();
 }
 
+bool TeacherOptionComparison::evaluation_accounting_is_exact()
+    const {
+    return candidate_count != 0 &&
+           expected_evaluations != 0 &&
+           recorded_candidate_samples == expected_evaluations &&
+           rollout_evaluations == expected_evaluations &&
+           terminal_evaluations <= rollout_evaluations &&
+           bootstrapped_evaluations ==
+               rollout_evaluations - terminal_evaluations;
+}
+
+bool TeacherOptionComparison::terminal_results_gate_passed()
+    const {
+    return conservative_terminal_bound_satisfied &&
+           evaluation_accounting_is_exact() &&
+           terminal_evaluations == expected_evaluations &&
+           bootstrapped_evaluations == 0;
+}
+
+bool TeacherOptionComparison::
+    second_key_excluded_from_selected_set() const {
+    return !selected_keys.empty() &&
+           std::find(selected_keys.begin(), selected_keys.end(),
+                     estimate.second_key) == selected_keys.end();
+}
+
 bool TeacherSufficiencyAuditReport::gate_passed() const {
     return hidden_repartition_bit_identical &&
            force_spike_live.gate_passed() &&
            force_spike_payable.gate_passed() &&
            disintegrate_x_zero.gate_passed();
+}
+
+bool terminal_credit_primary_gate_passed(
+    const TeacherSufficiencyAuditReport& report) {
+    const auto comparison_passes =
+        [](const TeacherOptionComparison& comparison) {
+            return comparison.hidden_repartition_bit_identical &&
+                   comparison.confidence_gate_passed() &&
+                   comparison.block_gate_passed() &&
+                   comparison.terminal_results_gate_passed();
+        };
+    return report.config.require_terminal_results &&
+           !report.config.blend_shallow_prior &&
+           comparison_passes(report.force_spike_live) &&
+           comparison_passes(report.force_spike_payable);
 }
 
 bool ForceSpikePolicyControlReport::live_selects_force_spike()
@@ -2221,6 +2328,12 @@ TeacherSufficiencyAuditReport score_teacher_sufficiency_audit(
         throw std::invalid_argument(
             "teacher-sufficiency horizon must be at most 128 turns");
     }
+    if (config.require_terminal_results &&
+        config.blend_shallow_prior) {
+        throw std::invalid_argument(
+            "full-terminal teacher audit cannot blend a shallow "
+            "critic prior");
+    }
     switch (config.continuation_variant) {
     case LearnedVariant::ValueSearchChampion:
     case LearnedVariant::UnifiedActor:
@@ -2290,6 +2403,23 @@ TeacherSufficiencyAuditReport score_teacher_sufficiency_audit(
     if (!validation_pair.has_value()) {
         throw std::logic_error(
             "validation-v1 teacher audit has no focused pair");
+    }
+    if (config.require_terminal_results) {
+        for (const probes::DecisionProbe* probe :
+             std::array{
+                 &live, &payable, validation_pair->probe}) {
+            const std::size_t required =
+                conservative_terminal_bound_turns(*probe);
+            if (config.horizon_turns < required) {
+                throw std::invalid_argument(
+                    "full-terminal teacher audit horizon H=" +
+                    std::to_string(config.horizon_turns) +
+                    " is below conservative bound " +
+                    std::to_string(required) + " for " +
+                    probe->stable_id +
+                    " (sum of both libraries plus one turn)");
+            }
+        }
     }
 
     TeacherSufficiencyAuditReport report;
@@ -2431,6 +2561,157 @@ std::string format_teacher_sufficiency_audit_report(
     return output.str();
 }
 
+std::string format_terminal_credit_audit_report(
+    const TeacherSufficiencyAuditReport& report) {
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::fixed << std::setprecision(6)
+           << "Full-Terminal Credit Audit\n"
+           << "Evaluation-only; every candidate uses paired common "
+              "worlds and a conservatively terminal horizon.\n"
+           << "The primary verdict uses only the Force Spike live "
+              "and payable ordering controls. The X=0 row is "
+              "diagnostic only.\n\n"
+           << report.policy_name << '\n'
+           << "  fingerprint: " << report.model_fingerprint << '\n'
+           << "  search: K=" << report.config.worlds << "/H="
+           << report.config.horizon_turns << ", "
+           << learned_variant_name(
+                  report.config.continuation_variant)
+           << " mirror, shallow-prior blend "
+           << (report.config.blend_shallow_prior ? "on" : "off")
+           << ", one rollout/world, terminal results "
+           << (report.config.require_terminal_results
+                   ? "required"
+                   : "NOT REQUIRED")
+           << '\n';
+
+    const auto append_keys =
+        [&output](const std::vector<std::string>& keys) {
+            output << '{';
+            for (std::size_t index = 0; index < keys.size();
+                 ++index) {
+                if (index != 0) {
+                    output << ", ";
+                }
+                output << keys[index];
+            }
+            output << '}';
+        };
+    const auto append_comparison =
+        [&output, &append_keys, &report](
+            std::string_view role,
+            const TeacherOptionComparison& comparison,
+            bool primary) {
+            const CandidatePairEstimate& estimate =
+                comparison.estimate;
+            output
+                << "\n  [" << role << "] "
+                << comparison.description << '\n'
+                << "    oriented delta: Q(" << estimate.first_key
+                << ") - Q(" << estimate.second_key << ") = "
+                << estimate.delta_q << ", paired SE "
+                << estimate.paired_standard_error << ", 95% CI ["
+                << estimate.confidence_lower_95 << ", "
+                << estimate.confidence_upper_95 << "] ["
+                << (comparison.confidence_gate_passed()
+                        ? "PASS"
+                        : "FAIL")
+                << "]\n"
+                << "    exact selected-best set: ";
+            append_keys(comparison.selected_keys);
+            output
+                << "\n    ordered K="
+                << comparison.ordered_blocks.worlds_per_block
+                << " blocks: "
+                << comparison.ordered_blocks.correct_block_count
+                << '/' << comparison.ordered_blocks.block_count
+                << " correct; require "
+                << comparison.ordered_blocks
+                       .required_correct_block_count()
+                << " ["
+                << (comparison.block_gate_passed()
+                        ? "PASS"
+                        : "FAIL")
+                << "]\n"
+                << "    hidden repartition: "
+                << (comparison.hidden_repartition_bit_identical
+                        ? "bit-identical"
+                        : "CHANGED")
+                << '\n'
+                << "    conservative terminal bound: H="
+                << report.config.horizon_turns << ", require >= "
+                << comparison.conservative_terminal_bound_turns
+                << " (both libraries + 1) ["
+                << (comparison
+                            .conservative_terminal_bound_satisfied
+                        ? "PASS"
+                        : "FAIL")
+                << "]\n"
+                << "    evaluation accounting: candidates "
+                << comparison.candidate_count << ", expected "
+                << comparison.expected_evaluations
+                << ", recorded candidate samples "
+                << comparison.recorded_candidate_samples
+                << ", rollouts "
+                << comparison.rollout_evaluations
+                << ", terminal "
+                << comparison.terminal_evaluations
+                << ", bootstrapped "
+                << comparison.bootstrapped_evaluations << " ["
+                << (comparison.evaluation_accounting_is_exact()
+                        ? "EXACT"
+                        : "MISMATCH")
+                << "]\n"
+                << "    all evaluations terminal: "
+                << (comparison.terminal_results_gate_passed()
+                        ? "PASS"
+                        : "FAIL")
+                << '\n';
+            if (primary) {
+                output
+                    << "    primary row gate: "
+                    << (comparison
+                                    .hidden_repartition_bit_identical &&
+                                comparison.confidence_gate_passed() &&
+                                comparison.block_gate_passed() &&
+                                comparison
+                                    .terminal_results_gate_passed()
+                            ? "PASS"
+                            : "FAIL")
+                    << '\n';
+            }
+        };
+
+    append_comparison(
+        "PRIMARY 1/2", report.force_spike_live, true);
+    append_comparison(
+        "PRIMARY 2/2", report.force_spike_payable, true);
+    append_comparison(
+        "DIAGNOSTIC ONLY", report.disintegrate_x_zero, false);
+    output
+        << "    X=0 excluded from exact selected-best set: "
+        << (report.disintegrate_x_zero
+                    .second_key_excluded_from_selected_set()
+                ? "PASS"
+                : "FAIL")
+        << '\n'
+        << "    This X=0 selection and its sign/integrity do not "
+           "enter the primary Force Spike gate.\n"
+        << "\nPrimary terminal-credit gate: "
+        << (terminal_credit_primary_gate_passed(report)
+                ? "PASS"
+                : "FAIL")
+        << '\n'
+        << (terminal_credit_primary_gate_passed(report)
+                ? "Decision: full-terminal mirror outcomes resolve "
+                  "both preregistered Force Spike orderings.\n"
+                : "Decision: full-terminal mirror outcomes do not "
+                  "yet resolve both preregistered Force Spike "
+                  "orderings.\n");
+    return output.str();
+}
+
 ValueProbeDecisionDetail make_value_probe_decision_detail(
     const probe_eval::ProbeLabel& label,
     const probe_eval::ProbePrediction& prediction,
@@ -2438,6 +2719,13 @@ ValueProbeDecisionDetail make_value_probe_decision_detail(
     const ValueProbeDecisionDetail* previous) {
     return build_value_probe_decision_detail(
         label, prediction, reference, previous);
+}
+
+bool value_decision_uniquely_selects(
+    const ValueProbeDecisionDetail& decision,
+    std::string_view candidate_key) {
+    return decision.selected_keys.size() == 1 &&
+           decision.selected_keys.front() == candidate_key;
 }
 
 CandidatePairEstimate make_candidate_pair_estimate(

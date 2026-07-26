@@ -1,9 +1,11 @@
 #include "old_school/game.hpp"
 #include "old_school/interactive.hpp"
+#include "old_school/learned_iteration.hpp"
 #include "old_school/probe_runner.hpp"
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -17,6 +19,7 @@
 #include <locale>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -192,6 +195,18 @@ void print_help(std::string_view executable) {
         << " --diagnose-force-spike-teacher --learned-generations N"
            " [--train-games N] [--train-seed N]\n"
         << "       " << executable
+        << " --train-p-family N [--seed N] [--train-games 800]"
+           " [--train-seed 424242]\n"
+        << "       " << executable
+        << " --diagnose-p1-fit [--seed N] [--train-games 800]"
+           " [--train-seed 424242]\n"
+        << "       " << executable
+        << " --score-p1r-probes --seed 577215"
+           " --train-games 800 --train-seed 424242\n"
+        << "       " << executable
+        << " --diagnose-terminal-credit --train-games 800"
+           " --train-seed 424242\n"
+        << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
@@ -281,6 +296,24 @@ void print_help(std::string_view executable) {
            "the frozen S0 teacher on Force Spike live/payable and RU "
            "Pass/X=0; requires --learned-generations N and accepts only "
            "training options\n"
+        << "  --train-p-family N  Train canonical outcome-tilted "
+           "Priority checkpoints P1..PN from exact Value Challenger C16; "
+           "N is 1..16, the recipe is fixed at K=8/H=4, root cap 32, "
+           "and 500 turns, and only --seed/--train-games/--train-seed "
+           "are accepted\n"
+        << "  --diagnose-p1-fit  Collect canonical P1 once, then fit "
+           "five independent same-parent epoch/rate cells; accepts only "
+           "--seed, --train-games, and --train-seed\n"
+        << "  --score-p1r-probes  Reconstruct revised P1R "
+           "(128 epochs, rate 0.003) and run its immutable dev-v3 and "
+           "validation-v1 reject-only gates; accepts only --seed, "
+           "--train-games, and --train-seed\n"
+        << "  --diagnose-terminal-credit  Eval-only K=1024/H=128 "
+           "terminal-outcome audit of exact Value Challenger C16 P0; "
+           "uses a Value mirror with zero continuation epsilon and "
+           "Priority residual, shallow-prior blend off, and required "
+           "terminal results; accepts only --train-games and "
+           "--train-seed\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
         << "  --score-probes   Label/score an offline decision-probe "
@@ -2143,6 +2176,1216 @@ void print_evolution(const old_school::DeckEvolutionSummary& result,
     }
 }
 
+constexpr std::string_view kCanonicalP0Fingerprint =
+    "bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc";
+constexpr std::string_view kCanonicalActorG0Fingerprint =
+    "7639176465b7b7c240e9d0d0067d352b0cac052a7083b47e6504073206068a84";
+constexpr std::string_view kP1RExpectedFingerprint =
+    "a17814d6cca71c95ab937d162e8fd183679b8e88c0fd175a7d1f750d4cd06a9b";
+
+bool approximately_equal(double left, double right) {
+    constexpr double kTolerance = 1.0e-9;
+    return std::isfinite(left) && std::isfinite(right) &&
+           std::abs(left - right) <= kTolerance;
+}
+
+void require_p_family_invariant(bool condition,
+                                std::string_view description) {
+    if (!condition) {
+        throw std::logic_error(
+            "P-family invariant failed: " +
+            std::string(description));
+    }
+}
+
+void validate_p_family_result(
+    const old_school::LearnedValuePolicyFamilyResult& result,
+    std::uint64_t root_seed, std::size_t requested_generations,
+    old_school::LearnedValuePriorityHeadUpdateConfig
+        expected_optimizer = {},
+    bool expected_canonical_recipe = true) {
+    constexpr std::size_t kCanonicalGames = 40;
+    constexpr std::size_t kCanonicalSeatGames = 80;
+    constexpr std::size_t kCanonicalSeatGamesPerDeck = 16;
+    constexpr std::size_t kCanonicalSeatZeroGamesPerDeck = 8;
+    constexpr std::size_t kCanonicalStartingGamesPerDeck = 8;
+    constexpr std::size_t kCanonicalWorlds = 8;
+    constexpr std::size_t kCanonicalRootCap = 32;
+    constexpr std::size_t kCanonicalMaxTurns = 500;
+    constexpr std::size_t kCanonicalCollectionThreads = 4;
+
+    require_p_family_invariant(
+        result.checkpoints.size() == requested_generations + 1,
+        "checkpoint count");
+    require_p_family_invariant(
+        result.reports.size() == requested_generations,
+        "generation-report count");
+
+    for (std::size_t index = 0;
+         index < result.reports.size(); ++index) {
+        const auto& report = result.reports[index];
+        const auto& parent = result.checkpoints[index];
+        const auto& candidate = result.checkpoints[index + 1];
+        const std::size_t generation = index + 1;
+
+        require_p_family_invariant(
+            report.root_seed == root_seed,
+            "reported root seed");
+        require_p_family_invariant(
+            report.generation == generation,
+            "generation number");
+        require_p_family_invariant(
+            report.canonical_recipe == expected_canonical_recipe &&
+                report.search_worlds == kCanonicalWorlds &&
+                report.rollouts_per_world == 1 &&
+                report.search_horizon_turns == 4 &&
+                report.max_roots_per_actor_game ==
+                    kCanonicalRootCap &&
+                report.max_game_turns == kCanonicalMaxTurns &&
+                report.collection_threads ==
+                    kCanonicalCollectionThreads &&
+                report.residual_weight == 0.10 &&
+                report.td_lambda == 0.90,
+            "canonical search and return recipe");
+        auto reported_optimizer = report.optimizer;
+        reported_optimizer.seed = 0;
+        expected_optimizer.seed = 0;
+        require_p_family_invariant(
+            reported_optimizer == expected_optimizer,
+            "expected optimizer recipe");
+
+        require_p_family_invariant(
+            report.parent_fingerprint ==
+                old_school::learned_model_fingerprint(parent),
+            "parent fingerprint");
+        require_p_family_invariant(
+            report.candidate_fingerprint ==
+                old_school::learned_model_fingerprint(candidate),
+            "candidate fingerprint");
+        require_p_family_invariant(
+            report.parent_components ==
+                old_school::learned_model_component_fingerprints(
+                    parent),
+            "parent component fingerprints");
+        require_p_family_invariant(
+            report.candidate_components ==
+                old_school::learned_model_component_fingerprints(
+                    candidate),
+            "candidate component fingerprints");
+        require_p_family_invariant(
+            report.parent_components.critic ==
+                    report.candidate_components.critic &&
+                report.parent_components.attack ==
+                    report.candidate_components.attack &&
+                report.parent_components.block ==
+                    report.candidate_components.block &&
+                report.parent_components.damage_order ==
+                    report.candidate_components.damage_order,
+            "critic and non-Priority component isolation");
+
+        require_p_family_invariant(
+            report.games.size() == kCanonicalGames,
+            "40-game schedule");
+        std::array<old_school::LearnedValuePolicyDeckReport,
+                   old_school::kDeckCount>
+            reconstructed_decks;
+        std::size_t raw_roots = 0;
+        std::size_t raw_options = 0;
+        std::size_t retained_roots = 0;
+        std::size_t rollout_evaluations = 0;
+        double policy_weight = 0.0;
+        for (std::size_t game_index = 0;
+             game_index < report.games.size(); ++game_index) {
+            const auto& game = report.games[game_index];
+            require_p_family_invariant(
+                game.schedule_index == game_index &&
+                    game.pairing_index < 10 &&
+                    game.starting_player < 2 &&
+                    game.winner >= -1 && game.winner <= 1,
+                "game schedule metadata");
+            require_p_family_invariant(
+                game.seat_decks[0] != game.seat_decks[1],
+                "distinct scheduled decks");
+            for (std::size_t player = 0; player < 2;
+                 ++player) {
+                const std::size_t deck =
+                    static_cast<std::size_t>(
+                        game.seat_decks[player]);
+                require_p_family_invariant(
+                    deck < old_school::kDeckCount,
+                    "scheduled deck id");
+                require_p_family_invariant(
+                    game.raw_priority_roots[player] > 0 &&
+                        game.raw_legal_options[player] >=
+                            2 *
+                                game.raw_priority_roots[player] &&
+                        game.retained_priority_roots[player] > 0 &&
+                        game.retained_priority_roots[player] <=
+                            kCanonicalRootCap &&
+                        game.retained_ordinals[player].size() ==
+                            game.retained_priority_roots[player] &&
+                        game.rollout_evaluations[player] ==
+                            kCanonicalWorlds *
+                                game.raw_legal_options[player] &&
+                        approximately_equal(
+                            game.policy_weight_sums[player],
+                            1.0),
+                    "per-seat root and rollout accounting");
+                require_p_family_invariant(
+                    game.retained_ordinals[player] ==
+                        old_school::learned_iteration::
+                            evenly_spaced_retained_indices(
+                                game.raw_priority_roots[player],
+                                kCanonicalRootCap),
+                    "exact evenly spaced root retention");
+                std::size_t prior_ordinal = 0;
+                bool first_ordinal = true;
+                for (const std::size_t ordinal :
+                     game.retained_ordinals[player]) {
+                    require_p_family_invariant(
+                        ordinal <
+                                game.raw_priority_roots[player] &&
+                            (first_ordinal ||
+                             ordinal > prior_ordinal),
+                        "retained-root ordinals");
+                    prior_ordinal = ordinal;
+                    first_ordinal = false;
+                }
+
+                auto& deck_report =
+                    reconstructed_decks[deck];
+                ++deck_report.seat_games;
+                if (player == 0) {
+                    ++deck_report.seat_zero_games;
+                }
+                if (game.starting_player == player) {
+                    ++deck_report.starting_games;
+                }
+                deck_report.raw_priority_roots +=
+                    game.raw_priority_roots[player];
+                deck_report.raw_legal_options +=
+                    game.raw_legal_options[player];
+                deck_report.retained_priority_roots +=
+                    game.retained_priority_roots[player];
+                deck_report.rollout_evaluations +=
+                    game.rollout_evaluations[player];
+                deck_report.policy_weight +=
+                    game.policy_weight_sums[player];
+
+                raw_roots +=
+                    game.raw_priority_roots[player];
+                raw_options +=
+                    game.raw_legal_options[player];
+                retained_roots +=
+                    game.retained_priority_roots[player];
+                rollout_evaluations +=
+                    game.rollout_evaluations[player];
+                policy_weight +=
+                    game.policy_weight_sums[player];
+            }
+        }
+
+        require_p_family_invariant(
+            report.raw_priority_roots == raw_roots &&
+                report.raw_legal_options == raw_options &&
+                report.retained_priority_roots ==
+                    retained_roots &&
+                report.rollout_evaluations ==
+                    rollout_evaluations &&
+                report.rollout_evaluations ==
+                    kCanonicalWorlds *
+                        report.raw_legal_options &&
+                report.rootless_actor_games == 0 &&
+                approximately_equal(
+                    report.policy_weight, policy_weight) &&
+                approximately_equal(
+                    report.policy_weight,
+                    static_cast<double>(
+                        kCanonicalSeatGames)),
+            "generation totals");
+
+        double positive_weight = 0.0;
+        double negative_weight = 0.0;
+        double zero_weight = 0.0;
+        double conflict_weight = 0.0;
+        for (std::size_t deck = 0;
+             deck < report.decks.size(); ++deck) {
+            const auto& actual = report.decks[deck];
+            const auto& reconstructed =
+                reconstructed_decks[deck];
+            require_p_family_invariant(
+                actual.seat_games ==
+                        kCanonicalSeatGamesPerDeck &&
+                    actual.seat_zero_games ==
+                        kCanonicalSeatZeroGamesPerDeck &&
+                    actual.starting_games ==
+                        kCanonicalStartingGamesPerDeck &&
+                    actual.rootless_actor_games == 0 &&
+                    actual.raw_priority_roots ==
+                        reconstructed.raw_priority_roots &&
+                    actual.raw_legal_options ==
+                        reconstructed.raw_legal_options &&
+                    actual.retained_priority_roots ==
+                        reconstructed.retained_priority_roots &&
+                    actual.rollout_evaluations ==
+                        reconstructed.rollout_evaluations &&
+                    approximately_equal(
+                        actual.policy_weight,
+                        reconstructed.policy_weight) &&
+                    approximately_equal(
+                        actual.policy_weight,
+                        static_cast<double>(
+                            kCanonicalSeatGamesPerDeck)) &&
+                    approximately_equal(
+                        actual.positive_advantage_weight +
+                            actual.negative_advantage_weight +
+                            actual.zero_advantage_weight,
+                        actual.policy_weight),
+                "per-deck balance and weight accounting");
+            positive_weight +=
+                actual.positive_advantage_weight;
+            negative_weight +=
+                actual.negative_advantage_weight;
+            zero_weight += actual.zero_advantage_weight;
+            conflict_weight += actual.conflict_weight;
+        }
+
+        const auto& mechanism = report.mechanism;
+        require_p_family_invariant(
+            mechanism.observation_count ==
+                    report.retained_priority_roots &&
+                mechanism.residual_option_count >=
+                    2 * mechanism.observation_count &&
+                mechanism.saturated_residual_count <=
+                    mechanism.residual_option_count &&
+                approximately_equal(
+                    mechanism.total_weight,
+                    report.policy_weight) &&
+                approximately_equal(
+                    mechanism.residual_option_weight,
+                    report.policy_weight) &&
+                approximately_equal(
+                    mechanism.positive_advantage_weight,
+                    positive_weight) &&
+                approximately_equal(
+                    mechanism.negative_advantage_weight,
+                    negative_weight) &&
+                approximately_equal(
+                    mechanism.zero_advantage_weight,
+                    zero_weight) &&
+                approximately_equal(
+                    mechanism.conflict_weight,
+                    conflict_weight),
+            "mechanism accounting");
+        require_p_family_invariant(
+            std::isfinite(report.minimum_target_sum) &&
+                std::isfinite(report.maximum_target_sum) &&
+                approximately_equal(
+                    report.minimum_target_sum, 1.0) &&
+                approximately_equal(
+                    report.maximum_target_sum, 1.0),
+            "finite normalized targets");
+
+        const std::size_t replay_begin =
+            generation > 3 ? generation - 3 : 0;
+        std::size_t expected_replay_examples = 0;
+        for (std::size_t replay_index = replay_begin;
+             replay_index < generation; ++replay_index) {
+            expected_replay_examples +=
+                result.reports[replay_index]
+                    .retained_priority_roots;
+        }
+        require_p_family_invariant(
+            report.replay_generations ==
+                    std::min<std::size_t>(generation, 3) &&
+                report.replay_examples ==
+                    expected_replay_examples,
+            "three-generation replay window");
+    }
+}
+
+void print_component_comparison(
+    std::string_view name, const std::string& parent,
+    const std::string& candidate) {
+    std::cout << "    " << name << ' '
+              << (parent == candidate ? "SAME " : "CHANGED ")
+              << parent;
+    if (parent != candidate) {
+        std::cout << " -> " << candidate;
+    }
+    std::cout << '\n';
+}
+
+bool print_p_family_generation_report(
+    const old_school::LearnedValuePolicyGenerationReport& report) {
+    const auto& mechanism = report.mechanism;
+    bool deck_signal_pass = true;
+    for (const auto& deck : report.decks) {
+        deck_signal_pass =
+            deck_signal_pass &&
+            deck.positive_advantage_weight > 0.0 &&
+            deck.negative_advantage_weight > 0.0 &&
+            deck.conflict_weight > 0.0;
+    }
+    const bool kl_pass =
+        mechanism.kl_reduction_defined &&
+        std::isfinite(mechanism.kl_reduction_fraction) &&
+        mechanism.kl_reduction_fraction >= 0.30;
+    const bool movement_pass =
+        std::isfinite(
+            mechanism.signed_movement_correct_rate) &&
+        mechanism.signed_movement_correct_rate > 0.60;
+    const bool argmax_pass =
+        mechanism.changed_argmax_weight > 0.0;
+    const bool saturation_pass =
+        std::isfinite(
+            mechanism.residual_saturation_fraction) &&
+        mechanism.residual_saturation_fraction < 0.05;
+    const bool mechanism_pass =
+        deck_signal_pass && kl_pass && movement_pass &&
+        argmax_pass && saturation_pass;
+
+    std::cout
+        << "\nP" << report.generation
+        << " generation\n"
+        << "  fingerprints: parent="
+        << report.parent_fingerprint
+        << " candidate=" << report.candidate_fingerprint
+        << "\n  recipe: K=" << report.search_worlds
+        << " H=" << report.search_horizon_turns
+        << " rollout/world=" << report.rollouts_per_world
+        << " collection-threads="
+        << report.collection_threads
+        << "\n  balance: games=" << report.games.size()
+        << "/40 seat-games=80/80 rootless="
+        << report.rootless_actor_games
+        << " accounting=PASS isolation=PASS\n"
+        << "  totals: raw-roots="
+        << report.raw_priority_roots
+        << " raw-options=" << report.raw_legal_options
+        << " retained-roots="
+        << report.retained_priority_roots
+        << " rollout-evaluations="
+        << report.rollout_evaluations
+        << " policy-weight="
+        << format_real(report.policy_weight) << '\n';
+    for (std::size_t deck = 0;
+         deck < report.decks.size(); ++deck) {
+        const auto& metrics = report.decks[deck];
+        std::cout
+            << "    "
+            << old_school::deck_name(
+                   static_cast<old_school::DeckId>(deck))
+            << ": seats=" << metrics.seat_games
+            << " seat0=" << metrics.seat_zero_games
+            << " starts=" << metrics.starting_games
+            << " roots=" << metrics.raw_priority_roots
+            << '/' << metrics.retained_priority_roots
+            << " options/evals=" << metrics.raw_legal_options
+            << '/' << metrics.rollout_evaluations
+            << " weight=" << format_real(metrics.policy_weight)
+            << " +A="
+            << format_real(
+                   metrics.positive_advantage_weight)
+            << " -A="
+            << format_real(
+                   metrics.negative_advantage_weight)
+            << " zero="
+            << format_real(metrics.zero_advantage_weight)
+            << " conflict="
+            << format_real(metrics.conflict_weight)
+            << '\n';
+    }
+    std::cout
+        << "  replay: generations="
+        << report.replay_generations
+        << " examples=" << report.replay_examples
+        << "\n  target sums: min="
+        << format_real(report.minimum_target_sum)
+        << " max=" << format_real(report.maximum_target_sum)
+        << "\n  KL(y||mu): parent="
+        << format_real(mechanism.parent_kl)
+        << " candidate="
+        << format_real(mechanism.candidate_kl)
+        << " reduction="
+        << format_real(mechanism.kl_reduction_fraction)
+        << " defined="
+        << (mechanism.kl_reduction_defined ? "yes" : "no")
+        << " gate=" << (kl_pass ? "PASS" : "REJECT")
+        << "\n  signed movement: all="
+        << format_real(
+               mechanism.signed_movement_correct_rate)
+        << " ("
+        << format_real(
+               mechanism.correct_signed_movement_weight)
+        << '/'
+        << format_real(
+               mechanism.eligible_signed_movement_weight)
+        << "), +A="
+        << format_real(
+               mechanism.positive_movement_correct_rate)
+        << " ("
+        << format_real(
+               mechanism.correct_positive_movement_weight)
+        << '/'
+        << format_real(
+               mechanism.eligible_positive_movement_weight)
+        << "), -A="
+        << format_real(
+               mechanism.negative_movement_correct_rate)
+        << " ("
+        << format_real(
+               mechanism.correct_negative_movement_weight)
+        << '/'
+        << format_real(
+               mechanism.eligible_negative_movement_weight)
+        << ") gate="
+        << (movement_pass ? "PASS" : "REJECT")
+        << "\n  argmax changed: weight="
+        << format_real(mechanism.changed_argmax_weight)
+        << " fraction="
+        << format_real(
+               mechanism.changed_argmax_weight_fraction)
+        << " gate=" << (argmax_pass ? "PASS" : "REJECT")
+        << "\n  residual saturation: count="
+        << mechanism.saturated_residual_count << '/'
+        << mechanism.residual_option_count
+        << " weight="
+        << format_real(
+               mechanism.saturated_residual_weight)
+        << '/'
+        << format_real(mechanism.residual_option_weight)
+        << " fraction="
+        << format_real(
+               mechanism.residual_saturation_fraction)
+        << " gate="
+        << (saturation_pass ? "PASS" : "REJECT")
+        << "\n  deck +A/-A/conflict gate: "
+        << (deck_signal_pass ? "PASS" : "REJECT")
+        << "\n  components (bit-exact candidate vs parent):\n";
+    print_component_comparison(
+        "critic", report.parent_components.critic,
+        report.candidate_components.critic);
+    print_component_comparison(
+        "priority", report.parent_components.priority,
+        report.candidate_components.priority);
+    print_component_comparison(
+        "attack", report.parent_components.attack,
+        report.candidate_components.attack);
+    print_component_comparison(
+        "block", report.parent_components.block,
+        report.candidate_components.block);
+    print_component_comparison(
+        "damage-order",
+        report.parent_components.damage_order,
+        report.candidate_components.damage_order);
+    std::cout
+        << "  Mechanism gate P" << report.generation
+        << ": "
+        << (mechanism_pass ? "PASS" : "REJECT")
+        << (mechanism_pass
+                ? "\n"
+                : " (scientific rejection; exit status remains 0)\n");
+    return mechanism_pass;
+}
+
+struct P1FitCell {
+    std::string_view label;
+    std::size_t epochs;
+    double learning_rate;
+};
+
+constexpr std::array<P1FitCell, 5> kP1FitCells = {{
+    {"E8/R0.001-control", 8, 0.001},
+    {"E32/R0.001", 32, 0.001},
+    {"E128/R0.001", 128, 0.001},
+    {"E512/R0.001", 512, 0.001},
+    {"E128/R0.003", 128, 0.003},
+}};
+
+std::vector<old_school::LearnedValuePriorityHeadUpdateConfig>
+p1_fit_diagnostic_optimizers() {
+    std::vector<
+        old_school::LearnedValuePriorityHeadUpdateConfig>
+        optimizers;
+    optimizers.reserve(kP1FitCells.size());
+    for (const auto& cell : kP1FitCells) {
+        old_school::LearnedValuePriorityHeadUpdateConfig optimizer;
+        optimizer.epochs = cell.epochs;
+        optimizer.learning_rate = cell.learning_rate;
+        optimizers.push_back(optimizer);
+    }
+    return optimizers;
+}
+
+bool p1_fit_mechanism_input_equal(
+    const old_school::LearnedValuePolicyMechanismReport& left,
+    const old_school::LearnedValuePolicyMechanismReport& right) {
+    return left.observation_count == right.observation_count &&
+           left.residual_option_count ==
+               right.residual_option_count &&
+           left.total_weight == right.total_weight &&
+           left.parent_kl == right.parent_kl &&
+           left.positive_advantage_weight ==
+               right.positive_advantage_weight &&
+           left.negative_advantage_weight ==
+               right.negative_advantage_weight &&
+           left.zero_advantage_weight ==
+               right.zero_advantage_weight &&
+           left.conflict_weight == right.conflict_weight &&
+           left.eligible_signed_movement_weight ==
+               right.eligible_signed_movement_weight &&
+           left.eligible_positive_movement_weight ==
+               right.eligible_positive_movement_weight &&
+           left.eligible_negative_movement_weight ==
+               right.eligible_negative_movement_weight &&
+           left.residual_option_weight ==
+               right.residual_option_weight;
+}
+
+void validate_p1_fit_mechanism(
+    const old_school::LearnedValuePolicyMechanismReport& metrics,
+    std::string_view scope) {
+    require_p_family_invariant(
+        metrics.observation_count > 0 &&
+            metrics.residual_option_count >=
+                2 * metrics.observation_count &&
+            metrics.saturated_residual_count <=
+                metrics.residual_option_count &&
+            metrics.total_weight > 0.0 &&
+            std::isfinite(metrics.parent_kl) &&
+            std::isfinite(metrics.candidate_kl) &&
+            metrics.kl_reduction_defined &&
+            std::isfinite(metrics.kl_reduction_fraction) &&
+            metrics.positive_advantage_weight > 0.0 &&
+            metrics.negative_advantage_weight > 0.0 &&
+            metrics.conflict_weight > 0.0 &&
+            metrics.correct_signed_movement_weight <=
+                metrics.eligible_signed_movement_weight &&
+            metrics.correct_positive_movement_weight <=
+                metrics.eligible_positive_movement_weight &&
+            metrics.correct_negative_movement_weight <=
+                metrics.eligible_negative_movement_weight &&
+            std::isfinite(
+                metrics.signed_movement_correct_rate) &&
+            std::isfinite(
+                metrics.positive_movement_correct_rate) &&
+            std::isfinite(
+                metrics.negative_movement_correct_rate) &&
+            metrics.changed_argmax_weight <=
+                metrics.total_weight &&
+            std::isfinite(
+                metrics.changed_argmax_weight_fraction) &&
+            metrics.saturated_residual_weight <=
+                metrics.residual_option_weight &&
+            std::isfinite(
+                metrics.residual_saturation_fraction),
+        std::string("P1 fit mechanism metrics for ") +
+            std::string(scope));
+}
+
+void validate_p1_fit_diagnostic(
+    const old_school::LearnedValuePolicyFamilyResult& family) {
+    require_p_family_invariant(
+        family.reports.size() == 1 &&
+            family.checkpoints.size() == 2,
+        "P1 fit diagnostic family shape");
+    const auto& report = family.reports.front();
+    const auto& diagnostics = report.capacity_diagnostics;
+    require_p_family_invariant(
+        diagnostics.size() == kP1FitCells.size(),
+        "P1 fit diagnostic cell count");
+    require_p_family_invariant(
+        diagnostics.front().optimizer == report.optimizer &&
+            diagnostics.front().parent_fingerprint ==
+                report.parent_fingerprint &&
+            diagnostics.front().candidate_fingerprint ==
+                report.candidate_fingerprint &&
+            diagnostics.front().parent_components ==
+                report.parent_components &&
+            diagnostics.front().candidate_components ==
+                report.candidate_components &&
+            diagnostics.front().mechanism ==
+                report.mechanism,
+        "E8/R0.001 control equivalence");
+    require_p_family_invariant(
+        report.rootwise_oracle.has_value(),
+        "P1 rootwise oracle presence");
+    const auto& oracle = *report.rootwise_oracle;
+    require_p_family_invariant(
+        oracle.observation_count ==
+                report.mechanism.observation_count &&
+            oracle.observation_count ==
+                report.retained_priority_roots &&
+            oracle.total_weight ==
+                report.mechanism.total_weight &&
+            oracle.total_weight == report.policy_weight &&
+            approximately_equal(
+                oracle.parent_kl,
+                report.mechanism.parent_kl) &&
+            oracle.reduction_defined ==
+                report.mechanism.kl_reduction_defined,
+        "P1 rootwise oracle shard identity");
+    const auto validate_oracle_bound =
+        [&](const old_school::
+                LearnedValuePolicyRootwiseOracleBoundReport&
+                    bound,
+            std::string_view name) {
+            require_p_family_invariant(
+                std::isfinite(bound.numerical_best_kl) &&
+                    bound.numerical_best_kl >= 0.0 &&
+                    std::isfinite(
+                        bound.achievable_reduction_fraction) &&
+                    std::isfinite(
+                        bound.certified_kl_lower_bound) &&
+                    bound.certified_kl_lower_bound >= 0.0 &&
+                    std::isfinite(
+                        bound.certified_reduction_upper_bound) &&
+                    bound.achievable_reduction_fraction <=
+                        bound.certified_reduction_upper_bound &&
+                    std::isfinite(
+                        bound.maximum_abs_squashed_residual) &&
+                    bound.maximum_abs_squashed_residual >= 0.0 &&
+                    bound.maximum_abs_squashed_residual <= 1.0,
+                std::string("P1 rootwise oracle ") +
+                    std::string(name));
+        };
+    validate_oracle_bound(oracle.full_range, "full range");
+    validate_oracle_bound(
+        oracle.zero_saturation, "zero saturation");
+
+    for (std::size_t cell = 0;
+         cell < diagnostics.size(); ++cell) {
+        const auto& diagnostic = diagnostics[cell];
+        auto expected_optimizer =
+            old_school::LearnedValuePriorityHeadUpdateConfig{};
+        expected_optimizer.epochs =
+            kP1FitCells[cell].epochs;
+        expected_optimizer.learning_rate =
+            kP1FitCells[cell].learning_rate;
+        expected_optimizer.seed = report.optimizer.seed;
+        require_p_family_invariant(
+            diagnostic.optimizer == expected_optimizer,
+            "P1 fit optimizer identity");
+        require_p_family_invariant(
+            diagnostic.parent_fingerprint ==
+                    report.parent_fingerprint &&
+                diagnostic.parent_components ==
+                    report.parent_components &&
+                diagnostic.candidate_components.critic ==
+                    report.parent_components.critic &&
+                diagnostic.candidate_components.attack ==
+                    report.parent_components.attack &&
+                diagnostic.candidate_components.block ==
+                    report.parent_components.block &&
+                diagnostic.candidate_components.damage_order ==
+                    report.parent_components.damage_order,
+            "P1 fit same-parent component isolation");
+        validate_p1_fit_mechanism(
+            diagnostic.mechanism, "pooled");
+        require_p_family_invariant(
+            p1_fit_mechanism_input_equal(
+                diagnostic.mechanism,
+                diagnostics.front().mechanism),
+            "P1 fit pooled same-shard identity");
+        for (std::size_t deck = 0;
+             deck < old_school::kDeckCount; ++deck) {
+            const auto& deck_metrics =
+                diagnostic.mechanisms_by_deck[deck];
+            validate_p1_fit_mechanism(
+                deck_metrics,
+                old_school::deck_name(
+                    static_cast<old_school::DeckId>(deck)));
+            require_p_family_invariant(
+                p1_fit_mechanism_input_equal(
+                    deck_metrics,
+                    diagnostics.front()
+                        .mechanisms_by_deck[deck]),
+                "P1 fit per-deck same-shard identity");
+        }
+    }
+}
+
+void print_weighted_rate(double numerator, double denominator,
+                         double rate) {
+    std::cout << format_real(numerator) << '/'
+              << format_real(denominator) << '('
+              << format_real(rate) << ')';
+}
+
+void print_p1_fit_metric_row(
+    std::string_view cell, std::string_view scope,
+    const old_school::LearnedValuePolicyMechanismReport& metrics) {
+    std::cout << "  " << cell << " | " << scope
+              << " | " << format_real(metrics.parent_kl)
+              << " | " << format_real(metrics.candidate_kl)
+              << " | "
+              << format_real(metrics.kl_reduction_fraction)
+              << " | ";
+    print_weighted_rate(
+        metrics.correct_signed_movement_weight,
+        metrics.eligible_signed_movement_weight,
+        metrics.signed_movement_correct_rate);
+    std::cout << " | ";
+    print_weighted_rate(
+        metrics.correct_positive_movement_weight,
+        metrics.eligible_positive_movement_weight,
+        metrics.positive_movement_correct_rate);
+    std::cout << " | ";
+    print_weighted_rate(
+        metrics.correct_negative_movement_weight,
+        metrics.eligible_negative_movement_weight,
+        metrics.negative_movement_correct_rate);
+    std::cout << " | ";
+    print_weighted_rate(
+        metrics.changed_argmax_weight,
+        metrics.total_weight,
+        metrics.changed_argmax_weight_fraction);
+    std::cout << " | ";
+    print_weighted_rate(
+        metrics.saturated_residual_weight,
+        metrics.residual_option_weight,
+        metrics.residual_saturation_fraction);
+    std::cout << '\n';
+}
+
+void print_p1_fit_diagnostic(
+    const old_school::LearnedValuePolicyFamilyResult& family,
+    std::uint64_t root_seed, std::size_t training_games,
+    std::uint64_t training_seed, double elapsed_seconds) {
+    const auto& report = family.reports.front();
+    std::cout
+        << "\nP1 Same-Parent Fit Diagnostic\n"
+        << "  root-seed=" << root_seed
+        << " train-games=" << training_games
+        << " train-seed=" << training_seed
+        << "\n  collection: games=" << report.games.size()
+        << " seat-games=80 K=" << report.search_worlds
+        << "/H=" << report.search_horizon_turns
+        << " root-cap=" << report.max_roots_per_actor_game
+        << " max-turns=" << report.max_game_turns
+        << " threads=" << report.collection_threads
+        << " retained-roots="
+        << report.retained_priority_roots
+        << " rollout-evaluations="
+        << report.rollout_evaluations
+        << "\n  frozen-parent="
+        << report.parent_fingerprint
+        << "\n  control-candidate="
+        << report.candidate_fingerprint
+        << "\n  control equivalence: PASS"
+        << "\n  all-cell same-parent isolation: PASS"
+        << "\n  rootwise-oracle shard identity: PASS"
+        << "\n  elapsed-seconds="
+        << format_real(elapsed_seconds)
+        << "\n\nCandidate fingerprints\n";
+    for (std::size_t cell = 0;
+         cell < report.capacity_diagnostics.size(); ++cell) {
+        const auto& diagnostic =
+            report.capacity_diagnostics[cell];
+        std::cout
+            << "  " << kP1FitCells[cell].label
+            << ": model="
+            << diagnostic.candidate_fingerprint
+            << " priority="
+            << diagnostic.candidate_components.priority
+            << " fit-seed=" << diagnostic.optimizer.seed
+            << " isolation=PASS\n";
+    }
+
+    const auto& oracle = *report.rootwise_oracle;
+    const auto print_oracle_bound =
+        [&](std::string_view name,
+            const old_school::
+                LearnedValuePolicyRootwiseOracleBoundReport&
+                    bound) {
+            std::cout
+                << "  " << name << " | "
+                << format_real(bound.numerical_best_kl)
+                << " | "
+                << format_real(
+                       bound.achievable_reduction_fraction)
+                << " | "
+                << format_real(
+                       bound.certified_kl_lower_bound)
+                << " | "
+                << format_real(
+                       bound.certified_reduction_upper_bound)
+                << " | "
+                << format_real(
+                       bound.maximum_abs_squashed_residual)
+                << " | "
+                << bound.roots_reaching_iteration_limit
+                << '\n';
+        };
+    std::cout
+        << "\nIndependent-root capacity bracket"
+        << "\n  observations=" << oracle.observation_count
+        << " weight=" << format_real(oracle.total_weight)
+        << " parent-KL=" << format_real(oracle.parent_kl)
+        << " reduction-defined="
+        << (oracle.reduction_defined ? "yes" : "no")
+        << "\n  range | numerical-best-KL | achievable-reduction | "
+           "certified-KL-lower | certified-reduction-upper | "
+           "max-abs-squashed-residual | iteration-limit-roots\n";
+    print_oracle_bound("full", oracle.full_range);
+    print_oracle_bound(
+        "zero-saturation", oracle.zero_saturation);
+
+    std::cout
+        << "\nMetrics"
+        << "\n  cell | scope | parent-KL | candidate-KL | "
+           "KL-reduction | signed | signed+ | signed- | "
+           "argmax | saturation\n";
+    for (std::size_t cell = 0;
+         cell < report.capacity_diagnostics.size(); ++cell) {
+        const auto& diagnostic =
+            report.capacity_diagnostics[cell];
+        print_p1_fit_metric_row(
+            kP1FitCells[cell].label, "Pooled",
+            diagnostic.mechanism);
+        for (std::size_t deck = 0;
+             deck < old_school::kDeckCount; ++deck) {
+            print_p1_fit_metric_row(
+                kP1FitCells[cell].label,
+                old_school::deck_name(
+                    static_cast<old_school::DeckId>(deck)),
+                diagnostic.mechanisms_by_deck[deck]);
+        }
+    }
+}
+
+bool same_real_bits(double left, double right) {
+    return std::bit_cast<std::uint64_t>(left) ==
+           std::bit_cast<std::uint64_t>(right);
+}
+
+bool same_deck_probe_metrics(
+    const old_school::probe_eval::DeckProbeMetrics& left,
+    const old_school::probe_eval::DeckProbeMetrics& right) {
+    return left.root_deck == right.root_deck &&
+           left.probe_count == right.probe_count &&
+           left.stable_pair_count == right.stable_pair_count &&
+           same_real_bits(
+               left.top1_expected_agreement,
+               right.top1_expected_agreement) &&
+           same_real_bits(
+               left.stable_pair_agreement,
+               right.stable_pair_agreement) &&
+           same_real_bits(left.mean_regret, right.mean_regret) &&
+           same_real_bits(
+               left.critic_brier, right.critic_brier) &&
+           same_real_bits(left.critic_mse, right.critic_mse) &&
+           same_real_bits(
+               left.critic_log_loss, right.critic_log_loss) &&
+           same_real_bits(left.critic_bias, right.critic_bias) &&
+           same_real_bits(left.critic_ece, right.critic_ece);
+}
+
+bool same_probe_metrics(
+    const old_school::probe_eval::ProbeMetricSummary& left,
+    const old_school::probe_eval::ProbeMetricSummary& right) {
+    if (left.probe_count != right.probe_count ||
+        left.stable_pair_count != right.stable_pair_count ||
+        !same_real_bits(
+            left.top1_expected_agreement,
+            right.top1_expected_agreement) ||
+        !same_real_bits(
+            left.stable_pair_agreement,
+            right.stable_pair_agreement) ||
+        !same_real_bits(left.mean_regret, right.mean_regret) ||
+        !same_real_bits(left.critic_brier, right.critic_brier) ||
+        !same_real_bits(left.critic_mse, right.critic_mse) ||
+        !same_real_bits(
+            left.critic_log_loss, right.critic_log_loss) ||
+        !same_real_bits(left.critic_bias, right.critic_bias) ||
+        !same_real_bits(left.critic_ece, right.critic_ece)) {
+        return false;
+    }
+    for (std::size_t deck = 0; deck < left.by_deck.size();
+         ++deck) {
+        if (!same_deck_probe_metrics(
+                left.by_deck[deck], right.by_deck[deck])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool same_value_probe_decision(
+    const old_school::probe_runner::ValueProbeDecisionDetail& left,
+    const old_school::probe_runner::ValueProbeDecisionDetail& right) {
+    return left.stable_id == right.stable_id &&
+           left.root_deck == right.root_deck &&
+           left.selected_keys == right.selected_keys &&
+           left.deterministic_selection ==
+               right.deterministic_selection &&
+           left.reference_best_set == right.reference_best_set &&
+           same_real_bits(left.regret, right.regret) &&
+           same_real_bits(
+               left.critic_prediction,
+               right.critic_prediction) &&
+           same_real_bits(
+               left.selected_action_reference_q,
+               right.selected_action_reference_q) &&
+           same_real_bits(
+               left.critic_error, right.critic_error) &&
+           left.selection_changed_from_reference ==
+               right.selection_changed_from_reference &&
+           left.selection_changed_from_previous ==
+               right.selection_changed_from_previous;
+}
+
+const old_school::probe_runner::ValueCheckpointProbeReport&
+checkpoint_named(
+    const old_school::probe_runner::ProbeScoreReport& report,
+    std::string_view name) {
+    const auto found = std::find_if(
+        report.value_checkpoints.begin(),
+        report.value_checkpoints.end(),
+        [name](const auto& checkpoint) {
+            return checkpoint.name == name;
+        });
+    if (found == report.value_checkpoints.end()) {
+        throw std::logic_error(
+            "P1R probe report is missing checkpoint " +
+            std::string(name));
+    }
+    return *found;
+}
+
+const old_school::probe_runner::ValueProbeDecisionDetail&
+decision_named(
+    const old_school::probe_runner::ValueCheckpointProbeReport&
+        checkpoint,
+    std::string_view stable_id) {
+    const auto found = std::find_if(
+        checkpoint.decisions.begin(), checkpoint.decisions.end(),
+        [stable_id](const auto& decision) {
+            return decision.stable_id == stable_id;
+        });
+    if (found == checkpoint.decisions.end()) {
+        throw std::logic_error(
+            "P1R checkpoint is missing decision " +
+            std::string(stable_id));
+    }
+    return *found;
+}
+
+const old_school::probe_runner::ForceSpikePolicyControlReport&
+force_spike_control_named(
+    const old_school::probe_runner::ProbeScoreReport& report,
+    std::string_view name) {
+    const auto found = std::find_if(
+        report.force_spike_controls.begin(),
+        report.force_spike_controls.end(),
+        [name](const auto& control) {
+            return control.policy_name == name;
+        });
+    if (found == report.force_spike_controls.end()) {
+        throw std::logic_error(
+            "P1R probe report is missing Force Spike control " +
+            std::string(name));
+    }
+    return *found;
+}
+
+const old_school::probe_runner::CandidatePairEstimate&
+value_pair_named(
+    const old_school::probe_runner::ProbeScoreReport& report,
+    std::string_view name) {
+    const auto found = std::find_if(
+        report.value_candidate_pairs.begin(),
+        report.value_candidate_pairs.end(),
+        [name](const auto& pair) {
+            return pair.name == name;
+        });
+    if (found == report.value_candidate_pairs.end()) {
+        throw std::logic_error(
+            "P1R probe report is missing Value pair " +
+            std::string(name));
+    }
+    return *found;
+}
+
+bool checkpoint_behavior_bit_identical(
+    const old_school::probe_runner::ValueCheckpointProbeReport& left,
+    const old_school::probe_runner::ValueCheckpointProbeReport&
+        right) {
+    if (left.fingerprint != right.fingerprint ||
+        !same_probe_metrics(left.metrics, right.metrics) ||
+        left.decisions.size() != right.decisions.size()) {
+        return false;
+    }
+    for (const auto& left_decision : left.decisions) {
+        const auto& right_decision =
+            decision_named(right, left_decision.stable_id);
+        if (!same_value_probe_decision(
+                left_decision, right_decision)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool selected_inside_reference_best(
+    const old_school::probe_runner::ValueProbeDecisionDetail&
+        decision) {
+    return !decision.selected_keys.empty() &&
+           std::all_of(
+               decision.selected_keys.begin(),
+               decision.selected_keys.end(),
+               [&decision](const std::string& selected) {
+                   return std::find(
+                              decision.reference_best_set.begin(),
+                              decision.reference_best_set.end(),
+                              selected) !=
+                          decision.reference_best_set.end();
+               });
+}
+
+bool critic_predictions_bit_identical(
+    const old_school::probe_runner::ValueCheckpointProbeReport&
+        left,
+    const old_school::probe_runner::ValueCheckpointProbeReport&
+        right) {
+    if (left.decisions.size() != right.decisions.size()) {
+        return false;
+    }
+    return std::all_of(
+        left.decisions.begin(), left.decisions.end(),
+        [&right](const auto& decision) {
+            return same_real_bits(
+                decision.critic_prediction,
+                decision_named(right, decision.stable_id)
+                    .critic_prediction);
+        });
+}
+
+bool evaluate_p1r_offline_gate(
+    const old_school::probe_runner::ProbeScoreReport& dev,
+    const old_school::probe_runner::ProbeScoreReport& validation) {
+    const auto& dev_s0 = checkpoint_named(dev, "P0 residual-off");
+    const auto& dev_p0 = checkpoint_named(dev, "P0 residual-on");
+    const auto& dev_p1r = checkpoint_named(dev, "P1R");
+    const auto& validation_s0 =
+        checkpoint_named(validation, "P0 residual-off");
+    const auto& validation_p0 =
+        checkpoint_named(validation, "P0 residual-on");
+    const auto& validation_p1r =
+        checkpoint_named(validation, "P1R");
+    const auto& p1r_force_spike =
+        force_spike_control_named(dev, "P1R");
+    const auto& p0_x_zero = value_pair_named(
+        validation, "P0 residual-on Q(Pass) - Q(X=0)");
+    const auto& p1r_x_zero = value_pair_named(
+        validation, "P1R Q(Pass) - Q(X=0)");
+
+    const bool caches_loaded =
+        dev.cache_status ==
+            old_school::probe_runner::ProbeCacheStatus::Loaded &&
+        validation.cache_status ==
+            old_school::probe_runner::ProbeCacheStatus::Loaded;
+    const bool hidden_invariance =
+        dev.hidden_repartition.passed &&
+        validation.hidden_repartition.passed;
+    const bool p0_identity =
+        checkpoint_behavior_bit_identical(dev_s0, dev_p0) &&
+        checkpoint_behavior_bit_identical(
+            validation_s0, validation_p0);
+    const bool critic_identity =
+        critic_predictions_bit_identical(dev_p0, dev_p1r) &&
+        critic_predictions_bit_identical(
+            validation_p0, validation_p1r);
+    const bool pooled_regret_improved =
+        dev_p1r.metrics.mean_regret <
+        dev_p0.metrics.mean_regret;
+    bool deck_regret_guard = true;
+    for (std::size_t deck = 0;
+         deck < old_school::kDeckCount; ++deck) {
+        deck_regret_guard =
+            deck_regret_guard &&
+            dev_p1r.metrics.by_deck[deck].mean_regret <=
+                dev_p0.metrics.by_deck[deck].mean_regret + 0.01;
+    }
+
+    constexpr std::array<std::string_view, 4> kBlueStackProbes = {
+        "blue.counter-fire-elemental.v3",
+        "blue.counter-lethal-bolt.v3",
+        "blue.counter-war.v3",
+        "blue.force-spike-tapped-out-gray-ogre.v3",
+    };
+    bool blue_stack_retained = true;
+    for (const std::string_view stable_id : kBlueStackProbes) {
+        blue_stack_retained =
+            blue_stack_retained &&
+            selected_inside_reference_best(
+                decision_named(dev_p1r, stable_id));
+    }
+
+    const bool force_spike_gate =
+        p1r_force_spike.gate_passed();
+    const auto& validation_decision = decision_named(
+        validation_p1r,
+        "validation.ru.disintegrate-hold-x0.v1");
+    const bool validation_selects_pass =
+        old_school::probe_runner::
+            value_decision_uniquely_selects(
+                validation_decision, p1r_x_zero.first_key);
+    const bool x_zero_q_gate =
+        p1r_x_zero.delta_q > p0_x_zero.delta_q &&
+        p1r_x_zero.confidence_lower_95 > 0.0;
+
+    const auto print_gate =
+        [](std::string_view name, bool passed) {
+            std::cout << "  " << name << ": "
+                      << (passed ? "PASS" : "REJECT") << '\n';
+        };
+    std::cout
+        << "\nP1R preregistered offline gate\n"
+        << "  P0 pooled regret: "
+        << format_real(dev_p0.metrics.mean_regret)
+        << "\n  P1R pooled regret: "
+        << format_real(dev_p1r.metrics.mean_regret)
+        << "\n  validation P0 Q(Pass)-Q(X=0): "
+        << format_real(p0_x_zero.delta_q)
+        << " [" << format_real(p0_x_zero.confidence_lower_95)
+        << ", " << format_real(p0_x_zero.confidence_upper_95)
+        << "]\n  validation P1R Q(Pass)-Q(X=0): "
+        << format_real(p1r_x_zero.delta_q)
+        << " [" << format_real(p1r_x_zero.confidence_lower_95)
+        << ", " << format_real(p1r_x_zero.confidence_upper_95)
+        << "]\n";
+    print_gate("immutable caches loaded", caches_loaded);
+    print_gate("P0 residual-on identity", p0_identity);
+    print_gate("P1R critic prediction identity", critic_identity);
+    print_gate("pooled regret strictly improved",
+               pooled_regret_improved);
+    print_gate("all-five deck regret guard", deck_regret_guard);
+    print_gate("Blue stack decisions retained",
+               blue_stack_retained);
+    print_gate("Force Spike live/payable behavior",
+               force_spike_gate);
+    print_gate("validation uniquely selects Pass",
+               validation_selects_pass);
+    print_gate("validation positive Q improvement", x_zero_q_gate);
+    print_gate("hidden repartition invariance",
+               hidden_invariance);
+
+    const bool passed =
+        caches_loaded && p0_identity && critic_identity &&
+        pooled_regret_improved && deck_regret_guard &&
+        blue_stack_retained && force_spike_gate &&
+        validation_selects_pass && x_zero_q_gate &&
+        hidden_invariance;
+    std::cout << "  Offline verdict: "
+              << (passed ? "PASS" : "REJECT")
+              << (passed
+                      ? " (permits separate P4R declaration)\n"
+                      : " (stop: no P4R or gameplay)\n");
+    return passed;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2170,6 +3413,15 @@ int main(int argc, char** argv) {
         bool diagnose_value_context = false;
         bool diagnose_force_spike_teacher = false;
         bool teacher_audit_unsupported_option_used = false;
+        bool train_p_family = false;
+        std::size_t p_family_generations = 0;
+        bool p_family_unsupported_option_used = false;
+        bool diagnose_p1_fit = false;
+        bool p1_fit_unsupported_option_used = false;
+        bool score_p1r_probes = false;
+        bool p1r_probe_unsupported_option_used = false;
+        bool diagnose_terminal_credit = false;
+        bool terminal_credit_unsupported_option_used = false;
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
@@ -2216,6 +3468,29 @@ int main(int argc, char** argv) {
                 print_help(argv[0]);
                 return 0;
             }
+            if (option != "--train-p-family" &&
+                option != "--seed" &&
+                option != "--train-games" &&
+                option != "--train-seed") {
+                p_family_unsupported_option_used = true;
+            }
+            if (option != "--diagnose-p1-fit" &&
+                option != "--seed" &&
+                option != "--train-games" &&
+                option != "--train-seed") {
+                p1_fit_unsupported_option_used = true;
+            }
+            if (option != "--score-p1r-probes" &&
+                option != "--seed" &&
+                option != "--train-games" &&
+                option != "--train-seed") {
+                p1r_probe_unsupported_option_used = true;
+            }
+            if (option != "--diagnose-terminal-credit" &&
+                option != "--train-games" &&
+                option != "--train-seed") {
+                terminal_credit_unsupported_option_used = true;
+            }
             if (option != "--diagnose-force-spike-teacher" &&
                 option != "--train-games" &&
                 option != "--train-seed" &&
@@ -2248,6 +3523,18 @@ int main(int argc, char** argv) {
             }
             if (option == "--diagnose-force-spike-teacher") {
                 diagnose_force_spike_teacher = true;
+                continue;
+            }
+            if (option == "--diagnose-p1-fit") {
+                diagnose_p1_fit = true;
+                continue;
+            }
+            if (option == "--score-p1r-probes") {
+                score_p1r_probes = true;
+                continue;
+            }
+            if (option == "--diagnose-terminal-credit") {
+                diagnose_terminal_credit = true;
                 continue;
             }
             if (option == "--variance-study") {
@@ -2298,6 +3585,7 @@ int main(int argc, char** argv) {
                 option != "--value-recipe" &&
                 option != "--actor-policy-epochs" &&
                 option != "--actor-policy-rate" &&
+                option != "--train-p-family" &&
                 option != "--probe-cache") {
                 throw std::invalid_argument("unknown option: " +
                                             std::string(option));
@@ -2488,6 +3776,14 @@ int main(int argc, char** argv) {
                 actor_generation_config.policy_epochs =
                     static_cast<std::size_t>(value);
                 actor_policy_option_used = true;
+            } else if (option == "--train-p-family") {
+                if (value == 0 || value > 16) {
+                    throw std::invalid_argument(
+                        "--train-p-family must be in [1, 16]");
+                }
+                train_p_family = true;
+                p_family_generations =
+                    static_cast<std::size_t>(value);
             } else {
                 if (value == 0) {
                     throw std::invalid_argument(
@@ -2511,6 +3807,10 @@ int main(int argc, char** argv) {
                 static_cast<int>(diagnose_white_plan) +
                 static_cast<int>(diagnose_value_context) +
                 static_cast<int>(diagnose_force_spike_teacher) +
+                static_cast<int>(train_p_family) +
+                static_cast<int>(diagnose_p1_fit) +
+                static_cast<int>(score_p1r_probes) +
+                static_cast<int>(diagnose_terminal_credit) +
                 static_cast<int>(variance_study) +
                 static_cast<int>(score_probes) >
             1) {
@@ -2518,8 +3818,11 @@ int main(int argc, char** argv) {
                 "--interactive, --benchmark, --stability, "
                 "--evolve-deck, and "
                 "--diagnose-white-plan, --diagnose-value-context, "
-                "--diagnose-force-spike-teacher, --variance-study, "
-                "and --score-probes cannot be "
+                "--diagnose-force-spike-teacher, --train-p-family, "
+                "--diagnose-p1-fit, --score-p1r-probes, "
+                "--diagnose-terminal-credit, "
+                "--variance-study, and "
+                "--score-probes cannot be "
                 "combined");
         }
         if (diagnose_value_context && argc != 2) {
@@ -2539,6 +3842,37 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--diagnose-force-spike-teacher requires a positive "
                 "--learned-generations N");
+        }
+        if (train_p_family &&
+            p_family_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--train-p-family accepts only --seed, "
+                "--train-games, and --train-seed");
+        }
+        if (diagnose_p1_fit &&
+            p1_fit_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--diagnose-p1-fit accepts only --seed, "
+                "--train-games, and --train-seed");
+        }
+        if (score_p1r_probes &&
+            p1r_probe_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--score-p1r-probes accepts only --seed, "
+                "--train-games, and --train-seed");
+        }
+        if (diagnose_terminal_credit &&
+            terminal_credit_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--diagnose-terminal-credit accepts only "
+                "--train-games and --train-seed");
+        }
+        if (diagnose_terminal_credit &&
+            (training_games != 800 ||
+             training_seed != 424242)) {
+            throw std::invalid_argument(
+                "--diagnose-terminal-credit requires exact "
+                "--train-games 800 --train-seed 424242");
         }
         if (interactive &&
             interactive_unsupported_option_used) {
@@ -2676,6 +4010,10 @@ int main(int argc, char** argv) {
             !interactive && !benchmark && !stability && !evolve &&
             !diagnose_white_plan && !diagnose_value_context &&
             !diagnose_force_spike_teacher &&
+            !train_p_family &&
+            !diagnose_p1_fit &&
+            !score_p1r_probes &&
+            !diagnose_terminal_credit &&
             !variance_study && !score_probes &&
             (bot_field == old_school::BotField::Mixed ||
              bot_field == old_school::BotField::Learned);
@@ -2825,6 +4163,339 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--refresh-value-mix50-cache requires a benchmark "
                 "or probe route that selects Value G8 Late-Mix50");
+        }
+        if (diagnose_p1_fit) {
+            std::cout
+                << "Preparing P1 same-parent fit diagnostic"
+                << " (root seed " << seed
+                << ", C16 training seed " << training_seed
+                << ", " << training_games
+                << " initial games)...\n";
+            const auto p0 =
+                train_value_challenger_with_progress(
+                    training_games, training_seed, 16, false);
+            const std::string p0_fingerprint =
+                old_school::learned_model_fingerprint(p0);
+            if (p0_fingerprint != kCanonicalP0Fingerprint) {
+                throw std::runtime_error(
+                    "Value Challenger C16 P0 fingerprint mismatch: "
+                    "expected " +
+                    std::string(kCanonicalP0Fingerprint) +
+                    ", got " + p0_fingerprint);
+            }
+
+            old_school::LearnedValuePolicyFamilyConfig config;
+            config.generations = 1;
+            config.capacity_diagnostic_optimizers =
+                p1_fit_diagnostic_optimizers();
+            config.compute_rootwise_oracle = true;
+            config.required_p0_fingerprint =
+                kCanonicalP0Fingerprint;
+            const auto started =
+                std::chrono::steady_clock::now();
+            const auto family =
+                old_school::train_learned_value_policy_family(
+                    p0, seed, config);
+            const std::chrono::duration<double> elapsed =
+                std::chrono::steady_clock::now() - started;
+            validate_p_family_result(family, seed, 1);
+            validate_p1_fit_diagnostic(family);
+            print_p1_fit_diagnostic(
+                family, seed, training_games, training_seed,
+                elapsed.count());
+            return 0;
+        }
+        if (score_p1r_probes) {
+            constexpr std::uint64_t kP1RRootSeed = 577215;
+            constexpr std::size_t kP1RTrainingGames = 800;
+            constexpr std::uint64_t kP1RTrainingSeed = 424242;
+            const std::filesystem::path dev_cache =
+                "data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv";
+            const std::filesystem::path validation_cache =
+                "data/old-school-probe-validation-v1-exact-v2-k128-h0-t800-s424242.labels.tsv";
+            if (seed != kP1RRootSeed ||
+                training_games != kP1RTrainingGames ||
+                training_seed != kP1RTrainingSeed) {
+                throw std::invalid_argument(
+                    "--score-p1r-probes requires exact --seed "
+                    "577215 --train-games 800 --train-seed 424242");
+            }
+            if (!std::filesystem::exists(dev_cache) ||
+                !std::filesystem::exists(validation_cache)) {
+                throw std::runtime_error(
+                    "--score-p1r-probes requires both immutable "
+                    "preregistered probe caches; generate the "
+                    "exact-v2 validation cache first");
+            }
+
+            std::cout
+                << "P1R Revised-Optimizer Offline Gate\n"
+                << "Root seed: " << seed
+                << "\nTraining seed/games: " << training_seed
+                << '/' << training_games
+                << "\nOptimizer: Adam batch 64, epochs 128, "
+                   "rate 0.003, beta1 0.9, beta2 0.999, "
+                   "epsilon 1e-8, clip 5"
+                << "\nDev scoring: immutable Actor K=8/H=0 "
+                   "labels, Value K=8/H=4"
+                << "\nValidation scoring: immutable Actor "
+                   "K=128/H=0 labels, Value K=256/H=4\n\n";
+
+            const auto p0 =
+                train_value_challenger_with_progress(
+                    training_games, training_seed, 16, false);
+            const std::string p0_fingerprint =
+                old_school::learned_model_fingerprint(p0);
+            if (p0_fingerprint != kCanonicalP0Fingerprint) {
+                throw std::runtime_error(
+                    "Value Challenger C16 P0 fingerprint mismatch: "
+                    "expected " +
+                    std::string(kCanonicalP0Fingerprint) +
+                    ", got " + p0_fingerprint);
+            }
+            const auto actor_g0 =
+                train_actor_g0_with_progress(
+                    training_games, training_seed);
+            const std::string actor_fingerprint =
+                old_school::learned_model_fingerprint(actor_g0);
+            if (actor_fingerprint !=
+                kCanonicalActorG0Fingerprint) {
+                throw std::runtime_error(
+                    "Actor G0 fingerprint mismatch: expected " +
+                    std::string(kCanonicalActorG0Fingerprint) +
+                    ", got " + actor_fingerprint);
+            }
+
+            old_school::LearnedValuePolicyFamilyConfig family_config;
+            family_config.generations = 1;
+            family_config.optimizer.epochs = 128;
+            family_config.optimizer.learning_rate = 0.003;
+            family_config.required_p0_fingerprint =
+                kCanonicalP0Fingerprint;
+            const auto started =
+                std::chrono::steady_clock::now();
+            const auto family =
+                old_school::train_learned_value_policy_family(
+                    p0, seed, family_config);
+            const std::chrono::duration<double> elapsed =
+                std::chrono::steady_clock::now() - started;
+            validate_p_family_result(
+                family, seed, 1, family_config.optimizer, false);
+            const auto p1r = family.checkpoints.at(1);
+            const std::string p1r_fingerprint =
+                old_school::learned_model_fingerprint(p1r);
+            if (p1r_fingerprint != kP1RExpectedFingerprint) {
+                throw std::runtime_error(
+                    "P1R fingerprint mismatch: expected " +
+                    std::string(kP1RExpectedFingerprint) +
+                    ", got " + p1r_fingerprint);
+            }
+            const bool mechanism_passed =
+                print_p_family_generation_report(
+                    family.reports.front());
+            std::cout
+                << "  Revised P1R reconstruction time: "
+                << format_real(elapsed.count()) << " seconds\n";
+            if (!mechanism_passed) {
+                std::cout
+                    << "\nP1R offline verdict: REJECT "
+                       "(mechanism gate failed; probes skipped)\n";
+                return 1;
+            }
+
+            const auto make_models =
+                [&]() {
+                    return old_school::probe_runner::
+                        ProbeScoringModels{
+                            .reference_actor_model = actor_g0,
+                            .scoring_actor_model = actor_g0,
+                            .scoring_actor_name = "Actor G0",
+                            .reference_value_model = p0,
+                            .reference_value_name =
+                                "P0 residual-off",
+                            .scoring_value_models = {
+                                {
+                                    .name = "P0 residual-on",
+                                    .model = p0,
+                                    .transition_family =
+                                        "p1r-revised-optimizer",
+                                    .value_priority_residual_weight =
+                                        0.10,
+                                },
+                                {
+                                    .name = "P1R",
+                                    .model = p1r,
+                                    .transition_family =
+                                        "p1r-revised-optimizer",
+                                    .value_priority_residual_weight =
+                                        0.10,
+                                },
+                            },
+                        };
+                };
+            const old_school::probe_runner::ProbeScoreConfig
+                dev_config{
+                    .training_games = training_games,
+                    .training_seed = training_seed,
+                    .reference_worlds = 8,
+                    .reference_horizon_turns = 0,
+                    .reference_rollouts_per_world = 1,
+                    .scoring_value_worlds = 8,
+                    .scoring_value_continuation_epsilon = 0.0,
+                    .cache_path = dev_cache,
+                    .refresh_cache = false,
+                };
+            const auto dev_report =
+                old_school::probe_runner::
+                    score_probe_corpus_with_candidates(
+                        old_school::probe_runner::ProbeCorpusKind::
+                            DevV3,
+                        dev_config, std::cout, make_models());
+            std::cout
+                << old_school::probe_runner::
+                       format_probe_score_report(dev_report);
+
+            const old_school::probe_runner::ProbeScoreConfig
+                validation_config{
+                    .training_games = training_games,
+                    .training_seed = training_seed,
+                    .reference_worlds = 128,
+                    .reference_horizon_turns = 0,
+                    .reference_rollouts_per_world = 1,
+                    .scoring_value_worlds = 256,
+                    .scoring_value_continuation_epsilon = 0.0,
+                    .cache_path = validation_cache,
+                    .refresh_cache = false,
+                };
+            const auto validation_report =
+                old_school::probe_runner::
+                    score_probe_corpus_with_candidates(
+                        old_school::probe_runner::ProbeCorpusKind::
+                            ValidationV1,
+                        validation_config, std::cout, make_models());
+            std::cout
+                << old_school::probe_runner::
+                       format_probe_score_report(
+                           validation_report);
+            return evaluate_p1r_offline_gate(
+                       dev_report, validation_report)
+                       ? 0
+                       : 1;
+        }
+        if (diagnose_terminal_credit) {
+            constexpr std::size_t kTerminalTrainingGames = 800;
+            constexpr std::uint64_t kTerminalTrainingSeed = 424242;
+            constexpr std::size_t kTerminalWorlds = 1024;
+            constexpr std::size_t kTerminalHorizon = 128;
+
+            const auto p0 =
+                train_value_challenger_with_progress(
+                    kTerminalTrainingGames, kTerminalTrainingSeed,
+                    16, false);
+            const std::string fingerprint =
+                old_school::learned_model_fingerprint(p0);
+            if (fingerprint != kCanonicalP0Fingerprint) {
+                std::cout
+                    << "Terminal Credit Audit\n"
+                    << "Exact P0 identity: FAIL\n"
+                    << "  expected: " << kCanonicalP0Fingerprint
+                    << "\n  actual:   " << fingerprint << '\n';
+                return 1;
+            }
+
+            std::cout
+                << "Scoring exact P0 terminal credit "
+                   "(Value mirror, K=1024/H=128, one rollout/world, "
+                   "epsilon=0, residual=0, shallow blend off, "
+                   "terminal required)..."
+                << std::flush;
+            const auto report =
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        p0, "Exact P0 C16 Value K1024/H128",
+                        {
+                            .worlds = kTerminalWorlds,
+                            .horizon_turns = kTerminalHorizon,
+                            .continuation_variant =
+                                old_school::LearnedVariant::
+                                    ValueSearchChampion,
+                            .blend_shallow_prior = false,
+                            .require_terminal_results = true,
+                        });
+            std::cout
+                << " done\n\n"
+                << old_school::probe_runner::
+                       format_terminal_credit_audit_report(report);
+            const bool exact_identity =
+                report.model_fingerprint ==
+                kCanonicalP0Fingerprint;
+            return exact_identity &&
+                           old_school::probe_runner::
+                               terminal_credit_primary_gate_passed(
+                                   report)
+                       ? 0
+                       : 1;
+        }
+        if (train_p_family) {
+            std::cout
+                << "Canonical Outcome-Tilted Priority P-Family\n"
+                << "Root seed: " << seed
+                << "\nInitial model: Value Challenger C16"
+                << "\nTraining games: " << training_games
+                << "\nTraining seed: " << training_seed
+                << "\nRequired P0 fingerprint: "
+                << kCanonicalP0Fingerprint
+                << "\nRecipe: 40 games/generation, 80 seat-games, "
+                   "K=8/H=4, one rollout/world, root cap 32, "
+                   "max turns 500, 4 collection threads, residual "
+                   "0.1, TD(lambda) 0.9"
+                << "\nOptimizer: Adam batch 64, epochs 8, "
+                   "rate 0.001, beta1 0.9, beta2 0.999, "
+                   "epsilon 1e-8, clip 5"
+                << "\nRequested checkpoints: P1..P"
+                << p_family_generations << "\n\n";
+            const auto p0 =
+                train_value_challenger_with_progress(
+                    training_games, training_seed, 16, false);
+            const std::string p0_fingerprint =
+                old_school::learned_model_fingerprint(p0);
+            if (p0_fingerprint != kCanonicalP0Fingerprint) {
+                throw std::runtime_error(
+                    "Value Challenger C16 P0 fingerprint mismatch: "
+                    "expected " +
+                    std::string(kCanonicalP0Fingerprint) +
+                    ", got " + p0_fingerprint);
+            }
+            old_school::LearnedValuePolicyFamilyConfig config;
+            config.generations = p_family_generations;
+            config.required_p0_fingerprint =
+                kCanonicalP0Fingerprint;
+            const auto started =
+                std::chrono::steady_clock::now();
+            const auto family =
+                old_school::train_learned_value_policy_family(
+                    p0, seed, config);
+            const std::chrono::duration<double> elapsed =
+                std::chrono::steady_clock::now() - started;
+            validate_p_family_result(
+                family, seed, p_family_generations);
+
+            bool every_mechanism_passed = true;
+            for (const auto& report : family.reports) {
+                every_mechanism_passed =
+                    print_p_family_generation_report(report) &&
+                    every_mechanism_passed;
+            }
+            std::cout
+                << "\nP-family training complete: P0..P"
+                << p_family_generations << " in "
+                << format_real(elapsed.count())
+                << " seconds\nMechanism summary: "
+                << (every_mechanism_passed ? "PASS" : "REJECT")
+                << (every_mechanism_passed
+                        ? "\n"
+                        : " (scientific result; process succeeded)\n");
+            return 0;
         }
         if (diagnose_value_context) {
             const auto result =

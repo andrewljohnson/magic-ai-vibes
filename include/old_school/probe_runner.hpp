@@ -264,10 +264,26 @@ struct TeacherOptionComparison {
     std::vector<std::string> selected_keys;
     OrderedPairBlockSummary ordered_blocks;
     bool hidden_repartition_bit_identical = false;
+    // Full accounting is retained even for the historical shallow audit.
+    // A terminal-credit audit additionally requires every candidate sample
+    // to correspond one-for-one with a terminal rollout.
+    std::size_t candidate_count = 0;
+    std::size_t recorded_candidate_samples = 0;
+    std::size_t expected_evaluations = 0;
+    std::size_t rollout_evaluations = 0;
+    std::size_t terminal_evaluations = 0;
+    std::size_t bootstrapped_evaluations = 0;
+    // Empty-library termination is conservatively guaranteed when the
+    // configured horizon covers the sum of both libraries plus one turn.
+    std::size_t conservative_terminal_bound_turns = 0;
+    bool conservative_terminal_bound_satisfied = false;
 
     bool confidence_gate_passed() const;
     bool block_gate_passed() const;
     bool gate_passed() const;
+    bool evaluation_accounting_is_exact() const;
+    bool terminal_results_gate_passed() const;
+    bool second_key_excluded_from_selected_set() const;
 
     bool operator==(const TeacherOptionComparison&) const = default;
 };
@@ -278,6 +294,9 @@ struct TeacherSufficiencyAuditConfig {
     LearnedVariant continuation_variant =
         LearnedVariant::ValueSearchChampion;
     bool blend_shallow_prior = false;
+    // Requires a horizon that conservatively reaches a terminal result for
+    // every fixture and enables fail-closed terminal-result accounting.
+    bool require_terminal_results = false;
 
     bool operator==(const TeacherSufficiencyAuditConfig&) const =
         default;
@@ -480,6 +499,15 @@ TeacherSufficiencyAuditReport score_teacher_sufficiency_audit(
 std::string format_teacher_sufficiency_audit_report(
     const std::vector<TeacherSufficiencyAuditReport>& reports);
 
+// The full-terminal credit hypothesis concerns only the controlled Force
+// Spike ordering flip. The X=0 row remains a diagnostic and cannot make this
+// primary verdict pass or fail.
+bool terminal_credit_primary_gate_passed(
+    const TeacherSufficiencyAuditReport& report);
+
+std::string format_terminal_credit_audit_report(
+    const TeacherSufficiencyAuditReport& report);
+
 // Builds the exact deployed-selection attribution used by checkpoint reports.
 // Null selected_key means uniform choice over all exact score maxima; a
 // selected_key means a deterministic deployed selector.
@@ -488,6 +516,15 @@ ValueProbeDecisionDetail make_value_probe_decision_detail(
     const probe_eval::ProbePrediction& prediction,
     const ValueProbeDecisionDetail* reference = nullptr,
     const ValueProbeDecisionDetail* previous = nullptr);
+
+// Priority decisions represent deployment over the complete exact-score
+// argmax set and may leave deterministic_selection false. A singleton set is
+// nevertheless a unique deployed choice. This helper intentionally keys only
+// on that semantic set, so evaluation gates do not confuse selector metadata
+// with uniqueness.
+bool value_decision_uniquely_selects(
+    const ValueProbeDecisionDetail& decision,
+    std::string_view candidate_key);
 
 // Scores an immutable Actor candidate against labels owned by an immutable
 // reference Actor. This is the offline generation-vs-generation path: changing

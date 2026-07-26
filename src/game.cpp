@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -1186,6 +1187,9 @@ class LearnedModel {
         constexpr std::size_t decision_kind =
             static_cast<std::size_t>(
                 LearnedPolicyDecisionKind::Priority);
+        // The residual uses logit_i - mean(logits), so the shared output
+        // bias is an exact null direction. Keep its parent bits unchanged
+        // instead of letting Adam amplify floating-point cancellation.
         struct PriorityPolicyTensors {
             std::array<
                 std::array<double, kPolicyFeatureCount>,
@@ -1194,7 +1198,6 @@ class LearnedModel {
             std::array<double, kPolicyHiddenCount> hidden_bias{};
             std::array<double, kPolicyHiddenCount> output{};
             std::array<double, kPolicyFeatureCount> direct{};
-            double output_bias = 0.0;
         };
 
         PriorityPolicyTensors first_moment;
@@ -1264,9 +1267,9 @@ class LearnedModel {
                         logit_total /
                         static_cast<double>(logits.size());
                     std::vector<double> residual_tanh;
-                    std::vector<double> combined_logits;
+                    std::vector<double> combined_scores;
                     residual_tanh.reserve(logits.size());
-                    combined_logits.reserve(logits.size());
+                    combined_scores.reserve(logits.size());
                     for (std::size_t option = 0;
                          option < logits.size(); ++option) {
                         const double centered =
@@ -1274,29 +1277,35 @@ class LearnedModel {
                         const double squashed =
                             std::tanh(centered);
                         residual_tanh.push_back(squashed);
-                        combined_logits.push_back(
-                            (example.base_scores[option] +
-                             config.residual_weight * squashed) /
-                            config.policy_temperature);
+                        combined_scores.push_back(
+                            example.base_scores[option] +
+                            config.residual_weight * squashed);
                     }
 
-                    const double max_logit =
+                    const double max_score =
                         *std::max_element(
-                            combined_logits.begin(),
-                            combined_logits.end());
+                            combined_scores.begin(),
+                            combined_scores.end());
                     std::vector<double> probabilities(
-                        combined_logits.size());
-                    double probability_sum = 0.0;
+                        combined_scores.size());
+                    long double probability_sum = 0.0L;
                     for (std::size_t option = 0;
-                         option < combined_logits.size(); ++option) {
+                         option < combined_scores.size(); ++option) {
                         probabilities[option] =
                             std::exp(
-                                combined_logits[option] -
-                                max_logit);
-                        probability_sum += probabilities[option];
+                                (combined_scores[option] -
+                                 max_score) /
+                                config.policy_temperature);
+                        probability_sum +=
+                            static_cast<long double>(
+                                probabilities[option]);
                     }
                     for (double& probability : probabilities) {
-                        probability /= probability_sum;
+                        probability =
+                            static_cast<double>(
+                                static_cast<long double>(
+                                    probability) /
+                                probability_sum);
                     }
 
                     constexpr double kSearchChoiceWeight = 0.90;
@@ -1316,6 +1325,15 @@ class LearnedModel {
                             probabilities[option] *
                             example.target_probabilities[option] /
                             behavior_probabilities[option];
+                    }
+                    if (behavior_probabilities ==
+                        example.target_probabilities) {
+                        // At exactly zero advantage the P target is an
+                        // exact copy of the parent behavior distribution.
+                        // Skipping this example prevents Adam from
+                        // amplifying roundoff in a mathematically zero
+                        // gradient.
+                        continue;
                     }
 
                     std::vector<double> centered_gradients(
@@ -1362,7 +1380,6 @@ class LearnedModel {
                         const double output_error =
                             centered_gradients[option_index] -
                             mean_centered_gradient;
-                        gradient.output_bias += output_error;
                         for (std::size_t hidden_index = 0;
                              hidden_index < kPolicyHiddenCount;
                              ++hidden_index) {
@@ -1412,9 +1429,7 @@ class LearnedModel {
                     }
                 }
 
-                double squared_norm =
-                    gradient.output_bias *
-                    gradient.output_bias;
+                double squared_norm = 0.0;
                 for (std::size_t hidden_index = 0;
                      hidden_index < kPolicyHiddenCount;
                      ++hidden_index) {
@@ -1521,11 +1536,6 @@ class LearnedModel {
                         second_moment.direct[feature],
                         gradient.direct[feature]);
                 }
-                update(
-                    policy_output_bias_[decision_kind],
-                    first_moment.output_bias,
-                    second_moment.output_bias,
-                    gradient.output_bias);
             }
         }
     }
@@ -9994,7 +10004,8 @@ Game::finish_turn_after_priority_phase(TurnPhase phase) {
     return std::nullopt;
 }
 
-double Game::finish_learned_evaluation_horizon(
+Game::LearnedHorizonEvaluation
+Game::finish_learned_evaluation_horizon(
     std::size_t perspective, std::size_t horizon_turns) {
     if (perspective >= state_.players.size()) {
         throw std::out_of_range(
@@ -10058,28 +10069,40 @@ double Game::finish_learned_evaluation_horizon(
 
     if (const auto result = prepare_next_turn();
         result.has_value()) {
-        return result_score(*result);
+        return {
+            .score = result_score(*result),
+            .terminal = true,
+        };
     }
     if (horizon_turns == 0) {
-        return predict_learned_critic_with_context(
-            model, state_, perspective,
-            {
-                .valid = true,
-                .phase = TurnPhase::FirstMain,
-                .decision_player = state_.active_player,
-                .consecutive_passes = 0,
-                .sorcery_actions = true,
-            });
+        return {
+            .score = predict_learned_critic_with_context(
+                model, state_, perspective,
+                {
+                    .valid = true,
+                    .phase = TurnPhase::FirstMain,
+                    .decision_player = state_.active_player,
+                    .consecutive_passes = 0,
+                    .sorcery_actions = true,
+                }),
+            .terminal = false,
+        };
     }
     for (std::size_t turn = 0; turn < horizon_turns; ++turn) {
         if (const auto result = play_prepared_turn();
             result.has_value()) {
-            return result_score(*result);
+            return {
+                .score = result_score(*result),
+                .terminal = true,
+            };
         }
         if (turn + 1 < horizon_turns) {
             if (const auto result = prepare_next_turn();
                 result.has_value()) {
-                return result_score(*result);
+                return {
+                    .score = result_score(*result),
+                    .terminal = true,
+                };
             }
         }
     }
@@ -10087,19 +10110,29 @@ double Game::finish_learned_evaluation_horizon(
         LearnedCriticSchema::DecisionContextV1) {
         if (const auto result = prepare_next_turn();
             result.has_value()) {
-            return result_score(*result);
+            return {
+                .score = result_score(*result),
+                .terminal = true,
+            };
         }
-        return predict_learned_critic_with_context(
-            model, state_, perspective,
-            {
-                .valid = true,
-                .phase = TurnPhase::FirstMain,
-                .decision_player = state_.active_player,
-                .consecutive_passes = 0,
-                .sorcery_actions = true,
-            });
+        return {
+            .score = predict_learned_critic_with_context(
+                model, state_, perspective,
+                {
+                    .valid = true,
+                    .phase = TurnPhase::FirstMain,
+                    .decision_player = state_.active_player,
+                    .consecutive_passes = 0,
+                    .sorcery_actions = true,
+                }),
+            .terminal = false,
+        };
     }
-    return model->predict(learned_features(state_, perspective));
+    return {
+        .score = model->predict(
+            learned_features(state_, perspective)),
+        .terminal = false,
+    };
 }
 
 double Game::learned_value_search_action_score(
@@ -13471,30 +13504,66 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
         throw std::invalid_argument(
             "P-family training requires a frozen Value parent");
     }
+    const std::string initial_p0_fingerprint =
+        learned_model_fingerprint(p0);
+    if (!config.required_p0_fingerprint.empty() &&
+        config.required_p0_fingerprint !=
+            initial_p0_fingerprint) {
+        throw std::invalid_argument(
+            "P-family P0 fingerprint does not match the required parent");
+    }
+    const auto valid_optimizer =
+        [&](const LearnedValuePriorityHeadUpdateConfig& optimizer) {
+            return optimizer.batch_size > 0 &&
+                   optimizer.epochs > 0 &&
+                   std::isfinite(optimizer.learning_rate) &&
+                   optimizer.learning_rate > 0.0 &&
+                   std::isfinite(optimizer.beta1) &&
+                   optimizer.beta1 >= 0.0 &&
+                   optimizer.beta1 < 1.0 &&
+                   std::isfinite(optimizer.beta2) &&
+                   optimizer.beta2 >= 0.0 &&
+                   optimizer.beta2 < 1.0 &&
+                   std::isfinite(optimizer.epsilon) &&
+                   optimizer.epsilon > 0.0 &&
+                   std::isfinite(
+                       optimizer.global_gradient_norm_clip) &&
+                   optimizer.global_gradient_norm_clip > 0.0 &&
+                   optimizer.seed == 0 &&
+                   optimizer.residual_weight ==
+                       config.residual_weight &&
+                   optimizer.policy_temperature ==
+                       learned_iteration::
+                           kP16ExplorationTemperature;
+        };
     if (config.generations == 0 ||
         config.generations > 16 ||
         config.search_worlds == 0 ||
         config.search_worlds > 4096 ||
         config.max_roots_per_actor_game == 0 ||
         config.max_game_turns == 0 ||
+        config.collection_threads == 0 ||
+        config.collection_threads >
+            learned_iteration::kBalancedScheduleGames ||
         !std::isfinite(config.residual_weight) ||
         config.residual_weight <= 0.0 ||
         config.residual_weight > 1.0 ||
         !std::isfinite(config.td_lambda) ||
         config.td_lambda < 0.0 ||
         config.td_lambda > 1.0 ||
-        config.optimizer.seed != 0 ||
-        config.optimizer.residual_weight !=
-            config.residual_weight ||
-        config.optimizer.policy_temperature !=
-            learned_iteration::
-                kP16ExplorationTemperature) {
+        (config.compute_rootwise_oracle &&
+         config.generations != 1) ||
+        !valid_optimizer(config.optimizer) ||
+        !std::all_of(
+            config.capacity_diagnostic_optimizers.begin(),
+            config.capacity_diagnostic_optimizers.end(),
+            valid_optimizer)) {
         throw std::invalid_argument(
             "invalid P-family training configuration");
     }
 
     const LearnedValuePolicyFamilyConfig canonical;
-    const bool canonical_recipe =
+    const bool canonical_hyperparameters =
         config.search_worlds == canonical.search_worlds &&
         config.max_roots_per_actor_game ==
             canonical.max_roots_per_actor_game &&
@@ -13521,6 +13590,14 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
             canonical.optimizer.residual_weight &&
         config.optimizer.policy_temperature ==
             canonical.optimizer.policy_temperature;
+    constexpr std::string_view kDeclaredP0Fingerprint =
+        "bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc";
+    const bool canonical_recipe =
+        canonical_hyperparameters &&
+        config.required_p0_fingerprint ==
+            kDeclaredP0Fingerprint &&
+        config.required_p0_fingerprint ==
+            initial_p0_fingerprint;
 
     struct ShardRecord {
         LearnedValuePriorityTrainingExample training;
@@ -13528,6 +13605,11 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
         std::vector<double> parent_combined_scores;
         std::size_t chosen = 0;
         double advantage = 0.0;
+    };
+
+    struct CollectedGame {
+        GameResult result;
+        std::shared_ptr<LearnedPolicyRecorder> recorder;
     };
 
     const auto mechanism_report =
@@ -13584,6 +13666,43 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
                     metrics.residual_saturation_fraction,
             };
         };
+    const auto rootwise_oracle_report =
+        [](const learned_iteration::
+               CenteredTanhRootwiseOracleMetrics& metrics) {
+            const auto convert_bound =
+                [](const learned_iteration::
+                       CenteredTanhOracleBound& bound) {
+                    return
+                        LearnedValuePolicyRootwiseOracleBoundReport{
+                            .numerical_best_kl =
+                                bound.numerical_best_kl,
+                            .achievable_reduction_fraction =
+                                bound
+                                    .achievable_reduction_fraction,
+                            .certified_kl_lower_bound =
+                                bound.certified_kl_lower_bound,
+                            .certified_reduction_upper_bound =
+                                bound
+                                    .certified_reduction_upper_bound,
+                            .maximum_abs_squashed_residual =
+                                bound
+                                    .maximum_abs_squashed_residual,
+                            .roots_reaching_iteration_limit =
+                                bound
+                                    .roots_reaching_iteration_limit,
+                        };
+                };
+            return LearnedValuePolicyRootwiseOracleReport{
+                .observation_count = metrics.observation_count,
+                .total_weight = metrics.total_weight,
+                .parent_kl = metrics.parent_kl,
+                .reduction_defined = metrics.reduction_defined,
+                .full_range =
+                    convert_bound(metrics.full_range),
+                .zero_saturation =
+                    convert_bound(metrics.zero_saturation),
+            };
+        };
 
     LearnedValuePolicyFamilyResult output;
     output.checkpoints.reserve(config.generations + 1);
@@ -13606,6 +13725,8 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
         report.max_roots_per_actor_game =
             config.max_roots_per_actor_game;
         report.max_game_turns = config.max_game_turns;
+        report.collection_threads =
+            config.collection_threads;
         report.residual_weight = config.residual_weight;
         report.td_lambda = config.td_lambda;
         report.optimizer = config.optimizer;
@@ -13629,57 +13750,138 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
         const auto schedule =
             learned_iteration::balanced_schedule(
                 root_seed, generation);
-        for (const auto& scheduled : schedule) {
-            auto recorder =
-                std::make_shared<LearnedPolicyRecorder>();
-            recorder->value_priority_collection =
-                LearnedPolicyRecorder::
-                    ValuePriorityCollection{
-                        .root_seed = root_seed,
-                        .generation = generation,
-                        .schedule_index =
-                            scheduled.schedule_index,
-                        .worlds = config.search_worlds,
-                    };
+        std::array<
+            std::optional<CollectedGame>,
+            learned_iteration::kBalancedScheduleGames>
+            collected_games;
+        std::array<
+            std::exception_ptr,
+            learned_iteration::kBalancedScheduleGames>
+            collection_errors{};
+        std::atomic_size_t next_game = 0;
+        {
+            const std::size_t worker_count =
+                std::min(
+                    config.collection_threads,
+                    schedule.size());
+            std::vector<std::jthread> workers;
+            workers.reserve(worker_count);
+            for (std::size_t worker = 0;
+                 worker < worker_count; ++worker) {
+                workers.emplace_back([&] {
+                    while (true) {
+                        const std::size_t game_index =
+                            next_game.fetch_add(
+                                1, std::memory_order_relaxed);
+                        if (game_index >= schedule.size()) {
+                            return;
+                        }
+                        try {
+                            const auto& scheduled =
+                                schedule[game_index];
+                            auto recorder =
+                                std::make_shared<
+                                    LearnedPolicyRecorder>();
+                            recorder
+                                ->value_priority_collection =
+                                LearnedPolicyRecorder::
+                                    ValuePriorityCollection{
+                                        .root_seed =
+                                            root_seed,
+                                        .generation =
+                                            generation,
+                                        .schedule_index =
+                                            scheduled
+                                                .schedule_index,
+                                        .worlds =
+                                            config
+                                                .search_worlds,
+                                    };
 
-            GameConfig game_config;
-            game_config.max_turns =
-                config.max_game_turns;
-            game_config.starting_player =
-                scheduled.starting_player;
-            game_config.learned_model = parent;
-            game_config.learned_search_depth = 0;
-            game_config.learned_policy_recorder = recorder;
-            game_config.bots = {
-                BotConfig{
-                    .kind = BotKind::Learned,
-                    .learned_variant =
-                        LearnedVariant::
-                            ValueSearchChampion,
-                    .rollouts_per_action = 0,
-                    .exploration_rate = 0.0,
-                    .value_priority_residual_weight =
-                        config.residual_weight,
-                    .learned_model = parent,
-                },
-                BotConfig{
-                    .kind = BotKind::Learned,
-                    .learned_variant =
-                        LearnedVariant::
-                            ValueSearchChampion,
-                    .rollouts_per_action = 0,
-                    .exploration_rate = 0.0,
-                    .value_priority_residual_weight =
-                        config.residual_weight,
-                    .learned_model = parent,
-                },
-            };
+                            GameConfig game_config;
+                            game_config.max_turns =
+                                config.max_game_turns;
+                            game_config.starting_player =
+                                scheduled.starting_player;
+                            game_config.learned_model =
+                                parent;
+                            game_config.learned_search_depth =
+                                0;
+                            game_config.learned_policy_recorder =
+                                recorder;
+                            game_config.bots = {
+                                BotConfig{
+                                    .kind =
+                                        BotKind::Learned,
+                                    .learned_variant =
+                                        LearnedVariant::
+                                            ValueSearchChampion,
+                                    .rollouts_per_action = 0,
+                                    .exploration_rate = 0.0,
+                                    .value_priority_residual_weight =
+                                        config
+                                            .residual_weight,
+                                    .learned_model = parent,
+                                },
+                                BotConfig{
+                                    .kind =
+                                        BotKind::Learned,
+                                    .learned_variant =
+                                        LearnedVariant::
+                                            ValueSearchChampion,
+                                    .rollouts_per_action = 0,
+                                    .exploration_rate = 0.0,
+                                    .value_priority_residual_weight =
+                                        config
+                                            .residual_weight,
+                                    .learned_model = parent,
+                                },
+                            };
 
-            Game game(
-                deck_cards(scheduled.seat_decks[0]),
-                deck_cards(scheduled.seat_decks[1]),
-                scheduled.seed, game_config);
-            const GameResult result = game.run();
+                            Game game(
+                                deck_cards(
+                                    scheduled
+                                        .seat_decks[0]),
+                                deck_cards(
+                                    scheduled
+                                        .seat_decks[1]),
+                                scheduled.seed,
+                                game_config);
+                            collected_games[game_index] =
+                                CollectedGame{
+                                    .result = game.run(),
+                                    .recorder =
+                                        std::move(recorder),
+                                };
+                        } catch (...) {
+                            collection_errors[game_index] =
+                                std::current_exception();
+                        }
+                    }
+                });
+            }
+        }
+        for (std::size_t game_index = 0;
+             game_index < schedule.size(); ++game_index) {
+            if (collection_errors[game_index]) {
+                std::rethrow_exception(
+                    collection_errors[game_index]);
+            }
+            if (!collected_games[game_index]) {
+                throw std::logic_error(
+                    "P-family collection produced no game result");
+            }
+        }
+
+        // All floating-point aggregation and replay construction remains in
+        // semantic schedule order, independent of worker completion order.
+        for (std::size_t game_index = 0;
+             game_index < schedule.size(); ++game_index) {
+            const auto& scheduled = schedule[game_index];
+            const auto& collected =
+                *collected_games[game_index];
+            const auto& result = collected.result;
+            const auto& recorder = collected.recorder;
             const auto& collection =
                 *recorder->value_priority_collection;
             LearnedValuePolicyGameReport game_report{
@@ -13918,60 +14120,72 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
                 "P-family changed a non-Priority model component");
         }
 
-        std::vector<
-            learned_iteration::P16MechanismObservation>
-            observations;
-        observations.reserve(shard.size());
-        std::array<std::vector<
-            learned_iteration::P16MechanismObservation>,
-            kDeckCount>
-            observations_by_deck;
-        for (const auto& record : shard) {
-            const auto candidate_logits =
-                learned_policy_head_logits(
-                    record.training.options,
-                    LearnedPolicyDecisionKind::Priority,
-                    candidate);
-            const double mean =
-                std::accumulate(
-                    candidate_logits.begin(),
-                    candidate_logits.end(), 0.0) /
-                static_cast<double>(
-                    candidate_logits.size());
-            std::vector<double> centered;
-            std::vector<double> candidate_scores =
-                record.training.base_scores;
-            centered.reserve(candidate_logits.size());
-            for (std::size_t option = 0;
-                 option < candidate_logits.size();
-                 ++option) {
-                centered.push_back(
-                    candidate_logits[option] - mean);
-                candidate_scores[option] +=
-                    config.residual_weight *
-                    std::tanh(centered.back());
-            }
-            learned_iteration::P16MechanismObservation
-                observation{
-                    .parent_combined_scores =
-                        record.parent_combined_scores,
-                    .candidate_combined_scores =
-                        std::move(candidate_scores),
-                    .candidate_centered_policy_logits =
-                        std::move(centered),
-                    .target_probabilities =
-                        record.training.target_probabilities,
-                    .chosen = record.chosen,
-                    .advantage = record.advantage,
-                    .weight = record.training.weight,
+        const auto build_mechanism_observations =
+            [&](std::shared_ptr<const LearnedModel>
+                    evaluated_model) {
+                std::vector<
+                    learned_iteration::P16MechanismObservation>
+                    observations;
+                observations.reserve(shard.size());
+                std::array<std::vector<
+                    learned_iteration::P16MechanismObservation>,
+                    kDeckCount>
+                    observations_by_deck;
+                for (const auto& record : shard) {
+                    const auto candidate_logits =
+                        learned_policy_head_logits(
+                            record.training.options,
+                            LearnedPolicyDecisionKind::Priority,
+                            evaluated_model);
+                    const double mean =
+                        std::accumulate(
+                            candidate_logits.begin(),
+                            candidate_logits.end(), 0.0) /
+                        static_cast<double>(
+                            candidate_logits.size());
+                    std::vector<double> centered;
+                    std::vector<double> candidate_scores =
+                        record.training.base_scores;
+                    centered.reserve(candidate_logits.size());
+                    for (std::size_t option = 0;
+                         option < candidate_logits.size();
+                         ++option) {
+                        centered.push_back(
+                            candidate_logits[option] - mean);
+                        candidate_scores[option] +=
+                            config.residual_weight *
+                            std::tanh(centered.back());
+                    }
+                    learned_iteration::P16MechanismObservation
+                        observation{
+                            .parent_combined_scores =
+                                record.parent_combined_scores,
+                            .candidate_combined_scores =
+                                std::move(candidate_scores),
+                            .candidate_centered_policy_logits =
+                                std::move(centered),
+                            .target_probabilities =
+                                record.training
+                                    .target_probabilities,
+                            .chosen = record.chosen,
+                            .advantage = record.advantage,
+                            .weight = record.training.weight,
+                        };
+                    const std::size_t deck_index =
+                        static_cast<std::size_t>(
+                            record.actor_deck);
+                    observations_by_deck[deck_index]
+                        .push_back(observation);
+                    observations.push_back(
+                        std::move(observation));
+                }
+                return std::pair{
+                    std::move(observations),
+                    std::move(observations_by_deck),
                 };
-            const std::size_t deck_index =
-                static_cast<std::size_t>(
-                    record.actor_deck);
-            observations_by_deck[deck_index].push_back(
-                observation);
-            observations.push_back(std::move(observation));
-        }
+            };
+        auto [observations, observations_by_deck] =
+            build_mechanism_observations(candidate);
         const auto metrics =
             learned_iteration::
                 evaluate_p16_mechanism_metrics(
@@ -13994,6 +14208,108 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
                 deck_metrics.zero_advantage_weight;
             report.decks[deck].conflict_weight =
                 deck_metrics.conflict_weight;
+        }
+
+        if (config.compute_rootwise_oracle) {
+            std::vector<learned_iteration::
+                            CenteredTanhOracleObservation>
+                oracle_observations;
+            oracle_observations.reserve(shard.size());
+            for (const auto& record : shard) {
+                oracle_observations.push_back({
+                    .base_scores =
+                        record.training.base_scores,
+                    .target_probabilities =
+                        record.training.target_probabilities,
+                    .weight = record.training.weight,
+                });
+            }
+            report.rootwise_oracle =
+                rootwise_oracle_report(
+                    learned_iteration::
+                        evaluate_centered_tanh_rootwise_oracle(
+                            oracle_observations,
+                            {
+                                .residual_weight =
+                                    config.residual_weight,
+                                .policy_temperature =
+                                    config.optimizer
+                                        .policy_temperature,
+                                .policy_mixture_weight =
+                                    learned_iteration::
+                                        kP16ExplorationTeacherWeight,
+                                .saturation_threshold =
+                                    learned_iteration::
+                                        kP16ResidualSaturationThreshold,
+                            }));
+        }
+
+        report.capacity_diagnostics.reserve(
+            config.capacity_diagnostic_optimizers.size());
+        for (const auto& requested_optimizer :
+             config.capacity_diagnostic_optimizers) {
+            auto diagnostic_optimizer = requested_optimizer;
+            diagnostic_optimizer.seed = report.optimizer.seed;
+            const auto diagnostic_candidate =
+                update_learned_value_priority_head(
+                    parent, fit_examples,
+                    diagnostic_optimizer);
+
+            LearnedValuePolicyCapacityDiagnosticReport
+                diagnostic_report;
+            diagnostic_report.optimizer =
+                diagnostic_optimizer;
+            diagnostic_report.parent_fingerprint =
+                report.parent_fingerprint;
+            diagnostic_report.candidate_fingerprint =
+                learned_model_fingerprint(
+                    diagnostic_candidate);
+            diagnostic_report.parent_components =
+                report.parent_components;
+            diagnostic_report.candidate_components =
+                learned_model_component_fingerprints(
+                    diagnostic_candidate);
+            if (learned_model_fingerprint(parent) !=
+                report.parent_fingerprint) {
+                throw std::logic_error(
+                    "P-family capacity diagnostic mutated its "
+                    "frozen parent");
+            }
+            if (diagnostic_report.candidate_components.critic !=
+                    report.parent_components.critic ||
+                diagnostic_report.candidate_components.attack !=
+                    report.parent_components.attack ||
+                diagnostic_report.candidate_components.block !=
+                    report.parent_components.block ||
+                diagnostic_report.candidate_components
+                        .damage_order !=
+                    report.parent_components.damage_order) {
+                throw std::logic_error(
+                    "P-family capacity diagnostic changed a "
+                    "non-Priority model component");
+            }
+
+            auto [diagnostic_observations,
+                  diagnostic_observations_by_deck] =
+                build_mechanism_observations(
+                    diagnostic_candidate);
+            diagnostic_report.mechanism =
+                mechanism_report(
+                    learned_iteration::
+                        evaluate_p16_mechanism_metrics(
+                            diagnostic_observations));
+            for (std::size_t deck = 0;
+                 deck < kDeckCount; ++deck) {
+                diagnostic_report
+                    .mechanisms_by_deck[deck] =
+                    mechanism_report(
+                        learned_iteration::
+                            evaluate_p16_mechanism_metrics(
+                                diagnostic_observations_by_deck
+                                    [deck]));
+            }
+            report.capacity_diagnostics.push_back(
+                std::move(diagnostic_report));
         }
 
         output.checkpoints.push_back(candidate);
@@ -15344,12 +15660,20 @@ LearnedActionSamples learned_priority_action_samples(
                             phase);
                 }
 
-                const double continuation =
-                    terminal.has_value()
-                        ? learned_result_value(*terminal, player)
-                        : simulation
-                              .finish_learned_evaluation_horizon(
-                                  player, config.horizon_turns);
+                double continuation = 0.0;
+                bool terminal_evaluation = terminal.has_value();
+                if (terminal_evaluation) {
+                    continuation =
+                        learned_result_value(*terminal, player);
+                } else {
+                    const auto horizon_evaluation =
+                        simulation
+                            .finish_learned_evaluation_horizon(
+                                player, config.horizon_turns);
+                    continuation = horizon_evaluation.score;
+                    terminal_evaluation =
+                        horizon_evaluation.terminal;
+                }
                 double score = blend_evaluation_score(
                     continuation, shallow_prior,
                     config.blend_shallow_prior,
@@ -15359,10 +15683,20 @@ LearnedActionSamples learned_priority_action_samples(
                 }
                 result.q_samples[action_index].push_back(score);
                 ++result.rollout_evaluations;
+                if (terminal_evaluation) {
+                    ++result.terminal_evaluations;
+                } else {
+                    ++result.bootstrapped_evaluations;
+                }
             }
         }
     }
-    if (result.rollout_evaluations != expected_evaluations) {
+    if (result.rollout_evaluations != expected_evaluations ||
+        result.terminal_evaluations >
+            result.rollout_evaluations ||
+        result.bootstrapped_evaluations !=
+            result.rollout_evaluations -
+                result.terminal_evaluations) {
         throw std::logic_error(
             "Learned priority evaluation accounting mismatch");
     }
@@ -15497,24 +15831,41 @@ LearnedActionSamples learned_binary_attack_samples(
                     cleanup_turn(simulation.state_);
                 }
 
-                const double continuation =
-                    terminal.has_value()
-                        ? learned_result_value(
-                              *terminal, attacking_player)
-                        : simulation
-                              .finish_learned_evaluation_horizon(
-                                  attacking_player,
-                                  config.horizon_turns);
+                double continuation = 0.0;
+                bool terminal_evaluation = terminal.has_value();
+                if (terminal_evaluation) {
+                    continuation = learned_result_value(
+                        *terminal, attacking_player);
+                } else {
+                    const auto horizon_evaluation =
+                        simulation
+                            .finish_learned_evaluation_horizon(
+                                attacking_player,
+                                config.horizon_turns);
+                    continuation = horizon_evaluation.score;
+                    terminal_evaluation =
+                        horizon_evaluation.terminal;
+                }
                 result.q_samples[root_choice].push_back(
                     blend_evaluation_score(
                         continuation, shallow_prior,
                         config.blend_shallow_prior,
                         samples_per_action));
                 ++result.rollout_evaluations;
+                if (terminal_evaluation) {
+                    ++result.terminal_evaluations;
+                } else {
+                    ++result.bootstrapped_evaluations;
+                }
             }
         }
     }
-    if (result.rollout_evaluations != expected_evaluations) {
+    if (result.rollout_evaluations != expected_evaluations ||
+        result.terminal_evaluations >
+            result.rollout_evaluations ||
+        result.bootstrapped_evaluations !=
+            result.rollout_evaluations -
+                result.terminal_evaluations) {
         throw std::logic_error(
             "Learned attack evaluation accounting mismatch");
     }
@@ -15619,6 +15970,149 @@ diagnose_learned_actor_generation_priority(
             collection.searched_roots[player][0],
         .rollout_evaluations =
             collection.rollout_evaluations[player][0],
+        .selected_action = selected,
+        .transition_applied = transition_applied,
+        .pass_result = pass_result,
+        .terminal_result = terminal,
+        .final_state = simulation.state_,
+    };
+}
+
+LearnedValuePolicyPriorityDiagnostic
+diagnose_learned_value_policy_priority(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t root_seed, std::uint64_t generation,
+    std::size_t schedule_index, std::size_t worlds,
+    double residual_weight) {
+    validate_learned_model(
+        parent, LearnedVariant::ValueSearchChampion);
+    validate_value_priority_residual_weight(residual_weight);
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "P-family priority diagnostic player is invalid");
+    }
+    if (generation == 0 || worlds == 0 || worlds > 4096) {
+        throw std::invalid_argument(
+            "P-family priority diagnostic configuration is invalid");
+    }
+    const auto actions =
+        legal_priority_actions(state, player, sorcery_actions);
+    if (actions.size() < 2) {
+        throw std::invalid_argument(
+            "P-family priority diagnostic requires multiple actions");
+    }
+
+    auto recorder =
+        std::make_shared<LearnedPolicyRecorder>();
+    recorder->value_priority_collection =
+        LearnedPolicyRecorder::ValuePriorityCollection{
+            .root_seed = root_seed,
+            .generation = generation,
+            .schedule_index = schedule_index,
+            .worlds = worlds,
+        };
+    GameConfig config;
+    config.learned_model = parent;
+    config.learned_search_depth = 0;
+    config.learned_policy_recorder = recorder;
+    config.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .exploration_rate = 0.0,
+            .value_priority_residual_weight =
+                residual_weight,
+            .learned_model = parent,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .exploration_rate = 0.0,
+            .value_priority_residual_weight =
+                residual_weight,
+            .learned_model = parent,
+        },
+    };
+    Game simulation(
+        original_decks[0], original_decks[1],
+        learned_iteration::derive_seed(
+            root_seed,
+            learned_iteration::SeedDomain::SelfPlayGame,
+            generation, schedule_index),
+        config);
+    simulation.state_ = state;
+    const PriorityAction selected =
+        simulation.choose_priority_action(
+            actions, player, sorcery_actions, phase,
+            consecutive_passes);
+    if (recorder->value_priority_steps.size() != 1) {
+        throw std::logic_error(
+            "P-family priority diagnostic recorded the wrong root count");
+    }
+    const auto& step =
+        recorder->value_priority_steps.front();
+    const auto residual =
+        value_priority_residual_unchecked(
+            state, player, sorcery_actions, phase,
+            consecutive_passes, actions, parent,
+            residual_weight);
+
+    bool transition_applied = false;
+    std::optional<PriorityPassResult> pass_result;
+    std::optional<GameResult> terminal;
+    if (selected.kind == PriorityActionKind::Pass) {
+        PriorityState priority{
+            .player = player,
+            .consecutive_passes = consecutive_passes,
+        };
+        pass_result =
+            pass_priority(simulation.state_, priority);
+        transition_applied = true;
+        if (*pass_result ==
+            PriorityPassResult::StackObjectResolved) {
+            terminal = simulation.life_total_result();
+        }
+    } else {
+        transition_applied =
+            apply_priority_action(
+                simulation.state_, player, selected,
+                sorcery_actions);
+    }
+
+    const std::uint64_t subindex =
+        generation_decision_subindex(player, 0, 0);
+    return {
+        .actions = actions,
+        .base_scores = step.base_scores,
+        .policy_logits = residual.policy_logits,
+        .centered_policy_logits =
+            residual.centered_policy_logits,
+        .residuals = residual.residuals,
+        .combined_scores =
+            step.parent_combined_scores,
+        .behavior_probabilities =
+            step.behavior_probabilities,
+        .search_seed =
+            learned_iteration::derive_seed(
+                root_seed,
+                learned_iteration::SeedDomain::PrioritySearch,
+                generation, schedule_index, subindex),
+        .choice_seed =
+            learned_iteration::derive_seed(
+                root_seed,
+                learned_iteration::SeedDomain::PriorityChoice,
+                generation, schedule_index, subindex),
+        .rollout_evaluations =
+            recorder->value_priority_collection
+                ->rollout_evaluations[player],
+        .chosen = step.chosen,
         .selected_action = selected,
         .transition_applied = transition_applied,
         .pass_result = pass_result,

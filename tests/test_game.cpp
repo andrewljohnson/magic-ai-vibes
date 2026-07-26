@@ -3039,6 +3039,40 @@ TEST(value_priority_head_ce_uses_behavior_mixture_and_rejects_bad_targets) {
                 old_school::TurnPhase::FirstMain, 1));
     }
 
+    const auto parent_logits =
+        old_school::learned_policy_head_logits(
+            options,
+            old_school::LearnedPolicyDecisionKind::Priority,
+            parent);
+    const double parent_logit_mean =
+        std::accumulate(
+            parent_logits.begin(), parent_logits.end(), 0.0) /
+        static_cast<double>(parent_logits.size());
+    std::vector<double> moderate_scores = {0.55, 0.45};
+    for (std::size_t index = 0;
+         index < moderate_scores.size(); ++index) {
+        moderate_scores[index] +=
+            0.10 *
+            std::tanh(
+                parent_logits[index] - parent_logit_mean);
+    }
+    const old_school::LearnedValuePriorityTrainingExample
+        moderate_stationary = {
+            .options = options,
+            .base_scores = {0.55, 0.45},
+            .target_probabilities =
+                old_school::learned_iteration::
+                    p16_exploration_distribution(
+                        moderate_scores),
+            .weight = 1.0,
+        };
+    const auto moderate_unchanged =
+        old_school::update_learned_value_priority_head(
+            parent, {moderate_stationary}, {});
+    CHECK(old_school::learned_model_fingerprint(
+              moderate_unchanged) ==
+          old_school::learned_model_fingerprint(parent));
+
     // exp((-100 - 100) / .10) underflows to exactly zero, so the
     // parent behavior is exactly {.9 * 1 + .1 / 2, .1 / 2}. A bare
     // softmax CE would update this target; CE against the deployed
@@ -4164,6 +4198,441 @@ TEST(learned_actor_generation_is_balanced_bounded_immutable_and_deterministic) {
           parent_fingerprint);
 }
 
+TEST(learned_value_policy_family_balances_retains_and_isolates_p1) {
+    const old_school::LearnedValuePolicyFamilyConfig defaults;
+    CHECK(defaults.generations == 1);
+    CHECK(defaults.search_worlds == 8);
+    CHECK(defaults.max_roots_per_actor_game == 32);
+    CHECK(defaults.max_game_turns == 500);
+    CHECK(defaults.collection_threads == 4);
+    CHECK(defaults.residual_weight == 0.10);
+    CHECK(defaults.td_lambda == 0.90);
+    CHECK(defaults.optimizer.batch_size == 64);
+    CHECK(defaults.optimizer.epochs == 8);
+    CHECK(defaults.optimizer.learning_rate == 0.001);
+    CHECK(defaults.optimizer.residual_weight == 0.10);
+    CHECK(defaults.optimizer.policy_temperature == 0.10);
+    CHECK(defaults.capacity_diagnostic_optimizers.empty());
+    CHECK(!defaults.compute_rootwise_oracle);
+
+    const auto parent = small_value_model();
+    const std::string parent_fingerprint =
+        old_school::learned_model_fingerprint(parent);
+    const auto parent_components =
+        old_school::learned_model_component_fingerprints(parent);
+    constexpr std::uint64_t kRootSeed = 0x5011C1EULL;
+    old_school::LearnedValuePolicyFamilyConfig fast;
+    fast.search_worlds = 1;
+    fast.max_roots_per_actor_game = 1;
+    fast.max_game_turns = 8;
+    fast.collection_threads = 1;
+    fast.optimizer.epochs = 1;
+
+    const auto family =
+        old_school::train_learned_value_policy_family(
+            parent, kRootSeed, fast);
+    CHECK(family.checkpoints.size() == 2);
+    CHECK(family.checkpoints.front().get() == parent.get());
+    CHECK(family.reports.size() == 1);
+    const auto& report = family.reports.front();
+    const auto& candidate = family.checkpoints.back();
+    const auto expected =
+        old_school::learned_iteration::balanced_schedule(
+            kRootSeed, 1);
+
+    CHECK(!report.canonical_recipe);
+    CHECK(report.search_worlds == 1);
+    CHECK(report.rollouts_per_world == 1);
+    CHECK(report.search_horizon_turns == 4);
+    CHECK(report.max_roots_per_actor_game == 1);
+    CHECK(report.max_game_turns == 8);
+    CHECK(report.collection_threads == 1);
+    CHECK(report.residual_weight == 0.10);
+    CHECK(report.td_lambda == 0.90);
+    CHECK(report.optimizer.epochs == 1);
+    CHECK(report.optimizer.seed ==
+          old_school::learned_iteration::derive_seed(
+              kRootSeed,
+              old_school::learned_iteration::
+                  SeedDomain::PolicyFit,
+              1, 0));
+    CHECK(report.games.size() == expected.size());
+    CHECK(report.games.size() == 40);
+    CHECK(report.rootless_actor_games == 0);
+    CHECK(report.parent_fingerprint == parent_fingerprint);
+    CHECK(report.candidate_fingerprint ==
+          old_school::learned_model_fingerprint(candidate));
+    CHECK(report.parent_components == parent_components);
+    CHECK(report.candidate_components.critic ==
+          parent_components.critic);
+    CHECK(report.candidate_components.priority !=
+          parent_components.priority);
+    CHECK(report.candidate_components.attack ==
+          parent_components.attack);
+    CHECK(report.candidate_components.block ==
+          parent_components.block);
+    CHECK(report.candidate_components.damage_order ==
+          parent_components.damage_order);
+    CHECK(report.replay_generations == 1);
+    CHECK(report.replay_examples ==
+          report.retained_priority_roots);
+    CHECK(report.retained_priority_roots == 80);
+    CHECK(std::abs(report.policy_weight - 80.0) < 1.0e-12);
+    CHECK(std::abs(report.minimum_target_sum - 1.0) <
+          1.0e-12);
+    CHECK(std::abs(report.maximum_target_sum - 1.0) <
+          1.0e-12);
+    CHECK(report.rollout_evaluations ==
+          report.raw_legal_options);
+
+    std::size_t raw_roots = 0;
+    std::size_t raw_options = 0;
+    std::size_t retained_roots = 0;
+    std::size_t rollout_evaluations = 0;
+    double policy_weight = 0.0;
+    for (std::size_t index = 0;
+         index < report.games.size(); ++index) {
+        const auto& actual = report.games[index];
+        const auto& scheduled = expected[index];
+        CHECK(actual.schedule_index ==
+              scheduled.schedule_index);
+        CHECK(actual.pairing_index ==
+              scheduled.pairing_index);
+        CHECK(actual.seat_decks == scheduled.seat_decks);
+        CHECK(actual.starting_player ==
+              scheduled.starting_player);
+        CHECK(actual.game_seed == scheduled.seed);
+        for (std::size_t player = 0; player < 2; ++player) {
+            CHECK(actual.raw_priority_roots[player] > 0);
+            CHECK(actual.raw_legal_options[player] >=
+                  2 * actual.raw_priority_roots[player]);
+            CHECK(actual.rollout_evaluations[player] ==
+                  actual.raw_legal_options[player]);
+            const auto retained =
+                old_school::learned_iteration::
+                    evenly_spaced_retained_indices(
+                        actual.raw_priority_roots[player], 1);
+            CHECK(actual.retained_ordinals[player] ==
+                  retained);
+            CHECK(actual.retained_priority_roots[player] ==
+                  1);
+            CHECK(actual.policy_weight_sums[player] == 1.0);
+            raw_roots += actual.raw_priority_roots[player];
+            raw_options += actual.raw_legal_options[player];
+            retained_roots +=
+                actual.retained_priority_roots[player];
+            rollout_evaluations +=
+                actual.rollout_evaluations[player];
+            policy_weight +=
+                actual.policy_weight_sums[player];
+        }
+    }
+    CHECK(raw_roots == report.raw_priority_roots);
+    CHECK(raw_options == report.raw_legal_options);
+    CHECK(retained_roots == report.retained_priority_roots);
+    CHECK(rollout_evaluations ==
+          report.rollout_evaluations);
+    CHECK(policy_weight == report.policy_weight);
+
+    for (const auto& deck : report.decks) {
+        CHECK(deck.seat_games == 16);
+        CHECK(deck.seat_zero_games == 8);
+        CHECK(deck.starting_games == 8);
+        CHECK(deck.rootless_actor_games == 0);
+        CHECK(deck.retained_priority_roots == 16);
+        CHECK(deck.rollout_evaluations ==
+              deck.raw_legal_options);
+        CHECK(deck.policy_weight == 16.0);
+    }
+    CHECK(report.mechanism.observation_count == 80);
+    CHECK(report.mechanism.total_weight == 80.0);
+    CHECK(report.mechanism.residual_option_weight == 80.0);
+    CHECK(report.mechanism.positive_advantage_weight +
+              report.mechanism.negative_advantage_weight +
+              report.mechanism.zero_advantage_weight ==
+          80.0);
+    CHECK(report.mechanism.correct_signed_movement_weight <=
+          report.mechanism
+              .eligible_signed_movement_weight);
+    CHECK(report.mechanism.changed_argmax_weight <= 80.0);
+    CHECK(report.mechanism.saturated_residual_weight <=
+          report.mechanism.residual_option_weight);
+    CHECK(report.capacity_diagnostics.empty());
+    CHECK(!report.rootwise_oracle.has_value());
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+    CHECK(old_school::learned_model_component_fingerprints(parent) ==
+          parent_components);
+
+    auto parallel_fast = fast;
+    parallel_fast.collection_threads = 4;
+    auto harder_optimizer = fast.optimizer;
+    harder_optimizer.epochs = 4;
+    parallel_fast.capacity_diagnostic_optimizers = {
+        fast.optimizer,
+        harder_optimizer,
+        harder_optimizer,
+    };
+    parallel_fast.compute_rootwise_oracle = true;
+    const auto repeated =
+        old_school::train_learned_value_policy_family(
+            parent, kRootSeed, parallel_fast);
+    CHECK(repeated.reports.front().collection_threads == 4);
+    const auto& capacity =
+        repeated.reports.front().capacity_diagnostics;
+    CHECK(capacity.size() == 3);
+    CHECK(capacity[0].optimizer.epochs == 1);
+    CHECK(capacity[0].optimizer.learning_rate == 0.001);
+    CHECK(capacity[0].optimizer.seed == report.optimizer.seed);
+    CHECK(capacity[0].parent_fingerprint ==
+          report.parent_fingerprint);
+    CHECK(capacity[0].candidate_fingerprint ==
+          report.candidate_fingerprint);
+    CHECK(capacity[0].parent_components ==
+          report.parent_components);
+    CHECK(capacity[0].candidate_components ==
+          report.candidate_components);
+    CHECK(capacity[0].mechanism == report.mechanism);
+    CHECK(capacity[1] == capacity[2]);
+    CHECK(capacity[1].optimizer.epochs == 4);
+    CHECK(capacity[1].parent_fingerprint ==
+          report.parent_fingerprint);
+    CHECK(capacity[1].parent_components ==
+          report.parent_components);
+    CHECK(capacity[1].candidate_components.critic ==
+          report.parent_components.critic);
+    CHECK(capacity[1].candidate_components.attack ==
+          report.parent_components.attack);
+    CHECK(capacity[1].candidate_components.block ==
+          report.parent_components.block);
+    CHECK(capacity[1].candidate_components.damage_order ==
+          report.parent_components.damage_order);
+    CHECK(capacity[1].candidate_components.priority !=
+          report.parent_components.priority);
+    CHECK(capacity[1].candidate_fingerprint !=
+          report.parent_fingerprint);
+    CHECK(capacity[1].mechanism.observation_count == 80);
+    CHECK(capacity[1].mechanism.total_weight == 80.0);
+    for (const auto& deck_mechanism :
+         capacity[1].mechanisms_by_deck) {
+        CHECK(deck_mechanism.observation_count == 16);
+        CHECK(deck_mechanism.total_weight == 16.0);
+        CHECK(deck_mechanism.correct_signed_movement_weight <=
+              deck_mechanism
+                  .eligible_signed_movement_weight);
+        CHECK(deck_mechanism.saturated_residual_weight <=
+                  deck_mechanism.residual_option_weight);
+    }
+    CHECK(repeated.reports.front().rootwise_oracle.has_value());
+    const auto& oracle =
+        *repeated.reports.front().rootwise_oracle;
+    CHECK(oracle.observation_count == 80);
+    CHECK(oracle.total_weight == 80.0);
+    CHECK(std::abs(
+              oracle.parent_kl -
+              repeated.reports.front().mechanism.parent_kl) <
+          1.0e-12);
+    CHECK(oracle.reduction_defined);
+    CHECK(oracle.full_range.numerical_best_kl <=
+          oracle.parent_kl);
+    CHECK(oracle.zero_saturation.numerical_best_kl <=
+          oracle.parent_kl);
+    CHECK(oracle.full_range.achievable_reduction_fraction <=
+          oracle.full_range.certified_reduction_upper_bound);
+    CHECK(
+        oracle.zero_saturation.achievable_reduction_fraction <=
+        oracle.zero_saturation.certified_reduction_upper_bound);
+    CHECK(oracle.zero_saturation
+              .maximum_abs_squashed_residual <
+          old_school::learned_iteration::
+              kP16ResidualSaturationThreshold);
+    auto serial_reports = family.reports;
+    auto parallel_reports = repeated.reports;
+    for (auto& generation_report : serial_reports) {
+        generation_report.collection_threads = 0;
+    }
+    for (auto& generation_report : parallel_reports) {
+        generation_report.collection_threads = 0;
+        generation_report.capacity_diagnostics.clear();
+        generation_report.rootwise_oracle.reset();
+    }
+    CHECK(parallel_reports == serial_reports);
+    CHECK(repeated.checkpoints.size() ==
+          family.checkpoints.size());
+    CHECK(repeated.checkpoints.back().get() !=
+          candidate.get());
+    CHECK(old_school::learned_model_fingerprint(
+              repeated.checkpoints.back()) ==
+          report.candidate_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+
+    for (const std::size_t invalid_threads :
+         std::array<std::size_t, 2>{0, 41}) {
+        auto invalid = fast;
+        invalid.collection_threads = invalid_threads;
+        CHECK(throws_with_text(
+            [&] {
+                static_cast<void>(
+                    old_school::train_learned_value_policy_family(
+                        parent, kRootSeed, invalid));
+            },
+            "configuration"));
+    }
+
+    auto mismatched = fast;
+    mismatched.optimizer.residual_weight = 0.20;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_value_policy_family(
+                    parent, kRootSeed, mismatched));
+        },
+        "configuration"));
+    auto invalid_diagnostic = fast;
+    auto invalid_diagnostic_optimizer = fast.optimizer;
+    invalid_diagnostic_optimizer.epochs = 0;
+    invalid_diagnostic.capacity_diagnostic_optimizers = {
+        invalid_diagnostic_optimizer,
+    };
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_value_policy_family(
+                    parent, kRootSeed, invalid_diagnostic));
+        },
+        "configuration"));
+    auto invalid_oracle = fast;
+    invalid_oracle.generations = 2;
+    invalid_oracle.compute_rootwise_oracle = true;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_value_policy_family(
+                    parent, kRootSeed, invalid_oracle));
+        },
+        "configuration"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::train_learned_value_policy_family(
+                    small_actor_model(), kRootSeed, fast));
+        },
+        "Value parent"));
+}
+
+TEST(learned_value_policy_priority_sampling_is_real_and_hidden_safe) {
+    auto fixture = determinization_fixture();
+    auto& player = fixture.state.players[0];
+    const auto plains =
+        std::find(
+            player.hand.begin(), player.hand.end(),
+            old_school::CardId::Plains);
+    CHECK(plains != player.hand.end());
+    player.hand.erase(plains);
+    player.lands.push_back({
+        .card = old_school::CardId::Plains,
+        .tapped = false,
+    });
+    player.lands.front().tapped = false;
+    player.artifacts.front().tapped = false;
+
+    constexpr std::size_t kWorlds = 1;
+    constexpr std::uint64_t kGeneration = 1;
+    constexpr std::size_t kScheduleIndex = 3;
+    std::optional<
+        old_school::LearnedValuePolicyPriorityDiagnostic>
+        sampled_non_argmax;
+    std::uint64_t selected_root_seed = 0;
+    for (std::uint64_t root_seed = 1;
+         root_seed <= 32; ++root_seed) {
+        auto diagnostic =
+            old_school::diagnose_learned_value_policy_priority(
+                fixture.state, fixture.decks, 0, false,
+                old_school::TurnPhase::SecondMain, 0,
+                small_value_model(), root_seed, kGeneration,
+                kScheduleIndex, kWorlds);
+        const double best =
+            *std::max_element(
+                diagnostic.combined_scores.begin(),
+                diagnostic.combined_scores.end());
+        if (diagnostic.combined_scores[diagnostic.chosen] !=
+            best) {
+            selected_root_seed = root_seed;
+            sampled_non_argmax = std::move(diagnostic);
+            break;
+        }
+    }
+    CHECK(sampled_non_argmax.has_value());
+    const auto& original = *sampled_non_argmax;
+    CHECK(original.actions.size() >= 2);
+    CHECK(original.actions.size() ==
+          original.base_scores.size());
+    CHECK(original.actions.size() ==
+          original.policy_logits.size());
+    CHECK(original.actions.size() ==
+          original.centered_policy_logits.size());
+    CHECK(original.actions.size() ==
+          original.residuals.size());
+    CHECK(original.actions.size() ==
+          original.combined_scores.size());
+    CHECK(original.actions.size() ==
+          original.behavior_probabilities.size());
+    CHECK(original.selected_action ==
+          original.actions[original.chosen]);
+    CHECK(original.transition_applied);
+    CHECK(original.rollout_evaluations ==
+          original.actions.size() * kWorlds);
+    CHECK(original.search_seed != original.choice_seed);
+    CHECK(std::abs(
+              std::accumulate(
+                  original.behavior_probabilities.begin(),
+                  original.behavior_probabilities.end(), 0.0) -
+              1.0) <
+          1.0e-12);
+
+    std::mt19937_64 choice_random(original.choice_seed);
+    std::discrete_distribution<std::size_t> sample(
+        original.behavior_probabilities.begin(),
+        original.behavior_probabilities.end());
+    CHECK(sample(choice_random) == original.chosen);
+
+    const auto hidden =
+        old_school::diagnose_learned_value_policy_priority(
+            hidden_repartition(fixture.state, 0),
+            fixture.decks, 0, false,
+            old_school::TurnPhase::SecondMain, 0,
+            small_value_model(), selected_root_seed,
+            kGeneration, kScheduleIndex, kWorlds);
+    CHECK(hidden.actions == original.actions);
+    CHECK(hidden.base_scores == original.base_scores);
+    CHECK(hidden.policy_logits == original.policy_logits);
+    CHECK(hidden.centered_policy_logits ==
+          original.centered_policy_logits);
+    CHECK(hidden.residuals == original.residuals);
+    CHECK(hidden.combined_scores ==
+          original.combined_scores);
+    CHECK(hidden.behavior_probabilities ==
+          original.behavior_probabilities);
+    CHECK(hidden.search_seed == original.search_seed);
+    CHECK(hidden.choice_seed == original.choice_seed);
+    CHECK(hidden.chosen == original.chosen);
+    CHECK(hidden.selected_action == original.selected_action);
+    CHECK(hidden.transition_applied ==
+          original.transition_applied);
+    CHECK(hidden.pass_result == original.pass_result);
+    CHECK(hidden.terminal_result == original.terminal_result);
+    CHECK(old_school::observe_game_state(
+              hidden.final_state, 0) ==
+          old_school::observe_game_state(
+              original.final_state, 0));
+    CHECK(old_school::learned_iteration::p16_all_action_target(
+              hidden.behavior_probabilities, hidden.chosen, 0.25) ==
+          old_school::learned_iteration::p16_all_action_target(
+              original.behavior_probabilities,
+              original.chosen, 0.25));
+}
+
 TEST(learned_actor_generation_attack_search_controls_real_lethal_combat) {
     auto fixture =
         attack_evaluation_fixture(old_school::CardId::GrizzlyBears);
@@ -4338,6 +4807,11 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
             old_school::TurnPhase::BeginCombat, 1, actions,
             small_actor_model(), actor_config);
     CHECK(actor_samples.rollout_evaluations == 4);
+    CHECK(actor_samples.terminal_evaluations == 4);
+    CHECK(actor_samples.bootstrapped_evaluations == 0);
+    CHECK(actor_samples.terminal_evaluations +
+              actor_samples.bootstrapped_evaluations ==
+          actor_samples.rollout_evaluations);
     CHECK(actor_samples.q_samples.size() == 1);
     CHECK(actor_samples.q_samples[0] ==
           std::vector<double>({0.0, 0.0, 0.0, 0.0}));
@@ -4352,6 +4826,11 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
             state, decks, 0, false,
             old_school::TurnPhase::BeginCombat, 1, actions,
             small_value_model(), value_config);
+    CHECK(value_samples.terminal_evaluations == 1);
+    CHECK(value_samples.bootstrapped_evaluations == 0);
+    CHECK(value_samples.terminal_evaluations +
+              value_samples.bootstrapped_evaluations ==
+          value_samples.rollout_evaluations);
     CHECK(value_samples.q_samples ==
           std::vector<std::vector<double>>({{0.0}}));
 
@@ -4396,37 +4875,60 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
     old_school::LearnedSearchConfig horizon_zero = actor_config;
     horizon_zero.worlds = 1;
     horizon_zero.rollouts_per_world = 1;
-    const double h0 =
+    const auto horizon_zero_samples =
         old_school::learned_priority_action_samples(
             boundary, decks, 0, true,
             old_school::TurnPhase::SecondMain, 1, actions,
-            small_actor_model(), horizon_zero)
-            .q_samples[0][0];
+            small_actor_model(), horizon_zero);
+    const double h0 = horizon_zero_samples.q_samples[0][0];
     CHECK(h0 > 0.0 && h0 < 1.0);
+    CHECK(horizon_zero_samples.terminal_evaluations == 0);
+    CHECK(horizon_zero_samples.bootstrapped_evaluations == 1);
+    CHECK(horizon_zero_samples.terminal_evaluations +
+              horizon_zero_samples.bootstrapped_evaluations ==
+          horizon_zero_samples.rollout_evaluations);
 
     old_school::LearnedSearchConfig horizon_one = horizon_zero;
     horizon_one.horizon_turns = 1;
-    const double h1 =
+    const auto horizon_one_samples =
         old_school::learned_priority_action_samples(
             boundary, decks, 0, true,
             old_school::TurnPhase::SecondMain, 1, actions,
-            small_actor_model(), horizon_one)
-            .q_samples[0][0];
+            small_actor_model(), horizon_one);
+    const double h1 = horizon_one_samples.q_samples[0][0];
     // H1 bootstraps after turn two cleanup. Preparing turn three here would
     // make player zero draw from its empty library and return exactly zero.
     CHECK(h1 > 0.0 && h1 < 1.0);
+    CHECK(horizon_one_samples.terminal_evaluations == 0);
+    CHECK(horizon_one_samples.bootstrapped_evaluations == 1);
+
+    old_school::LearnedSearchConfig horizon_two = horizon_zero;
+    horizon_two.horizon_turns = 2;
+    const auto horizon_two_samples =
+        old_school::learned_priority_action_samples(
+            boundary, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1, actions,
+            small_actor_model(), horizon_two);
+    CHECK(horizon_two_samples.q_samples[0][0] == 0.0);
+    CHECK(horizon_two_samples.terminal_evaluations == 1);
+    CHECK(horizon_two_samples.bootstrapped_evaluations == 0);
+    CHECK(horizon_two_samples.terminal_evaluations +
+              horizon_two_samples.bootstrapped_evaluations ==
+          horizon_two_samples.rollout_evaluations);
 
     auto empty_next_library = boundary;
     empty_next_library.players[1].graveyard.push_back(
         empty_next_library.players[1].library.back());
     empty_next_library.players[1].library.clear();
-    const double deck_out =
+    const auto deck_out_samples =
         old_school::learned_priority_action_samples(
             empty_next_library, decks, 0, true,
             old_school::TurnPhase::SecondMain, 1, actions,
-            small_actor_model(), horizon_zero)
-            .q_samples[0][0];
+            small_actor_model(), horizon_zero);
+    const double deck_out = deck_out_samples.q_samples[0][0];
     CHECK(deck_out == 1.0);
+    CHECK(deck_out_samples.terminal_evaluations == 1);
+    CHECK(deck_out_samples.bootstrapped_evaluations == 0);
 }
 
 TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
@@ -4447,6 +4949,11 @@ TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
             small_actor_model(), actor_config);
     CHECK(baseline.sampled_worlds == 2);
     CHECK(baseline.rollout_evaluations == 8);
+    CHECK(baseline.terminal_evaluations == 0);
+    CHECK(baseline.bootstrapped_evaluations == 8);
+    CHECK(baseline.terminal_evaluations +
+              baseline.bootstrapped_evaluations ==
+          baseline.rollout_evaluations);
     CHECK(baseline.q_samples.size() == 2);
     for (const auto& samples : baseline.q_samples) {
         CHECK(samples.size() == 4);
@@ -4481,6 +4988,47 @@ TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
     CHECK(value_samples.q_samples.size() == 2);
     CHECK(value_samples.q_samples[0].size() == 1);
     CHECK(value_samples.q_samples[1].size() == 1);
+    CHECK(value_samples.terminal_evaluations == 0);
+    CHECK(value_samples.bootstrapped_evaluations == 2);
+    CHECK(value_samples.terminal_evaluations +
+              value_samples.bootstrapped_evaluations ==
+          value_samples.rollout_evaluations);
+
+    auto depleted = fixture;
+    for (std::size_t player = 0;
+         player < depleted.state.players.size(); ++player) {
+        auto& player_state = depleted.state.players[player];
+        if (player == 1) {
+            const old_school::CardId final_draw =
+                player_state.library.back();
+            player_state.library.pop_back();
+            player_state.graveyard.insert(
+                player_state.graveyard.end(),
+                player_state.library.begin(),
+                player_state.library.end());
+            player_state.library = {final_draw};
+        } else {
+            player_state.graveyard.insert(
+                player_state.graveyard.end(),
+                player_state.library.begin(),
+                player_state.library.end());
+            player_state.library.clear();
+        }
+    }
+    old_school::LearnedSearchConfig terminal_config = actor_config;
+    terminal_config.worlds = 1;
+    terminal_config.rollouts_per_world = 1;
+    terminal_config.horizon_turns = 2;
+    const auto natural_terminals =
+        old_school::learned_binary_attack_samples(
+            depleted.state, depleted.decks, 0, {}, 1, {},
+            small_actor_model(), terminal_config);
+    CHECK(natural_terminals.rollout_evaluations == 2);
+    CHECK(natural_terminals.terminal_evaluations == 2);
+    CHECK(natural_terminals.bootstrapped_evaluations == 0);
+    CHECK(natural_terminals.terminal_evaluations +
+              natural_terminals.bootstrapped_evaluations ==
+          natural_terminals.rollout_evaluations);
 
     auto moated = fixture.state;
     moated.players[1].enchantments.push_back(old_school::CardId::Moat);

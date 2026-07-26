@@ -159,6 +159,50 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--train-p-family N [--seed N] [--train-games 800]"*\
+"Train canonical outcome-tilted Priority checkpoints P1..PN"*\
+"N is 1..16"*\
+"only --seed/--train-games/--train-seed are accepted"*) ;;
+    *)
+        printf 'P-family training contract missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+case $help_output in
+    *"--diagnose-p1-fit [--seed N] [--train-games 800]"*\
+"Collect canonical P1 once"*\
+"five independent same-parent epoch/rate cells"*\
+"accepts only --seed, --train-games, and --train-seed"*) ;;
+    *)
+        printf 'P1 fit diagnostic contract missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+case $help_output in
+    *"--score-p1r-probes --seed 577215"*\
+"--train-games 800 --train-seed 424242"*\
+"Reconstruct revised P1R"*\
+"128 epochs, rate 0.003"*\
+"immutable dev-v3 and validation-v1 reject-only gates"*) ;;
+    *)
+        printf 'P1R offline-gate contract missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+case $help_output in
+    *"--diagnose-terminal-credit --train-games 800 --train-seed 424242"*\
+"Eval-only K=1024/H=128 terminal-outcome audit"*\
+"exact Value Challenger C16 P0"*\
+"zero continuation epsilon and Priority residual"*\
+"required terminal results"*\
+"accepts only --train-games and --train-seed"*) ;;
+    *)
+        printf 'terminal-credit diagnostic contract missing from --help\n' \
+            >&2
+        exit 1
+        ;;
+esac
 
 run_cli --diagnose-value-context
 if [ "$cli_status" -ne 0 ]; then
@@ -207,6 +251,50 @@ expect_error "accepts only --train-games, --train-seed, and --learned-generation
     --diagnose-force-spike-teacher --learned-generations 1 --seed 1
 expect_error "cannot be combined" \
     --diagnose-force-spike-teacher --learned-generations 1 --score-probes
+expect_error "--train-p-family must be in [1, 16]" \
+    --train-p-family 0
+expect_error "--train-p-family must be in [1, 16]" \
+    --train-p-family 17
+expect_error "missing value for --train-p-family" \
+    --train-p-family
+expect_error "invalid value for --train-p-family" \
+    --train-p-family nope
+expect_error "--train-p-family accepts only --seed, --train-games, and --train-seed" \
+    --train-p-family 1 --games 1
+expect_error "cannot be combined" \
+    --train-p-family 1 --benchmark
+expect_error "--train-games must be greater than zero" \
+    --train-p-family 1 --seed 577215 \
+    --train-games 0 --train-seed 424242
+expect_error "--diagnose-p1-fit accepts only --seed, --train-games, and --train-seed" \
+    --diagnose-p1-fit --games 1
+expect_error "cannot be combined" \
+    --diagnose-p1-fit --benchmark
+expect_error "cannot be combined" \
+    --diagnose-p1-fit --train-p-family 1
+expect_error "--train-games must be greater than zero" \
+    --diagnose-p1-fit --seed 577215 \
+    --train-games 0 --train-seed 424242
+expect_error "--score-p1r-probes accepts only --seed, --train-games, and --train-seed" \
+    --score-p1r-probes --games 1
+expect_error "cannot be combined" \
+    --score-p1r-probes --benchmark
+expect_error "--score-p1r-probes requires exact --seed 577215 --train-games 800 --train-seed 424242" \
+    --score-p1r-probes --seed 1 \
+    --train-games 800 --train-seed 424242
+expect_error "requires both immutable preregistered probe caches" \
+    --score-p1r-probes --seed 577215 \
+    --train-games 800 --train-seed 424242
+expect_error "--diagnose-terminal-credit accepts only --train-games and --train-seed" \
+    --diagnose-terminal-credit --games 1
+expect_error "cannot be combined" \
+    --diagnose-terminal-credit --benchmark
+expect_error "--diagnose-terminal-credit requires exact --train-games 800 --train-seed 424242" \
+    --diagnose-terminal-credit \
+    --train-games 1 --train-seed 424242
+expect_error "--diagnose-terminal-credit requires exact --train-games 800 --train-seed 424242" \
+    --diagnose-terminal-credit \
+    --train-games 800 --train-seed 1
 
 teacher_probe_files_before=$(
     find . -type f -name '*probe*.tsv' -print | sort
@@ -223,6 +311,7 @@ case $cli_output in
 "no probe-label cache access or mutation"*\
 "[PRIMARY] S0 C1 Value K256/H4"*\
 "search: K=256/H=4, Learned Value mirror, shallow-prior blend off"*\
+"all hidden repartitions: bit-identical"*\
 "[DIAGNOSTIC] S0 C1 Value K256/H0"*\
 "[DIAGNOSTIC] Actor G0 K256/H0"*\
 "oriented delta: Q("*\
@@ -230,7 +319,6 @@ case $cli_output in
 "95% CI"*\
 "exact selected keys: {"*\
 "ordered K=8 blocks:"*"/32 correct; require 24"*\
-"all hidden repartitions: bit-identical"*\
 "Primary teacher gate:"*) ;;
     *)
         printf 'teacher-sufficiency diagnostic evidence missing\n%s\n' \

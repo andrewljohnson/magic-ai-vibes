@@ -1136,6 +1136,23 @@ void test_teacher_sufficiency_audit_is_generic_and_hidden_safe() {
                     comparison->estimate.confidence_upper_95),
             "tiny teacher audit omitted paired statistics, exact "
             "selection, K=8 accounting, or hidden invariance");
+        expect(
+            comparison->candidate_count != 0 &&
+                comparison->expected_evaluations ==
+                    comparison->candidate_count * 8 &&
+                comparison->recorded_candidate_samples ==
+                    comparison->expected_evaluations &&
+                comparison->rollout_evaluations ==
+                    comparison->expected_evaluations &&
+                comparison->terminal_evaluations +
+                        comparison->bootstrapped_evaluations ==
+                    comparison->rollout_evaluations &&
+                comparison->evaluation_accounting_is_exact() &&
+                !comparison
+                     ->conservative_terminal_bound_satisfied &&
+                !comparison->terminal_results_gate_passed(),
+            "teacher audit did not retain exact terminal/bootstrap "
+            "accounting for its shallow default mode");
     }
     const auto validation =
         old_school::probes::make_probe_validation_v1();
@@ -1233,6 +1250,40 @@ void test_teacher_sufficiency_audit_is_generic_and_hidden_safe() {
     expect(
         world_error.find("multiple of 8") != std::string::npos,
         "teacher audit world validation was not actionable");
+    const std::string terminal_bound_error = expect_invalid(
+        [&] {
+            auto invalid = value_config;
+            invalid.require_terminal_results = true;
+            static_cast<void>(
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        value, "Terminal horizon too short",
+                        invalid));
+        },
+        "terminal teacher audit accepted an uncertified horizon");
+    expect(
+        terminal_bound_error.find("conservative bound") !=
+                std::string::npos &&
+            terminal_bound_error.find(
+                "sum of both libraries plus one") !=
+                std::string::npos,
+        "terminal horizon validation was not actionable");
+    const std::string shallow_blend_error = expect_invalid(
+        [&] {
+            auto invalid = value_config;
+            invalid.horizon_turns = 128;
+            invalid.blend_shallow_prior = true;
+            invalid.require_terminal_results = true;
+            static_cast<void>(
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        value, "Terminal shallow blend", invalid));
+        },
+        "terminal teacher audit accepted a shallow critic blend");
+    expect(
+        shallow_blend_error.find("cannot blend") !=
+            std::string::npos,
+        "terminal shallow-blend validation was not actionable");
     const std::string null_error = expect_invalid(
         [&] {
             static_cast<void>(
@@ -1244,6 +1295,154 @@ void test_teacher_sufficiency_audit_is_generic_and_hidden_safe() {
     expect(
         null_error.find("frozen model") != std::string::npos,
         "teacher audit null-model validation was not actionable");
+}
+
+void test_terminal_credit_gate_is_focused_and_fail_closed() {
+    using old_school::probe_runner::TeacherOptionComparison;
+    using old_school::probe_runner::TeacherSufficiencyAuditReport;
+
+    const auto passing_comparison =
+        [](std::string first, std::string second) {
+            TeacherOptionComparison comparison;
+            comparison.description = "synthetic terminal pair";
+            comparison.estimate.first_key = std::move(first);
+            comparison.estimate.second_key = std::move(second);
+            comparison.estimate.samples_per_candidate = 32;
+            comparison.estimate.delta_q = 0.10;
+            comparison.estimate.paired_standard_error = 0.01;
+            comparison.estimate.confidence_lower_95 = 0.08;
+            comparison.estimate.confidence_upper_95 = 0.12;
+            comparison.selected_keys = {
+                comparison.estimate.first_key};
+            comparison.ordered_blocks = {
+                .worlds_per_block = 8,
+                .block_count = 4,
+                .correct_block_count = 3,
+            };
+            comparison.hidden_repartition_bit_identical = true;
+            comparison.candidate_count = 3;
+            comparison.recorded_candidate_samples = 96;
+            comparison.expected_evaluations = 96;
+            comparison.rollout_evaluations = 96;
+            comparison.terminal_evaluations = 96;
+            comparison.bootstrapped_evaluations = 0;
+            comparison.conservative_terminal_bound_turns = 80;
+            comparison.conservative_terminal_bound_satisfied = true;
+            return comparison;
+        };
+
+    TeacherSufficiencyAuditReport report;
+    report.policy_name = "Synthetic full-terminal teacher";
+    report.model_fingerprint = "synthetic";
+    report.config = {
+        .worlds = 32,
+        .horizon_turns = 128,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = false,
+        .require_terminal_results = true,
+    };
+    report.force_spike_live = passing_comparison(
+        "force-spike-gray-ogre", "pass");
+    report.force_spike_payable = passing_comparison(
+        "pass", "force-spike-gray-ogre");
+
+    // Deliberately make every old X=0 sign/integrity gate fail. It is a
+    // diagnostic row in this experiment and must not veto the controlled
+    // Force Spike ordering hypothesis.
+    report.disintegrate_x_zero =
+        passing_comparison("pass", "x-zero");
+    report.disintegrate_x_zero.selected_keys = {"cast-orc"};
+    report.disintegrate_x_zero.estimate.confidence_lower_95 = -0.2;
+    report.disintegrate_x_zero.ordered_blocks.correct_block_count = 0;
+    report.disintegrate_x_zero.hidden_repartition_bit_identical =
+        false;
+    report.disintegrate_x_zero.terminal_evaluations = 95;
+    report.disintegrate_x_zero.bootstrapped_evaluations = 1;
+    report.hidden_repartition_bit_identical = false;
+
+    expect(
+        report.force_spike_live.evaluation_accounting_is_exact() &&
+            report.force_spike_live
+                .terminal_results_gate_passed() &&
+            report.disintegrate_x_zero
+                .evaluation_accounting_is_exact() &&
+            !report.disintegrate_x_zero
+                 .terminal_results_gate_passed() &&
+            report.disintegrate_x_zero
+                .second_key_excluded_from_selected_set() &&
+            old_school::probe_runner::
+                terminal_credit_primary_gate_passed(report),
+        "terminal-credit primary gate was not focused on the two "
+        "Force Spike controls");
+
+    const std::string formatted =
+        old_school::probe_runner::
+            format_terminal_credit_audit_report(report);
+    expect(
+        formatted.find("Full-Terminal Credit Audit") !=
+                std::string::npos &&
+            formatted.find("[PRIMARY 1/2]") !=
+                std::string::npos &&
+            formatted.find("[PRIMARY 2/2]") !=
+                std::string::npos &&
+            formatted.find("[DIAGNOSTIC ONLY]") !=
+                std::string::npos &&
+            formatted.find(
+                "X=0 excluded from exact selected-best set: PASS") !=
+                std::string::npos &&
+            formatted.find(
+                "do not enter the primary Force Spike gate") !=
+                std::string::npos &&
+            formatted.find("bootstrapped 1 [EXACT]") !=
+                std::string::npos &&
+            formatted.find(
+                "Primary terminal-credit gate: PASS") !=
+                std::string::npos,
+        "terminal-credit formatter omitted focused verdict, "
+        "terminal accounting, or diagnostic X=0 exclusion");
+
+    TeacherSufficiencyAuditReport critic_leak = report;
+    critic_leak.force_spike_live.terminal_evaluations = 95;
+    critic_leak.force_spike_live.bootstrapped_evaluations = 1;
+    expect(
+        critic_leak.force_spike_live
+                .evaluation_accounting_is_exact() &&
+            !critic_leak.force_spike_live
+                 .terminal_results_gate_passed() &&
+            !old_school::probe_runner::
+                 terminal_credit_primary_gate_passed(critic_leak),
+        "terminal-credit gate did not fail closed on a primary "
+        "critic bootstrap");
+
+    TeacherSufficiencyAuditReport bad_bound = report;
+    bad_bound.force_spike_payable
+        .conservative_terminal_bound_satisfied = false;
+    expect(
+        !old_school::probe_runner::
+             terminal_credit_primary_gate_passed(bad_bound),
+        "terminal-credit gate ignored a failed conservative bound");
+
+    TeacherSufficiencyAuditReport shallow = report;
+    shallow.config.require_terminal_results = false;
+    expect(
+        !old_school::probe_runner::
+             terminal_credit_primary_gate_passed(shallow),
+        "terminal-credit gate accepted a non-terminal audit config");
+    TeacherSufficiencyAuditReport blended = report;
+    blended.config.blend_shallow_prior = true;
+    expect(
+        !old_school::probe_runner::
+             terminal_credit_primary_gate_passed(blended),
+        "terminal-credit gate accepted a shallow critic blend");
+
+    report.disintegrate_x_zero.selected_keys = {"x-zero", "cast-orc"};
+    expect(
+        !report.disintegrate_x_zero
+             .second_key_excluded_from_selected_set() &&
+            old_school::probe_runner::
+                terminal_credit_primary_gate_passed(report),
+        "X=0 selected-set diagnostic leaked into the primary gate");
 }
 
 void test_value_decision_detail_respects_ties_and_selectors() {
@@ -1274,6 +1473,34 @@ void test_value_decision_detail_respects_ties_and_selectors() {
             std::abs(uniform_detail.regret - 0.2) < 1.0e-12 &&
             std::abs(uniform_detail.critic_error - 0.1) < 1.0e-12,
         "uniform tie detail did not use expected selected-action Q");
+    expect(
+        !old_school::probe_runner::
+             value_decision_uniquely_selects(
+                 uniform_detail, "best") &&
+            !old_school::probe_runner::
+                 value_decision_uniquely_selects(
+                     uniform_detail, "other"),
+        "multi-action exact tie was mistaken for a unique choice");
+
+    const old_school::probe_eval::ProbePrediction unique_priority{
+        "red.synthetic-selection",
+        {{"other", 1.0}, {"best", 2.0}},
+        0.7,
+    };
+    const auto unique_priority_detail =
+        old_school::probe_runner::make_value_probe_decision_detail(
+            label, unique_priority);
+    expect(
+        unique_priority_detail.selected_keys ==
+                std::vector<std::string>{"best"} &&
+            !unique_priority_detail.deterministic_selection &&
+            old_school::probe_runner::
+                value_decision_uniquely_selects(
+                    unique_priority_detail, "best") &&
+            !old_school::probe_runner::
+                 value_decision_uniquely_selects(
+                     unique_priority_detail, "other"),
+        "singleton Priority argmax did not count as a unique choice");
 
     const old_school::probe_eval::ProbePrediction deterministic_tie{
         "red.synthetic-selection",
@@ -1300,6 +1527,11 @@ void test_value_decision_detail_respects_ties_and_selectors() {
             std::abs(deterministic_detail.critic_error - 0.1) <
                 1.0e-12,
         "deterministic detail did not use its selected candidate");
+    expect(
+        old_school::probe_runner::
+            value_decision_uniquely_selects(
+                deterministic_detail, "other"),
+        "deterministic selected key did not count as unique");
 
     const auto persistent_detail =
         old_school::probe_runner::make_value_probe_decision_detail(
@@ -2486,6 +2718,8 @@ int main() {
                test_teacher_audit_ordered_blocks_are_exact);
     runner.run("teacher audit generic hidden-safe scorer",
                test_teacher_sufficiency_audit_is_generic_and_hidden_safe);
+    runner.run("terminal-credit focused fail-closed gate",
+               test_terminal_credit_gate_is_focused_and_fail_closed);
     runner.run("Value selection detail semantics",
                test_value_decision_detail_respects_ties_and_selectors);
     runner.run("actionable low-margin summary",
