@@ -7818,6 +7818,70 @@ hypothesis fails, fix only the different exact flag exposed by the preflight.
 Only a clean post-fix preflight can license preregistration of one fresh sealed
 RB0-0 seed; it cannot itself license a learning change or mechanism claim.
 
+#### Pre-fix result: mechanical hypothesis confirmed
+
+Run 2026-07-26 from committed source `fe24471` after rereading `REVIEW.md`
+through its 10:17 cycle. The exact declared command was:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/rb0-e1-arm64-mechanics-before \
+  ./build/rb0-mechanical-preflight
+```
+
+The embedded configuration was seed `202607260902`, generation `20`, 60
+balanced blocks = 2,400 physical games and 4,800 actor-games per capture,
+K=1/H=4, exploration `0.05`, and four canonical/repeat/reverse/one-worker
+captures. Each capture contained exactly 128,922 trace-perspective rows and
+zero rootless actor-games. The exact C16 artifact remained unchanged with
+parent fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+and content digest
+`ee89a4aa1e91bbfc3d1ca6144139a86910bbe3e7d465de369f3b5e52471132fe`.
+
+The hypothesis was confirmed exactly. In all four captures the naïvely summed
+global mass missed its identity by
+`2.1245796233415604e-08`, exceeding the unchanged
+`1.8320918115932727e-09` tolerance. Actor mass passed with maximum error
+`3.1974423109204508e-14` versus tolerance
+`3.8168579408193183e-13`; turn mass passed with maximum error
+`4.4408920985006262e-16` versus tolerance at that row
+`2.2452105534231285e-14`.
+
+Every other named invariant passed: artifact snapshots and schema; exact
+game/actor/row accounting; schedule balance and all hash shapes; trace, RO4,
+and terminal-tail identities; hidden repartition, changed-state, grouping,
+target, weight, and scoring identities; finite-positive weights; actor and
+turn mass; and full repeat/reverse/one-versus-four-worker capture equality.
+Only `weight.global-mass`, its aggregate `weight.identity`, and therefore
+`mechanical.complete` failed. The route exited `2`, as required for a named
+mechanical diagnosis; it exposed no scientific metric or gate.
+
+The immutable transcript is
+`build/experiments/rb0-e1-arm64-mechanics-before.complete.txt`, SHA-256
+`049f05d1b4cdcc800580b2f9a5a2a11ef87917e86a6aa65cfd83fa5b33fa43bc`;
+the independent sidecar matches and records exit `2`. Wall time was 535.03
+seconds (`user 1179.94`, `sys 6.74`).
+
+Decision: apply only deterministic compensated accumulation to the diagnostic
+global/actor/turn mass summaries. Do not change hierarchical row weights,
+their hashes, the 64-epsilon tolerance, squared-weight/Kish calculation,
+scientific accumulation, estimands, scopes, gates, schedules, or sample size.
+Add the declared >=129,280-row adversarial regression first. The exact
+post-fix engineering capture, using the same permitted engineering seed but
+a new collision-free prefix, is:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/rb0-e1-arm64-mechanics-after-compensated \
+  ./build/rb0-mechanical-preflight
+```
+
+It passes only if every named invariant passes and the exact row-weight,
+schedule, trace, RO4, target, feature, grouping, scoring, and artifact hashes
+remain those printed above. A clean result licenses only a fresh RB0-0 sealed
+seed declaration.
+
 ### Calendar-8 composite authorization (user delegated; accepted)
 
 Recorded 2026-07-26 after rereading `REVIEW.md` through its 08:32 cycle. The
