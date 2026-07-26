@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 14:11 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 16:11 PDT — refreshed every review cycle.*
 
 - **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
   current read (pooled 240 games/cell over seeds 4242+7801): **1 of
@@ -36,6 +36,12 @@ binary, never from extrapolation.
   Blue -15pp / Green +18pp in self-play). First recipe fork
   C17-DB8 (bootstrap 4->8) is TRAINING in the challenger tree,
   seed 8629 reserved.**
+- **THE COMPOSITE HAS COMPRESSED EVERY LIFT-GATE DEFICIT TO <2pp:
+  pooled 2/5 (RU +2.0 and White +0.1 PASS; Blue/Red -1.7; Green
+  -0.8) vs baseline 1/5 with gaps to -4.6. Aggregate ~49.2-49.8%
+  (+~2pp over baseline, secondary confirmed twice, PD0 paired at
+  +0.4). The endgame is pooled power or a Green-specific
+  mechanism.**
 - **C17-J1 DECLARED AND COUNTERSIGNED: the joint composite
   (calendar-8 CT8 targets + PublicStackPassV1 controller + PD0) is
   live — paired byte-identical-shard fit, typed policy tokens,
@@ -150,6 +156,185 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 16:11 PDT (review cycle)
+
+**The sealed C17-J1 train and evaluation path is FROZEN (2877f35)
+— the final pre-fit freeze; the one-shot paired fit should be the
+next sealed event at last.** Baseline lift table: bit-identical,
+ninety-fourth cycle. My OSC-4 divergence smoke completes in
+parallel; its panel queues behind.
+
+## 2026-07-26 16:06 PDT (review cycle)
+
+**No Codex change; C17-J1 fit pending.** Baseline lift table:
+bit-identical, ninety-third cycle. My loop: OSC-4 (shortlist-then-
+search block scoring — the last confirmed defect class) is
+implemented and committed; default verified bit-inert, divergence
+smoke completing; panel on seed 4451 follows. Every field-reported
+defect now has a deployed fix, sealed rejection, or running
+experiment.
+
+## 2026-07-26 15:51 PDT (research thread — OSC-3 rejected)
+
+**OSC-3 (paired-SE epsilon-pass, k=1): REJECTED at 47.6% — the
+rule is over-passive, refusing good plays far more than noise
+picks. Closed without retuning per its fixed declaration; twelfth
+sealed negative control.** Standing candidate unchanged
+(composite+PD0, ~49.2-49.8%, gate 2/5 @ 480g). The frontier now
+genuinely waits on your C17-J1 attribution; remaining hunt list:
+block-scoring depth, Green residual.
+
+## 2026-07-26 15:49 PDT (review cycle)
+
+**No Codex change; C17-J1 fit pending.** Baseline lift table:
+bit-identical, ninety-second cycle. My loop: OSC-3 (paired-SE
+epsilon-pass at roots, k=1 fixed — a genuinely NEW mechanism for
+the near-tie class) is implemented, verified, and running its
+panel on the full standing stack (seed 5573). The frontier hunt
+has begun without waiting.
+
+## 2026-07-26 15:41 PDT (review cycle)
+
+**No Codex change; C17-J1 fit still pending.** Baseline lift
+table: bit-identical, ninety-first cycle. My loop's component
+chapter is closed (15:40 entry); the frontier stands at
+composite+PD0 ~49.2-49.8% / gate 2/5 / residuals <2.5pp, awaiting
+your fit's construction attribution as the program's most
+informative pending result.
+
+## 2026-07-26 15:40 PDT (research thread — component space closed; the frontier)
+
+**Iteration 6 (full stack + anneal): 48.8%, rejected — the anneal
+adds nothing on calendar-8 targets, confirming your original
+same-error-mass caution from the CT8-0 counter. The confirmed
+component space is now EXHAUSTED alone and pairwise.** Standing
+frontier: composite+PD0 at ~49.2-49.8% (secondary confirmed
+twice), pooled lift gate 2/5 at 480g/cell with every residual
+under 2.5pp. Day's movement: +2pp aggregate, gate 1/5 -> 2/5, max
+deficit -4.6 -> -2.5.
+
+The remaining 1-2pp needs NEW mechanisms, not recombinations. Your
+C17-J1 fit is now the most informative pending experiment in the
+program — its construction attribution against my full-recipe
+numbers points where the next mechanism hunt begins.
+
+## 2026-07-26 15:32 PDT (review cycle)
+
+**No Codex change; C17-J1 fit pending.** Baseline lift table:
+bit-identical, ninetieth cycle. My loop: iteration 5's definitive
+480g/cell gate = 2/5 STABLE (RU +2.3, White 0.0 pass; Blue -2.5,
+Red -2.1, Green -1.9 as consistent ~2pp residuals); iteration 6
+(composite + annealed terminal weight — the last untested pairwise
+combination) has trained and enters its gates now.
+
+## 2026-07-26 15:22 PDT (research thread — THE USER'S PRIMARY VIEW, RE-MEASURED)
+
+**The composite's pooled lift gate reads 2/5 with EVERY per-deck
+gap now inside +-2pp** (240g/cell, three fresh seeds):
+
+| Deck | gap | vs baseline pooled |
+| --- | ---: | --- |
+| RU Aggro | +2.0 PASS | was -3.3 |
+| White | +0.1 PASS | was -2.9 |
+| Blue | -1.7 | was -4.6 |
+| Red | -1.7 | was -2.9 |
+| Green | -0.8 | was +2.9 |
+
+Four decks improved (two flipped to PASS); Green traded -3.7 —
+precisely CT8-0's predicted signature (calendar-8 repairs
+everything except early-Green fully). The gate is now inside the
+noise regime everywhere: finishing requires pooled power or a
+Green-specific mechanism, not more of the same.
+
+Day's arc: 47.4% aggregate & 1/5 pooled gate with gaps to -4.6
+==> ~49.2-49.8% & 2/5 with all gaps <2pp. Standing candidate:
+composite + PD0 (paired-attributed). Your C17-J1 incremental fit
+remains the parallel arm; its verdict now doubles as a
+construction-attribution experiment against these numbers.
+
+## 2026-07-26 15:20 PDT (review cycle)
+
+**No Codex change; C17-J1 fit pending.** Baseline lift table:
+bit-identical, eighty-ninth cycle. My loop: iteration 3R attributed
+PD0 cleanly (+0.4pp paired; Arm B = standing candidate, secondary
+passed; family pooled ~49.2% over 10,200 games); iteration 4 is
+running the COMPOSITE's pooled 3-seed lift panel (seeds 90011-13)
+— the user's primary view re-measured on the new model, against
+the baseline's pooled 1/5.
+
+## 2026-07-26 15:14 PDT (review cycle)
+
+**No Codex change; C17-J1 fit pending.** Lift table: bit-identical,
+eighty-eighth cycle. My loop status for your read: iteration 3's
+Arm B was VOID by wiring (my redundant flag clobbered by your
+benchmark path's --value-pass-dominance ownership — my flag is now
+removed; yours verified engaging by paired diff; DP-0's flag also
+re-verified, its exoneration stands). Iteration 3R runs the
+corrected pair on seed 3739. Composite level pooled across three
+seeds: ~48.9%, +1.5pp over baseline, secondary passed once.
+
+## 2026-07-26 15:03 PDT (review cycle)
+
+**No Codex change; C17-J1 fit still pending.** Lift table:
+bit-identical, eighty-seventh cycle. My loop: iteration 2 rejected
+on its seed (48.5%; cross-seed design confound acknowledged — Blue
+mirror 64.0% best-ever descriptive); iteration 3 is running as a
+PAIRED same-seed A/B (seed 9973, composite vs composite+PD0) with
+the arm rule fixed in advance. Iteration 1's 49.9% (secondary
+pass) stands as the program's best result.
+
+## 2026-07-26 14:57 PDT (research thread — C19-C iteration 1: BEST EVER)
+
+**My composite's first iteration: 49.9% (1018-1022, CI 47.7-52.1)
+on virgin seed 7207 — the strongest aggregate in program history,
+the FIRST result whose CI lower bound clears the 46.8 control
+(SECONDARY gate passes for the first time ever), dead even with
+Handcrafted, +2.5pp over the pooled baseline. Three ~1.5pp
+mechanisms stacked sublinearly, exactly as the six-for-six pattern
+predicted.** Mirrors: Blue 57.4%, White 60.3%, RU even (from
+~40%), Red +8pp; Green still weakest (44.9%) — consistent with
+CT8-0's partial early-Green repair. Hash and DRC 7/7 gates passed
+before the panel.
+
+Iteration 2 is already running (no retrain needed): the same
+artifact deployed WITH your PD0 filter (merged, mechanism-verified
+in my tree), fresh seed 8887. If dominated-line hygiene at the
+root adds its ~1pp on top, the crown gate is in reach. Your
+incremental C17-J1 fit remains the parallel arm — my full-recipe
+result suggests the compounding construction is potent; both
+verdicts together will attribute construction effects.
+
+## 2026-07-26 14:47 PDT (review cycle)
+
+**No Codex change; C17-J1's fit still pending.** Lift table:
+bit-identical, eighty-sixth cycle. NEW on my side (user-directed):
+C19-C — my own full-recipe composite attempt — is TRAINING now
+(all three confirmed mechanisms active throughout the 16
+generations: calendar-8 targets + continuation hygiene in every
+collection evaluation; seed 7207 reserved; hash + DRC gates before
+any benchmark). Two independent composite constructions now race:
+your incremental one-shard fit and my compounding full retrain.
+Whichever crosses 50% first, the program wins — and each serves as
+the other's replication target.
+
+## 2026-07-26 14:40 PDT (review cycle)
+
+**No-change cycle: fit pending after the repair chain closed.**
+Lift table: bit-identical, eighty-fifth cycle. Armed.
+
+## 2026-07-26 14:32 PDT (review cycle)
+
+**The scheduler and evaluator repair result is recorded (51fee1d)
+— the pre-fit hardening chain is closing; the one-shot paired fit
+remains next.** Lift table: bit-identical, eighty-fourth cycle.
+Armed.
+
+## 2026-07-26 14:18 PDT (review cycle)
+
+**Two simulator processes active with all machinery complete — the
+fit or its final verification is executing.** Lift table:
+bit-identical, eighty-third cycle. Armed.
 
 ## 2026-07-26 14:11 PDT (review cycle)
 

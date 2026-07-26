@@ -490,6 +490,37 @@ DecisionProbe field_ru_flying_men_chump_air_probe(
     return probe;
 }
 
+DecisionProbe diagnostic_ru_attack_flying_into_air_probe() {
+    constexpr PermanentId kFlyingAttacker = 1;
+    constexpr PermanentId kFlyingBlocker = 2;
+    DecisionProbe probe = make_base(
+        "diagnostic.ru.life20-flying-men-attack-air.v1",
+        Category::DiagnosticRUAttackFlyingIntoLargerFlyingBlocker,
+        DecisionKind::Attack, DeckId::RUAggro, DeckId::Blue,
+        TurnPhase::DeclareAttackers, 10);
+    PlayerState& root = probe.state.players[0];
+    root.life = 20;
+    root.lands = {land(CardId::Island)};
+    root.creatures = {
+        creature(kFlyingAttacker, CardId::FlyingMen),
+    };
+    PlayerState& opponent = probe.state.players[1];
+    opponent.life = 20;
+    opponent.lands.assign(5, land(CardId::Island));
+    opponent.creatures = {
+        creature(kFlyingBlocker, CardId::AirElemental),
+    };
+    probe.candidates = {
+        attack_candidate(
+            "no-attack", kFlyingAttacker, false),
+        attack_candidate(
+            "attack-with-only-legal-attacker",
+            kFlyingAttacker, true),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
 DecisionProbe field_green_second_main_sick_bear_growth_probe() {
     constexpr PermanentId kBear = 1;
     DecisionProbe probe = make_base(
@@ -2122,6 +2153,10 @@ std::vector<DecisionProbe> make_field_regressions_v1() {
     return probes;
 }
 
+std::vector<DecisionProbe> make_attack_regression_v1() {
+    return {diagnostic_ru_attack_flying_into_air_probe()};
+}
+
 bool hidden_clone_is_determinization_invariant(
     const DecisionProbe& probe, std::uint64_t seed) {
     if (probe.root_player >= kPlayerCount) {
@@ -2666,6 +2701,116 @@ std::vector<std::string> validate_field_regressions_v1(
                     "Elemental's tapped status");
             }
         }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_attack_regression_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed) {
+    std::vector<std::string> errors;
+    if (probes.size() != 1) {
+        errors.push_back(
+            "attack-regression-v1 must contain exactly one probe");
+        return errors;
+    }
+
+    const DecisionProbe& probe = probes.front();
+    if (probe.stable_id !=
+            "diagnostic.ru.life20-flying-men-attack-air.v1" ||
+        probe.category !=
+            Category::
+                DiagnosticRUAttackFlyingIntoLargerFlyingBlocker ||
+        probe.decision_kind != DecisionKind::Attack ||
+        probe.root_deck != DeckId::RUAggro ||
+        probe.opponent_deck != DeckId::Blue ||
+        probe.harvest.has_value()) {
+        errors.push_back(
+            "attack-regression-v1 identity or authored context "
+            "changed");
+    }
+
+    const Validation validation =
+        validate_probe(probe, hidden_seed);
+    for (const std::string& error : validation.errors) {
+        errors.push_back(probe.stable_id + ": " + error);
+    }
+
+    const std::size_t opponent = 1 - probe.root_player;
+    if (probe.root_player >= kPlayerCount ||
+        probe.state.players[probe.root_player].life != 20 ||
+        probe.state.players[opponent].life != 20 ||
+        probe.state.players[probe.root_player].creatures.size() !=
+            1 ||
+        probe.state.players[opponent].creatures.size() != 1) {
+        errors.push_back(
+            "attack-regression-v1 must retain the healthy-life "
+            "one-attacker/one-blocker public board");
+        return errors;
+    }
+
+    const CreaturePermanent& attacker =
+        probe.state.players[probe.root_player].creatures.front();
+    const CreaturePermanent& blocker =
+        probe.state.players[opponent].creatures.front();
+    const CardDefinition& attacker_definition =
+        card_definition(attacker.card);
+    const CardDefinition& blocker_definition =
+        card_definition(blocker.card);
+    if (attacker_definition.power != 1 ||
+        attacker_definition.toughness != 1 ||
+        !attacker_definition.flying || attacker.tapped ||
+        attacker.summoning_sick ||
+        blocker_definition.power != 4 ||
+        blocker_definition.toughness != 4 ||
+        !blocker_definition.flying || blocker.tapped) {
+        errors.push_back(
+            "attack-regression-v1 public creatures are not an "
+            "eligible 1/1 flyer and untapped 4/4 flying blocker");
+    }
+
+    if (probe.candidates.size() != 2) {
+        errors.push_back(
+            "attack-regression-v1 must enumerate both legal "
+            "attacker sets");
+        return errors;
+    }
+    const auto* no_attack =
+        std::get_if<BinaryAttackDecision>(
+            &probe.candidates[0].action);
+    const auto* attack =
+        std::get_if<BinaryAttackDecision>(
+            &probe.candidates[1].action);
+    if (probe.candidates[0].descriptor != "no-attack" ||
+        probe.candidates[1].descriptor !=
+            "attack-with-only-legal-attacker" ||
+        no_attack == nullptr || attack == nullptr ||
+        no_attack->attacker != attacker.id ||
+        attack->attacker != attacker.id ||
+        no_attack->include || !attack->include) {
+        errors.push_back(
+            "attack-regression-v1 does not enumerate No Attack "
+            "then the only nonempty legal attacker set");
+    }
+
+    GameState passed = probe.state;
+    if (!resolve_combat(
+            passed, probe.root_player, {}, {}) ||
+        passed.players[probe.root_player].creatures.size() != 1 ||
+        passed.players[opponent].creatures.size() != 1) {
+        errors.push_back(
+            "attack-regression-v1 No Attack branch is not a legal "
+            "engine combat declaration");
+    }
+    GameState blocked = probe.state;
+    if (!resolve_combat(
+            blocked, probe.root_player, {attacker.id},
+            {{attacker.id, blocker.id}}) ||
+        !blocked.players[probe.root_player].creatures.empty() ||
+        blocked.players[opponent].creatures.size() != 1) {
+        errors.push_back(
+            "attack-regression-v1 engine block does not destroy "
+            "only the 1/1 attacker");
     }
     return errors;
 }

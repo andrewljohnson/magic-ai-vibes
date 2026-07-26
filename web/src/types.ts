@@ -510,6 +510,34 @@ export interface PolicyMeta {
   id: string;
   name: string;
   description?: string;
+  versionDate?: string;
+  versionDateLabel?: string;
+  lifecycle?: string;
+}
+
+export function formatPolicyVersionDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  if (month < 1 || month > monthNames.length || day < 1 || day > 31) {
+    return value;
+  }
+  return `${monthNames[month - 1]} ${day}, ${match[1]}`;
 }
 
 export interface MetaResponse {

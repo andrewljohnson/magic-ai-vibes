@@ -9548,3 +9548,61 @@ while Red, Blue, and RU move in the wrong loss direction and Blue/RU preserve
 the known optimism problem. The next experiment must introduce a new
 card-agnostic credit or action-evaluation mechanism rather than recombining
 this exhausted target/controller/PD0 stack.
+
+### Post-C17 attack-regression instrument
+
+Implemented 2026-07-26 after the sealed C17-J1 rejection and before changing
+any deployed attack policy. `REVIEW.md` was reread through its newest 16:11
+PDT entry before recording this implementation. That entry predates the C17
+result and still lists the independent OSC-4 Block-only experiment as
+pending; it contains no newer attack-side result.
+
+This closes the measurement task prospectively recorded in the
+post-freeze Flying Men observation above. The separate, reject-only corpus
+`old-school-attack-regression-v1` contains one exact public position: RU and
+Blue are both at 20 life, RU has one ready 1/1 flying attacker, Blue has one
+untapped 4/4 flying blocker, and the stack is empty at Declare Attackers. The
+authored candidates are only factual declarations—No Attack and attack with
+the sole legal attacker—which are the complete legal attacker-set power set.
+The corpus does not author a preferred action.
+
+The scorer now reports:
+
+- the exact production immediate Value attack-set scores and deterministic
+  selection for an immutable parent and candidate;
+- a hidden-information-safe K64/H8, unblended, common-world Value-mirror
+  reference owned by the immutable parent;
+- the reference-best set, each deployment's agreement, and reference regret;
+- engine-authoritative public consequences for No Attack, the unblocked
+  attack, and the legal block that kills only the 1/1 attacker; and
+- bit-identical deep samples, immediate scores, selections, and accounting
+  after opponent hidden-zone repartition.
+
+The diagnostic is deliberately separate from Dev-v3, validation-v1, the six
+frozen C17 field regressions, and every label cache. It changes no frozen
+corpus ID, label hash, artifact identity, policy, training recipe, or
+acceptance gate. It uses no Handcoded score, card-name policy rule, material
+heuristic, combat heuristic, opponent hidden identity, or C17 reserved seed.
+
+Exact focused verification:
+
+```sh
+git diff --check
+make -j4 test-probes
+```
+
+Results were 46/46 probe-corpus tests, 11/11 probe-metric tests, and 32/32
+probe-runner tests under `-Werror`. Tests also mutate the fixture to expose a
+second legal attacker and require the now-incomplete candidate set to fail;
+re-run the K64/H8 reference twice and require exact determinism; and compare
+the reported deployment row directly with the production attack selector.
+
+Decision: accept this only as measurement infrastructure. It makes no claim
+that the canonical fixture reproduces the manual game, does not label No
+Attack by fiat, and does not change C16. Next, from committed source, score
+the exact frozen C16 on this fixture. If the immediate selector attacks while
+the deep paired reference prefers No Attack, the structural
+uniform-block-average mismatch is reproduced. If both prefer Attack, the
+reference/critic is also wrong and an attack prune is not licensed. If both
+prefer No Attack, retain the fixture but capture the complete state the next
+time the manual behavior appears.

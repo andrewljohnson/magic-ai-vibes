@@ -464,6 +464,102 @@ function assertStackControllerCues(cues, expected) {
   });
 }
 
+test(
+  "setup dates and distinguishes all three Learned policy lineages",
+  { timeout: 60_000 },
+  async (t) => {
+    const { server, url } = await startFixture();
+    t.after(() => closeServer(server));
+    const browser = await launchBrowser();
+    t.after(() => browser.close());
+    const context = await browser.newContext({ viewport: REAL_ENGINE_VIEWPORT });
+    t.after(() => context.close());
+    const page = await context.newPage();
+
+    await page.goto(url, { waitUntil: "networkidle" });
+    const setup = page.getByRole("dialog", { name: "Set the table" });
+    const farSeat = setup.locator(".seat-1");
+    const policy = farSeat.locator("select").nth(1);
+    const description = farSeat.locator(".policy-description");
+    const provenance = farSeat.locator(".policy-provenance");
+
+    await policy.selectOption("learned-value-c16");
+    assert.match(await description.innerText(), /16 bootstrapped self-play/);
+    assert.match(await description.innerText(), /K8\/H4/);
+    assert.match(await provenance.innerText(), /Research control/);
+    assert.match(await provenance.innerText(), /Artifact frozen Jul 26, 2026/);
+    assert.equal(
+      await provenance.locator("time").getAttribute("datetime"),
+      "2026-07-26",
+    );
+
+    await policy.selectOption("learned-value-g0");
+    assert.match(await description.innerText(), /random play plus two fitted self-play/);
+    assert.match(await provenance.innerText(), /Legacy recipe · trained per match/);
+    assert.match(await provenance.innerText(), /Recipe introduced Jul 24, 2026/);
+
+    await policy.selectOption("learned-actor");
+    assert.match(await description.innerText(), /priority, attacks, blocks/);
+    assert.match(
+      await provenance.innerText(),
+      /Experimental recipe · trained per match/,
+    );
+    assert.match(await provenance.innerText(), /Recipe introduced Jul 24, 2026/);
+
+    const geometry = await page.evaluate(() => {
+      const rectangle = (element) => {
+        const bounds = element?.getBoundingClientRect();
+        return bounds
+          ? {
+              left: bounds.left,
+              top: bounds.top,
+              right: bounds.right,
+              bottom: bounds.bottom,
+              width: bounds.width,
+              height: bounds.height,
+            }
+          : null;
+      };
+      const provenance = document.querySelector(
+        ".seat-1 .policy-provenance",
+      );
+      return {
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        bodyWidth: document.body.scrollWidth,
+        drawer: rectangle(document.querySelector(".setup-drawer")),
+        seat: rectangle(document.querySelector(".seat-1")),
+        provenance: rectangle(provenance),
+        fontSize: provenance
+          ? Number.parseFloat(getComputedStyle(provenance).fontSize)
+          : 0,
+      };
+    });
+    assert.equal(geometry.viewportWidth, REAL_ENGINE_VIEWPORT.width);
+    assert.equal(geometry.documentWidth, REAL_ENGINE_VIEWPORT.width);
+    assert.equal(geometry.bodyWidth, REAL_ENGINE_VIEWPORT.width);
+    assert.ok(geometry.drawer);
+    assert.ok(geometry.seat);
+    assert.ok(geometry.provenance);
+    assert.ok(geometry.fontSize >= 12, "provenance copy must remain readable");
+    assert.ok(
+      geometry.provenance.left >= geometry.seat.left - 0.5 &&
+        geometry.provenance.right <= geometry.seat.right + 0.5,
+      "policy provenance must stay inside the far-seat card",
+    );
+    assert.ok(
+      geometry.seat.left >= geometry.drawer.left - 0.5 &&
+        geometry.seat.right <= geometry.drawer.right + 0.5,
+      "far-seat card must stay inside the setup drawer",
+    );
+
+    t.diagnostic(
+      "1280x720 setup rendered C16 artifact and G0/Actor recipe dates, " +
+        "lineages, and lifecycle labels without horizontal overflow",
+    );
+  },
+);
+
 for (const viewport of VIEWPORTS) {
   test(
     `frozen C16 identity is loaded and conspicuous at ${viewport.width}x${viewport.height}`,

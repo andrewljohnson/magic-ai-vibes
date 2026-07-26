@@ -25,6 +25,8 @@ inline constexpr std::string_view kForceSpikePolicyControlsV1 =
     "old-school-force-spike-policy-controls-v1";
 inline constexpr std::string_view kFieldRegressionsV1 =
     "old-school-field-regressions-v1";
+inline constexpr std::string_view kAttackRegressionV1 =
+    "old-school-attack-regression-v1";
 inline constexpr std::string_view kProbePriorityCallbackCollector =
     "Game::HumanController::choose_priority_action";
 inline constexpr std::string_view kProbeLandThenPassScript =
@@ -70,6 +72,7 @@ enum class Category : std::uint8_t {
     FieldGreenBeginCombatGrowthTappedAir,
     FieldGreenAttackAfterGrowthTappedAir,
     FieldGreenAttackAfterGrowthUntappedAirControl,
+    DiagnosticRUAttackFlyingIntoLargerFlyingBlocker,
 };
 
 struct BinaryAttackDecision {
@@ -166,6 +169,12 @@ std::vector<DecisionProbe> make_force_spike_policy_controls_v1();
 // preferred strategic action.
 std::vector<DecisionProbe> make_field_regressions_v1();
 
+// One post-C17, reject-only diagnostic for the reported attack-selection
+// failure. The public board has exactly one legal 1/1 flying attacker and one
+// untapped opposing 4/4 flying blocker, so the authored No Attack / Attack
+// pair is the complete power set of legal attacker declarations.
+std::vector<DecisionProbe> make_attack_regression_v1();
+
 Validation validate_probe(
     const DecisionProbe& probe,
     std::uint64_t hidden_seed = kProbeValidationSeed);
@@ -185,6 +194,10 @@ std::vector<std::string> validate_force_spike_policy_controls_v1(
     std::uint64_t hidden_seed = kProbeValidationSeed);
 
 std::vector<std::string> validate_field_regressions_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed = kProbeValidationSeed);
+
+std::vector<std::string> validate_attack_regression_v1(
     const std::vector<DecisionProbe>& probes,
     std::uint64_t hidden_seed = kProbeValidationSeed);
 

@@ -200,6 +200,31 @@ Status: **stack controller/targets and the concise Chronicle rendered at both
 target viewports; setup legibility and explicit card-state/keyword cues
 rendered at 1280 × 720; broader visual work in progress**
 
+#### Preregistered Learned-policy provenance slice
+
+Hypothesis: showing an explicit date, lifecycle status, and concise training
+lineage beside each Learned pilot will let players distinguish the frozen C16
+control from per-match G0 and Actor recipes without implying that an
+unpromoted research challenger is deployed.
+
+Status: **contract and production build complete; rendered acceptance pending
+because this session could neither bind an ephemeral localhost test port nor
+open the user-blocked live port 4173**
+
+- C16 must identify its exact 2026-07-26 artifact freeze, K8/H4 deployment,
+  Value/self-play lineage, and current role as the frozen research control.
+- G0 and Actor must identify their 2026-07-24 recipe dates and say explicitly
+  that the selected training games and seed produce a model for the match.
+- Actor must be described as the separate direct policy-head experiment;
+  neither it nor G0 may be presented as a newer C16 generation.
+- Dates and lifecycle labels must come from server metadata, survive the
+  fallback metadata path, and render in the selected pilot summary without
+  changing the engine-authoritative model identity in the REPRO panel.
+- Acceptance requires focused server/client contract assertions,
+  `make test-web-ui`, `make test-web`, and a rendered setup-drawer smoke at
+  1280 × 720 proving the provenance text is readable without horizontal
+  overflow.
+
 Acceptance criteria:
 
 - At 1200–1800 px wide, hand, both battlefields, life totals, phase, stack, and
@@ -1449,3 +1474,19 @@ For each web issue:
   all six intervening priority passes in order, changed the visible count to
   eight with `01`–`08` ordinals, preserved the single turn marker, and kept
   document/viewport width at exactly 1280.
+- 2026-07-26 — Implemented the Learned-policy provenance slice without
+  changing the deployed model. C16 now advertises its 2026-07-26 artifact
+  freeze, 16-generation bootstrapped Value lineage, K8/H4 deployment, and
+  research-control status. G0 and Actor advertise their 2026-07-24 recipe
+  dates, per-match training lifecycle, and distinct Value versus direct
+  policy-head lineages. Server metadata and the client fallback carry the same
+  structured date/label/lifecycle fields; the selected pilot renders a
+  semantic `time` element, readable lifecycle label, and full description.
+  `make test-web-ui` passed 85/85. `make test-web` passed 13/13 C++ bridge
+  tests and 93/93 Node tests. The new 1280 × 720 Playwright assertion is
+  present, but the rendered run is infrastructure-incomplete: the sandbox
+  rejected every ephemeral `127.0.0.1` listener with `EPERM`, the permitted
+  rerun could not be authorized because the execution service reported its
+  usage limit, and the existing in-app browser policy explicitly rejected
+  port 4173. No alternate browser or port was used. The visual milestone
+  remains open until that exact rendered check can run.

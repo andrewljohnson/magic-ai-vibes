@@ -2846,7 +2846,8 @@ struct FieldImmediateScores {
 FieldImmediateScores field_immediate_scores(
     const probes::DecisionProbe& probe,
     const GameState& state,
-    std::shared_ptr<const LearnedModel> model) {
+    std::shared_ptr<const LearnedModel> model,
+    std::string_view corpus_id) {
     if (probe.decision_kind ==
         probes::DecisionKind::Attack) {
         const PermanentId subject =
@@ -2856,8 +2857,7 @@ FieldImmediateScores field_immediate_scores(
                 state, probe.root_player,
                 {{}, {subject}}, std::move(model),
                 reference_seed_for_probe(
-                    probes::kFieldRegressionsV1,
-                    probe.stable_id,
+                    corpus_id, probe.stable_id,
                     kProbeProductionPolicySeed));
         if (canonical.scores.size() != 2 ||
             canonical.selected_candidate >= 2) {
@@ -2940,7 +2940,8 @@ FieldImmediateScores field_immediate_scores(
 FieldRegressionPolicyDecision score_field_deployment(
     const probes::DecisionProbe& probe,
     const GameState& state,
-    const NamedValueScoringModel& scoring) {
+    const NamedValueScoringModel& scoring,
+    std::string_view corpus_id) {
     FieldRegressionPolicyDecision detail{
         .name = scoring.name,
         .fingerprint =
@@ -2969,7 +2970,7 @@ FieldRegressionPolicyDecision score_field_deployment(
         probes::DecisionKind::Priority) {
         const FieldImmediateScores immediate =
             field_immediate_scores(
-                probe, state, scoring.model);
+                probe, state, scoring.model, corpus_id);
         detail.scores =
             field_policy_scores(probe, immediate.scores);
         detail.selected_keys = {
@@ -2983,8 +2984,7 @@ FieldRegressionPolicyDecision score_field_deployment(
 
     const LearnedSearchConfig search{
         .seed = reference_seed_for_probe(
-            probes::kFieldRegressionsV1,
-            probe.stable_id),
+            corpus_id, probe.stable_id),
         .worlds = kFieldDeploymentWorlds,
         .rollouts_per_world = 1,
         .horizon_turns =
@@ -4063,33 +4063,39 @@ FieldRegressionReport score_field_regressions_v1(
 
         FieldRegressionPolicyDecision parent_detail =
             score_field_deployment(
-                probe, probe.state, parent);
+                probe, probe.state, parent,
+                probes::kFieldRegressionsV1);
         const FieldRegressionPolicyDecision
             parent_clone_detail =
                 score_field_deployment(
-                    clone, clone.state, parent);
+                    clone, clone.state, parent,
+                    probes::kFieldRegressionsV1);
         require_field_policy_bit_identical(
             parent_detail, parent_clone_detail,
             probe.stable_id + " parent");
 
         FieldRegressionPolicyDecision control_detail =
             score_field_deployment(
-                probe, probe.state, control);
+                probe, probe.state, control,
+                probes::kFieldRegressionsV1);
         const FieldRegressionPolicyDecision
             control_clone_detail =
                 score_field_deployment(
-                    clone, clone.state, control);
+                    clone, clone.state, control,
+                    probes::kFieldRegressionsV1);
         require_field_policy_bit_identical(
             control_detail, control_clone_detail,
             probe.stable_id + " control");
 
         FieldRegressionPolicyDecision treatment_detail =
             score_field_deployment(
-                probe, probe.state, treatment);
+                probe, probe.state, treatment,
+                probes::kFieldRegressionsV1);
         const FieldRegressionPolicyDecision
             treatment_clone_detail =
                 score_field_deployment(
-                    clone, clone.state, treatment);
+                    clone, clone.state, treatment,
+                    probes::kFieldRegressionsV1);
         require_field_policy_bit_identical(
             treatment_detail, treatment_clone_detail,
             probe.stable_id + " treatment");
@@ -4118,6 +4124,216 @@ FieldRegressionReport score_field_regressions_v1(
         }
         report.decisions.push_back(
             std::move(decision));
+    }
+    return report;
+}
+
+AttackRegressionReport score_attack_regression_v1(
+    const NamedValueScoringModel& parent,
+    const NamedValueScoringModel& candidate) {
+    validate_named_value_scoring_model(
+        parent, "attack diagnostic parent");
+    validate_named_value_scoring_model(
+        candidate, "attack diagnostic candidate");
+    if (parent.name == candidate.name) {
+        throw std::invalid_argument(
+            "attack diagnostic parent/candidate names must be "
+            "unique");
+    }
+
+    const std::vector<probes::DecisionProbe> corpus =
+        probes::make_attack_regression_v1();
+    const std::vector<std::string> validation_errors =
+        probes::validate_attack_regression_v1(corpus);
+    if (!validation_errors.empty()) {
+        throw std::runtime_error(
+            "attack-regression-v1 corpus is invalid: " +
+            validation_errors.front());
+    }
+    if (corpus.size() != 1) {
+        throw std::logic_error(
+            "validated attack-regression-v1 corpus changed size");
+    }
+    const std::vector<probes::DecisionProbe> hidden =
+        hidden_clone_corpus(corpus);
+    if (hidden.size() != 1) {
+        throw std::logic_error(
+            "attack diagnostic hidden-clone count changed");
+    }
+
+    const probes::DecisionProbe& probe = corpus.front();
+    const probes::DecisionProbe& clone = hidden.front();
+    const probes::Validation clone_validation =
+        probes::validate_probe(clone);
+    if (!clone_validation.ok()) {
+        throw std::runtime_error(
+            probe.stable_id +
+            ": hidden attack fixture is invalid: " +
+            (clone_validation.errors.empty()
+                 ? std::string("unspecified validation failure")
+                 : clone_validation.errors.front()));
+    }
+    if (probe.stable_id != clone.stable_id ||
+        probe.root_deck != clone.root_deck ||
+        probe.decision_kind != clone.decision_kind ||
+        probe.root_player != clone.root_player ||
+        probe.candidates != clone.candidates ||
+        field_public_information_state(
+            probe.state, probe.root_player) !=
+            field_public_information_state(
+                clone.state, clone.root_player)) {
+        throw std::runtime_error(
+            probe.stable_id +
+            ": hidden clone changed attack descriptors or the "
+            "root information set");
+    }
+
+    const LearnedSearchConfig reference_search{
+        .seed = reference_seed_for_probe(
+            probes::kAttackRegressionV1,
+            probe.stable_id),
+        .worlds = kFieldReferenceWorlds,
+        .rollouts_per_world = 1,
+        .horizon_turns = kFieldReferenceHorizonTurns,
+        .continuation_variant =
+            LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon = 0.0,
+        .blend_shallow_prior = false,
+        .value_priority_residual_weight = 0.0,
+        .value_pass_dominance = false,
+        .value_continuation_controller =
+            LearnedContinuationController::Legacy,
+    };
+    const LearnedActionSamples reference =
+        score_field_probe_actions(
+            probe, probe.state, parent.model,
+            reference_search);
+    const LearnedActionSamples clone_reference =
+        score_field_probe_actions(
+            clone, clone.state, parent.model,
+            reference_search);
+    require_field_accounting(
+        reference, probe.candidates.size(),
+        kFieldReferenceWorlds, 1,
+        probe.stable_id + " deep reference");
+    require_field_accounting(
+        clone_reference, clone.candidates.size(),
+        kFieldReferenceWorlds, 1,
+        clone.stable_id + " hidden deep reference");
+    if (!action_samples_bit_identical(
+            reference, clone_reference)) {
+        throw std::runtime_error(
+            probe.stable_id +
+            ": hidden repartition changed exact attack "
+            "reference samples or accounting");
+    }
+    const auto mapped_reference =
+        map_field_candidate_samples(probe, reference);
+    const auto mapped_clone_reference =
+        map_field_candidate_samples(
+            clone, clone_reference);
+    require_field_candidate_samples_bit_identical(
+        mapped_reference, mapped_clone_reference,
+        probe.stable_id + " deep reference");
+
+    FieldRegressionPolicyDecision parent_detail =
+        score_field_deployment(
+            probe, probe.state, parent,
+            probes::kAttackRegressionV1);
+    const FieldRegressionPolicyDecision parent_clone_detail =
+        score_field_deployment(
+            clone, clone.state, parent,
+            probes::kAttackRegressionV1);
+    require_field_policy_bit_identical(
+        parent_detail, parent_clone_detail,
+        probe.stable_id + " parent");
+
+    FieldRegressionPolicyDecision candidate_detail =
+        score_field_deployment(
+            probe, probe.state, candidate,
+            probes::kAttackRegressionV1);
+    const FieldRegressionPolicyDecision candidate_clone_detail =
+        score_field_deployment(
+            clone, clone.state, candidate,
+            probes::kAttackRegressionV1);
+    require_field_policy_bit_identical(
+        candidate_detail, candidate_clone_detail,
+        probe.stable_id + " candidate");
+
+    const probe_eval::ProbeLabel label =
+        probe_eval::make_probe_label(
+            probe.stable_id, probe.root_deck,
+            mapped_reference);
+    const auto summarize_policy =
+        [&label](
+            FieldRegressionPolicyDecision deployment) {
+            if (!deployment.deterministic_selection ||
+                deployment.selected_keys.size() != 1) {
+                throw std::runtime_error(
+                    "attack diagnostic deployment did not make "
+                    "one deterministic selection");
+            }
+            const std::string& selected =
+                deployment.selected_keys.front();
+            const auto selected_label = std::find_if(
+                label.candidates.begin(),
+                label.candidates.end(),
+                [&selected](
+                    const probe_eval::CandidateLabel& value) {
+                    return value.key == selected;
+                });
+            if (selected_label == label.candidates.end()) {
+                throw std::logic_error(
+                    "attack diagnostic selection is absent from "
+                    "the reference label");
+            }
+            const bool selects_reference_best =
+                std::find(
+                    label.reference_best_set.begin(),
+                    label.reference_best_set.end(),
+                    selected) != label.reference_best_set.end();
+            const double regret =
+                label.reference_value - selected_label->q;
+            if (!std::isfinite(regret) || regret < -1.0e-12) {
+                throw std::logic_error(
+                    "attack diagnostic produced invalid regret");
+            }
+            return AttackRegressionPolicyReport{
+                .deployment = std::move(deployment),
+                .selects_reference_best =
+                    selects_reference_best,
+                .regret = std::max(0.0, regret),
+            };
+        };
+
+    AttackRegressionReport report{
+        .corpus_id =
+            std::string(probes::kAttackRegressionV1),
+        .stable_id = probe.stable_id,
+        .root_deck = probe.root_deck,
+        .reference_samples = mapped_reference,
+        .reference_accounting = field_accounting(reference),
+        .reference_label = label,
+        .forced_consequences =
+            field_forced_consequences(probe, clone),
+        .hidden_repartition = {
+            .passed = true,
+            // Deep reference, parent deployment, candidate deployment.
+            .policy_count = 3,
+            .probe_count = 1,
+        },
+        .rules_contract_passed = true,
+        .parent = summarize_policy(
+            std::move(parent_detail)),
+        .candidate = summarize_policy(
+            std::move(candidate_detail)),
+    };
+    report.candidate_descriptors.reserve(
+        probe.candidates.size());
+    for (const probes::Candidate& action :
+         probe.candidates) {
+        report.candidate_descriptors.push_back(
+            action.descriptor);
     }
     return report;
 }

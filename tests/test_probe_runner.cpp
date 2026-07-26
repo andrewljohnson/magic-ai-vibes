@@ -1926,6 +1926,199 @@ void test_field_report_is_cache_free_hidden_safe_and_deployment_exact() {
         "field duplicate-name failure was not actionable");
 }
 
+void test_attack_regression_scores_all_sets_hidden_safely() {
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x41545441434B5631ULL);
+    const old_school::probe_runner::NamedValueScoringModel parent{
+        .name = "attack parent",
+        .model = model,
+    };
+    const old_school::probe_runner::NamedValueScoringModel candidate{
+        .name = "attack candidate",
+        .model = model,
+        .value_pass_dominance = true,
+        .value_continuation_controller =
+            old_school::LearnedContinuationController::
+                PublicStackPassV1,
+    };
+    const auto report =
+        old_school::probe_runner::
+            score_attack_regression_v1(parent, candidate);
+    const auto corpus =
+        old_school::probes::make_attack_regression_v1();
+    const DecisionProbe& probe = corpus.front();
+    expect(
+        report.corpus_id ==
+                old_school::probes::kAttackRegressionV1 &&
+            report.stable_id == probe.stable_id &&
+            report.root_deck == DeckId::RUAggro &&
+            report.candidate_descriptors ==
+                std::vector<std::string>{
+                    "no-attack",
+                    "attack-with-only-legal-attacker"} &&
+            report.reference_samples.size() == 2 &&
+            report.reference_accounting.sampled_worlds ==
+                old_school::probe_runner::
+                    kFieldReferenceWorlds &&
+            report.reference_accounting.rollout_evaluations ==
+                2 *
+                    old_school::probe_runner::
+                        kFieldReferenceWorlds &&
+            report.reference_accounting.terminal_evaluations +
+                    report.reference_accounting
+                        .bootstrapped_evaluations ==
+                report.reference_accounting.rollout_evaluations &&
+            report.reference_label.candidates.size() == 2 &&
+            report.reference_label.pairs.size() == 1 &&
+            !report.reference_label.reference_best_set.empty() &&
+            report.forced_consequences.size() == 2 &&
+            report.hidden_repartition.passed &&
+            report.hidden_repartition.policy_count == 3 &&
+            report.hidden_repartition.probe_count == 1 &&
+            report.rules_contract_passed,
+        "Attack report omitted complete common-world, rules, or "
+        "hidden-repartition evidence");
+    for (std::size_t index = 0;
+         index < report.reference_samples.size(); ++index) {
+        expect(
+            report.reference_samples[index].key ==
+                    report.candidate_descriptors[index] &&
+                report.reference_samples[index]
+                        .q_samples.size() ==
+                    old_school::probe_runner::
+                        kFieldReferenceWorlds &&
+                report.forced_consequences[index].descriptor ==
+                    report.candidate_descriptors[index] &&
+                !report.forced_consequences[index]
+                     .public_state_fingerprint.empty(),
+            "Attack report lost candidate ordering, samples, or "
+            "public consequences");
+    }
+
+    const auto check_policy =
+        [&report](
+            const old_school::probe_runner::
+                AttackRegressionPolicyReport& policy,
+            std::string_view expected_name) {
+            expect(
+                policy.deployment.name == expected_name &&
+                    policy.deployment.score_kind ==
+                        old_school::probe_runner::
+                            FieldRegressionScoreKind::
+                                ImmediateCombat &&
+                    policy.deployment.deterministic_selection &&
+                    policy.deployment.scores.size() == 2 &&
+                    policy.deployment.selected_keys.size() == 1 &&
+                    policy.deployment.samples.empty() &&
+                    std::isfinite(policy.regret) &&
+                    policy.regret >= 0.0,
+                "Attack policy omitted production selection or "
+                "finite reference regret");
+            const std::string& selected =
+                policy.deployment.selected_keys.front();
+            const auto label = std::find_if(
+                report.reference_label.candidates.begin(),
+                report.reference_label.candidates.end(),
+                [&selected](const auto& value) {
+                    return value.key == selected;
+                });
+            expect(
+                label !=
+                        report.reference_label.candidates.end() &&
+                    std::abs(
+                        policy.regret -
+                        (report.reference_label.reference_value -
+                         label->q)) <
+                        1.0e-12 &&
+                    policy.selects_reference_best ==
+                        (std::find(
+                             report.reference_label
+                                 .reference_best_set.begin(),
+                             report.reference_label
+                                 .reference_best_set.end(),
+                             selected) !=
+                         report.reference_label
+                             .reference_best_set.end()),
+                "Attack selection regret/reference-best semantics "
+                "are inconsistent");
+        };
+    check_policy(report.parent, parent.name);
+    check_policy(report.candidate, candidate.name);
+
+    const auto& attack =
+        std::get<old_school::probes::BinaryAttackDecision>(
+            probe.candidates[1].action);
+    const auto deployed =
+        old_school::learned_value_attack_set_scores(
+            probe.state, probe.root_player,
+            {{}, {attack.attacker}}, model,
+            old_school::probe_runner::reference_seed_for_probe(
+                old_school::probes::kAttackRegressionV1,
+                probe.stable_id,
+                old_school::probe_runner::
+                    kProbeProductionPolicySeed));
+    expect(
+        policy_score_for(
+            report.parent.deployment.scores, "no-attack")
+                    .score == deployed.scores[0] &&
+            policy_score_for(
+                report.parent.deployment.scores,
+                "attack-with-only-legal-attacker")
+                    .score == deployed.scores[1] &&
+            report.parent.deployment.selected_keys ==
+                std::vector<std::string>{
+                    probe.candidates[
+                        deployed.selected_candidate]
+                        .descriptor},
+        "Attack report is not the production immediate attack-set "
+        "selector");
+
+    const auto repeated =
+        old_school::probe_runner::
+            score_attack_regression_v1(parent, candidate);
+    expect(
+        repeated.parent.deployment.selected_keys ==
+                report.parent.deployment.selected_keys &&
+            repeated.candidate.deployment.selected_keys ==
+                report.candidate.deployment.selected_keys &&
+            std::bit_cast<std::uint64_t>(
+                repeated.parent.regret) ==
+                std::bit_cast<std::uint64_t>(
+                    report.parent.regret) &&
+            std::bit_cast<std::uint64_t>(
+                repeated.candidate.regret) ==
+                std::bit_cast<std::uint64_t>(
+                    report.candidate.regret),
+        "Attack diagnostic is not deterministic");
+    for (std::size_t candidate_index = 0;
+         candidate_index < report.reference_samples.size();
+         ++candidate_index) {
+        expect(
+            repeated.reference_samples[candidate_index].key ==
+                    report.reference_samples[candidate_index].key &&
+                repeated.reference_samples[candidate_index]
+                        .q_samples ==
+                    report.reference_samples[candidate_index]
+                        .q_samples,
+            "Attack common-world samples changed on repeat");
+    }
+
+    auto duplicate = candidate;
+    duplicate.name = parent.name;
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        score_attack_regression_v1(
+                            parent, duplicate));
+            },
+            "Attack scorer accepted duplicate policy names")
+                .find("unique") != std::string::npos,
+        "Attack duplicate-name failure was not actionable");
+}
+
 void test_priority_evaluation_threads_are_bit_identical() {
     const auto controls =
         old_school::probes::make_force_spike_policy_controls_v1();
@@ -4102,6 +4295,9 @@ int main() {
                test_field_candidate_mapping_supports_canonical_block_rows);
     runner.run("field scorer exact deployment report",
                test_field_report_is_cache_free_hidden_safe_and_deployment_exact);
+    runner.run(
+        "post-C17 Attack reference and regret report",
+        test_attack_regression_scores_all_sets_hidden_safely);
     runner.run("Priority evaluation thread identity",
                test_priority_evaluation_threads_are_bit_identical);
     runner.run("deployed Value attack seed independence",

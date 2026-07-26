@@ -57,6 +57,16 @@ test("game results use player-facing titles and readable reasons", async () => {
   assert.equal(formatGameResultReason(null), null);
 });
 
+test("policy version dates render deterministically without locale drift", async () => {
+  const { formatPolicyVersionDate } =
+    await loadTypeScriptModule("src/types.ts");
+
+  assert.equal(formatPolicyVersionDate("2026-07-26"), "Jul 26, 2026");
+  assert.equal(formatPolicyVersionDate("2026-07-24"), "Jul 24, 2026");
+  assert.equal(formatPolicyVersionDate("rolling"), "rolling");
+  assert.equal(formatPolicyVersionDate("2026-13-01"), "2026-13-01");
+});
+
 test("reproduction summaries keep setup stable while public context advances", async () => {
   const {
     formatReproductionSummary,

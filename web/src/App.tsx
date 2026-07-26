@@ -27,6 +27,7 @@ import {
   formatStackTargets,
   formatGameResultReason,
   formatGameResultTitle,
+  formatPolicyVersionDate,
   formatReproductionSummary,
   formatTargetLabel,
   hasPublicCombatStats,
@@ -82,17 +83,29 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
   {
     id: "learned-value-c16",
     name: "Learned Value C16",
-    description: "Frozen research baseline · C16 · K8/H4.",
+    description:
+      "Value critic trained through 16 bootstrapped self-play generations; deployed with K8/H4 search.",
+    versionDate: "2026-07-26",
+    versionDateLabel: "Artifact frozen",
+    lifecycle: "Research control · not promoted over Handcoded Policy",
   },
   {
     id: "learned-value-g0",
     name: "Learned Value G0",
-    description: "Trainable legacy model for quick tests.",
+    description:
+      "Legacy Value critic trained from random play plus two fitted self-play passes; built for this match from the selected games and seed.",
+    versionDate: "2026-07-24",
+    versionDateLabel: "Recipe introduced",
+    lifecycle: "Legacy recipe · trained per match",
   },
   {
     id: "learned-actor",
     name: "Learned Actor",
-    description: "A learned policy distilled from self-play.",
+    description:
+      "Separate policy heads learn priority, attacks, blocks, and damage order, backed by a learned critic; built for this match.",
+    versionDate: "2026-07-24",
+    versionDateLabel: "Recipe introduced",
+    lifecycle: "Experimental recipe · trained per match",
   },
 ];
 
@@ -2191,6 +2204,22 @@ function SetupDrawer({
                     <p className="policy-description">
                       {policy?.description ?? "A legal Old School pilot."}
                     </p>
+                    {policy?.versionDate && (
+                      <div
+                        className="policy-provenance"
+                        aria-label={`${policy.name} provenance`}
+                      >
+                        {policy.lifecycle && (
+                          <strong>{policy.lifecycle}</strong>
+                        )}
+                        <span>
+                          {policy.versionDateLabel ?? "Version dated"}{" "}
+                          <time dateTime={policy.versionDate}>
+                            {formatPolicyVersionDate(policy.versionDate)}
+                          </time>
+                        </span>
+                      </div>
+                    )}
                     <DeckManifest deck={deck} />
                   </section>
                 );

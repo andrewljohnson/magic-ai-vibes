@@ -2579,6 +2579,27 @@ select {
   line-height: 1.4;
 }
 
+.policy-provenance {
+  margin: 8px 0 0 130px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  color: var(--muted);
+  font-size: var(--type-label);
+  line-height: 1.4;
+}
+
+.policy-provenance strong {
+  color: var(--gold-bright);
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.policy-provenance time {
+  color: var(--ink);
+}
+
 .deck-manifest {
   margin-top: 15px;
   padding-top: 14px;
@@ -3030,6 +3051,10 @@ select {
   }
 
   .policy-description {
+    margin-left: 98px;
+  }
+
+  .policy-provenance {
     margin-left: 98px;
   }
 

@@ -28,6 +28,7 @@ using old_school::TurnPhase;
 using old_school::probes::Category;
 using old_school::probes::Dc1Dominance;
 using old_school::probes::DecisionProbe;
+using old_school::probes::BinaryAttackDecision;
 using old_school::probes::BinaryBlockDecision;
 using old_school::probes::Validation;
 
@@ -55,7 +56,8 @@ class TestRunner {
             << passed_
             << " probe tests passed (20 dev fixtures + 1 harvested "
                "validation fixture + 2 supplemental Force Spike "
-               "controls + 6 reject-only field regressions)\n";
+               "controls + 6 reject-only field regressions + 1 "
+               "post-C17 attack diagnostic)\n";
         return 0;
     }
 
@@ -366,6 +368,7 @@ std::size_t expected_candidate_count(Category category) {
     case Category::FieldGreenBeginCombatGrowthTappedAir:
     case Category::FieldGreenAttackAfterGrowthTappedAir:
     case Category::FieldGreenAttackAfterGrowthUntappedAirControl:
+    case Category::DiagnosticRUAttackFlyingIntoLargerFlyingBlocker:
         break;
     }
     throw std::runtime_error(
@@ -1218,6 +1221,119 @@ void test_field_ru_chump_block_rules_consequences() {
             "Flying Men block branch has wrong factual "
             "consequences");
     }
+}
+
+void test_attack_regression_is_complete_rules_valid_and_hidden_safe() {
+    const std::vector<DecisionProbe> corpus =
+        old_school::probes::make_attack_regression_v1();
+    expect(
+        corpus.size() == 1 &&
+            old_school::probes::
+                validate_attack_regression_v1(corpus)
+                .empty(),
+        "post-C17 Attack corpus failed exact validation");
+    const DecisionProbe& probe = corpus.front();
+    const Validation validation =
+        old_school::probes::validate_probe(probe);
+    expect(
+        validation.exact_card_conservation &&
+            validation.candidates_legal_and_complete &&
+            validation.reachable_state &&
+            validation.hidden_clone_invariant &&
+            probe.state.players[probe.root_player]
+                    .creatures.size() == 1 &&
+            probe.state.players[1 - probe.root_player]
+                    .creatures.size() == 1 &&
+            probe.candidates.size() == 2,
+        "Attack diagnostic lost conservation, legality, one-attacker "
+        "completeness, or hidden invariance");
+
+    const auto& no_attack =
+        std::get<BinaryAttackDecision>(
+            probe.candidates[0].action);
+    const auto& attack =
+        std::get<BinaryAttackDecision>(
+            probe.candidates[1].action);
+    const PermanentId blocker =
+        probe.state.players[1 - probe.root_player]
+            .creatures.front()
+            .id;
+    expect(
+        probe.candidates[0].descriptor == "no-attack" &&
+            probe.candidates[1].descriptor ==
+                "attack-with-only-legal-attacker" &&
+            no_attack.attacker == attack.attacker &&
+            !no_attack.include && attack.include,
+        "Attack diagnostic does not enumerate the exact empty and "
+        "singleton legal attacker sets");
+
+    GameState passed = probe.state;
+    expect(
+        old_school::resolve_combat(
+            passed, probe.root_player, {}, {}) &&
+            passed.players[probe.root_player].life == 20 &&
+            passed.players[1 - probe.root_player].life == 20 &&
+            passed.players[probe.root_player]
+                    .creatures.size() == 1,
+        "No Attack branch changed the healthy public board");
+
+    GameState unblocked = probe.state;
+    expect(
+        old_school::resolve_combat(
+            unblocked, probe.root_player,
+            {attack.attacker}, {}) &&
+            unblocked.players[1 - probe.root_player].life == 19 &&
+            unblocked.players[probe.root_player]
+                    .creatures.size() == 1 &&
+            unblocked.players[probe.root_player]
+                .creatures.front()
+                .tapped,
+        "unblocked singleton attack has wrong engine consequences");
+
+    GameState blocked = probe.state;
+    expect(
+        old_school::resolve_combat(
+            blocked, probe.root_player, {attack.attacker},
+            {{attack.attacker, blocker}}) &&
+            blocked.players[probe.root_player]
+                .creatures.empty() &&
+            std::count(
+                blocked.players[probe.root_player]
+                    .graveyard.begin(),
+                blocked.players[probe.root_player]
+                    .graveyard.end(),
+                CardId::FlyingMen) == 1 &&
+            blocked.players[1 - probe.root_player]
+                    .creatures.size() == 1 &&
+            blocked.players[1 - probe.root_player]
+                .creatures.front()
+                .damage == 1,
+        "engine-authoritative block did not kill only the 1/1 "
+        "flying attacker");
+
+    std::vector<DecisionProbe> incomplete = corpus;
+    auto& root =
+        incomplete.front()
+            .state.players[incomplete.front().root_player];
+    const auto hidden_flyer = std::find(
+        root.library.begin(), root.library.end(),
+        CardId::FlyingMen);
+    expect(
+        hidden_flyer != root.library.end(),
+        "Attack diagnostic has no hidden flyer for completeness "
+        "mutation");
+    root.library.erase(hidden_flyer);
+    root.creatures.push_back({
+        .id = incomplete.front().state.next_permanent_id,
+        .card = CardId::FlyingMen,
+    });
+    ++incomplete.front().state.next_permanent_id;
+    expect(
+        !old_school::probes::
+             validate_attack_regression_v1(incomplete)
+             .empty(),
+        "Attack diagnostic accepted omitted attacker subsets after "
+        "a second legal attacker was exposed");
 }
 
 void test_field_sick_bear_root_has_exact_cast_predecessor() {
@@ -2981,6 +3097,9 @@ int main() {
                test_field_regressions_are_separate_and_rules_valid);
     runner.run("field RU chump-block consequences",
                test_field_ru_chump_block_rules_consequences);
+    runner.run(
+        "post-C17 attack diagnostic consequences",
+        test_attack_regression_is_complete_rules_valid_and_hidden_safe);
     runner.run("field sick-Bear exact cast predecessor",
                test_field_sick_bear_root_has_exact_cast_predecessor);
     runner.run("field sick-Bear Growth consequences",

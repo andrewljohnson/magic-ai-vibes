@@ -558,6 +558,7 @@ test("setup content uses the primary-label type floor without reflowing its grid
     ".setup-drawer header p",
     ".seat-setup label > span,\n.simulation-settings label > span:first-child",
     ".policy-description",
+    ".policy-provenance",
     ".seed-field button",
     ".toggle-field strong",
     ".toggle-field small",
@@ -629,6 +630,18 @@ test("landing metadata includes and advertises every bot policy", async () => {
   assert.match(app, /id:\s*"learned-value-c16"/);
   assert.match(app, /id:\s*"learned-value-g0"/);
   assert.match(app, /id:\s*"learned-actor"/);
+  assert.match(
+    app,
+    /versionDate:\s*"2026-07-26"[\s\S]+?Artifact frozen[\s\S]+?Research control/,
+  );
+  assert.match(
+    app,
+    /versionDate:\s*"2026-07-24"[\s\S]+?Recipe introduced[\s\S]+?trained per match/,
+  );
+  assert.match(
+    app,
+    /className="policy-provenance"[\s\S]+?<time dateTime=\{policy\.versionDate\}>/,
+  );
   assert.match(app, /policyCount=\{meta\?\.policies\.length \|\| FALLBACK_POLICIES\.length\}/);
   assert.match(app, /<strong>\{policyCount\}<\/strong> bot policies/);
 });

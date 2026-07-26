@@ -593,6 +593,37 @@ FieldRegressionReport score_field_regressions_v1(
     const NamedValueScoringModel& control,
     const NamedValueScoringModel& treatment);
 
+struct AttackRegressionPolicyReport {
+    FieldRegressionPolicyDecision deployment;
+    bool selects_reference_best = false;
+    double regret = 0.0;
+};
+
+struct AttackRegressionReport {
+    std::string corpus_id;
+    std::string stable_id;
+    DeckId root_deck = DeckId::RUAggro;
+    std::vector<std::string> candidate_descriptors;
+    std::vector<probe_eval::CandidateSamples> reference_samples;
+    FieldRegressionEvaluationAccounting reference_accounting;
+    probe_eval::ProbeLabel reference_label;
+    std::vector<FieldRegressionForcedConsequence>
+        forced_consequences;
+    HiddenRepartitionSummary hidden_repartition;
+    bool rules_contract_passed = false;
+    AttackRegressionPolicyReport parent;
+    AttackRegressionPolicyReport candidate;
+};
+
+// Post-C17, cache- and trainer-free Attack diagnostic. The immutable parent
+// supplies the hidden-information-safe K64/H8 common-world reference. Both
+// parent and candidate are scored through the production immediate Value
+// attack-set selector; no Handcrafted score, combat heuristic, or card-name
+// policy rule enters the result.
+AttackRegressionReport score_attack_regression_v1(
+    const NamedValueScoringModel& parent,
+    const NamedValueScoringModel& candidate);
+
 // Candidate-only, cache-free comparison against an already-loaded frozen
 // label set. The control is the transition parent for the treatment. This
 // path constructs the named frozen corpus internally and has no Actor,

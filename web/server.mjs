@@ -129,19 +129,31 @@ export const POLICIES = Object.freeze([
     id: "learned-value-c16",
     label: "Learned Value C16",
     name: "Learned Value C16",
-    description: "Frozen research baseline · C16 · K8/H4.",
+    description:
+      "Value critic trained through 16 bootstrapped self-play generations; deployed with K8/H4 search.",
+    versionDate: "2026-07-26",
+    versionDateLabel: "Artifact frozen",
+    lifecycle: "Research control · not promoted over Handcoded Policy",
   },
   {
     id: "learned-value-g0",
     label: "Learned Value G0",
     name: "Learned Value G0",
-    description: "Trainable legacy model for quick test matches.",
+    description:
+      "Legacy Value critic trained from random play plus two fitted self-play passes; built for this match from the selected games and seed.",
+    versionDate: "2026-07-24",
+    versionDateLabel: "Recipe introduced",
+    lifecycle: "Legacy recipe · trained per match",
   },
   {
     id: "learned-actor",
     label: "Learned Actor",
     name: "Learned Actor",
-    description: "The learned actor-policy research model.",
+    description:
+      "Separate policy heads learn priority, attacks, blocks, and damage order, backed by a learned critic; built for this match.",
+    versionDate: "2026-07-24",
+    versionDateLabel: "Recipe introduced",
+    lifecycle: "Experimental recipe · trained per match",
   },
 ]);
 

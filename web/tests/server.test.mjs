@@ -127,9 +127,29 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     body.decks.find(({ id }) => id === "blue").deckList,
     /Force Spike/,
   );
-  assert.ok(body.policies.some(({ id }) => id === "learned-value-c16"));
-  assert.ok(body.policies.some(({ id }) => id === "learned-value-g0"));
-  assert.ok(body.policies.some(({ id }) => id === "learned-actor"));
+  const c16 = body.policies.find(({ id }) => id === "learned-value-c16");
+  const g0 = body.policies.find(({ id }) => id === "learned-value-g0");
+  const actor = body.policies.find(({ id }) => id === "learned-actor");
+  assert.deepEqual(
+    {
+      versionDate: c16?.versionDate,
+      versionDateLabel: c16?.versionDateLabel,
+      lifecycle: c16?.lifecycle,
+    },
+    {
+      versionDate: "2026-07-26",
+      versionDateLabel: "Artifact frozen",
+      lifecycle: "Research control · not promoted over Handcoded Policy",
+    },
+  );
+  assert.match(c16?.description ?? "", /16 bootstrapped self-play generations/);
+  for (const policy of [g0, actor]) {
+    assert.equal(policy?.versionDate, "2026-07-24");
+    assert.equal(policy?.versionDateLabel, "Recipe introduced");
+    assert.match(policy?.lifecycle ?? "", /trained per match/);
+  }
+  assert.match(g0?.description ?? "", /random play plus two fitted self-play/);
+  assert.match(actor?.description ?? "", /priority, attacks, blocks/);
   assert.equal(body.defaults.bluffMode, false);
   assert.equal(body.defaults.learnedGenerations, 16);
   assert.equal(body.defaults.learnedRollouts, 8);
