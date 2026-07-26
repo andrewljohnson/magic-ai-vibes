@@ -106,6 +106,19 @@ export interface StackEntry {
   xValue?: number;
 }
 
+export function formatStackController(
+  controller: number | undefined,
+  humanSeat: number,
+): "You" | "Opponent" | null {
+  if (
+    (controller !== 0 && controller !== 1) ||
+    (humanSeat !== 0 && humanSeat !== 1)
+  ) {
+    return null;
+  }
+  return controller === humanSeat ? "You" : "Opponent";
+}
+
 export interface StackInteraction {
   label: string;
   targets: string[];

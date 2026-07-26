@@ -172,9 +172,9 @@ shrinking any match control.
 
 ### P2 — Arena-quality board readability
 
-Status: **stack/targets rendered at both target viewports; setup legibility
-and explicit card-state/keyword cues rendered at 1280 × 720; broader visual
-work in progress**
+Status: **stack controller/targets rendered at both target viewports; setup
+legibility and explicit card-state/keyword cues rendered at 1280 × 720;
+broader visual work in progress**
 
 Acceptance criteria:
 
@@ -186,6 +186,26 @@ Acceptance criteria:
   readable.
 - The event log explains every state transition exercised by the journey gate.
 - Board updates do not jump the hand away from the pointer or keyboard focus.
+
+#### Preregistered explicit stack-controller slice
+
+Hypothesis: rendering each stack object's public controller as an explicit
+`YOU` or `OPPONENT` chip will make stack ownership readable without relying on
+bridge-authored prose or teaching the client card-specific rules.
+
+- The cue derives only from `entry.controller` and the configured human seat.
+  Missing or invalid controller data produces no invented label.
+- Each cue has a visible text label plus an accessible
+  `Controlled by You/Opponent` name. Targets, resolving order, cards, and action
+  routing remain unchanged.
+- At both 1280 × 720 and 1440 × 900, the fixed Green/human versus Red/Learned
+  Value seed-42 target-stack fixture must show `OPPONENT`, then `YOU` from top
+  to bottom initially; after the Giant Growth response it must show `YOU`,
+  `OPPONENT`, `YOU`.
+- Controller chips must remain inside their stack entries and must not overlap
+  the `NEXT`/`+N` order cues. Acceptance requires pure/source regressions,
+  `make test-web-ui`, and the existing dual-viewport
+  `make test-web-rendered` journey.
 
 #### Preregistered setup-text legibility slice
 
@@ -1266,3 +1286,19 @@ For each web issue:
   `{x:238,y:822,w:1202,h:78}`, and hidden-hand fan
   `{x:893,y:117,w:103,h:43}`. Supporting gates on the same tree were
   `make test-web-ui` 75/75 and `make test-web-rendered` 4/4.
+- 2026-07-26 — Implemented and rendered the preregistered explicit
+  stack-controller slice. The initial fixed target-stack run failed at both
+  1280 × 720 and 1440 × 900 with no `.stack-controller` cues despite public
+  controller fields; the two interaction journeys were otherwise green.
+  Stack entries now derive a visible `YOU`/`OPPONENT` chip and accessible
+  `Controlled by You/Opponent` name only from the public controller seat and
+  configured human seat. Missing or invalid seats return no invented label.
+  In the corrected dual-viewport journey, top-to-bottom ownership read
+  `OPPONENT, YOU` on the original two-object stack; dragging Giant Growth to
+  Bears `#110` changed it to `YOU, OPPONENT, YOU`; passing toward resolution
+  restored `OPPONENT, YOU`. Every chip remained wholly inside its own stack
+  object with zero intersection against `NEXT`/`+N`, while the existing exact
+  action count, targets, hand/stack transitions, and overflow gates remained
+  green. Final results: `make test-web-ui` 75/75 and
+  `make test-web-rendered` 4/4. The rendered server used ephemeral localhost
+  ports; port `4173` was untouched.

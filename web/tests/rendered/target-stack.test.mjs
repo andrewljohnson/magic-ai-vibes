@@ -317,6 +317,80 @@ function assertVisibleRectangle(rectangle, viewport, label) {
   );
 }
 
+async function stackControllerMetrics(page) {
+  return page.locator(".stack-entry").evaluateAll((entries) => {
+    const rectangle = (element) => {
+      if (!element) return null;
+      const bounds = element.getBoundingClientRect();
+      return {
+        left: bounds.left,
+        top: bounds.top,
+        right: bounds.right,
+        bottom: bounds.bottom,
+        width: bounds.width,
+        height: bounds.height,
+      };
+    };
+    const overlap = (left, right) => {
+      if (!left || !right) return null;
+      return (
+        Math.max(
+          0,
+          Math.min(left.right, right.right) - Math.max(left.left, right.left),
+        ) *
+        Math.max(
+          0,
+          Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top),
+        )
+      );
+    };
+    return entries.map((entry) => {
+      const controller = entry.querySelector(".stack-controller");
+      const controllerRectangle = rectangle(controller);
+      const orderRectangle = rectangle(entry.querySelector(".stack-order"));
+      return {
+        text: controller?.textContent?.trim() ?? null,
+        accessibleName: controller?.getAttribute("aria-label") ?? null,
+        entry: rectangle(entry),
+        controller: controllerRectangle,
+        order: orderRectangle,
+        controllerOrderOverlap: overlap(
+          controllerRectangle,
+          orderRectangle,
+        ),
+      };
+    });
+  });
+}
+
+function assertStackControllerCues(cues, expected) {
+  assert.equal(cues.length, expected.length);
+  assert.deepEqual(
+    cues.map(({ text }) => text),
+    expected,
+  );
+  cues.forEach((cue, index) => {
+    const readable =
+      expected[index] === "YOU" ? "You" : "Opponent";
+    assert.equal(cue.accessibleName, `Controlled by ${readable}`);
+    assert.ok(cue.entry, `stack entry ${index} must render`);
+    assert.ok(cue.controller, `stack controller ${index} must render`);
+    assert.ok(cue.order, `stack order ${index} must render`);
+    assert.ok(
+      cue.controller.left >= cue.entry.left - 0.5 &&
+        cue.controller.top >= cue.entry.top - 0.5 &&
+        cue.controller.right <= cue.entry.right + 0.5 &&
+        cue.controller.bottom <= cue.entry.bottom + 0.5,
+      `stack controller ${index} must remain inside its entry`,
+    );
+    assert.ok(
+      cue.controllerOrderOverlap <= 0.5,
+      `stack controller ${index} overlaps its order cue by ` +
+        `${cue.controllerOrderOverlap}px²`,
+    );
+  });
+}
+
 test(
   "real engine auto-passes forced priority and empty attackers with Bluff off",
   { timeout: 60_000 },
@@ -526,6 +600,10 @@ for (const viewport of VIEWPORTS) {
         await page.getByRole("complementary", { name: "The stack" }).innerText(),
         /Lightning Bolt[\s\S]*Grizzly Bears #110/,
       );
+      assertStackControllerCues(
+        await stackControllerMetrics(page),
+        ["OPPONENT", "YOU"],
+      );
       assertStableGeometry(await renderedGeometry(page));
 
       const responsePromise = page.waitForResponse(
@@ -554,6 +632,10 @@ for (const viewport of VIEWPORTS) {
       assert.equal(await hand.getByRole("listitem").count(), 6);
       assert.equal(await page.locator(".stack-entry").count(), 3);
       assert.equal(await page.getByText("TARGET", { exact: true }).count(), 2);
+      assertStackControllerCues(
+        await stackControllerMetrics(page),
+        ["YOU", "OPPONENT", "YOU"],
+      );
       assert.equal(await page.getByRole("alert").count(), 0);
       assert.equal(
         await page
@@ -581,6 +663,10 @@ for (const viewport of VIEWPORTS) {
         () => document.querySelectorAll(".stack-entry").length === 2,
       );
       assert.equal(actionRequests, 2);
+      assertStackControllerCues(
+        await stackControllerMetrics(page),
+        ["OPPONENT", "YOU"],
+      );
       assert.equal(await page.getByRole("alert").count(), 0);
       assertStableGeometry(await renderedGeometry(page));
 

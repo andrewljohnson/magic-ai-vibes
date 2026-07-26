@@ -30,6 +30,7 @@ test("production structured targets have stable readable labels", async () => {
   const {
     concisePriorityOptionLabel,
     describeTopOfStack,
+    formatStackController,
     formatStackEntryLabel,
     formatTargetLabel,
     priorityDestinationKey,
@@ -123,6 +124,13 @@ test("production structured targets have stable readable labels", async () => {
     targets: ["You"],
     summary: "Braingeyser targeting You is next to resolve.",
   });
+  assert.equal(formatStackController(0, 0), "You");
+  assert.equal(formatStackController(1, 0), "Opponent");
+  assert.equal(formatStackController(1, 1), "You");
+  assert.equal(formatStackController(0, 1), "Opponent");
+  assert.equal(formatStackController(undefined, 0), null);
+  assert.equal(formatStackController(2, 0), null);
+  assert.equal(formatStackController(0, 2), null);
   assert.deepEqual(stackPermanentTargetIds(targetedStack), ["73", "18"]);
   assert.equal(
     formatStackEntryLabel({
@@ -227,6 +235,13 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   ]);
 
   assert.match(app, /formatStackTargets\(entry\)/);
+  assert.match(
+    app,
+    /formatStackController\(\s*entry\.controller,\s*observerSeat,\s*\)/,
+  );
+  assert.match(app, /observerSeat=\{nearSeat\}/);
+  assert.match(app, /aria-label=\{`Controlled by \$\{controller\}`\}/);
+  assert.match(app, /\{controller\.toUpperCase\(\)\}/);
   assert.match(app, /const stackId = entry\.stackId \?\? entry\.id/);
   assert.match(app, /key=\{stackId \?\?/);
   assert.match(app, /formatTargetLabel\(option\.target\)/);
@@ -257,6 +272,9 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   );
   assert.match(css, /\.stack-entry\.is-priority-destination\s*\{/);
   assert.match(css, /\.stack-surface-action\s*\{/);
+  assert.match(css, /\.stack-controller\s*\{/);
+  assert.match(css, /\.stack-controller-you\s*\{/);
+  assert.match(css, /\.stack-controller-opponent\s*\{/);
   assert.doesNotMatch(app, /\{entry\.target\}/);
   assert.doesNotMatch(app, /entry\.targets\?\.join/);
 });

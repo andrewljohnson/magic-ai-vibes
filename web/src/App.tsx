@@ -21,6 +21,7 @@ import {
   blockerPairsFromKeys,
   concisePriorityOptionLabel,
   describeTopOfStack,
+  formatStackController,
   formatStackEntryLabel,
   formatStackTargets,
   formatGameResultReason,
@@ -1250,6 +1251,7 @@ function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
 
 function StackRail({
   stack,
+  observerSeat,
   priorityStackTargetIds,
   draggingPriority,
   onChoosePriorityStack,
@@ -1258,6 +1260,7 @@ function StackRail({
   onPriorityDrop,
 }: {
   stack: StackEntry[];
+  observerSeat: PlayerIndex;
   priorityStackTargetIds?: ReadonlySet<string>;
   draggingPriority?: boolean;
   onChoosePriorityStack?: (id: string) => void;
@@ -1283,6 +1286,10 @@ function StackRail({
         {[...stack].reverse().map((entry, index) => {
           const label = formatStackEntryLabel(entry);
           const targets = formatStackTargets(entry);
+          const controller = formatStackController(
+            entry.controller,
+            observerSeat,
+          );
           const stackId = entry.stackId ?? entry.id;
           const priorityTarget =
             stackId !== undefined &&
@@ -1305,6 +1312,14 @@ function StackRail({
               <span className="stack-order">
                 {index === 0 ? "NEXT" : `+${index}`}
               </span>
+              {controller && (
+                <span
+                  className={`stack-controller stack-controller-${controller.toLowerCase()}`}
+                  aria-label={`Controlled by ${controller}`}
+                >
+                  {controller.toUpperCase()}
+                </span>
+              )}
               {entry.card ? (
                 <CardFace card={entry.card} compact />
               ) : (
@@ -3326,6 +3341,7 @@ export default function App() {
             </main>
             <StackRail
               stack={stack}
+              observerSeat={nearSeat}
               priorityStackTargetIds={priorityStackTargetIds}
               draggingPriority={Boolean(draggedPriorityOrigin)}
               onChoosePriorityStack={(id) =>
