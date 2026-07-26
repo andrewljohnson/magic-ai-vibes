@@ -220,6 +220,18 @@ Candidate attack_candidate(std::string descriptor, PermanentId attacker,
     };
 }
 
+Candidate block_candidate(std::string descriptor, PermanentId attacker,
+                          PermanentId blocker, bool include) {
+    return {
+        .descriptor = std::move(descriptor),
+        .action = BinaryBlockDecision{
+            .attacker = attacker,
+            .blocker = blocker,
+            .include = include,
+        },
+    };
+}
+
 LandPermanent land(CardId card, bool tapped = false) {
     return {.card = card, .tapped = tapped};
 }
@@ -444,6 +456,162 @@ DecisionProbe green_growth_hold_probe() {
                 Target::creature_target(0, kBear))),
     };
     finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe field_ru_flying_men_chump_air_probe(
+    int life, std::string stable_id, Category category) {
+    constexpr PermanentId kFlyingMen = 1;
+    constexpr PermanentId kAirElemental = 2;
+    DecisionProbe probe = make_base(
+        std::move(stable_id), category, DecisionKind::Block,
+        DeckId::RUAggro, DeckId::Blue,
+        TurnPhase::DeclareBlockers, 10, 1);
+    PlayerState& defender = probe.state.players[0];
+    defender.life = life;
+    defender.lands = {land(CardId::Island)};
+    defender.creatures = {
+        creature(kFlyingMen, CardId::FlyingMen),
+    };
+    PlayerState& attacker = probe.state.players[1];
+    attacker.lands.assign(5, land(CardId::Island, true));
+    // Attackers are tapped as they enter the Declare Blockers state.
+    attacker.creatures = {
+        creature(kAirElemental, CardId::AirElemental, true),
+    };
+    probe.candidates = {
+        block_candidate(
+            "no-blocks", kAirElemental, kFlyingMen, false),
+        block_candidate(
+            "block-air-elemental-with-flying-men",
+            kAirElemental, kFlyingMen, true),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe field_green_second_main_sick_bear_growth_probe() {
+    constexpr PermanentId kBear = 1;
+    DecisionProbe probe = make_base(
+        "field.green.second-main-sick-bear-growth.v1",
+        Category::FieldGreenSecondMainSickBearGrowth,
+        DecisionKind::Priority, DeckId::Green, DeckId::Red,
+        TurnPhase::SecondMain, 9);
+    PlayerState& root = probe.state.players[0];
+    root.hand = {CardId::GiantGrowth};
+    root.lands = {
+        land(CardId::Forest, true),
+        land(CardId::Forest, true),
+        land(CardId::Forest),
+    };
+    root.creatures = {
+        creature(kBear, CardId::GrizzlyBears, false, true),
+    };
+    root.land_played_this_turn = true;
+    probe.state.players[1].lands.assign(
+        5, land(CardId::Mountain, true));
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "growth-own-summoning-sick-grizzly-bears",
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(0, kBear))),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe field_green_begin_combat_growth_tapped_air_probe() {
+    constexpr PermanentId kTreefolk = 1;
+    constexpr PermanentId kAirElemental = 2;
+    DecisionProbe probe = make_base(
+        "field.green.begin-combat-growth-tapped-air.v1",
+        Category::FieldGreenBeginCombatGrowthTappedAir,
+        DecisionKind::Priority, DeckId::Green, DeckId::Blue,
+        TurnPhase::BeginCombat, 9);
+    PlayerState& root = probe.state.players[0];
+    root.hand = {CardId::GiantGrowth};
+    root.lands = {
+        land(CardId::Forest, true),
+        land(CardId::Forest, true),
+        land(CardId::Forest, true),
+        land(CardId::Forest, true),
+        land(CardId::Forest),
+    };
+    root.creatures = {
+        creature(kTreefolk, CardId::IronrootTreefolk),
+    };
+    root.land_played_this_turn = true;
+    PlayerState& opponent = probe.state.players[1];
+    opponent.life = 6;
+    opponent.lands.assign(5, land(CardId::Island, true));
+    opponent.creatures = {
+        creature(kAirElemental, CardId::AirElemental, true),
+    };
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "growth-own-ironroot-treefolk",
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(0, kTreefolk))),
+        priority_candidate(
+            "growth-opponent-tapped-air-elemental",
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(1, kAirElemental))),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe field_green_attack_after_growth_air_probe(
+    bool air_tapped, std::string stable_id, Category category) {
+    constexpr PermanentId kTreefolk = 1;
+    constexpr PermanentId kAirElemental = 2;
+    const DecisionProbe source =
+        field_green_begin_combat_growth_tapped_air_probe();
+
+    GameState successor = source.state;
+    const PriorityAction growth =
+        PriorityAction::cast_giant_growth(
+            Target::creature_target(1, kAirElemental));
+    if (!apply_priority_action(
+            successor, source.root_player, growth, false) ||
+        !resolve_top_of_stack(successor)) {
+        throw std::logic_error(
+            "field Growth fixture could not construct its linked "
+            "attack successor");
+    }
+    CreaturePermanent* air = nullptr;
+    for (CreaturePermanent& candidate :
+         successor.players[1].creatures) {
+        if (candidate.id == kAirElemental) {
+            air = &candidate;
+            break;
+        }
+    }
+    if (air == nullptr) {
+        throw std::logic_error(
+            "field Growth successor lost Air Elemental");
+    }
+    air->tapped = air_tapped;
+
+    DecisionProbe probe;
+    probe.stable_id = std::move(stable_id);
+    probe.category = category;
+    probe.decision_kind = DecisionKind::Attack;
+    probe.root_deck = source.root_deck;
+    probe.opponent_deck = source.opponent_deck;
+    probe.root_player = source.root_player;
+    probe.phase = TurnPhase::DeclareAttackers;
+    probe.consecutive_passes = 0;
+    probe.state = std::move(successor);
+    probe.original_decks = source.original_decks;
+    probe.candidates = {
+        attack_candidate(
+            "skip-ironroot-treefolk", kTreefolk, false),
+        attack_candidate(
+            "include-ironroot-treefolk", kTreefolk, true),
+    };
     return probe;
 }
 
@@ -1322,6 +1490,45 @@ bool candidates_are_legal_and_complete(
         return valid;
     }
 
+    if (probe.decision_kind == DecisionKind::Block) {
+        std::vector<BinaryBlockDecision> declared;
+        for (const Candidate& candidate : probe.candidates) {
+            const auto* action =
+                std::get_if<BinaryBlockDecision>(&candidate.action);
+            if (action == nullptr) {
+                errors.push_back(
+                    "block probe contains a non-block candidate");
+                valid = false;
+                continue;
+            }
+            if (std::find(declared.begin(), declared.end(), *action) !=
+                declared.end()) {
+                errors.push_back(
+                    "block probe contains a duplicate candidate action");
+                valid = false;
+            }
+            declared.push_back(*action);
+
+            GameState settled = probe.state;
+            if (!settle_binary_block_decision(
+                    settled, probe.state.active_player, *action)) {
+                errors.push_back(
+                    "block probe contains an illegal combat branch");
+                valid = false;
+            }
+        }
+        if (declared.size() != 2 ||
+            declared[0].attacker != declared[1].attacker ||
+            declared[0].blocker != declared[1].blocker ||
+            declared[0].include == declared[1].include) {
+            errors.push_back(
+                "block probe must offer no-block/block for one "
+                "attacker-blocker pair");
+            valid = false;
+        }
+        return valid;
+    }
+
     std::vector<BinaryAttackDecision> declared;
     for (const Candidate& candidate : probe.candidates) {
         const auto* action =
@@ -1404,6 +1611,15 @@ bool reachable_state(const DecisionProbe& probe,
             !probe.state.stack.empty()) {
             errors.push_back(
                 "attack probe is outside a reachable declaration window");
+            valid = false;
+        }
+    } else if (probe.decision_kind == DecisionKind::Block) {
+        if (probe.phase != TurnPhase::DeclareBlockers ||
+            probe.state.active_player == probe.root_player ||
+            probe.consecutive_passes != 0 ||
+            !probe.state.stack.empty()) {
+            errors.push_back(
+                "block probe is outside a reachable declaration window");
             valid = false;
         }
     } else if (probe.phase == TurnPhase::DeclareAttackers ||
@@ -1567,6 +1783,27 @@ bool reachable_state(const DecisionProbe& probe,
                 "binary attack subject cannot legally attack");
             valid = false;
         }
+    } else if (probe.decision_kind == DecisionKind::Block) {
+        if (probe.candidates.empty()) {
+            errors.push_back("block probe has no blocking subject");
+            return false;
+        }
+        const auto* first = std::get_if<BinaryBlockDecision>(
+            &probe.candidates.front().action);
+        if (first == nullptr) {
+            errors.push_back("block probe has no blocking subject");
+            return false;
+        }
+        const CreaturePermanent* attacker = find_creature(
+            probe.state, probe.state.active_player, first->attacker);
+        const CreaturePermanent* blocker = find_creature(
+            probe.state, probe.root_player, first->blocker);
+        if (attacker == nullptr || !attacker->tapped ||
+            blocker == nullptr || blocker->tapped) {
+            errors.push_back(
+                "binary block subject is outside a legal combat state");
+            valid = false;
+        }
     }
     return valid;
 }
@@ -1585,6 +1822,39 @@ bool sampled_hidden_zones_equal(const GameState& left,
 }
 
 } // namespace
+
+bool settle_binary_block_decision(
+    GameState& state, std::size_t attacking_player,
+    const BinaryBlockDecision& decision) {
+    if (attacking_player >= state.players.size()) {
+        return false;
+    }
+    GameState settled = state;
+    auto& attackers = settled.players[attacking_player].creatures;
+    const auto attacker = std::find_if(
+        attackers.begin(), attackers.end(),
+        [&](const CreaturePermanent& creature) {
+            return creature.id == decision.attacker;
+        });
+    if (attacker == attackers.end() || !attacker->tapped) {
+        return false;
+    }
+    // resolve_combat() owns both declaration and settlement and therefore
+    // expects a ready attacker. This corpus captures the next decision point,
+    // where declaration has already tapped it.
+    attacker->tapped = false;
+    const std::vector<std::pair<PermanentId, PermanentId>> blocks =
+        decision.include
+            ? std::vector<std::pair<PermanentId, PermanentId>>{
+                  {decision.attacker, decision.blocker}}
+            : std::vector<std::pair<PermanentId, PermanentId>>{};
+    if (!resolve_combat(
+            settled, attacking_player, {decision.attacker}, blocks)) {
+        return false;
+    }
+    state = std::move(settled);
+    return true;
+}
 
 bool Validation::ok() const {
     return exact_card_conservation &&
@@ -1825,6 +2095,31 @@ std::vector<DecisionProbe> make_force_spike_policy_controls_v1() {
     payable.state.players[1].lands.push_back(
         land(CardId::Mountain));
     return {std::move(live), std::move(payable)};
+}
+
+std::vector<DecisionProbe> make_field_regressions_v1() {
+    std::vector<DecisionProbe> probes;
+    probes.reserve(6);
+    probes.push_back(field_ru_flying_men_chump_air_probe(
+        20, "field.ru.life20-flying-men-chump-air.v1",
+        Category::FieldRULife20FlyingMenChumpAir));
+    probes.push_back(field_ru_flying_men_chump_air_probe(
+        4, "field.ru.life4-flying-men-chump-air.v1",
+        Category::FieldRULife4FlyingMenChumpAir));
+    probes.push_back(
+        field_green_second_main_sick_bear_growth_probe());
+    probes.push_back(
+        field_green_begin_combat_growth_tapped_air_probe());
+    probes.push_back(field_green_attack_after_growth_air_probe(
+        true,
+        "field.green.attack-after-growth-opponent-air.v1",
+        Category::FieldGreenAttackAfterGrowthTappedAir));
+    probes.push_back(field_green_attack_after_growth_air_probe(
+        false,
+        "field.green.attack-after-growth-opponent-air-untapped-"
+        "control.v1",
+        Category::FieldGreenAttackAfterGrowthUntappedAirControl));
+    return probes;
 }
 
 bool hidden_clone_is_determinization_invariant(
@@ -2194,6 +2489,121 @@ std::vector<std::string> validate_force_spike_policy_controls_v1(
                         "identity or order");
                     break;
                 }
+            }
+        }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_field_regressions_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed) {
+    constexpr std::array<std::string_view, 6> kExpectedIds = {
+        "field.ru.life20-flying-men-chump-air.v1",
+        "field.ru.life4-flying-men-chump-air.v1",
+        "field.green.second-main-sick-bear-growth.v1",
+        "field.green.begin-combat-growth-tapped-air.v1",
+        "field.green.attack-after-growth-opponent-air.v1",
+        "field.green.attack-after-growth-opponent-air-untapped-"
+        "control.v1",
+    };
+    constexpr std::array<Category, 6> kExpectedCategories = {
+        Category::FieldRULife20FlyingMenChumpAir,
+        Category::FieldRULife4FlyingMenChumpAir,
+        Category::FieldGreenSecondMainSickBearGrowth,
+        Category::FieldGreenBeginCombatGrowthTappedAir,
+        Category::FieldGreenAttackAfterGrowthTappedAir,
+        Category::FieldGreenAttackAfterGrowthUntappedAirControl,
+    };
+    constexpr std::array<DecisionKind, 6> kExpectedKinds = {
+        DecisionKind::Block,
+        DecisionKind::Block,
+        DecisionKind::Priority,
+        DecisionKind::Priority,
+        DecisionKind::Attack,
+        DecisionKind::Attack,
+    };
+
+    std::vector<std::string> errors;
+    if (probes.size() != kExpectedIds.size()) {
+        errors.push_back(
+            "field-regressions-v1 must contain exactly six probes");
+    }
+    std::unordered_set<std::string> stable_ids;
+    const std::size_t checked =
+        std::min(probes.size(), kExpectedIds.size());
+    for (std::size_t index = 0; index < checked; ++index) {
+        const DecisionProbe& probe = probes[index];
+        if (probe.stable_id != kExpectedIds[index] ||
+            !stable_ids.insert(probe.stable_id).second) {
+            errors.push_back(
+                "field-regressions-v1 has an unknown, reordered, or "
+                "duplicate stable ID");
+        }
+        if (probe.category != kExpectedCategories[index] ||
+            probe.decision_kind != kExpectedKinds[index] ||
+            probe.harvest.has_value()) {
+            errors.push_back(
+                probe.stable_id +
+                ": field decision context or authored provenance "
+                "changed");
+        }
+        const Validation validation =
+            validate_probe(probe, hidden_seed + index);
+        for (const std::string& error : validation.errors) {
+            errors.push_back(probe.stable_id + ": " + error);
+        }
+    }
+
+    if (probes.size() >= 2) {
+        GameState life20 = probes[0].state;
+        life20.players[probes[0].root_player].life = 4;
+        if (life20 != probes[1].state ||
+            probes[0].original_decks != probes[1].original_decks ||
+            probes[0].candidates != probes[1].candidates) {
+            errors.push_back(
+                "RU chump-block controls differ by more than defender "
+                "life");
+        }
+    }
+
+    if (probes.size() >= 5) {
+        GameState expected = probes[3].state;
+        const PriorityAction growth =
+            PriorityAction::cast_giant_growth(
+                Target::creature_target(1, 2));
+        if (!apply_priority_action(
+                expected, probes[3].root_player, growth, false) ||
+            !resolve_top_of_stack(expected) ||
+            expected != probes[4].state) {
+            errors.push_back(
+                "Growth-on-tapped-Air attack probe is not the exact "
+                "resolved successor of its linked priority probe");
+        }
+    }
+
+    if (probes.size() >= 6) {
+        GameState tapped = probes[4].state;
+        CreaturePermanent* air = nullptr;
+        for (CreaturePermanent& creature :
+             tapped.players[1].creatures) {
+            if (creature.id == 2) {
+                air = &creature;
+                break;
+            }
+        }
+        if (air == nullptr) {
+            errors.push_back(
+                "linked attack probe is missing Air Elemental");
+        } else {
+            air->tapped = false;
+            if (tapped != probes[5].state ||
+                probes[4].original_decks !=
+                    probes[5].original_decks ||
+                probes[4].candidates != probes[5].candidates) {
+                errors.push_back(
+                    "untapped-Air control differs by more than Air "
+                    "Elemental's tapped status");
             }
         }
     }

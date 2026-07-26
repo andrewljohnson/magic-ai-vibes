@@ -23,6 +23,8 @@ inline constexpr std::uint64_t kProbeValidationV1GameSeed =
     0x52555830484F4C44ULL;
 inline constexpr std::string_view kForceSpikePolicyControlsV1 =
     "old-school-force-spike-policy-controls-v1";
+inline constexpr std::string_view kFieldRegressionsV1 =
+    "old-school-field-regressions-v1";
 inline constexpr std::string_view kProbePriorityCallbackCollector =
     "Game::HumanController::choose_priority_action";
 inline constexpr std::string_view kProbeLandThenPassScript =
@@ -31,6 +33,7 @@ inline constexpr std::string_view kProbeLandThenPassScript =
 enum class DecisionKind : std::uint8_t {
     Priority,
     Attack,
+    Block,
 };
 
 enum class Category : std::uint8_t {
@@ -61,6 +64,12 @@ enum class Category : std::uint8_t {
     RUFlyingMoatAttack,
     RUDisintegrateLethal,
     RUDisintegrateHoldValidation,
+    FieldRULife20FlyingMenChumpAir,
+    FieldRULife4FlyingMenChumpAir,
+    FieldGreenSecondMainSickBearGrowth,
+    FieldGreenBeginCombatGrowthTappedAir,
+    FieldGreenAttackAfterGrowthTappedAir,
+    FieldGreenAttackAfterGrowthUntappedAirControl,
 };
 
 struct BinaryAttackDecision {
@@ -70,8 +79,17 @@ struct BinaryAttackDecision {
     bool operator==(const BinaryAttackDecision&) const = default;
 };
 
+struct BinaryBlockDecision {
+    PermanentId attacker = 0;
+    PermanentId blocker = 0;
+    bool include = false;
+
+    bool operator==(const BinaryBlockDecision&) const = default;
+};
+
 using CandidateAction =
-    std::variant<PriorityAction, BinaryAttackDecision>;
+    std::variant<PriorityAction, BinaryAttackDecision,
+                 BinaryBlockDecision>;
 
 struct Candidate {
     // A stable, human-readable description of the candidate. It is fixture
@@ -79,6 +97,8 @@ struct Candidate {
     // labels or scores.
     std::string descriptor;
     CandidateAction action;
+
+    bool operator==(const Candidate&) const = default;
 };
 
 struct HarvestProvenance {
@@ -140,6 +160,12 @@ std::vector<DecisionProbe> make_probe_validation_v1();
 // any promotion-eligible corpus.
 std::vector<DecisionProbe> make_force_spike_policy_controls_v1();
 
+// A reject-only corpus made from concrete field reports. It is deliberately
+// separate from probe-dev-v3 and every label-cache path: the paired states
+// describe legal decisions and their rules consequences, but encode no
+// preferred strategic action.
+std::vector<DecisionProbe> make_field_regressions_v1();
+
 Validation validate_probe(
     const DecisionProbe& probe,
     std::uint64_t hidden_seed = kProbeValidationSeed);
@@ -157,6 +183,18 @@ std::vector<std::string> validate_probe_validation_v1(
 std::vector<std::string> validate_force_spike_policy_controls_v1(
     const std::vector<DecisionProbe>& probes,
     std::uint64_t hidden_seed = kProbeValidationSeed);
+
+std::vector<std::string> validate_field_regressions_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed = kProbeValidationSeed);
+
+// Settles a binary block candidate captured after attackers were declared.
+// resolve_combat() accepts a pre-declaration state, so this adapter restores
+// only the referenced attacker's declaration tap before delegating to the
+// engine-authoritative combat resolver.
+bool settle_binary_block_decision(
+    GameState& state, std::size_t attacking_player,
+    const BinaryBlockDecision& decision);
 
 // Repartitions/reorders only hidden zones, then verifies that
 // sample_determinization returns the same sampled information set for a fixed

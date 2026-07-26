@@ -28,6 +28,7 @@ using old_school::TurnPhase;
 using old_school::probes::Category;
 using old_school::probes::Dc1Dominance;
 using old_school::probes::DecisionProbe;
+using old_school::probes::BinaryBlockDecision;
 using old_school::probes::Validation;
 
 class TestRunner {
@@ -54,7 +55,7 @@ class TestRunner {
             << passed_
             << " probe tests passed (20 dev fixtures + 1 harvested "
                "validation fixture + 2 supplemental Force Spike "
-               "controls)\n";
+               "controls + 6 reject-only field regressions)\n";
         return 0;
     }
 
@@ -97,6 +98,26 @@ const PriorityAction& priority_candidate(
     if (action == nullptr) {
         throw std::runtime_error(
             "named candidate is not a priority action");
+    }
+    return *action;
+}
+
+const BinaryBlockDecision& block_candidate(
+    const DecisionProbe& probe, std::string_view descriptor) {
+    const auto found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [descriptor](const old_school::probes::Candidate& candidate) {
+            return candidate.descriptor == descriptor;
+        });
+    if (found == probe.candidates.end()) {
+        throw std::runtime_error(
+            "required block candidate is missing");
+    }
+    const auto* action =
+        std::get_if<BinaryBlockDecision>(&found->action);
+    if (action == nullptr) {
+        throw std::runtime_error(
+            "named candidate is not a block decision");
     }
     return *action;
 }
@@ -339,6 +360,12 @@ std::size_t expected_candidate_count(Category category) {
     case Category::GreenFavorableAttack:
     case Category::GreenUnfavorableAttack:
     case Category::RUDisintegrateHoldValidation:
+    case Category::FieldRULife20FlyingMenChumpAir:
+    case Category::FieldRULife4FlyingMenChumpAir:
+    case Category::FieldGreenSecondMainSickBearGrowth:
+    case Category::FieldGreenBeginCombatGrowthTappedAir:
+    case Category::FieldGreenAttackAfterGrowthTappedAir:
+    case Category::FieldGreenAttackAfterGrowthUntappedAirControl:
         break;
     }
     throw std::runtime_error(
@@ -1088,6 +1115,244 @@ void test_ru_flying_and_disintegrate_traces() {
     resolve_cast_spell(short_burn);
     expect(short_burn.players[1].life == 1,
            "X=2 Disintegrate dealt the wrong damage");
+}
+
+void test_field_regressions_are_separate_and_rules_valid() {
+    const std::vector<DecisionProbe> fields =
+        old_school::probes::make_field_regressions_v1();
+    expect(fields.size() == 6,
+           "field-regressions-v1 must contain six fixtures");
+    const std::vector<std::string> corpus_errors =
+        old_school::probes::validate_field_regressions_v1(fields);
+    if (!corpus_errors.empty()) {
+        std::string joined;
+        for (const std::string& error : corpus_errors) {
+            if (!joined.empty()) {
+                joined += "; ";
+            }
+            joined += error;
+        }
+        throw std::runtime_error(
+            "field-regressions-v1 failed corpus validation: " +
+            joined);
+    }
+    for (const DecisionProbe& probe : fields) {
+        const Validation validation =
+            old_school::probes::validate_probe(probe);
+        if (!validation.ok()) {
+            throw std::runtime_error(
+                probe.stable_id + ": " +
+                validation_errors(validation));
+        }
+        expect(validation.exact_card_conservation &&
+                   validation.candidates_legal_and_complete &&
+                   validation.reachable_state &&
+                   validation.hidden_clone_invariant,
+               "field fixture skipped a validation dimension");
+        expect(probe.stable_id.starts_with("field.") &&
+                   probe.stable_id.ends_with(".v1") &&
+                   !probe.harvest.has_value(),
+               "field fixture lost its separate authored identity");
+    }
+
+    expect(old_school::probes::make_probe_dev_v3().size() == 20,
+           "field fixtures leaked into probe-dev-v3");
+
+    std::vector<DecisionProbe> malformed = fields;
+    BinaryBlockDecision& illegal =
+        std::get<BinaryBlockDecision>(
+            malformed.front().candidates.back().action);
+    illegal.blocker = 999'999;
+    expect(
+        !old_school::probes::validate_probe(malformed.front())
+             .candidates_legal_and_complete &&
+            !old_school::probes::
+                 validate_field_regressions_v1(malformed)
+                 .empty(),
+        "field block validation accepted a missing blocker");
+}
+
+void test_field_ru_chump_block_rules_consequences() {
+    const std::vector<DecisionProbe> fields =
+        old_school::probes::make_field_regressions_v1();
+    for (const Category category :
+         {Category::FieldRULife20FlyingMenChumpAir,
+          Category::FieldRULife4FlyingMenChumpAir}) {
+        const DecisionProbe& probe = find_probe(fields, category);
+        const BinaryBlockDecision& no_blocks =
+            block_candidate(probe, "no-blocks");
+        const BinaryBlockDecision& block = block_candidate(
+            probe, "block-air-elemental-with-flying-men");
+        expect(!no_blocks.include && block.include &&
+                   no_blocks.attacker == block.attacker &&
+                   no_blocks.blocker == block.blocker,
+               "field chump fixture lost its binary block branches");
+
+        const int starting_life =
+            probe.state.players[probe.root_player].life;
+        GameState unblocked = probe.state;
+        expect(
+            old_school::probes::settle_binary_block_decision(
+                unblocked, probe.state.active_player, no_blocks) &&
+                unblocked.players[probe.root_player].life ==
+                    starting_life - 4 &&
+                unblocked.players[0].creatures.size() == 1 &&
+                unblocked.players[1].creatures.size() == 1,
+            "unblocked Air Elemental branch has wrong factual "
+            "consequences");
+
+        GameState blocked = probe.state;
+        expect(
+            old_school::probes::settle_binary_block_decision(
+                blocked, probe.state.active_player, block) &&
+                blocked.players[probe.root_player].life ==
+                    starting_life &&
+                blocked.players[0].creatures.empty() &&
+                std::count(
+                    blocked.players[0].graveyard.begin(),
+                    blocked.players[0].graveyard.end(),
+                    CardId::FlyingMen) == 1 &&
+                blocked.players[1].creatures.size() == 1 &&
+                blocked.players[1].creatures.front().tapped &&
+                blocked.players[1].creatures.front().damage == 1,
+            "Flying Men block branch has wrong factual "
+            "consequences");
+    }
+}
+
+void test_field_second_main_sick_bear_growth_consequences() {
+    const std::vector<DecisionProbe> fields =
+        old_school::probes::make_field_regressions_v1();
+    const DecisionProbe& probe = find_probe(
+        fields, Category::FieldGreenSecondMainSickBearGrowth);
+    const PriorityAction& growth = priority_candidate(
+        probe, "growth-own-summoning-sick-grizzly-bears");
+
+    GameState state = probe.state;
+    expect(old_school::apply_priority_action(
+               state, probe.root_player, growth, true),
+           "field sick-Bear Giant Growth failed to cast");
+    resolve_cast_spell(state);
+    expect(
+        state.players[0].hand.empty() &&
+            state.players[0].creatures.size() == 1 &&
+            state.players[0].creatures.front().summoning_sick &&
+            state.players[0]
+                    .creatures.front()
+                    .temporary_power_bonus == 3 &&
+            state.players[0]
+                    .creatures.front()
+                    .temporary_toughness_bonus == 3 &&
+            old_school::card_definition(
+                state.players[0].creatures.front().card)
+                        .power +
+                    state.players[0]
+                        .creatures.front()
+                        .temporary_power_bonus ==
+                5 &&
+            old_school::card_definition(
+                state.players[0].creatures.front().card)
+                        .toughness +
+                    state.players[0]
+                        .creatures.front()
+                        .temporary_toughness_bonus ==
+                5,
+        "resolved field Growth did not produce a sick 5/5 Bear");
+
+    GameState illegal_attack = state;
+    const PermanentId bear =
+        creature_id(illegal_attack, 0, CardId::GrizzlyBears);
+    expect(!old_school::resolve_combat(
+               illegal_attack, 0, {bear}, {}),
+           "summoning-sick field Bear was allowed to attack");
+
+    old_school::cleanup_turn(state, probe.root_player, {});
+    const auto& cleaned_bear = state.players[0].creatures.front();
+    const auto& bear_definition =
+        old_school::card_definition(cleaned_bear.card);
+    expect(
+        bear_definition.power +
+                    cleaned_bear.temporary_power_bonus ==
+                2 &&
+            bear_definition.toughness +
+                    cleaned_bear.temporary_toughness_bonus ==
+                2 &&
+            std::count(
+                state.players[0].graveyard.begin(),
+                state.players[0].graveyard.end(),
+                CardId::GiantGrowth) == 1,
+        "cleanup did not restore the Bear to 2/2 and retain the "
+        "spent Growth");
+}
+
+void test_field_growth_on_air_has_linked_attack_consequences() {
+    const std::vector<DecisionProbe> fields =
+        old_school::probes::make_field_regressions_v1();
+    const DecisionProbe& growth_probe = find_probe(
+        fields, Category::FieldGreenBeginCombatGrowthTappedAir);
+    const DecisionProbe& linked_attack = find_probe(
+        fields, Category::FieldGreenAttackAfterGrowthTappedAir);
+    const DecisionProbe& untapped_control = find_probe(
+        fields,
+        Category::FieldGreenAttackAfterGrowthUntappedAirControl);
+
+    GameState resolved = growth_probe.state;
+    expect(old_school::apply_priority_action(
+               resolved, growth_probe.root_player,
+               priority_candidate(
+                   growth_probe,
+                   "growth-opponent-tapped-air-elemental"),
+               false),
+           "field opponent-targeted Growth failed to cast");
+    resolve_cast_spell(resolved);
+    expect(
+        game_states_equal(resolved, linked_attack.state) &&
+            resolved.players[1].creatures.size() == 1 &&
+            resolved.players[1].creatures.front().tapped &&
+            resolved.players[1]
+                    .creatures.front()
+                    .temporary_power_bonus == 3 &&
+            resolved.players[1]
+                    .creatures.front()
+                    .temporary_toughness_bonus == 3,
+        "field attack fixture is not the exact resolved Growth "
+        "successor");
+
+    const PermanentId treefolk =
+        creature_id(linked_attack.state, 0, CardId::IronrootTreefolk);
+    GameState skipped = linked_attack.state;
+    expect(old_school::resolve_combat(skipped, 0, {}, {}) &&
+               skipped.players[1].life == 6,
+           "linked skip branch changed the opponent's life");
+    GameState attacked = linked_attack.state;
+    expect(old_school::resolve_combat(
+               attacked, 0, {treefolk}, {}) &&
+               attacked.players[1].life == 3,
+           "linked unblocked Treefolk did not deal three damage");
+
+    const PermanentId control_treefolk =
+        creature_id(untapped_control.state, 0,
+                    CardId::IronrootTreefolk);
+    const PermanentId control_air =
+        creature_id(untapped_control.state, 1,
+                    CardId::AirElemental);
+    GameState control_skip = untapped_control.state;
+    expect(old_school::resolve_combat(control_skip, 0, {}, {}) &&
+               control_skip.players[1].life == 6 &&
+               control_skip.players[0].creatures.size() == 1 &&
+               control_skip.players[1].creatures.size() == 1,
+           "untapped-Air skip control changed public resources");
+    GameState control_block = untapped_control.state;
+    expect(
+        old_school::resolve_combat(
+            control_block, 0, {control_treefolk},
+            {{control_treefolk, control_air}}) &&
+            control_block.players[1].life == 6 &&
+            control_block.players[0].creatures.empty() &&
+            control_block.players[1].creatures.size() == 1 &&
+            control_block.players[1].creatures.front().damage == 3,
+        "untapped grown Air Elemental did not legally eat the "
+        "Treefolk");
 }
 
 void test_harvested_validation_probe_is_reproducible_and_valid() {
@@ -2627,6 +2892,14 @@ int main() {
                test_ru_land_color_and_blocker_traces);
     runner.run("RU flying and Disintegrate traces",
                test_ru_flying_and_disintegrate_traces);
+    runner.run("reject-only field corpus validation",
+               test_field_regressions_are_separate_and_rules_valid);
+    runner.run("field RU chump-block consequences",
+               test_field_ru_chump_block_rules_consequences);
+    runner.run("field sick-Bear Growth consequences",
+               test_field_second_main_sick_bear_growth_consequences);
+    runner.run("field Growth and linked attack consequences",
+               test_field_growth_on_air_has_linked_attack_consequences);
     runner.run("harvested validation-v1 reproducibility",
                test_harvested_validation_probe_is_reproducible_and_valid);
     runner.run("harvested X=0 hold-versus-waste trace",

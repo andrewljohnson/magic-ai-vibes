@@ -8922,3 +8922,64 @@ An independent parser then reproduced the 276,387-byte size and SHA-256 above,
 found 3,904 sample rows covering 20 unique probes, exactly four probes per
 deck, 61 candidates, and exactly 64 unique sample indices per candidate. Every
 Q value was finite and in `[0,1]`; there were no duplicate or malformed rows.
+
+#### C17-J1 pre-fit contract clarifications
+
+Recorded after the mechanical controller/field-fixture implementation began
+but before that implementation was frozen, before the paired-artifact or
+evaluator implementation, and before any fit or reserved-seed use. These
+clarifications remove reporting and wiring ambiguities without changing a
+component, target, gate, or scientific hypothesis. `REVIEW.md` was reread
+through its 12:05 PDT countersignature first. It agrees with the component set
+and staged gates; its statement that the crown attempt is “running” is treated
+as a status overstatement because the raw shard seed remains unopened.
+
+- Stable best-set loss is counted per probe, not per candidate pair. A probe
+  is eligible when at least one reference-best candidate beats every candidate
+  outside `reference_best_set` under the existing stable-pair rule: absolute
+  common-world paired delta at least `0.03` and greater than `1.96` times its
+  paired standard error. A deployed policy agrees when its selected set
+  intersects `reference_best_set`. For each deck, count probes where control
+  agrees and treatment does not; gains do not offset losses. Treatment may
+  lose at most one such probe per deck.
+- The four frozen stable Blue cache probes are
+  `blue.counter-fire-elemental.v3`,
+  `blue.counter-lethal-bolt.v3`,
+  `blue.counter-war.v3`, and
+  `blue.force-spike-tapped-out-gray-ogre.v3`. Treatment must select a
+  reference-best action on all four. Separately,
+  `control.blue.force-spike-live-gray-ogre.v1` must uniquely select Force
+  Spike, while
+  `control.blue.force-spike-payable-gray-ogre.v1` must uniquely select Pass.
+- The paired common critic label is `ProbeLabel::reference_value`: the frozen
+  Actor reference's maximum candidate mean Q for that state. Both critics'
+  Brier, soft-log-loss, signed-bias, and ECE rows use that same label regardless
+  of which action either policy selects. The existing selected-action-Q
+  calibration metrics remain separately reported diagnostics and do not
+  substitute for this common-label gate.
+- The fixed direct panel is exactly seeds
+  `101, 202, 303, 404, 505, 606, 707, 808`, five repetitions of the 60-game
+  five-deck schedule per seed, with the frozen treatment at K8/H4, epsilon
+  zero, residual zero, PD0 on, `PublicStackPassV1`, and T800/S424242. This is
+  300 games per seed and 2,400 pooled. No seed may have fewer treatment wins
+  than losses. Pooled with the 2,040-game Handcoded primary, the final direct
+  sample is 4,440 games: 888 per challenger deck, 296 in each diagonal
+  challenger/baseline deck cell, and 148 in every off-diagonal cell.
+- The unchanged mixed field uses those same eight seeds. Per seed it runs 100
+  games for each of the ten distinct deck pairings, hence 1,000 physical games
+  per seed and 8,000 pooled. Each deck/policy receives 640 pooled seat records.
+  The 25 ordered pairings of Random, Monte Carlo K2, Deep Monte Carlo K8,
+  HandcodedPolicy, and frozen treatment K8/H4 are equally represented.
+  Per-seed lift is descriptive; the conjunctive gate is the pooled five-deck
+  result, where treatment's win-rate lift over Random must equal or exceed
+  every other policy's lift under the existing `1e-12` comparison tolerance.
+- The frozen spellings, with no aliases, are `--train-joint-c17`,
+  `--evaluate-joint-c17`, `learned-value-j1-control-c17`, and
+  `learned-value-j1-treatment-c17`. Benchmark/stability selection uses
+  `--challenger learned-value-j1-treatment-c17`. Both policy tokens load the
+  same bundle and enforce their serialized deployment metadata.
+- No-overwrite is a writer-level invariant.
+  `write_learned_joint_c17_artifact_atomic` must use atomic no-replace
+  publication, reject any existing file, directory, or symlink at the
+  destination, and leave existing bytes unchanged. A CLI precheck alone is
+  insufficient.

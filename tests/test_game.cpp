@@ -1321,8 +1321,15 @@ TEST(learned_defaults_to_value_search_champion) {
           old_school::LearnedVariant::ValueSearchChampion);
     CHECK(learned.value_continuation_epsilon == 0.0);
     CHECK(learned.value_priority_residual_weight == 0.0);
+    CHECK(learned.value_continuation_controller ==
+          old_school::LearnedContinuationController::Legacy);
     CHECK(old_school::LearnedSearchConfig{}
               .value_priority_residual_weight == 0.0);
+    CHECK(!old_school::LearnedSearchConfig{}
+               .value_pass_dominance);
+    CHECK(old_school::LearnedSearchConfig{}
+              .value_continuation_controller ==
+          old_school::LearnedContinuationController::Legacy);
     CHECK(old_school::bot_config_name(learned) == "Learned Value");
 
     const old_school::BotConfig actor = {
@@ -1330,6 +1337,106 @@ TEST(learned_defaults_to_value_search_champion) {
         .learned_variant = old_school::LearnedVariant::UnifiedActor,
     };
     CHECK(old_school::bot_config_name(actor) == "Learned Actor");
+}
+
+TEST(value_continuation_controller_rejects_every_non_value_policy) {
+    const std::array<old_school::BotConfig, 5> invalid = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Random,
+            .rollouts_per_action = 1,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::MonteCarlo,
+            .rollouts_per_action = 1,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::DeepMonteCarlo,
+            .rollouts_per_action = 1,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Handcrafted,
+            .rollouts_per_action = 1,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+            .learned_model = small_actor_model(),
+        },
+    };
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::Handcrafted,
+        .rollouts_per_action = 1,
+    };
+    for (const auto& challenger : invalid) {
+        CHECK(throws_with_text(
+            [&] {
+                static_cast<void>(
+                    old_school::run_bot_benchmark(
+                        1, 0xBAD0C017ULL,
+                        challenger, baseline));
+            },
+            "requires Learned Value"));
+    }
+
+    old_school::GameState state;
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::green_deck(),
+        old_school::red_deck(),
+    };
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_priority_action_samples(
+                    state, decks, 0, true,
+                    old_school::TurnPhase::FirstMain, 0,
+                    {old_school::PriorityAction::pass()},
+                    small_actor_model(),
+                    {
+                        .seed = 1,
+                        .continuation_variant =
+                            old_school::LearnedVariant::
+                                UnifiedActor,
+                        .value_continuation_controller =
+                            old_school::
+                                LearnedContinuationController::
+                                    PublicStackPassV1,
+                    }));
+        },
+        "requires a Value-mirror search"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_priority_action_samples(
+                    state, decks, 0, true,
+                    old_school::TurnPhase::FirstMain, 0,
+                    {old_school::PriorityAction::pass()},
+                    small_actor_model(),
+                    {
+                        .seed = 2,
+                        .continuation_variant =
+                            old_school::LearnedVariant::
+                                UnifiedActor,
+                        .value_pass_dominance = true,
+                    }));
+        },
+        "requires a Value-mirror search"));
 }
 
 TEST(value_continuation_epsilon_rejects_invalid_or_non_value_use) {
@@ -7958,6 +8065,120 @@ TEST(benchmark_policy_identity_includes_value_pass_dominance) {
     CHECK(!result.baseline.value_pass_dominance);
 }
 
+TEST(benchmark_policy_identity_includes_value_continuation_controller) {
+    const auto model = small_value_model();
+    const old_school::BotConfig control = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .training_games = 1,
+        .learned_model = model,
+    };
+    old_school::BotConfig treatment = control;
+    treatment.value_continuation_controller =
+        old_school::LearnedContinuationController::
+            PublicStackPassV1;
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+    bounded.learned_model = model;
+
+    const auto result = old_school::run_bot_benchmark(
+        1, 0xC0171D3A71ULL, treatment, control, bounded);
+    CHECK(result.total_games == 60);
+    CHECK(result.challenger.value_continuation_controller ==
+          old_school::LearnedContinuationController::
+              PublicStackPassV1);
+    CHECK(result.baseline.value_continuation_controller ==
+          old_school::LearnedContinuationController::Legacy);
+}
+
+TEST(value_continuation_controller_legacy_is_default_off_rng_identity) {
+    const auto model = small_value_model();
+    old_school::GameConfig implicit;
+    implicit.max_turns = 3;
+    implicit.starting_player = 0;
+    implicit.learned_model = model;
+    implicit.bots = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 1,
+            .learned_model = model,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 1,
+            .learned_model = model,
+        },
+    };
+    auto explicit_legacy = implicit;
+    for (auto& bot : explicit_legacy.bots) {
+        bot.value_continuation_controller =
+            old_school::LearnedContinuationController::Legacy;
+    }
+
+    old_school::Game implicit_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0xC0171DE4717EULL, implicit);
+    old_school::Game explicit_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0xC0171DE4717EULL, explicit_legacy);
+    CHECK(implicit_game.run() == explicit_game.run());
+    CHECK(implicit_game.state() == explicit_game.state());
+}
+
+TEST(public_stack_controller_does_not_change_real_root_policy) {
+    const auto model = small_value_model();
+    old_school::GameConfig legacy;
+    legacy.max_turns = 8;
+    legacy.starting_player = 0;
+    legacy.learned_model = model;
+    legacy.learned_search_depth = 0;
+    legacy.bots = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .learned_model = model,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .learned_model = model,
+        },
+    };
+    auto treatment = legacy;
+    for (auto& bot : treatment.bots) {
+        bot.value_continuation_controller =
+            old_school::LearnedContinuationController::
+                PublicStackPassV1;
+    }
+
+    old_school::Game legacy_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0xC017A007ULL, legacy);
+    old_school::Game treatment_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0xC017A007ULL, treatment);
+    CHECK(legacy_game.run() == treatment_game.run());
+    CHECK(legacy_game.state() == treatment_game.state());
+}
+
 TEST(value_pass_dominance_rejects_non_value_bots) {
     const std::array<old_school::BotConfig, 2> invalid = {
         old_school::BotConfig{
@@ -8570,6 +8791,320 @@ TEST(pass_dominance_filters_only_redundant_same_target_counter) {
     CHECK(counter_war_same_target.comparison_settled);
     CHECK(!counter_war_same_target
                .strictly_dominated_by_pass);
+}
+
+old_school::GameState continuation_counter_war_state(
+    std::size_t chooser) {
+    const std::size_t opponent = 1 - chooser;
+    old_school::GameState state;
+    state.active_player = opponent;
+    state.starting_player = opponent;
+    state.turn_number = 7;
+    state.next_stack_object_id = 3;
+    state.players[chooser].hand = {
+        old_school::CardId::Counterspell,
+    };
+    state.players[chooser].library = {
+        old_school::CardId::Island,
+        old_school::CardId::FlyingMen,
+    };
+    state.players[opponent].hand = {
+        old_school::CardId::Mountain,
+    };
+    state.players[opponent].library = {
+        old_school::CardId::LightningBolt,
+        old_school::CardId::Mountain,
+    };
+    state.players[chooser].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    state.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::FlyingMen,
+            .controller = chooser,
+        },
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 2,
+            .card = old_school::CardId::Counterspell,
+            .controller = opponent,
+            .spell_target = 1,
+        },
+    };
+    return state;
+}
+
+std::size_t spell_target_action_index(
+    const std::vector<old_school::PriorityAction>& actions,
+    old_school::StackObjectId target) {
+    const auto action = std::find_if(
+        actions.begin(), actions.end(),
+        [target](const old_school::PriorityAction& candidate) {
+            return candidate.spell_target == target;
+        });
+    if (action == actions.end()) {
+        throw std::runtime_error(
+            "fixture stack-target action is unavailable");
+    }
+    return static_cast<std::size_t>(
+        std::distance(actions.begin(), action));
+}
+
+TEST(public_stack_controller_prunes_only_own_targets_for_both_seats) {
+    constexpr auto controller =
+        old_school::LearnedContinuationController::
+            PublicStackPassV1;
+    constexpr std::uint64_t seed = 0xC017C017ULL;
+    for (const std::size_t chooser : {
+             std::size_t{0}, std::size_t{1}}) {
+        const auto state =
+            continuation_counter_war_state(chooser);
+        const auto actions =
+            old_school::legal_priority_actions(
+                state, chooser, false);
+        const std::size_t own_spell =
+            spell_target_action_index(actions, 1);
+        const std::size_t opposing_counter =
+            spell_target_action_index(actions, 2);
+        std::vector<double> scores(actions.size(), -1.0);
+        scores[priority_action_index(
+            actions,
+            old_school::PriorityActionKind::Pass)] = 0.0;
+        scores[own_spell] = 10.0;
+        scores[opposing_counter] = 5.0;
+
+        const auto treatment =
+            old_school::
+                diagnose_learned_value_continuation_controller(
+                    state, chooser, false,
+                    old_school::TurnPhase::FirstMain, 0,
+                    scores, controller, 0.0, seed);
+        CHECK(treatment.legal_actions == actions);
+        CHECK(treatment.controller_pruned_actions.size() == 1);
+        CHECK(treatment.controller_pruned_actions.front() ==
+              actions[own_spell]);
+        CHECK(has_action(
+            treatment.retained_actions,
+            actions[opposing_counter]));
+        CHECK(treatment.selected_action ==
+              actions[opposing_counter]);
+
+        const auto hidden =
+            old_school::
+                diagnose_learned_value_continuation_controller(
+                    hidden_repartition(state, chooser),
+                    chooser, false,
+                    old_school::TurnPhase::FirstMain, 0,
+                    scores, controller, 0.0, seed);
+        CHECK(hidden == treatment);
+
+        const auto legacy =
+            old_school::
+                diagnose_learned_value_continuation_controller(
+                    state, chooser, false,
+                    old_school::TurnPhase::FirstMain, 0,
+                    scores,
+                    old_school::
+                        LearnedContinuationController::Legacy,
+                    0.0, seed);
+        CHECK(legacy.controller_pruned_actions.empty());
+        CHECK(legacy.retained_actions == legacy.legal_actions);
+        CHECK(legacy.selected_action == actions[own_spell]);
+    }
+}
+
+TEST(public_stack_controller_applies_pd0_before_stack_pruning) {
+    old_school::GameState state;
+    state.active_player = 1;
+    state.starting_player = 1;
+    state.turn_number = 7;
+    state.next_stack_object_id = 3;
+    state.players[0].hand = {
+        old_school::CardId::Counterspell,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    state.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::AirElemental,
+            .controller = 1,
+        },
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 2,
+            .card = old_school::CardId::Counterspell,
+            .controller = 0,
+            .spell_target = 1,
+        },
+    };
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, false);
+    std::vector<double> scores(actions.size(), 0.0);
+    const auto diagnostic =
+        old_school::
+            diagnose_learned_value_continuation_controller(
+                state, 0, false,
+                old_school::TurnPhase::FirstMain, 0,
+                scores,
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+                0.0, 0x504430C017ULL, true);
+    CHECK(diagnostic.pass_dominated_actions.size() == 1);
+    CHECK(diagnostic.pass_dominated_actions.front().spell_target ==
+          1);
+    CHECK(diagnostic.controller_pruned_actions.size() == 1);
+    CHECK(diagnostic.controller_pruned_actions.front().spell_target ==
+          2);
+    CHECK(diagnostic.retained_actions.size() == 1);
+    CHECK(diagnostic.retained_actions.front().kind ==
+          old_school::PriorityActionKind::Pass);
+    CHECK(diagnostic.selected_action.kind ==
+          old_school::PriorityActionKind::Pass);
+}
+
+TEST(public_stack_controller_prefers_exact_pass_argmax_and_bounds_exploration) {
+    const auto state = continuation_counter_war_state(0);
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, false);
+    const std::size_t pass = priority_action_index(
+        actions, old_school::PriorityActionKind::Pass);
+    const std::size_t own_spell =
+        spell_target_action_index(actions, 1);
+    const std::size_t opposing_counter =
+        spell_target_action_index(actions, 2);
+    constexpr auto controller =
+        old_school::LearnedContinuationController::
+            PublicStackPassV1;
+
+    std::vector<double> tied(actions.size(), -1.0);
+    tied[pass] = 4.0;
+    tied[own_spell] = 100.0;
+    tied[opposing_counter] = 4.0;
+    const auto exact_tie =
+        old_school::
+            diagnose_learned_value_continuation_controller(
+                state, 0, false,
+                old_school::TurnPhase::FirstMain, 0,
+                tied, controller, 0.0, 0x71EULL);
+    CHECK(exact_tie.selected_action.kind ==
+          old_school::PriorityActionKind::Pass);
+    CHECK(!exact_tie.explored);
+    CHECK(!exact_tie.tie_break_path_used);
+
+    auto unique_non_pass = tied;
+    unique_non_pass[opposing_counter] = 5.0;
+    const auto unique =
+        old_school::
+            diagnose_learned_value_continuation_controller(
+                state, 0, false,
+                old_school::TurnPhase::FirstMain, 0,
+                unique_non_pass, controller, 0.0, 0x71EULL);
+    CHECK(unique.selected_action == actions[opposing_counter]);
+    CHECK(!unique.explored);
+    CHECK(unique.tie_break_path_used);
+
+    bool saw_pass = false;
+    bool saw_opposing_counter = false;
+    for (std::uint64_t seed = 1; seed <= 128; ++seed) {
+        const auto exploratory =
+            old_school::
+                diagnose_learned_value_continuation_controller(
+                    state, 0, false,
+                    old_school::TurnPhase::FirstMain, 0,
+                    tied, controller, 1.0, seed);
+        CHECK(exploratory.explored);
+        CHECK(exploratory.selected_legal_index != own_spell);
+        saw_pass =
+            saw_pass ||
+            exploratory.selected_legal_index == pass;
+        saw_opposing_counter =
+            saw_opposing_counter ||
+            exploratory.selected_legal_index ==
+                opposing_counter;
+    }
+    CHECK(saw_pass);
+    CHECK(saw_opposing_counter);
+}
+
+TEST(public_stack_controller_retains_live_and_payable_force_spike) {
+    for (const bool payable : {false, true}) {
+        old_school::GameState state;
+        state.active_player = 1;
+        state.turn_number = 6;
+        state.next_stack_object_id = 2;
+        state.players[0].hand = {
+            old_school::CardId::ForceSpike,
+        };
+        state.players[0].lands = {
+            {.card = old_school::CardId::Island,
+             .tapped = false},
+        };
+        state.players[1].lands = {
+            {.card = old_school::CardId::Mountain,
+             .tapped = !payable},
+        };
+        state.stack = {
+            {
+                .kind = old_school::StackObjectKind::Spell,
+                .id = 1,
+                .card = old_school::CardId::GrayOgre,
+                .controller = 1,
+            },
+        };
+        const auto actions =
+            old_school::legal_priority_actions(
+                state, 0, false);
+        const std::size_t force_spike =
+            spell_target_action_index(actions, 1);
+        std::vector<double> scores(actions.size(), 0.0);
+        scores[force_spike] = 1.0;
+        const auto diagnostic =
+            old_school::
+                diagnose_learned_value_continuation_controller(
+                    state, 0, false,
+                    old_school::TurnPhase::FirstMain, 0,
+                    scores,
+                    old_school::
+                        LearnedContinuationController::
+                            PublicStackPassV1,
+                    0.0, 0xF05CEULL, true);
+        CHECK(diagnostic.controller_pruned_actions.empty());
+        CHECK(has_action(
+            diagnostic.retained_actions,
+            actions[force_spike]));
+        CHECK(diagnostic.selected_action ==
+              actions[force_spike]);
+
+        auto resolved = state;
+        CHECK(old_school::apply_priority_action(
+            resolved, 0, actions[force_spike], false));
+        old_school::PriorityState priority = {
+            .player = 0,
+            .consecutive_passes = 0,
+        };
+        CHECK(old_school::pass_priority(resolved, priority) ==
+              old_school::PriorityPassResult::Passed);
+        CHECK(old_school::pass_priority(resolved, priority) ==
+              old_school::PriorityPassResult::
+                  StackObjectResolved);
+        if (payable) {
+            CHECK(resolved.stack.size() == 1);
+            CHECK(resolved.stack.back().id == 1);
+            CHECK(resolved.players[1].lands.front().tapped);
+        } else {
+            CHECK(resolved.stack.empty());
+            CHECK(count_card(
+                resolved.players[1].graveyard,
+                old_school::CardId::GrayOgre) == 1);
+        }
+    }
 }
 
 old_school::HumanController developing_human_controller() {

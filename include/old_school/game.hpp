@@ -531,6 +531,11 @@ enum class LearnedVariant : std::uint8_t {
     UnifiedActor,
 };
 
+enum class LearnedContinuationController : std::uint8_t {
+    Legacy,
+    PublicStackPassV1,
+};
+
 inline constexpr std::size_t kBotKindCount = 5;
 inline constexpr std::size_t kBotMatchupCount =
     kBotKindCount * (kBotKindCount - 1) / 2;
@@ -563,6 +568,11 @@ struct BotConfig {
     // choices. It changes neither legal actions nor any other policy. False
     // preserves the historical selector and RNG stream bit-for-bit.
     bool value_pass_dominance = false;
+    // Versioned, continuation-only controller for Learned Value. Legacy is
+    // the exact historical behavior. PublicStackPassV1 is applied only in
+    // depth-zero Value-mirror continuations, never at a real root.
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy;
     std::size_t training_games = 800;
     // Optional per-seat frozen model. This permits a paired benchmark between
     // two Learned variants without sharing or silently retraining a model.
@@ -726,6 +736,13 @@ struct LearnedSearchConfig {
     // Value-mirror continuation seats. It is invalid for Unified Actor
     // continuations.
     double value_priority_residual_weight = 0.0;
+    // Applied only inside depth-zero Value-mirror continuations. The
+    // evaluated root candidates remain the caller's explicit list.
+    bool value_pass_dominance = false;
+    // Propagated symmetrically to depth-zero Value-mirror continuation seats.
+    // The evaluated root remains outside this controller.
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy;
     // Evaluation-only Priority-sampler worker count. One preserves the
     // historical serial execution path exactly. Values above one may
     // evaluate independent, preindexed candidate/world/rollout cells
@@ -821,6 +838,35 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     std::size_t rollouts_per_action, std::uint64_t seed,
     double value_continuation_epsilon = 0.0,
     double value_priority_residual_weight = 0.0,
+    bool value_pass_dominance = false,
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy);
+
+// Evaluation-only seam for the continuation controller. `scores` follows
+// `legal_actions` order and is otherwise opaque to the controller.
+struct LearnedContinuationControllerDiagnostic {
+    std::vector<PriorityAction> legal_actions;
+    std::vector<PriorityAction> pass_dominated_actions;
+    std::vector<PriorityAction> controller_pruned_actions;
+    std::vector<PriorityAction> retained_actions;
+    std::vector<double> scores;
+    bool explored = false;
+    bool tie_break_path_used = false;
+    std::size_t selected_legal_index = 0;
+    PriorityAction selected_action;
+
+    bool operator==(
+        const LearnedContinuationControllerDiagnostic&) const =
+        default;
+};
+
+LearnedContinuationControllerDiagnostic
+diagnose_learned_value_continuation_controller(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<double>& scores,
+    LearnedContinuationController controller,
+    double exploration_rate, std::uint64_t seed,
     bool value_pass_dominance = false);
 
 // Evaluation-only decomposition of the bounded Value Priority residual.
@@ -933,7 +979,9 @@ class Game {
         std::size_t rollouts_per_action, std::uint64_t seed,
         double value_continuation_epsilon,
         double value_priority_residual_weight,
-        bool value_pass_dominance);
+        bool value_pass_dominance,
+        LearnedContinuationController
+            value_continuation_controller);
     friend LearnedActionSamples learned_priority_action_samples(
         const GameState& state,
         const std::array<std::vector<CardId>, 2>& original_decks,
@@ -1043,6 +1091,11 @@ class Game {
     bool has_human_observer() const;
     void notify_human_observers(const GameEvent& event) const;
 
+    enum class LearnedDecisionRole : std::uint8_t {
+        RealRoot,
+        ValueContinuation,
+    };
+
     std::array<std::vector<CardId>, 2> decks_;
     std::mt19937_64 random_;
     GameConfig config_;
@@ -1053,6 +1106,8 @@ class Game {
         learned_decision_trace_ = nullptr;
     LearnedDecisionTraceMode learned_decision_trace_mode_ =
         LearnedDecisionTraceMode::Sparse;
+    LearnedDecisionRole learned_decision_role_ =
+        LearnedDecisionRole::RealRoot;
 };
 
 struct DeckSimulationStats {

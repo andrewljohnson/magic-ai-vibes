@@ -14,6 +14,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <numeric>
 #include <span>
 #include <stdexcept>
 #include <system_error>
@@ -239,11 +240,24 @@ void validate_value_priority_residual_weight(double weight) {
     }
 }
 
+void validate_value_continuation_controller(
+    LearnedContinuationController controller) {
+    switch (controller) {
+    case LearnedContinuationController::Legacy:
+    case LearnedContinuationController::PublicStackPassV1:
+        return;
+    }
+    throw std::invalid_argument(
+        "unknown Learned Value continuation controller");
+}
+
 void validate_bot_research_config(const BotConfig& bot) {
     validate_value_continuation_epsilon(
         bot.value_continuation_epsilon);
     validate_value_priority_residual_weight(
         bot.value_priority_residual_weight);
+    validate_value_continuation_controller(
+        bot.value_continuation_controller);
     if (bot.value_continuation_epsilon != 0.0 &&
         (bot.kind != BotKind::Learned ||
          bot.learned_variant !=
@@ -264,6 +278,14 @@ void validate_bot_research_config(const BotConfig& bot) {
              LearnedVariant::ValueSearchChampion)) {
         throw std::invalid_argument(
             "Value Pass dominance requires Learned Value");
+    }
+    if (bot.value_continuation_controller !=
+            LearnedContinuationController::Legacy &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion)) {
+        throw std::invalid_argument(
+            "Value continuation controller requires Learned Value");
     }
 }
 
@@ -10037,6 +10059,127 @@ value_pass_dominance_for_actions(
     return diagnostic;
 }
 
+std::vector<std::size_t>
+public_stack_controller_retained_indices(
+    const GameState& state, std::size_t player,
+    const std::vector<PriorityAction>& actions,
+    const std::vector<std::size_t>& input_indices,
+    LearnedContinuationController controller) {
+    validate_value_continuation_controller(controller);
+    if (controller == LearnedContinuationController::Legacy) {
+        return input_indices;
+    }
+
+    std::vector<std::size_t> retained;
+    retained.reserve(input_indices.size());
+    for (const std::size_t index : input_indices) {
+        if (index >= actions.size()) {
+            throw std::out_of_range(
+                "continuation controller action index is invalid");
+        }
+        const PriorityAction& action = actions[index];
+        bool targets_own_public_stack_object = false;
+        if (action.spell_target.has_value()) {
+            const auto object = std::find_if(
+                state.stack.begin(), state.stack.end(),
+                [&](const StackObject& candidate) {
+                    return candidate.id == *action.spell_target;
+                });
+            targets_own_public_stack_object =
+                object != state.stack.end() &&
+                object->controller == player;
+        }
+        if (!targets_own_public_stack_object ||
+            action.kind == PriorityActionKind::Pass) {
+            retained.push_back(index);
+        }
+    }
+    return retained;
+}
+
+struct ValueContinuationSelection {
+    std::size_t index = 0;
+    bool explored = false;
+    bool tie_break_path_used = false;
+};
+
+std::optional<ValueContinuationSelection>
+sample_value_continuation_exploration(
+    const std::vector<std::size_t>& retained,
+    double exploration_rate, std::mt19937_64& random) {
+    validate_value_continuation_epsilon(exploration_rate);
+    if (retained.empty()) {
+        throw std::logic_error(
+            "continuation controller removed every action");
+    }
+    if (exploration_rate == 0.0) {
+        return std::nullopt;
+    }
+    std::bernoulli_distribution explore(exploration_rate);
+    if (!explore(random)) {
+        return std::nullopt;
+    }
+    std::uniform_int_distribution<std::size_t> choose_action(
+        0, retained.size() - 1);
+    return ValueContinuationSelection{
+        .index = retained[choose_action(random)],
+        .explored = true,
+        .tie_break_path_used = false,
+    };
+}
+
+ValueContinuationSelection
+choose_value_continuation_greedy(
+    const std::vector<PriorityAction>& actions,
+    const std::vector<double>& scores,
+    const std::vector<std::size_t>& retained,
+    bool prefer_exact_argmax_pass, std::mt19937_64& random) {
+    if (actions.size() != scores.size()) {
+        throw std::invalid_argument(
+            "continuation controller score count must match actions");
+    }
+    if (retained.empty()) {
+        throw std::logic_error(
+            "continuation controller removed every action");
+    }
+    double best = -std::numeric_limits<double>::infinity();
+    for (const std::size_t index : retained) {
+        if (index >= actions.size()) {
+            throw std::out_of_range(
+                "continuation controller action index is invalid");
+        }
+        best = std::max(best, scores[index]);
+    }
+    std::vector<std::size_t> best_actions;
+    for (const std::size_t index : retained) {
+        if (scores[index] == best) {
+            best_actions.push_back(index);
+        }
+    }
+    if (prefer_exact_argmax_pass) {
+        const auto pass = std::find_if(
+            best_actions.begin(), best_actions.end(),
+            [&](std::size_t index) {
+                return actions[index].kind ==
+                       PriorityActionKind::Pass;
+            });
+        if (pass != best_actions.end()) {
+            return {
+                .index = *pass,
+                .explored = false,
+                .tie_break_path_used = false,
+            };
+        }
+    }
+    std::uniform_int_distribution<std::size_t> break_tie(
+        0, best_actions.size() - 1);
+    return {
+        .index = best_actions[break_tie(random)],
+        .explored = false,
+        .tie_break_path_used = true,
+    };
+}
+
 } // namespace
 
 std::vector<PriorityAction>
@@ -10066,6 +10209,96 @@ ValuePassDominanceDiagnostic diagnose_value_pass_dominance(
         state, player, sorcery_actions, phase,
         consecutive_passes,
         legal_priority_actions(state, player, sorcery_actions));
+}
+
+LearnedContinuationControllerDiagnostic
+diagnose_learned_value_continuation_controller(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<double>& scores,
+    LearnedContinuationController controller,
+    double exploration_rate, std::uint64_t seed,
+    bool value_pass_dominance) {
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "continuation controller player must be 0 or 1");
+    }
+    if (consecutive_passes < 0 || consecutive_passes > 1) {
+        throw std::out_of_range(
+            "continuation controller pass count must be zero or one");
+    }
+    validate_value_continuation_epsilon(exploration_rate);
+    validate_value_continuation_controller(controller);
+
+    LearnedContinuationControllerDiagnostic diagnostic;
+    diagnostic.legal_actions =
+        legal_priority_actions(state, player, sorcery_actions);
+    if (scores.size() != diagnostic.legal_actions.size()) {
+        throw std::invalid_argument(
+            "continuation controller score count must match legal actions");
+    }
+    diagnostic.scores = scores;
+
+    std::vector<std::size_t> retained(
+        diagnostic.legal_actions.size());
+    std::iota(retained.begin(), retained.end(), 0);
+    if (value_pass_dominance) {
+        const auto dominance =
+            value_pass_dominance_for_actions(
+                state, player, sorcery_actions, phase,
+                consecutive_passes, diagnostic.legal_actions);
+        retained.clear();
+        for (std::size_t index = 0;
+             index < dominance.actions.size(); ++index) {
+            if (dominance.actions[index]
+                    .strictly_dominated_by_pass) {
+                diagnostic.pass_dominated_actions.push_back(
+                    dominance.actions[index].action);
+            } else {
+                retained.push_back(index);
+            }
+        }
+    }
+    const auto controller_retained =
+        public_stack_controller_retained_indices(
+            state, player, diagnostic.legal_actions, retained,
+            controller);
+    for (const std::size_t index : retained) {
+        if (std::find(
+                controller_retained.begin(),
+                controller_retained.end(), index) ==
+            controller_retained.end()) {
+            diagnostic.controller_pruned_actions.push_back(
+                diagnostic.legal_actions[index]);
+        }
+    }
+    for (const std::size_t index : controller_retained) {
+        diagnostic.retained_actions.push_back(
+            diagnostic.legal_actions[index]);
+    }
+
+    std::mt19937_64 random(seed);
+    ValueContinuationSelection selection;
+    if (const auto exploration =
+            sample_value_continuation_exploration(
+                controller_retained, exploration_rate, random);
+        exploration.has_value()) {
+        selection = *exploration;
+    } else {
+        selection = choose_value_continuation_greedy(
+            diagnostic.legal_actions, scores,
+            controller_retained,
+            controller ==
+                LearnedContinuationController::PublicStackPassV1,
+            random);
+    }
+    diagnostic.explored = selection.explored;
+    diagnostic.tie_break_path_used =
+        selection.tie_break_path_used;
+    diagnostic.selected_legal_index = selection.index;
+    diagnostic.selected_action =
+        diagnostic.legal_actions[selection.index];
+    return diagnostic;
 }
 
 std::size_t advance_turn_player(GameState& state) {
@@ -11020,7 +11253,43 @@ PriorityAction Game::choose_priority_action(
             }
         }
 
-        if (bot.exploration_rate > 0.0) {
+        const bool continuation_controller_active =
+            learned_decision_role_ ==
+                LearnedDecisionRole::ValueContinuation &&
+            bot.value_continuation_controller ==
+                LearnedContinuationController::PublicStackPassV1;
+        std::vector<std::size_t>
+            continuation_controller_retained;
+        if (continuation_controller_active) {
+            if (bot.value_pass_dominance) {
+                continuation_controller_retained =
+                    public_stack_controller_retained_indices(
+                        state_, player, actions,
+                        pass_dominance_retained,
+                        bot.value_continuation_controller);
+            } else {
+                std::vector<std::size_t> all(actions.size());
+                std::iota(all.begin(), all.end(), 0);
+                continuation_controller_retained =
+                    public_stack_controller_retained_indices(
+                        state_, player, actions, all,
+                        bot.value_continuation_controller);
+            }
+            if (continuation_controller_retained.empty()) {
+                throw std::logic_error(
+                    "continuation controller removed every action");
+            }
+        }
+
+        if (continuation_controller_active) {
+            if (const auto exploration =
+                    sample_value_continuation_exploration(
+                        continuation_controller_retained,
+                        bot.exploration_rate, random_);
+                exploration.has_value()) {
+                return actions[exploration->index];
+            }
+        } else if (bot.exploration_rate > 0.0) {
             std::bernoulli_distribution explore(
                 bot.exploration_rate);
             if (explore(random_)) {
@@ -11061,6 +11330,14 @@ PriorityAction Game::choose_priority_action(
         std::vector<double> scores(actions.size(), 0.0);
         for (std::size_t action_index = 0;
              action_index < actions.size(); ++action_index) {
+            if (continuation_controller_active &&
+                std::find(
+                    continuation_controller_retained.begin(),
+                    continuation_controller_retained.end(),
+                    action_index) ==
+                    continuation_controller_retained.end()) {
+                continue;
+            }
             if (bot.value_pass_dominance &&
                 std::find(
                     pass_dominance_retained.begin(),
@@ -11097,7 +11374,9 @@ PriorityAction Game::choose_priority_action(
         }
         if (root_search) {
             state_.stats[player].monte_carlo_rollouts +=
-                (bot.value_pass_dominance
+                (continuation_controller_active
+                     ? continuation_controller_retained.size()
+                 : bot.value_pass_dominance
                      ? pass_dominance_retained.size()
                      : actions.size()) *
                 bot.rollouts_per_action;
@@ -11113,6 +11392,15 @@ PriorityAction Game::choose_priority_action(
                  index < scores.size(); ++index) {
                 scores[index] += residual.residuals[index];
             }
+        }
+
+        if (continuation_controller_active) {
+            const auto selection =
+                choose_value_continuation_greedy(
+                    actions, scores,
+                    continuation_controller_retained, true,
+                    random_);
+            return actions[selection.index];
         }
 
         if (bot.value_pass_dominance) {
@@ -11579,6 +11867,8 @@ double Game::learned_value_search_action_score(
     simulation.config_.human_controllers = {};
     simulation.config_.learned_policy_recorder.reset();
     simulation.config_.learned_search_depth = 0;
+    simulation.learned_decision_role_ =
+        LearnedDecisionRole::ValueContinuation;
     simulation.config_.bots = {
         BotConfig{
             .kind = BotKind::Learned,
@@ -11593,6 +11883,9 @@ double Game::learned_value_search_action_score(
                     .value_priority_residual_weight,
             .value_pass_dominance =
                 config_.bots[player].value_pass_dominance,
+            .value_continuation_controller =
+                config_.bots[player]
+                    .value_continuation_controller,
             .learned_model = root_model,
         },
         BotConfig{
@@ -11608,6 +11901,9 @@ double Game::learned_value_search_action_score(
                     .value_priority_residual_weight,
             .value_pass_dominance =
                 config_.bots[player].value_pass_dominance,
+            .value_continuation_controller =
+                config_.bots[player]
+                    .value_continuation_controller,
             .learned_model = root_model,
         },
     };
@@ -17691,6 +17987,8 @@ void validate_search_config(
         config.value_continuation_epsilon);
     validate_value_priority_residual_weight(
         config.value_priority_residual_weight);
+    validate_value_continuation_controller(
+        config.value_continuation_controller);
     if (config.value_continuation_epsilon != 0.0 &&
         config.continuation_variant !=
             LearnedVariant::ValueSearchChampion) {
@@ -17702,6 +18000,19 @@ void validate_search_config(
             LearnedVariant::ValueSearchChampion) {
         throw std::invalid_argument(
             "Value Priority residual requires a Value-mirror search");
+    }
+    if (config.value_pass_dominance &&
+        config.continuation_variant !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Value Pass dominance requires a Value-mirror search");
+    }
+    if (config.value_continuation_controller !=
+            LearnedContinuationController::Legacy &&
+        config.continuation_variant !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Value continuation controller requires a Value-mirror search");
     }
     if (config.worlds == 0 ||
         config.worlds > kMaximumEvaluationWorlds) {
@@ -17781,7 +18092,10 @@ GameConfig learned_evaluation_game_config(
     const std::shared_ptr<const LearnedModel>& model,
     LearnedVariant variant,
     double value_continuation_epsilon,
-    double value_priority_residual_weight) {
+    double value_priority_residual_weight,
+    bool value_pass_dominance,
+    LearnedContinuationController
+        value_continuation_controller) {
     GameConfig config;
     config.learned_model = model;
     config.learned_search_depth = 0;
@@ -17794,6 +18108,10 @@ GameConfig learned_evaluation_game_config(
                 value_continuation_epsilon,
             .value_priority_residual_weight =
                 value_priority_residual_weight,
+            .value_pass_dominance =
+                value_pass_dominance,
+            .value_continuation_controller =
+                value_continuation_controller,
             .learned_model = model,
         },
         BotConfig{
@@ -17804,6 +18122,10 @@ GameConfig learned_evaluation_game_config(
                 value_continuation_epsilon,
             .value_priority_residual_weight =
                 value_priority_residual_weight,
+            .value_pass_dominance =
+                value_pass_dominance,
+            .value_continuation_controller =
+                value_continuation_controller,
             .learned_model = model,
         },
     };
@@ -17868,7 +18190,9 @@ LearnedActionSamples learned_priority_action_samples(
         learned_evaluation_game_config(
             model, config.continuation_variant,
             config.value_continuation_epsilon,
-            config.value_priority_residual_weight));
+            config.value_priority_residual_weight,
+            config.value_pass_dominance,
+            config.value_continuation_controller));
     evaluator.state_ = state;
 
     LearnedActionSamples result;
@@ -17893,6 +18217,11 @@ LearnedActionSamples learned_priority_action_samples(
         simulation.learned_decision_trace_ = nullptr;
         simulation.config_.learned_policy_recorder.reset();
         simulation.config_.learned_search_depth = 0;
+        if (config.continuation_variant ==
+            LearnedVariant::ValueSearchChampion) {
+            simulation.learned_decision_role_ =
+                Game::LearnedDecisionRole::ValueContinuation;
+        }
 
         const double shallow_prior =
             config.blend_shallow_prior
@@ -18082,7 +18411,9 @@ LearnedActionSamples learned_binary_attack_samples(
         learned_evaluation_game_config(
             model, config.continuation_variant,
             config.value_continuation_epsilon,
-            config.value_priority_residual_weight));
+            config.value_priority_residual_weight,
+            config.value_pass_dominance,
+            config.value_continuation_controller));
     evaluator.state_ = state;
 
     LearnedActionSamples result;
@@ -18108,6 +18439,12 @@ LearnedActionSamples learned_binary_attack_samples(
                 simulation.learned_decision_trace_ = nullptr;
                 simulation.config_.learned_policy_recorder.reset();
                 simulation.config_.learned_search_depth = 0;
+                if (config.continuation_variant ==
+                    LearnedVariant::ValueSearchChampion) {
+                    simulation.learned_decision_role_ =
+                        Game::LearnedDecisionRole::
+                            ValueContinuation;
+                }
 
                 std::vector<PermanentId> attackers =
                     selected_attackers;
@@ -18563,7 +18900,9 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     std::size_t rollouts_per_action, std::uint64_t seed,
     double value_continuation_epsilon,
     double value_priority_residual_weight,
-    bool value_pass_dominance) {
+    bool value_pass_dominance,
+    LearnedContinuationController
+        value_continuation_controller) {
     if (!model) {
         throw std::invalid_argument(
             "Learned Value diagnostic requires a frozen model");
@@ -18580,6 +18919,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
         value_continuation_epsilon);
     validate_value_priority_residual_weight(
         value_priority_residual_weight);
+    validate_value_continuation_controller(
+        value_continuation_controller);
 
     GameConfig config;
     config.learned_model = model;
@@ -18596,6 +18937,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .value_priority_residual_weight =
                 value_priority_residual_weight,
             .value_pass_dominance = value_pass_dominance,
+            .value_continuation_controller =
+                value_continuation_controller,
             .learned_model = model,
         },
         BotConfig{
@@ -18608,6 +18951,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .value_priority_residual_weight =
                 value_priority_residual_weight,
             .value_pass_dominance = value_pass_dominance,
+            .value_continuation_controller =
+                value_continuation_controller,
             .learned_model = model,
         },
     };
@@ -18985,6 +19330,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
               baseline.value_priority_residual_weight &&
           challenger.value_pass_dominance ==
               baseline.value_pass_dominance &&
+          challenger.value_continuation_controller ==
+              baseline.value_continuation_controller &&
           !distinct_explicit_models));
     if (same_policy &&
         challenger.rollouts_per_action ==
