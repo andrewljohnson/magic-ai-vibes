@@ -6235,3 +6235,53 @@ seed `202607260219`. Await VC-1v3 before preregistering a target-distance
 challenger. If it transfers, isolate the label distance with same-shard
 TD4-C17 and TD8-C17 siblings rather than confounding a TD8 C17 treatment with
 an extra generation.
+
+### Certification v4 pooled-direct metrology correction (declared)
+
+Declared after the valid C16 rejection was committed. This changes future
+certification measurement only; it does not reinterpret or rerun the v3 C16
+result, change a bot, or relax any five-deck acceptance requirement.
+
+Hypothesis: pooling the two already-predeclared, exact direct matrices will
+make the per-deck sign gate more credible and eliminate premature rejection
+caused solely by an underpowered standalone deck slice. The primary matrix
+contains 34 repetitions (2,040 games; 408 per challenger deck), and the fixed
+eight-seed panel contains 40 repetitions (2,400 games; 480 per challenger
+deck). Their component-wise sum must contain exactly 74 repetitions:
+
+- 296 games in every diagonal cell and 148 in every off-diagonal cell;
+- 888 games for each of Green, Red, Blue, White, and RU Aggro;
+- 4,440 games in aggregate.
+
+Certification schema v4 will retain all existing parsing and integrity
+checks, but separate standalone diagnostics from promotion evidence:
+
+1. The 2,040-game primary remains an early large-regression screen. Its
+   aggregate win rate and Wilson 95% lower bound must both exceed 50%.
+2. If that aggregate screen passes, a primary CLI rejection caused only by a
+   standalone 408-game deck sign will not stop collection of the fixed panel.
+   Its exit code must still agree with the CLI's own stricter printed verdict.
+3. The fixed panel must still have no losing evaluation seed and Learned must
+   still have the largest lift over Random on all five decks. Its standalone
+   480-game deck signs and Wilson interval remain reported diagnostics rather
+   than separate vetoes.
+4. The two exact matrices are then summed cell by cell. The combined
+   4,440-game aggregate win rate and Wilson lower bound must exceed 50%, and
+   Learned must have strictly more direct wins than Handcrafted for every one
+   of the five 888-game challenger-deck marginals.
+5. Tests, release/sanitizer gates, load-only artifact identity, hidden-info
+   rules, fixed seeds, and every source/toolchain integrity check remain
+   mandatory.
+
+This is not threshold weakening: the all-five direct requirement remains
+strict, but is applied once to all prespecified direct evidence instead of
+twice to smaller noisy slices. The implementation must cross-check every
+combined cell, row, column, and aggregate; reject ties, losses, Wilson
+failures, tampering, and CLI exit-code contradictions; bump the report schema;
+and preserve both standalone matrices in the report. It must not change the
+simulator commands.
+
+No evaluation seed is claimed by this declaration. After implementation,
+focused tests, complete integration tests, and a committed source snapshot,
+any certification using v4 requires a new repository-searched virgin primary
+seed. Seeds `11235813` and `202607260219` remain permanently consumed.
