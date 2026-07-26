@@ -8464,3 +8464,97 @@ been invoked and no reserved-prefix file exists. Its substantive conclusion
 that the declaration is frozen and has no blocker agrees with the independent
 code review. The next action remains exactly the single `capture_once` command
 declared above.
+
+#### Fresh-seed sealed result: scientifically rejected
+
+The one-shot audit ran 2026-07-26 from committed source `d2e48e4` after
+rereading `REVIEW.md` through its 11:17 PDT freeze cycle. The exact command
+was:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/rb0-0-sealed-audit-repaired-s202607261047 \
+  ./build/old-school-sim --audit-replay-weights
+```
+
+The route completed all four declared captures and exited `1`, a complete
+scientific rejection. It did not exit `2`. Each capture contained 2,400
+physical games, 4,800 actor perspectives, and 129,384 rows. The run took
+552.48 seconds wall time (`user 1231.81`, `sys 5.67`).
+
+The immutable 133,086-byte transcript is
+`build/experiments/rb0-0-sealed-audit-repaired-s202607261047.complete.txt`.
+Its independently recomputed SHA-256 is
+`ad73a062085e16c68cd3babd52e06c71064a73842e1e515d86590653bc6092fa`,
+exactly matching the sidecar; the exit sidecar contains `1`.
+
+Configuration and evidence were complete. The report bound exact C16 parent
+fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+seed/generation/blocks `202607261047/20/60`, and all five decks at 960
+actor-games each. Global treatment mass was exactly 129,384, with all
+global/actor/turn identities passing. Schedule, eligible coverage,
+early-Green positive control, Kish ESS, trace/RO4/tail mechanics, hidden
+repartition (125,873 changed states), hidden grouping/target/weight/scoring
+hashes, repeat/reverse/worker equality, and artifact identity all passed. The
+artifact's path, 3,111,437-byte size, modification time, and external SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`
+were independently unchanged before and after.
+
+The primary mechanism prediction passed. On 2,956 RO4-eligible early-Green
+rows from 960 actor-games:
+
+- control signed bias was `+0.033023` (SE `0.005642`, 95% CI
+  `[+0.021964, +0.044081]`);
+- treatment signed bias was `+0.026395` (SE `0.005990`, 95% CI
+  `[+0.014655, +0.038134]`);
+- treatment-minus-control was `-0.006628` (SE `0.001403`, 95% CI
+  `[-0.009379, -0.003878]`), beyond the fixed `-0.005` point threshold and
+  with its upper bound below zero; and
+- the post-run `2.802*SE` descriptive value was `0.003932`.
+
+Whole-Green absolute bias also shrank on both required scopes: all rows
+`+0.015954 -> +0.008537`, and RO4-eligible rows
+`+0.018892 -> +0.010433`.
+
+The all-five safety results below report signed-bias control to treatment,
+then Brier treatment-minus-control with its upper 95% bound, then soft-log
+treatment-minus-control. Each pair is `all / RO4-eligible`.
+
+| Deck | Signed bias, control -> treatment | Brier delta (upper 95%) | Soft-log delta | Safety result |
+| --- | --- | --- | --- | --- |
+| Green | `+.015954 -> +.008537 / +.018892 -> +.010433` | `+.002079 (.002322) / +.003092 (.003370)` | `-.017757 / -.014283` | Brier **FAIL** |
+| Red | `-.005724 -> -.013905 / -.006858 -> -.017161` | `+.000936 (.001284) / +.001847 (.002253)` | `-.018808 / -.015653` | bias band **FAIL** |
+| Blue | `-.012370 -> -.011760 / -.014717 -> -.014322` | `-.000310 (-.000029) / +.000038 (.000368)` | `-.010475 / -.009693` | PASS |
+| White | `-.014349 -> -.010694 / -.016140 -> -.011946` | `+.000790 (.001008) / +.000790 (.001028)` | `-.010693 / -.009863` | PASS |
+| RU Aggro | `-.004680 -> -.002437 / -.005627 -> -.003016` | `+.000022 (.000407) / +.000695 (.001147)` | `-.018061 / -.015592` | PASS |
+
+Green fails the fixed per-deck Brier rule: its all-row point delta exceeds
+`+0.002`, and its eligible point delta and upper bound exceed `+0.002` and
+`+0.003`. Red fails the fixed bias band on both scopes: treatment absolute
+biases `0.013905` and `0.017161` exceed
+`max(control absolute bias, 0.010)`.
+
+The pooled all-row Brier contrast was also unsafe:
+`+0.001081` (95% CI `[+0.000889, +0.001272]`), whose upper bound is not below
+the frozen `+0.001` ceiling. Pooled all-row soft log loss improved by
+`-0.017270` (95% CI `[-0.018364, -0.016176]`). The separate per-deck soft-log
+guard and no-new-material-bias guard passed everywhere, but the scientific
+gates are conjunctive.
+
+An independent read-only transcript audit then rechecked the sidecar with
+`shasum -c`, found exactly one complete TSV block, verified the 25-cell
+ordered-pair schedule (zero diagonal, 120 in every off-diagonal cell), and
+recomputed the primary and failed gates from raw TSV rows. It independently
+classified the result as a complete exit-`1` scientific rejection with no
+infrastructure defect.
+
+Decision: **reject RB0-0 scientifically** and permanently retire seed
+`202607261047`. The mechanism really does reduce early-Green signed bias, but
+the exact hierarchical weighting is not safe under the predeclared pooled
+Brier, Green Brier, and Red bias gates. Per the frozen decision rule, there is
+no best-deck salvage, clipping/blending retry, threshold reinterpretation, or
+weighted critic fit. This closes the replay-weight family and excludes density
+weighting from the next composite. The joint composite will be declared
+separately with calendar-8 targets, the card-agnostic continuation/pass
+controller, and PD0 exact pass dominance, but without RB0 weighting.
