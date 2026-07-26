@@ -9248,3 +9248,67 @@ It corrects the implementation to the declaration; it is not a result-driven
 threshold or component change. The falsifiable mechanical expectation is that
 all exact schedule/evidence tests pass, old malformed synthetic summaries fail
 closed, and no production artifact or reserved seed exists afterward.
+
+#### C17-J1 acceptance-scheduler and evaluator repair result
+
+Completed 2026-07-26 before any C17-J1 fit or reserved-seed use. `REVIEW.md`
+was reread through its newest 14:11 PDT cycle before recording this result.
+That entry still reports an unchanged legacy lift table and the fit pending;
+there is no conflicting experimental evidence.
+
+The preregistered mechanical expectation passed. The repaired K5 benchmark
+schedule now balances each challenger deck across physical policy seat and
+play/draw, and the pure evaluator rejects any redistribution that preserves
+only the old marginals. Direct evidence binds exact evaluation seed, serialized
+treatment/control/parent/Handcoded recipe, actual reported model fingerprint,
+all 20 deck matchups, every quadrant, and the physical-game-quartet CR1
+estimate. The ordered `101,202,303,404,505,606,707,808` panel cannot be
+reordered, duplicated, or partially pooled; the exact 4,440-game direct gate
+must pass before any mixed-field result can run.
+
+Each of the eight mixed-field panels is independently required to contain ten
+ordered 100-game deck matchups, exact 40/40 per-deck-policy play/draw rows, all
+five policy identities, complementary physical outcomes, child-to-parent
+telemetry reconciliation, and the exact frozen treatment deployment. The
+pooled lift gate still requires Learned to tie or beat every other policy on
+Green, Red, Blue, White, and RU Aggro.
+
+The six user-field positions are now a mandatory stage between the balanced
+deep-reference gate and gameplay. The evaluator binds their exact ordered
+identities, decision kinds, candidates, engine-authoritative public consequence
+fingerprints, K64/H8 parent reference, K8/H4 epsilon-zero deployed metadata,
+rules contract, and hidden-clone accounting. It constructs labels with the
+shared paired-world labeler and rejects a treatment loss of any stable control
+agreement; a gain elsewhere cannot cancel that loss. This closes the producer
+trust gaps found during adversarial review without adding a combat score,
+card-specific target rule, or Handcoded knowledge.
+
+The older HOLD1 collector was also parameterized and exposed as one shared
+deterministic seam, so C17-J1 can collect its exact generation-18/seed-1146
+holdout without cloning the threaded trace collector. Its original sealed
+terminal-weight route remains covered and bit-for-bit configured through the
+new wrapper.
+
+Verification:
+
+```sh
+make -j4 test-terminal-weight-eval
+make -j4 test-joint-c17-eval
+./build/old-school-probe-runner-tests
+git diff --check
+```
+
+Results were 11/11 terminal-weight evaluator tests, 21/21 joint evaluator
+tests, and 31/31 probe-runner tests under `-Werror`. An independent focused
+ASan/UBSan joint-evaluator run also passed 21/21. Adversarial cases cover
+overflow, seed/order/model/recipe swaps, quadrant and child-summary
+redistribution, malformed CR1, noncanonical field consequences, nonzero
+deployment epsilon, stable field losses, and no-salvage stage suppression.
+
+The frozen probe cache remains exactly 276,387 bytes with SHA-256
+`949ea2fda448fa76b31a61927721629cfba9e6addee2da383cfbb68450b04770`.
+The canonical joint artifact path remains absent. Decision: accept this repair
+as pre-fit mechanism/integrity evidence only. It is not a bot-strength result
+and changes no champion. Next: finish and freeze the atomic train/load-only
+runner and true artifact snapshots; only then open raw shard seed
+`202607261145` once.
