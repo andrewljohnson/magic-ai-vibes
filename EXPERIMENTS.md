@@ -5837,3 +5837,94 @@ exact byte count, line count, SHA-256, and actual process exit along with its
 scientific output. This is reporting infrastructure only: no source/reference
 seed, model, schedule, search configuration, retention rule, bound, threshold,
 or interpretation changed.
+
+#### BSR0 result — invalid because the fixed retention design was infeasible
+
+Run once on 2026-07-26 after committing the exact Environment-v3 source as
+`48b8709219cd02adb0b8c663b7240935761a328d`. Before recording this result I
+reread the independent review through its 01:41 PDT entry. No alternate seed,
+replacement prefix, retry, or post-result threshold change was used.
+
+Exact invocation:
+
+```sh
+sh tools/run_bsr0_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/bsr0-env-v3-c16-48b8709-20260726T014524-0700
+```
+
+The wrapper executed the exact preregistered simulator argv:
+
+```sh
+./build/old-school-sim --audit-v3-blue-stack-regret \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+The load-only check passed and loaded fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+The source and reference configurations also matched the declaration exactly:
+source seed `1618033`, 10 blocks, 200 games, 128-turn cap, production K8/H4;
+reference seed `1414213562`, disjoint K64 scout plus K64 confirmation, H8,
+frozen Learned-mirror continuations, and four threads.
+
+Source result:
+
+| Opponent | Games | Blue losses | Eligible roots | Eligible-loss games | Retained roots / distinct losses |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Green | 40 | 13 | 36 | 12 | 8 / 4 |
+| Red | 40 | 13 | 69 | 13 | 8 / 4 |
+| Blue | 40 | 19 | 98 | 18 | 8 / 4 |
+| White | 40 | 0 | 0 | 0 | 0 / 0 |
+| RU Aggro | 40 | 15 | 63 | 15 | 8 / 4 |
+| **Total** | **200** | **60** | **266** | **58** | **32 / 16** |
+
+There were no draws or turn-limit draws. The trace contained 43,776 priority
+roots, including 1,919 correctly owned Blue-held/opponent-top roots and 1,920
+rejected opponent-held/opponent-top roots. All opponent-stratum/aggregate
+cross-sums matched. The 32 retained roots used 20,736 reference evaluations
+(5,158 terminal and 15,578 bootstrap), below the declared 5,242,880 maximum.
+Traced-action, descriptor-order, hidden-clone, disjoint-seed, accounting, and
+bound checks all passed.
+
+The preregistered retention check failed. Frozen C16 Blue went 40-0 against
+Handcrafted White in this exact source schedule, so the requirement for eight
+roots from at least four Blue losses in **every** opponent stratum was
+mathematically impossible. The harness therefore reported:
+
+```text
+Checks: source-balance=PASS, retention=FAIL, traced-actions=PASS,
+descriptor-order=PASS, hidden=PASS, split-seeds=PASS, accounting=PASS,
+bounds=PASS
+Audit validity: INVALID
+Minimum diagnostic replication: NOT FOUND
+BSR0 practical high-cost verdict: INCONCLUSIVE
+```
+
+The scored-but-incomplete 32-root sample contained zero `>=0.05/lower>0`
+diagnostic mistakes and zero `>=0.20/lower>0.10` practical mistakes. Those
+zeros are reported for completeness but are **not** accepted as evidence
+against the hypothesis because the audit failed its fixed retention gate.
+This is a design failure, not a negative scientific result. In particular,
+the all-five exact-loss-stratum requirement failed to account for the
+possibility that a tracked matchup would supply no losses.
+
+The simulator's intended and actual process exit was `1`. Internal audit time
+was 93.716979625 seconds; the complete POSIX capture recorded `real 93.75`,
+`user 115.77`, and `sys 0.56` seconds. The immutable complete capture has 219
+lines, 33,859 bytes, and SHA-256
+`7e4b45381261df017ed93b47b146c903ec2bdc6ecac1927b474c070539896474`.
+Its three artifacts are:
+
+```text
+build/experiments/bsr0-env-v3-c16-48b8709-20260726T014524-0700.complete.txt
+build/experiments/bsr0-env-v3-c16-48b8709-20260726T014524-0700.exit.txt
+build/experiments/bsr0-env-v3-c16-48b8709-20260726T014524-0700.sha256.txt
+```
+
+Decision: **BSR0 invalid; accept no mechanism claim and do not retry it.**
+The next experiment is the already planned frozen Environment-v3
+certification panel on this committed tree. Its pooled all-five-deck result
+will establish the current deficit shape before a separately preregistered
+general training-strength challenger. Any future stack-regret audit must
+predeclare a loss-conditioned or feasibility-aware retention rule rather
+than requiring losses from every matchup.
