@@ -8831,3 +8831,94 @@ stable deep-reference ranking, but they cannot promote it or authorize
 hardcoded target/combat knowledge. If they expose a distinct mechanism that
 CT8 plus the already declared controller does not address, record and
 preregister that mechanism separately rather than silently expanding C17-J1.
+
+#### Frozen five-deck deep-reference cache result
+
+Completed 2026-07-26 from committed declaration `27bf1a1`, before any C17-J1
+implementation, fit, artifact, or reserved-seed use. `REVIEW.md` was reread
+through its 11:49 PDT cycle after the run; its 11:44 entry independently
+countersigns the same final component set and contains no conflicting cache
+evidence.
+
+The exact preregistered command was:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-corpus dev-v3 \
+  --probe-worlds 64 --probe-horizon 8 \
+  --learned-rollouts 8 --learned-generations 16 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k64-h8-c17-j1.labels.tsv \
+  --refresh-probe-cache
+```
+
+The command exited `0`. It trained exact Environment-v3 Actor G0 in 90.06
+seconds with fingerprint
+`dd58d3814f46d6661d40690f6ad7ac73226c2160137b2e42bfadf3e6ac7a1b72`,
+trained diagnostic Value G0 in 23.60 seconds with fingerprint
+`ab7a782478d9dbafe7bfd3242a2434b24f9b9fb6a0f3f83b8c406e3818566f78`,
+and load-only bound exact C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+
+The immutable cache is 276,387 bytes and 3,921 lines with SHA-256
+`949ea2fda448fa76b31a61927721629cfba9e6addee2da383cfbb68450b04770`.
+Its metadata binds schema/algorithm/semantics
+`old-school-probe-label-cache-v3` /
+`actor-mirror-common-world-v3` /
+`old-school-probe-score-semantics-v3`, environment
+`old-school-environment-v3-cleanup-discard`, fixed reference and policy-domain
+seeds `0x50524f4245524546` / `0x50524f44504f4c59`, T800/S424242,
+K64/H8/one rollout, 20 probes, Actor fingerprint above, and information-set
+fingerprint `cf4729a535378a12`. Every probe/candidate has exactly 64 finite
+samples. Corpus validation and hidden-repartition identity passed for all six
+policy views across all 20 positions.
+
+For the current exact C16 deployed K8/H4 policy, the frozen baseline is:
+
+| Scope | Top-one | Stable-pair agreement | Regret | Brier | Soft log | Bias | ECE |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pooled | 95.0% | 94.5% | .0039 | .0857 | .5486 | -.1097 | .1097 |
+| Green | 100.0% | 100.0% | .0000 | .0685 | .5242 | +.0044 | .0614 |
+| Red | 100.0% | 100.0% | .0046 | .2223 | .7886 | -.4367 | .4367 |
+| Blue | 100.0% | 100.0% | .0000 | .0560 | .6453 | -.0074 | .0797 |
+| White | 75.0% | 66.7% | .0150 | .0385 | .4864 | +.0065 | .1669 |
+| RU Aggro | 100.0% | 92.6% | .0000 | .0429 | .2986 | -.1155 | .1476 |
+
+The reference has 55 stable action pairs. Its Actor-versus-Value continuation
+cross-check found three point-sign reversals—one White and two RU—but none was
+stable under both references. Twelve best-action pairs are low-margin,
+including exact-zero Growth, Bear-development, Millstone, and Flying-Men/Moat
+pairs. These rows remain explicitly nonstable and cannot be used to claim that
+a policy learned their intended plan.
+
+The new user Growth reports make that limitation concrete. On
+`green.begin-combat-growth-targets.v3`, Actor K64/H8 returned exactly `1.0` in
+all 64 worlds for Pass, Growth on the attack-capable Treefolk, and Growth on
+the summoning-sick Bear. On `green.second-main-growth-options.v3`, Pass and
+wasted Growth were sample-by-sample identical, with mean `0.239873`. This is
+continuation healing/terminal saturation, not evidence that the actions are
+strategically equal. The field fixtures therefore retain the deep scores as a
+reported diagnostic but use exact forced rules consequences through cleanup
+to characterize the no-op plan; their Growth rows are not action-ranking
+acceptance labels.
+
+The supplemental Force Spike controls are not part of balanced cache metrics
+but expose a concrete rejection target. C16 correctly selected Force Spike
+when the opponent was tapped out (`0.2889` versus Pass `0.2353`) and
+incorrectly still selected it when the opponent could pay (`0.2940` versus
+Pass `0.2544`). Hidden repartition passed in both states. C17-J1 must preserve
+the live choice and uniquely select Pass in the payable fixture under its
+already declared gate; no Force-Spike-specific rule is licensed.
+
+Decision: accept and freeze the file only as the prospectively declared
+five-deck, deep common-world, reject-only regression corpus. It is not a
+champion or playing-strength result, and its low-margin/reference-sensitive
+rows cannot promote C17-J1. The next action is controller and paired-artifact
+implementation with focused field regressions; raw shard seed
+`202607261145` remains unopened until that implementation and its strict tests
+are frozen.
+
+An independent parser then reproduced the 276,387-byte size and SHA-256 above,
+found 3,904 sample rows covering 20 unique probes, exactly four probes per
+deck, 61 candidates, and exactly 64 unique sample indices per candidate. Every
+Q value was finite and in `[0,1]`; there were no duplicate or malformed rows.

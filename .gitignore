@@ -2,5 +2,6 @@ build/
 certification-runs/
 .DS_Store
 data/*.labels.tsv
+!data/old-school-probe-dev-v3-k64-h8-c17-j1.labels.tsv
 __pycache__/
 *.py[cod]
