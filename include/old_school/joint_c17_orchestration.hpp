@@ -22,8 +22,9 @@ inline constexpr std::size_t kCanonicalMaximumGameTurns = 500;
 // both values from the no-replace publication snapshot. Standalone
 // evaluation fails before loading any model or opening an evaluation seed
 // while either placeholder remains unset.
-inline constexpr std::uintmax_t kCanonicalBundleByteSize = 0;
-inline constexpr std::string_view kCanonicalBundleSha256 = "";
+inline constexpr std::uintmax_t kCanonicalBundleByteSize = 6225107;
+inline constexpr std::string_view kCanonicalBundleSha256 =
+    "adb9404bbdd57c92c2a6a3ad759c385d8d9a81389db02faf2b74e0695afca1ba";
 
 bool canonical_bundle_identity_is_pinned();
 
