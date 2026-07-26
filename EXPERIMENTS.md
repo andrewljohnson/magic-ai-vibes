@@ -7056,3 +7056,194 @@ or promoted, and C16 remains the champion/control. The next experiment must be
 a separately preregistered axis; the standing candidate is the independently
 preregistered horizon-eight collection-target axis using verified inert,
 card-agnostic plumbing, not a post-hoc calendar-alignment retry.
+
+#### C18-H8 external sealed result: rejected from promotion
+
+Recorded at 2026-07-26 06:17 PDT after rereading `REVIEW.md` through its
+06:11 PDT cycle and independently auditing the separately maintained
+`claude/challenger` experiment at commit `7e808bc`. That branch had
+preregistered the standalone collection-horizon treatment before TA4-0
+finished, so mainline did not duplicate its reserved seed.
+
+The sole training change was in late-generation **Priority** collection:
+one-world Value continuations used horizon eight instead of the canonical
+horizon four. The terminal/parent target remained record-offset four with
+weight `0.50/0.50`; combat selectors and K=8/H=4 deployment remained
+canonical. Exact sealed benchmark command:
+
+```sh
+OS_COLLECTION_HORIZON=8 ./build/old-school-sim --benchmark \
+  --games 34 --seed 2861 \
+  --train-seed 424242 --train-games 800 \
+  --challenger learned-value-c16 --baseline handcrafted \
+  --learned-rollouts 8
+```
+
+The frozen treatment fingerprint was
+`99544b7dd6153d25e5986a3e04e7b0839b8e7798c6852f3171ab293e4348c7e0`;
+its 3,111,437-byte artifact SHA-256 was
+`096b59ba0fc8df139a61a3eca5e8911d7b9de7d259c6dfddbb62bf16ef799b1a`.
+It differs from exact C16
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+(artifact SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`).
+
+The 34-repetition all-five-deck benchmark produced 2,040 games:
+
+| Scope | C18-H8 | Handcrafted |
+| --- | ---: | ---: |
+| Pooled | 963-1077, **47.2%** (Wilson 95% 45.0-49.4) | 1077-963 |
+| Green | 137-271, 33.6% | 160-248, 39.2% |
+| Red | 190-218, 46.6% | 221-187, 54.2% |
+| Blue | 278-130, 68.1% | 296-112, 72.5% |
+| White | 202-206, 49.5% | 218-190, 53.4% |
+| RU Aggro | 156-252, 38.2% | 182-226, 44.6% |
+
+Registered same-deck diagnostics also failed to show the predicted Green
+repair: Green was `56-80` (41.2%), Red `62-74` (45.6%), Blue `66-70`
+(48.5%), White `73-63` (53.7%), and RU Aggro `60-76` (44.1%). A separate
+load-only reproduction of the exact seed and artifact reproduced every
+scientific field, including `963-1077`; its transcript at
+`/private/tmp/c18-h8-audit.txt` has SHA-256
+`596cf6753134938f0313f52acd70106eb160795faeee76ba4b5c5ded19a2361a`.
+
+Two provenance defects were found and must not be copied into mainline:
+
+- the treatment artifact embeds the canonical
+  `terminal-anchor-bootstrap4w50-replay3-k1h4.v1` recipe ID. Horizon eight
+  exists only in an environment-dependent filename, so a renamed canonical
+  artifact could cross-load and malformed environment text is not rejected;
+- `drc-builder --deployment` does not read or hash the claimed frozen
+  deep-reference cache. It recomputes its reference with the candidate
+  model, so that check fails open. Manual comparison against the committed
+  cache nevertheless confirmed that this treatment selected the frozen best
+  action on all seven fixtures.
+
+These defects weaken artifact self-authentication and the claimed automatic
+DRC gate, but they do not rescue a model whose deterministic 2,040-game
+promotion benchmark has an upper Wilson bound below 50%. Result:
+**REJECT C18-H8 from promotion** and retire seed `2861`. We do not make the
+stronger causal claim that H8 has exactly zero lift over C16, because it was
+not paired against C16 on this evaluation seed. No H6/H10 sweep or another
+Handcrafted seed is licensed.
+
+### CT8-0: record/calendar unit x four/eight horizon target audit (declared)
+
+Declared at 2026-07-26 06:17 PDT after the independently reproduced TA4-0
+and C18-H8 rejections, before seed `202607260621` or any CT8 implementation
+was opened. Repository and all-history searches found no prior use of that
+seed.
+
+`REVIEW.md` at 06:07 and 06:11 recommends immediately training a broad C19
+composite of calendar targets plus deeper or annealed credit and possibly
+deeper collection. We agree that the interaction is now the important
+question, but not that a three-knob fit is yet confirmatory. The `+1.8` and
+`+1.9` point TW8/DB8 estimates came from different noisy evaluation seeds;
+their mirror gains may describe the same error mass. TW75 worsened Green
+bias, and H8 collection was flat with its Green prediction refuted. Adding
+those knobs after seeing five single-change results would introduce
+unnecessary researcher choice. This audit therefore tests one exact
+two-factor target interaction before any model is fit.
+
+Falsifiable hypothesis: canonical targets are wrong in both their unit
+(trace records rather than physical turns) and their reach. On a fresh,
+balanced frozen-C16 mirror corpus, the exact eight-calendar-turn target
+`CT8` will materially reduce the independently identified early-Green
+optimism beyond either single-factor treatment (`CT4` or `RO8`), improve
+pooled loss, move Blue and RU bias toward zero, and remain safe on all five
+decks.
+
+#### Frozen construction
+
+- Parent/source policy: exact Environment-v3 C16, T800, training seed
+  `424242`, fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+- Audit seed `202607260621`, generation coordinate 19, 50 repetitions of the
+  exact 40-game balanced schedule: 2,000 physical games, 4,000
+  perspectives, and 800 perspectives for each of Green, Red, Blue, White,
+  and RU Aggro.
+- Source games are C16 mirrors at K=1/H=4, exploration `0.05`, maximum 500
+  turns. No Handcrafted action, label, feature, or state enters the audit.
+- Terminal weight is fixed at `0.50`. For every trace root and perspective,
+  compute four arrays on the identical trace:
+  - `RO4 = 0.5*z + 0.5*V(i+4 records)` (canonical control);
+  - `RO8 = 0.5*z + 0.5*V(i+8 records)`;
+  - `CT4 = 0.5*z + 0.5*V(earliest exact turn+4)` (TA4 treatment);
+  - `CT8 = 0.5*z + 0.5*V(earliest exact turn+8)`.
+  Roots without the requested future state retain `z`.
+- Primary comparisons use only rows bootstrap-eligible under all four
+  formulas. All-row metrics, terminal tails, and pair-specific common sets
+  remain mandatory sensitivity reports.
+- Report Brier, soft log loss, signed bias, target distribution, eligibility,
+  and directly paired physical-game-clustered CR1 uncertainty for RO4, RO8,
+  CT4, CT8, each contrast to RO4, CT8 versus each constituent, and the
+  interaction `(CT8-CT4) - (RO8-RO4)`. Report record weighting and
+  equal-actor-game weighting pooled, per deck, and at root turns `<=3`,
+  `4-7`, and `>=8`.
+
+This is load-only measurement. It may not call a trainer, write/refresh a
+model, alter the parent artifact, or benchmark gameplay. One canonical CLI
+route will accept no other option, build the complete corpus twice from
+fresh `Game` instances, reduce in semantic schedule order, and require
+bit-identical reports and hashes. Hidden-zone repartitioning must preserve
+public observations, all four target arrays, eligibility, critic values, and
+scoring hashes. Exact +4/+8 landings, earliest-index semantics, terminal
+tails, Time Walk extra-turn numbering, deck/seat/play-draw counts, and
+one-versus-N worker determinism require focused tests. Exit `0` is a
+mechanism pass, `1` a complete scientific rejection, and `2`
+infrastructure/incomplete evidence.
+
+#### Fixed qualification and gates
+
+Evidence is incomplete unless at least 3,000 of 4,000 actor-games, 560 of
+800 for every deck, and 1,500 of 2,000 physical games contribute a
+four-arm-common row, with at least 1,000 early-Green common records from 500
+Green actor-games. RO4 early-Green signed bias must be positive with its
+clustered lower 95% bound above zero; failure is an unqualified corpus, not a
+license to choose another seed.
+
+All of the following must pass:
+
+1. **Early-Green primary:** on four-arm-common roots at turn `<=3`,
+   `CT8-RO4` signed-bias delta is at most `-0.010`, its clustered 95% upper
+   bound is below zero, and the equal-actor-game estimate is negative.
+   CT8 absolute bias must be at least `0.005` smaller than both CT4 and RO8
+   under record weighting and strictly smaller than both under equal-actor
+   weighting.
+2. **Interaction:** `(CT8-CT4) - (RO8-RO4)` early-Green signed-bias
+   interaction is negative with its clustered 95% upper bound below zero.
+   Whole-Green four-arm-common absolute bias must also shrink versus RO4
+   under both weighting schemes.
+3. **Pooled loss:** on four-arm-common rows, CT8 Brier and soft-log-loss
+   deltas versus RO4 have clustered 95% upper bounds below zero. Versus CT4
+   and RO8, both point deltas must be nonpositive and their upper bounds
+   below `+0.001`. On all rows, pooled CT8 Brier must be no greater than
+   RO4, CT4, or RO8.
+4. **All-five guard:** for every deck, CT8 all-row Brier may be no more than
+   `0.005` worse than each other arm. CT8 may create no material signed bias
+   (`abs(bias) >= 0.05` with the physical-game-clustered interval excluding
+   zero) unless RO4 already has same-sign material bias.
+5. **Registered deck directions:** Blue `CT8-RO4` signed bias is positive
+   and RU Aggro is negative under both record and equal-actor-game
+   weighting, with absolute bias shrinking. Red and White must pass the
+   no-new-material-bias rule.
+6. Every coverage, schedule, target identity, tail, landing, earliest-index,
+   hidden-information, artifact-immutability, repeated-construction, and
+   deterministic-reduction check passes.
+
+The 2,000-game size reuses TA4's observed precision: its early-Green
+calendar contrast had clustered SE `0.000377` over 2,460 rows, far below the
+new one-point MDE. CT8 has stricter eligibility, so the explicit actor-game
+and row minima fail closed if that precision does not transfer.
+
+If CT8-0 fails, seed `202607260621` is retired and the whole
+record/calendar-horizon/terminal-weight/collection-horizon surface is closed:
+no H6/H12, anneal add-on, best-cell promotion, or seed retry. The next axis
+will be card-agnostic actor-game/calendar-turn-balanced replay weighting,
+motivated by the already measured record-density imbalance.
+
+Only a CT8-0 pass licenses a separately preregistered **CT8-only** full C16
+recipe (constant terminal weight `0.50`, canonical H4 collection). That model
+must then pass a fresh all-five held-out fitted-critic gate, the correctly
+implemented frozen DRC regression check, and a paired frozen CT8-versus-C16
+benchmark before any Handcrafted or certification seed is opened.
