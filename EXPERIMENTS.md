@@ -7684,3 +7684,136 @@ Next: capture the exclusive route exactly once with
 `tools/capture_once.sh`, retain exit `0/1/2` without reinterpretation, reread
 the newest independent review, and have a separate agent audit the sealed
 transcript before recording the result.
+
+### RB0-0 sealed audit (infrastructure failure; no scientific result)
+
+The reserved audit was opened exactly once on 2026-07-26 from the complete
+frozen tree at `9e2d48b` (the implementation itself entered at `6c44ae8`;
+`9e2d48b` added the final notebook freeze). The exact command was:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/rb0-0-sealed-audit-9e2d48b \
+  ./build/old-school-sim --audit-replay-weights
+```
+
+The four declared captures all finished collection and each contained 129,280
+trace-perspective rows, corresponding to 2,400 physical games and 4,800 actor
+games per capture. The route then exited `2` at the aggregate infrastructure
+guard before printing any scientific metric or gate table:
+
+```text
+Loading exact frozen Environment-v3 C16... done
+Constructing RB0-0 audit corpus four times (2,400 games each: repeat, reverse, and fixed 1-vs-4 workers; K=1/H=4)... done (129280 trace-perspective rows per capture)
+RB0-0 infrastructure/incomplete-evidence failure: RB0 audit mechanics, hidden-zone, artifact, or deterministic-reduction checks were incomplete
+real 738.75
+user 1324.09
+sys 10.50
+```
+
+The immutable capture is
+`build/experiments/rb0-0-sealed-audit-9e2d48b.complete.txt`; its independently
+recomputed SHA-256 is
+`8022e54f9e6d22a98a77ea20970b3a4edad6c257463f3f6daa5568fde9f847bf`, matching
+the capture sidecar byte for byte. The exit sidecar contains exactly `2`.
+
+Decision: **infrastructure failure, not accepted or rejected scientifically**.
+No RB0 weighting estimand, loss, bias, confidence interval, qualification, or
+gate result was exposed, so none may be inferred from this run. Seed
+`202607260731` is consumed and quarantined permanently; it will not be rerun.
+The transcript proves that artifact loading, all four full collections, report
+construction, the 129,280-row accounting print, and the final artifact
+snapshot completed. It narrows the fault to one or more nonthrowing booleans
+inside the aggregate repeat/reverse/worker, schedule, weight, hidden-zone, or
+mechanical invariant guard, but the generic fail-closed message does not retain
+which boolean. The independent sealed-transcript audit confirmed that exact
+non-identifiability: the report and gates were computed in process memory, but
+the generic exception discarded every distinguishing flag before human/TSV
+output, so no analyst opened or retained the scientific values.
+
+The strongest static candidate is numerical, but is **not** promoted to a
+result: this arm64 toolchain defines eight-byte, 53-bit `long double`
+(`__SIZEOF_LONG_DOUBLE__=8`, `__LDBL_MANT_DIG__=53`), while the diagnostic
+naively accumulates 129,280 positive double weights and tests the result
+against a fixed 64-double-epsilon tolerance. The two-game collection test
+cannot exercise that full-scale failure. Repeat/reverse/worker equality and
+the other final nonthrowing flags remain equally compatible with the sealed
+393-byte transcript.
+
+`REVIEW.md` was reread through its 08:29 cycle before finalizing this
+classification. Its OSC-1 continuation-only treatment was independently
+rejected as a standalone challenger at 47.8% (95% interval 45.7–50.0), while
+its registered Blue-mirror instrument improved to 55.9%. That supports the
+user-derived continuation mechanism and a future jointly declared composite,
+but it does not reinterpret this failed density audit.
+
+Next: complete an independent read-only audit of the sealed transcript and
+implementation. If the exact failed boolean is not recoverable after process
+exit, add fail-closed per-invariant diagnostics and reproduce the failure only
+with a nonreserved engineering seed. Any new RB0-0 sealed run must use a new
+previously unused seed, may change only the causally established mechanical
+defect, and must keep the declared hypothesis, estimands, weights, scopes,
+thresholds, qualifications, sample size, and analysis frozen. Separately, the
+user’s own-spell Counterspell, payable Force Spike, and Flying-Men chump reports
+license a preregistered card-agnostic continuation-policy diagnostic; they do
+not license silently changing Learned while the mechanism gate is still being
+specified.
+
+### RB0-E1 full-scale mechanical preflight (declared; no science)
+
+This is an engineering diagnosis of RB0-0's proven exit-2 observability defect,
+not a replay-weight experiment. Engineering seed `202607260902` and generation
+coordinate `20` were searched in the working tree and all Git history and were
+unused at declaration. It is explicitly not the quarantined RB0-0 seed and
+cannot produce, accept, reject, or expose a scientific result.
+
+#### Falsifiable mechanical hypothesis
+
+On this arm64 host, `long double` has the same 53-bit mantissa as `double`.
+RB0-0's naive full-corpus and per-group accumulation therefore exceeds at
+least one fixed `64 * double-epsilon * max(1, expected_mass)` identity
+tolerance at the declared 129,280-row scale. All exact weights themselves,
+schedule/trace/RO4/tail/hidden identities, artifact binding, repeated
+construction, reversed input, and one-versus-four-worker equality will pass.
+
+#### Frozen preflight
+
+Add a separate mechanical-only preflight executable and make target. It must:
+
+- load only the exact immutable Environment-v3 C16 T800/S424242 artifact with
+  fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+- use seed `202607260902`, generation `20`, 60 balanced 40-game blocks,
+  K=1/H=4, exploration `0.05`, 500-turn bound, and the same canonical
+  four-capture repeat/reverse/one-versus-four-worker construction as RB0-0;
+- print only artifact identity, row/game counts, hashes, every named
+  mechanical boolean, hidden changed-state count, weight finite/global/actor/
+  turn flags, each maximum mass error with its unchanged 64-epsilon tolerance,
+  and exact repeat/reverse/worker equality;
+- never call `score_records`, `evaluate_gate`, a trainer, gameplay benchmark,
+  probe scorer, or any human/TSV scientific report writer; never print bias,
+  Brier, log loss, qualification, confidence interval, MDE, or gate values;
+- snapshot the artifact before and after, remain deterministic under fixed
+  input, and make failure flags observable rather than collapsing them behind
+  one exception;
+- have focused tests proving a synthetic failed invariant remains named in
+  output and proving the route rejects the quarantined seed.
+
+The exact first diagnostic command will be:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/rb0-e1-arm64-mechanics-before \
+  ./build/rb0-mechanical-preflight
+```
+
+The hypothesis passes only if the full preflight shows one or more weight-mass
+identity failures while every other named mechanical flag passes. If confirmed,
+the only permitted fix is deterministic compensated or pairwise accumulation
+inside diagnostics; calculated row weights, 64-epsilon thresholds, estimands,
+scopes, gates, and sample size remain byte-for-byte unchanged. Add a
+>=129,280-row adversarial numerical regression, then rerun the same engineering
+seed under a different capture prefix to isolate that mechanical fix. If the
+hypothesis fails, fix only the different exact flag exposed by the preflight.
+Only a clean post-fix preflight can license preregistration of one fresh sealed
+RB0-0 seed; it cannot itself license a learning change or mechanism claim.
