@@ -1927,16 +1927,19 @@ void test_field_report_is_cache_free_hidden_safe_and_deployment_exact() {
 }
 
 void test_attack_regression_scores_all_sets_hidden_safely() {
-    const auto model =
+    const auto parent_model =
         old_school::train_learned_value_champion(
             1, 0x41545441434B5631ULL);
+    const auto candidate_model =
+        old_school::train_learned_value_champion(
+            1, 0x41545441434B5632ULL);
     const old_school::probe_runner::NamedValueScoringModel parent{
         .name = "attack parent",
-        .model = model,
+        .model = parent_model,
     };
     const old_school::probe_runner::NamedValueScoringModel candidate{
         .name = "attack candidate",
-        .model = model,
+        .model = candidate_model,
         .value_pass_dominance = true,
         .value_continuation_controller =
             old_school::LearnedContinuationController::
@@ -1976,9 +1979,17 @@ void test_attack_regression_scores_all_sets_hidden_safely() {
             report.hidden_repartition.passed &&
             report.hidden_repartition.policy_count == 3 &&
             report.hidden_repartition.probe_count == 1 &&
-            report.rules_contract_passed,
+            report.rules_contract_passed &&
+            report.parent.deployment.fingerprint ==
+                old_school::learned_model_fingerprint(
+                    parent_model) &&
+            report.candidate.deployment.fingerprint ==
+                old_school::learned_model_fingerprint(
+                    candidate_model) &&
+            report.parent.deployment.fingerprint !=
+                report.candidate.deployment.fingerprint,
         "Attack report omitted complete common-world, rules, or "
-        "hidden-repartition evidence");
+        "hidden-repartition/model-identity evidence");
     for (std::size_t index = 0;
          index < report.reference_samples.size(); ++index) {
         expect(
@@ -2049,30 +2060,49 @@ void test_attack_regression_scores_all_sets_hidden_safely() {
     const auto& attack =
         std::get<old_school::probes::BinaryAttackDecision>(
             probe.candidates[1].action);
-    const auto deployed =
+    const std::uint64_t deployment_seed =
+        old_school::probe_runner::reference_seed_for_probe(
+            old_school::probes::kAttackRegressionV1,
+            probe.stable_id,
+            old_school::probe_runner::
+                kProbeProductionPolicySeed);
+    const auto parent_deployed =
         old_school::learned_value_attack_set_scores(
             probe.state, probe.root_player,
-            {{}, {attack.attacker}}, model,
-            old_school::probe_runner::reference_seed_for_probe(
-                old_school::probes::kAttackRegressionV1,
-                probe.stable_id,
-                old_school::probe_runner::
-                    kProbeProductionPolicySeed));
+            {{}, {attack.attacker}}, parent_model,
+            deployment_seed);
+    const auto candidate_deployed =
+        old_school::learned_value_attack_set_scores(
+            probe.state, probe.root_player,
+            {{}, {attack.attacker}}, candidate_model,
+            deployment_seed);
     expect(
         policy_score_for(
             report.parent.deployment.scores, "no-attack")
-                    .score == deployed.scores[0] &&
+                    .score == parent_deployed.scores[0] &&
             policy_score_for(
                 report.parent.deployment.scores,
                 "attack-with-only-legal-attacker")
-                    .score == deployed.scores[1] &&
+                    .score == parent_deployed.scores[1] &&
             report.parent.deployment.selected_keys ==
                 std::vector<std::string>{
                     probe.candidates[
-                        deployed.selected_candidate]
+                        parent_deployed.selected_candidate]
+                        .descriptor} &&
+            policy_score_for(
+                report.candidate.deployment.scores, "no-attack")
+                    .score == candidate_deployed.scores[0] &&
+            policy_score_for(
+                report.candidate.deployment.scores,
+                "attack-with-only-legal-attacker")
+                    .score == candidate_deployed.scores[1] &&
+            report.candidate.deployment.selected_keys ==
+                std::vector<std::string>{
+                    probe.candidates[
+                        candidate_deployed.selected_candidate]
                         .descriptor},
-        "Attack report is not the production immediate attack-set "
-        "selector");
+        "Attack report did not use each policy's production "
+        "immediate attack-set selector");
 
     const auto repeated =
         old_school::probe_runner::

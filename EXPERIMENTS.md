@@ -9606,3 +9606,61 @@ uniform-block-average mismatch is reproduced. If both prefer Attack, the
 reference/critic is also wrong and an attack prune is not licensed. If both
 prefer No Attack, retain the fixture but capture the complete state the next
 time the manual behavior appears.
+
+#### Frozen-C16 attack-regression result: canonical fixture does not reproduce
+
+Executed 2026-07-26 after rereading `REVIEW.md` through its newest 16:44 PDT
+entry. The review independently accepted the attack-regression instrument as
+measurement, requested publication of the K64/H8 Q-values, and separately
+reported an unattributed C16 deployment-path behavior flip. This one-fixture
+diagnostic neither resolves nor relies on that mixed-field flip: it loads the
+exact frozen artifact and verifies fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+before scoring.
+
+Exact command:
+
+```sh
+make -j4 attack-regression
+```
+
+Exact result:
+
+```text
+fixture: diagnostic.ru.life20-flying-men-attack-air.v1
+reference best: no-attack,attack-with-only-legal-attacker
+reference Q[no-attack]: 0.1326196552
+reference Q[attack-with-only-legal-attacker]: 0.1428187090
+reference delta Q[no-attack - attack-with-only-legal-attacker]:
+  -0.0101990537, paired SE 0.0122998452
+production score[no-attack]: 0.1492136800
+production score[attack-with-only-legal-attacker]: 0.1471254783
+production selected: no-attack
+production selection is reference-best: yes
+production reference regret: 0.0101990537
+hidden repartition: PASS
+reference evaluations: 128
+```
+
+The normal 95% interval for the paired reference difference is
+`[-0.0343063073, +0.0139081999]`. Thus the reference point estimate slightly
+favors attacking, but the preregistered uncertainty-aware best set contains
+both actions. Production C16 selects No Attack. The exact canonical public
+fixture therefore does **not** reproduce the reported bad attack and cannot
+license a combat prune, deeper deployment re-scorer, or changed attack policy.
+The missing complete public/own-hand context from the manual game may be
+decisive.
+
+Decision: retain the fixture and executable as a deterministic regression,
+make no policy change, and do not treat the point-estimate ordering as a
+playing-strength result. The next attack-side measurement should harvest exact
+full roots where the production selector and the deep information-safe
+reference actually disagree, preferably from reproducible web sessions. Only
+such a divergence can preregister a card-agnostic action-evaluation challenger.
+
+Review postscript: the subsequent 16:52 PDT review cycle attributed the
+previously reported deployment flip to the deliberate Environment-v3 freeze,
+not an undeclared C16-policy change. That correction removes the unrelated
+baseline alarm and does not alter this fixture verdict. Its pooled lift read
+also concentrates the remaining Handcoded-policy deficit in Blue, reinforcing
+exact stack-response/action-evaluation harvesting as the next research target.

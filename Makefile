@@ -28,6 +28,7 @@ LEARNED_ITERATION_TEST_RUNNER := $(BUILD_DIR)/old-school-learned-iteration-tests
 PROBE_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-tests
 PROBE_EVAL_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-eval-tests
 PROBE_RUNNER_TEST_RUNNER := $(BUILD_DIR)/old-school-probe-runner-tests
+ATTACK_REGRESSION := $(BUILD_DIR)/old-school-attack-regression
 AUDIT_COMMON_TEST_RUNNER := $(BUILD_DIR)/old-school-audit-common-tests
 ARTIFACT_INTEGRITY_TEST_RUNNER := $(BUILD_DIR)/old-school-artifact-integrity-tests
 TERMINAL_WEIGHT_EVAL_TEST_RUNNER := $(BUILD_DIR)/old-school-terminal-weight-eval-tests
@@ -48,7 +49,7 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -72,6 +73,9 @@ $(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp includ
 
 $(PROBE_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp -o $@
+
+$(ATTACK_REGRESSION): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/attack_regression_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/attack_regression_main.cpp -o $@
 
 $(AUDIT_COMMON_TEST_RUNNER): $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp include/old_school/audit_common.hpp include/old_school/learned_iteration.hpp include/old_school/game.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp -o $@
@@ -163,6 +167,9 @@ test-probes: $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_
 	./$(PROBE_TEST_RUNNER)
 	./$(PROBE_EVAL_TEST_RUNNER)
 	./$(PROBE_RUNNER_TEST_RUNNER)
+
+attack-regression: $(ATTACK_REGRESSION)
+	./$(ATTACK_REGRESSION)
 
 test-audit-common: $(AUDIT_COMMON_TEST_RUNNER)
 	./$(AUDIT_COMMON_TEST_RUNNER)
