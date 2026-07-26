@@ -7920,8 +7920,21 @@ Focused acceptance fixtures:
 
 The diagnostic uses seed `202607260947` only for paired information-set worlds
 and reports G0/K2 plus exact frozen C16/K8. This is a mechanism/proof gate, not
-a claim that C16 already handles Braingeyser correctly. The treatment then
-runs a 240-game paired all-five large-regression smoke:
+a claim that C16 already handles Braingeyser correctly. Add an exclusive
+`--diagnose-value-pass-dominance` route: it accepts only the exact diagnostic
+seed, trains deterministic G0 T800/S424242 in memory at K=2, load-only checks
+the exact frozen C16 T800/S424242 fingerprint at K=8, writes or refreshes no
+artifact, and prints before/after fixture option sets, selections, dominance,
+and hidden-information checks. Exit `0` is a complete mechanism pass, `1` a
+complete mechanism rejection, and `2` infrastructure/incomplete evidence.
+The exact command is:
+
+```sh
+./build/old-school-sim --diagnose-value-pass-dominance \
+  --seed 202607260947
+```
+
+The treatment then runs a 240-game paired all-five large-regression smoke:
 
 ```sh
 ./build/old-school-sim --benchmark --games 4 \
