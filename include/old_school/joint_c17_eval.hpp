@@ -22,6 +22,30 @@ inline constexpr std::size_t
 inline constexpr std::size_t kExpectedProbeCount = 20;
 inline constexpr std::size_t kExpectedProbesPerDeck = 4;
 
+// Sealed C17-J1 gameplay schedule. A repetition contains four games for
+// same-deck pairings and two games for distinct ordered deck pairings.
+inline constexpr std::size_t kDirectPanelRepetitions = 34;
+inline constexpr std::size_t kDirectPanelGames = 2'040;
+inline constexpr std::size_t kDirectPanelGamesPerDeck = 408;
+inline constexpr std::size_t kDirectPanelDiagonalGames = 136;
+inline constexpr std::size_t kDirectPanelOffDiagonalGames = 68;
+inline constexpr std::size_t kFixedSeedPanelCount = 8;
+inline constexpr std::size_t kFixedSeedPanelRepetitions = 5;
+inline constexpr std::size_t kFixedSeedPanelGames = 300;
+inline constexpr std::size_t kFixedSeedPanelGamesPerDeck = 60;
+inline constexpr std::size_t kFixedSeedPanelDiagonalGames = 20;
+inline constexpr std::size_t kFixedSeedPanelOffDiagonalGames = 10;
+inline constexpr std::size_t kFinalDirectPanelCount =
+    1 + kFixedSeedPanelCount;
+inline constexpr std::size_t kFinalDirectRepetitions = 74;
+inline constexpr std::size_t kFinalDirectGames = 4'440;
+inline constexpr std::size_t kFinalDirectGamesPerDeck = 888;
+inline constexpr std::size_t kFinalDirectDiagonalGames = 296;
+inline constexpr std::size_t kFinalDirectOffDiagonalGames = 148;
+inline constexpr std::size_t kMixedFieldTotalGames = 8'000;
+inline constexpr std::size_t kMixedFieldGamesPerDeckPolicy = 640;
+inline constexpr double kMixedFieldLiftTolerance = 1e-12;
+
 inline constexpr std::array<std::string_view, 4>
     kRequiredStableBlueProbeIds = {
         "blue.counter-fire-elemental.v3",
@@ -173,6 +197,132 @@ DeepReferenceGateReport evaluate_deep_reference_gate(
     const probe_runner::ForceSpikePolicyControlReport&
         treatment_force_spike,
     bool hidden_repartition_passed);
+
+struct OutcomeCounts {
+    std::size_t games = 0;
+    std::size_t wins = 0;
+    std::size_t losses = 0;
+    std::size_t draws = 0;
+
+    bool operator==(const OutcomeCounts&) const = default;
+};
+
+// Count-only representation used to pool independently evaluated benchmark
+// panels without copying policy/model objects or summing unrelated telemetry.
+struct BenchmarkCountSummary {
+    std::size_t panel_count = 0;
+    std::size_t repetitions_per_deck_pairing = 0;
+    std::size_t total_games = 0;
+    OutcomeCounts challenger;
+    OutcomeCounts baseline;
+    std::array<OutcomeCounts, kDeckCount> challenger_decks{};
+    std::array<OutcomeCounts, kDeckCount> baseline_decks{};
+    std::array<std::array<OutcomeCounts, kDeckCount>, kDeckCount>
+        challenger_deck_matchups{};
+
+    bool operator==(const BenchmarkCountSummary&) const = default;
+};
+
+struct DirectGameplayGateReport {
+    bool accounting_exact = false;
+    bool rates_finite = false;
+    bool aggregate_strict_win = false;
+    bool wilson_lower_above_half = false;
+    std::array<bool, kDeckCount> challenger_deck_strict_wins{};
+    bool every_challenger_deck_strict_win = false;
+    double challenger_win_rate_percent = 0.0;
+    double wilson_lower_95_percent = 0.0;
+    bool passed = false;
+    std::vector<std::string> failures;
+
+    bool operator==(const DirectGameplayGateReport&) const = default;
+};
+
+// The deck gate is deliberately challenger-perspective: each
+// challenger_decks[d].wins is compared with its own losses. Baseline deck
+// buckets are accounting data only and never enter the strength predicate.
+DirectGameplayGateReport evaluate_direct_gameplay_panel(
+    const BotBenchmarkSummary& summary);
+
+struct FixedSeedPanelGateReport {
+    bool accounting_exact = false;
+    bool aggregate_non_losing = false;
+    bool passed = false;
+    std::vector<std::string> failures;
+
+    bool operator==(const FixedSeedPanelGateReport&) const = default;
+};
+
+FixedSeedPanelGateReport evaluate_fixed_seed_panel(
+    const BotBenchmarkSummary& summary);
+
+struct FixedSeedPanelSetGateReport {
+    bool panel_count_exact = false;
+    bool every_panel_passed = false;
+    std::vector<FixedSeedPanelGateReport> panels;
+    bool passed = false;
+    std::vector<std::string> failures;
+
+    bool operator==(
+        const FixedSeedPanelSetGateReport&) const = default;
+};
+
+FixedSeedPanelSetGateReport evaluate_fixed_seed_panel_set(
+    std::span<const BotBenchmarkSummary> summaries);
+
+// Merges the one 34-repetition panel and eight 5-repetition panels only when
+// every input has exact schedule accounting. All additions are checked;
+// malformed input or size_t overflow returns nullopt.
+std::optional<BenchmarkCountSummary> merge_final_direct_panels(
+    const BotBenchmarkSummary& direct_panel,
+    std::span<const BotBenchmarkSummary> fixed_seed_panels);
+
+struct FinalDirectPoolGateReport {
+    bool accounting_exact = false;
+    bool rates_finite = false;
+    bool aggregate_strict_win = false;
+    bool wilson_lower_above_half = false;
+    std::array<bool, kDeckCount> challenger_deck_strict_wins{};
+    bool every_challenger_deck_strict_win = false;
+    double challenger_win_rate_percent = 0.0;
+    double wilson_lower_95_percent = 0.0;
+    bool passed = false;
+    std::vector<std::string> failures;
+
+    bool operator==(const FinalDirectPoolGateReport&) const = default;
+};
+
+FinalDirectPoolGateReport evaluate_final_direct_pool(
+    const BenchmarkCountSummary& summary);
+
+struct MixedFieldDeckGateReport {
+    DeckId deck = DeckId::Green;
+    double random_win_rate_percent = 0.0;
+    double learned_win_rate_percent = 0.0;
+    double learned_lift_percentage_points = 0.0;
+    double best_other_lift_percentage_points = 0.0;
+    BotKind best_other = BotKind::Random;
+    bool rates_finite = false;
+    bool learned_lift_is_best = false;
+
+    bool operator==(const MixedFieldDeckGateReport&) const = default;
+};
+
+struct MixedFieldGateReport {
+    bool accounting_exact = false;
+    bool rates_finite = false;
+    std::array<MixedFieldDeckGateReport, kDeckCount> by_deck{};
+    bool learned_lift_best_on_every_deck = false;
+    bool passed = false;
+    std::vector<std::string> failures;
+
+    bool operator==(const MixedFieldGateReport&) const = default;
+};
+
+// Random's lift is zero. Learned must tie or beat Random, Monte Carlo, Deep
+// Monte Carlo, and Handcrafted on each of all five decks.
+MixedFieldGateReport evaluate_mixed_field_pool(
+    const TournamentSummary& summary);
 
 struct StageOutcomes {
     bool heldout_passed = false;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,6 +27,281 @@ void record_failure(
     if (!condition) {
         failures.emplace_back(message);
     }
+}
+
+template <typename Stats>
+OutcomeCounts outcome_counts(const Stats& stats) {
+    return {
+        .games = stats.games,
+        .wins = stats.wins,
+        .losses = stats.losses,
+        .draws = stats.draws,
+    };
+}
+
+bool checked_add(
+    std::size_t first, std::size_t second,
+    std::size_t& result) {
+    if (first >
+        std::numeric_limits<std::size_t>::max() - second) {
+        return false;
+    }
+    result = first + second;
+    return true;
+}
+
+bool add_to(
+    std::size_t value, std::size_t& accumulator) {
+    std::size_t result = 0;
+    if (!checked_add(accumulator, value, result)) {
+        return false;
+    }
+    accumulator = result;
+    return true;
+}
+
+bool outcomes_valid(const OutcomeCounts& outcomes) {
+    std::size_t completed = 0;
+    return outcomes.wins <= outcomes.games &&
+           outcomes.losses <= outcomes.games &&
+           outcomes.draws <= outcomes.games &&
+           checked_add(
+               outcomes.wins, outcomes.losses,
+               completed) &&
+           add_to(outcomes.draws, completed) &&
+           completed == outcomes.games;
+}
+
+bool add_outcomes(
+    const OutcomeCounts& source,
+    OutcomeCounts& destination) {
+    OutcomeCounts merged = destination;
+    if (!add_to(source.games, merged.games) ||
+        !add_to(source.wins, merged.wins) ||
+        !add_to(source.losses, merged.losses) ||
+        !add_to(source.draws, merged.draws)) {
+        return false;
+    }
+    destination = merged;
+    return true;
+}
+
+BenchmarkCountSummary benchmark_count_summary(
+    const BotBenchmarkSummary& summary) {
+    BenchmarkCountSummary counts{
+        .panel_count = 1,
+        .repetitions_per_deck_pairing =
+            summary.repetitions_per_deck_pairing,
+        .total_games = summary.total_games,
+        .challenger = outcome_counts(
+            summary.challenger_stats),
+        .baseline = outcome_counts(summary.baseline_stats),
+    };
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        counts.challenger_decks[deck] =
+            outcome_counts(summary.challenger_decks[deck]);
+        counts.baseline_decks[deck] =
+            outcome_counts(summary.baseline_decks[deck]);
+        for (std::size_t opponent = 0;
+             opponent < kDeckCount; ++opponent) {
+            counts.challenger_deck_matchups[deck][opponent] =
+                outcome_counts(
+                    summary.challenger_deck_matchups
+                        [deck][opponent]);
+        }
+    }
+    return counts;
+}
+
+bool outcomes_equal(
+    const OutcomeCounts& first,
+    const OutcomeCounts& second) {
+    return first == second;
+}
+
+bool benchmark_counts_self_consistent(
+    const BenchmarkCountSummary& counts) {
+    if (counts.panel_count == 0 ||
+        !outcomes_valid(counts.challenger) ||
+        !outcomes_valid(counts.baseline) ||
+        counts.challenger.games != counts.total_games ||
+        counts.baseline.games != counts.total_games ||
+        counts.challenger.wins != counts.baseline.losses ||
+        counts.challenger.losses != counts.baseline.wins ||
+        counts.challenger.draws != counts.baseline.draws) {
+        return false;
+    }
+
+    OutcomeCounts challenger_deck_total;
+    OutcomeCounts baseline_deck_total;
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        if (!outcomes_valid(counts.challenger_decks[deck]) ||
+            !outcomes_valid(counts.baseline_decks[deck]) ||
+            !add_outcomes(
+                counts.challenger_decks[deck],
+                challenger_deck_total) ||
+            !add_outcomes(
+                counts.baseline_decks[deck],
+                baseline_deck_total)) {
+            return false;
+        }
+
+        OutcomeCounts challenger_row;
+        OutcomeCounts baseline_column;
+        for (std::size_t opponent = 0;
+             opponent < kDeckCount; ++opponent) {
+            const auto& row_cell =
+                counts.challenger_deck_matchups
+                    [deck][opponent];
+            const auto& column_cell =
+                counts.challenger_deck_matchups
+                    [opponent][deck];
+            if (!outcomes_valid(row_cell) ||
+                !outcomes_valid(column_cell) ||
+                !add_outcomes(row_cell, challenger_row)) {
+                return false;
+            }
+            const OutcomeCounts baseline_view{
+                .games = column_cell.games,
+                .wins = column_cell.losses,
+                .losses = column_cell.wins,
+                .draws = column_cell.draws,
+            };
+            if (!add_outcomes(
+                    baseline_view, baseline_column)) {
+                return false;
+            }
+        }
+        if (!outcomes_equal(
+                challenger_row,
+                counts.challenger_decks[deck]) ||
+            !outcomes_equal(
+                baseline_column,
+                counts.baseline_decks[deck])) {
+            return false;
+        }
+    }
+    return outcomes_equal(
+               challenger_deck_total, counts.challenger) &&
+           outcomes_equal(
+               baseline_deck_total, counts.baseline);
+}
+
+bool benchmark_schedule_exact(
+    const BenchmarkCountSummary& counts,
+    std::size_t expected_panel_count,
+    std::size_t expected_repetitions,
+    std::size_t expected_total_games,
+    std::size_t expected_games_per_deck,
+    std::size_t expected_diagonal_games,
+    std::size_t expected_off_diagonal_games) {
+    if (counts.panel_count != expected_panel_count ||
+        counts.repetitions_per_deck_pairing !=
+            expected_repetitions ||
+        counts.total_games != expected_total_games ||
+        !benchmark_counts_self_consistent(counts)) {
+        return false;
+    }
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        if (counts.challenger_decks[deck].games !=
+                expected_games_per_deck ||
+            counts.baseline_decks[deck].games !=
+                expected_games_per_deck) {
+            return false;
+        }
+        for (std::size_t opponent = 0;
+             opponent < kDeckCount; ++opponent) {
+            const std::size_t expected_games =
+                deck == opponent
+                    ? expected_diagonal_games
+                    : expected_off_diagonal_games;
+            if (counts.challenger_deck_matchups
+                    [deck][opponent]
+                        .games != expected_games) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool merge_benchmark_counts(
+    const BenchmarkCountSummary& source,
+    BenchmarkCountSummary& destination) {
+    BenchmarkCountSummary merged = destination;
+    if (!add_to(source.panel_count, merged.panel_count) ||
+        !add_to(
+            source.repetitions_per_deck_pairing,
+            merged.repetitions_per_deck_pairing) ||
+        !add_to(source.total_games, merged.total_games) ||
+        !add_outcomes(source.challenger, merged.challenger) ||
+        !add_outcomes(source.baseline, merged.baseline)) {
+        return false;
+    }
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        if (!add_outcomes(
+                source.challenger_decks[deck],
+                merged.challenger_decks[deck]) ||
+            !add_outcomes(
+                source.baseline_decks[deck],
+                merged.baseline_decks[deck])) {
+            return false;
+        }
+        for (std::size_t opponent = 0;
+             opponent < kDeckCount; ++opponent) {
+            if (!add_outcomes(
+                    source.challenger_deck_matchups
+                        [deck][opponent],
+                    merged.challenger_deck_matchups
+                        [deck][opponent])) {
+                return false;
+            }
+        }
+    }
+    destination = merged;
+    return true;
+}
+
+std::optional<double> win_rate_percent(
+    const OutcomeCounts& outcomes) {
+    if (!outcomes_valid(outcomes) || outcomes.games == 0) {
+        return std::nullopt;
+    }
+    const double rate =
+        100.0 * static_cast<double>(outcomes.wins) /
+        static_cast<double>(outcomes.games);
+    if (!std::isfinite(rate)) {
+        return std::nullopt;
+    }
+    return rate;
+}
+
+std::optional<double> wilson_lower_95_percent(
+    const OutcomeCounts& outcomes) {
+    if (!outcomes_valid(outcomes) || outcomes.games == 0) {
+        return std::nullopt;
+    }
+    constexpr double z = 1.959963984540054;
+    const double games = static_cast<double>(outcomes.games);
+    const double proportion =
+        static_cast<double>(outcomes.wins) / games;
+    const double z_squared = z * z;
+    const double denominator = 1.0 + z_squared / games;
+    const double center =
+        proportion + z_squared / (2.0 * games);
+    const double radius =
+        z * std::sqrt(
+                (proportion * (1.0 - proportion) +
+                 z_squared / (4.0 * games)) /
+                games);
+    const double lower =
+        100.0 * std::max(
+                    0.0,
+                    (center - radius) / denominator);
+    if (!std::isfinite(lower)) {
+        return std::nullopt;
+    }
+    return lower;
 }
 
 bool finite_estimate(
@@ -1023,6 +1299,368 @@ DeepReferenceGateReport evaluate_deep_reference_gate(
         gate.common_state_critics.accounting_exact &&
         gate.common_state_critics.predictions_valid &&
         gate.common_state_critics.metrics_finite;
+    return gate;
+}
+
+DirectGameplayGateReport evaluate_direct_gameplay_panel(
+    const BotBenchmarkSummary& summary) {
+    const auto counts = benchmark_count_summary(summary);
+    DirectGameplayGateReport gate;
+    gate.accounting_exact = benchmark_schedule_exact(
+        counts, 1, kDirectPanelRepetitions,
+        kDirectPanelGames, kDirectPanelGamesPerDeck,
+        kDirectPanelDiagonalGames,
+        kDirectPanelOffDiagonalGames);
+
+    const auto win_rate = win_rate_percent(counts.challenger);
+    const auto wilson =
+        wilson_lower_95_percent(counts.challenger);
+    gate.rates_finite =
+        win_rate.has_value() && wilson.has_value();
+    if (win_rate.has_value()) {
+        gate.challenger_win_rate_percent = *win_rate;
+    }
+    if (wilson.has_value()) {
+        gate.wilson_lower_95_percent = *wilson;
+    }
+    gate.aggregate_strict_win =
+        outcomes_valid(counts.challenger) &&
+        counts.challenger.wins > counts.challenger.losses;
+    gate.wilson_lower_above_half =
+        wilson.has_value() && *wilson > 50.0;
+    gate.every_challenger_deck_strict_win = true;
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        gate.challenger_deck_strict_wins[deck] =
+            outcomes_valid(counts.challenger_decks[deck]) &&
+            counts.challenger_decks[deck].wins >
+                counts.challenger_decks[deck].losses;
+        gate.every_challenger_deck_strict_win =
+            gate.every_challenger_deck_strict_win &&
+            gate.challenger_deck_strict_wins[deck];
+    }
+
+    record_failure(
+        gate.accounting_exact,
+        "direct panel schedule accounting is not exact",
+        gate.failures);
+    record_failure(
+        gate.rates_finite,
+        "direct panel rates are not finite",
+        gate.failures);
+    record_failure(
+        gate.aggregate_strict_win,
+        "direct panel challenger does not have more wins than losses",
+        gate.failures);
+    record_failure(
+        gate.wilson_lower_above_half,
+        "direct panel Wilson lower bound is not above 50%",
+        gate.failures);
+    record_failure(
+        gate.every_challenger_deck_strict_win,
+        "a challenger deck does not have more wins than losses",
+        gate.failures);
+    gate.passed =
+        gate.accounting_exact &&
+        gate.rates_finite &&
+        gate.aggregate_strict_win &&
+        gate.wilson_lower_above_half &&
+        gate.every_challenger_deck_strict_win;
+    return gate;
+}
+
+FixedSeedPanelGateReport evaluate_fixed_seed_panel(
+    const BotBenchmarkSummary& summary) {
+    const auto counts = benchmark_count_summary(summary);
+    FixedSeedPanelGateReport gate;
+    gate.accounting_exact = benchmark_schedule_exact(
+        counts, 1, kFixedSeedPanelRepetitions,
+        kFixedSeedPanelGames,
+        kFixedSeedPanelGamesPerDeck,
+        kFixedSeedPanelDiagonalGames,
+        kFixedSeedPanelOffDiagonalGames);
+    gate.aggregate_non_losing =
+        outcomes_valid(counts.challenger) &&
+        counts.challenger.wins >= counts.challenger.losses;
+    record_failure(
+        gate.accounting_exact,
+        "fixed-seed panel schedule accounting is not exact",
+        gate.failures);
+    record_failure(
+        gate.aggregate_non_losing,
+        "fixed-seed panel challenger has fewer wins than losses",
+        gate.failures);
+    gate.passed =
+        gate.accounting_exact &&
+        gate.aggregate_non_losing;
+    return gate;
+}
+
+FixedSeedPanelSetGateReport evaluate_fixed_seed_panel_set(
+    std::span<const BotBenchmarkSummary> summaries) {
+    FixedSeedPanelSetGateReport gate;
+    gate.panel_count_exact =
+        summaries.size() == kFixedSeedPanelCount;
+    gate.panels.reserve(summaries.size());
+    for (const auto& summary : summaries) {
+        gate.panels.push_back(
+            evaluate_fixed_seed_panel(summary));
+    }
+    gate.every_panel_passed = std::all_of(
+        gate.panels.begin(), gate.panels.end(),
+        [](const FixedSeedPanelGateReport& panel) {
+            return panel.passed;
+        });
+    record_failure(
+        gate.panel_count_exact,
+        "fixed-seed panel count is not eight",
+        gate.failures);
+    record_failure(
+        gate.every_panel_passed,
+        "a fixed-seed panel failed its non-losing gate",
+        gate.failures);
+    gate.passed =
+        gate.panel_count_exact &&
+        gate.every_panel_passed;
+    return gate;
+}
+
+std::optional<BenchmarkCountSummary> merge_final_direct_panels(
+    const BotBenchmarkSummary& direct_panel,
+    std::span<const BotBenchmarkSummary> fixed_seed_panels) {
+    if (fixed_seed_panels.size() !=
+        kFixedSeedPanelCount) {
+        return std::nullopt;
+    }
+
+    const auto direct_counts =
+        benchmark_count_summary(direct_panel);
+    if (!benchmark_schedule_exact(
+            direct_counts, 1, kDirectPanelRepetitions,
+            kDirectPanelGames,
+            kDirectPanelGamesPerDeck,
+            kDirectPanelDiagonalGames,
+            kDirectPanelOffDiagonalGames)) {
+        return std::nullopt;
+    }
+
+    BenchmarkCountSummary merged;
+    if (!merge_benchmark_counts(
+            direct_counts, merged)) {
+        return std::nullopt;
+    }
+    for (const auto& panel : fixed_seed_panels) {
+        const auto panel_counts =
+            benchmark_count_summary(panel);
+        if (!benchmark_schedule_exact(
+                panel_counts, 1,
+                kFixedSeedPanelRepetitions,
+                kFixedSeedPanelGames,
+                kFixedSeedPanelGamesPerDeck,
+                kFixedSeedPanelDiagonalGames,
+                kFixedSeedPanelOffDiagonalGames) ||
+            !merge_benchmark_counts(
+                panel_counts, merged)) {
+            return std::nullopt;
+        }
+    }
+    if (!benchmark_schedule_exact(
+            merged, kFinalDirectPanelCount,
+            kFinalDirectRepetitions,
+            kFinalDirectGames,
+            kFinalDirectGamesPerDeck,
+            kFinalDirectDiagonalGames,
+            kFinalDirectOffDiagonalGames)) {
+        return std::nullopt;
+    }
+    return merged;
+}
+
+FinalDirectPoolGateReport evaluate_final_direct_pool(
+    const BenchmarkCountSummary& summary) {
+    FinalDirectPoolGateReport gate;
+    gate.accounting_exact = benchmark_schedule_exact(
+        summary, kFinalDirectPanelCount,
+        kFinalDirectRepetitions,
+        kFinalDirectGames,
+        kFinalDirectGamesPerDeck,
+        kFinalDirectDiagonalGames,
+        kFinalDirectOffDiagonalGames);
+
+    const auto win_rate = win_rate_percent(summary.challenger);
+    const auto wilson =
+        wilson_lower_95_percent(summary.challenger);
+    gate.rates_finite =
+        win_rate.has_value() && wilson.has_value();
+    if (win_rate.has_value()) {
+        gate.challenger_win_rate_percent = *win_rate;
+    }
+    if (wilson.has_value()) {
+        gate.wilson_lower_95_percent = *wilson;
+    }
+    gate.aggregate_strict_win =
+        outcomes_valid(summary.challenger) &&
+        summary.challenger.wins >
+            summary.challenger.losses;
+    gate.wilson_lower_above_half =
+        wilson.has_value() && *wilson > 50.0;
+    gate.every_challenger_deck_strict_win = true;
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        gate.challenger_deck_strict_wins[deck] =
+            outcomes_valid(summary.challenger_decks[deck]) &&
+            summary.challenger_decks[deck].wins >
+                summary.challenger_decks[deck].losses;
+        gate.every_challenger_deck_strict_win =
+            gate.every_challenger_deck_strict_win &&
+            gate.challenger_deck_strict_wins[deck];
+    }
+
+    record_failure(
+        gate.accounting_exact,
+        "final direct pool schedule accounting is not exact",
+        gate.failures);
+    record_failure(
+        gate.rates_finite,
+        "final direct pool rates are not finite",
+        gate.failures);
+    record_failure(
+        gate.aggregate_strict_win,
+        "final direct pool challenger does not have more wins than losses",
+        gate.failures);
+    record_failure(
+        gate.wilson_lower_above_half,
+        "final direct pool Wilson lower bound is not above 50%",
+        gate.failures);
+    record_failure(
+        gate.every_challenger_deck_strict_win,
+        "a final-pool challenger deck does not have more wins than losses",
+        gate.failures);
+    gate.passed =
+        gate.accounting_exact &&
+        gate.rates_finite &&
+        gate.aggregate_strict_win &&
+        gate.wilson_lower_above_half &&
+        gate.every_challenger_deck_strict_win;
+    return gate;
+}
+
+MixedFieldGateReport evaluate_mixed_field_pool(
+    const TournamentSummary& summary) {
+    MixedFieldGateReport gate;
+    OutcomeCounts seat_total;
+    bool cell_accounting_exact = true;
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        for (std::size_t bot = 0;
+             bot < kBotKindCount; ++bot) {
+            const auto counts =
+                outcome_counts(summary.deck_bots[deck][bot]);
+            cell_accounting_exact =
+                cell_accounting_exact &&
+                outcomes_valid(counts) &&
+                counts.games ==
+                    kMixedFieldGamesPerDeckPolicy;
+            if (!add_outcomes(counts, seat_total)) {
+                cell_accounting_exact = false;
+            }
+        }
+    }
+    std::size_t expected_seat_games = 0;
+    std::size_t expected_seat_draws = 0;
+    const bool doubled_counts_valid =
+        checked_add(
+            summary.total_games, summary.total_games,
+            expected_seat_games) &&
+        checked_add(
+            summary.draws, summary.draws,
+            expected_seat_draws);
+    gate.accounting_exact =
+        summary.total_games == kMixedFieldTotalGames &&
+        cell_accounting_exact &&
+        doubled_counts_valid &&
+        outcomes_valid(seat_total) &&
+        seat_total.games == expected_seat_games &&
+        seat_total.wins == seat_total.losses &&
+        seat_total.draws == expected_seat_draws;
+
+    gate.rates_finite = true;
+    gate.learned_lift_best_on_every_deck = true;
+    const auto random_index =
+        static_cast<std::size_t>(BotKind::Random);
+    const auto learned_index =
+        static_cast<std::size_t>(BotKind::Learned);
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        auto& deck_gate = gate.by_deck[deck];
+        deck_gate.deck = static_cast<DeckId>(deck);
+        std::array<double, kBotKindCount> rates{};
+        bool deck_rates_finite = true;
+        for (std::size_t bot = 0;
+             bot < kBotKindCount; ++bot) {
+            const auto rate = win_rate_percent(
+                outcome_counts(
+                    summary.deck_bots[deck][bot]));
+            if (!rate.has_value()) {
+                deck_rates_finite = false;
+                continue;
+            }
+            rates[bot] = *rate;
+        }
+        deck_gate.rates_finite = deck_rates_finite;
+        gate.rates_finite =
+            gate.rates_finite && deck_rates_finite;
+        if (!deck_rates_finite) {
+            deck_gate.learned_lift_is_best = false;
+            gate.learned_lift_best_on_every_deck = false;
+            continue;
+        }
+
+        deck_gate.random_win_rate_percent =
+            rates[random_index];
+        deck_gate.learned_win_rate_percent =
+            rates[learned_index];
+        deck_gate.learned_lift_percentage_points =
+            rates[learned_index] - rates[random_index];
+        deck_gate.best_other = BotKind::Random;
+        deck_gate.best_other_lift_percentage_points = 0.0;
+        deck_gate.learned_lift_is_best = true;
+        for (std::size_t bot = 0;
+             bot < kBotKindCount; ++bot) {
+            if (bot == learned_index) {
+                continue;
+            }
+            const double lift =
+                rates[bot] - rates[random_index];
+            if (lift >
+                deck_gate.best_other_lift_percentage_points) {
+                deck_gate.best_other_lift_percentage_points =
+                    lift;
+                deck_gate.best_other =
+                    static_cast<BotKind>(bot);
+            }
+            if (deck_gate.learned_lift_percentage_points +
+                    kMixedFieldLiftTolerance <
+                lift) {
+                deck_gate.learned_lift_is_best = false;
+            }
+        }
+        gate.learned_lift_best_on_every_deck =
+            gate.learned_lift_best_on_every_deck &&
+            deck_gate.learned_lift_is_best;
+    }
+    record_failure(
+        gate.accounting_exact,
+        "mixed-field pool accounting is not exact",
+        gate.failures);
+    record_failure(
+        gate.rates_finite,
+        "mixed-field deck-policy rates are not finite",
+        gate.failures);
+    record_failure(
+        gate.learned_lift_best_on_every_deck,
+        "Learned lift is not best on every deck",
+        gate.failures);
+    gate.passed =
+        gate.accounting_exact &&
+        gate.rates_finite &&
+        gate.learned_lift_best_on_every_deck;
     return gate;
 }
 
