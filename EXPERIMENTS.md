@@ -8420,3 +8420,47 @@ pass licenses replay weighting only as a component of a separately declared
 paired composite fit. A valid rejection closes the replay-weight family and
 excludes it from that composite. An exit-`2` consumes and quarantines the fresh
 seed without a scientific conclusion.
+
+#### Repaired implementation freeze (no audit data opened)
+
+Frozen on committed and pushed source `ca2cd13` after a separate read-only
+review reported no blocker. The code exposes
+`kAuditSeed = 202607261047` and
+`kQuarantinedAuditSeed = 202607260731`; the canonical audit derives its
+schedule, both capture configurations, and all four scientific reports from
+the fresh constant. Ordinary simulation and training reject both seeds with
+distinct reserved/quarantined errors. RB0-E1 likewise rejects both while
+retaining engineering seed `202607260902` and its previously frozen report
+schema.
+
+No row-weight calculation, target, reducer, estimand, gate, threshold,
+qualification, artifact loader, scientific report skeleton, capture schedule,
+or exclusive route changed. The current C16 artifact is present at the exact
+canonical path, is 3,111,437 bytes, and has filesystem SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`;
+the audit will independently enforce its internal parent fingerprint and
+before/after snapshot.
+
+Verification before the sealed command:
+
+- 15/15 replay-weight tests and 7/7 mechanical-preflight tests passed
+  `-Werror` clean, including exact fresh/quarantined constants and both
+  function/executable fences;
+- the complete CLI suite passed with fresh reserved `--seed`/`--train-seed`
+  rejection, permanent old-seed quarantine, updated help, exclusivity, and
+  missing-artifact/no-write coverage;
+- `make -j4 test` passed 134 engine/bot, 27 learned-iteration, 40 probe, 11
+  probe-metric, 25 probe-runner, 8 audit-common, 10 terminal, 10 TA4, 7 CT8,
+  15 RB0, 7 preflight, 12 web-bridge, 90 web-client, and 48 certification
+  tests, plus CLI and capture-once suites;
+- both affected 15-test and 7-test binaries rebuilt at `-O1 -g` with
+  AddressSanitizer and UndefinedBehaviorSanitizer and passed with
+  `halt_on_error=1`; and
+- the reserved capture prefix remains absent and the Git tree is clean.
+
+`REVIEW.md` was reread through its 11:11 PDT cycle. Its phrase that the sealed
+rerun “is executing” is premature: at this freeze the capture command has not
+been invoked and no reserved-prefix file exists. Its substantive conclusion
+that the declaration is frozen and has no blocker agrees with the independent
+code review. The next action remains exactly the single `capture_once` command
+declared above.
