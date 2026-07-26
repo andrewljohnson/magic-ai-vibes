@@ -8063,6 +8063,33 @@ The exact command is:
   --seed 202607260947
 ```
 
+#### Pre-run benchmark-admission repair
+
+Recorded 2026-07-26 before either reserved PD0 seed was consumed. Independent
+final review found one infrastructure blocker: `run_bot_benchmark`'s generic
+same-policy rejection does not include `value_pass_dominance` in Learned
+policy identity, so it rejects the on/off treatment as identical; it also
+necessarily rejects the intentionally identical off/off runtime control.
+Nonreserved G0 analogues at evaluation seed `17`, training seed `19`, T=1,
+K=1 reproduced both exit-2 failures with
+`benchmark bots must use different policies or rollout counts`.
+
+The permitted repair is mechanical and prospective:
+
+- include `value_pass_dominance` in Learned benchmark policy identity;
+- add an explicit default-false identical-policy-control permission to the
+  benchmark API;
+- enable that permission in the CLI only for the already fenced exact reserved
+  PD0 off/off control; the on/off treatment is distinct and needs no bypass;
+- reject `value_pass_dominance` on every non-Learned-Value `BotConfig`;
+- retain generic identical-policy rejection for every other benchmark.
+
+Add focused tests proving each condition. This changes benchmark admission
+only: it must not change a game seed, RNG stream, policy decision, model,
+fixture, smoke command, threshold, or interpretation. Re-run the nonreserved
+analogue and the complete strict/CLI suites before consuming either reserved
+seed.
+
 The smoke seed `202607260948` is reserved for exactly two 240-game paired
 all-five configurations, run in this fixed order. First, the unfiltered
 C16/K8 control:
