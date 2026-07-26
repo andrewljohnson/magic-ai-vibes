@@ -270,6 +270,19 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--audit-replay-weights"*\
+"Exclusive load-only RB0-0 audit"*\
+"unit versus actor-game/exact-calendar-turn replay weights"*\
+"fixed seed 202607260731 and frozen C16"*\
+"accepts no other options"*\
+"exits 0/1/2 for pass/reject/infrastructure"*) ;;
+    *)
+        printf 'RB0-0 replay-weight audit contract missing from --help\n' \
+            >&2
+        exit 1
+        ;;
+esac
 
 run_cli --diagnose-value-context
 if [ "$cli_status" -ne 0 ]; then
@@ -405,6 +418,16 @@ expect_error "reserved CT8-0 audit seed 202607260621 may be used only by --audit
     --games 1 --seed 202607260621 --bots random
 expect_error "reserved CT8-0 audit seed 202607260621 may be used only by --audit-calendar-eight-targets" \
     --games 1 --seed 1 --bots random --train-seed 202607260621
+expect_error "--audit-replay-weights is exclusive and accepts no other options" \
+    --audit-replay-weights --seed 1
+expect_error "--audit-replay-weights is exclusive and accepts no other options" \
+    --audit-replay-weights --benchmark
+expect_error "--audit-replay-weights is exclusive and accepts no other options" \
+    --audit-replay-weights --help
+expect_error "reserved RB0-0 audit seed 202607260731 may be used only by --audit-replay-weights" \
+    --games 1 --seed 202607260731 --bots random
+expect_error "reserved RB0-0 audit seed 202607260731 may be used only by --audit-replay-weights" \
+    --games 1 --seed 1 --bots random --train-seed 202607260731
 ta4_files_before=$(find . -type f -print | sort)
 expect_error "TA4-0 infrastructure/incomplete-evidence failure" \
     --audit-calendar-turn-targets
@@ -426,6 +449,30 @@ esac
 if [ "$ta4_files_before" != "$ta4_files_after" ] ||
     [ -e "$ta4_parent_cache" ]; then
     printf 'TA4-0 load-only audit created an artifact\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+rb0_files_before=$(find . -type f -print | sort)
+expect_error "RB0-0 infrastructure/incomplete-evidence failure" \
+    --audit-replay-weights
+rb0_files_after=$(find . -type f -print | sort)
+case $cli_output in
+    *"Training"*|*"training games"*)
+        printf 'RB0-0 load-only audit tried to train\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+case $cli_output in
+    *"Constructing RB0-0 audit corpus"*)
+        printf 'RB0-0 missing-artifact route began collection\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+if [ "$rb0_files_before" != "$rb0_files_after" ] ||
+    [ -e "$ta4_parent_cache" ]; then
+    printf 'RB0-0 load-only audit created an artifact\n%s\n' \
         "$cli_output" >&2
     exit 1
 fi

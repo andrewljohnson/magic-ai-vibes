@@ -3,6 +3,7 @@
 #include "old_school/learned_iteration.hpp"
 #include "old_school/probe_runner.hpp"
 #include "old_school/probes.hpp"
+#include "old_school/replay_weight_audit.hpp"
 #include "old_school/target_factorial_audit.hpp"
 #include "old_school/terminal_weight_eval.hpp"
 #include "old_school/turn_alignment_audit.hpp"
@@ -227,6 +228,8 @@ void print_help(std::string_view executable) {
         << "       " << executable
         << " --audit-calendar-eight-targets\n"
         << "       " << executable
+        << " --audit-replay-weights\n"
+        << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
@@ -364,6 +367,11 @@ void print_help(std::string_view executable) {
            "four-arm audit of record/calendar units at four/eight-turn "
            "bootstrap horizons; fixed seed 202607260621 and frozen C16, "
            "accepts no other options, and exits 0/1/2 for "
+           "pass/reject/infrastructure\n"
+        << "  --audit-replay-weights  Exclusive load-only RB0-0 audit "
+           "of unit versus actor-game/exact-calendar-turn replay "
+           "weights; fixed seed 202607260731 and frozen C16, accepts no "
+           "other options, and exits 0/1/2 for "
            "pass/reject/infrastructure\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
@@ -4441,8 +4449,11 @@ int main(int argc, char** argv) {
             "--audit-calendar-turn-targets";
         constexpr std::string_view calendar_eight_audit_option =
             "--audit-calendar-eight-targets";
+        constexpr std::string_view replay_weight_audit_option =
+            "--audit-replay-weights";
         bool calendar_turn_audit_requested = false;
         bool calendar_eight_audit_requested = false;
+        bool replay_weight_audit_requested = false;
         for (int argument = 1; argument < argc; ++argument) {
             calendar_turn_audit_requested =
                 calendar_turn_audit_requested ||
@@ -4452,6 +4463,10 @@ int main(int argc, char** argv) {
                 calendar_eight_audit_requested ||
                 std::string_view(argv[argument]) ==
                     calendar_eight_audit_option;
+            replay_weight_audit_requested =
+                replay_weight_audit_requested ||
+                std::string_view(argv[argument]) ==
+                    replay_weight_audit_option;
         }
         if (calendar_turn_audit_requested &&
             (argc != 2 ||
@@ -4468,6 +4483,14 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--audit-calendar-eight-targets is exclusive and "
                 "accepts no other options");
+        }
+        if (replay_weight_audit_requested &&
+            (argc != 2 ||
+             std::string_view(argv[1]) !=
+                 replay_weight_audit_option)) {
+            throw std::invalid_argument(
+                "--audit-replay-weights is exclusive and accepts no "
+                "other options");
         }
 
         std::size_t games = 100;
@@ -4515,6 +4538,7 @@ int main(int argc, char** argv) {
         bool bsr0_unsupported_option_used = false;
         bool audit_calendar_turn_targets = false;
         bool audit_calendar_eight_targets = false;
+        bool audit_replay_weights = false;
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
@@ -4679,6 +4703,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--audit-calendar-eight-targets") {
                 audit_calendar_eight_targets = true;
+                continue;
+            }
+            if (option == "--audit-replay-weights") {
+                audit_replay_weights = true;
                 continue;
             }
             if (option == "--variance-study") {
@@ -4964,6 +4992,7 @@ int main(int argc, char** argv) {
                 static_cast<int>(audit_v3_blue_stack_regret) +
                 static_cast<int>(audit_calendar_turn_targets) +
                 static_cast<int>(audit_calendar_eight_targets) +
+                static_cast<int>(audit_replay_weights) +
                 static_cast<int>(variance_study) +
                 static_cast<int>(score_probes) >
             1) {
@@ -4981,6 +5010,7 @@ int main(int argc, char** argv) {
                 "--audit-v3-blue-stack-regret, "
                 "--audit-calendar-turn-targets, "
                 "--audit-calendar-eight-targets, "
+                "--audit-replay-weights, "
                 "--variance-study, and "
                 "--score-probes cannot be "
                 "combined");
@@ -5062,6 +5092,11 @@ int main(int argc, char** argv) {
                 "--audit-calendar-eight-targets is exclusive and "
                 "accepts no other options");
         }
+        if (audit_replay_weights && argc != 2) {
+            throw std::invalid_argument(
+                "--audit-replay-weights is exclusive and accepts no "
+                "other options");
+        }
         constexpr std::uint64_t calendar_turn_audit_seed =
             202607260501ULL;
         if (!audit_calendar_turn_targets &&
@@ -5083,6 +5118,17 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "reserved CT8-0 audit seed 202607260621 may be used "
                 "only by --audit-calendar-eight-targets");
+        }
+        if (!audit_replay_weights &&
+            ((seed_option_used &&
+              seed ==
+                  old_school::replay_weight_audit::kAuditSeed) ||
+             (training_seed_option_used &&
+              training_seed ==
+                  old_school::replay_weight_audit::kAuditSeed))) {
+            throw std::invalid_argument(
+                "reserved RB0-0 audit seed 202607260731 may be used "
+                "only by --audit-replay-weights");
         }
         if (audit_dc1_dominance &&
             dc1_unsupported_option_used) {
@@ -5530,6 +5576,29 @@ int main(int argc, char** argv) {
                        "failure: "
                     << error.what() << '\n';
                 return old_school::target_factorial_audit::
+                    audit_exit_code(false, false);
+            }
+        }
+        if (audit_replay_weights) {
+            try {
+                const auto report =
+                    old_school::replay_weight_audit::
+                        run_canonical_rb0_audit(std::cout);
+                old_school::replay_weight_audit::
+                    write_human_report(report, std::cout);
+                old_school::replay_weight_audit::
+                    write_tsv_report(report, std::cout);
+                return old_school::replay_weight_audit::
+                    audit_exit_code(
+                        old_school::replay_weight_audit::
+                            infrastructure_complete(report),
+                        report.passed);
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "RB0-0 infrastructure/incomplete-evidence "
+                       "failure: "
+                    << error.what() << '\n';
+                return old_school::replay_weight_audit::
                     audit_exit_code(false, false);
             }
         }
