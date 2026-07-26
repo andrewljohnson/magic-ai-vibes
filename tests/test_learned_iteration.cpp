@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -1467,6 +1468,157 @@ void test_eight_state_bootstrap_indexing_and_tail_are_exact() {
     }
 }
 
+void test_weighted_half_bootstrap_is_bit_exact_with_canonical_api() {
+    const std::vector<double> parent_values = {
+        0.01, 0.13, 0.27, 0.41, 0.56,
+        0.68, 0.79, 0.83, 0.97,
+    };
+    const auto canonical =
+        iteration::n_state_bootstrap_targets(
+            parent_values, 0.37, 4);
+    const auto weighted =
+        iteration::weighted_n_state_bootstrap_targets(
+            parent_values, 0.37, 4, 0.5);
+    expect(canonical.size() == weighted.size(),
+           "weighted-half target count must match canonical");
+    for (std::size_t index = 0; index < canonical.size();
+         ++index) {
+        double legacy_target = 0.37;
+        if (index + 4 < parent_values.size()) {
+            legacy_target =
+                0.5 * 0.37 +
+                0.5 * parent_values[index + 4];
+        }
+        expect(
+            std::bit_cast<std::uint64_t>(weighted[index]) ==
+                std::bit_cast<std::uint64_t>(
+                    canonical[index]),
+            "weighted-half targets must be bit-exactly canonical");
+        expect(
+            std::bit_cast<std::uint64_t>(weighted[index]) ==
+                std::bit_cast<std::uint64_t>(
+                    legacy_target),
+            "weighted-half targets must preserve legacy target bits");
+    }
+}
+
+void test_weighted_three_quarters_targets_and_delta_are_exact() {
+    const std::vector<double> parent_values = {
+        0.00, 0.25, 0.50, 0.75, 1.00,
+    };
+    const auto half =
+        iteration::weighted_n_state_bootstrap_targets(
+            parent_values, 0.75, 2, 0.50);
+    const auto three_quarters =
+        iteration::weighted_n_state_bootstrap_targets(
+            parent_values, 0.75, 2, 0.75);
+    const auto bootstrap_only =
+        iteration::weighted_n_state_bootstrap_targets(
+            parent_values, 0.75, 2, 0.0);
+    const auto terminal_only =
+        iteration::weighted_n_state_bootstrap_targets(
+            parent_values, 0.75, 2, 1.0);
+    const std::vector<double> expected = {
+        0.6875, 0.7500, 0.8125, 0.7500, 0.7500,
+    };
+    expect(three_quarters == expected,
+           "three-quarter terminal targets must match hand values");
+    for (std::size_t index = 0;
+         index + 2 < parent_values.size(); ++index) {
+        const double expected_delta =
+            0.25 * (0.75 - parent_values[index + 2]);
+        expect(
+            std::bit_cast<std::uint64_t>(
+                three_quarters[index] - half[index]) ==
+                std::bit_cast<std::uint64_t>(
+                    expected_delta),
+            "TW75 minus TW50 must equal one quarter of z minus V");
+    }
+    expect(three_quarters[3] == 0.75 &&
+               three_quarters[4] == 0.75,
+           "terminal tail must not depend on terminal weight");
+    expect(
+        bootstrap_only ==
+            std::vector<double>(
+                {0.50, 0.75, 1.00, 0.75, 0.75}),
+        "zero terminal weight must use bootstrap values before the tail");
+    expect(
+        terminal_only ==
+            std::vector<double>(
+                {0.75, 0.75, 0.75, 0.75, 0.75}),
+        "unit terminal weight must use terminal targets everywhere");
+}
+
+void test_weighted_bootstrap_handles_empty_short_and_huge_distance() {
+    const std::vector<double> empty;
+    expect(
+        iteration::weighted_n_state_bootstrap_targets(
+            empty, 0.25, 4, 0.75)
+            .empty(),
+        "empty weighted bootstrap trajectory must stay empty");
+
+    const std::vector<double> short_values = {
+        0.10, 0.20, 0.30,
+    };
+    const std::vector<double> terminal_only = {
+        0.60, 0.60, 0.60,
+    };
+    expect(
+        iteration::weighted_n_state_bootstrap_targets(
+            short_values, 0.60, 4, 0.75) ==
+            terminal_only,
+        "a short trace must retain only terminal targets");
+    expect(
+        iteration::weighted_n_state_bootstrap_targets(
+            short_values, 0.60,
+            std::numeric_limits<std::size_t>::max(),
+            0.75) == terminal_only,
+        "a huge distance must safely retain terminal targets");
+}
+
+void test_weighted_bootstrap_validates_weight_and_probabilities() {
+    const std::vector<double> parent_values = {
+        0.10, 0.20, 0.30,
+    };
+    for (const double invalid_weight : {
+             std::numeric_limits<double>::quiet_NaN(),
+             -0.01,
+             1.01,
+             std::numeric_limits<double>::infinity(),
+         }) {
+        expect_invalid(
+            [&] {
+                iteration::weighted_n_state_bootstrap_targets(
+                    parent_values, 0.5, 2,
+                    invalid_weight);
+            },
+            "invalid terminal weight must be rejected");
+    }
+    expect_invalid(
+        [&] {
+            iteration::weighted_n_state_bootstrap_targets(
+                parent_values, 0.5, 0, 0.75);
+        },
+        "weighted bootstrap must reject zero distance");
+    expect_invalid(
+        [&] {
+            iteration::weighted_n_state_bootstrap_targets(
+                parent_values,
+                std::numeric_limits<double>::quiet_NaN(),
+                2, 0.75);
+        },
+        "weighted bootstrap must reject non-finite terminal value");
+    expect_invalid(
+        [] {
+            const std::vector<double> invalid_values = {
+                0.25, 1.25,
+            };
+            iteration::weighted_n_state_bootstrap_targets(
+                invalid_values, 0.5, 1, 0.75);
+        },
+        "weighted bootstrap must reject out-of-range parent value");
+}
+
 void test_n_state_bootstrap_validates_inputs() {
     const std::vector<double> parent_values = {
         0.10, 0.20, 0.30,
@@ -1493,6 +1645,64 @@ void test_n_state_bootstrap_validates_inputs() {
                 invalid, 0.5, 4);
         },
         "invalid parent bootstrap value must be rejected");
+}
+
+void test_annealed_terminal_weight_has_exact_endpoints_and_is_monotonic() {
+    expect(
+        iteration::annealed_terminal_weight(1, 16) == 0.50,
+        "G1 terminal weight must be exactly one half");
+    expect(
+        iteration::annealed_terminal_weight(16, 16) == 0.75,
+        "G16 terminal weight must be exactly three quarters");
+
+    double previous =
+        iteration::annealed_terminal_weight(1, 16);
+    for (std::size_t generation = 2; generation <= 16;
+         ++generation) {
+        const double current =
+            iteration::annealed_terminal_weight(
+                generation, 16);
+        const double expected =
+            0.50 +
+            0.25 * static_cast<double>(generation - 1) /
+                15.0;
+        expect(
+            std::bit_cast<std::uint64_t>(current) ==
+                std::bit_cast<std::uint64_t>(expected),
+            "terminal weight must follow the exact declared formula");
+        expect(current > previous,
+               "terminal weight must strictly increase each generation");
+        expect(current >= 0.50 && current <= 0.75,
+               "annealed terminal weight must remain in range");
+        previous = current;
+    }
+}
+
+void test_annealed_terminal_weight_rejects_invalid_coordinates() {
+    expect_invalid(
+        [] {
+            static_cast<void>(
+                iteration::annealed_terminal_weight(1, 0));
+        },
+        "zero total generations must be rejected");
+    expect_invalid(
+        [] {
+            static_cast<void>(
+                iteration::annealed_terminal_weight(1, 1));
+        },
+        "a one-generation schedule must be rejected");
+    expect_invalid(
+        [] {
+            static_cast<void>(
+                iteration::annealed_terminal_weight(0, 16));
+        },
+        "generation zero must be rejected");
+    expect_invalid(
+        [] {
+            static_cast<void>(
+                iteration::annealed_terminal_weight(17, 16));
+        },
+        "generation beyond the schedule must be rejected");
 }
 
 void test_n_state_bootstrap_large_distance_cannot_overflow() {
@@ -1680,11 +1890,29 @@ int main() {
         "exact eight-state Value bootstrap",
         test_eight_state_bootstrap_indexing_and_tail_are_exact);
     runner.run(
+        "weighted-half bootstrap bit equivalence",
+        test_weighted_half_bootstrap_is_bit_exact_with_canonical_api);
+    runner.run(
+        "weighted three-quarter bootstrap algebra",
+        test_weighted_three_quarters_targets_and_delta_are_exact);
+    runner.run(
+        "weighted bootstrap boundary traces",
+        test_weighted_bootstrap_handles_empty_short_and_huge_distance);
+    runner.run(
+        "weighted bootstrap validation",
+        test_weighted_bootstrap_validates_weight_and_probabilities);
+    runner.run(
         "n-state Value bootstrap input validation",
         test_n_state_bootstrap_validates_inputs);
     runner.run(
         "n-state Value bootstrap overflow safety",
         test_n_state_bootstrap_large_distance_cannot_overflow);
+    runner.run(
+        "annealed terminal-weight schedule",
+        test_annealed_terminal_weight_has_exact_endpoints_and_is_monotonic);
+    runner.run(
+        "annealed terminal-weight validation",
+        test_annealed_terminal_weight_rejects_invalid_coordinates);
     runner.run(
         "exact Value G8 Late-Mix50 assignment",
         test_value_g8_mix50_assignment_is_exact_and_rng_free);

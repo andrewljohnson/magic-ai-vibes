@@ -1141,12 +1141,17 @@ evaluate_centered_tanh_rootwise_oracle(
     return metrics;
 }
 
-std::vector<double> n_state_bootstrap_targets(
+std::vector<double> weighted_n_state_bootstrap_targets(
     std::span<const double> chronological_parent_values,
-    double terminal_z, std::size_t distance) {
+    double terminal_z, std::size_t distance,
+    double terminal_weight) {
     if (distance == 0) {
         throw std::invalid_argument(
             "bootstrap distance must be nonzero");
+    }
+    if (!valid_probability(terminal_weight)) {
+        throw std::invalid_argument(
+            "terminal weight must be finite and in [0, 1]");
     }
     if (!valid_probability(terminal_z)) {
         throw std::invalid_argument(
@@ -1170,11 +1175,39 @@ std::vector<double> n_state_bootstrap_targets(
          index < bootstrapped_count;
          ++index) {
         targets[index] =
-            0.5 * terminal_z +
-            0.5 * chronological_parent_values[
-                      index + distance];
+            terminal_weight * terminal_z +
+            (1.0 - terminal_weight) *
+                chronological_parent_values[
+                    index + distance];
     }
     return targets;
+}
+
+std::vector<double> n_state_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    double terminal_z, std::size_t distance) {
+    return weighted_n_state_bootstrap_targets(
+        chronological_parent_values, terminal_z, distance, 0.5);
+}
+
+double annealed_terminal_weight(
+    std::size_t published_generation,
+    std::size_t total_generations) {
+    if (total_generations < 2) {
+        throw std::invalid_argument(
+            "terminal-weight schedule requires at least two "
+            "generations");
+    }
+    if (published_generation == 0 ||
+        published_generation > total_generations) {
+        throw std::invalid_argument(
+            "published generation is outside the terminal-weight "
+            "schedule");
+    }
+    return 0.50 +
+           0.25 *
+               static_cast<double>(published_generation - 1) /
+               static_cast<double>(total_generations - 1);
 }
 
 std::vector<double> four_state_bootstrap_targets(

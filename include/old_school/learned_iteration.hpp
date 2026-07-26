@@ -262,13 +262,32 @@ evaluate_centered_tanh_rootwise_oracle(
     std::span<const CenteredTanhOracleObservation> observations,
     CenteredTanhOracleConfig config = {});
 
-// Exact n-recorded-state bootstrap. For state i, when state i+distance
-// exists, the target is the equal blend of terminal_z and
-// V_parent(i+distance). The final `distance` states (or the entire trace when
-// it is shorter) retain the terminal target alone. Distance must be nonzero.
+// Exact weighted n-recorded-state bootstrap. For state i, when
+// state i+distance exists, the target is
+//   terminal_weight * terminal_z
+//       + (1-terminal_weight) * V_parent(i+distance).
+// The final `distance` states (or the entire trace when it is shorter) retain
+// the terminal target alone. Distance must be nonzero and terminal_weight
+// must be finite and in [0, 1].
+std::vector<double> weighted_n_state_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    double terminal_z, std::size_t distance,
+    double terminal_weight);
+
+// Exact equal-weight n-recorded-state bootstrap. This compatibility API
+// delegates to weighted_n_state_bootstrap_targets(..., 0.5).
 std::vector<double> n_state_bootstrap_targets(
     std::span<const double> chronological_parent_values,
     double terminal_z, std::size_t distance);
+
+// Fixed one-based terminal-credit schedule:
+//   0.50 + 0.25 * (published_generation - 1)
+//                   / (total_generations - 1).
+// The total must be at least two and the published generation must be in
+// [1, total_generations].
+double annealed_terminal_weight(
+    std::size_t published_generation,
+    std::size_t total_generations);
 
 // Value G8's exact four-recorded-state bootstrap. Kept as the canonical
 // training API and as a compatibility wrapper around
