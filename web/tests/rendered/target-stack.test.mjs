@@ -807,6 +807,10 @@ for (const viewport of VIEWPORTS) {
       await page.goto(url, { waitUntil: "networkidle" });
       await configureFixedMatch(page);
 
+      const chronicle = page.locator(".match-log");
+      const showPriorityPasses = chronicle.getByRole("checkbox", {
+        name: "Show priority passes",
+      });
       const hand = page.getByRole("list", { name: "Cards in your hand" });
       const giantGrowth = hand
         .getByRole("button", { name: "Giant Growth, instant, Cost G" })
@@ -833,6 +837,16 @@ for (const viewport of VIEWPORTS) {
       assertStackControllerCues(
         await stackControllerMetrics(page),
         ["OPPONENT", "YOU"],
+      );
+      assert.equal(await showPriorityPasses.isChecked(), false);
+      assert.equal(await showPriorityPasses.isVisible(), true);
+      assert.equal(
+        await chronicle.getByText("You: Pass priority", { exact: true }).count(),
+        0,
+      );
+      assert.deepEqual(
+        await chronicle.locator(".event-turn").allTextContents(),
+        ["Turn 4"],
       );
       assertStableGeometry(await renderedGeometry(page));
 
@@ -866,6 +880,14 @@ for (const viewport of VIEWPORTS) {
         await stackControllerMetrics(page),
         ["YOU", "OPPONENT", "YOU"],
       );
+      assert.deepEqual(
+        await chronicle.locator(".event-index").allTextContents(),
+        ["01", "02"],
+      );
+      assert.deepEqual(
+        await chronicle.locator(".event-turn").allTextContents(),
+        ["Turn 4"],
+      );
       assert.equal(await page.getByRole("alert").count(), 0);
       assert.equal(
         await page
@@ -897,11 +919,51 @@ for (const viewport of VIEWPORTS) {
         await stackControllerMetrics(page),
         ["OPPONENT", "YOU"],
       );
+      assert.equal(
+        await chronicle.getByText("You: Pass priority", { exact: true }).count(),
+        0,
+      );
+      assert.deepEqual(
+        await chronicle.locator(".event-index").allTextContents(),
+        ["01", "02", "03"],
+      );
+      assert.deepEqual(
+        await chronicle.locator(".event-turn").allTextContents(),
+        ["Turn 4"],
+      );
+      await showPriorityPasses.check();
+      assert.equal(await showPriorityPasses.isChecked(), true);
+      assert.equal(
+        await chronicle.getByText("You: Pass priority", { exact: true }).count(),
+        1,
+      );
+      assert.deepEqual(
+        await chronicle.locator(".event-index").allTextContents(),
+        ["01", "02", "03", "04"],
+      );
+      assert.deepEqual(
+        await chronicle.locator(".event-turn").allTextContents(),
+        ["Turn 4"],
+      );
+      assert.equal(
+        await chronicle.locator(".event-count").innerText(),
+        "4",
+      );
+      await showPriorityPasses.uncheck();
+      assert.equal(
+        await chronicle.getByText("You: Pass priority", { exact: true }).count(),
+        0,
+      );
+      assert.equal(
+        await chronicle.locator(".event-count").innerText(),
+        "3",
+      );
       assert.equal(await page.getByRole("alert").count(), 0);
       assertStableGeometry(await renderedGeometry(page));
 
       t.diagnostic(
         `${viewport.width}x${viewport.height}: 7→6 hand, 2→3→2 stack, ` +
+          "priority passes hidden→shown→hidden with one Turn 4 marker, " +
           `${actionRequests} exact action requests, no horizontal overflow`,
       );
     },

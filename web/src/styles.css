@@ -635,6 +635,32 @@ textarea:focus-visible,
   padding: 3px 7px;
 }
 
+.chronicle-pass-toggle {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: var(--type-label);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.chronicle-pass-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+.chronicle-pass-toggle input:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
 .event-list {
   min-height: 0;
   overflow-y: auto;

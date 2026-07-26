@@ -20,13 +20,13 @@ import { ApiRequestError } from "./errors";
 import {
   blockerPairsFromKeys,
   concisePriorityOptionLabel,
+  chronicleEntries,
   describeTopOfStack,
   formatStackController,
   formatStackEntryLabel,
   formatStackTargets,
   formatGameResultReason,
   formatGameResultTitle,
-  formatPublicLogEntry,
   formatReproductionSummary,
   formatTargetLabel,
   hasPublicCombatStats,
@@ -1212,35 +1212,58 @@ function PhaseRibbon({
 
 function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
   const endRef = useRef<HTMLDivElement>(null);
+  const [showPriorityPasses, setShowPriorityPasses] = useState(false);
+  const visibleEntries = useMemo(
+    () => chronicleEntries(entries, showPriorityPasses),
+    [entries, showPriorityPasses],
+  );
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "nearest" });
-  }, [entries.length]);
+  }, [visibleEntries.length, showPriorityPasses]);
   return (
     <aside className="match-log">
       <div className="panel-heading">
         <span className="eyebrow">MATCH</span>
         <h2>Chronicle</h2>
-        <span className="event-count">{entries.length}</span>
+        <span
+          className="event-count"
+          aria-label={`${visibleEntries.length} visible events`}
+        >
+          {visibleEntries.length}
+        </span>
+        <label className="chronicle-pass-toggle">
+          <input
+            type="checkbox"
+            checked={showPriorityPasses}
+            onChange={(event) =>
+              setShowPriorityPasses(event.target.checked)
+            }
+          />
+          <span>Show priority passes</span>
+        </label>
       </div>
       <div className="event-list" role="log" aria-live="polite">
-        {entries.length === 0 && (
+        {visibleEntries.length === 0 && (
           <div className="log-empty">
             <span className="log-sigil">◌</span>
-            The first draw is moments away.
+            {entries.length === 0
+              ? "The first draw is moments away."
+              : "Only priority passes so far."}
           </div>
         )}
-        {entries.map((raw, index) => {
-          const entry = formatPublicLogEntry(raw);
+        {visibleEntries.map(({ entry, sourceIndex, startsTurn }, index) => {
           return (
             <div
               className={`event event-${entry.kind ?? "game"} ${
                 entry.player === 0 ? "event-you" : ""
               }`}
-              key={`${entry.turn ?? "x"}-${index}-${entry.message}`}
+              key={`${entry.turn ?? "x"}-${sourceIndex}-${entry.message}`}
             >
-              <span className="event-index">{String(index + 1).padStart(2, "0")}</span>
+              <span className="event-index">
+                {String(index + 1).padStart(2, "0")}
+              </span>
               <div>
-                {entry.turn !== undefined && (
+                {startsTurn && (
                   <span className="event-turn">Turn {entry.turn}</span>
                 )}
                 <p>{entry.message}</p>

@@ -182,12 +182,14 @@ test("event prose cannot fall back to serializing incidental payloads", async ()
       turn: 3,
       player: 0,
       kind: "priority_action",
+      actionKind: "cast_creature",
     }),
     {
       message: "You cast Grizzly Bears",
       turn: 3,
       player: 0,
       kind: "priority_action",
+      actionKind: "cast_creature",
     },
   );
   assert.deepEqual(formatPublicLogEntry(hiddenShaped), {
@@ -207,8 +209,118 @@ test("event prose cannot fall back to serializing incidental payloads", async ()
     app.indexOf("function MatchLog"),
     app.indexOf("function StackRail"),
   );
-  assert.match(matchLog, /const entry = formatPublicLogEntry\(raw\)/);
+  assert.match(
+    matchLog,
+    /chronicleEntries\(entries, showPriorityPasses\)/,
+  );
   assert.doesNotMatch(matchLog, /JSON\.stringify|Object\.(?:entries|values)/);
+});
+
+test("Chronicle filters structured passes and groups the visible events by turn", async () => {
+  const { chronicleEntries } =
+    await loadTypeScriptModule("src/types.ts");
+  const entries = [
+    {
+      message: "You started turn 3",
+      turn: 3,
+      kind: "turn_started",
+    },
+    {
+      message: "Opaque pass prose",
+      turn: 3,
+      kind: "priority_action",
+      actionKind: "pass",
+    },
+    {
+      message: "You: Pass priority",
+      turn: 3,
+      kind: "priority_action",
+      actionKind: "cast_creature",
+    },
+    {
+      message: "Another opaque pass",
+      turn: 4,
+      kind: "priority_action",
+      actionKind: "pass",
+    },
+    {
+      message: "Resolved Grizzly Bears",
+      turn: 4,
+      kind: "stack_resolved",
+    },
+    {
+      message: "Non-priority event with pass metadata",
+      turn: 4,
+      kind: "stack_resolved",
+      actionKind: "pass",
+    },
+    {
+      message: "Third opaque pass",
+      turn: 5,
+      kind: "priority_action",
+      actionKind: "pass",
+    },
+    {
+      message: "Opponent declared an attacker",
+      turn: 5,
+      kind: "attackers_declared",
+    },
+  ];
+
+  const filtered = chronicleEntries(entries, false);
+  assert.deepEqual(
+    filtered.map(({ entry }) => entry.message),
+    [
+      "You started turn 3",
+      "You: Pass priority",
+      "Resolved Grizzly Bears",
+      "Non-priority event with pass metadata",
+      "Opponent declared an attacker",
+    ],
+  );
+  assert.deepEqual(
+    filtered.map(({ sourceIndex }) => sourceIndex),
+    [0, 2, 4, 5, 7],
+  );
+  assert.deepEqual(
+    filtered.map(({ startsTurn }) => startsTurn),
+    [true, false, true, false, true],
+  );
+
+  const unfiltered = chronicleEntries(entries, true);
+  assert.equal(unfiltered.length, entries.length);
+  assert.deepEqual(
+    unfiltered.map(({ startsTurn }) => startsTurn),
+    [true, false, false, true, false, false, true, false],
+  );
+});
+
+test("Chronicle exposes an unchecked accessible pass toggle and concise turn markers", async () => {
+  const app = await source("src/App.tsx");
+  const matchLog = app.slice(
+    app.indexOf("function MatchLog"),
+    app.indexOf("function StackRail"),
+  );
+
+  assert.match(
+    matchLog,
+    /const \[showPriorityPasses, setShowPriorityPasses\] = useState\(false\)/,
+  );
+  assert.match(
+    matchLog,
+    /chronicleEntries\(entries, showPriorityPasses\)/,
+  );
+  assert.match(matchLog, /type="checkbox"/);
+  assert.match(matchLog, /<span>Show priority passes<\/span>/);
+  assert.match(matchLog, /\{startsTurn && \(/);
+  assert.match(
+    matchLog,
+    /String\(index \+ 1\)\.padStart\(2, "0"\)/,
+  );
+  assert.doesNotMatch(
+    matchLog,
+    /includes\([^)]*Pass priority|match\([^)]*Pass priority/,
+  );
 });
 
 test("combat stats follow public card type instead of bridge zero defaults", async () => {

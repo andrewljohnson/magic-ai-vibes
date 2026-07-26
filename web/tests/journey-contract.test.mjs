@@ -102,6 +102,7 @@ test("journey Pass priority settles and unsupported branches fail promptly", asy
   assert.equal(passed.snapshot.phase, "declare_attackers");
   assert.equal(passed.snapshot.players[0].handSize, 7);
   assert.equal(passed.events.at(-1).kind, "priority_action");
+  assert.equal(passed.events.at(-1).actionKind, "pass");
   assert.equal(passed.events.at(-1).message, "You: Pass priority");
 
   const { game: failed } = await harness.action(passed.id, {

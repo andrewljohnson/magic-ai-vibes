@@ -112,6 +112,7 @@ test("targeted-stack fixture exposes both public targets and a legal response", 
   assert.equal(responded.snapshot.players[0].hand.length, 6);
   assert.equal(responded.snapshot.players[0].lands[1].tapped, true);
   assert.equal(responded.events.at(-1).kind, "priority_action");
+  assert.equal(responded.events.at(-1).actionKind, "cast_giant_growth");
   assert.match(responded.events.at(-1).message, /Cast Giant Growth/);
 
   const { game: resolved } = await harness.action(initial.id, {
@@ -121,6 +122,9 @@ test("targeted-stack fixture exposes both public targets and a legal response", 
   assert.equal(resolved.snapshot.stack.length, 2);
   assert.equal(resolved.decision.id, "target-stack-priority-3");
   assert.equal(resolved.events.at(-1).kind, "stack_resolved");
+  assert.equal(resolved.events.at(-2).kind, "priority_action");
+  assert.equal(resolved.events.at(-2).actionKind, "pass");
+  assert.equal(resolved.events.at(-2).message, "You: Pass priority");
 });
 
 test("targeted-stack browser fixture has one stable make command", async () => {

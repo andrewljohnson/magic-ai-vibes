@@ -196,9 +196,9 @@ choice.
 
 ### P2 — Arena-quality board readability
 
-Status: **stack controller/targets rendered at both target viewports; setup
-legibility and explicit card-state/keyword cues rendered at 1280 × 720;
-broader visual work in progress**
+Status: **stack controller/targets and the concise Chronicle rendered at both
+target viewports; setup legibility and explicit card-state/keyword cues
+rendered at 1280 × 720; broader visual work in progress**
 
 Acceptance criteria:
 
@@ -279,6 +279,29 @@ rules.
 - Acceptance requires a focused source regression, `make test-web-ui`, and a
   real-engine 1280 × 720 Blue-versus-Red seed-42 render showing the opening
   Air Elemental keyword without hand overlap, clipping, or page overflow.
+
+#### Preregistered concise Chronicle slice
+
+Hypothesis: grouping the Chronicle's public events by turn and hiding routine
+priority passes by default will make meaningful game actions easier to scan
+without discarding any public history.
+
+- The bridge exposes the selected priority action's rules-level kind as public
+  scalar metadata. The client identifies passes only from that structured kind,
+  never by parsing event prose or inspecting cards.
+- An unchecked checkbox labeled `Show priority passes` is visible in the
+  Chronicle heading. Turning it on reveals every pass in original order;
+  turning it off hides them again without changing the authoritative log.
+- Among the currently visible events, `Turn N` appears only on the first event
+  after the turn number changes. If earlier events in that turn are filtered,
+  the first remaining visible event owns the turn marker.
+- The event count describes the visible list, and event numbering remains
+  consecutive within that visible list so hidden passes leave no unexplained
+  ordinal gaps.
+- Acceptance requires focused bridge/helper/source regressions,
+  `make test-web-ui`, `make test-web`, and rendered checks at 1280 × 720 and
+  1440 × 900 proving the default and toggled views are readable and preserve
+  page geometry.
 
 ### P3 — Model inspection and reproducibility
 
@@ -1399,3 +1422,30 @@ For each web issue:
   opponent HUD visibly named `Learned Value C16`, and the open REPRO panel
   visibly contained `learned-value C16 · K8/H4` plus the complete fingerprint,
   with the panel wholly inside the viewport and no page overflow.
+- 2026-07-26 — Implemented and rendered the preregistered concise Chronicle
+  slice. Priority-action events now carry the bridge's existing rules-level
+  action kind as a public scalar, and the client filters only the structured
+  `priority_action` + `pass` combination; it does not parse prose or inspect
+  card payloads. `Show priority passes` is an accessible native checkbox that
+  starts unchecked. The visible event list and count omit passes by default,
+  use consecutive display ordinals, and emit `Turn N` only when the turn
+  changes among those visible events, so a filtered leading pass cannot consume
+  the marker. Focused regressions include deliberately misleading prose and
+  filtered first-in-turn cases. `make test-web-ui` passed 84/84;
+  `make test-web` passed 13/13 C++ bridge tests and 92/92 Node tests. The first
+  rendered invocation was infrastructure-only `listen EPERM`; the permitted
+  identical rerun passed all 7/7 real-Chromium journeys. In the fixed seed-42
+  target-stack journey at both 1280 × 720 and 1440 × 900, the checkbox
+  visibly began unchecked, one pass stayed hidden, checking it revealed that
+  pass in its original order, unchecking hid it again, ordinals/counts changed
+  3→4→3 without gaps, and the four same-turn events retained exactly one
+  `Turn 4` marker. Hand/stack transitions, two exact action requests, and
+  horizontal-overflow gates remained green. The delegated browser runner had
+  no available binding, so the repository gate used ephemeral localhost
+  ports. A separate in-app-browser smoke then opened the live port `4173` at
+  1280 × 720: after one first-main pass the default Chronicle showed only
+  `You started turn 1` and `You declared no attackers`, with consecutive
+  `01`/`02` ordinals and one `Turn 1` marker. Checking the control revealed
+  all six intervening priority passes in order, changed the visible count to
+  eight with `01`–`08` ordinals, preserved the single turn marker, and kept
+  document/viewport width at exactly 1280.

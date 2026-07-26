@@ -1085,6 +1085,15 @@ class JsonController {
         output_ << ",\"player\":" << event.player
                 << ",\"phase\":";
         write_json_string(output_, phase_name(event.phase));
+        if (event.kind ==
+                GameEventKind::PriorityActionSelected &&
+            event.priority_action.has_value()) {
+            output_ << ",\"actionKind\":";
+            write_json_string(
+                output_,
+                action_kind_name(
+                    event.priority_action->kind));
+        }
         output_ << ",\"label\":";
         write_json_string(
             output_, event_label(observation, event));

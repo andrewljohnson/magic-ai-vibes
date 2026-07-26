@@ -189,11 +189,17 @@ function state({
   };
 }
 
-function event(kind, player, phase, label, eventState) {
+function event(kind, player, phase, label, eventState, actionKind) {
   return {
     type: "event",
     state: eventState,
-    event: { kind, player, phase, label },
+    event: {
+      kind,
+      player,
+      phase,
+      label,
+      ...(actionKind === undefined ? {} : { actionKind }),
+    },
   };
 }
 
@@ -266,6 +272,7 @@ input.on("line", (line) => {
           "first_main",
           "You: Pass priority",
           initialState,
+          "pass",
         ),
       );
       write({
@@ -302,6 +309,7 @@ input.on("line", (line) => {
         "first_main",
         "You: Play Forest",
         afterLand,
+        "play_land",
       ),
     );
     write({
@@ -355,6 +363,7 @@ input.on("line", (line) => {
         "first_main",
         "You: Cast Grizzly Bears",
         spellState,
+        "cast_creature",
       ),
     );
     write(
@@ -364,6 +373,7 @@ input.on("line", (line) => {
         "first_main",
         "You: Pass priority",
         spellState,
+        "pass",
       ),
     );
     const resolvedState = state({

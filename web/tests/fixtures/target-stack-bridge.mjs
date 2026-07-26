@@ -227,6 +227,7 @@ write({
   state: initialState,
   event: {
     kind: "priority_action",
+    actionKind: "cast_lightning_bolt",
     player: 1,
     phase: "first_main",
     label: "Opponent: Cast Lightning Bolt → Grizzly Bears #110",
@@ -288,6 +289,7 @@ input.on("line", (line) => {
       state: responseState,
       event: {
         kind: "priority_action",
+        actionKind: "cast_giant_growth",
         player: 0,
         phase: "first_main",
         label: "You: Cast Giant Growth → Grizzly Bears #110",
@@ -306,6 +308,27 @@ input.on("line", (line) => {
     action.index === 0
   ) {
     step = 2;
+    const passState = state({
+      stack: [bottomGrowth, topBolt, responseGrowth],
+      human: playerState({
+        hand: openingHand.slice(1),
+        forests: [
+          firstForest,
+          { ...secondForest, tapped: true },
+        ],
+      }),
+    });
+    write({
+      type: "event",
+      state: passState,
+      event: {
+        kind: "priority_action",
+        actionKind: "pass",
+        player: 0,
+        phase: "first_main",
+        label: "You: Pass priority",
+      },
+    });
     const resolvedState = state({
       human: playerState({
         hand: openingHand.slice(1),

@@ -393,6 +393,37 @@ void test_same_seed_bridge_transcripts_are_byte_identical() {
            "same-seed Bluff transcripts differ");
 }
 
+void test_priority_events_expose_structured_action_kinds() {
+    const std::string transcript =
+        complete_transcript(cleanup_config());
+    std::size_t cursor = 0;
+    std::size_t priority_events = 0;
+    while ((cursor = transcript.find(
+                "\"kind\":\"priority_action\"",
+                cursor)) != std::string::npos) {
+        const std::size_t line_end =
+            transcript.find('\n', cursor);
+        const std::string_view line(
+            transcript.data() + cursor,
+            (line_end == std::string::npos
+                 ? transcript.size()
+                 : line_end) -
+                cursor);
+        expect(line.find("\"actionKind\":") !=
+                   std::string_view::npos,
+               "priority event omitted its actionKind");
+        ++priority_events;
+        cursor = line_end == std::string::npos
+                     ? transcript.size()
+                     : line_end + 1;
+    }
+    expect(priority_events != 0,
+           "structured action-kind fixture emitted no priority events");
+    expect(transcript.find("\"actionKind\":\"pass\"") !=
+               std::string::npos,
+           "public priority events omitted the pass action kind");
+}
+
 void test_cleanup_decision_and_public_event_are_emitted() {
     std::istringstream input(passive_responses(5000));
     std::ostringstream output;
@@ -475,5 +506,7 @@ int main() {
                test_legal_millstone_activation_prevents_auto_pass);
     runner.run("same-seed bridge transcripts are exact",
                test_same_seed_bridge_transcripts_are_byte_identical);
+    runner.run("priority events expose action kinds",
+               test_priority_events_expose_structured_action_kinds);
     return runner.finish();
 }

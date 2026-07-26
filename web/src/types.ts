@@ -416,6 +416,7 @@ export interface LogEntry {
   text?: string;
   label?: string;
   kind?: string;
+  actionKind?: string;
   phase?: string;
 }
 
@@ -424,6 +425,13 @@ export interface PublicLogEntry {
   turn?: number;
   player?: number;
   kind?: string;
+  actionKind?: string;
+}
+
+export interface ChronicleEntry {
+  entry: PublicLogEntry;
+  sourceIndex: number;
+  startsTurn: boolean;
 }
 
 function explicitPublicLogMessage(
@@ -445,7 +453,36 @@ export function formatPublicLogEntry(
     turn: Number.isSafeInteger(entry.turn) ? entry.turn : undefined,
     player: Number.isSafeInteger(entry.player) ? entry.player : undefined,
     kind: typeof entry.kind === "string" ? entry.kind : undefined,
+    ...(typeof entry.actionKind === "string"
+      ? { actionKind: entry.actionKind }
+      : {}),
   };
+}
+
+export function chronicleEntries(
+  entries: readonly (string | LogEntry)[],
+  showPriorityPasses: boolean,
+): ChronicleEntry[] {
+  const visible: ChronicleEntry[] = [];
+  let previousTurn: number | undefined;
+
+  entries.forEach((raw, sourceIndex) => {
+    const entry = formatPublicLogEntry(raw);
+    if (
+      !showPriorityPasses &&
+      entry.kind === "priority_action" &&
+      entry.actionKind === "pass"
+    ) {
+      return;
+    }
+
+    const startsTurn =
+      entry.turn !== undefined && entry.turn !== previousTurn;
+    visible.push({ entry, sourceIndex, startsTurn });
+    if (entry.turn !== undefined) previousTurn = entry.turn;
+  });
+
+  return visible;
 }
 
 export function latestPublicEventMessage(
