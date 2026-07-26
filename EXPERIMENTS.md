@@ -6130,3 +6130,42 @@ five decks, and use the especially weak Red/RU mirrors only as sensitive
 diagnostics rather than as card- or deck-specific training inputs. Await the
 already-preregistered VC-1 self-consistent-realization result to choose
 between value-target quality and richer strong-pilot data.
+
+### Environment-v3 C16 replacement certification (declared)
+
+Declared on 2026-07-26 after committing the offline dependency repair, proving
+the complete fresh-archive gate, and rereading the independent review through
+02:18 PDT. The independent clean retrain has reproduced exact fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+therefore this remains the correct immutable committed-v3 control.
+
+Hypothesis: frozen C16 will **reject at the 2,040-game primary direct gate**
+against Handcrafted on fresh seed `202607260219`. The prior independent
+at-scale controls scored 47.5% and 46.8% on distinct virgin seeds, so the
+predeclared expectation is that aggregate win rate will not exceed 50% with a
+Wilson 95% lower bound above 50%. Per-deck results are reported but not
+predicted. If the primary unexpectedly passes, the harness must continue into
+its unchanged fixed eight-seed all-five direct/mixed-lift panel; no result can
+promote C16 without every gate.
+
+Exact command:
+
+```sh
+sh tools/certify.sh 202607260219 \
+  68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+```
+
+Seed `202607260219` was selected and repository-searched before execution. It
+is distinct from training, artifact-smoke, fixed-panel, historical, reviewer
+(`9317`, `6733`, `5077`), and consumed local (`11235813`) seeds, and there was
+no preexisting seed claim. This is the only invocation permitted for that
+seed. An exit of `1` after a fully parsed benchmark is the expected valid
+scientific rejection; `2+` is infrastructure incomplete and licenses no
+strength conclusion.
+
+The sample remains 34 balanced repetitions / 2,040 paired games, 408 per
+challenger deck. The harness truthfully reports 77.0656% exact-binomial power
+at a true 53% win rate and a 3.111-point MDE at 80% power. It loads only the
+existing artifact, binds source/artifact/toolchain integrity, runs the full
+archived test and sanitizer gates, and preserves the fixed all-five
+definition. This control certification does not tune or select a policy.
