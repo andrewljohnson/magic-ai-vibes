@@ -9424,3 +9424,54 @@ state, labels it with bounded common-world Learned-mirror continuations, and
 records parent/candidate selections and regret. This is a card-agnostic
 action-ranking diagnostic: do not add a combat score, Flying-Men exception,
 Air-Elemental value, Handcoded label, or opponent hidden information.
+
+#### C17-J1 one-shot paired fit and publication result
+
+Executed once on 2026-07-26 from pushed source freeze `2877f35` after
+rereading `REVIEW.md` through its 16:06 cycle. The review had no conflicting
+blocker and subsequently countersigned `2877f35` as the final pre-fit freeze
+at 16:11. Exact command:
+
+```sh
+./build/old-school-sim --train-joint-c17
+```
+
+This opened raw shard seed `202607261145` exactly once. The trainer validated
+the frozen parent and Dev-v3 labels before collection, fit both arms from one
+shared shard, revalidated both prerequisites before publication, published
+with atomic no-replace semantics, reloaded the written bytes, and passed every
+publication/deployment/report gate.
+
+Published artifact:
+
+```text
+path: build/model-cache/old-school-value-joint-c17-v1-t800-p424242-r202607261145.bin
+bytes: 6225107
+sha256: adb9404bbdd57c92c2a6a3ad759c385d8d9a81389db02faf2b74e0695afca1ba
+parent fingerprint: 68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+control fingerprint: 69f23877717082f9256e6b909cd54d205d72d9d162ae84bf99847b32b3c4bebf
+treatment fingerprint: e3f531ed5f0a5c7c6d9a81455f9af1c3d7b0af6c7e7e318df56fdb8ae7ba63b3
+shared schedule: 8935721beb838b217da347a4b56dee5b34cd817a1de12c3cb3b670e31820072b
+shared raw: e722f3c57e89189e8454273f65abbc12a5169b28379fb9423825ab1ab12b6f21
+shared features: 1166e70fe609c85d9a5a533fc205b1425c92a421f506a2aef7fe0ed08ff1e034
+shared outcomes: 7ac82816ac9e898897b8611fcde3df050a73b21bf08d8a148583591d383066ab
+RO4 targets: 234fc971900a48776f9de5f55cab5bda8626680479f7204f61742358fc795152
+CT8 targets: 4b623a58ccb10071b81633243e8e7be5c35ee106cd1e9568a1daa7ee53c1b166
+games / perspectives / examples: 200 / 400 / 10804
+publication gate: PASS
+```
+
+Independent `stat` and `shasum -a 256` reproduced the artifact byte size and
+SHA exactly. They also confirmed that the prerequisites remained unchanged:
+the parent is still 3,111,437 bytes with SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+and the labels are still 276,387 bytes with SHA-256
+`949ea2fda448fa76b31a61927721629cfba9e6addee2da383cfbb68450b04770`.
+
+Decision: accept the fit only as a valid immutable experimental artifact.
+Training/publication success is not playing-strength evidence and changes no
+champion. Do not rerun this fit. Before any evaluation seed is opened, make
+the declared identity-only source patch setting
+`kCanonicalBundleByteSize=6225107` and
+`kCanonicalBundleSha256=adb9404bbdd57c92c2a6a3ad759c385d8d9a81389db02faf2b74e0695afca1ba`,
+rebuild, rerun load/report/CLI gates, commit, and push that two-constant patch.
