@@ -7983,3 +7983,48 @@ hidden-information/default-off safeguard, and the large-regression/runtime
 screen accepts PD0 only as a candidate component for the jointly declared
 composite. It does not promote a bot or relax any five-deck Learned-is-king
 gate.
+
+### Audit-common mechanical extraction (declared)
+
+Declared 2026-07-26 after the user requested deduplication of the frozen audit
+helpers and after rereading `REVIEW.md` through its 09:32 cycle. This is a
+mechanical source cleanup, not a learning experiment, audit rerun, or
+reinterpretation of any sealed result.
+
+Falsifiable hypothesis: a leaf-only `audit_common` layer can replace the
+byte-identical or semantically identical copies of deterministic formatting,
+TSV sanitization, probability validation, bit-identity checks, content hashing,
+optional-index/observation hashing, lower-hex digest validation, and
+64-epsilon mass tolerance without changing one byte of existing audit-test
+output or any focused audit/preflight result. Frozen serializers retain their
+existing field order and domain tags; scientific reducers, estimands, gates,
+thresholds, seeds, schedules, and CLI routes are untouched.
+
+Before editing, rebuild and capture the stdout SHA-256 of the four existing
+audit test binaries. After editing, rebuild them and require exact equality:
+
+```sh
+make test-terminal-weight-eval test-turn-alignment-audit \
+  test-target-factorial-audit test-replay-weight-audit
+for test_binary in \
+  old-school-terminal-weight-eval-tests \
+  old-school-turn-alignment-audit-tests \
+  old-school-target-factorial-audit-tests \
+  old-school-replay-weight-audit-tests
+do
+  zsh -o pipefail -c \
+    "./build/$test_binary | shasum -a 256"
+done
+make test-rb0-mechanical-preflight
+```
+
+Add focused common-helper characterization tests, keep `-Werror` clean, and
+run the affected audit tests under ASan/UBSan before accepting the extraction.
+Any changed stdout hash, digest, report row, invariant, or test result rejects
+the cleanup until the exact mechanical discrepancy is explained.
+
+The proposed `old-school-audits` binary split is deliberately deferred. TA4,
+CT8, and RB0 have frozen commands naming `old-school-sim`; moving those routes
+while PD0 and the repaired RB0 are live would widen this cleanup into a CLI and
+evidence-contract migration. Reconsider the split only after the current
+preflight and PD0 captures, under its own command-compatibility declaration.
