@@ -5984,3 +5984,110 @@ panel remains unobserved; that is a valid result, not permission to choose a
 different seed. If the run reaches and rejects the fixed panel, its pooled
 all-five tables become the control for the next separately declared
 general-training-strength challenger.
+
+### Environment-v3 C16 first certification panel (result: infrastructure incomplete)
+
+Run once on 2026-07-26 from committed source
+`fb34908392e5cb8ddb09f0f3957ee1a4514b5bb2` after rereading the independent
+review through 01:48 PDT. The exact declared command was used:
+
+```sh
+sh tools/certify.sh 11235813 \
+  68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+```
+
+Result: **infrastructure incomplete, exit 2; no gameplay or scientific gate
+ran**. The harness permanently claimed primary seed `11235813`, archived the
+exact committed source, bound the expected C16 artifact SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+accepted only the exact external ` M REVIEW.md` worktree status, passed its
+40 certification parser/integrity self-tests, and began the forced
+archived-tree `make test`. It then failed in `npm --prefix web ci
+--ignore-scripts`.
+
+The npm debug log establishes the infrastructure cause: the harness forced a
+fresh isolated npm cache, that cache contained package metadata but not the
+required tarballs, and sandboxed DNS returned `ENOTFOUND` for
+`registry.npmjs.org` through all three attempts. npm 11.7.0 surfaced this as
+`Exit handler never called!`; Make exited 2. The failed make stage took
+186.03384953923523 seconds. No model was loaded by the runtime simulator, no
+primary game was played, and every scientific criterion remains `null`.
+
+Evidence:
+
+- run directory:
+  `certification-runs/runs/20260726T085410Z-fb34908392e5-s11235813-p16274`;
+- `03-make-test.log`: 14 lines, 1,783 bytes, SHA-256
+  `83aac42fcda24bba1d113e34c502c46869574fb20ec3c13476441abeba70dd6c`;
+- completed `report.json` SHA-256
+  `c6532ff8f1b3b8355f1f2c23b12a4c86cb888bf17ebb81f301e75ca729454f88`.
+
+The harness's own power calculation also records a useful metrology
+disclosure: 2,040 games provide 77.0656% power at a true 53% win rate; 80%
+power corresponds to about a 3.111-point effect. This still satisfies the
+repository's explicit at-least-2,000-games rule for claims about a roughly
+three-point effect, but future prose must not call it literal 3.00-point/80%
+power.
+
+Decision: consume seed `11235813` and make no bot-strength inference. Do not
+delete or reuse its seed claim and do not resume the partially created run.
+Next, repair and test dependency provisioning so archived-tree verification
+does not depend on an empty network-isolated cache. Only then preregister a
+new primary seed and run a new certification attempt; the replacement must
+remain load-only and retain every scientific gate.
+
+#### Certification dependency repair (accepted)
+
+Implemented after the incomplete seed-`11235813` attempt and before any
+replacement certification declaration. The defect was the harness's forced
+empty cache, not the project lockfile or web build. The repaired runner:
+
+- asks the pinned npm executable for its preexisting cache path and requires
+  one existing absolute directory;
+- pins that exact path in the archived-test environment;
+- sets `NPM_CONFIG_OFFLINE=true`, so missing content fails immediately and
+  cannot silently fetch from the network;
+- keeps audit, funding, and lifecycle scripts disabled;
+- records the cache path, offline contract, package-lock SHA-256, and
+  no-network-fallback fact in `report.json`.
+
+Validation:
+
+```sh
+npm ci --ignore-scripts --offline --audit=false --fund=false
+# in a fresh temporary directory containing only web/package.json and
+# web/package-lock.json
+```
+
+completed in 1.1031 seconds and installed 41 packages from the existing
+content-addressed cache. The focused certification suite then passed 42/42
+tests, including new regressions for strict offline environment construction,
+replacement of an empty cache override, and rejection of a relative cache
+path:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_certify.py
+```
+
+`python3 -m py_compile tools/certify.py tests/test_certify.py` and
+`git diff --check` also passed. Decision: **accept the infrastructure fix**.
+It changes no model, seed schedule, sample size, parser, or scientific gate.
+
+Review reconciliation after the fix: the independent 02:03 PDT review
+reported the first at-scale committed-v3 control result from its separate
+harness: frozen C16 went `970-1070-0` (`47.5%`, 95% interval
+`45.4%--49.7%`) against Handcrafted at virgin seed `9317` over 2,040 games.
+Its three-seed pooled mixed-field view passed only Red (`+0.4` points) and RU
+Aggro (`+3.3`), while Green (`-2.4`), White (`-4.6`), and Blue (`-7.1`)
+failed. Treat this as independently generated external evidence, not as a
+result from the incomplete local certification. It nevertheless becomes the
+best current headline: Environment-v3 C16 is below Handcrafted, and its lift
+gap is diffuse rather than a Blue-only defect. Historical 53.5%/55.1%
+results remain valid only for their older environment versions.
+
+The review has independently started a clean committed-v3 retrain and
+reserved seed `6733`; do not collide with that seed. Before preregistering a
+replacement local certification, compare that retrain's fingerprint with the
+current artifact. If it differs, the committed-source retrain becomes the
+required new frozen control. If it is bit-identical, proceed from the current
+artifact with a fresh, noncolliding primary seed.

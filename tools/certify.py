@@ -279,6 +279,62 @@ def compiler_argv() -> list[str]:
     return command
 
 
+def resolve_npm_cache(
+    npm: Path,
+    cwd: Path,
+    environment: dict[str, str],
+) -> Path:
+    """Resolve a preexisting npm cache without allowing network fallback."""
+    process = subprocess.run(
+        [str(npm), "config", "get", "cache"],
+        cwd=cwd,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if process.returncode != 0:
+        detail = process.stderr.strip() or process.stdout.strip()
+        raise InfrastructureError(
+            "could not resolve npm cache"
+            + (f": {detail}" if detail else "")
+        )
+    lines = [line.strip() for line in process.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise InfrastructureError(
+            f"npm cache query returned {len(lines)} nonempty lines"
+        )
+    cache = Path(lines[0])
+    if not cache.is_absolute() or not cache.is_dir():
+        raise InfrastructureError(
+            f"npm cache is not an existing absolute directory: {cache}"
+        )
+    return cache
+
+
+def archived_test_environment(
+    base: dict[str, str],
+    compiler: Iterable[str],
+    toolchain_bin: Path,
+    npm_cache: Path,
+) -> dict[str, str]:
+    """Build the archived-tree test environment with offline dependencies."""
+    environment = base.copy()
+    environment["CXX"] = shlex.join(compiler)
+    environment["NPM_CONFIG_AUDIT"] = "false"
+    environment["NPM_CONFIG_FUND"] = "false"
+    environment["NPM_CONFIG_IGNORE_SCRIPTS"] = "true"
+    environment["NPM_CONFIG_OFFLINE"] = "true"
+    environment["NPM_CONFIG_CACHE"] = str(npm_cache)
+    environment["PATH"] = (
+        str(toolchain_bin)
+        + os.pathsep
+        + environment.get("PATH", "")
+    )
+    return environment
+
+
 def resolve_executable(command: str, cwd: Path) -> Path:
     candidate: str | None
     if os.sep in command:
@@ -1633,12 +1689,15 @@ class CertificationRunner:
             )
         self.report["dependencies"] = {
             "web_install": (
-                "make -B test invokes npm ci --ignore-scripts from the "
-                "archived source tree"
+                "make -B test invokes offline npm ci --ignore-scripts from "
+                "the archived source tree; package-lock integrity selects "
+                "bytes and a preexisting content-addressed cache supplies "
+                "transport only"
             ),
             "package_lock": "web/package-lock.json",
             "package_lock_sha256": sha256_path(package_lock),
             "generated_dependency_prefix": "web/node_modules/",
+            "network_fallback": False,
         }
         self.report["artifact"] = {
             "path": str(ARTIFACT_RELATIVE_PATH),
@@ -1952,18 +2011,24 @@ class CertificationRunner:
             self._write_report()
             parser_test_environment = os.environ.copy()
             parser_test_environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            make_test_environment = parser_test_environment.copy()
-            make_test_environment["CXX"] = shlex.join(compiler)
-            make_test_environment["NPM_CONFIG_AUDIT"] = "false"
-            make_test_environment["NPM_CONFIG_FUND"] = "false"
-            make_test_environment["NPM_CONFIG_IGNORE_SCRIPTS"] = "true"
-            make_test_environment["NPM_CONFIG_CACHE"] = str(
-                self.runtime_dir / "npm-cache"
-            )
-            make_test_environment["PATH"] = (
+            cache_query_environment = parser_test_environment.copy()
+            cache_query_environment["PATH"] = (
                 str(toolchain_bin)
                 + os.pathsep
-                + make_test_environment.get("PATH", "")
+                + cache_query_environment.get("PATH", "")
+            )
+            npm_cache = resolve_npm_cache(
+                npm_path,
+                self.source_dir,
+                cache_query_environment,
+            )
+            self.report["dependencies"]["npm_cache"] = str(npm_cache)
+            self._write_report()
+            make_test_environment = archived_test_environment(
+                parser_test_environment,
+                compiler,
+                toolchain_bin,
+                npm_cache,
             )
             self.run_stage(
                 "compiler-version",

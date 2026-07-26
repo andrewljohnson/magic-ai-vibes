@@ -326,6 +326,54 @@ class CertificationParserTests(unittest.TestCase):
         self.assertIn("-Werror", release)
         self.assertEqual(release[-2:], ["-o", "/tmp/runtime/old-school-sim"])
 
+    def test_archived_tests_use_a_preexisting_cache_strictly_offline(
+        self,
+    ) -> None:
+        environment = certify.archived_test_environment(
+            {
+                "PATH": "/usr/bin",
+                "PRESERVED": "yes",
+                "NPM_CONFIG_CACHE": "/discarded-empty-cache",
+            },
+            ["clang++", "-O3"],
+            Path("/pinned-tools"),
+            Path("/existing-npm-cache"),
+        )
+        self.assertEqual(environment["PRESERVED"], "yes")
+        self.assertEqual(environment["CXX"], "clang++ -O3")
+        self.assertEqual(
+            environment["PATH"], "/pinned-tools:/usr/bin"
+        )
+        self.assertEqual(
+            environment["NPM_CONFIG_CACHE"], "/existing-npm-cache"
+        )
+        self.assertEqual(environment["NPM_CONFIG_OFFLINE"], "true")
+        self.assertEqual(environment["NPM_CONFIG_IGNORE_SCRIPTS"], "true")
+        self.assertEqual(environment["NPM_CONFIG_AUDIT"], "false")
+        self.assertEqual(environment["NPM_CONFIG_FUND"], "false")
+
+    def test_npm_cache_resolution_requires_one_existing_absolute_path(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            cache.mkdir()
+            npm = root / "npm"
+            npm.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$CERTIFY_TEST_CACHE\"\n",
+                encoding="utf-8",
+            )
+            npm.chmod(0o755)
+            environment = {"CERTIFY_TEST_CACHE": str(cache), "PATH": "/usr/bin"}
+            self.assertEqual(
+                certify.resolve_npm_cache(npm, root, environment),
+                cache,
+            )
+            environment["CERTIFY_TEST_CACHE"] = "relative-cache"
+            with self.assertRaises(certify.InfrastructureError):
+                certify.resolve_npm_cache(npm, root, environment)
+
     def test_artifact_requires_loaded_expected_fingerprint(self) -> None:
         result = certify.parse_artifact_log(artifact_log(), FINGERPRINT)
         self.assertTrue(result["loaded"])
