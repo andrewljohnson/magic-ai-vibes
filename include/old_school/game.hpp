@@ -507,6 +507,11 @@ struct BotConfig {
     // depth-zero Value-mirror continuation. The real root remains greedy.
     // Zero reproduces the historical Value policy bit-for-bit.
     double value_continuation_epsilon = 0.0;
+    // Value-only bounded Priority correction. Zero preserves the historical
+    // Value policy bit-for-bit. A nonzero weight adds
+    //   weight * tanh(logit - mean legal logit)
+    // after the unchanged production Value score has been computed.
+    double value_priority_residual_weight = 0.0;
     std::size_t training_games = 800;
     // Optional per-seat frozen model. This permits a paired benchmark between
     // two Learned variants without sharing or silently retraining a model.
@@ -580,9 +585,20 @@ WhitePlanTeacherDiagnostic diagnose_white_lock_plan_teacher(
 
 struct LearnedValuePriorityDiagnostic {
     std::vector<PriorityAction> actions;
+    std::vector<double> base_scores;
+    std::vector<double> policy_logits;
+    std::vector<double> centered_policy_logits;
+    std::vector<double> priority_residuals;
     std::vector<double> scores;
     std::size_t sampled_worlds = 0;
     std::size_t rollout_evaluations = 0;
+};
+
+struct LearnedValuePriorityResidualDiagnostic {
+    std::vector<double> policy_logits;
+    double mean_legal_logit = 0.0;
+    std::vector<double> centered_policy_logits;
+    std::vector<double> residuals;
 };
 
 // Structural, model-free audit of context omitted from the current Value
@@ -643,6 +659,10 @@ struct LearnedSearchConfig {
     // Reproduces the deployed Value selector's one aggregate shallow-prior
     // observation blended with all continuation samples.
     bool blend_shallow_prior = false;
+    // Applied at the evaluated root and propagated symmetrically to both
+    // Value-mirror continuation seats. It is invalid for Unified Actor
+    // continuations.
+    double value_priority_residual_weight = 0.0;
 };
 
 struct LearnedActionSamples {
@@ -727,7 +747,19 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     std::size_t player, bool sorcery_actions, TurnPhase phase,
     int consecutive_passes, std::shared_ptr<const LearnedModel> model,
     std::size_t rollouts_per_action, std::uint64_t seed,
-    double value_continuation_epsilon = 0.0);
+    double value_continuation_epsilon = 0.0,
+    double value_priority_residual_weight = 0.0);
+
+// Evaluation-only decomposition of the bounded Value Priority residual.
+// Inputs are the same hidden-information-safe observation/action features
+// used by Learned. No opponent hidden identities are exposed.
+LearnedValuePriorityResidualDiagnostic
+diagnose_learned_value_priority_residual(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedModel> model,
+    double value_priority_residual_weight);
 
 // Focused evaluation-only seams for proving that generation-mode searched
 // choices are the actions actually applied by the engine.
@@ -789,7 +821,8 @@ class Game {
         int consecutive_passes,
         std::shared_ptr<const LearnedModel> model,
         std::size_t rollouts_per_action, std::uint64_t seed,
-        double value_continuation_epsilon);
+        double value_continuation_epsilon,
+        double value_priority_residual_weight);
     friend LearnedActionSamples learned_priority_action_samples(
         const GameState& state,
         const std::array<std::vector<CardId>, 2>& original_decks,
@@ -1369,6 +1402,49 @@ struct LearnedActorUpdateConfig {
     std::uint64_t policy_seed = 0;
 };
 
+struct LearnedValuePriorityHeadUpdateConfig {
+    std::size_t batch_size = 64;
+    std::size_t epochs = 8;
+    double learning_rate = 0.001;
+    double beta1 = 0.9;
+    double beta2 = 0.999;
+    double epsilon = 1.0e-8;
+    double global_gradient_norm_clip = 5.0;
+    std::uint64_t seed = 0;
+    double residual_weight = 0.10;
+    double policy_temperature = 0.10;
+
+    bool operator==(
+        const LearnedValuePriorityHeadUpdateConfig&) const = default;
+};
+
+struct LearnedValuePriorityTrainingExample {
+    std::vector<std::vector<double>> options;
+    // Immutable production Value scores from the frozen parent.
+    std::vector<double> base_scores;
+    // Soft target over the deployed 90% score-softmax / 10% uniform
+    // behavior mixture, not over the bare policy-head softmax.
+    std::vector<double> target_probabilities;
+    double weight = 1.0;
+};
+
+// Deep-clones a frozen Value model and fits only its outer Priority policy
+// head with soft all-action targets. Critic tensors and the Attack, Block,
+// and DamageOrder heads are copied bit-for-bit and never updated.
+std::shared_ptr<const LearnedModel>
+update_learned_value_priority_head(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedValuePriorityTrainingExample>&
+        priority_examples,
+    LearnedValuePriorityHeadUpdateConfig config = {});
+
+// Evaluation-only tensor-isolation seam. Options are already-neutral policy
+// feature vectors, so this exposes no additional game or hidden information.
+std::vector<double> learned_policy_head_logits(
+    const std::vector<std::vector<double>>& options,
+    LearnedPolicyDecisionKind decision_kind,
+    std::shared_ptr<const LearnedModel> model);
+
 // Recursively deep-clones `parent`, updates every independently cloned critic
 // leaf and the cloned outer policy heads, then republishes the result as
 // immutable. Empty example sets perform a pure deep clone.
@@ -1599,6 +1675,152 @@ learned_value_g8_generation_checkpoint(
 // bit patterns, and recursively serialized ensemble members.
 std::string learned_model_fingerprint(
     std::shared_ptr<const LearnedModel> model);
+// Stable, bit-exact fingerprints for isolation checks. Each digest binds
+// only the named component plus recursive model topology, so an update to
+// one policy head cannot obscure a mutation in another head or the critic.
+struct LearnedModelComponentFingerprints {
+    std::string critic;
+    std::string priority;
+    std::string attack;
+    std::string block;
+    std::string damage_order;
+
+    bool operator==(
+        const LearnedModelComponentFingerprints&) const = default;
+};
+LearnedModelComponentFingerprints
+learned_model_component_fingerprints(
+    std::shared_ptr<const LearnedModel> model);
+
+struct LearnedValuePolicyFamilyConfig {
+    std::size_t generations = 1;
+    std::size_t search_worlds = 8;
+    std::size_t max_roots_per_actor_game = 32;
+    std::size_t max_game_turns = 500;
+    double residual_weight = 0.10;
+    double td_lambda = 0.90;
+    LearnedValuePriorityHeadUpdateConfig optimizer{};
+};
+
+struct LearnedValuePolicyGameReport {
+    std::size_t schedule_index = 0;
+    std::size_t pairing_index = 0;
+    std::array<DeckId, 2> seat_decks = {
+        DeckId::Green,
+        DeckId::Red,
+    };
+    std::size_t starting_player = 0;
+    std::uint64_t game_seed = 0;
+    int winner = -1;
+    std::array<std::size_t, 2> raw_priority_roots{};
+    std::array<std::size_t, 2> raw_legal_options{};
+    std::array<std::size_t, 2> retained_priority_roots{};
+    std::array<std::vector<std::size_t>, 2> retained_ordinals;
+    std::array<std::size_t, 2> rollout_evaluations{};
+    std::array<double, 2> policy_weight_sums{};
+
+    bool operator==(
+        const LearnedValuePolicyGameReport&) const = default;
+};
+
+struct LearnedValuePolicyDeckReport {
+    std::size_t seat_games = 0;
+    std::size_t seat_zero_games = 0;
+    std::size_t starting_games = 0;
+    std::size_t rootless_actor_games = 0;
+    std::size_t raw_priority_roots = 0;
+    std::size_t raw_legal_options = 0;
+    std::size_t retained_priority_roots = 0;
+    std::size_t rollout_evaluations = 0;
+    double policy_weight = 0.0;
+    double positive_advantage_weight = 0.0;
+    double negative_advantage_weight = 0.0;
+    double zero_advantage_weight = 0.0;
+    double conflict_weight = 0.0;
+
+    bool operator==(
+        const LearnedValuePolicyDeckReport&) const = default;
+};
+
+struct LearnedValuePolicyMechanismReport {
+    std::size_t observation_count = 0;
+    std::size_t residual_option_count = 0;
+    std::size_t saturated_residual_count = 0;
+    double total_weight = 0.0;
+    double parent_kl = 0.0;
+    double candidate_kl = 0.0;
+    bool kl_reduction_defined = false;
+    double kl_reduction_fraction = 0.0;
+    double positive_advantage_weight = 0.0;
+    double negative_advantage_weight = 0.0;
+    double zero_advantage_weight = 0.0;
+    double conflict_weight = 0.0;
+    double eligible_signed_movement_weight = 0.0;
+    double correct_signed_movement_weight = 0.0;
+    double signed_movement_correct_rate = 0.0;
+    double eligible_positive_movement_weight = 0.0;
+    double correct_positive_movement_weight = 0.0;
+    double positive_movement_correct_rate = 0.0;
+    double eligible_negative_movement_weight = 0.0;
+    double correct_negative_movement_weight = 0.0;
+    double negative_movement_correct_rate = 0.0;
+    double changed_argmax_weight = 0.0;
+    double changed_argmax_weight_fraction = 0.0;
+    double residual_option_weight = 0.0;
+    double saturated_residual_weight = 0.0;
+    double residual_saturation_fraction = 0.0;
+
+    bool operator==(
+        const LearnedValuePolicyMechanismReport&) const = default;
+};
+
+struct LearnedValuePolicyGenerationReport {
+    std::uint64_t root_seed = 0;
+    std::size_t generation = 0;
+    bool canonical_recipe = false;
+    std::size_t search_worlds = 0;
+    std::size_t rollouts_per_world = 1;
+    std::size_t search_horizon_turns = 4;
+    std::size_t max_roots_per_actor_game = 0;
+    std::size_t max_game_turns = 0;
+    double residual_weight = 0.0;
+    double td_lambda = 0.0;
+    LearnedValuePriorityHeadUpdateConfig optimizer;
+    std::vector<LearnedValuePolicyGameReport> games;
+    std::array<LearnedValuePolicyDeckReport, kDeckCount> decks;
+    std::size_t raw_priority_roots = 0;
+    std::size_t raw_legal_options = 0;
+    std::size_t retained_priority_roots = 0;
+    std::size_t rollout_evaluations = 0;
+    std::size_t rootless_actor_games = 0;
+    double policy_weight = 0.0;
+    std::size_t replay_generations = 0;
+    std::size_t replay_examples = 0;
+    double minimum_target_sum = 0.0;
+    double maximum_target_sum = 0.0;
+    std::string parent_fingerprint;
+    std::string candidate_fingerprint;
+    LearnedModelComponentFingerprints parent_components;
+    LearnedModelComponentFingerprints candidate_components;
+    LearnedValuePolicyMechanismReport mechanism;
+
+    bool operator==(
+        const LearnedValuePolicyGenerationReport&) const = default;
+};
+
+struct LearnedValuePolicyFamilyResult {
+    // P0 is checkpoints.front(); subsequent entries are P1 through Pn.
+    std::vector<std::shared_ptr<const LearnedModel>> checkpoints;
+    std::vector<LearnedValuePolicyGenerationReport> reports;
+};
+
+// Trains immutable P-family generations from a frozen Value parent. Each
+// generation collects the complete 40-game, five-deck mirror schedule with
+// indexed information-set search and fits only the bounded Priority residual.
+LearnedValuePolicyFamilyResult train_learned_value_policy_family(
+    std::shared_ptr<const LearnedModel> p0,
+    std::uint64_t root_seed,
+    LearnedValuePolicyFamilyConfig config = {});
 // Observation presented to Learned: own private zones plus public
 // information, never the opponent's hidden card identities.
 std::vector<double>

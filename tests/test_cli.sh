@@ -21,6 +21,8 @@ mix50_cache=build/model-cache/old-school-value-g8-mix50-v2-t8-s424242.bin
 challenger_c1_cache=build/model-cache/old-school-value-challenger-v2-c1-t1-s424242.bin
 challenger_c2_cache=build/model-cache/old-school-value-challenger-v2-c2-t1-s424242.bin
 context_challenger_c1_cache=build/model-cache/old-school-value-context-s1-v2-c1-t1-s424242.bin
+dense_masked_c1_cache=build/model-cache/old-school-value-context-d0-v2-c1-t1-s424242.bin
+dense_context_c1_cache=build/model-cache/old-school-value-context-d1-v2-c1-t1-s424242.bin
 probe_cache=
 mix50_probe_cache=
 validation_probe_cache=
@@ -29,7 +31,8 @@ probe_directory=
 cleanup() {
     rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
         "$challenger_c1_cache" "$challenger_c2_cache" \
-        "$context_challenger_c1_cache"
+        "$context_challenger_c1_cache" \
+        "$dense_masked_c1_cache" "$dense_context_c1_cache"
     if [ -n "$probe_cache" ]; then
         rm -f "$probe_cache"
     fi
@@ -48,7 +51,8 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
     "$challenger_c1_cache" "$challenger_c2_cache" \
-    "$context_challenger_c1_cache"
+    "$context_challenger_c1_cache" \
+    "$dense_masked_c1_cache" "$dense_context_c1_cache"
 
 run_cli() {
     set +e
@@ -95,6 +99,8 @@ case $help_output in
 "RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs, 2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate"*\
 "--interactive"*"learned-value-g0..g8"*"learned-value-cN"*\
 "learned-value-context-cN"*\
+"learned-value-dense-masked-cN"*\
+"learned-value-dense-context-cN"*\
 "learned-value-mix50-g8"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
@@ -143,6 +149,16 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--diagnose-force-spike-teacher --learned-generations N"*\
+"Eval-only K=256 audit of the frozen S0 teacher"*\
+"Force Spike live/payable and RU Pass/X=0"*) ;;
+    *)
+        printf 'teacher-sufficiency diagnostic contract missing from --help\n' \
+            >&2
+        exit 1
+        ;;
+esac
 
 run_cli --diagnose-value-context
 if [ "$cli_status" -ne 0 ]; then
@@ -185,6 +201,50 @@ expect_error "--diagnose-value-context accepts no other options" \
     --diagnose-value-context --seed 1
 expect_error "cannot be combined" \
     --diagnose-value-context --benchmark
+expect_error "requires a positive --learned-generations N" \
+    --diagnose-force-spike-teacher
+expect_error "accepts only --train-games, --train-seed, and --learned-generations" \
+    --diagnose-force-spike-teacher --learned-generations 1 --seed 1
+expect_error "cannot be combined" \
+    --diagnose-force-spike-teacher --learned-generations 1 --score-probes
+
+teacher_probe_files_before=$(
+    find . -type f -name '*probe*.tsv' -print | sort
+)
+run_cli --diagnose-force-spike-teacher \
+    --learned-generations 1 --train-games 1 --train-seed 987654321
+if [ "$cli_status" -ne 0 ]; then
+    printf 'teacher-sufficiency diagnostic smoke failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"P16 Search-Teacher Sufficiency Audit"*\
+"no probe-label cache access or mutation"*\
+"[PRIMARY] S0 C1 Value K256/H4"*\
+"search: K=256/H=4, Learned Value mirror, shallow-prior blend off"*\
+"[DIAGNOSTIC] S0 C1 Value K256/H0"*\
+"[DIAGNOSTIC] Actor G0 K256/H0"*\
+"oriented delta: Q("*\
+"paired SE"*\
+"95% CI"*\
+"exact selected keys: {"*\
+"ordered K=8 blocks:"*"/32 correct; require 24"*\
+"all hidden repartitions: bit-identical"*\
+"Primary teacher gate:"*) ;;
+    *)
+        printf 'teacher-sufficiency diagnostic evidence missing\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+teacher_probe_files_after=$(
+    find . -type f -name '*probe*.tsv' -print | sort
+)
+if [ "$teacher_probe_files_before" != "$teacher_probe_files_after" ]; then
+    printf 'teacher diagnostic mutated a probe-label cache\n' >&2
+    exit 1
+fi
 
 run_cli_input "q" --interactive --seed 1 \
     --train-games 1 --train-seed 424242
@@ -432,20 +492,46 @@ do
         --challenger "$invalid_context_challenger" \
         --baseline random
 done
+for invalid_dense_challenger in \
+    learned-value-dense-masked-c \
+    learned-value-dense-masked-c0 \
+    learned-value-dense-masked-c-1 \
+    learned-value-dense-masked-c1x \
+    learned-value-dense-masked-c18446744073709551616 \
+    learned-value-dense-context-c \
+    learned-value-dense-context-c0 \
+    learned-value-dense-context-c-1 \
+    learned-value-dense-context-c1x \
+    learned-value-dense-context-c18446744073709551616
+do
+    expect_error "invalid bot name" \
+        --benchmark --games 1 \
+        --challenger "$invalid_dense_challenger" \
+        --baseline random
+done
 expect_error "invalid bot name" \
     --benchmark --games 1 --challenger learned-value-mix50-g7 \
     --baseline random
 expect_error "--challenger requires --benchmark or --score-probes" \
     --games 1 --challenger learned-value-context-c1
+expect_error "--challenger requires --benchmark or --score-probes" \
+    --games 1 --challenger learned-value-dense-masked-c1
 expect_error "--baseline requires --benchmark" \
     --games 1 --baseline learned-value-context-c1
+expect_error "--baseline requires --benchmark" \
+    --games 1 --baseline learned-value-dense-context-c1
 expect_error "requires learned-value-context-cN" \
     --score-probes --challenger learned-value-c1
 expect_error "requires --learned-generations N" \
     --score-probes --challenger learned-value-context-c1
+expect_error "requires --learned-generations N" \
+    --score-probes --challenger learned-value-dense-context-c1
 expect_error "generation must match --learned-generations N" \
     --score-probes --learned-generations 1 \
     --challenger learned-value-context-c2
+expect_error "generation must match --learned-generations N" \
+    --score-probes --learned-generations 1 \
+    --challenger learned-value-dense-masked-c2
 expect_error "--learned-rollouts must be greater than zero" \
     --games 1 --learned-rollouts 0
 expect_error "--score-probes requires --learned-rollouts of at least two" \
@@ -491,6 +577,8 @@ expect_error "--evolve-pilot requires --evolve-deck" \
     --evolve-pilot handcrafted
 expect_error "Learned --evolve-pilot currently requires learned-value-context-cN" \
     --evolve-deck --evolve-pilot learned-value-c1
+expect_error "Learned --evolve-pilot currently requires learned-value-context-cN" \
+    --evolve-deck --evolve-pilot learned-value-dense-context-c1
 expect_error "$learned_rollout_scope" \
     --evolve-deck --evolve-pilot handcrafted --learned-rollouts 1
 expect_error "$value_epsilon_scope" \
@@ -626,6 +714,94 @@ if [ -z "$context_evolve_first_fingerprint" ] ||
     printf 'fingerprints: %s / %s\n' \
         "$context_evolve_first_fingerprint" \
         "$context_evolve_second_fingerprint" >&2
+    exit 1
+fi
+
+dense_benchmark_args="--benchmark --games 1 --seed 1 \
+--train-games 1 --train-seed 424242 \
+--challenger learned-value-dense-masked-c1 \
+--baseline learned-value-dense-context-c1 --learned-rollouts 1"
+
+# shellcheck disable=SC2086
+run_cli $dense_benchmark_args
+if [ "$cli_status" -eq 2 ]; then
+    printf 'dense D0/D1 benchmark route failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+dense_first_output=$cli_output
+case $dense_first_output in
+    *"Training frozen Value Dense Masked C1"*\
+"Value Dense Masked C1 fingerprint:"*\
+"Value Dense Masked C1 artifact cache: generated $dense_masked_c1_cache"*\
+"D0 dense decision roots: total="*\
+"Training frozen Value Dense Context C1"*\
+"Value Dense Context C1 fingerprint:"*\
+"Value Dense Context C1 artifact cache: generated $dense_context_c1_cache"*\
+"D1 dense decision roots: total="*\
+"Challenger: Learned Value Dense Masked C1"*\
+"Baseline: Learned Value Dense Context C1"*) ;;
+    *)
+        printf 'dense D0/D1 generation/reporting missing\n%s\n' \
+            "$dense_first_output" >&2
+        exit 1
+        ;;
+esac
+dense_masked_first_fingerprint=$(
+    printf '%s\n' "$dense_first_output" |
+        sed -n 's/^  Value Dense Masked C1 fingerprint: //p'
+)
+dense_context_first_fingerprint=$(
+    printf '%s\n' "$dense_first_output" |
+        sed -n 's/^  Value Dense Context C1 fingerprint: //p'
+)
+dense_first_record=$(
+    printf '%s\n' "$dense_first_output" |
+        sed -n 's/^  Challenger record: //p'
+)
+
+# shellcheck disable=SC2086
+run_cli $dense_benchmark_args
+if [ "$cli_status" -eq 2 ]; then
+    printf 'repeated dense D0/D1 benchmark failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Loading immutable Value Dense Masked C1 artifact"*\
+"Value Dense Masked C1 artifact cache: loaded $dense_masked_c1_cache"*\
+"D0 dense decision roots: total="*\
+"Loading immutable Value Dense Context C1 artifact"*\
+"Value Dense Context C1 artifact cache: loaded $dense_context_c1_cache"*\
+"D1 dense decision roots: total="*) ;;
+    *)
+        printf 'dense D0/D1 route did not reuse artifacts\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+dense_masked_second_fingerprint=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Value Dense Masked C1 fingerprint: //p'
+)
+dense_context_second_fingerprint=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Value Dense Context C1 fingerprint: //p'
+)
+dense_second_record=$(
+    printf '%s\n' "$cli_output" |
+        sed -n 's/^  Challenger record: //p'
+)
+if [ -z "$dense_masked_first_fingerprint" ] ||
+    [ "$dense_masked_first_fingerprint" != \
+      "$dense_masked_second_fingerprint" ] ||
+    [ -z "$dense_context_first_fingerprint" ] ||
+    [ "$dense_context_first_fingerprint" != \
+      "$dense_context_second_fingerprint" ] ||
+    [ -z "$dense_first_record" ] ||
+    [ "$dense_first_record" != "$dense_second_record" ]; then
+    printf 'dense D0/D1 artifacts were not fixed-seed deterministic\n' \
+        >&2
     exit 1
 fi
 
@@ -1229,7 +1405,8 @@ g8_final_fingerprint=$(
 )
 g8_checkpoint_fingerprint=$(
     printf '%s\n' "$cli_output" |
-        sed -n 's/^  Value G8: fingerprint \([^,]*\),.*/\1/p'
+        sed -n 's/^  Value G8: fingerprint \([^,]*\),.*/\1/p' |
+        tail -n 1
 )
 if [ -z "$g8_final_fingerprint" ] ||
     [ "$g8_final_fingerprint" != "$g8_checkpoint_fingerprint" ]; then
@@ -1304,7 +1481,8 @@ if [ "$mix50_probe_checksum_before" != \
 fi
 mix50_checkpoint_fingerprint=$(
     printf '%s\n' "$mix50_probe_output" |
-        sed -n 's/^  Value Mix50 G8: fingerprint \([^,]*\),.*/\1/p'
+        sed -n 's/^  Value Mix50 G8: fingerprint \([^,]*\),.*/\1/p' |
+        tail -n 1
 )
 if [ "$mix50_checkpoint_fingerprint" != \
     "$mix50_final_fingerprint" ]; then
@@ -1421,6 +1599,38 @@ case $cli_output in
     *"Training immutable Value G8"*|\
 *"Value checkpoint transitions (compact)"*)
         printf 'legacy Value G0 unexpectedly trained/scored G8\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+
+run_cli --score-probes \
+    --challenger learned-value-dense-context-c1 \
+    --learned-generations 1 --learned-rollouts 2 \
+    --probe-worlds 2 --probe-horizon 0 \
+    --train-games 1 --train-seed 424242 \
+    --probe-cache "$probe_cache"
+if [ "$cli_status" -ne 0 ]; then
+    printf 'ordered S0/S1/D0/D1 probe route failed\n%s\n' \
+        "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *"Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*\
+"Value Context C1 artifact cache: loaded $context_challenger_c1_cache"*\
+"Value Dense Masked C1 artifact cache: loaded $dense_masked_c1_cache"*\
+"Value Dense Context C1 artifact cache: loaded $dense_context_c1_cache"*\
+"Value checkpoint transitions (compact)"*\
+"  Value Challenger C1: fingerprint"*\
+"transition parent Value G0"*\
+"  Value Context C1: fingerprint"*\
+"transition parent Value Challenger C1"*\
+"  Value Dense Masked C1: fingerprint"*\
+"transition parent Value Context C1"*\
+"  Value Dense Context C1: fingerprint"*\
+"transition parent Value Dense Masked C1"*) ;;
+    *)
+        printf 'S0/S1/D0/D1 probe ordering/attribution missing\n%s\n' \
             "$cli_output" >&2
         exit 1
         ;;

@@ -219,15 +219,32 @@ void validate_value_continuation_epsilon(double epsilon) {
     }
 }
 
+void validate_value_priority_residual_weight(double weight) {
+    if (!std::isfinite(weight) || weight < 0.0 ||
+        weight > 1.0) {
+        throw std::invalid_argument(
+            "Value Priority residual weight must be finite and in [0, 1]");
+    }
+}
+
 void validate_bot_research_config(const BotConfig& bot) {
     validate_value_continuation_epsilon(
         bot.value_continuation_epsilon);
+    validate_value_priority_residual_weight(
+        bot.value_priority_residual_weight);
     if (bot.value_continuation_epsilon != 0.0 &&
         (bot.kind != BotKind::Learned ||
          bot.learned_variant !=
              LearnedVariant::ValueSearchChampion)) {
         throw std::invalid_argument(
             "Value continuation epsilon requires Learned Value");
+    }
+    if (bot.value_priority_residual_weight != 0.0 &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion)) {
+        throw std::invalid_argument(
+            "Value Priority residual requires Learned Value");
     }
 }
 
@@ -668,6 +685,13 @@ class LearnedModel {
         std::size_t chosen = 0;
         std::size_t decision_kind = 0;
         double advantage = 0.0;
+        double weight = 1.0;
+    };
+
+    struct ValuePriorityTrainingExample {
+        std::vector<PolicyFeatureVector> options;
+        std::vector<double> base_scores;
+        std::vector<double> target_probabilities;
         double weight = 1.0;
     };
 
@@ -1152,6 +1176,360 @@ class LearnedModel {
         }
     }
 
+    void train_priority_policy_adam(
+        const std::vector<ValuePriorityTrainingExample>& examples,
+        const LearnedValuePriorityHeadUpdateConfig& config) {
+        if (examples.empty()) {
+            return;
+        }
+
+        constexpr std::size_t decision_kind =
+            static_cast<std::size_t>(
+                LearnedPolicyDecisionKind::Priority);
+        struct PriorityPolicyTensors {
+            std::array<
+                std::array<double, kPolicyFeatureCount>,
+                kPolicyHiddenCount>
+                input{};
+            std::array<double, kPolicyHiddenCount> hidden_bias{};
+            std::array<double, kPolicyHiddenCount> output{};
+            std::array<double, kPolicyFeatureCount> direct{};
+            double output_bias = 0.0;
+        };
+
+        PriorityPolicyTensors first_moment;
+        PriorityPolicyTensors second_moment;
+        std::mt19937_64 random(config.seed);
+        std::vector<std::size_t> order(examples.size());
+        for (std::size_t index = 0; index < order.size(); ++index) {
+            order[index] = index;
+        }
+        std::size_t optimizer_step = 0;
+
+        for (std::size_t epoch = 0; epoch < config.epochs;
+             ++epoch) {
+            std::shuffle(order.begin(), order.end(), random);
+            for (std::size_t batch_begin = 0;
+                 batch_begin < order.size();
+                 batch_begin += config.batch_size) {
+                const std::size_t batch_end = std::min(
+                    order.size(),
+                    batch_begin + config.batch_size);
+                const double inverse_batch =
+                    1.0 / static_cast<double>(
+                              batch_end - batch_begin);
+                PriorityPolicyTensors gradient;
+
+                for (std::size_t order_index = batch_begin;
+                     order_index < batch_end; ++order_index) {
+                    const ValuePriorityTrainingExample& example =
+                        examples[order[order_index]];
+                    std::vector<
+                        std::array<double, kPolicyHiddenCount>>
+                        hidden;
+                    std::vector<double> logits;
+                    hidden.reserve(example.options.size());
+                    logits.reserve(example.options.size());
+                    for (const auto& option : example.options) {
+                        hidden.push_back(policy_hidden_values(
+                            option, decision_kind));
+                        double logit =
+                            policy_output_bias_[decision_kind];
+                        for (std::size_t hidden_index = 0;
+                             hidden_index < kPolicyHiddenCount;
+                             ++hidden_index) {
+                            logit +=
+                                policy_output_weights_
+                                    [decision_kind][hidden_index] *
+                                hidden.back()[hidden_index];
+                        }
+                        for (std::size_t feature = 0;
+                             feature < kPolicyFeatureCount;
+                             ++feature) {
+                            if (option[feature] != 0.0) {
+                                logit +=
+                                    policy_direct_output_weights_
+                                        [decision_kind][feature] *
+                                    option[feature];
+                            }
+                        }
+                        logits.push_back(logit);
+                    }
+
+                    double logit_total = 0.0;
+                    for (const double logit : logits) {
+                        logit_total += logit;
+                    }
+                    const double mean_logit =
+                        logit_total /
+                        static_cast<double>(logits.size());
+                    std::vector<double> residual_tanh;
+                    std::vector<double> combined_logits;
+                    residual_tanh.reserve(logits.size());
+                    combined_logits.reserve(logits.size());
+                    for (std::size_t option = 0;
+                         option < logits.size(); ++option) {
+                        const double centered =
+                            logits[option] - mean_logit;
+                        const double squashed =
+                            std::tanh(centered);
+                        residual_tanh.push_back(squashed);
+                        combined_logits.push_back(
+                            (example.base_scores[option] +
+                             config.residual_weight * squashed) /
+                            config.policy_temperature);
+                    }
+
+                    const double max_logit =
+                        *std::max_element(
+                            combined_logits.begin(),
+                            combined_logits.end());
+                    std::vector<double> probabilities(
+                        combined_logits.size());
+                    double probability_sum = 0.0;
+                    for (std::size_t option = 0;
+                         option < combined_logits.size(); ++option) {
+                        probabilities[option] =
+                            std::exp(
+                                combined_logits[option] -
+                                max_logit);
+                        probability_sum += probabilities[option];
+                    }
+                    for (double& probability : probabilities) {
+                        probability /= probability_sum;
+                    }
+
+                    constexpr double kSearchChoiceWeight = 0.90;
+                    const double uniform_choice_probability =
+                        (1.0 - kSearchChoiceWeight) /
+                        static_cast<double>(probabilities.size());
+                    std::vector<double> behavior_probabilities(
+                        probabilities.size());
+                    double behavior_ratio_sum = 0.0;
+                    for (std::size_t option = 0;
+                         option < probabilities.size(); ++option) {
+                        behavior_probabilities[option] =
+                            kSearchChoiceWeight *
+                                probabilities[option] +
+                            uniform_choice_probability;
+                        behavior_ratio_sum +=
+                            probabilities[option] *
+                            example.target_probabilities[option] /
+                            behavior_probabilities[option];
+                    }
+
+                    std::vector<double> centered_gradients(
+                        probabilities.size());
+                    double centered_gradient_total = 0.0;
+                    for (std::size_t option_index = 0;
+                         option_index < example.options.size();
+                         ++option_index) {
+                        // Cross-entropy is against the deployed/search
+                        // behavior distribution
+                        //   mu = .9 * softmax(z) + .1 / N,
+                        // not bare softmax. This keeps a zero-advantage
+                        // target equal to the parent behavior stationary.
+                        const double combined_error =
+                            inverse_batch * example.weight *
+                            kSearchChoiceWeight *
+                            probabilities[option_index] *
+                            (behavior_ratio_sum -
+                             example.target_probabilities
+                                 [option_index] /
+                                 behavior_probabilities
+                                     [option_index]);
+                        centered_gradients[option_index] =
+                            combined_error *
+                            config.residual_weight /
+                            config.policy_temperature *
+                            (1.0 -
+                             residual_tanh[option_index] *
+                                 residual_tanh[option_index]);
+                        centered_gradient_total +=
+                            centered_gradients[option_index];
+                    }
+                    const double mean_centered_gradient =
+                        centered_gradient_total /
+                        static_cast<double>(
+                            centered_gradients.size());
+
+                    for (std::size_t option_index = 0;
+                         option_index < example.options.size();
+                         ++option_index) {
+                        // c_i = logit_i - mean(logits), so every raw-logit
+                        // derivative receives its own centered derivative
+                        // minus the legal-action mean.
+                        const double output_error =
+                            centered_gradients[option_index] -
+                            mean_centered_gradient;
+                        gradient.output_bias += output_error;
+                        for (std::size_t hidden_index = 0;
+                             hidden_index < kPolicyHiddenCount;
+                             ++hidden_index) {
+                            gradient.output[hidden_index] +=
+                                output_error *
+                                hidden[option_index][hidden_index];
+                        }
+                        for (std::size_t feature = 0;
+                             feature < kPolicyFeatureCount;
+                             ++feature) {
+                            const double feature_value =
+                                example.options[option_index]
+                                               [feature];
+                            if (feature_value != 0.0) {
+                                gradient.direct[feature] +=
+                                    output_error * feature_value;
+                            }
+                        }
+
+                        for (std::size_t hidden_index = 0;
+                             hidden_index < kPolicyHiddenCount;
+                             ++hidden_index) {
+                            const double hidden_value =
+                                hidden[option_index][hidden_index];
+                            const double hidden_error =
+                                output_error *
+                                policy_output_weights_
+                                    [decision_kind][hidden_index] *
+                                (1.0 -
+                                 hidden_value * hidden_value);
+                            gradient.hidden_bias[hidden_index] +=
+                                hidden_error;
+                            for (std::size_t feature = 0;
+                                 feature < kPolicyFeatureCount;
+                                 ++feature) {
+                                const double feature_value =
+                                    example.options[option_index]
+                                                   [feature];
+                                if (feature_value != 0.0) {
+                                    gradient.input[hidden_index]
+                                                  [feature] +=
+                                        hidden_error *
+                                        feature_value;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                double squared_norm =
+                    gradient.output_bias *
+                    gradient.output_bias;
+                for (std::size_t hidden_index = 0;
+                     hidden_index < kPolicyHiddenCount;
+                     ++hidden_index) {
+                    squared_norm +=
+                        gradient.hidden_bias[hidden_index] *
+                        gradient.hidden_bias[hidden_index];
+                    squared_norm +=
+                        gradient.output[hidden_index] *
+                        gradient.output[hidden_index];
+                    for (std::size_t feature = 0;
+                         feature < kPolicyFeatureCount;
+                         ++feature) {
+                        squared_norm +=
+                            gradient.input[hidden_index][feature] *
+                            gradient.input[hidden_index][feature];
+                    }
+                }
+                for (std::size_t feature = 0;
+                     feature < kPolicyFeatureCount; ++feature) {
+                    squared_norm +=
+                        gradient.direct[feature] *
+                        gradient.direct[feature];
+                }
+                if (!std::isfinite(squared_norm)) {
+                    throw std::runtime_error(
+                        "Value Priority Adam gradient is not finite");
+                }
+                const double norm = std::sqrt(squared_norm);
+                const double gradient_scale =
+                    norm > config.global_gradient_norm_clip
+                        ? config.global_gradient_norm_clip / norm
+                        : 1.0;
+                ++optimizer_step;
+                const double first_bias_correction =
+                    1.0 -
+                    std::pow(
+                        config.beta1,
+                        static_cast<double>(optimizer_step));
+                const double second_bias_correction =
+                    1.0 -
+                    std::pow(
+                        config.beta2,
+                        static_cast<double>(optimizer_step));
+                const auto update =
+                    [&](double& parameter, double& first,
+                        double& second, double raw_gradient) {
+                        const double clipped_gradient =
+                            gradient_scale * raw_gradient;
+                        first =
+                            config.beta1 * first +
+                            (1.0 - config.beta1) *
+                                clipped_gradient;
+                        second =
+                            config.beta2 * second +
+                            (1.0 - config.beta2) *
+                                clipped_gradient *
+                                clipped_gradient;
+                        const double corrected_first =
+                            first / first_bias_correction;
+                        const double corrected_second =
+                            second / second_bias_correction;
+                        parameter -=
+                            config.learning_rate *
+                            corrected_first /
+                            (std::sqrt(corrected_second) +
+                             config.epsilon);
+                    };
+
+                for (std::size_t hidden_index = 0;
+                     hidden_index < kPolicyHiddenCount;
+                     ++hidden_index) {
+                    for (std::size_t feature = 0;
+                         feature < kPolicyFeatureCount;
+                         ++feature) {
+                        update(
+                            policy_input_weights_
+                                [decision_kind][hidden_index]
+                                [feature],
+                            first_moment.input[hidden_index]
+                                              [feature],
+                            second_moment.input[hidden_index]
+                                               [feature],
+                            gradient.input[hidden_index][feature]);
+                    }
+                    update(
+                        policy_hidden_biases_
+                            [decision_kind][hidden_index],
+                        first_moment.hidden_bias[hidden_index],
+                        second_moment.hidden_bias[hidden_index],
+                        gradient.hidden_bias[hidden_index]);
+                    update(
+                        policy_output_weights_
+                            [decision_kind][hidden_index],
+                        first_moment.output[hidden_index],
+                        second_moment.output[hidden_index],
+                        gradient.output[hidden_index]);
+                }
+                for (std::size_t feature = 0;
+                     feature < kPolicyFeatureCount; ++feature) {
+                    update(
+                        policy_direct_output_weights_
+                            [decision_kind][feature],
+                        first_moment.direct[feature],
+                        second_moment.direct[feature],
+                        gradient.direct[feature]);
+                }
+                update(
+                    policy_output_bias_[decision_kind],
+                    first_moment.output_bias,
+                    second_moment.output_bias,
+                    gradient.output_bias);
+            }
+        }
+    }
+
     std::shared_ptr<LearnedModel> deep_clone_mutable(
         std::vector<std::shared_ptr<LearnedModel>>& critic_leaves)
         const {
@@ -1322,7 +1700,59 @@ class LearnedModel {
         }
     }
 
+    void append_critic_fingerprint(
+        ModelFingerprintHash& hash) const {
+        hash.add(0x4352495449434E44ULL);
+        hash.add(static_cast<std::uint64_t>(critic_schema_));
+        add_model_fingerprint_value(hash, input_weights_);
+        add_model_fingerprint_value(hash, hidden_biases_);
+        add_model_fingerprint_value(hash, output_weights_);
+        add_model_fingerprint_value(
+            hash, direct_output_weights_);
+        add_model_fingerprint_value(hash, output_bias_);
+        add_model_fingerprint_value(
+            hash, context_input_weights_);
+        add_model_fingerprint_value(
+            hash, context_direct_output_weights_);
+        hash.add(static_cast<std::uint64_t>(ensemble_.size()));
+        for (const auto& member : ensemble_) {
+            hash.add(member ? 1ULL : 0ULL);
+            if (member) {
+                member->append_critic_fingerprint(hash);
+            }
+        }
+    }
+
+    void append_policy_head_fingerprint(
+        ModelFingerprintHash& hash,
+        std::size_t decision_kind) const {
+        hash.add(0x504F4C4943594E44ULL);
+        hash.add(static_cast<std::uint64_t>(decision_kind));
+        add_model_fingerprint_value(
+            hash, policy_input_weights_[decision_kind]);
+        add_model_fingerprint_value(
+            hash, policy_hidden_biases_[decision_kind]);
+        add_model_fingerprint_value(
+            hash, policy_output_weights_[decision_kind]);
+        add_model_fingerprint_value(
+            hash,
+            policy_direct_output_weights_[decision_kind]);
+        add_model_fingerprint_value(
+            hash, policy_output_bias_[decision_kind]);
+        hash.add(static_cast<std::uint64_t>(ensemble_.size()));
+        for (const auto& member : ensemble_) {
+            hash.add(member ? 1ULL : 0ULL);
+            if (member) {
+                member->append_policy_head_fingerprint(
+                    hash, decision_kind);
+            }
+        }
+    }
+
     friend std::string learned_model_fingerprint(
+        std::shared_ptr<const LearnedModel> model);
+    friend LearnedModelComponentFingerprints
+    learned_model_component_fingerprints(
         std::shared_ptr<const LearnedModel> model);
     friend void write_learned_value_g8_bundle_atomic(
         const std::string& path,
@@ -1416,6 +1846,53 @@ std::string learned_model_fingerprint(
     hash.add(1);
     model->append_fingerprint(hash);
     return hash.finish();
+}
+
+LearnedModelComponentFingerprints
+learned_model_component_fingerprints(
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model) {
+        throw std::invalid_argument(
+            "cannot fingerprint a null Learned model");
+    }
+
+    ModelFingerprintHash critic;
+    critic.add(0x4D41474943435254ULL);
+    critic.add(1);
+    critic.add(static_cast<std::uint64_t>(
+        LearnedModel::kFeatureCount));
+    critic.add(static_cast<std::uint64_t>(
+        LearnedModel::kHiddenCount));
+    critic.add(static_cast<std::uint64_t>(
+        kLearnedDecisionContextFeatureCount));
+    model->append_critic_fingerprint(critic);
+
+    const auto policy_fingerprint =
+        [&](LearnedPolicyDecisionKind decision_kind) {
+            ModelFingerprintHash policy;
+            policy.add(0x4D41474943504F4CULL);
+            policy.add(1);
+            policy.add(static_cast<std::uint64_t>(
+                LearnedModel::kPolicyFeatureCount));
+            policy.add(static_cast<std::uint64_t>(
+                LearnedModel::kPolicyHiddenCount));
+            model->append_policy_head_fingerprint(
+                policy,
+                static_cast<std::size_t>(decision_kind));
+            return policy.finish();
+        };
+
+    return {
+        .critic = critic.finish(),
+        .priority = policy_fingerprint(
+            LearnedPolicyDecisionKind::Priority),
+        .attack = policy_fingerprint(
+            LearnedPolicyDecisionKind::Attack),
+        .block = policy_fingerprint(
+            LearnedPolicyDecisionKind::Block),
+        .damage_order = policy_fingerprint(
+            LearnedPolicyDecisionKind::DamageOrder),
+    };
 }
 
 namespace {
@@ -1963,6 +2440,76 @@ LearnedValueContextChallengerArtifact::root_coverage() const {
     return root_coverage_;
 }
 
+LearnedValueDenseContextChallengerArtifact::
+    LearnedValueDenseContextChallengerArtifact(
+        std::shared_ptr<const LearnedModel> model,
+        std::size_t training_games, std::uint64_t seed,
+        std::size_t self_play_generations,
+        LearnedValueDenseContextTreatment treatment,
+        LearnedValueContextRootCoverage root_coverage)
+    : model_(std::move(model)),
+      training_games_(training_games),
+      seed_(seed),
+      self_play_generations_(self_play_generations),
+      treatment_(treatment),
+      root_coverage_(std::move(root_coverage)) {}
+
+std::shared_ptr<const LearnedModel>
+LearnedValueDenseContextChallengerArtifact::model() const {
+    return model_;
+}
+
+std::size_t
+LearnedValueDenseContextChallengerArtifact::
+    training_games() const {
+    return training_games_;
+}
+
+std::uint64_t
+LearnedValueDenseContextChallengerArtifact::seed() const {
+    return seed_;
+}
+
+std::size_t
+LearnedValueDenseContextChallengerArtifact::
+    self_play_generations() const {
+    return self_play_generations_;
+}
+
+LearnedValueDenseContextTreatment
+LearnedValueDenseContextChallengerArtifact::treatment() const {
+    return treatment_;
+}
+
+LearnedCriticSchema
+LearnedValueDenseContextChallengerArtifact::
+    critic_schema() const {
+    return LearnedCriticSchema::DecisionContextV1;
+}
+
+bool LearnedValueDenseContextChallengerArtifact::
+    context_masked() const {
+    return value_dense_context_treatment_definition(
+               treatment_)
+        .context_masked;
+}
+
+LearnedDecisionTraceMode
+LearnedValueDenseContextChallengerArtifact::trace_mode() const {
+    return kValueDenseContextTraceMode;
+}
+
+std::size_t
+LearnedValueDenseContextChallengerArtifact::trace_limit() const {
+    return kValueDenseContextTraceLimit;
+}
+
+const LearnedValueContextRootCoverage&
+LearnedValueDenseContextChallengerArtifact::
+    root_coverage() const {
+    return root_coverage_;
+}
+
 LearnedValueChallengerArtifact
 train_learned_value_challenger_artifact(
     std::size_t training_games, std::uint64_t seed,
@@ -1979,10 +2526,43 @@ train_learned_value_context_challenger_artifact(
     std::size_t self_play_generations) {
     auto trained =
         train_learned_value_context_challenger_internal(
-            training_games, seed, self_play_generations);
+            training_games, seed, self_play_generations,
+            {
+                .trace_mode =
+                    LearnedDecisionTraceMode::Sparse,
+                .context_masked = false,
+                .coverage_source =
+                    "Learned Value context S1 training",
+            });
     return LearnedValueContextChallengerArtifact(
         std::move(trained.model), training_games, seed,
         self_play_generations,
+        std::move(trained.root_coverage));
+}
+
+LearnedValueDenseContextChallengerArtifact
+train_learned_value_dense_context_challenger_artifact(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations,
+    LearnedValueDenseContextTreatment treatment) {
+    const auto definition =
+        value_dense_context_treatment_definition(treatment);
+    auto trained =
+        train_learned_value_context_challenger_internal(
+            training_games, seed, self_play_generations,
+            {
+                .trace_mode =
+                    LearnedDecisionTraceMode::Dense,
+                .context_masked =
+                    definition.context_masked,
+                .coverage_source =
+                    definition.context_masked
+                        ? "Learned Value context D0 training"
+                        : "Learned Value context D1 training",
+            });
+    return LearnedValueDenseContextChallengerArtifact(
+        std::move(trained.model), training_games, seed,
+        self_play_generations, treatment,
         std::move(trained.root_coverage));
 }
 
@@ -2035,6 +2615,30 @@ std::string learned_value_context_challenger_cache_path(
     }
     return "build/model-cache/"
            "old-school-value-context-s1-v2-c" +
+           std::to_string(self_play_generations) + "-t" +
+           std::to_string(training_games) + "-s" +
+           std::to_string(seed) + ".bin";
+}
+
+std::string learned_value_dense_context_challenger_cache_path(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations,
+    LearnedValueDenseContextTreatment treatment) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value dense-context challenger cache "
+            "training_games must be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value dense-context challenger cache "
+            "generations must be positive");
+    }
+    const auto definition =
+        value_dense_context_treatment_definition(treatment);
+    return "build/model-cache/"
+           "old-school-value-context-" +
+           std::string(definition.cache_cell) + "-v2-c" +
            std::to_string(self_play_generations) + "-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
@@ -2914,6 +3518,573 @@ load_learned_value_context_challenger_artifact(
     return LearnedValueContextChallengerArtifact(
         std::move(model), training_games, seed,
         self_play_generations, std::move(root_coverage));
+}
+
+void
+write_learned_value_dense_context_challenger_artifact_atomic(
+    const std::string& path,
+    const LearnedValueDenseContextChallengerArtifact& artifact) {
+    const auto definition =
+        value_dense_context_treatment_definition(
+            artifact.treatment_);
+    const auto& model = artifact.model_;
+    const std::size_t training_games =
+        artifact.training_games_;
+    const std::uint64_t seed = artifact.seed_;
+    const std::size_t self_play_generations =
+        artifact.self_play_generations_;
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "Learned Value dense-context artifact training_games "
+            "must be positive");
+    }
+    if (self_play_generations == 0) {
+        throw std::invalid_argument(
+            "Learned Value dense-context artifact generations "
+            "must be positive");
+    }
+    if (!model) {
+        throw std::invalid_argument(
+            "Learned Value dense-context artifact model must not "
+            "be null");
+    }
+    if (model->variant_ !=
+            LearnedVariant::ValueSearchChampion ||
+        model->critic_schema_ !=
+            LearnedCriticSchema::DecisionContextV1) {
+        throw std::invalid_argument(
+            "Learned Value dense-context artifact requires a "
+            "DecisionContextV1 Value model");
+    }
+    validate_value_context_root_coverage(
+        artifact.root_coverage_,
+        "Learned Value dense-context artifact");
+
+    const std::string fingerprint =
+        learned_model_fingerprint(model);
+    ValueG8BinaryWriter payload;
+    payload.text(kValueChallengerEngineSchemaId);
+    payload.text(definition.recipe_id);
+    payload.text(kValueContextCriticSchemaId);
+    payload.unsigned32(static_cast<std::uint32_t>(
+        artifact.treatment_));
+    payload.unsigned32(static_cast<std::uint32_t>(
+        LearnedCriticSchema::DecisionContextV1));
+    payload.unsigned32(definition.context_masked ? 1U : 0U);
+    payload.unsigned32(static_cast<std::uint32_t>(
+        kValueDenseContextTraceMode));
+    payload.size(kValueDenseContextTraceLimit);
+    payload.size(kLearnedCardCount);
+    payload.size(LearnedModel::kScalarFeatureCount);
+    payload.size(LearnedModel::kCardPlanes);
+    payload.size(LearnedModel::kFeatureCount);
+    payload.size(kLearnedDecisionContextFeatureCount);
+    payload.size(LearnedModel::kHiddenCount);
+    payload.size(LearnedModel::kPolicyDecisionCount);
+    payload.size(LearnedModel::kPolicyPhaseCount);
+    payload.size(LearnedModel::kPolicyVerbCount);
+    payload.size(LearnedModel::kPolicyCardPlanes);
+    payload.size(LearnedModel::kPolicyScalarCount);
+    payload.size(LearnedModel::kPolicyFeatureCount);
+    payload.size(LearnedModel::kPolicyHiddenCount);
+    payload.size(training_games);
+    payload.unsigned64(seed);
+    payload.size(self_play_generations);
+    payload.size(artifact.root_coverage_.anchor_roots);
+    payload.size(artifact.root_coverage_.self_play_roots);
+    for (const std::size_t count :
+         artifact.root_coverage_.decision_player_decks) {
+        payload.size(count);
+    }
+    for (const std::size_t count :
+         artifact.root_coverage_.phases) {
+        payload.size(count);
+    }
+    for (const std::size_t count :
+         artifact.root_coverage_.pass_counts) {
+        payload.size(count);
+    }
+    for (const std::size_t count :
+         artifact.root_coverage_.stack_status) {
+        payload.size(count);
+    }
+    payload.text(fingerprint);
+
+    std::size_t node_count = 0;
+    std::function<void(
+        const std::shared_ptr<const LearnedModel>&,
+        std::size_t)>
+        write_model;
+    write_model =
+        [&](const std::shared_ptr<const LearnedModel>& node,
+            std::size_t depth) {
+            if (!node) {
+                throw std::runtime_error(
+                    "Learned Value dense-context artifact "
+                    "contains a null model node");
+            }
+            if (depth > kMaximumValueG8ArtifactDepth ||
+                ++node_count > kMaximumValueG8ArtifactNodes) {
+                throw std::runtime_error(
+                    "Learned Value dense-context artifact model "
+                    "graph exceeds its bound");
+            }
+            if (node->variant_ !=
+                    LearnedVariant::ValueSearchChampion ||
+                node->critic_schema_ !=
+                    LearnedCriticSchema::DecisionContextV1) {
+                throw std::runtime_error(
+                    "Learned Value dense-context artifact "
+                    "contains a non-contextual Value model node");
+            }
+            if (definition.context_masked) {
+                const bool input_is_zero = std::all_of(
+                    node->context_input_weights_.begin(),
+                    node->context_input_weights_.end(),
+                    [](const auto& row) {
+                        return std::all_of(
+                            row.begin(), row.end(),
+                            [](double value) {
+                                return value == 0.0;
+                            });
+                    });
+                const bool direct_is_zero = std::all_of(
+                    node->context_direct_output_weights_.begin(),
+                    node->context_direct_output_weights_.end(),
+                    [](double value) {
+                        return value == 0.0;
+                    });
+                if (!input_is_zero || !direct_is_zero) {
+                    throw std::runtime_error(
+                        "Learned Value dense-context D0 artifact "
+                        "contains nonzero context weights");
+                }
+            }
+            if (node->ensemble_.size() >
+                kMaximumValueG8EnsembleMembers) {
+                throw std::runtime_error(
+                    "Learned Value dense-context artifact "
+                    "ensemble exceeds its bound");
+            }
+            payload.unsigned32(0x4D4F444C);
+            payload.unsigned32(static_cast<std::uint32_t>(
+                node->variant_));
+            payload.unsigned32(static_cast<std::uint32_t>(
+                node->critic_schema_));
+            write_value_g8_fixed(
+                payload, node->input_weights_);
+            write_value_g8_fixed(
+                payload, node->hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->output_weights_);
+            write_value_g8_fixed(
+                payload, node->direct_output_weights_);
+            payload.real(node->output_bias_);
+            write_value_g8_fixed(
+                payload, node->context_input_weights_);
+            write_value_g8_fixed(
+                payload,
+                node->context_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_input_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->policy_output_weights_);
+            write_value_g8_fixed(
+                payload,
+                node->policy_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_output_bias_);
+            payload.unsigned32(static_cast<std::uint32_t>(
+                node->ensemble_.size()));
+            for (const auto& member : node->ensemble_) {
+                write_model(member, depth + 1);
+            }
+        };
+    write_model(model, 0);
+
+    ValueG8BinaryWriter file;
+    file.bytes(definition.artifact_magic);
+    file.unsigned32(kValueDenseContextArtifactSchema);
+    file.size(payload.data().size());
+    file.unsigned64(
+        value_g8_payload_checksum(payload.data()));
+    file.bytes(payload.data());
+    write_value_g8_file_atomic(path, file.data());
+}
+
+LearnedValueDenseContextChallengerArtifact
+load_learned_value_dense_context_challenger_artifact(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_seed,
+    std::size_t expected_self_play_generations,
+    LearnedValueDenseContextTreatment expected_treatment) {
+    if (expected_training_games == 0) {
+        throw std::invalid_argument(
+            "expected Learned Value dense-context training_games "
+            "must be positive");
+    }
+    if (expected_self_play_generations == 0) {
+        throw std::invalid_argument(
+            "expected Learned Value dense-context generations "
+            "must be positive");
+    }
+    const auto definition =
+        value_dense_context_treatment_definition(
+            expected_treatment);
+
+    const std::vector<std::uint8_t> file_bytes =
+        read_bounded_value_g8_file(path);
+    ValueG8BinaryReader file(file_bytes);
+    for (const std::uint8_t expected :
+         definition.artifact_magic) {
+        if (file.byte("file magic") != expected) {
+            throw std::runtime_error(
+                "Learned Value dense-context artifact '" + path +
+                "' has the wrong magic");
+        }
+    }
+    const std::uint32_t schema = file.unsigned32("schema");
+    if (schema != kValueDenseContextArtifactSchema) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' uses unsupported schema " +
+            std::to_string(schema) + " (expected " +
+            std::to_string(
+                kValueDenseContextArtifactSchema) + ")");
+    }
+    const std::size_t payload_size =
+        file.size("payload length");
+    if (file.remaining() < 8 ||
+        payload_size > kMaximumValueG8ArtifactBytes ||
+        payload_size != file.remaining() - 8) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' has an invalid payload length");
+    }
+    const std::uint64_t stored_checksum =
+        file.unsigned64("payload checksum");
+    const auto payload_bytes =
+        file.take(payload_size, "payload");
+    if (!file.at_end()) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' has trailing bytes");
+    }
+    if (value_g8_payload_checksum(payload_bytes) !=
+        stored_checksum) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' failed its payload checksum");
+    }
+
+    ValueG8BinaryReader payload(payload_bytes);
+    const std::string engine_schema =
+        payload.text("engine schema ID");
+    if (engine_schema != kValueChallengerEngineSchemaId) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' engine schema mismatch: found '" +
+            engine_schema + "', expected '" +
+            std::string(kValueChallengerEngineSchemaId) + "'");
+    }
+    const std::string recipe = payload.text("recipe ID");
+    if (recipe != definition.recipe_id) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' recipe mismatch: found '" + recipe +
+            "', expected '" +
+            std::string(definition.recipe_id) + "'");
+    }
+    const std::string critic_schema_id =
+        payload.text("critic schema ID");
+    if (critic_schema_id != kValueContextCriticSchemaId) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' critic schema ID mismatch");
+    }
+    const std::uint32_t raw_treatment =
+        payload.unsigned32("dense-context treatment");
+    if (raw_treatment != static_cast<std::uint32_t>(
+            expected_treatment)) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' treatment mismatch");
+    }
+    const std::uint32_t raw_critic_schema =
+        payload.unsigned32("critic schema");
+    if (raw_critic_schema != static_cast<std::uint32_t>(
+            LearnedCriticSchema::DecisionContextV1)) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' critic schema mismatch");
+    }
+    const std::uint32_t raw_context_mask =
+        payload.unsigned32("context mask");
+    if (raw_context_mask !=
+        (definition.context_masked ? 1U : 0U)) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' context mask mismatch");
+    }
+    const std::uint32_t raw_trace_mode =
+        payload.unsigned32("trace mode");
+    if (raw_trace_mode != static_cast<std::uint32_t>(
+            kValueDenseContextTraceMode)) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' trace mode mismatch");
+    }
+    const std::size_t trace_limit =
+        payload.size("trace limit");
+    if (trace_limit != kValueDenseContextTraceLimit) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' trace limit mismatch");
+    }
+    const auto require_dimension =
+        [&](std::string_view name, std::size_t expected) {
+            const std::size_t actual = payload.size(name);
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "Learned Value dense-context artifact '" +
+                    path + "' dimension '" +
+                    std::string(name) + "' is " +
+                    std::to_string(actual) + ", expected " +
+                    std::to_string(expected));
+            }
+        };
+    require_dimension("card count", kLearnedCardCount);
+    require_dimension(
+        "scalar feature count",
+        LearnedModel::kScalarFeatureCount);
+    require_dimension(
+        "card planes", LearnedModel::kCardPlanes);
+    require_dimension(
+        "feature count", LearnedModel::kFeatureCount);
+    require_dimension(
+        "context feature count",
+        kLearnedDecisionContextFeatureCount);
+    require_dimension(
+        "hidden count", LearnedModel::kHiddenCount);
+    require_dimension(
+        "policy decision count",
+        LearnedModel::kPolicyDecisionCount);
+    require_dimension(
+        "policy phase count",
+        LearnedModel::kPolicyPhaseCount);
+    require_dimension(
+        "policy verb count",
+        LearnedModel::kPolicyVerbCount);
+    require_dimension(
+        "policy card planes",
+        LearnedModel::kPolicyCardPlanes);
+    require_dimension(
+        "policy scalar count",
+        LearnedModel::kPolicyScalarCount);
+    require_dimension(
+        "policy feature count",
+        LearnedModel::kPolicyFeatureCount);
+    require_dimension(
+        "policy hidden count",
+        LearnedModel::kPolicyHiddenCount);
+
+    const std::size_t training_games =
+        payload.size("metadata training_games");
+    const std::uint64_t seed =
+        payload.unsigned64("metadata seed");
+    const std::size_t self_play_generations =
+        payload.size("metadata generations");
+    if (training_games != expected_training_games) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' training_games mismatch: found " +
+            std::to_string(training_games) + ", expected " +
+            std::to_string(expected_training_games));
+    }
+    if (seed != expected_seed) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' training seed mismatch: found " +
+            std::to_string(seed) + ", expected " +
+            std::to_string(expected_seed));
+    }
+    if (self_play_generations !=
+        expected_self_play_generations) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' generation mismatch: found " +
+            std::to_string(self_play_generations) +
+            ", expected " +
+            std::to_string(expected_self_play_generations));
+    }
+
+    LearnedValueContextRootCoverage root_coverage;
+    root_coverage.anchor_roots =
+        payload.size("coverage anchor roots");
+    root_coverage.self_play_roots =
+        payload.size("coverage self-play roots");
+    for (std::size_t& count :
+         root_coverage.decision_player_decks) {
+        count = payload.size(
+            "coverage decision-player deck");
+    }
+    for (std::size_t& count : root_coverage.phases) {
+        count = payload.size("coverage phase");
+    }
+    for (std::size_t& count :
+         root_coverage.pass_counts) {
+        count = payload.size("coverage pass");
+    }
+    for (std::size_t& count :
+         root_coverage.stack_status) {
+        count = payload.size("coverage stack status");
+    }
+    validate_value_context_root_coverage(
+        root_coverage,
+        "Learned Value dense-context artifact '" + path + "'");
+
+    const std::string stored_fingerprint =
+        payload.text("model fingerprint");
+    if (!is_lower_hex_fingerprint(stored_fingerprint)) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' has a malformed model fingerprint");
+    }
+
+    std::size_t node_count = 0;
+    std::function<std::shared_ptr<const LearnedModel>(
+        std::size_t)>
+        read_model;
+    read_model = [&](std::size_t depth)
+        -> std::shared_ptr<const LearnedModel> {
+        if (depth > kMaximumValueG8ArtifactDepth ||
+            ++node_count > kMaximumValueG8ArtifactNodes) {
+            throw std::runtime_error(
+                "Learned Value dense-context artifact '" + path +
+                "' model graph exceeds its bound");
+        }
+        if (payload.unsigned32("model marker") !=
+            0x4D4F444C) {
+            throw std::runtime_error(
+                "Learned Value dense-context artifact '" + path +
+                "' has an invalid model marker");
+        }
+        const std::uint32_t raw_variant =
+            payload.unsigned32("model variant");
+        if (raw_variant != static_cast<std::uint32_t>(
+                LearnedVariant::ValueSearchChampion)) {
+            throw std::runtime_error(
+                "Learned Value dense-context artifact '" + path +
+                "' contains a non-Value model variant");
+        }
+        const std::uint32_t node_schema =
+            payload.unsigned32("model critic schema");
+        if (node_schema != static_cast<std::uint32_t>(
+                LearnedCriticSchema::DecisionContextV1)) {
+            throw std::runtime_error(
+                "Learned Value dense-context artifact '" + path +
+                "' contains a non-contextual model node");
+        }
+        auto node = std::shared_ptr<LearnedModel>(
+            new LearnedModel(
+                0, LearnedVariant::ValueSearchChampion));
+        node->critic_schema_ =
+            LearnedCriticSchema::DecisionContextV1;
+        read_value_g8_fixed(
+            payload, node->input_weights_,
+            "critic input weight");
+        read_value_g8_fixed(
+            payload, node->hidden_biases_,
+            "critic hidden bias");
+        read_value_g8_fixed(
+            payload, node->output_weights_,
+            "critic output weight");
+        read_value_g8_fixed(
+            payload, node->direct_output_weights_,
+            "critic direct weight");
+        node->output_bias_ =
+            payload.real("critic output bias");
+        read_value_g8_fixed(
+            payload, node->context_input_weights_,
+            "critic context input weight");
+        read_value_g8_fixed(
+            payload,
+            node->context_direct_output_weights_,
+            "critic context direct weight");
+        if (definition.context_masked) {
+            const bool input_is_zero = std::all_of(
+                node->context_input_weights_.begin(),
+                node->context_input_weights_.end(),
+                [](const auto& row) {
+                    return std::all_of(
+                        row.begin(), row.end(),
+                        [](double value) {
+                            return value == 0.0;
+                        });
+                });
+            const bool direct_is_zero = std::all_of(
+                node->context_direct_output_weights_.begin(),
+                node->context_direct_output_weights_.end(),
+                [](double value) {
+                    return value == 0.0;
+                });
+            if (!input_is_zero || !direct_is_zero) {
+                throw std::runtime_error(
+                    "Learned Value dense-context D0 artifact '" +
+                    path + "' contains nonzero context weights");
+            }
+        }
+        read_value_g8_fixed(
+            payload, node->policy_input_weights_,
+            "policy input weight");
+        read_value_g8_fixed(
+            payload, node->policy_hidden_biases_,
+            "policy hidden bias");
+        read_value_g8_fixed(
+            payload, node->policy_output_weights_,
+            "policy output weight");
+        read_value_g8_fixed(
+            payload,
+            node->policy_direct_output_weights_,
+            "policy direct weight");
+        read_value_g8_fixed(
+            payload, node->policy_output_bias_,
+            "policy output bias");
+        const std::uint32_t member_count =
+            payload.unsigned32("ensemble member count");
+        if (member_count >
+            kMaximumValueG8EnsembleMembers) {
+            throw std::runtime_error(
+                "Learned Value dense-context artifact '" + path +
+                "' ensemble exceeds its bound");
+        }
+        node->ensemble_.reserve(member_count);
+        for (std::uint32_t member = 0;
+             member < member_count; ++member) {
+            node->ensemble_.push_back(
+                read_model(depth + 1));
+        }
+        return node;
+    };
+    auto model = read_model(0);
+    if (!payload.at_end()) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' has trailing payload bytes");
+    }
+    if (learned_model_fingerprint(model) !=
+        stored_fingerprint) {
+        throw std::runtime_error(
+            "Learned Value dense-context artifact '" + path +
+            "' model fingerprint mismatch");
+    }
+    return LearnedValueDenseContextChallengerArtifact(
+        std::move(model), training_games, seed,
+        self_play_generations, expected_treatment,
+        std::move(root_coverage));
 }
 
 void write_learned_value_g8_bundle_atomic(
@@ -3941,6 +5112,109 @@ update_learned_contextual_value_model(
     return candidate;
 }
 
+std::shared_ptr<const LearnedModel>
+update_learned_value_priority_head(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedValuePriorityTrainingExample>&
+        priority_examples,
+    LearnedValuePriorityHeadUpdateConfig config) {
+    if (!parent) {
+        throw std::invalid_argument(
+            "Learned Value Priority update requires a parent model");
+    }
+    if (parent->variant() !=
+        LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Learned Value Priority update requires a Value model");
+    }
+    if (!priority_examples.empty() &&
+        (config.batch_size == 0 || config.epochs == 0 ||
+         !std::isfinite(config.learning_rate) ||
+         config.learning_rate <= 0.0 ||
+         !std::isfinite(config.beta1) ||
+         config.beta1 < 0.0 || config.beta1 >= 1.0 ||
+         !std::isfinite(config.beta2) ||
+         config.beta2 < 0.0 || config.beta2 >= 1.0 ||
+         !std::isfinite(config.epsilon) ||
+         config.epsilon <= 0.0 ||
+         !std::isfinite(config.global_gradient_norm_clip) ||
+         config.global_gradient_norm_clip <= 0.0 ||
+         !std::isfinite(config.residual_weight) ||
+         config.residual_weight <= 0.0 ||
+         config.residual_weight > 1.0 ||
+         !std::isfinite(config.policy_temperature) ||
+         config.policy_temperature <= 0.0)) {
+        throw std::invalid_argument(
+            "Learned Value Priority Adam parameters are invalid");
+    }
+
+    std::vector<LearnedModel::ValuePriorityTrainingExample>
+        encoded;
+    encoded.reserve(priority_examples.size());
+    for (const LearnedValuePriorityTrainingExample& example :
+         priority_examples) {
+        if (example.options.size() < 2 ||
+            example.base_scores.size() !=
+                example.options.size() ||
+            example.target_probabilities.size() !=
+                example.options.size() ||
+            !std::isfinite(example.weight) ||
+            example.weight <= 0.0) {
+            throw std::invalid_argument(
+                "invalid Learned Value Priority training example");
+        }
+
+        LearnedModel::ValuePriorityTrainingExample converted;
+        converted.options.reserve(example.options.size());
+        converted.base_scores.reserve(
+            example.base_scores.size());
+        double target_total = 0.0;
+        for (std::size_t option_index = 0;
+             option_index < example.options.size();
+             ++option_index) {
+            const std::vector<double>& option =
+                example.options[option_index];
+            const double target =
+                example.target_probabilities[option_index];
+            const double base_score =
+                example.base_scores[option_index];
+            if (option.size() !=
+                    LearnedModel::kPolicyFeatureCount ||
+                !std::all_of(
+                    option.begin(), option.end(),
+                    [](double value) {
+                        return std::isfinite(value);
+                    }) ||
+                !std::isfinite(base_score) ||
+                !std::isfinite(target) || target < 0.0 ||
+                target > 1.0) {
+                throw std::invalid_argument(
+                    "invalid Learned Value Priority training example");
+            }
+            LearnedModel::PolicyFeatureVector features{};
+            std::copy(
+                option.begin(), option.end(), features.begin());
+            converted.options.push_back(features);
+            converted.base_scores.push_back(base_score);
+            target_total += target;
+        }
+        if (std::abs(target_total - 1.0) > 1.0e-9) {
+            throw std::invalid_argument(
+                "Learned Value Priority targets must sum to one");
+        }
+        converted.target_probabilities =
+            example.target_probabilities;
+        converted.weight = example.weight;
+        encoded.push_back(std::move(converted));
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> critic_leaves;
+    auto candidate =
+        parent->deep_clone_mutable(critic_leaves);
+    candidate->train_priority_policy_adam(encoded, config);
+    return candidate;
+}
+
 std::shared_ptr<const LearnedModel> update_learned_actor_model(
     std::shared_ptr<const LearnedModel> parent,
     const std::vector<LearnedCriticTrainingExample>& critic_examples,
@@ -4448,8 +5722,30 @@ class LearnedPolicyRecorder {
         std::array<std::size_t, 2> attack_includes{};
     };
 
+    struct ValuePriorityStep {
+        std::vector<LearnedModel::PolicyFeatureVector> options;
+        std::vector<double> base_scores;
+        std::vector<double> parent_combined_scores;
+        std::vector<double> behavior_probabilities;
+        std::size_t chosen = 0;
+        std::size_t actor = 0;
+        double critic_baseline = 0.5;
+    };
+
+    struct ValuePriorityCollection {
+        std::uint64_t root_seed = 0;
+        std::uint64_t generation = 1;
+        std::size_t schedule_index = 0;
+        std::size_t worlds = 8;
+        std::array<std::size_t, 2> raw_roots{};
+        std::array<std::size_t, 2> raw_legal_options{};
+        std::array<std::size_t, 2> rollout_evaluations{};
+    };
+
     std::vector<Step> steps;
     std::optional<GenerationCollection> generation_collection;
+    std::vector<ValuePriorityStep> value_priority_steps;
+    std::optional<ValuePriorityCollection> value_priority_collection;
 };
 
 namespace {
@@ -6015,6 +7311,64 @@ std::uint64_t generation_decision_subindex(
         static_cast<std::uint64_t>(ordinal);
 }
 
+struct ValuePriorityCollectionSeeds {
+    std::uint64_t search = 0;
+    std::uint64_t choice = 0;
+    std::size_t ordinal = 0;
+};
+
+ValuePriorityCollectionSeeds reserve_value_priority_collection_seeds(
+    const GameConfig& config, std::size_t player,
+    std::size_t legal_options) {
+    if (player >= 2 || legal_options < 2 ||
+        !config.learned_policy_recorder ||
+        !config.learned_policy_recorder
+             ->value_priority_collection) {
+        throw std::logic_error(
+            "Value Priority collection requires a multi-action root");
+    }
+    auto& collection =
+        *config.learned_policy_recorder
+             ->value_priority_collection;
+    auto& roots = collection.raw_roots[player];
+    const std::size_t ordinal = roots++;
+    collection.raw_legal_options[player] += legal_options;
+    const std::uint64_t subindex =
+        generation_decision_subindex(player, 0, ordinal);
+    return {
+        .search = learned_iteration::derive_seed(
+            collection.root_seed,
+            learned_iteration::SeedDomain::PrioritySearch,
+            collection.generation,
+            collection.schedule_index, subindex),
+        .choice = learned_iteration::derive_seed(
+            collection.root_seed,
+            learned_iteration::SeedDomain::PriorityChoice,
+            collection.generation,
+            collection.schedule_index, subindex),
+        .ordinal = ordinal,
+    };
+}
+
+std::size_t sample_generation_distribution(
+    std::span<const double> probabilities,
+    std::uint64_t seed) {
+    if (probabilities.empty() ||
+        !std::all_of(
+            probabilities.begin(), probabilities.end(),
+            [](double probability) {
+                return std::isfinite(probability) &&
+                       probability > 0.0;
+            })) {
+        throw std::invalid_argument(
+            "generation distribution must be finite and positive");
+    }
+    std::mt19937_64 random(seed);
+    std::discrete_distribution<std::size_t> sample(
+        probabilities.begin(), probabilities.end());
+    return sample(random);
+}
+
 std::optional<std::uint64_t> reserve_generation_search_seed(
     const GameConfig& config, std::size_t player,
     LearnedDecisionKind kind) {
@@ -6326,6 +7680,63 @@ std::vector<LearnedPolicyOption> priority_policy_options(
                 phase, consecutive_passes));
     }
     return options;
+}
+
+std::vector<double> priority_policy_logits_for_model(
+    const GameState& state, std::size_t player,
+    const std::vector<PriorityAction>& actions,
+    bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes,
+    const std::shared_ptr<const LearnedModel>& model) {
+    const auto encoded = encode_learned_policy_options(
+        state, player,
+        priority_policy_options(
+            state, player, actions, sorcery_actions, phase,
+            consecutive_passes));
+    std::vector<double> logits;
+    logits.reserve(encoded.size());
+    for (const auto& option : encoded) {
+        logits.push_back(model->policy_logit(
+            option,
+            static_cast<std::size_t>(
+                LearnedPolicyDecisionKind::Priority)));
+    }
+    return logits;
+}
+
+LearnedValuePriorityResidualDiagnostic
+value_priority_residual_unchecked(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    const std::shared_ptr<const LearnedModel>& model,
+    double weight) {
+    LearnedValuePriorityResidualDiagnostic diagnostic;
+    diagnostic.policy_logits =
+        priority_policy_logits_for_model(
+            state, player, candidates, sorcery_actions, phase,
+            consecutive_passes, model);
+    double total = 0.0;
+    for (const double logit : diagnostic.policy_logits) {
+        total += logit;
+    }
+    diagnostic.mean_legal_logit =
+        total /
+        static_cast<double>(diagnostic.policy_logits.size());
+    diagnostic.centered_policy_logits.reserve(
+        diagnostic.policy_logits.size());
+    diagnostic.residuals.reserve(
+        diagnostic.policy_logits.size());
+    for (const double logit : diagnostic.policy_logits) {
+        const double centered =
+            logit - diagnostic.mean_legal_logit;
+        diagnostic.centered_policy_logits.push_back(centered);
+        diagnostic.residuals.push_back(
+            weight == 0.0
+                ? 0.0
+                : weight * std::tanh(centered));
+    }
+    return diagnostic;
 }
 
 void add_policy_creature(
@@ -8002,6 +9413,73 @@ PriorityAction Game::choose_priority_action(
         return choose_handcrafted_action(actions, player, phase);
     }
     if (bot.kind == BotKind::Learned) {
+        if (bot.learned_variant ==
+                LearnedVariant::ValueSearchChampion &&
+            config_.learned_policy_recorder &&
+            config_.learned_policy_recorder
+                ->value_priority_collection) {
+            const auto& collection =
+                *config_.learned_policy_recorder
+                     ->value_priority_collection;
+            const auto seeds =
+                reserve_value_priority_collection_seeds(
+                    config_, player, actions.size());
+            const auto diagnostic =
+                diagnose_learned_value_priority(
+                    state_, decks_, player, sorcery_actions,
+                    phase, consecutive_passes,
+                    learned_model_for(player),
+                    collection.worlds, seeds.search, 0.0,
+                    bot.value_priority_residual_weight);
+            if (diagnostic.actions != actions) {
+                throw std::logic_error(
+                    "Value Priority collection action order changed");
+            }
+            const auto behavior =
+                learned_iteration::p16_exploration_distribution(
+                    diagnostic.scores);
+            const std::size_t chosen =
+                sample_generation_distribution(
+                    behavior, seeds.choice);
+            const auto options =
+                priority_policy_options(
+                    state_, player, actions, sorcery_actions,
+                    phase, consecutive_passes);
+            auto encoded =
+                encode_learned_policy_options(
+                    state_, player, options);
+            const auto model = learned_model_for(player);
+            const double baseline =
+                predict_learned_critic_with_context(
+                    model, state_, player,
+                    {
+                        .valid = true,
+                        .phase = phase,
+                        .decision_player = player,
+                        .consecutive_passes =
+                            consecutive_passes,
+                        .sorcery_actions = sorcery_actions,
+                    });
+            config_.learned_policy_recorder
+                ->value_priority_steps.push_back({
+                    .options = std::move(encoded),
+                    .base_scores = diagnostic.base_scores,
+                    .parent_combined_scores =
+                        diagnostic.scores,
+                    .behavior_probabilities = behavior,
+                    .chosen = chosen,
+                    .actor = player,
+                    .critic_baseline = baseline,
+                });
+            auto& mutable_collection =
+                *config_.learned_policy_recorder
+                     ->value_priority_collection;
+            mutable_collection.rollout_evaluations[player] +=
+                diagnostic.rollout_evaluations;
+            state_.stats[player].monte_carlo_rollouts +=
+                diagnostic.rollout_evaluations;
+            return actions[chosen];
+        }
         if (bot.learned_variant == LearnedVariant::UnifiedActor) {
             const auto options =
                 priority_policy_options(
@@ -8201,6 +9679,18 @@ PriorityAction Game::choose_priority_action(
         if (root_search) {
             state_.stats[player].monte_carlo_rollouts +=
                 actions.size() * bot.rollouts_per_action;
+        }
+        if (bot.value_priority_residual_weight != 0.0) {
+            const auto residual =
+                value_priority_residual_unchecked(
+                    state_, player, sorcery_actions, phase,
+                    consecutive_passes, actions,
+                    learned_model_for(player),
+                    bot.value_priority_residual_weight);
+            for (std::size_t index = 0;
+                 index < scores.size(); ++index) {
+                scores[index] += residual.residuals[index];
+            }
         }
 
         const double best =
@@ -8635,6 +10125,9 @@ double Game::learned_value_search_action_score(
             .exploration_rate =
                 config_.bots[player]
                     .value_continuation_epsilon,
+            .value_priority_residual_weight =
+                config_.bots[player]
+                    .value_priority_residual_weight,
             .learned_model = root_model,
         },
         BotConfig{
@@ -8645,6 +10138,9 @@ double Game::learned_value_search_action_score(
             .exploration_rate =
                 config_.bots[player]
                     .value_continuation_epsilon,
+            .value_priority_residual_weight =
+                config_.bots[player]
+                    .value_priority_residual_weight,
             .learned_model = root_model,
         },
     };
@@ -11158,6 +12654,61 @@ std::vector<PermanentId> validate_binary_attack_context(
 
 } // namespace
 
+LearnedValuePriorityResidualDiagnostic
+diagnose_learned_value_priority_residual(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedModel> model,
+    double value_priority_residual_weight) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    validate_value_priority_residual_weight(
+        value_priority_residual_weight);
+    validate_priority_candidates(
+        state, player, sorcery_actions, phase,
+        consecutive_passes, candidates);
+    return value_priority_residual_unchecked(
+        state, player, sorcery_actions, phase,
+        consecutive_passes, candidates, model,
+        value_priority_residual_weight);
+}
+
+std::vector<double> learned_policy_head_logits(
+    const std::vector<std::vector<double>>& options,
+    LearnedPolicyDecisionKind decision_kind,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(model);
+    const std::size_t kind =
+        static_cast<std::size_t>(decision_kind);
+    if (kind >= LearnedModel::kPolicyDecisionCount) {
+        throw std::invalid_argument(
+            "Learned policy-head diagnostic has an invalid decision kind");
+    }
+    if (options.empty()) {
+        throw std::invalid_argument(
+            "Learned policy-head diagnostic requires options");
+    }
+    std::vector<double> logits;
+    logits.reserve(options.size());
+    for (const std::vector<double>& option : options) {
+        if (option.size() !=
+                LearnedModel::kPolicyFeatureCount ||
+            !std::all_of(
+                option.begin(), option.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                })) {
+            throw std::invalid_argument(
+                "Learned policy-head diagnostic option is invalid");
+        }
+        LearnedModel::PolicyFeatureVector encoded{};
+        std::copy(option.begin(), option.end(), encoded.begin());
+        logits.push_back(model->policy_logit(encoded, kind));
+    }
+    return logits;
+}
+
 std::vector<double> learned_actor_priority_logits(
     const GameState& state, std::size_t player,
     bool sorcery_actions, TurnPhase phase, int consecutive_passes,
@@ -11910,6 +13461,548 @@ LearnedActorGenerationResult train_learned_actor_generation(
     return output;
 }
 
+LearnedValuePolicyFamilyResult train_learned_value_policy_family(
+    std::shared_ptr<const LearnedModel> p0,
+    std::uint64_t root_seed,
+    LearnedValuePolicyFamilyConfig config) {
+    if (!p0 ||
+        p0->variant() !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "P-family training requires a frozen Value parent");
+    }
+    if (config.generations == 0 ||
+        config.generations > 16 ||
+        config.search_worlds == 0 ||
+        config.search_worlds > 4096 ||
+        config.max_roots_per_actor_game == 0 ||
+        config.max_game_turns == 0 ||
+        !std::isfinite(config.residual_weight) ||
+        config.residual_weight <= 0.0 ||
+        config.residual_weight > 1.0 ||
+        !std::isfinite(config.td_lambda) ||
+        config.td_lambda < 0.0 ||
+        config.td_lambda > 1.0 ||
+        config.optimizer.seed != 0 ||
+        config.optimizer.residual_weight !=
+            config.residual_weight ||
+        config.optimizer.policy_temperature !=
+            learned_iteration::
+                kP16ExplorationTemperature) {
+        throw std::invalid_argument(
+            "invalid P-family training configuration");
+    }
+
+    const LearnedValuePolicyFamilyConfig canonical;
+    const bool canonical_recipe =
+        config.search_worlds == canonical.search_worlds &&
+        config.max_roots_per_actor_game ==
+            canonical.max_roots_per_actor_game &&
+        config.max_game_turns ==
+            canonical.max_game_turns &&
+        config.residual_weight ==
+            canonical.residual_weight &&
+        config.td_lambda == canonical.td_lambda &&
+        config.optimizer.batch_size ==
+            canonical.optimizer.batch_size &&
+        config.optimizer.epochs ==
+            canonical.optimizer.epochs &&
+        config.optimizer.learning_rate ==
+            canonical.optimizer.learning_rate &&
+        config.optimizer.beta1 ==
+            canonical.optimizer.beta1 &&
+        config.optimizer.beta2 ==
+            canonical.optimizer.beta2 &&
+        config.optimizer.epsilon ==
+            canonical.optimizer.epsilon &&
+        config.optimizer.global_gradient_norm_clip ==
+            canonical.optimizer.global_gradient_norm_clip &&
+        config.optimizer.residual_weight ==
+            canonical.optimizer.residual_weight &&
+        config.optimizer.policy_temperature ==
+            canonical.optimizer.policy_temperature;
+
+    struct ShardRecord {
+        LearnedValuePriorityTrainingExample training;
+        DeckId actor_deck = DeckId::Green;
+        std::vector<double> parent_combined_scores;
+        std::size_t chosen = 0;
+        double advantage = 0.0;
+    };
+
+    const auto mechanism_report =
+        [](const learned_iteration::P16MechanismMetrics&
+               metrics) {
+            return LearnedValuePolicyMechanismReport{
+                .observation_count =
+                    metrics.observation_count,
+                .residual_option_count =
+                    metrics.residual_option_count,
+                .saturated_residual_count =
+                    metrics.saturated_residual_count,
+                .total_weight = metrics.total_weight,
+                .parent_kl = metrics.parent_kl,
+                .candidate_kl = metrics.candidate_kl,
+                .kl_reduction_defined =
+                    metrics.kl_reduction_defined,
+                .kl_reduction_fraction =
+                    metrics.kl_reduction_fraction,
+                .positive_advantage_weight =
+                    metrics.positive_advantage_weight,
+                .negative_advantage_weight =
+                    metrics.negative_advantage_weight,
+                .zero_advantage_weight =
+                    metrics.zero_advantage_weight,
+                .conflict_weight = metrics.conflict_weight,
+                .eligible_signed_movement_weight =
+                    metrics.eligible_signed_movement_weight,
+                .correct_signed_movement_weight =
+                    metrics.correct_signed_movement_weight,
+                .signed_movement_correct_rate =
+                    metrics.signed_movement_correct_rate,
+                .eligible_positive_movement_weight =
+                    metrics.eligible_positive_movement_weight,
+                .correct_positive_movement_weight =
+                    metrics.correct_positive_movement_weight,
+                .positive_movement_correct_rate =
+                    metrics.positive_movement_correct_rate,
+                .eligible_negative_movement_weight =
+                    metrics.eligible_negative_movement_weight,
+                .correct_negative_movement_weight =
+                    metrics.correct_negative_movement_weight,
+                .negative_movement_correct_rate =
+                    metrics.negative_movement_correct_rate,
+                .changed_argmax_weight =
+                    metrics.changed_argmax_weight,
+                .changed_argmax_weight_fraction =
+                    metrics.changed_argmax_weight_fraction,
+                .residual_option_weight =
+                    metrics.residual_option_weight,
+                .saturated_residual_weight =
+                    metrics.saturated_residual_weight,
+                .residual_saturation_fraction =
+                    metrics.residual_saturation_fraction,
+            };
+        };
+
+    LearnedValuePolicyFamilyResult output;
+    output.checkpoints.reserve(config.generations + 1);
+    output.reports.reserve(config.generations);
+    output.checkpoints.push_back(p0);
+    auto parent = std::move(p0);
+    learned_iteration::ReplayWindow<
+        LearnedValuePriorityTrainingExample>
+        replay;
+
+    for (std::size_t generation = 1;
+         generation <= config.generations; ++generation) {
+        LearnedValuePolicyGenerationReport report;
+        report.root_seed = root_seed;
+        report.generation = generation;
+        report.canonical_recipe = canonical_recipe;
+        report.search_worlds = config.search_worlds;
+        report.rollouts_per_world = 1;
+        report.search_horizon_turns = 4;
+        report.max_roots_per_actor_game =
+            config.max_roots_per_actor_game;
+        report.max_game_turns = config.max_game_turns;
+        report.residual_weight = config.residual_weight;
+        report.td_lambda = config.td_lambda;
+        report.optimizer = config.optimizer;
+        report.optimizer.seed =
+            learned_iteration::derive_seed(
+                root_seed,
+                learned_iteration::SeedDomain::PolicyFit,
+                generation, 0);
+        report.parent_fingerprint =
+            learned_model_fingerprint(parent);
+        report.parent_components =
+            learned_model_component_fingerprints(parent);
+        report.games.reserve(
+            learned_iteration::kBalancedScheduleGames);
+
+        std::vector<ShardRecord> shard;
+        double minimum_target_sum =
+            std::numeric_limits<double>::infinity();
+        double maximum_target_sum =
+            -std::numeric_limits<double>::infinity();
+        const auto schedule =
+            learned_iteration::balanced_schedule(
+                root_seed, generation);
+        for (const auto& scheduled : schedule) {
+            auto recorder =
+                std::make_shared<LearnedPolicyRecorder>();
+            recorder->value_priority_collection =
+                LearnedPolicyRecorder::
+                    ValuePriorityCollection{
+                        .root_seed = root_seed,
+                        .generation = generation,
+                        .schedule_index =
+                            scheduled.schedule_index,
+                        .worlds = config.search_worlds,
+                    };
+
+            GameConfig game_config;
+            game_config.max_turns =
+                config.max_game_turns;
+            game_config.starting_player =
+                scheduled.starting_player;
+            game_config.learned_model = parent;
+            game_config.learned_search_depth = 0;
+            game_config.learned_policy_recorder = recorder;
+            game_config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::
+                            ValueSearchChampion,
+                    .rollouts_per_action = 0,
+                    .exploration_rate = 0.0,
+                    .value_priority_residual_weight =
+                        config.residual_weight,
+                    .learned_model = parent,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::
+                            ValueSearchChampion,
+                    .rollouts_per_action = 0,
+                    .exploration_rate = 0.0,
+                    .value_priority_residual_weight =
+                        config.residual_weight,
+                    .learned_model = parent,
+                },
+            };
+
+            Game game(
+                deck_cards(scheduled.seat_decks[0]),
+                deck_cards(scheduled.seat_decks[1]),
+                scheduled.seed, game_config);
+            const GameResult result = game.run();
+            const auto& collection =
+                *recorder->value_priority_collection;
+            LearnedValuePolicyGameReport game_report{
+                .schedule_index =
+                    scheduled.schedule_index,
+                .pairing_index =
+                    scheduled.pairing_index,
+                .seat_decks = scheduled.seat_decks,
+                .starting_player =
+                    result.starting_player,
+                .game_seed = scheduled.seed,
+                .winner = result.winner,
+                .raw_priority_roots =
+                    collection.raw_roots,
+                .raw_legal_options =
+                    collection.raw_legal_options,
+                .rollout_evaluations =
+                    collection.rollout_evaluations,
+            };
+
+            std::array<std::vector<
+                const LearnedPolicyRecorder::
+                    ValuePriorityStep*>, 2>
+                chronological;
+            for (const auto& step :
+                 recorder->value_priority_steps) {
+                if (step.actor >= 2 ||
+                    step.options.size() < 2 ||
+                    step.base_scores.size() !=
+                        step.options.size() ||
+                    step.parent_combined_scores.size() !=
+                        step.options.size() ||
+                    step.behavior_probabilities.size() !=
+                        step.options.size() ||
+                    step.chosen >= step.options.size()) {
+                    throw std::logic_error(
+                        "P-family recorder retained an invalid root");
+                }
+                chronological[step.actor].push_back(&step);
+            }
+
+            for (std::size_t player = 0; player < 2;
+                 ++player) {
+                const DeckId deck =
+                    scheduled.seat_decks[player];
+                const std::size_t deck_index =
+                    static_cast<std::size_t>(deck);
+                if (deck_index >= kDeckCount) {
+                    throw std::logic_error(
+                        "P-family schedule contains an invalid deck");
+                }
+                auto& deck_report =
+                    report.decks[deck_index];
+                ++deck_report.seat_games;
+                if (player == 0) {
+                    ++deck_report.seat_zero_games;
+                }
+                if (result.starting_player == player) {
+                    ++deck_report.starting_games;
+                }
+                deck_report.raw_priority_roots +=
+                    collection.raw_roots[player];
+                deck_report.raw_legal_options +=
+                    collection.raw_legal_options[player];
+                deck_report.rollout_evaluations +=
+                    collection.rollout_evaluations[player];
+
+                if (chronological[player].size() !=
+                    collection.raw_roots[player]) {
+                    throw std::logic_error(
+                        "P-family raw-root accounting mismatch");
+                }
+                if (collection.rollout_evaluations[player] !=
+                    collection.raw_legal_options[player] *
+                        config.search_worlds) {
+                    throw std::logic_error(
+                        "P-family rollout accounting mismatch");
+                }
+                if (chronological[player].empty()) {
+                    ++report.rootless_actor_games;
+                    ++deck_report.rootless_actor_games;
+                    throw std::logic_error(
+                        "P-family encountered a rootless actor-game");
+                }
+
+                const auto retained =
+                    learned_iteration::
+                        evenly_spaced_retained_indices(
+                            chronological[player].size(),
+                            config.max_roots_per_actor_game);
+                game_report.retained_ordinals[player] =
+                    retained;
+                game_report.retained_priority_roots[player] =
+                    retained.size();
+                deck_report.retained_priority_roots +=
+                    retained.size();
+
+                std::vector<double> baselines;
+                baselines.reserve(retained.size());
+                for (const std::size_t ordinal : retained) {
+                    baselines.push_back(
+                        chronological[player][ordinal]
+                            ->critic_baseline);
+                }
+                const auto signal =
+                    learned_iteration::p16_outcome_signal(
+                        baselines,
+                        learned_iteration::
+                            terminal_value_for_perspective(
+                                result.winner, player),
+                        config.td_lambda);
+                const double weight =
+                    1.0 /
+                    static_cast<double>(retained.size());
+                for (std::size_t retained_index = 0;
+                     retained_index < retained.size();
+                     ++retained_index) {
+                    const auto& step =
+                        *chronological[player][
+                            retained[retained_index]];
+                    auto target =
+                        learned_iteration::
+                            p16_all_action_target(
+                                step.behavior_probabilities,
+                                step.chosen,
+                                signal.advantages[
+                                    retained_index]);
+                    const double target_sum =
+                        std::accumulate(
+                            target.begin(), target.end(),
+                            0.0);
+                    minimum_target_sum =
+                        std::min(
+                            minimum_target_sum, target_sum);
+                    maximum_target_sum =
+                        std::max(
+                            maximum_target_sum, target_sum);
+
+                    std::vector<std::vector<double>> options;
+                    options.reserve(step.options.size());
+                    for (const auto& encoded :
+                         step.options) {
+                        options.emplace_back(
+                            encoded.begin(), encoded.end());
+                    }
+                    shard.push_back({
+                        .training = {
+                            .options = std::move(options),
+                            .base_scores =
+                                step.base_scores,
+                            .target_probabilities =
+                                std::move(target),
+                            .weight = weight,
+                        },
+                        .actor_deck = deck,
+                        .parent_combined_scores =
+                            step.parent_combined_scores,
+                        .chosen = step.chosen,
+                        .advantage =
+                            signal.advantages[
+                                retained_index],
+                    });
+                    game_report.policy_weight_sums[player] +=
+                        weight;
+                    deck_report.policy_weight += weight;
+                    report.policy_weight += weight;
+                }
+            }
+
+            for (std::size_t player = 0; player < 2;
+                 ++player) {
+                report.raw_priority_roots +=
+                    game_report.raw_priority_roots[player];
+                report.raw_legal_options +=
+                    game_report.raw_legal_options[player];
+                report.retained_priority_roots +=
+                    game_report.retained_priority_roots[player];
+                report.rollout_evaluations +=
+                    game_report.rollout_evaluations[player];
+            }
+            report.games.push_back(std::move(game_report));
+        }
+
+        if (shard.empty()) {
+            throw std::logic_error(
+                "P-family collected no retained roots");
+        }
+        report.minimum_target_sum = minimum_target_sum;
+        report.maximum_target_sum = maximum_target_sum;
+
+        std::vector<LearnedValuePriorityTrainingExample>
+            training_shard;
+        training_shard.reserve(shard.size());
+        for (const auto& record : shard) {
+            training_shard.push_back(record.training);
+        }
+        replay.append_generation(
+            generation, std::move(training_shard));
+        report.replay_generations =
+            replay.generation_count();
+        report.replay_examples =
+            replay.example_count();
+
+        std::vector<LearnedValuePriorityTrainingExample>
+            fit_examples;
+        fit_examples.reserve(replay.example_count());
+        replay.for_each(
+            [&](std::uint64_t,
+                const LearnedValuePriorityTrainingExample&
+                    example) {
+                fit_examples.push_back(example);
+            });
+        auto optimizer = config.optimizer;
+        optimizer.seed = report.optimizer.seed;
+        const auto candidate =
+            update_learned_value_priority_head(
+                parent, fit_examples, optimizer);
+        report.candidate_fingerprint =
+            learned_model_fingerprint(candidate);
+        report.candidate_components =
+            learned_model_component_fingerprints(candidate);
+        if (learned_model_fingerprint(parent) !=
+            report.parent_fingerprint) {
+            throw std::logic_error(
+                "P-family mutated its frozen parent");
+        }
+        if (report.candidate_components.critic !=
+                report.parent_components.critic ||
+            report.candidate_components.attack !=
+                report.parent_components.attack ||
+            report.candidate_components.block !=
+                report.parent_components.block ||
+            report.candidate_components.damage_order !=
+                report.parent_components.damage_order) {
+            throw std::logic_error(
+                "P-family changed a non-Priority model component");
+        }
+
+        std::vector<
+            learned_iteration::P16MechanismObservation>
+            observations;
+        observations.reserve(shard.size());
+        std::array<std::vector<
+            learned_iteration::P16MechanismObservation>,
+            kDeckCount>
+            observations_by_deck;
+        for (const auto& record : shard) {
+            const auto candidate_logits =
+                learned_policy_head_logits(
+                    record.training.options,
+                    LearnedPolicyDecisionKind::Priority,
+                    candidate);
+            const double mean =
+                std::accumulate(
+                    candidate_logits.begin(),
+                    candidate_logits.end(), 0.0) /
+                static_cast<double>(
+                    candidate_logits.size());
+            std::vector<double> centered;
+            std::vector<double> candidate_scores =
+                record.training.base_scores;
+            centered.reserve(candidate_logits.size());
+            for (std::size_t option = 0;
+                 option < candidate_logits.size();
+                 ++option) {
+                centered.push_back(
+                    candidate_logits[option] - mean);
+                candidate_scores[option] +=
+                    config.residual_weight *
+                    std::tanh(centered.back());
+            }
+            learned_iteration::P16MechanismObservation
+                observation{
+                    .parent_combined_scores =
+                        record.parent_combined_scores,
+                    .candidate_combined_scores =
+                        std::move(candidate_scores),
+                    .candidate_centered_policy_logits =
+                        std::move(centered),
+                    .target_probabilities =
+                        record.training.target_probabilities,
+                    .chosen = record.chosen,
+                    .advantage = record.advantage,
+                    .weight = record.training.weight,
+                };
+            const std::size_t deck_index =
+                static_cast<std::size_t>(
+                    record.actor_deck);
+            observations_by_deck[deck_index].push_back(
+                observation);
+            observations.push_back(std::move(observation));
+        }
+        const auto metrics =
+            learned_iteration::
+                evaluate_p16_mechanism_metrics(
+                    observations);
+        report.mechanism = mechanism_report(metrics);
+        for (std::size_t deck = 0;
+             deck < kDeckCount; ++deck) {
+            const auto deck_metrics =
+                learned_iteration::
+                    evaluate_p16_mechanism_metrics(
+                        observations_by_deck[deck]);
+            report.decks[deck]
+                .positive_advantage_weight =
+                deck_metrics.positive_advantage_weight;
+            report.decks[deck]
+                .negative_advantage_weight =
+                deck_metrics.negative_advantage_weight;
+            report.decks[deck]
+                .zero_advantage_weight =
+                deck_metrics.zero_advantage_weight;
+            report.decks[deck].conflict_weight =
+                deck_metrics.conflict_weight;
+        }
+
+        output.checkpoints.push_back(candidate);
+        output.reports.push_back(std::move(report));
+        parent = candidate;
+    }
+    return output;
+}
+
 std::shared_ptr<const LearnedModel>
 train_learned_value_champion(std::size_t training_games,
                              std::uint64_t seed) {
@@ -12301,7 +14394,8 @@ namespace {
 LearnedValueContextTrainingResult
 train_learned_value_context_challenger_internal(
     std::size_t training_games, std::uint64_t seed,
-    std::size_t self_play_generations) {
+    std::size_t self_play_generations,
+    LearnedValueContextTrainingConfig training_config) {
     if (training_games == 0) {
         throw std::invalid_argument(
             "Learned Value context challenger training games "
@@ -12311,6 +14405,14 @@ train_learned_value_context_challenger_internal(
         throw std::invalid_argument(
             "Learned Value context challenger generations "
             "must be positive");
+    }
+    if (training_config.trace_mode !=
+            LearnedDecisionTraceMode::Sparse &&
+        training_config.trace_mode !=
+            LearnedDecisionTraceMode::Dense) {
+        throw std::invalid_argument(
+            "Learned Value context challenger trace mode "
+            "must be Sparse or Dense");
     }
 
     std::mt19937_64 random(seed);
@@ -12342,8 +14444,19 @@ train_learned_value_context_challenger_internal(
                        ? 0.5 + discounted_outcome
                        : 0.5 - discounted_outcome;
         };
+    const auto context_features =
+        [context_masked = training_config.context_masked](
+            const LearnedDecisionContext& context,
+            std::size_t perspective) {
+            if (context_masked) {
+                return LearnedDecisionContextFeatures{};
+            }
+            return learned_decision_context_features(
+                context, perspective);
+        };
     const auto add_terminal_trace =
-        [&](const std::vector<LearnedDecisionTracePoint>& trace,
+        [&context_features, &terminal_target](
+            const std::vector<LearnedDecisionTracePoint>& trace,
             const GameResult& result,
             std::vector<
                 LearnedContextualCriticTrainingExample>&
@@ -12355,7 +14468,7 @@ train_learned_value_context_challenger_internal(
                         .features = learned_observation(
                             point.state, perspective),
                         .context_features =
-                            learned_decision_context_features(
+                            context_features(
                                 point.context, perspective),
                         .target = terminal_target(
                             result, perspective),
@@ -12367,7 +14480,10 @@ train_learned_value_context_challenger_internal(
     constexpr std::size_t kBootstrapStepStates = 4;
     constexpr double kBootstrapWeight = 0.5;
     const auto add_bootstrap_trace =
-        [&](const std::vector<LearnedDecisionTracePoint>& trace,
+        [&add_terminal_trace, &context_features,
+         &terminal_target,
+         context_masked = training_config.context_masked](
+            const std::vector<LearnedDecisionTracePoint>& trace,
             const GameResult& result,
             const std::shared_ptr<const LearnedModel>& frozen,
             std::vector<
@@ -12389,8 +14505,13 @@ train_learned_value_context_challenger_internal(
                     if (bootstrap_index < trace.size()) {
                         const auto& future =
                             trace[bootstrap_index];
-                        const double bootstrap =
-                            learned_contextual_critic_value(
+                        const double bootstrap = context_masked
+                            ? frozen->predict(
+                                  learned_features(
+                                      future.state,
+                                      perspective),
+                                  LearnedDecisionContextFeatures{})
+                            : learned_contextual_critic_value(
                                 future.state, perspective,
                                 future.context, frozen);
                         target = (1.0 - kBootstrapWeight) *
@@ -12402,7 +14523,7 @@ train_learned_value_context_challenger_internal(
                         .features = learned_observation(
                             point.state, perspective),
                         .context_features =
-                            learned_decision_context_features(
+                            context_features(
                                 point.context, perspective),
                         .target = target,
                     });
@@ -12423,7 +14544,7 @@ train_learned_value_context_challenger_internal(
         std::vector<LearnedDecisionTracePoint> trace;
         const GameResult result =
             game.run_with_learned_decision_trace(
-                trace, LearnedDecisionTraceMode::Sparse);
+                trace, training_config.trace_mode);
         add_value_context_root_coverage(
             trace, first_deck, second_deck, false,
             root_coverage);
@@ -12507,7 +14628,7 @@ train_learned_value_context_challenger_internal(
             std::vector<LearnedDecisionTracePoint> trace;
             const GameResult result =
                 game.run_with_learned_decision_trace(
-                    trace, LearnedDecisionTraceMode::Sparse);
+                    trace, training_config.trace_mode);
             add_value_context_root_coverage(
                 trace, first_deck, second_deck, true,
                 root_coverage);
@@ -12541,8 +14662,7 @@ train_learned_value_context_challenger_internal(
             });
     }
     validate_value_context_root_coverage(
-        root_coverage,
-        "Learned Value context S1 training");
+        root_coverage, training_config.coverage_source);
     return {
         .model = std::move(model),
         .root_coverage = std::move(root_coverage),
@@ -12556,7 +14676,36 @@ train_learned_value_context_challenger(
     std::size_t training_games, std::uint64_t seed,
     std::size_t self_play_generations) {
     return train_learned_value_context_challenger_internal(
-               training_games, seed, self_play_generations)
+               training_games, seed, self_play_generations,
+               {
+                   .trace_mode =
+                       LearnedDecisionTraceMode::Sparse,
+                   .context_masked = false,
+                   .coverage_source =
+                       "Learned Value context S1 training",
+               })
+        .model;
+}
+
+std::shared_ptr<const LearnedModel>
+train_learned_value_dense_context_challenger(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations,
+    LearnedValueDenseContextTreatment treatment) {
+    const auto definition =
+        value_dense_context_treatment_definition(treatment);
+    return train_learned_value_context_challenger_internal(
+               training_games, seed, self_play_generations,
+               {
+                   .trace_mode =
+                       LearnedDecisionTraceMode::Dense,
+                   .context_masked =
+                       definition.context_masked,
+                   .coverage_source =
+                       definition.context_masked
+                           ? "Learned Value context D0 training"
+                           : "Learned Value context D1 training",
+               })
         .model;
 }
 
@@ -12947,11 +15096,19 @@ void validate_search_config(
     validate_learned_model(model, config.continuation_variant);
     validate_value_continuation_epsilon(
         config.value_continuation_epsilon);
+    validate_value_priority_residual_weight(
+        config.value_priority_residual_weight);
     if (config.value_continuation_epsilon != 0.0 &&
         config.continuation_variant !=
             LearnedVariant::ValueSearchChampion) {
         throw std::invalid_argument(
             "Value continuation epsilon requires a Value-mirror search");
+    }
+    if (config.value_priority_residual_weight != 0.0 &&
+        config.continuation_variant !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Value Priority residual requires a Value-mirror search");
     }
     if (config.worlds == 0 ||
         config.worlds > kMaximumEvaluationWorlds) {
@@ -13024,7 +15181,8 @@ std::vector<LearnedEvaluationWorld> sample_evaluation_worlds(
 GameConfig learned_evaluation_game_config(
     const std::shared_ptr<const LearnedModel>& model,
     LearnedVariant variant,
-    double value_continuation_epsilon) {
+    double value_continuation_epsilon,
+    double value_priority_residual_weight) {
     GameConfig config;
     config.learned_model = model;
     config.learned_search_depth = 0;
@@ -13035,6 +15193,8 @@ GameConfig learned_evaluation_game_config(
             .rollouts_per_action = 0,
             .exploration_rate =
                 value_continuation_epsilon,
+            .value_priority_residual_weight =
+                value_priority_residual_weight,
             .learned_model = model,
         },
         BotConfig{
@@ -13043,6 +15203,8 @@ GameConfig learned_evaluation_game_config(
             .rollouts_per_action = 0,
             .exploration_rate =
                 value_continuation_epsilon,
+            .value_priority_residual_weight =
+                value_priority_residual_weight,
             .learned_model = model,
         },
     };
@@ -13087,6 +15249,16 @@ LearnedActionSamples learned_priority_action_samples(
     validate_priority_candidates(
         state, player, sorcery_actions, phase,
         consecutive_passes, candidates);
+    std::vector<double> priority_residuals(
+        candidates.size(), 0.0);
+    if (config.value_priority_residual_weight != 0.0) {
+        priority_residuals =
+            value_priority_residual_unchecked(
+                state, player, sorcery_actions, phase,
+                consecutive_passes, candidates, model,
+                config.value_priority_residual_weight)
+                .residuals;
+    }
     const auto worlds = sample_evaluation_worlds(
         state, original_decks, player, config);
 
@@ -13096,7 +15268,8 @@ LearnedActionSamples learned_priority_action_samples(
             config.seed, 0x4556414C55415445ULL, 0),
         learned_evaluation_game_config(
             model, config.continuation_variant,
-            config.value_continuation_epsilon));
+            config.value_continuation_epsilon,
+            config.value_priority_residual_weight));
     evaluator.state_ = state;
 
     LearnedActionSamples result;
@@ -13177,11 +15350,14 @@ LearnedActionSamples learned_priority_action_samples(
                         : simulation
                               .finish_learned_evaluation_horizon(
                                   player, config.horizon_turns);
-                result.q_samples[action_index].push_back(
-                    blend_evaluation_score(
-                        continuation, shallow_prior,
-                        config.blend_shallow_prior,
-                        samples_per_action));
+                double score = blend_evaluation_score(
+                    continuation, shallow_prior,
+                    config.blend_shallow_prior,
+                    samples_per_action);
+                if (config.value_priority_residual_weight != 0.0) {
+                    score += priority_residuals[action_index];
+                }
+                result.q_samples[action_index].push_back(score);
                 ++result.rollout_evaluations;
             }
         }
@@ -13215,7 +15391,8 @@ LearnedActionSamples learned_binary_attack_samples(
             config.seed, 0x41545441434B4556ULL, 0),
         learned_evaluation_game_config(
             model, config.continuation_variant,
-            config.value_continuation_epsilon));
+            config.value_continuation_epsilon,
+            config.value_priority_residual_weight));
     evaluator.state_ = state;
 
     LearnedActionSamples result;
@@ -13534,7 +15711,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     std::size_t player, bool sorcery_actions, TurnPhase phase,
     int consecutive_passes, std::shared_ptr<const LearnedModel> model,
     std::size_t rollouts_per_action, std::uint64_t seed,
-    double value_continuation_epsilon) {
+    double value_continuation_epsilon,
+    double value_priority_residual_weight) {
     if (!model) {
         throw std::invalid_argument(
             "Learned Value diagnostic requires a frozen model");
@@ -13549,6 +15727,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     }
     validate_value_continuation_epsilon(
         value_continuation_epsilon);
+    validate_value_priority_residual_weight(
+        value_priority_residual_weight);
 
     GameConfig config;
     config.learned_model = model;
@@ -13562,6 +15742,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .rollouts_per_action = rollouts_per_action,
             .value_continuation_epsilon =
                 value_continuation_epsilon,
+            .value_priority_residual_weight =
+                value_priority_residual_weight,
             .learned_model = model,
         },
         BotConfig{
@@ -13571,6 +15753,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .rollouts_per_action = rollouts_per_action,
             .value_continuation_epsilon =
                 value_continuation_epsilon,
+            .value_priority_residual_weight =
+                value_priority_residual_weight,
             .learned_model = model,
         },
     };
@@ -13586,7 +15770,7 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
         std::max<std::size_t>(1, rollouts_per_action);
     diagnostic.rollout_evaluations =
         diagnostic.actions.size() * rollouts_per_action;
-    diagnostic.scores.assign(
+    diagnostic.base_scores.assign(
         diagnostic.actions.size(), 0.0);
 
     struct SampledWorld {
@@ -13609,27 +15793,44 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
          action_index < diagnostic.actions.size();
          ++action_index) {
         for (const auto& world : worlds) {
-            diagnostic.scores[action_index] +=
+            diagnostic.base_scores[action_index] +=
                 evaluator.learned_value_shallow_action_score(
                     diagnostic.actions[action_index], player,
                     sorcery_actions, phase,
                     consecutive_passes,
                     world.state);
         }
-        diagnostic.scores[action_index] /=
+        diagnostic.base_scores[action_index] /=
             static_cast<double>(worlds.size());
         if (rollouts_per_action == 0) {
             continue;
         }
         for (const auto& world : worlds) {
-            diagnostic.scores[action_index] +=
+            diagnostic.base_scores[action_index] +=
                 evaluator.learned_value_search_action_score(
                     diagnostic.actions[action_index], player,
                     sorcery_actions, phase, consecutive_passes,
                     world.state, world.continuation_seed);
         }
-        diagnostic.scores[action_index] /=
+        diagnostic.base_scores[action_index] /=
             static_cast<double>(worlds.size() + 1);
+    }
+    const auto residual =
+        value_priority_residual_unchecked(
+            state, player, sorcery_actions, phase,
+            consecutive_passes, diagnostic.actions, model,
+            value_priority_residual_weight);
+    diagnostic.policy_logits = residual.policy_logits;
+    diagnostic.centered_policy_logits =
+        residual.centered_policy_logits;
+    diagnostic.priority_residuals = residual.residuals;
+    diagnostic.scores = diagnostic.base_scores;
+    if (value_priority_residual_weight != 0.0) {
+        for (std::size_t index = 0;
+             index < diagnostic.scores.size(); ++index) {
+            diagnostic.scores[index] +=
+                diagnostic.priority_residuals[index];
+        }
     }
     return diagnostic;
 }
@@ -13902,6 +16103,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
               baseline.learned_variant &&
           challenger.value_continuation_epsilon ==
               baseline.value_continuation_epsilon &&
+          challenger.value_priority_residual_weight ==
+              baseline.value_priority_residual_weight &&
           !distinct_explicit_models));
     if (same_policy &&
         challenger.rollouts_per_action ==

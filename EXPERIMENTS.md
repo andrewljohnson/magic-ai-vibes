@@ -4065,3 +4065,370 @@ games)` and returned the Green seed list at 50.0% (10-10) overall, exactly
 2-2 against each of the five metagame decks. This is a T1/C1 lifecycle smoke,
 not evidence that the deck or pilot is strong. Real use should select the
 frozen C16 artifact, K=8, and an independently sized evolution search.
+
+### Dense D0/D1 offline cells (result: rejected)
+
+Recorded after rereading the independent review timestamped 2026-07-25 16:46
+PDT. S1 failed its preregistered gates, so the remaining two cells were trained
+and scored together with the exact ordered S0 -> S1 -> D0 -> D1 attribution:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-worlds 8 --probe-horizon 0 \
+  --learned-generations 16 \
+  --challenger learned-value-dense-context-c16 \
+  --learned-rollouts 8 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
+```
+
+The run reloaded the exact frozen S0 fingerprint `bda1ea44...` and S1
+fingerprint `68d0ffef...`; it did not regenerate Actor-owned labels. D0
+(Dense/context masked) trained in 351.72 seconds and published
+`build/model-cache/old-school-value-context-d0-v2-c16-t800-s424242.bin`,
+fingerprint
+`19aa52c98fbd848a0f086b8eda11016cf1dc5b9eb7b669bbc5b7040ce03352f1`.
+D1 (Dense/context live) trained in 308.31 seconds and published
+`build/model-cache/old-school-value-context-d1-v2-c16-t800-s424242.bin`,
+fingerprint
+`9e2c225e53de967fa5b48b0e4625d6965e9edd9a341ae97449f43847107e3e55`.
+
+Both dense cells retained the full deterministic cap of 256,000 roots over
+4,000 games. D0 contained 111,968 pass-one and 49,756 nonempty-stack roots;
+D1 contained 111,809 and 49,906 respectively. Every decision-player deck had
+roughly 50--52k retained roots. Hidden-zone repartition remained bit-identical
+for all nine scored policy views.
+
+Offline checkpoint results:
+
+| Cell | Pooled top-1 | Stable pairs | Mean regret | Critic Brier | Deck regrets G/R/B/W/RU |
+| --- | ---: | ---: | ---: | ---: | --- |
+| S0 | 90.0% | 94.44% | 0.0085 | 0.0528 | .0368/.0000/.0000/.0013/.0045 |
+| S1 | 90.0% | 96.30% | 0.0061 | 0.0711 | .0000/.0000/.0000/.0259/.0045 |
+| D0 | 90.0% | 92.59% | 0.0032 | 0.0954 | .0146/.0000/.0000/.0013/.0000 |
+| D1 | 90.0% | 94.44% | 0.0032 | 0.0985 | .0146/.0000/.0000/.0013/.0000 |
+
+Dense collection therefore halved pooled regret relative to S0 and fixed the
+RU land-choice probe. It retained zero Blue regret and produced no reported
+Counterspell regression. However, calibration worsened substantially, and D1
+did not beat D0 on pooled regret or critic loss as required.
+
+The paired deployed Force Spike controls were decisive:
+
+- D0 live: Pass 0.1393, Force Spike 0.1690 (select Spike, pass);
+  payable: Pass 0.1171, Force Spike 0.1349 (select Spike, fail).
+- D1 live: Pass 0.1140, Force Spike 0.1468 (select Spike, pass);
+  payable: Pass 0.0941, Force Spike 0.1167 (select Spike, fail).
+
+Decision: reject both dense cells before validation-v1 or gameplay. D0 fails
+the payable-tax gate. D1 also fails that gate, ties rather than beats D0's
+pooled regret, and has worse critic Brier than both D0 and S1. The experiment
+falsifies the hypothesis that context representation plus substantially more
+forced-pass value roots is sufficient. Dense data improves broad action
+ranking, but the remaining hold-versus-spend failure is now most plausibly an
+action-preference/teacher-target problem. Proceed to a separately versioned,
+iterated search-distilled policy-head experiment; do not tune D1 or screen it
+on a gameplay seed.
+
+### P16 search-teacher sufficiency audit (declared)
+
+Declared after rereading the independent review timestamped 2026-07-25 16:46
+PDT and before implementing or fitting a policy head. This is a
+measurement-only prerequisite to the proposed P16 experiment. It changes no
+training, model, probe label, or deployed policy.
+
+Hypothesis: the frozen S0 C16 model's own high-sample, unblended Value-mirror
+search contains the action signal that a separate policy head would need.
+Using the existing paired live/payable Force Spike controls, K=256 common
+information-set worlds, one rollout per world, H=4, and no shallow-prior
+blend, it must:
+
+- rank Force Spike above Pass in the live state with the paired 95% lower
+  confidence bound on `Q(Spike)-Q(Pass)` above zero;
+- rank Pass above Force Spike in the payable state with the paired 95% lower
+  confidence bound on `Q(Pass)-Q(Spike)` above zero; and
+- rank Pass above opponent-targeted Disintegrate X=0 in the harvested
+  validation-v1 state with the paired 95% lower confidence bound on
+  `Q(Pass)-Q(X=0)` above zero; and
+- remain bit-identical under opponent-hidden-zone repartition.
+
+The 256 paired samples will also be partitioned in order into 32 disjoint
+K=8 blocks. At least 24 of 32 blocks must have the correct ordering in each
+of the three comparisons, so a practical K=8 training teacher is not justified only by an
+expensive asymptotic estimate. Exact ties count as incorrect.
+
+Two fixed diagnostics are reported but cannot substitute for the primary
+gate: S0 C16 at K=256/H=0 without a shallow prior isolates its critic
+bootstrap, and frozen Actor G0 at K=256/H=0 without a shallow prior measures
+whether the existing Actor-owned reference has the distinction. Every row
+uses the same physical controls, deterministic seed derivation, paired
+candidate worlds, and hidden-repartition check.
+
+Decision rule: implement pure iterated search distillation only if the primary
+S0 K=256/H=4 teacher passes every conjunctive gate. If it fails, do not tune a
+policy-prior weight or distill a teacher already known to prefer the dominated
+payable action. Instead, the next P16 design must add an orthogonal
+self-generated improvement signal (for example counterfactual outcome
+advantage or recursive search), still with no Handcrafted data, card-specific
+rule, combat score, or opponent hidden identity. This two-state audit can
+reject a teacher mechanism but cannot promote a bot.
+
+### P16 search-teacher sufficiency audit (result: rejected)
+
+Recorded after rereading the independent review timestamped 2026-07-25 17:01
+PDT. A read-only diagnostic harness composed the existing public probe,
+information-set search, artifact-loader, and paired-estimate APIs. It loaded
+the frozen S0 C16 artifact in 0.014 seconds and verified fingerprint
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`.
+Every row used 256 common information-set worlds, one rollout per world, no
+shallow-prior blend, Value-mirror continuation, epsilon zero, and an exact
+hidden-repartition clone.
+
+The primary K=256/H=4 results were:
+
+| comparison | first Q | second Q | oriented delta | paired SE | 95% interval | correct K=8 blocks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| live Spike minus Pass | .191790 | .121599 | +.070191 | .001934 | [.066401, .073982] | 32/32 |
+| payable Pass minus Spike | .122070 | .165836 | -.043767 | .001860 | [-.047412, -.040122] | 0/32 |
+| RU Pass minus X=0 | .478538 | .597960 | -.119422 | .005931 | [-.131046, -.107797] | 0/32 |
+
+The fixed H=0 diagnostic retained the same signs. Live Spike minus Pass was
+`+0.029915` with interval `[+0.027377,+0.032453]` and 32/32 correct K=8
+blocks. Payable Pass minus Spike was `-0.005043` with interval
+`[-0.006648,-0.003438]` and only 4/32 correct blocks. RU Pass minus X=0 was
+exactly `-0.079679` in every paired sample and 0/32 blocks. Every original
+versus hidden-repartition sample was bit-identical. The three H=4 rows took
+4.24 seconds and the whole audit took 4.77 seconds after compilation.
+
+The separately frozen Actor G0 diagnostic agreed with the failure. Its
+payable `Q(Spike)-Q(Pass)` remained positive at K=256/H=0
+(`+0.006708`, interval `[+0.005741,+0.007675]`), K=64/H=4
+(`+0.020490`, `[+0.014830,+0.026151]`), and K=256/H=12
+(`+0.005094`, `[+0.001171,+0.009017]`). Increasing worlds or horizon
+therefore does not reveal a clean distillation target.
+
+Decision: reject pure P16 search distillation before fitting it. The primary
+teacher passes only the live counter and fails both option-value comparisons
+decisively, including every practical K=8 block. H=4 makes both wrong margins
+larger, not smaller. A head trained only by cross-entropy to this search would
+make the two known failures more confident. The next policy experiment must
+retain search as a bounded prior while obtaining its corrective direction from
+an orthogonal, self-generated outcome signal.
+
+The one-off harness was removed after the measurement. A permanent CLI audit
+using the same public APIs is being added so this result can be reproduced
+without reconstructing the harness; that engineering reproduction will not
+change the decision.
+
+### Outcome-tilted priority residual P16 (declared)
+
+Declared after the failed teacher audit and before changing Learned policy
+training or deployment. The hypothesis is that long-term outcomes contain
+useful hold-versus-spend information even though the frozen search teacher
+does not. A bounded, priority-only residual trained by advantage-weighted
+regression can correct those preferences while retaining the strong S0 C16
+Value search, critic, and combat policy.
+
+The immutable P0 parent is exact S0 C16 fingerprint `bda1ea44...`. Every
+Value model already contains a neutral observation-action Priority head whose
+output paths are initialized to zero. For legal priority action `a`, the P
+family's deployed score is fixed to:
+
+```text
+S(a) = Q_S0_or_parent(a)
+       + 0.10 * tanh(logit(a) - mean_legal_logit)
+```
+
+`Q` is the unchanged production K=8/H=4 Value score, including its aggregate
+shallow-prior blend. The centered residual is bounded to `[-0.10,+0.10]`;
+there is no weight sweep. Uniform P0 logits contribute exactly zero, so P0 at
+weight 0.10 and weight zero must both be action-, score-, and game-record
+identical to S0. Both continuation seats receive the same frozen parent model
+and residual, while Value attack, block, and damage-order code remains
+unchanged.
+
+Training is 16 immutable frozen-parent generations, with P1 and P4 as
+predeclared mechanism checkpoints rather than selectable endpoints:
+
+- each generation uses the existing exact 40-game schedule: all ten unordered
+  five-deck pairs, both seat orientations, and both starting players;
+- both seats use the same frozen parent; Handcrafted is never used;
+- every multi-action Priority root runs the same K=8/H=4 information-set
+  search and samples the real action from
+  `mu = 0.9*softmax(S/0.10) + 0.1/N`, using indexed seeds;
+- after each game, retain at most 32 evenly spaced Priority roots per actor
+  and weight each by the inverse retained count, so every seat-game and deck
+  contributes equal total weight;
+- for each actor's chronological retained roots, compute the existing
+  TD(lambda) return with lambda `0.90` and terminal `z` in `{0,0.5,1}`;
+  use `R = 0.5*G_lambda + 0.5*z` and
+  `A = clamp(R - V_S0(root), -0.5, +0.5)`;
+- turn that chosen-action evidence into one valid all-action target,
+  `y(a) proportional to mu(a) * exp((A/0.25) * I[a=chosen])`.
+  Positive advantage raises the sampled action; negative advantage suppresses
+  it and redistributes mass over all alternatives according to `mu`.
+  At zero advantage, `y` equals `mu` exactly.
+
+There is no separate search cross-entropy loss: the known-wrong search score
+is the KL anchor inside `mu`, while the outcome advantage is the sole
+improvement direction. Fit only the outer Priority head to weighted
+cross-entropy between `y` and the candidate's combined-score distribution.
+The critic ensemble and Attack, Block, and DamageOrder heads remain
+bit-identical. Replay contains exactly the newest three immutable policy
+shards, with occupancy `1,2,3,3,...`.
+
+The fixed optimizer is deterministic mini-batch Adam: batch 64, eight epochs,
+learning rate `0.001`, beta1 `0.9`, beta2 `0.999`, epsilon `1e-8`, global
+gradient-norm clip `5`, indexed PolicyFit shuffles, and fresh moments each
+generation. These values will not be tuned against named probes or gameplay.
+
+P0 and P1 mechanism gates precede any strength interpretation:
+
+1. default residual zero and uniform-head residual 0.10 reproduce S0 exactly;
+2. P1 is fixed-seed deterministic and leaves its parent, every critic
+   prediction, and all three non-Priority heads bit-identical;
+3. each deck has both positive and negative retained advantage weight and
+   nonzero search/outcome conflict;
+4. newest-shard `KL(y || deployed_distribution)` falls at least 30%, weighted
+   chosen probability moves with the sign of advantage more than 60% of the
+   time, some deployed argmax weight changes, and fewer than 5% of residuals
+   saturate;
+5. all targets are finite/normalized, exact per-deck game/root/weight and
+   rollout accounting balances, and hidden repartition leaves logits,
+   combined scores, targets, and choices bit-identical; and
+6. P1 retains live Force Spike and all four Counterspell top-one choices, with
+   no deck regret more than S0 plus 0.01. Payable Spike and X=0 are reported
+   but are not required to flip after only one generation.
+
+If P1 fails a mechanism or isolation gate, stop rather than scaling a broken
+operator. If it passes, continue the unchanged recipe through P4. P4 must
+uniquely select Spike live, Pass payable, and Pass over validation-v1 X=0;
+retain every Counterspell choice; improve pooled dev-v3 regret; worsen no deck
+regret by more than 0.01; and preserve exact hidden invariance. Because the
+critic is frozen, its predictions and Brier/log-loss must remain bit-identical
+to P0. Only then run the reject-only screen:
+
+```sh
+./build/old-school-sim --benchmark --games 10 --seed 919191 \
+  --challenger learned-value-policy-p4 --baseline learned-value-policy-p0 \
+  --learned-rollouts 8 --train-games 800 --train-seed 424242
+```
+
+Stop below 45% aggregate or below 40% on any challenger deck. A near-50%
+result is not an improvement claim. If P4 clears, continue the already fixed
+recipe to P16 rather than choosing a lucky intermediate checkpoint.
+
+P16 must clear the same offline behavioral/nonregression gates, then the
+generation and promotion ladder:
+
+1. 2,040 paired games versus P4 at virgin seed `161803`, requiring a Wilson
+   95% lower bound above 50% and more wins on all five P16 deck slices;
+2. 2,040 paired games versus P0 at seed `271828` with the same requirements;
+3. 2,040 paired games versus Handcrafted at seed `314159`, requiring the
+   repository's aggregate and all-five direct gates;
+4. the fixed evaluation seeds `101,202,303,404,505,606,707,808`, no aggregate
+   seed loss, and the all-five mixed-field lift gate.
+
+Before any Handcrafted comparison, freeze a separate fail-closed P-family
+artifact bound to the exact P0 fingerprint and full recipe. Strict unit,
+integration, CLI, determinism, hidden-information, and sanitizer gates remain
+mandatory. These small named probes may reject P1/P4/P16 but can never promote
+one.
+
+### Permanent search-teacher audit reproduction
+
+Recorded after rereading the independent review timestamped
+2026-07-25 17:10 PDT. The temporary audit has now been replaced by a permanent,
+evaluation-only CLI and generic tested API. It scores the two physical Force
+Spike controls plus validation-v1 X=0 directly from frozen models; it does not
+read or mutate a label cache.
+
+Exact command:
+
+```sh
+./build/old-school-sim --diagnose-force-spike-teacher \
+  --learned-generations 16 \
+  --train-games 800 --train-seed 424242
+```
+
+The CLI loaded the exact S0 C16 fingerprint
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`.
+Its primary K=256/H=4 row reproduced every earlier S0 point estimate,
+standard error, confidence interval, K=8 block count, exact selected set, and
+hidden-repartition result:
+
+- live `Q(Spike)-Q(Pass) = +0.070191`, SE `0.001934`, 95% interval
+  `[+0.066401,+0.073982]`, 32/32 correct blocks;
+- payable `Q(Pass)-Q(Spike) = -0.043767`, SE `0.001860`, 95% interval
+  `[-0.047412,-0.040122]`, 0/32 correct blocks; and
+- RU `Q(Pass)-Q(X=0) = -0.119422`, SE `0.005931`, 95% interval
+  `[-0.131046,-0.107797]`, 0/32 correct blocks.
+
+The permanent H=0 S0 control likewise reproduced `+0.029915`,
+`-0.005043`, and `-0.079679`, with 32/32, 4/32, and 0/32 correct blocks.
+The canonical Actor G0 H=0 row used fingerprint `76391764...` and retained the
+same failure signs: live `+0.031364`, payable `-0.007245`, and RU
+`-0.029690`. Its deterministic paired seed differs from the earlier one-off
+Actor-only diagnostic; that control cannot substitute for the primary row.
+All nine original/hidden-repartition comparisons were bit-identical.
+
+Verification:
+
+```sh
+make -j4 build/old-school-sim build/old-school-probe-runner-tests
+./build/old-school-probe-runner-tests
+```
+
+The strict build passed and all 21 probe-runner tests passed. Decision
+unchanged: pure search distillation is rejected. The permanent route closes
+the independent review's reproducibility request; proceed with the already
+preregistered outcome-tilted priority residual without consulting a gameplay
+seed.
+
+### P-family distribution and mechanism-metric clarification (declared)
+
+Declared after rereading the independent review timestamped
+2026-07-25 17:20 PDT and before fitting P1. This resolves two implementation
+details that the recipe named but did not define numerically; it does not alter
+the residual bound, data, optimizer, seeds, checkpoints, or gates.
+
+The distribution fitted by cross-entropy is the full collection/deployment
+behavior distribution
+
+```text
+p_model(a) = softmax((Q_parent(a) + residual_model(a)) / 0.10)
+mu_model(a) = 0.9 * p_model(a) + 0.1 / N
+```
+
+rather than bare `p_model`. Thus, when advantage is exactly zero,
+`y = mu_parent` and the frozen parent is an exact optimum with zero gradient.
+This preserves the preregistered claim that outcome advantage is the sole
+improvement direction; fitting bare softmax would introduce an unintended
+uniform-flattening update even at zero advantage. The optimizer differentiates
+through the 90/10 mixture exactly.
+
+P1 mechanism metrics use only the newest immutable shard and inverse-root
+weights:
+
+- `KL` is weighted mean `KL(y || mu_model)`, and the required reduction is
+  `(KL_parent - KL_candidate) / KL_parent`;
+- signed movement is the weighted fraction of nonzero-advantage examples where
+  candidate chosen-action `mu` moves strictly above the parent for positive
+  advantage or strictly below it for negative advantage; ties fail;
+- argmax-change weight compares exact maxima of the combined score
+  `Q+residual`, with any set change counted;
+- a residual is saturated when
+  `abs(tanh(logit - mean_legal_logit)) >= 0.95`. Saturation rate gives each
+  legal action equal share of its root weight, preventing high-action-count
+  roots from dominating;
+- positive and negative advantage weights are reported separately per deck;
+  search/outcome conflict means positive advantage on a sampled non-argmax
+  action or negative advantage on a sampled exact-argmax action. Each deck
+  must have nonzero conflict weight; and
+- game balance means 16 seat-games per deck. Every retained seat-game assigns
+  total policy weight one across at most 32 evenly spaced roots; rootless
+  seat-games, raw/retained root counts, and exact rollout totals are reported
+  rather than silently normalized away.
+
+These definitions are fixed before P1 collection. They are mechanism
+diagnostics, not knobs and not substitutes for the offline behavioral gates.

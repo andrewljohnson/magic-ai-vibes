@@ -73,6 +73,111 @@ std::vector<double> td_lambda_targets(
     std::span<const double> chronological_values,
     double terminal_z, double lambda);
 
+// Returns exactly min(total, cap) chronological indices. When truncation is
+// required, index i is retained precisely when
+//   floor((i + 1) * cap / total) != floor(i * cap / total).
+// The implementation avoids overflowing either product.
+std::vector<std::size_t> evenly_spaced_retained_indices(
+    std::size_t total, std::size_t cap);
+
+inline constexpr double kP16ExplorationTeacherWeight = 0.90;
+inline constexpr double kP16ExplorationTemperature = 0.10;
+inline constexpr double kP16TdLambda = 0.90;
+inline constexpr double kP16TerminalReturnWeight = 0.50;
+inline constexpr double kP16AdvantageLimit = 0.50;
+inline constexpr double kP16AdvantageTemperature = 0.25;
+inline constexpr double kP16MechanismMovementTolerance = 1.0e-12;
+inline constexpr double kP16MechanismKlDefinedTolerance = 1.0e-15;
+inline constexpr double kP16ResidualSaturationThreshold = 0.95;
+
+// Converts finite action scores into the P16 collection behavior:
+// 90% stable softmax at temperature 0.10 plus 10% uniform exploration.
+// The result is nonempty, normalized, and gives every action positive mass.
+std::vector<double> p16_exploration_distribution(
+    std::span<const double> scores);
+
+struct P16OutcomeSignal {
+    std::vector<double> returns;
+    std::vector<double> advantages;
+
+    bool operator==(const P16OutcomeSignal&) const = default;
+};
+
+// Builds the P16 outcome signal from one actor's chronological frozen-parent
+// baselines. G_lambda is computed by td_lambda_targets; each returned target
+// is the equal blend of G_lambda and terminal_z. Advantages are return minus
+// the corresponding baseline, clamped to [-0.5, +0.5].
+P16OutcomeSignal p16_outcome_signal(
+    std::span<const double> chronological_baselines,
+    double terminal_z, double lambda = kP16TdLambda);
+
+// Tilts a normalized all-action behavior distribution only at `chosen` by
+// exp(advantage / 0.25), then renormalizes. A zero advantage returns an exact
+// copy of the input distribution.
+std::vector<double> p16_all_action_target(
+    std::span<const double> behavior_distribution,
+    std::size_t chosen, double advantage);
+
+// One card-agnostic retained root for P-family mechanism accounting. Combined
+// scores are Q plus the bounded Priority residual. The evaluator converts
+// both score vectors through the canonical 90/10 P16 distribution.
+struct P16MechanismObservation {
+    std::vector<double> parent_combined_scores;
+    std::vector<double> candidate_combined_scores;
+    std::vector<double> candidate_centered_policy_logits;
+    std::vector<double> target_probabilities;
+    std::size_t chosen = 0;
+    double advantage = 0.0;
+    double weight = 1.0;
+
+    bool operator==(
+        const P16MechanismObservation&) const = default;
+};
+
+struct P16MechanismMetrics {
+    std::size_t observation_count = 0;
+    std::size_t residual_option_count = 0;
+    std::size_t saturated_residual_count = 0;
+    double total_weight = 0.0;
+
+    double parent_kl = 0.0;
+    double candidate_kl = 0.0;
+    bool kl_reduction_defined = false;
+    double kl_reduction_fraction = 0.0;
+
+    double positive_advantage_weight = 0.0;
+    double negative_advantage_weight = 0.0;
+    double zero_advantage_weight = 0.0;
+    double conflict_weight = 0.0;
+
+    double eligible_signed_movement_weight = 0.0;
+    double correct_signed_movement_weight = 0.0;
+    double signed_movement_correct_rate = 0.0;
+    double eligible_positive_movement_weight = 0.0;
+    double correct_positive_movement_weight = 0.0;
+    double positive_movement_correct_rate = 0.0;
+    double eligible_negative_movement_weight = 0.0;
+    double correct_negative_movement_weight = 0.0;
+    double negative_movement_correct_rate = 0.0;
+
+    double changed_argmax_weight = 0.0;
+    double changed_argmax_weight_fraction = 0.0;
+
+    // Each option receives weight / legal-option-count, so every retained
+    // root contributes exactly its root weight regardless of branching.
+    double residual_option_weight = 0.0;
+    double saturated_residual_weight = 0.0;
+    double residual_saturation_fraction = 0.0;
+
+    bool operator==(const P16MechanismMetrics&) const = default;
+};
+
+// Computes newest-shard P-family mechanism diagnostics. An empty span returns
+// zero metrics with undefined KL reduction. Malformed observations fail
+// closed with invalid_argument.
+P16MechanismMetrics evaluate_p16_mechanism_metrics(
+    std::span<const P16MechanismObservation> observations);
+
 // Value G8's exact four-recorded-state bootstrap. For state i, when state
 // i+4 exists, the target is the equal blend of terminal_z and V_parent(i+4).
 // The final four states retain the terminal target alone.

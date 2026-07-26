@@ -189,6 +189,9 @@ void print_help(std::string_view executable) {
         << "       " << executable
         << " --diagnose-value-context\n"
         << "       " << executable
+        << " --diagnose-force-spike-teacher --learned-generations N"
+           " [--train-games N] [--train-seed N]\n"
+        << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
@@ -274,6 +277,10 @@ void print_help(std::string_view executable) {
            "rankings on a held-out White lock state\n"
         << "  --diagnose-value-context  Audit phase/pass context omitted "
            "from the current Value observation; accepts no other options\n"
+        << "  --diagnose-force-spike-teacher  Eval-only K=256 audit of "
+           "the frozen S0 teacher on Force Spike live/payable and RU "
+           "Pass/X=0; requires --learned-generations N and accepts only "
+           "training options\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
         << "  --score-probes   Label/score an offline decision-probe "
@@ -904,6 +911,50 @@ train_value_challenger_with_progress(
     return model;
 }
 
+void print_value_root_coverage(
+    std::string_view cell,
+    bool dense,
+    const old_school::LearnedValueContextRootCoverage& root_coverage) {
+    std::cout
+        << "  " << cell
+        << (dense ? " dense" : "")
+        << " decision roots: total="
+        << root_coverage.total_roots()
+        << ", anchor=" << root_coverage.anchor_roots
+        << ", self-play=" << root_coverage.self_play_roots
+        << "\n  " << cell << " roots by deck:";
+    for (std::size_t deck = 0; deck < old_school::kDeckCount;
+         ++deck) {
+        std::cout
+            << ' '
+            << old_school::deck_name(
+                   static_cast<old_school::DeckId>(deck))
+            << '=' << root_coverage.decision_player_decks[deck];
+    }
+    constexpr std::array<std::string_view, 7> phase_names = {
+        "first-main",
+        "begin-combat",
+        "declare-attackers",
+        "declare-blockers",
+        "damage-order",
+        "end-combat",
+        "second-main",
+    };
+    std::cout << "\n  " << cell << " roots by phase:";
+    for (std::size_t phase = 0; phase < phase_names.size();
+         ++phase) {
+        std::cout << ' ' << phase_names[phase] << '='
+                  << root_coverage.phases[phase];
+    }
+    std::cout
+        << "\n  " << cell << " roots by pass: 0="
+        << root_coverage.pass_counts[0]
+        << " 1=" << root_coverage.pass_counts[1]
+        << "\n  " << cell << " roots by stack: empty="
+        << root_coverage.stack_status[0]
+        << " nonempty=" << root_coverage.stack_status[1] << '\n';
+}
+
 std::shared_ptr<const old_school::LearnedModel>
 train_value_context_challenger_with_progress(
     std::size_t training_games,
@@ -976,42 +1027,93 @@ train_value_context_challenger_with_progress(
               << (cache_exists && !refresh_cache
                       ? "loaded "
                       : "generated ")
-              << cache_path << '\n'
-              << "  S1 decision roots: total="
-              << root_coverage.total_roots()
-              << ", anchor=" << root_coverage.anchor_roots
-              << ", self-play=" << root_coverage.self_play_roots
-              << "\n  S1 roots by deck:";
-    for (std::size_t deck = 0; deck < old_school::kDeckCount;
-         ++deck) {
+              << cache_path << '\n';
+    print_value_root_coverage("S1", false, root_coverage);
+    return model;
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+train_value_dense_context_challenger_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed,
+    std::size_t generations,
+    old_school::LearnedValueDenseContextTreatment treatment,
+    bool refresh_cache) {
+    const bool context_masked =
+        treatment ==
+        old_school::LearnedValueDenseContextTreatment::ContextMasked;
+    const std::string_view cell = context_masked ? "D0" : "D1";
+    const std::string_view name =
+        context_masked ? "Value Dense Masked" : "Value Dense Context";
+    const std::string cache_path =
+        old_school::learned_value_dense_context_challenger_cache_path(
+            training_games, training_seed, generations, treatment);
+    std::error_code exists_error;
+    const bool cache_exists =
+        std::filesystem::exists(cache_path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect " + std::string(name) + " C" +
+            std::to_string(generations) + " artifact cache '" +
+            cache_path + "': " + exists_error.message());
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    std::shared_ptr<const old_school::LearnedModel> model;
+    old_school::LearnedValueContextRootCoverage root_coverage;
+    if (cache_exists && !refresh_cache) {
         std::cout
-            << ' '
-            << old_school::deck_name(
-                   static_cast<old_school::DeckId>(deck))
-            << '=' << root_coverage.decision_player_decks[deck];
+            << "Loading immutable " << name << " C"
+            << generations << " artifact (seed " << training_seed
+            << ", " << training_games << " initial games) from "
+            << cache_path << "..." << std::flush;
+        try {
+            const auto artifact =
+                old_school::
+                    load_learned_value_dense_context_challenger_artifact(
+                        cache_path, training_games, training_seed,
+                        generations, treatment);
+            model = artifact.model();
+            root_coverage = artifact.root_coverage();
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                std::string(name) + " C" +
+                std::to_string(generations) +
+                " artifact cache '" + cache_path +
+                "' is invalid: " + error.what() +
+                "; rerun this challenger route with "
+                "--refresh-value-challenger-cache to regenerate it");
+        }
+    } else {
+        std::cout << "Training frozen " << name << " C"
+                  << generations << " (seed " << training_seed
+                  << ", " << training_games
+                  << " initial games)..." << std::flush;
+        const auto artifact =
+            old_school::
+                train_learned_value_dense_context_challenger_artifact(
+                    training_games, training_seed, generations,
+                    treatment);
+        model = artifact.model();
+        root_coverage = artifact.root_coverage();
+        old_school::
+            write_learned_value_dense_context_challenger_artifact_atomic(
+                cache_path, artifact);
     }
-    constexpr std::array<std::string_view, 7> phase_names = {
-        "first-main",
-        "begin-combat",
-        "declare-attackers",
-        "declare-blockers",
-        "damage-order",
-        "end-combat",
-        "second-main",
-    };
-    std::cout << "\n  S1 roots by phase:";
-    for (std::size_t phase = 0; phase < phase_names.size();
-         ++phase) {
-        std::cout << ' ' << phase_names[phase] << '='
-                  << root_coverage.phases[phase];
-    }
-    std::cout
-        << "\n  S1 roots by pass: 0="
-        << root_coverage.pass_counts[0]
-        << " 1=" << root_coverage.pass_counts[1]
-        << "\n  S1 roots by stack: empty="
-        << root_coverage.stack_status[0]
-        << " nonempty=" << root_coverage.stack_status[1] << '\n';
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout << " done (" << std::fixed << std::setprecision(2)
+              << elapsed.count() << "s)\n"
+              << "  " << name << " C" << generations
+              << " fingerprint: "
+              << old_school::learned_model_fingerprint(model) << '\n'
+              << "  " << name << " C" << generations
+              << " artifact cache: "
+              << (cache_exists && !refresh_cache
+                      ? "loaded "
+                      : "generated ")
+              << cache_path << '\n';
+    print_value_root_coverage(cell, true, root_coverage);
     return model;
 }
 
@@ -2066,6 +2168,8 @@ int main(int argc, char** argv) {
         bool evolve = false;
         bool diagnose_white_plan = false;
         bool diagnose_value_context = false;
+        bool diagnose_force_spike_teacher = false;
+        bool teacher_audit_unsupported_option_used = false;
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
@@ -2112,6 +2216,12 @@ int main(int argc, char** argv) {
                 print_help(argv[0]);
                 return 0;
             }
+            if (option != "--diagnose-force-spike-teacher" &&
+                option != "--train-games" &&
+                option != "--train-seed" &&
+                option != "--learned-generations") {
+                teacher_audit_unsupported_option_used = true;
+            }
             if (option == "--benchmark") {
                 benchmark = true;
                 continue;
@@ -2134,6 +2244,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--diagnose-value-context") {
                 diagnose_value_context = true;
+                continue;
+            }
+            if (option == "--diagnose-force-spike-teacher") {
+                diagnose_force_spike_teacher = true;
                 continue;
             }
             if (option == "--variance-study") {
@@ -2396,6 +2510,7 @@ int main(int argc, char** argv) {
                 static_cast<int>(evolve) +
                 static_cast<int>(diagnose_white_plan) +
                 static_cast<int>(diagnose_value_context) +
+                static_cast<int>(diagnose_force_spike_teacher) +
                 static_cast<int>(variance_study) +
                 static_cast<int>(score_probes) >
             1) {
@@ -2403,12 +2518,27 @@ int main(int argc, char** argv) {
                 "--interactive, --benchmark, --stability, "
                 "--evolve-deck, and "
                 "--diagnose-white-plan, --diagnose-value-context, "
-                "--variance-study, and --score-probes cannot be "
+                "--diagnose-force-spike-teacher, --variance-study, "
+                "and --score-probes cannot be "
                 "combined");
         }
         if (diagnose_value_context && argc != 2) {
             throw std::invalid_argument(
                 "--diagnose-value-context accepts no other options");
+        }
+        if (diagnose_force_spike_teacher &&
+            teacher_audit_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--diagnose-force-spike-teacher accepts only "
+                "--train-games, --train-seed, and "
+                "--learned-generations");
+        }
+        if (diagnose_force_spike_teacher &&
+            (!learned_generations_option_used ||
+             learned_generations == 0)) {
+            throw std::invalid_argument(
+                "--diagnose-force-spike-teacher requires a positive "
+                "--learned-generations N");
         }
         if (interactive &&
             interactive_unsupported_option_used) {
@@ -2451,6 +2581,30 @@ int main(int argc, char** argv) {
                                ContextChallenger &&
                        selection.value_generation > 0;
             };
+        const auto selects_value_dense_masked_challenger =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           old_school::BotKind::Learned &&
+                       selection.learned_variant ==
+                           old_school::LearnedVariant::
+                               ValueSearchChampion &&
+                       selection.value_family ==
+                           BotSelection::ValueFamily::
+                               DenseMaskedChallenger &&
+                       selection.value_generation > 0;
+            };
+        const auto selects_value_dense_context_challenger =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           old_school::BotKind::Learned &&
+                       selection.learned_variant ==
+                           old_school::LearnedVariant::
+                               ValueSearchChampion &&
+                       selection.value_family ==
+                           BotSelection::ValueFamily::
+                               DenseContextChallenger &&
+                       selection.value_generation > 0;
+            };
         if (evolve &&
             evolve_pilot.kind == old_school::BotKind::Learned &&
             !selects_value_context_challenger(evolve_pilot)) {
@@ -2458,27 +2612,39 @@ int main(int argc, char** argv) {
                 "Learned --evolve-pilot currently requires "
                 "learned-value-context-cN");
         }
-        const bool probe_context_challenger_selected =
+        const bool probe_sparse_context_challenger_selected =
             score_probes && challenger_option_used &&
             selects_value_context_challenger(challenger);
+        const bool probe_dense_masked_challenger_selected =
+            score_probes && challenger_option_used &&
+            selects_value_dense_masked_challenger(challenger);
+        const bool probe_dense_context_challenger_selected =
+            score_probes && challenger_option_used &&
+            selects_value_dense_context_challenger(challenger);
+        const bool probe_context_ablation_selected =
+            probe_sparse_context_challenger_selected ||
+            probe_dense_masked_challenger_selected ||
+            probe_dense_context_challenger_selected;
         if (score_probes && challenger_option_used &&
-            !probe_context_challenger_selected) {
+            !probe_context_ablation_selected) {
             throw std::invalid_argument(
                 "--score-probes --challenger requires "
-                "learned-value-context-cN");
+                "learned-value-context-cN, "
+                "learned-value-dense-masked-cN, or "
+                "learned-value-dense-context-cN");
         }
-        if (probe_context_challenger_selected &&
+        if (probe_context_ablation_selected &&
             learned_generations == 0) {
             throw std::invalid_argument(
-                "learned-value-context-cN probe scoring requires "
+                "context-ablation probe scoring requires "
                 "--learned-generations N for its state-only S0");
         }
-        if (probe_context_challenger_selected &&
+        if (probe_context_ablation_selected &&
             challenger.value_generation !=
                 learned_generations) {
             throw std::invalid_argument(
-                "learned-value-context-cN generation must match "
-                "--learned-generations N for S0-to-S1 probe "
+                "context-ablation generation must match "
+                "--learned-generations N for ordered probe "
                 "attribution");
         }
         if (score_probes &&
@@ -2509,6 +2675,7 @@ int main(int argc, char** argv) {
         const bool tournament_uses_any_learned =
             !interactive && !benchmark && !stability && !evolve &&
             !diagnose_white_plan && !diagnose_value_context &&
+            !diagnose_force_spike_teacher &&
             !variance_study && !score_probes &&
             (bot_field == old_school::BotField::Mixed ||
              bot_field == old_school::BotField::Learned);
@@ -2531,12 +2698,14 @@ int main(int argc, char** argv) {
                 "deck evolution");
         }
         if (learned_generations_option_used &&
-            !(interactive || stability || score_probes ||
+            !(interactive || stability ||
+              diagnose_force_spike_teacher || score_probes ||
               tournament_uses_value)) {
             throw std::invalid_argument(
                 "--learned-generations requires --interactive, "
-                "--stability, --score-probes, or a mixed/learned-value "
-                "simulation; benchmark challengers use "
+                "--stability, --diagnose-force-spike-teacher, "
+                "--score-probes, or a mixed/learned-value simulation; "
+                "benchmark challengers use "
                 "learned-value-cN");
         }
         if (learned_rollouts_option_used &&
@@ -2624,14 +2793,19 @@ int main(int argc, char** argv) {
              (selects_mix50_value_bundle(challenger) ||
               selects_mix50_value_bundle(baseline)));
         const bool value_challenger_will_be_used =
-            ((interactive || stability || score_probes ||
+            ((interactive || stability ||
+              diagnose_force_spike_teacher || score_probes ||
               tournament_uses_value) &&
              learned_generations > 0) ||
             (benchmark &&
              (selects_value_challenger(challenger) ||
               selects_value_challenger(baseline) ||
               selects_value_context_challenger(challenger) ||
-              selects_value_context_challenger(baseline))) ||
+              selects_value_context_challenger(baseline) ||
+              selects_value_dense_masked_challenger(challenger) ||
+              selects_value_dense_masked_challenger(baseline) ||
+              selects_value_dense_context_challenger(challenger) ||
+              selects_value_dense_context_challenger(baseline))) ||
             (evolve &&
              selects_value_context_challenger(evolve_pilot));
         if (refresh_value_challenger_cache &&
@@ -2657,6 +2831,80 @@ int main(int argc, char** argv) {
                 old_school::diagnose_value_context_aliases();
             print_value_context_alias_diagnostic(result);
             return result.demonstrated() ? 0 : 1;
+        }
+        if (diagnose_force_spike_teacher) {
+            const auto value_s0 =
+                train_value_challenger_with_progress(
+                    training_games, training_seed,
+                    learned_generations, false);
+            const auto actor_g0 =
+                train_actor_g0_with_progress(
+                    training_games, training_seed);
+            const std::string generation =
+                std::to_string(learned_generations);
+            std::vector<
+                old_school::probe_runner::
+                    TeacherSufficiencyAuditReport>
+                reports;
+            reports.reserve(3);
+            std::cout
+                << "Scoring S0 C" << generation
+                << " Value K=256/H=4 unblended teacher..."
+                << std::flush;
+            reports.push_back(
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        value_s0,
+                        "S0 C" + generation +
+                            " Value K256/H4",
+                        {
+                            .worlds = 256,
+                            .horizon_turns = 4,
+                            .continuation_variant =
+                                old_school::LearnedVariant::
+                                    ValueSearchChampion,
+                            .blend_shallow_prior = false,
+                        }));
+            std::cout << " done\n"
+                      << "Scoring S0 C" << generation
+                      << " Value K=256/H=0 unblended control..."
+                      << std::flush;
+            reports.push_back(
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        value_s0,
+                        "S0 C" + generation +
+                            " Value K256/H0",
+                        {
+                            .worlds = 256,
+                            .horizon_turns = 0,
+                            .continuation_variant =
+                                old_school::LearnedVariant::
+                                    ValueSearchChampion,
+                            .blend_shallow_prior = false,
+                        }));
+            std::cout << " done\n"
+                      << "Scoring Actor G0 K=256/H=0 unblended "
+                         "control..."
+                      << std::flush;
+            reports.push_back(
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        actor_g0, "Actor G0 K256/H0",
+                        {
+                            .worlds = 256,
+                            .horizon_turns = 0,
+                            .continuation_variant =
+                                old_school::LearnedVariant::
+                                    UnifiedActor,
+                            .blend_shallow_prior = false,
+                        }));
+            std::cout
+                << " done\n\n"
+                << old_school::probe_runner::
+                       format_teacher_sufficiency_audit_report(
+                           reports);
+            return 0;
         }
         if (interactive) {
             const auto matchup =
@@ -2738,7 +2986,7 @@ int main(int argc, char** argv) {
                 challenger_scoring_models;
             if (learned_generations > 0) {
                 const std::string transition_family =
-                    probe_context_challenger_selected
+                    probe_context_ablation_selected
                         ? "value-context-ablation-c" +
                               std::to_string(
                                   learned_generations)
@@ -2759,7 +3007,7 @@ int main(int argc, char** argv) {
                         .transition_family =
                             transition_family,
                     });
-                if (probe_context_challenger_selected) {
+                if (probe_context_ablation_selected) {
                     challenger_scoring_models.push_back(
                         {
                             .name =
@@ -2770,6 +3018,45 @@ int main(int argc, char** argv) {
                                 train_value_context_challenger_with_progress(
                                     training_games, training_seed,
                                     learned_generations,
+                                    refresh_value_challenger_cache),
+                            .transition_family =
+                                transition_family,
+                        });
+                }
+                if (probe_dense_masked_challenger_selected ||
+                    probe_dense_context_challenger_selected) {
+                    challenger_scoring_models.push_back(
+                        {
+                            .name =
+                                "Value Dense Masked C" +
+                                std::to_string(
+                                    learned_generations),
+                            .model =
+                                train_value_dense_context_challenger_with_progress(
+                                    training_games, training_seed,
+                                    learned_generations,
+                                    old_school::
+                                        LearnedValueDenseContextTreatment::
+                                            ContextMasked,
+                                    refresh_value_challenger_cache),
+                            .transition_family =
+                                transition_family,
+                        });
+                }
+                if (probe_dense_context_challenger_selected) {
+                    challenger_scoring_models.push_back(
+                        {
+                            .name =
+                                "Value Dense Context C" +
+                                std::to_string(
+                                    learned_generations),
+                            .model =
+                                train_value_dense_context_challenger_with_progress(
+                                    training_games, training_seed,
+                                    learned_generations,
+                                    old_school::
+                                        LearnedValueDenseContextTreatment::
+                                            ContextLive,
                                     refresh_value_challenger_cache),
                             .transition_family =
                                 transition_family,
@@ -2883,6 +3170,14 @@ int main(int argc, char** argv) {
                 std::size_t,
                 std::shared_ptr<const old_school::LearnedModel>>
                 frozen_value_context_challengers;
+            std::map<
+                std::size_t,
+                std::shared_ptr<const old_school::LearnedModel>>
+                frozen_value_dense_masked_challengers;
+            std::map<
+                std::size_t,
+                std::shared_ptr<const old_school::LearnedModel>>
+                frozen_value_dense_context_challengers;
             old_school::LearnedValueG8Result frozen_value_bundle;
             old_school::LearnedValueG8Result
                 frozen_value_mix50_bundle;
@@ -2930,6 +3225,52 @@ int main(int argc, char** argv) {
                                 selection.value_generation,
                                 refresh_value_challenger_cache);
                         frozen_value_context_challengers.emplace(
+                            selection.value_generation, model);
+                        return model;
+                    }
+                    if (selection.value_family ==
+                        BotSelection::ValueFamily::
+                            DenseMaskedChallenger) {
+                        const auto found =
+                            frozen_value_dense_masked_challengers.find(
+                                selection.value_generation);
+                        if (found !=
+                            frozen_value_dense_masked_challengers
+                                .end()) {
+                            return found->second;
+                        }
+                        auto model =
+                            train_value_dense_context_challenger_with_progress(
+                                training_games, training_seed,
+                                selection.value_generation,
+                                old_school::
+                                    LearnedValueDenseContextTreatment::
+                                        ContextMasked,
+                                refresh_value_challenger_cache);
+                        frozen_value_dense_masked_challengers.emplace(
+                            selection.value_generation, model);
+                        return model;
+                    }
+                    if (selection.value_family ==
+                        BotSelection::ValueFamily::
+                            DenseContextChallenger) {
+                        const auto found =
+                            frozen_value_dense_context_challengers.find(
+                                selection.value_generation);
+                        if (found !=
+                            frozen_value_dense_context_challengers
+                                .end()) {
+                            return found->second;
+                        }
+                        auto model =
+                            train_value_dense_context_challenger_with_progress(
+                                training_games, training_seed,
+                                selection.value_generation,
+                                old_school::
+                                    LearnedValueDenseContextTreatment::
+                                        ContextLive,
+                                refresh_value_challenger_cache);
+                        frozen_value_dense_context_challengers.emplace(
                             selection.value_generation, model);
                         return model;
                     }
@@ -3037,6 +3378,10 @@ int main(int argc, char** argv) {
                     case BotSelection::ValueFamily::Challenger:
                     case BotSelection::ValueFamily::
                         ContextChallenger:
+                    case BotSelection::ValueFamily::
+                        DenseMaskedChallenger:
+                    case BotSelection::ValueFamily::
+                        DenseContextChallenger:
                     case BotSelection::ValueFamily::Canonical:
                         return left.value_generation ==
                                right.value_generation;
@@ -3097,6 +3442,28 @@ int main(int argc, char** argv) {
                                 ContextChallenger) {
                             return std::string(
                                        "Learned Value Context C") +
+                                   std::to_string(
+                                       selection.value_generation) +
+                                   value_continuation_epsilon_suffix(
+                                       config
+                                           .value_continuation_epsilon);
+                        }
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                DenseMaskedChallenger) {
+                            return std::string(
+                                       "Learned Value Dense Masked C") +
+                                   std::to_string(
+                                       selection.value_generation) +
+                                   value_continuation_epsilon_suffix(
+                                       config
+                                           .value_continuation_epsilon);
+                        }
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                DenseContextChallenger) {
+                            return std::string(
+                                       "Learned Value Dense Context C") +
                                    std::to_string(
                                        selection.value_generation) +
                                    value_continuation_epsilon_suffix(

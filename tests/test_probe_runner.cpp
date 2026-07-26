@@ -826,9 +826,11 @@ void test_force_spike_control_gate_and_report_semantics() {
             output.find("behavioral gate: PASS") !=
                 std::string::npos &&
             output.find("behavioral gate: FAIL") !=
+                std::string::npos &&
+            output.find("Value Priority residual weight") ==
                 std::string::npos,
         "Force Spike control report lost exact scores, selections, "
-        "or gate status");
+        "gate status, or legacy-zero formatting");
 }
 
 void test_force_spike_control_scorer_uses_deployed_value_path() {
@@ -842,9 +844,14 @@ void test_force_spike_control_scorer_uses_deployed_value_path() {
         old_school::probe_runner::
             score_value_force_spike_policy_controls(
                 model, "Synthetic Value", 2);
+    const auto explicit_zero =
+        old_school::probe_runner::
+            score_value_force_spike_policy_controls(
+                model, "Synthetic Value", 2, 0.0, 0.0);
 
-    expect(first == repeated,
-           "deployed Force Spike control scorer is not deterministic");
+    expect(
+        first == repeated && first == explicit_zero,
+        "explicit zero changed legacy deployed Force Spike scores");
     expect(
         first.model_fingerprint ==
                 old_school::learned_model_fingerprint(model) &&
@@ -866,6 +873,18 @@ void test_force_spike_control_scorer_uses_deployed_value_path() {
             !first.payable.selected_keys.empty(),
         "Force Spike control scorer omitted a state, score, or "
         "exact-max selection");
+    ProbeScoreReport default_report;
+    default_report.metadata.corpus_id =
+        std::string(old_school::probes::kProbeDevV3);
+    default_report.force_spike_controls = {first};
+    ProbeScoreReport explicit_zero_report = default_report;
+    explicit_zero_report.force_spike_controls = {explicit_zero};
+    expect(
+        old_school::probe_runner::format_probe_score_report(
+            default_report) ==
+            old_school::probe_runner::format_probe_score_report(
+                explicit_zero_report),
+        "explicit zero changed legacy Force Spike report output");
 
     const std::string world_error = expect_invalid(
         [&] {
@@ -877,6 +896,354 @@ void test_force_spike_control_scorer_uses_deployed_value_path() {
         "Force Spike controls accepted an under-sampled K");
     expect(world_error.find("[2, 4096]") != std::string::npos,
            "Force Spike K validation was not actionable");
+}
+
+void test_force_spike_residual_uses_trained_priority_head() {
+    const auto parent =
+        old_school::train_learned_value_champion(
+            1, 0x5052494FULL);
+    const auto controls =
+        old_school::probes::make_force_spike_policy_controls_v1();
+    const DecisionProbe& live = controls.front();
+    const bool sorcery_actions =
+        live.phase == old_school::TurnPhase::FirstMain ||
+        live.phase == old_school::TurnPhase::SecondMain;
+
+    std::vector<old_school::PriorityAction> actions;
+    std::vector<std::vector<double>> options;
+    actions.reserve(live.candidates.size());
+    options.reserve(live.candidates.size());
+    for (const auto& candidate : live.candidates) {
+        const auto* action =
+            std::get_if<old_school::PriorityAction>(
+                &candidate.action);
+        expect(action != nullptr,
+               "Force Spike control contains a non-Priority action");
+        actions.push_back(*action);
+        options.push_back(
+            old_school::learned_priority_policy_features(
+                live.state, live.root_player, *action,
+                sorcery_actions, live.phase,
+                live.consecutive_passes));
+    }
+    expect(options.size() >= 2,
+           "Force Spike control lost its policy alternatives");
+
+    std::vector<double> targets(options.size(), 0.0);
+    targets.front() = 1.0;
+    const old_school::LearnedValuePriorityTrainingExample example{
+        .options = options,
+        .base_scores =
+            std::vector<double>(options.size(), 0.5),
+        .target_probabilities = targets,
+        .weight = 1.0,
+    };
+    const auto trained =
+        old_school::update_learned_value_priority_head(
+            parent, {example},
+            {
+                .batch_size = 1,
+                .epochs = 20,
+                .learning_rate = 0.02,
+                .beta1 = 0.9,
+                .beta2 = 0.999,
+                .epsilon = 1.0e-8,
+                .global_gradient_norm_clip = 5.0,
+                .seed = 0x524553494455414CULL,
+                .residual_weight = 0.10,
+                .policy_temperature = 0.10,
+            });
+    const auto logits =
+        old_school::learned_policy_head_logits(
+            options,
+            old_school::LearnedPolicyDecisionKind::Priority,
+            trained);
+    const auto [minimum_logit, maximum_logit] =
+        std::minmax_element(logits.begin(), logits.end());
+    expect(
+        maximum_logit != logits.end() &&
+            minimum_logit != logits.end() &&
+            *maximum_logit != *minimum_logit,
+        "synthetic Priority-head training remained uniform");
+
+    const auto combined =
+        old_school::diagnose_learned_value_priority(
+            live.state, live.original_decks, live.root_player,
+            sorcery_actions, live.phase,
+            live.consecutive_passes, trained, 2,
+            0x524553494455414CULL, 0.0, 0.10);
+    expect(
+        combined.scores.size() == combined.base_scores.size() &&
+            combined.scores.size() ==
+                combined.priority_residuals.size() &&
+            std::all_of(
+                combined.scores.begin(), combined.scores.end(),
+                [](double score) {
+                    return std::isfinite(score);
+                }) &&
+            std::all_of(
+                combined.priority_residuals.begin(),
+                combined.priority_residuals.end(),
+                [](double residual) {
+                    return std::isfinite(residual);
+                }) &&
+            std::any_of(
+                combined.priority_residuals.begin(),
+                combined.priority_residuals.end(),
+                [](double residual) {
+                    return residual != 0.0;
+                }),
+        "trained nonuniform Priority head did not produce finite "
+        "combined Value scores");
+
+    const auto legacy =
+        old_school::probe_runner::
+            score_value_force_spike_policy_controls(
+                trained, "Synthetic residual Value", 2, 0.0, 0.0);
+    const auto residual =
+        old_school::probe_runner::
+            score_value_force_spike_policy_controls(
+                trained, "Synthetic residual Value", 2, 0.0, 0.10);
+    const bool score_changed =
+        legacy.live.pass_score != residual.live.pass_score ||
+        legacy.live.force_spike_score !=
+            residual.live.force_spike_score ||
+        legacy.payable.pass_score != residual.payable.pass_score ||
+        legacy.payable.force_spike_score !=
+            residual.payable.force_spike_score;
+    expect(
+        residual.value_priority_residual_weight == 0.10 &&
+            residual.hidden_repartition_passed &&
+            std::isfinite(residual.live.pass_score) &&
+            std::isfinite(residual.live.force_spike_score) &&
+            std::isfinite(residual.payable.pass_score) &&
+            std::isfinite(residual.payable.force_spike_score) &&
+            score_changed,
+        "residual Force Spike scoring did not exercise finite "
+        "combined scores or hidden repartition");
+
+    ProbeScoreReport report;
+    report.metadata.corpus_id =
+        std::string(old_school::probes::kProbeDevV3);
+    report.force_spike_controls = {residual};
+    expect(
+        old_school::probe_runner::format_probe_score_report(report)
+                .find(
+                    "Value Priority residual weight=0.1000") !=
+            std::string::npos,
+        "Force Spike report did not identify the residual scorer");
+}
+
+void test_teacher_audit_ordered_blocks_are_exact() {
+    std::vector<double> first(32, 0.6);
+    std::vector<double> second(32, 0.4);
+    std::fill(first.begin() + 24, first.end(), 0.4);
+    const auto three_of_four =
+        old_school::probe_runner::summarize_ordered_pair_blocks(
+            first, second);
+    expect(
+        three_of_four.worlds_per_block == 8 &&
+            three_of_four.block_count == 4 &&
+            three_of_four.correct_block_count == 3 &&
+            three_of_four.required_correct_block_count() == 3 &&
+            three_of_four.gate_passed(),
+        "ordered K=8 blocks did not implement the 75% gate");
+
+    // The fourth block is an exact tie and must not be credited.
+    std::fill(first.begin() + 16, first.begin() + 24, 0.4);
+    const auto two_of_four =
+        old_school::probe_runner::summarize_ordered_pair_blocks(
+            first, second);
+    expect(
+        two_of_four.correct_block_count == 2 &&
+            !two_of_four.gate_passed(),
+        "ordered block gate credited an incorrect or tied block");
+
+    const std::string shape_error = expect_invalid(
+        [] {
+            static_cast<void>(
+                old_school::probe_runner::
+                    summarize_ordered_pair_blocks(
+                        {0.5, 0.5}, {0.4}, 1));
+        },
+        "ordered block scorer accepted mismatched samples");
+    expect(
+        shape_error.find("equally sized") != std::string::npos,
+        "ordered block shape error was not actionable");
+    const std::string divisibility_error = expect_invalid(
+        [] {
+            static_cast<void>(
+                old_school::probe_runner::
+                    summarize_ordered_pair_blocks(
+                        std::vector<double>(9, 0.5),
+                        std::vector<double>(9, 0.4)));
+        },
+        "ordered block scorer accepted a partial K=8 block");
+    expect(
+        divisibility_error.find("divisible") != std::string::npos,
+        "ordered block divisibility error was not actionable");
+}
+
+void test_teacher_sufficiency_audit_is_generic_and_hidden_safe() {
+    using old_school::probe_runner::TeacherSufficiencyAuditConfig;
+    const auto value =
+        old_school::train_learned_value_champion(1, 0x7EA0E2ULL);
+    const TeacherSufficiencyAuditConfig value_config{
+        .worlds = 8,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = false,
+    };
+    const auto first =
+        old_school::probe_runner::score_teacher_sufficiency_audit(
+            value, "Synthetic Value K8/H0", value_config);
+    const auto repeated =
+        old_school::probe_runner::score_teacher_sufficiency_audit(
+            value, "Synthetic Value K8/H0", value_config);
+    expect(first == repeated,
+           "teacher-sufficiency audit is not deterministic");
+    expect(
+        first.model_fingerprint ==
+                old_school::learned_model_fingerprint(value) &&
+            first.config == value_config &&
+            first.hidden_repartition_bit_identical,
+        "teacher audit lost its frozen model/config identity or "
+        "hidden safety");
+
+    const std::array<
+        const old_school::probe_runner::TeacherOptionComparison*, 3>
+        comparisons = {
+            &first.force_spike_live,
+            &first.force_spike_payable,
+            &first.disintegrate_x_zero,
+        };
+    for (const auto* comparison : comparisons) {
+        expect(
+            comparison->estimate.samples_per_candidate == 8 &&
+                comparison->ordered_blocks.worlds_per_block == 8 &&
+                comparison->ordered_blocks.block_count == 1 &&
+                comparison->ordered_blocks
+                        .required_correct_block_count() == 1 &&
+                comparison->hidden_repartition_bit_identical &&
+                !comparison->selected_keys.empty() &&
+                std::isfinite(comparison->estimate.delta_q) &&
+                std::isfinite(
+                    comparison->estimate.paired_standard_error) &&
+                std::isfinite(
+                    comparison->estimate.confidence_lower_95) &&
+                std::isfinite(
+                    comparison->estimate.confidence_upper_95),
+            "tiny teacher audit omitted paired statistics, exact "
+            "selection, K=8 accounting, or hidden invariance");
+    }
+    const auto validation =
+        old_school::probes::make_probe_validation_v1();
+    const auto validation_pass = std::find_if(
+        validation.front().candidates.begin(),
+        validation.front().candidates.end(),
+        [](const old_school::probes::Candidate& candidate) {
+            const auto* action =
+                std::get_if<old_school::PriorityAction>(
+                    &candidate.action);
+            return action != nullptr &&
+                   action->kind ==
+                       old_school::PriorityActionKind::Pass;
+        });
+    expect(
+        first.force_spike_live.estimate.first_key ==
+                "force-spike-gray-ogre" &&
+            first.force_spike_live.estimate.second_key == "pass" &&
+            first.force_spike_payable.estimate.first_key == "pass" &&
+            first.force_spike_payable.estimate.second_key ==
+                "force-spike-gray-ogre" &&
+            validation_pass !=
+                validation.front().candidates.end() &&
+            first.disintegrate_x_zero.estimate.first_key ==
+                validation_pass->descriptor,
+        "teacher audit did not orient the three comparisons toward "
+        "the preregistered correct action");
+
+    const auto actor =
+        old_school::train_learned_actor_model(1, 0x7EA0E2ULL);
+    const TeacherSufficiencyAuditConfig actor_config{
+        .worlds = 8,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .blend_shallow_prior = false,
+    };
+    const auto actor_report =
+        old_school::probe_runner::score_teacher_sufficiency_audit(
+            actor, "Synthetic Actor K8/H0", actor_config);
+    expect(
+        actor_report.config.continuation_variant ==
+                old_school::LearnedVariant::UnifiedActor &&
+            actor_report.hidden_repartition_bit_identical,
+        "generic teacher audit did not support an Actor mirror");
+
+    TeacherSufficiencyAuditConfig blended_config = value_config;
+    blended_config.blend_shallow_prior = true;
+    const auto blended_report =
+        old_school::probe_runner::score_teacher_sufficiency_audit(
+            value, "Synthetic Value K8/H0 blended",
+            blended_config);
+    expect(
+        blended_report.config.blend_shallow_prior &&
+            blended_report.hidden_repartition_bit_identical &&
+            blended_report.force_spike_live.estimate
+                    .samples_per_candidate == 8,
+        "generic teacher audit did not support a shallow-prior blend");
+
+    const std::string formatted =
+        old_school::probe_runner::
+            format_teacher_sufficiency_audit_report(
+                {first, actor_report});
+    expect(
+        formatted.find("P16 Search-Teacher Sufficiency Audit") !=
+                std::string::npos &&
+            formatted.find("no probe-label cache access or mutation") !=
+                std::string::npos &&
+            formatted.find("[PRIMARY] Synthetic Value K8/H0") !=
+                std::string::npos &&
+            formatted.find("[DIAGNOSTIC] Synthetic Actor K8/H0") !=
+                std::string::npos &&
+            formatted.find("oriented delta: Q(") !=
+                std::string::npos &&
+            formatted.find("paired SE") != std::string::npos &&
+            formatted.find("95% CI") != std::string::npos &&
+            formatted.find("exact selected keys: {") !=
+                std::string::npos &&
+            formatted.find("ordered K=8 blocks:") !=
+                std::string::npos &&
+            formatted.find("Primary teacher gate:") !=
+                std::string::npos,
+        "teacher audit formatter omitted preregistered evidence");
+
+    const std::string world_error = expect_invalid(
+        [&] {
+            auto invalid = value_config;
+            invalid.worlds = 9;
+            static_cast<void>(
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        value, "Invalid K", invalid));
+        },
+        "teacher audit accepted a partial K=8 block");
+    expect(
+        world_error.find("multiple of 8") != std::string::npos,
+        "teacher audit world validation was not actionable");
+    const std::string null_error = expect_invalid(
+        [&] {
+            static_cast<void>(
+                old_school::probe_runner::
+                    score_teacher_sufficiency_audit(
+                        nullptr, "Null", value_config));
+        },
+        "teacher audit accepted a null model");
+    expect(
+        null_error.find("frozen model") != std::string::npos,
+        "teacher audit null-model validation was not actionable");
 }
 
 void test_value_decision_detail_respects_ties_and_selectors() {
@@ -1443,7 +1810,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 .reference_value_model = reference_value,
                 .reference_value_name = "Value G0",
                 .scoring_value_models = {
-                    {"Value G8", scoring_value, ""},
+                    {"Value G8", scoring_value, "", 0.10},
                 },
             });
     expect(
@@ -1467,7 +1834,11 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             value_loaded.force_spike_controls[0].policy_name ==
                 "Value G0" &&
             value_loaded.force_spike_controls[1].policy_name ==
-                "Value G8",
+                "Value G8" &&
+            value_loaded.force_spike_controls[0]
+                    .value_priority_residual_weight == 0.0 &&
+            value_loaded.force_spike_controls[1]
+                    .value_priority_residual_weight == 0.10,
         "supplemental Force Spike controls changed balanced "
         "denominators or lost G0/candidate order");
     expect(
@@ -1475,6 +1846,12 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                 "Value G0 deployed policy" &&
             value_loaded.policies[3].name ==
                 "Value G8 deployed policy" &&
+            value_loaded.policies[2].configuration.find(
+                "Value Priority residual weight") ==
+                std::string::npos &&
+            value_loaded.policies[3].configuration.find(
+                "Value Priority residual weight=0.1") !=
+                std::string::npos &&
             value_loaded.policies.back().name ==
                 "Value G0-continuation deep cross-check",
         "Value candidate/reference policy rows were mislabeled");
@@ -1487,6 +1864,9 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
             value_output.find("Scoring Value model fingerprint") !=
                 std::string::npos &&
             value_output.find("6 policy views") !=
+                std::string::npos &&
+            value_output.find(
+                "Value Priority residual weight=0.1000") !=
                 std::string::npos,
         "formatted report did not distinguish the Value candidate");
 
@@ -1635,7 +2015,7 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                     {"Value Mix50 G8", third_scoring_value,
                      "mix50"},
                     {"Value Challenger C16", scoring_value,
-                     "challenger-c16"},
+                     "challenger-c16", 0.10},
                 },
             });
     expect(
@@ -1687,7 +2067,11 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
                     .transition_parent_name ==
                 "Value Mix50 G7" &&
             checkpoint_loaded.value_checkpoints[10]
-                    .transition_parent_name == "Value G0",
+                    .transition_parent_name == "Value G0" &&
+            checkpoint_loaded.value_checkpoints[0]
+                    .value_priority_residual_weight == 0.0 &&
+            checkpoint_loaded.value_checkpoints[10]
+                    .value_priority_residual_weight == 0.10,
         "Value checkpoint rows did not preserve exact caller order");
     const std::array<std::string, 11> expected_fingerprints{
         old_school::learned_model_fingerprint(reference_value),
@@ -1766,6 +2150,9 @@ void test_candidate_scoring_reuses_reference_owned_cache() {
     expect(
         checkpoint_output.find(
             "Value Challenger C16: fingerprint ") !=
+                std::string::npos &&
+            checkpoint_output.find(
+                "Value Priority residual weight=0.1000") !=
                 std::string::npos &&
             checkpoint_output.find(
                 "transition parent Value G0") !=
@@ -2093,6 +2480,12 @@ int main() {
                test_force_spike_control_gate_and_report_semantics);
     runner.run("Force Spike deployed Value scorer",
                test_force_spike_control_scorer_uses_deployed_value_path);
+    runner.run("Force Spike trained Value residual scorer",
+               test_force_spike_residual_uses_trained_priority_head);
+    runner.run("teacher audit ordered K8 blocks",
+               test_teacher_audit_ordered_blocks_are_exact);
+    runner.run("teacher audit generic hidden-safe scorer",
+               test_teacher_sufficiency_audit_is_generic_and_hidden_safe);
     runner.run("Value selection detail semantics",
                test_value_decision_detail_respects_ties_and_selectors);
     runner.run("actionable low-margin summary",

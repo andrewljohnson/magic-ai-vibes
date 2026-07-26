@@ -175,6 +175,9 @@ struct ValueCheckpointProbeReport {
     // used for its adjacent-transition comparison; this need not be the
     // immediately preceding displayed row when families are independent.
     std::string transition_parent_name;
+    // Zero is the legacy deployed Value selector. Nonzero candidates add the
+    // bounded, learned Priority-head residual after the unchanged Value score.
+    double value_priority_residual_weight = 0.0;
     probe_eval::ProbeMetricSummary metrics;
     // Stable-ID order, independent of fixture or cache row order.
     std::vector<ValueProbeDecisionDetail> decisions;
@@ -191,6 +194,8 @@ struct CandidatePairEstimate {
     double paired_standard_error = 0.0;
     double confidence_lower_95 = 0.0;
     double confidence_upper_95 = 0.0;
+
+    bool operator==(const CandidatePairEstimate&) const = default;
 };
 
 // Extracts and explicitly orients a cached common-world pair as
@@ -219,12 +224,77 @@ struct ForceSpikePolicyControlReport {
     ForceSpikeControlDecision live;
     ForceSpikeControlDecision payable;
     bool hidden_repartition_passed = false;
+    double value_priority_residual_weight = 0.0;
 
     bool live_selects_force_spike() const;
     bool payable_selects_pass() const;
     bool gate_passed() const;
 
     bool operator==(const ForceSpikePolicyControlReport&) const =
+        default;
+};
+
+inline constexpr std::size_t kTeacherAuditBlockWorlds = 8;
+
+struct OrderedPairBlockSummary {
+    std::size_t worlds_per_block = kTeacherAuditBlockWorlds;
+    std::size_t block_count = 0;
+    std::size_t correct_block_count = 0;
+
+    // The preregistered practical-teacher gate is at least three quarters of
+    // the ordered K=8 blocks. Exact ties are counted as incorrect.
+    std::size_t required_correct_block_count() const;
+    bool gate_passed() const;
+
+    bool operator==(const OrderedPairBlockSummary&) const = default;
+};
+
+// Summarizes paired, world-major Q samples as disjoint ordered blocks. A block
+// is correct only when mean(first) is strictly greater than mean(second).
+OrderedPairBlockSummary summarize_ordered_pair_blocks(
+    const std::vector<double>& first,
+    const std::vector<double>& second,
+    std::size_t worlds_per_block = kTeacherAuditBlockWorlds);
+
+struct TeacherOptionComparison {
+    std::string description;
+    CandidatePairEstimate estimate;
+    // Complete exact-score argmax set across every legal action in the
+    // fixture. This deliberately exposes ties instead of sampling one key.
+    std::vector<std::string> selected_keys;
+    OrderedPairBlockSummary ordered_blocks;
+    bool hidden_repartition_bit_identical = false;
+
+    bool confidence_gate_passed() const;
+    bool block_gate_passed() const;
+    bool gate_passed() const;
+
+    bool operator==(const TeacherOptionComparison&) const = default;
+};
+
+struct TeacherSufficiencyAuditConfig {
+    std::size_t worlds = 256;
+    std::size_t horizon_turns = 4;
+    LearnedVariant continuation_variant =
+        LearnedVariant::ValueSearchChampion;
+    bool blend_shallow_prior = false;
+
+    bool operator==(const TeacherSufficiencyAuditConfig&) const =
+        default;
+};
+
+struct TeacherSufficiencyAuditReport {
+    std::string policy_name;
+    std::string model_fingerprint;
+    TeacherSufficiencyAuditConfig config;
+    TeacherOptionComparison force_spike_live;
+    TeacherOptionComparison force_spike_payable;
+    TeacherOptionComparison disintegrate_x_zero;
+    bool hidden_repartition_bit_identical = false;
+
+    bool gate_passed() const;
+
+    bool operator==(const TeacherSufficiencyAuditReport&) const =
         default;
 };
 
@@ -356,6 +426,8 @@ struct NamedValueScoringModel {
     // ladder. The first row in each family compares directly with G0.
     // An empty family is a standalone candidate compared directly with G0.
     std::string transition_family;
+    // Zero preserves legacy deployed Value scoring bit-for-bit.
+    double value_priority_residual_weight = 0.0;
 };
 
 struct ProbeScoringModels {
@@ -392,7 +464,21 @@ ForceSpikePolicyControlReport
 score_value_force_spike_policy_controls(
     std::shared_ptr<const LearnedModel> model,
     std::string policy_name, std::size_t worlds = 8,
-    double value_continuation_epsilon = 0.0);
+    double value_continuation_epsilon = 0.0,
+    double value_priority_residual_weight = 0.0);
+
+// Eval-only P16 prerequisite. Scores the existing Force Spike live/payable
+// controls and validation-v1 Pass/X=0 decision with a caller-supplied frozen
+// model and search semantics. It neither reads nor writes probe-label caches.
+TeacherSufficiencyAuditReport score_teacher_sufficiency_audit(
+    std::shared_ptr<const LearnedModel> model,
+    std::string policy_name,
+    TeacherSufficiencyAuditConfig config = {});
+
+// The first row is treated as the preregistered primary teacher; later rows
+// are explicitly diagnostic controls and cannot substitute for it.
+std::string format_teacher_sufficiency_audit_report(
+    const std::vector<TeacherSufficiencyAuditReport>& reports);
 
 // Builds the exact deployed-selection attribution used by checkpoint reports.
 // Null selected_key means uniform choice over all exact score maxima; a

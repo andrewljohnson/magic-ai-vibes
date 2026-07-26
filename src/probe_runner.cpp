@@ -985,7 +985,8 @@ std::vector<double> learned_search_scores(
     LearnedVariant continuation_variant, std::size_t worlds,
     std::size_t rollouts_per_world, std::size_t horizon_turns,
     bool blend_shallow_prior,
-    double value_continuation_epsilon = 0.0) {
+    double value_continuation_epsilon = 0.0,
+    double value_priority_residual_weight = 0.0) {
     const LearnedSearchConfig config{
         .seed = reference_seed_for_probe(
             corpus_id, probe.stable_id),
@@ -996,6 +997,8 @@ std::vector<double> learned_search_scores(
         .value_continuation_epsilon =
             value_continuation_epsilon,
         .blend_shallow_prior = blend_shallow_prior,
+        .value_priority_residual_weight =
+            value_priority_residual_weight,
     };
     const LearnedActionSamples samples =
         score_probe_actions(probe, probe.state, model, config);
@@ -1083,7 +1086,8 @@ std::vector<probe_eval::ProbePrediction> score_value_deployed(
     const std::vector<probes::DecisionProbe>& corpus,
     std::shared_ptr<const LearnedModel> value_model,
     std::string_view corpus_id, std::size_t worlds,
-    double value_continuation_epsilon) {
+    double value_continuation_epsilon,
+    double value_priority_residual_weight) {
     std::vector<probe_eval::ProbePrediction> predictions;
     predictions.reserve(corpus.size());
     for (const probes::DecisionProbe& probe : corpus) {
@@ -1096,7 +1100,8 @@ std::vector<probe_eval::ProbePrediction> score_value_deployed(
                 LearnedVariant::ValueSearchChampion,
                 worlds, 1,
                 kProductionValueHorizon, true,
-                value_continuation_epsilon);
+                value_continuation_epsilon,
+                value_priority_residual_weight);
         } else {
             const auto attack =
                 value_deployed_attack_scores(
@@ -1634,6 +1639,7 @@ ValueProbeDecisionDetail build_value_probe_decision_detail(
 
 ValueCheckpointProbeReport make_value_checkpoint_report(
     std::string name, std::string fingerprint,
+    double value_priority_residual_weight,
     const std::vector<probe_eval::ProbeLabel>& labels,
     const std::vector<probe_eval::ProbePrediction>& predictions,
     const std::vector<probe_eval::ProbePrediction>& clone_predictions,
@@ -1648,6 +1654,8 @@ ValueCheckpointProbeReport make_value_checkpoint_report(
         .fingerprint = std::move(fingerprint),
         .transition_parent_name =
             previous == nullptr ? std::string{} : previous->name,
+        .value_priority_residual_weight =
+            value_priority_residual_weight,
         .metrics = evaluated.metrics,
     };
     checkpoint.decisions.reserve(labels.size());
@@ -1871,7 +1879,8 @@ std::vector<CandidatePairEstimate> score_value_candidate_pair(
     ProbeCorpusKind corpus_kind,
     const std::vector<probes::DecisionProbe>& corpus,
     std::shared_ptr<const LearnedModel> model, std::string name,
-    std::string_view corpus_id, const ProbeScoreConfig& config) {
+    std::string_view corpus_id, const ProbeScoreConfig& config,
+    double value_priority_residual_weight) {
     const auto focused =
         focused_candidate_pair(corpus_kind, corpus);
     if (!focused.has_value()) {
@@ -1888,6 +1897,8 @@ std::vector<CandidatePairEstimate> score_value_candidate_pair(
         .value_continuation_epsilon =
             config.scoring_value_continuation_epsilon,
         .blend_shallow_prior = true,
+        .value_priority_residual_weight =
+            value_priority_residual_weight,
     };
     const LearnedActionSamples original =
         score_probe_actions(
@@ -1913,7 +1924,186 @@ std::vector<CandidatePairEstimate> score_value_candidate_pair(
         config.scoring_value_worlds)};
 }
 
+const probes::DecisionProbe& probe_with_stable_id(
+    const std::vector<probes::DecisionProbe>& corpus,
+    std::string_view stable_id) {
+    const auto found = std::find_if(
+        corpus.begin(), corpus.end(),
+        [stable_id](const probes::DecisionProbe& probe) {
+            return probe.stable_id == stable_id;
+        });
+    if (found == corpus.end()) {
+        throw std::invalid_argument(
+            "teacher audit fixture is missing " +
+            std::string(stable_id));
+    }
+    return *found;
+}
+
+bool action_samples_bit_identical(
+    const LearnedActionSamples& first,
+    const LearnedActionSamples& second) {
+    if (first.sampled_worlds != second.sampled_worlds ||
+        first.rollout_evaluations != second.rollout_evaluations ||
+        first.q_samples.size() != second.q_samples.size()) {
+        return false;
+    }
+    for (std::size_t candidate = 0;
+         candidate < first.q_samples.size(); ++candidate) {
+        if (first.q_samples[candidate].size() !=
+            second.q_samples[candidate].size()) {
+            return false;
+        }
+        for (std::size_t sample = 0;
+             sample < first.q_samples[candidate].size(); ++sample) {
+            if (!bit_identical(
+                    first.q_samples[candidate][sample],
+                    second.q_samples[candidate][sample])) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+const probe_eval::CandidateSamples& candidate_samples_for(
+    const std::vector<probe_eval::CandidateSamples>& samples,
+    std::string_view key) {
+    const auto found = std::find_if(
+        samples.begin(), samples.end(),
+        [key](const probe_eval::CandidateSamples& candidate) {
+            return candidate.key == key;
+        });
+    if (found == samples.end()) {
+        throw std::invalid_argument(
+            "teacher audit samples are missing candidate " +
+            std::string(key));
+    }
+    return *found;
+}
+
+TeacherOptionComparison score_teacher_option_comparison(
+    const probes::DecisionProbe& probe, std::string_view corpus_id,
+    std::shared_ptr<const LearnedModel> model,
+    const TeacherSufficiencyAuditConfig& config,
+    std::string description, std::string_view first_key,
+    std::string_view second_key) {
+    const LearnedSearchConfig search{
+        .seed = reference_seed_for_probe(
+            corpus_id, probe.stable_id),
+        .worlds = config.worlds,
+        .rollouts_per_world = 1,
+        .horizon_turns = config.horizon_turns,
+        .continuation_variant = config.continuation_variant,
+        .blend_shallow_prior = config.blend_shallow_prior,
+    };
+    const LearnedActionSamples original =
+        score_probe_actions(probe, probe.state, model, search);
+    const LearnedActionSamples hidden =
+        score_probe_actions(
+            probe, hidden_repartition_clone(probe), model, search);
+    if (original.sampled_worlds != config.worlds) {
+        throw std::runtime_error(
+            "teacher audit scorer returned the wrong world count");
+    }
+
+    const auto candidates =
+        map_candidate_samples(probe, original);
+    const probe_eval::ProbeLabel label =
+        probe_eval::make_probe_label(
+            probe.stable_id, probe.root_deck, candidates);
+    const auto& first =
+        candidate_samples_for(candidates, first_key);
+    const auto& second =
+        candidate_samples_for(candidates, second_key);
+    const auto prediction = make_prediction(
+        probe, means_of(original), probe_critic_value(probe, model));
+    return {
+        .description = std::move(description),
+        .estimate = oriented_pair_estimate(
+            label, "Q(" + std::string(first_key) + ") - Q(" +
+                       std::string(second_key) + ")",
+            first_key, second_key, config.worlds),
+        .selected_keys = deployed_selected_keys(prediction),
+        .ordered_blocks = summarize_ordered_pair_blocks(
+            first.q_samples, second.q_samples),
+        .hidden_repartition_bit_identical =
+            action_samples_bit_identical(original, hidden),
+    };
+}
+
 } // namespace
+
+std::size_t
+OrderedPairBlockSummary::required_correct_block_count() const {
+    return block_count - block_count / 4;
+}
+
+bool OrderedPairBlockSummary::gate_passed() const {
+    return block_count != 0 &&
+           correct_block_count >= required_correct_block_count();
+}
+
+OrderedPairBlockSummary summarize_ordered_pair_blocks(
+    const std::vector<double>& first,
+    const std::vector<double>& second,
+    std::size_t worlds_per_block) {
+    if (first.empty() || first.size() != second.size()) {
+        throw std::invalid_argument(
+            "ordered pair blocks require equally sized, nonempty "
+            "sample rows");
+    }
+    if (worlds_per_block == 0 ||
+        first.size() % worlds_per_block != 0) {
+        throw std::invalid_argument(
+            "ordered pair sample count must be divisible by the "
+            "nonzero block size");
+    }
+    OrderedPairBlockSummary summary{
+        .worlds_per_block = worlds_per_block,
+        .block_count = first.size() / worlds_per_block,
+    };
+    for (std::size_t block = 0; block < summary.block_count;
+         ++block) {
+        double first_sum = 0.0;
+        double second_sum = 0.0;
+        const std::size_t begin = block * worlds_per_block;
+        const std::size_t end = begin + worlds_per_block;
+        for (std::size_t sample = begin; sample < end; ++sample) {
+            if (!std::isfinite(first[sample]) ||
+                !std::isfinite(second[sample])) {
+                throw std::invalid_argument(
+                    "ordered pair blocks require finite samples");
+            }
+            first_sum += first[sample];
+            second_sum += second[sample];
+        }
+        if (first_sum > second_sum) {
+            ++summary.correct_block_count;
+        }
+    }
+    return summary;
+}
+
+bool TeacherOptionComparison::confidence_gate_passed() const {
+    return estimate.confidence_lower_95 > 0.0;
+}
+
+bool TeacherOptionComparison::block_gate_passed() const {
+    return ordered_blocks.gate_passed();
+}
+
+bool TeacherOptionComparison::gate_passed() const {
+    return hidden_repartition_bit_identical &&
+           confidence_gate_passed() && block_gate_passed();
+}
+
+bool TeacherSufficiencyAuditReport::gate_passed() const {
+    return hidden_repartition_bit_identical &&
+           force_spike_live.gate_passed() &&
+           force_spike_payable.gate_passed() &&
+           disintegrate_x_zero.gate_passed();
+}
 
 bool ForceSpikePolicyControlReport::live_selects_force_spike()
     const {
@@ -1935,7 +2125,8 @@ ForceSpikePolicyControlReport
 score_value_force_spike_policy_controls(
     std::shared_ptr<const LearnedModel> model,
     std::string policy_name, std::size_t worlds,
-    double value_continuation_epsilon) {
+    double value_continuation_epsilon,
+    double value_priority_residual_weight) {
     if (!model) {
         throw std::invalid_argument(
             "Force Spike control scoring requires a frozen Value "
@@ -1955,6 +2146,13 @@ score_value_force_spike_policy_controls(
             "Force Spike control continuation epsilon must be "
             "finite and in [0, 1]");
     }
+    if (!std::isfinite(value_priority_residual_weight) ||
+        value_priority_residual_weight < 0.0 ||
+        value_priority_residual_weight > 1.0) {
+        throw std::invalid_argument(
+            "Force Spike control Value Priority residual weight "
+            "must be finite and in [0, 1]");
+    }
 
     const std::vector<probes::DecisionProbe> controls =
         probes::make_force_spike_policy_controls_v1();
@@ -1971,13 +2169,15 @@ score_value_force_spike_policy_controls(
 
     const auto predictions = score_value_deployed(
         controls, model, probes::kForceSpikePolicyControlsV1,
-        worlds, value_continuation_epsilon);
+        worlds, value_continuation_epsilon,
+        value_priority_residual_weight);
     const std::vector<probes::DecisionProbe> hidden_clones =
         hidden_clone_corpus(controls);
     const auto clone_predictions = score_value_deployed(
         hidden_clones, model,
         probes::kForceSpikePolicyControlsV1, worlds,
-        value_continuation_epsilon);
+        value_continuation_epsilon,
+        value_priority_residual_weight);
     require_predictions_bit_identical(
         predictions, clone_predictions, policy_name);
 
@@ -1995,7 +2195,240 @@ score_value_force_spike_policy_controls(
         .payable = make_force_spike_control_decision(
             prediction_for(predictions, kPayableId)),
         .hidden_repartition_passed = true,
+        .value_priority_residual_weight =
+            value_priority_residual_weight,
     };
+}
+
+TeacherSufficiencyAuditReport score_teacher_sufficiency_audit(
+    std::shared_ptr<const LearnedModel> model,
+    std::string policy_name,
+    TeacherSufficiencyAuditConfig config) {
+    if (!model) {
+        throw std::invalid_argument(
+            "teacher-sufficiency audit requires a frozen model");
+    }
+    validate_text_field(
+        policy_name, "teacher-sufficiency policy name");
+    if (config.worlds < kTeacherAuditBlockWorlds ||
+        config.worlds > kMaximumReferenceWorlds ||
+        config.worlds % kTeacherAuditBlockWorlds != 0) {
+        throw std::invalid_argument(
+            "teacher-sufficiency worlds must be a multiple of 8 "
+            "in [8, 4096]");
+    }
+    if (config.horizon_turns > kMaximumReferenceHorizon) {
+        throw std::invalid_argument(
+            "teacher-sufficiency horizon must be at most 128 turns");
+    }
+    switch (config.continuation_variant) {
+    case LearnedVariant::ValueSearchChampion:
+    case LearnedVariant::UnifiedActor:
+        break;
+    default:
+        throw std::invalid_argument(
+            "teacher-sufficiency continuation variant is invalid");
+    }
+
+    const std::vector<probes::DecisionProbe> controls =
+        probes::make_force_spike_policy_controls_v1();
+    const std::vector<std::string> control_errors =
+        probes::validate_force_spike_policy_controls_v1(controls);
+    if (!control_errors.empty()) {
+        throw std::runtime_error(
+            "invalid Force Spike teacher-audit controls: " +
+            control_errors.front());
+    }
+    const std::vector<probes::DecisionProbe> validation =
+        probes::make_probe_validation_v1();
+    const std::vector<std::string> validation_errors =
+        probes::validate_probe_validation_v1(validation);
+    if (!validation_errors.empty()) {
+        throw std::runtime_error(
+            "invalid validation-v1 teacher-audit corpus: " +
+            validation_errors.front());
+    }
+
+    constexpr std::string_view kLiveId =
+        "control.blue.force-spike-live-gray-ogre.v1";
+    constexpr std::string_view kPayableId =
+        "control.blue.force-spike-payable-gray-ogre.v1";
+    const probes::DecisionProbe& live =
+        probe_with_stable_id(controls, kLiveId);
+    const probes::DecisionProbe& payable =
+        probe_with_stable_id(controls, kPayableId);
+    const auto pass_key_for =
+        [](const probes::DecisionProbe& probe)
+        -> const std::string& {
+        return unique_candidate_key(
+            probe,
+            [](const probes::Candidate& candidate) {
+                const auto* action =
+                    std::get_if<PriorityAction>(&candidate.action);
+                return action != nullptr &&
+                       action->kind == PriorityActionKind::Pass;
+            },
+            "Pass");
+    };
+    const auto force_spike_key_for =
+        [](const probes::DecisionProbe& probe)
+        -> const std::string& {
+        return unique_candidate_key(
+            probe,
+            [](const probes::Candidate& candidate) {
+                const auto* action =
+                    std::get_if<PriorityAction>(&candidate.action);
+                return action != nullptr &&
+                       action->kind ==
+                           PriorityActionKind::CastForceSpike;
+            },
+            "Force Spike");
+    };
+
+    const auto validation_pair = focused_candidate_pair(
+        ProbeCorpusKind::ValidationV1, validation);
+    if (!validation_pair.has_value()) {
+        throw std::logic_error(
+            "validation-v1 teacher audit has no focused pair");
+    }
+
+    TeacherSufficiencyAuditReport report;
+    report.policy_name = std::move(policy_name);
+    report.model_fingerprint = learned_model_fingerprint(model);
+    report.config = config;
+    report.force_spike_live = score_teacher_option_comparison(
+        live, probes::kForceSpikePolicyControlsV1, model, config,
+        "Force Spike live: counter versus Pass",
+        force_spike_key_for(live), pass_key_for(live));
+    report.force_spike_payable =
+        score_teacher_option_comparison(
+            payable, probes::kForceSpikePolicyControlsV1, model,
+            config,
+            "Force Spike payable: Pass versus counter",
+            pass_key_for(payable),
+            force_spike_key_for(payable));
+    report.disintegrate_x_zero =
+        score_teacher_option_comparison(
+            *validation_pair->probe, probes::kProbeValidationV1,
+            model, config,
+            "RU hold: Pass versus opponent-targeted "
+            "Disintegrate X=0",
+            *validation_pair->first_key,
+            *validation_pair->second_key);
+    report.hidden_repartition_bit_identical =
+        report.force_spike_live
+                .hidden_repartition_bit_identical &&
+        report.force_spike_payable
+                .hidden_repartition_bit_identical &&
+        report.disintegrate_x_zero
+                .hidden_repartition_bit_identical;
+    return report;
+}
+
+std::string format_teacher_sufficiency_audit_report(
+    const std::vector<TeacherSufficiencyAuditReport>& reports) {
+    if (reports.empty()) {
+        throw std::invalid_argument(
+            "teacher-sufficiency report requires at least one row");
+    }
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::fixed << std::setprecision(6)
+           << "P16 Search-Teacher Sufficiency Audit\n"
+           << "Evaluation-only; fixed physical fixtures, paired "
+              "common worlds, and no probe-label cache access or "
+              "mutation.\n"
+           << "The first row is primary. Diagnostic rows cannot "
+              "substitute for its conjunctive gate.\n";
+
+    const auto append_keys =
+        [&output](const std::vector<std::string>& keys) {
+        output << '{';
+        for (std::size_t index = 0; index < keys.size(); ++index) {
+            if (index != 0) {
+                output << ", ";
+            }
+            output << keys[index];
+        }
+        output << '}';
+    };
+    const auto append_comparison =
+        [&output, &append_keys](
+            const TeacherOptionComparison& comparison) {
+        const CandidatePairEstimate& estimate =
+            comparison.estimate;
+        output
+            << "    " << comparison.description << '\n'
+            << "      oriented delta: Q(" << estimate.first_key
+            << ") - Q(" << estimate.second_key << ") = "
+            << estimate.delta_q << ", paired SE "
+            << estimate.paired_standard_error << ", 95% CI ["
+            << estimate.confidence_lower_95 << ", "
+            << estimate.confidence_upper_95 << "] ["
+            << (comparison.confidence_gate_passed()
+                    ? "PASS"
+                    : "FAIL")
+            << "]\n"
+            << "      exact selected keys: ";
+        append_keys(comparison.selected_keys);
+        output
+            << "\n      ordered K="
+            << comparison.ordered_blocks.worlds_per_block
+            << " blocks: "
+            << comparison.ordered_blocks.correct_block_count << '/'
+            << comparison.ordered_blocks.block_count
+            << " correct; require "
+            << comparison.ordered_blocks
+                   .required_correct_block_count()
+            << " ["
+            << (comparison.block_gate_passed() ? "PASS" : "FAIL")
+            << "]\n"
+            << "      hidden repartition: "
+            << (comparison.hidden_repartition_bit_identical
+                    ? "bit-identical"
+                    : "CHANGED")
+            << "; comparison gate "
+            << (comparison.gate_passed() ? "PASS" : "FAIL")
+            << '\n';
+    };
+
+    for (std::size_t index = 0; index < reports.size(); ++index) {
+        const TeacherSufficiencyAuditReport& report =
+            reports[index];
+        output
+            << "\n[" << (index == 0 ? "PRIMARY" : "DIAGNOSTIC")
+            << "] " << report.policy_name << '\n'
+            << "  fingerprint: " << report.model_fingerprint << '\n'
+            << "  search: K=" << report.config.worlds << "/H="
+            << report.config.horizon_turns << ", "
+            << learned_variant_name(
+                   report.config.continuation_variant)
+            << " mirror, shallow-prior blend "
+            << (report.config.blend_shallow_prior ? "on" : "off")
+            << ", one rollout/world\n"
+            << "  all hidden repartitions: "
+            << (report.hidden_repartition_bit_identical
+                    ? "bit-identical"
+                    : "CHANGED")
+            << '\n';
+        append_comparison(report.force_spike_live);
+        append_comparison(report.force_spike_payable);
+        append_comparison(report.disintegrate_x_zero);
+        output << "  row gate: "
+               << (report.gate_passed() ? "PASS" : "FAIL")
+               << '\n';
+    }
+    output
+        << "\nPrimary teacher gate: "
+        << (reports.front().gate_passed() ? "PASS" : "FAIL")
+        << '\n'
+        << (reports.front().gate_passed()
+                ? "Decision: the measured search teacher is "
+                  "sufficient for the preregistered pure-distillation "
+                  "experiment.\n"
+                : "Decision: do not pure-distill this teacher; add an "
+                  "orthogonal self-generated improvement signal.\n");
+    return output.str();
 }
 
 ValueProbeDecisionDetail make_value_probe_decision_detail(
@@ -2594,6 +3027,14 @@ ProbeScoreReport score_probe_corpus_with_candidates(
                 scoring.transition_family,
                 "probe scoring Value transition family");
         }
+        if (!std::isfinite(
+                scoring.value_priority_residual_weight) ||
+            scoring.value_priority_residual_weight < 0.0 ||
+            scoring.value_priority_residual_weight > 1.0) {
+            throw std::invalid_argument(
+                "probe scoring Value Priority residual weight must "
+                "be finite and in [0, 1]");
+        }
         for (std::size_t prior = 0; prior < candidate; ++prior) {
             if (models.scoring_value_models[prior].name ==
                 scoring.name) {
@@ -2711,8 +3152,10 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         models.scoring_value_models.size() > 1;
     const bool has_distinct_single_value_candidate =
         models.scoring_value_models.size() == 1 &&
-        scoring_value_fingerprints.front() !=
-            reference_value_fingerprint;
+        (scoring_value_fingerprints.front() !=
+             reference_value_fingerprint ||
+         models.scoring_value_models.front()
+                 .value_priority_residual_weight != 0.0);
     const std::size_t policy_count =
         5 + (multi_checkpoint_attribution
                  ? models.scoring_value_models.size()
@@ -2748,12 +3191,12 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         score_value_deployed(
             corpus, models.reference_value_model,
             definition.corpus_id, config.scoring_value_worlds,
-            config.scoring_value_continuation_epsilon);
+            config.scoring_value_continuation_epsilon, 0.0);
     const auto reference_value_deployed_clone =
         score_value_deployed(
             hidden_clones, models.reference_value_model,
             definition.corpus_id, config.scoring_value_worlds,
-            config.scoring_value_continuation_epsilon);
+            config.scoring_value_continuation_epsilon, 0.0);
     std::vector<std::vector<probe_eval::ProbePrediction>>
         scoring_value_deployed;
     std::vector<std::vector<probe_eval::ProbePrediction>>
@@ -2768,13 +3211,15 @@ ProbeScoreReport score_probe_corpus_with_candidates(
             score_value_deployed(
                 corpus, candidate.model, definition.corpus_id,
                 config.scoring_value_worlds,
-                config.scoring_value_continuation_epsilon));
+                config.scoring_value_continuation_epsilon,
+                candidate.value_priority_residual_weight));
         scoring_value_deployed_clones.push_back(
             score_value_deployed(
                 hidden_clones, candidate.model,
                 definition.corpus_id,
                 config.scoring_value_worlds,
-                config.scoring_value_continuation_epsilon));
+                config.scoring_value_continuation_epsilon,
+                candidate.value_priority_residual_weight));
     }
     const auto handcrafted = score_handcrafted(corpus);
     const auto handcrafted_clone =
@@ -2820,7 +3265,7 @@ ProbeScoreReport score_probe_corpus_with_candidates(
             corpus_kind, corpus, models.reference_value_model,
             models.reference_value_name +
                 " Q(Pass) - Q(X=0)",
-            definition.corpus_id, config);
+            definition.corpus_id, config, 0.0);
         for (CandidatePairEstimate& pair : value_pairs) {
             report.value_candidate_pairs.push_back(
                 std::move(pair));
@@ -2831,7 +3276,8 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         auto value_pairs = score_value_candidate_pair(
             corpus_kind, corpus, candidate.model,
             candidate.name + " Q(Pass) - Q(X=0)",
-            definition.corpus_id, config);
+            definition.corpus_id, config,
+            candidate.value_priority_residual_weight);
         for (CandidatePairEstimate& pair : value_pairs) {
             report.value_candidate_pairs.push_back(
                 std::move(pair));
@@ -2847,14 +3293,15 @@ ProbeScoreReport score_probe_corpus_with_candidates(
                 models.reference_value_model,
                 models.reference_value_name,
                 config.scoring_value_worlds,
-                config.scoring_value_continuation_epsilon));
+                config.scoring_value_continuation_epsilon, 0.0));
         for (const NamedValueScoringModel& candidate :
              models.scoring_value_models) {
             report.force_spike_controls.push_back(
                 score_value_force_spike_policy_controls(
                     candidate.model, candidate.name,
                     config.scoring_value_worlds,
-                    config.scoring_value_continuation_epsilon));
+                    config.scoring_value_continuation_epsilon,
+                    candidate.value_priority_residual_weight));
         }
         progress << " done\n";
     }
@@ -2869,21 +3316,30 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         models.scoring_actor_name + " deployed policy";
     const std::string reference_value_deployed_name =
         models.reference_value_name + " deployed policy";
-    std::ostringstream value_configuration;
-    value_configuration.imbue(std::locale::classic());
-    value_configuration
-        << "Priority: K=" << config.scoring_value_worlds
-        << "/H=4 Value mirror with deployed aggregate shallow-prior "
-           "blend";
-    if (config.scoring_value_continuation_epsilon != 0.0) {
-        value_configuration
-            << ", continuation epsilon="
-            << config.scoring_value_continuation_epsilon;
-    }
-    value_configuration
-        << "; Attack: deployed public-board attack-set scorer";
-    const std::string value_deployed_configuration =
-        value_configuration.str();
+    const auto value_deployed_configuration =
+        [&config](double value_priority_residual_weight) {
+            std::ostringstream value_configuration;
+            value_configuration.imbue(std::locale::classic());
+            value_configuration
+                << "Priority: K="
+                << config.scoring_value_worlds
+                << "/H=4 Value mirror with deployed aggregate "
+                   "shallow-prior blend";
+            if (config.scoring_value_continuation_epsilon != 0.0) {
+                value_configuration
+                    << ", continuation epsilon="
+                    << config.scoring_value_continuation_epsilon;
+            }
+            if (value_priority_residual_weight != 0.0) {
+                value_configuration
+                    << ", Value Priority residual weight="
+                    << value_priority_residual_weight;
+            }
+            value_configuration
+                << "; Attack: deployed public-board attack-set "
+                   "scorer";
+            return value_configuration.str();
+        };
     report.policies.reserve(policy_count);
     report.policies.push_back(evaluate_hidden_invariant_policy(
         raw_name,
@@ -2896,14 +3352,16 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         labels, actor_deployed, actor_deployed_clone, true));
     report.policies.push_back(evaluate_hidden_invariant_policy(
         reference_value_deployed_name,
-        value_deployed_configuration,
+        value_deployed_configuration(0.0),
         labels, reference_value_deployed,
         reference_value_deployed_clone, true));
     if (has_distinct_single_value_candidate) {
         report.policies.push_back(evaluate_hidden_invariant_policy(
             models.scoring_value_models.front().name +
                 " deployed policy",
-            value_deployed_configuration,
+            value_deployed_configuration(
+                models.scoring_value_models.front()
+                    .value_priority_residual_weight),
             labels, scoring_value_deployed.front(),
             scoring_value_deployed_clones.front(), true));
     }
@@ -2927,7 +3385,7 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         report.value_checkpoints.push_back(
             make_value_checkpoint_report(
                 models.reference_value_name,
-                reference_value_fingerprint, labels,
+                reference_value_fingerprint, 0.0, labels,
                 reference_value_deployed,
                 reference_value_deployed_clone, nullptr, nullptr));
         std::unordered_map<std::string, std::size_t>
@@ -2952,7 +3410,8 @@ ProbeScoreReport score_probe_corpus_with_candidates(
             report.value_checkpoints.push_back(
                 make_value_checkpoint_report(
                     scoring.name,
-                    scoring_value_fingerprints[candidate], labels,
+                    scoring_value_fingerprints[candidate],
+                    scoring.value_priority_residual_weight, labels,
                     scoring_value_deployed[candidate],
                     scoring_value_deployed_clones[candidate],
                     reference, previous));
@@ -3226,8 +3685,12 @@ std::string format_probe_score_report(
                    << ": fingerprint "
                    << control.model_fingerprint << ", K="
                    << control.worlds << "/H="
-                   << control.horizon_turns
-                   << ", hidden repartition "
+                   << control.horizon_turns;
+            if (control.value_priority_residual_weight != 0.0) {
+                output << ", Value Priority residual weight="
+                       << control.value_priority_residual_weight;
+            }
+            output << ", hidden repartition "
                    << (control.hidden_repartition_passed
                            ? "PASS"
                            : "FAIL")
@@ -3283,7 +3746,13 @@ std::string format_probe_score_report(
         for (const ValueCheckpointProbeReport& checkpoint :
              report.value_checkpoints) {
             output << "  " << checkpoint.name << ": fingerprint "
-                   << checkpoint.fingerprint << ", pooled top1 "
+                   << checkpoint.fingerprint;
+            if (checkpoint.value_priority_residual_weight != 0.0) {
+                output << ", Value Priority residual weight="
+                       << checkpoint
+                              .value_priority_residual_weight;
+            }
+            output << ", pooled top1 "
                    << 100.0 *
                           checkpoint.metrics.top1_expected_agreement
                    << "%, pair "

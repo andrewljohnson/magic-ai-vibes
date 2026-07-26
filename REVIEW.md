@@ -8,7 +8,25 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 16:10 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 17:35 PDT — refreshed at the top of every review cycle.*
+
+- **Teacher audit now permanently reproducible** — the CLI reproduces
+  the retired harness to six decimals (reviewer-verified). Orthogonal
+  track pivoted honestly: pure distillation withdrawn, W-family
+  (behavior-consistent world sampling, deployment-only) declared.
+
+- **Both purist paths are now closed by evidence:** the value-side 2×2
+  (all four cells rejected) and pure search distillation (teacher
+  audit: the K=256 teacher confidently prefers the dominated action in
+  both option-value probes; deeper search widens the error). The
+  defect is invisible to state values AND to the search teacher.
+- **Active mainline: outcome-tilted priority residual (P-family)** —
+  bounded ±0.10 advantage-weighted correction from the recipe's own
+  game outcomes over frozen S0 scores, zero-init identity (P0 ≡ S0),
+  P1/P4 mechanism checkpoints, full five-rung promotion ladder
+  attached. The only signal left that can know what search cannot:
+  what actually wins games.
+- Lift gate: 3 of 5 (v2 baseline; Red −3.7, Blue −2.5).
 
 - **ENVIRONMENT v2 (user-directed):** Blue runs Power (Ancestral, Time
   Walk, Mox Sapphire, Sol Ring, Braingeyser) plus Force Spike and Air
@@ -56,6 +74,151 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 17:35 PDT
+
+Declaration-only cycle: before P1 collection, Codex fixed the
+P-family's mechanism-metric definitions — residual saturation rate
+(tanh magnitude ≥ 0.95, weighted so high-action-count roots can't
+dominate), separately reported positive/negative advantage weights per
+deck with a required nonzero search/outcome conflict share, and exact
+seat-game/root accounting with nothing silently normalized. Fixing
+these before data exists prevents the mechanism diagnostics from
+becoming post-hoc knobs — the same pre-commitment discipline that has
+held all day. No results yet; P1 collection is next.
+
+Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 17:20 PDT
+
+The 17:10 entry's priority 1 was closed within minutes: the permanent
+`--diagnose-force-spike-teacher` CLI landed, and the reviewer's
+verbatim run reproduces the retired one-off harness to six decimal
+places on every row — deltas, paired SEs, intervals, and K=8 block
+counts (live +0.070191 PASS; payable −0.043767 FAIL 0/32; X=0
+−0.119422 FAIL 0/32), against the same S0 fingerprint. The teacher
+rejection is now independently reproducible on demand. Both trees'
+verification story is airtight; P-family training proceeds per its
+preregistration.
+
+Also noted: the orthogonal track withdrew its pure-distillation P16
+preregistration (falsified by this audit, as its own entry gate
+required) and declared the W-family — behavior-consistent world
+sampling, deployment-only, composing with all model families. Details
+in CLAUDE-PLAN.md.
+
+Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 17:10 PDT
+
+**Teacher audit: rejected, decisively and fast (4.77s).** At K=256/H=4
+the frozen search teacher passes the live counter (+0.070, 32/32 K=8
+blocks) but confidently prefers the dominated action in BOTH
+option-value comparisons: payable Spike (−0.044 for Pass, 0/32 blocks)
+and X=0 (−0.119 for Pass, 0/32). Deeper horizon widens the wrong
+margins; the Actor reference fails at every K/H tried. Conclusion
+verified in the numbers: cross-entropy distillation of this teacher
+would make the two known failures MORE confident. Pure P16
+distillation is dead before it was fit — the cheapest kill of the day.
+
+**The escalation is well designed: outcome-tilted priority residual.**
+S(a) = Q_parent(a) + 0.10·tanh(centered logit), advantage-weighted
+regression from the recipe's own game outcomes, frozen parent
+throughout, no weight sweep, and a zero-init identity guarantee (P0
+must be bit-identical to S0 in actions, scores, and game records).
+P1/P4 are mechanism checkpoints, not selectable endpoints, and the
+full five-rung ladder (919191 → 271828 → 314159 → eight seeds → lift
+gate) is attached. This is the "self-generated outcome signal" branch
+the audit's decision rule demanded — outcomes know what the search
+teacher cannot.
+
+Priorities:
+1. Land the permanent CLI reproduction of the teacher audit before P1
+   training — the one-off harness was removed, so the rejection is
+   currently unreproducible by a second party (this reviewer included).
+2. The known historical risk for outcome-weighted policy signals is
+   the four-deck-era actor collapse; the bounded residual over a
+   strong value prior is the right mitigation, but watch the P1/P4
+   checkpoints for early divergence on the two named probes rather
+   than waiting for P16.
+
+Lift table deterministic-identical (3 of 5).
+
+## 2026-07-25 17:01 PDT
+
+**The 2×2 is complete and fully rejected — and that is a landmark
+result, not a setback.** All four cells scored against the frozen
+controls with exact ordered attribution:
+
+| Cell | Mean regret | Critic Brier | Payable-tax flip |
+| --- | ---: | ---: | --- |
+| S0 (control) | 0.0085 | 0.0528 | fail |
+| S1 (context) | 0.0061 | 0.0711 | fail |
+| D0 (dense) | 0.0032 | 0.0954 | fail |
+| D1 (dense+context) | 0.0032 | 0.0985 | fail |
+
+Dense collection halved pooled regret and fixed the RU land probe, but
+the hold-versus-spend defect survived every value-side treatment: the
+hypothesis "context representation + forced-pass data suffices" is
+falsified with four fingerprinted artifacts. The value axis is
+exhausted; the defect is an action-preference/teacher-target problem.
+
+**Codex has adopted the policy-head path** (the orthogonal track's P16
+preregistration) with exactly the right first step: a teacher
+sufficiency audit — before distilling anything, prove the K=256/H=4
+search teacher itself prefers Pass in the payable state. If the
+teacher carries the defect, distillation would faithfully reproduce
+it, and P16 must add a self-generated improvement signal
+(counterfactual outcome advantage or recursive search). The
+conjunctive decision rule is preregistered. This is the correct
+convergence of the two tracks: value side closed by exhaustion, policy
+side now mainline with a falsifiable entry gate.
+
+Lift table deterministic-identical (3 of 5). Reviewer will execute the
+teacher audit verbatim when its implementation commits.
+
+## 2026-07-25 16:46 PDT
+
+No-change cycle: D0/D1 dense-cell implementation continues in the
+working tree (HEAD `19b7c61` remains mid-implementation — dense
+challenger enums declared but unhandled, so the commit is not yet
+green). Lift table deterministic-identical (3 of 5). Orthogonal P16
+track synced to main and correctly holding for a green base.
+
+## 2026-07-25 16:40 PDT
+
+No-change cycle: no new notebook sections since the S1 rejection;
+D0/D1 dense-cell implementation in progress (6 files in flux). Lift
+table deterministic-identical (v2 baseline, 3 of 5; Red −3.7, Blue
+−2.5). Orthogonal track remains blocked on main's next green commit;
+P16 preregistration stands.
+
+## 2026-07-25 16:35 PDT
+
+**S1 rejected by its own gates — and the rejection is informative.**
+The sparse/context-live cell improved pooled regret (0.0085 → 0.0061),
+fixed the Green Giant Growth selection, and kept Blue at zero regret —
+but failed the Force Spike payable flip (still casts into a payable
+tax) and blew the White nonregression limit (+0.0246 regret, Brier
++0.0183). Codex's reading is precise: the context is representable,
+but sparse collection contains too few forced-pass successor roots for
+the critic to learn what passing buys. Per preregistration, D0/D1
+(dense trace cells) are next, with no gameplay-seed selection. The 2×2
+is functioning exactly as designed — one axis at a time, reject-only,
+every artifact fingerprinted.
+
+Also recorded: a learned-pilot deck-evolution route (engineering smoke
+only) — evolution can now use a Learned pilot instead of Random, which
+will matter later for metagame work.
+
+Side note for the program: S1's failure on the payable flip supports
+the orthogonal policy-head bet (the branch's P16 preregistration) —
+if dense data (D1) also fails the flip, the action-preference path
+becomes the leading candidate; if D1 passes, P16 becomes a
+composition test. Either way the two tracks now bracket the defect.
+
+Lift table deterministic-identical (3 of 5). Trees actively changing;
+committed-state verification only.
 
 ## 2026-07-25 16:10 PDT
 

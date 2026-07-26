@@ -330,6 +330,28 @@ small_value_context_challenger_c1_artifact() {
     return artifact;
 }
 
+const old_school::LearnedValueDenseContextChallengerArtifact&
+small_value_dense_context_d0_c1_artifact() {
+    static const auto artifact =
+        old_school::
+            train_learned_value_dense_context_challenger_artifact(
+                1, 0xD305E001ULL, 1,
+                old_school::LearnedValueDenseContextTreatment::
+                    ContextMasked);
+    return artifact;
+}
+
+const old_school::LearnedValueDenseContextChallengerArtifact&
+small_value_dense_context_d1_c1_artifact() {
+    static const auto artifact =
+        old_school::
+            train_learned_value_dense_context_challenger_artifact(
+                1, 0xD305E001ULL, 1,
+                old_school::LearnedValueDenseContextTreatment::
+                    ContextLive);
+    return artifact;
+}
+
 const old_school::LearnedValueG8Result& small_value_g8() {
     static const auto result =
         old_school::train_learned_value_g8(1, 0x68A11EADULL);
@@ -1278,6 +1300,9 @@ TEST(learned_defaults_to_value_search_champion) {
     CHECK(learned.learned_variant ==
           old_school::LearnedVariant::ValueSearchChampion);
     CHECK(learned.value_continuation_epsilon == 0.0);
+    CHECK(learned.value_priority_residual_weight == 0.0);
+    CHECK(old_school::LearnedSearchConfig{}
+              .value_priority_residual_weight == 0.0);
     CHECK(old_school::bot_config_name(learned) == "Learned Value");
 
     const old_school::BotConfig actor = {
@@ -1370,6 +1395,246 @@ TEST(value_continuation_epsilon_rejects_invalid_or_non_value_use) {
         rejected_actor_search = true;
     }
     CHECK(rejected_actor_search);
+}
+
+TEST(value_priority_residual_p0_and_uniform_head_are_exact_identity) {
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
+    };
+    const auto model = small_value_model();
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() > 1);
+
+    const auto zero_residual =
+        old_school::diagnose_learned_value_priority_residual(
+            state, 0, true, old_school::TurnPhase::FirstMain, 1,
+            actions, model, 0.0);
+    const auto uniform_residual =
+        old_school::diagnose_learned_value_priority_residual(
+            state, 0, true, old_school::TurnPhase::FirstMain, 1,
+            actions, model, 0.10);
+    CHECK(zero_residual.policy_logits ==
+          uniform_residual.policy_logits);
+    CHECK(std::all_of(
+        uniform_residual.policy_logits.begin(),
+        uniform_residual.policy_logits.end(),
+        [](double value) { return value == 0.0; }));
+    CHECK(uniform_residual.mean_legal_logit == 0.0);
+    CHECK(std::all_of(
+        uniform_residual.centered_policy_logits.begin(),
+        uniform_residual.centered_policy_logits.end(),
+        [](double value) { return value == 0.0; }));
+    CHECK(std::all_of(
+        zero_residual.residuals.begin(),
+        zero_residual.residuals.end(),
+        [](double value) { return value == 0.0; }));
+    CHECK(zero_residual.residuals ==
+          uniform_residual.residuals);
+
+    constexpr std::uint64_t kSeed = 0xA11CE050ULL;
+    const auto p0 =
+        old_school::diagnose_learned_value_priority(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, 0,
+            kSeed);
+    const auto explicit_zero =
+        old_school::diagnose_learned_value_priority(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, 0,
+            kSeed, 0.0, 0.0);
+    const auto uniform_weighted =
+        old_school::diagnose_learned_value_priority(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, model, 0,
+            kSeed, 0.0, 0.10);
+    CHECK(p0.actions == explicit_zero.actions);
+    CHECK(p0.actions == uniform_weighted.actions);
+    CHECK(p0.base_scores == explicit_zero.base_scores);
+    CHECK(p0.base_scores == uniform_weighted.base_scores);
+    CHECK(p0.scores == explicit_zero.scores);
+    CHECK(p0.scores == uniform_weighted.scores);
+    CHECK(p0.policy_logits == uniform_weighted.policy_logits);
+    CHECK(p0.centered_policy_logits ==
+          uniform_weighted.centered_policy_logits);
+    CHECK(p0.priority_residuals ==
+          uniform_weighted.priority_residuals);
+
+    const auto hidden = hidden_repartition(state, 0);
+    const auto hidden_residual =
+        old_school::diagnose_learned_value_priority_residual(
+            hidden, 0, true, old_school::TurnPhase::FirstMain, 1,
+            actions, model, 0.10);
+    CHECK(hidden_residual.policy_logits ==
+          uniform_residual.policy_logits);
+    CHECK(hidden_residual.centered_policy_logits ==
+          uniform_residual.centered_policy_logits);
+    CHECK(hidden_residual.residuals ==
+          uniform_residual.residuals);
+
+    old_school::LearnedSearchConfig search = {
+        .seed = kSeed,
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon = 0.0,
+        .blend_shallow_prior = true,
+    };
+    const auto p0_samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, actions, model,
+            search);
+    search.value_priority_residual_weight = 0.10;
+    const auto uniform_samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, actions, model,
+            search);
+    CHECK(p0_samples.q_samples == uniform_samples.q_samples);
+    CHECK(p0_samples.rollout_evaluations ==
+          uniform_samples.rollout_evaluations);
+
+    old_school::GameConfig game_config;
+    game_config.max_turns = 5;
+    game_config.starting_player = 0;
+    game_config.learned_model = model;
+    game_config.learned_search_depth = 0;
+    game_config.bots = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .learned_model = model,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .learned_model = model,
+        },
+    };
+    old_school::Game p0_game(
+        old_school::green_deck(), old_school::red_deck(),
+        kSeed, game_config);
+    const auto p0_record = p0_game.run();
+    for (auto& bot : game_config.bots) {
+        bot.value_priority_residual_weight = 0.10;
+    }
+    old_school::Game uniform_game(
+        old_school::green_deck(), old_school::red_deck(),
+        kSeed, game_config);
+    CHECK(uniform_game.run() == p0_record);
+}
+
+TEST(value_priority_residual_rejects_invalid_or_non_value_use) {
+    const auto rejects_game_config =
+        [](old_school::BotConfig bot) {
+            old_school::GameConfig config;
+            config.bots[0] = std::move(bot);
+            try {
+                old_school::Game game(
+                    old_school::green_deck(),
+                    old_school::red_deck(), 1, config);
+                static_cast<void>(game);
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .value_priority_residual_weight =
+            std::numeric_limits<double>::quiet_NaN(),
+        .learned_model = small_value_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .value_priority_residual_weight = -0.01,
+        .learned_model = small_value_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .value_priority_residual_weight = 1.01,
+        .learned_model = small_value_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .rollouts_per_action = 0,
+        .value_priority_residual_weight = 0.10,
+        .learned_model = small_actor_model(),
+    }));
+    CHECK(rejects_game_config({
+        .kind = old_school::BotKind::Random,
+        .rollouts_per_action = 1,
+        .value_priority_residual_weight = 0.10,
+    }));
+
+    const auto state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    diagnose_learned_value_priority_residual(
+                        state, 0, true,
+                        old_school::TurnPhase::FirstMain, 1,
+                        actions, small_value_model(), -0.01));
+        },
+        "residual weight"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    diagnose_learned_value_priority_residual(
+                        state, 0, true,
+                        old_school::TurnPhase::FirstMain, 1,
+                        actions, small_actor_model(), 0.10));
+        },
+        "variant"));
+
+    old_school::LearnedSearchConfig actor_search = {
+        .seed = 1,
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .value_priority_residual_weight = 0.10,
+    };
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_priority_action_samples(
+                    state,
+                    {
+                        old_school::white_control_deck(),
+                        old_school::red_deck(),
+                    },
+                    0, true, old_school::TurnPhase::FirstMain, 1,
+                    actions, small_actor_model(), actor_search));
+        },
+        "Value-mirror"));
 }
 
 TEST(learned_value_search_is_hidden_invariant_phase_aware_and_bounded) {
@@ -1622,10 +1887,31 @@ TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
     CHECK(old_school::learned_model_fingerprint(small_value_model()) !=
           fingerprint);
 
+    const auto components =
+        old_school::learned_model_component_fingerprints(actor);
+    CHECK(components ==
+          old_school::learned_model_component_fingerprints(repeated));
+    CHECK(components.critic.size() == 64);
+    CHECK(components.priority.size() == 64);
+    CHECK(components.attack.size() == 64);
+    CHECK(components.block.size() == 64);
+    CHECK(components.damage_order.size() == 64);
+    CHECK(old_school::learned_model_component_fingerprints(changed) !=
+          components);
+
     bool rejected_null = false;
     try {
         static_cast<void>(
             old_school::learned_model_fingerprint(nullptr));
+    } catch (const std::invalid_argument&) {
+        rejected_null = true;
+    }
+    CHECK(rejected_null);
+    rejected_null = false;
+    try {
+        static_cast<void>(
+            old_school::learned_model_component_fingerprints(
+                nullptr));
     } catch (const std::invalid_argument&) {
         rejected_null = true;
     }
@@ -2102,6 +2388,284 @@ TEST(value_context_challenger_artifact_roundtrips_and_fails_closed) {
     std::filesystem::remove(canonical);
 }
 
+TEST(value_dense_context_cells_are_deterministic_bounded_and_isolated) {
+    using Treatment =
+        old_school::LearnedValueDenseContextTreatment;
+    const auto& d0 =
+        small_value_dense_context_d0_c1_artifact();
+    const auto& d1 =
+        small_value_dense_context_d1_c1_artifact();
+    const auto repeated_d0 =
+        old_school::
+            train_learned_value_dense_context_challenger_artifact(
+                1, 0xD305E001ULL, 1,
+                Treatment::ContextMasked);
+    const auto repeated_d1 =
+        old_school::
+            train_learned_value_dense_context_challenger_artifact(
+                1, 0xD305E001ULL, 1,
+                Treatment::ContextLive);
+
+    const std::string d0_fingerprint =
+        old_school::learned_model_fingerprint(d0.model());
+    const std::string d1_fingerprint =
+        old_school::learned_model_fingerprint(d1.model());
+    CHECK(old_school::learned_model_fingerprint(
+              repeated_d0.model()) == d0_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(
+              repeated_d1.model()) == d1_fingerprint);
+    CHECK(d0_fingerprint != d1_fingerprint);
+    CHECK(d0.root_coverage() ==
+          repeated_d0.root_coverage());
+    CHECK(d1.root_coverage() ==
+          repeated_d1.root_coverage());
+
+    for (const auto* artifact : {&d0, &d1}) {
+        CHECK(artifact->critic_schema() ==
+              old_school::LearnedCriticSchema::
+                  DecisionContextV1);
+        CHECK(artifact->trace_mode() ==
+              old_school::LearnedDecisionTraceMode::Dense);
+        CHECK(artifact->trace_limit() ==
+              old_school::kLearnedDenseDecisionTraceLimit);
+        CHECK(artifact->training_games() == 1);
+        CHECK(artifact->seed() == 0xD305E001ULL);
+        CHECK(artifact->self_play_generations() == 1);
+
+        const auto& coverage = artifact->root_coverage();
+        CHECK(coverage.anchor_roots > 0);
+        CHECK(coverage.self_play_roots > 0);
+        CHECK(coverage.anchor_roots <=
+              old_school::kLearnedDenseDecisionTraceLimit);
+        CHECK(coverage.self_play_roots <=
+              old_school::kLearnedDenseDecisionTraceLimit);
+        const std::size_t total = coverage.total_roots();
+        CHECK(std::accumulate(
+                  coverage.decision_player_decks.begin(),
+                  coverage.decision_player_decks.end(),
+                  std::size_t{0}) == total);
+        CHECK(std::accumulate(
+                  coverage.phases.begin(),
+                  coverage.phases.end(),
+                  std::size_t{0}) == total);
+        CHECK(std::accumulate(
+                  coverage.pass_counts.begin(),
+                  coverage.pass_counts.end(),
+                  std::size_t{0}) == total);
+        CHECK(std::accumulate(
+                  coverage.stack_status.begin(),
+                  coverage.stack_status.end(),
+                  std::size_t{0}) == total);
+        CHECK(coverage.pass_counts[1] > 0);
+        CHECK(coverage.stack_status[1] > 0);
+    }
+    CHECK(d0.treatment() == Treatment::ContextMasked);
+    CHECK(d0.context_masked());
+    CHECK(d1.treatment() == Treatment::ContextLive);
+    CHECK(!d1.context_masked());
+
+    const old_school::GameState state =
+        determinization_fixture().state;
+    const old_school::LearnedDecisionContext pass_zero{
+        .valid = true,
+        .phase = old_school::TurnPhase::FirstMain,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    const old_school::LearnedDecisionContext pass_one{
+        .valid = true,
+        .phase = old_school::TurnPhase::SecondMain,
+        .decision_player = 1,
+        .consecutive_passes = 1,
+        .sorcery_actions = true,
+    };
+    for (std::size_t perspective = 0;
+         perspective < 2; ++perspective) {
+        const double d0_zero =
+            old_school::learned_contextual_critic_value(
+                state, perspective, pass_zero, d0.model());
+        const double d0_one =
+            old_school::learned_contextual_critic_value(
+                state, perspective, pass_one, d0.model());
+        CHECK(std::bit_cast<std::uint64_t>(d0_zero) ==
+              std::bit_cast<std::uint64_t>(d0_one));
+    }
+    CHECK(old_school::learned_contextual_critic_value(
+              state, 0, pass_zero, d1.model()) !=
+          old_school::learned_contextual_critic_value(
+              state, 0, pass_one, d1.model()));
+}
+
+TEST(value_dense_context_artifacts_roundtrip_and_cross_load_fail) {
+    using Treatment =
+        old_school::LearnedValueDenseContextTreatment;
+    const auto& d0 =
+        small_value_dense_context_d0_c1_artifact();
+    const auto& d1 =
+        small_value_dense_context_d1_c1_artifact();
+    const std::filesystem::path directory =
+        "build/test-model-cache";
+    const std::filesystem::path d0_path =
+        directory / "value-context-d0-c1.bin";
+    const std::filesystem::path d1_path =
+        directory / "value-context-d1-c1.bin";
+    const std::filesystem::path corrupt =
+        directory / "value-context-d0-c1-corrupt.bin";
+    const std::filesystem::path s1_path =
+        directory / "value-context-s1-cross.bin";
+    std::filesystem::remove(d0_path);
+    std::filesystem::remove(d1_path);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(s1_path);
+
+    old_school::
+        write_learned_value_dense_context_challenger_artifact_atomic(
+            d0_path.string(), d0);
+    old_school::
+        write_learned_value_dense_context_challenger_artifact_atomic(
+            d1_path.string(), d1);
+    old_school::
+        write_learned_value_context_challenger_artifact_atomic(
+            s1_path.string(),
+            small_value_context_challenger_c1_artifact());
+
+    const auto d0_bytes = read_binary_file(d0_path);
+    const auto d1_bytes = read_binary_file(d1_path);
+    const std::array<std::uint8_t, 8> d0_magic = {
+        'O', 'S', 'M', 'V', 'D', '0', '0', '1',
+    };
+    const std::array<std::uint8_t, 8> d1_magic = {
+        'O', 'S', 'M', 'V', 'D', '1', '0', '1',
+    };
+    CHECK(std::equal(
+        d0_magic.begin(), d0_magic.end(), d0_bytes.begin()));
+    CHECK(std::equal(
+        d1_magic.begin(), d1_magic.end(), d1_bytes.begin()));
+    CHECK(d0_bytes != d1_bytes);
+
+    const auto loaded_d0 =
+        old_school::
+            load_learned_value_dense_context_challenger_artifact(
+                d0_path.string(), 1, 0xD305E001ULL, 1,
+                Treatment::ContextMasked);
+    const auto loaded_d1 =
+        old_school::
+            load_learned_value_dense_context_challenger_artifact(
+                d1_path.string(), 1, 0xD305E001ULL, 1,
+                Treatment::ContextLive);
+    CHECK(old_school::learned_model_fingerprint(
+              loaded_d0.model()) ==
+          old_school::learned_model_fingerprint(d0.model()));
+    CHECK(old_school::learned_model_fingerprint(
+              loaded_d1.model()) ==
+          old_school::learned_model_fingerprint(d1.model()));
+    CHECK(loaded_d0.root_coverage() == d0.root_coverage());
+    CHECK(loaded_d1.root_coverage() == d1.root_coverage());
+    CHECK(loaded_d0.context_masked());
+    CHECK(!loaded_d1.context_masked());
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_dense_context_challenger_artifact(
+                        d0_path.string(), 1,
+                        0xD305E001ULL, 1,
+                        Treatment::ContextLive));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_dense_context_challenger_artifact(
+                        d1_path.string(), 1,
+                        0xD305E001ULL, 1,
+                        Treatment::ContextMasked));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_dense_context_challenger_artifact(
+                        s1_path.string(), 1,
+                        0xC07E6751ULL, 1,
+                        Treatment::ContextLive));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_context_challenger_artifact(
+                        d1_path.string(), 1,
+                        0xD305E001ULL, 1));
+        },
+        "wrong magic"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_dense_context_challenger_artifact(
+                        d0_path.string(), 2,
+                        0xD305E001ULL, 1,
+                        Treatment::ContextMasked));
+        },
+        "training_games mismatch"));
+
+    auto changed = d0_bytes;
+    changed.back() ^= 0x01U;
+    write_binary_file(corrupt, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_dense_context_challenger_artifact(
+                        corrupt.string(), 1,
+                        0xD305E001ULL, 1,
+                        Treatment::ContextMasked));
+        },
+        "checksum"));
+
+    CHECK(old_school::
+              learned_value_dense_context_challenger_cache_path(
+                  800, 424242, 16,
+                  Treatment::ContextMasked) ==
+          "build/model-cache/"
+          "old-school-value-context-d0-v2-c16-t800-s424242.bin");
+    CHECK(old_school::
+              learned_value_dense_context_challenger_cache_path(
+                  800, 424242, 16,
+                  Treatment::ContextLive) ==
+          "build/model-cache/"
+          "old-school-value-context-d1-v2-c16-t800-s424242.bin");
+    CHECK(throws_with_text(
+        [] {
+            static_cast<void>(
+                old_school::
+                    learned_value_dense_context_challenger_cache_path(
+                        1, 424242, 0,
+                        Treatment::ContextMasked));
+        },
+        "generations"));
+    CHECK(throws_with_text(
+        [] {
+            static_cast<void>(
+                old_school::
+                    learned_value_dense_context_challenger_cache_path(
+                        1, 424242, 1,
+                        static_cast<Treatment>(255)));
+        },
+        "unknown"));
+
+    std::filesystem::remove(d0_path);
+    std::filesystem::remove(d1_path);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(s1_path);
+}
+
 TEST(learned_value_update_deep_clones_without_mutating_parent) {
     const auto parent = small_value_model();
     const old_school::GameState state =
@@ -2217,6 +2781,340 @@ TEST(learned_value_update_deep_clones_without_mutating_parent) {
                     .learning_rate =
                         std::numeric_limits<double>::
                             quiet_NaN(),
+                }));
+    }));
+}
+
+TEST(value_priority_head_adam_is_deterministic_isolated_and_bounded) {
+    const auto parent = small_value_model();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() > 1);
+    std::vector<std::vector<double>> options;
+    options.reserve(actions.size());
+    for (const auto& action : actions) {
+        options.push_back(
+            old_school::learned_priority_policy_features(
+                state, 0, action, true,
+                old_school::TurnPhase::FirstMain, 1));
+    }
+
+    const std::string parent_fingerprint =
+        old_school::learned_model_fingerprint(parent);
+    const auto parent_components =
+        old_school::learned_model_component_fingerprints(parent);
+    const auto pure_clone =
+        old_school::update_learned_value_priority_head(
+            parent, {}, {});
+    CHECK(pure_clone.get() != parent.get());
+    CHECK(old_school::learned_model_fingerprint(pure_clone) ==
+          parent_fingerprint);
+    CHECK(old_school::learned_model_component_fingerprints(
+              pure_clone) == parent_components);
+
+    std::vector<double> base_scores(options.size(), 0.5);
+    if (base_scores.size() > 2) {
+        base_scores[0] = 0.55;
+        base_scores[1] = 0.45;
+    }
+    std::vector<double> targets(options.size(), 0.0);
+    targets.back() = 1.0;
+    const old_school::LearnedValuePriorityTrainingExample example = {
+        .options = options,
+        .base_scores = base_scores,
+        .target_probabilities = targets,
+        .weight = 1.0,
+    };
+    const old_school::LearnedValuePriorityHeadUpdateConfig config = {
+        .batch_size = 64,
+        .epochs = 8,
+        .learning_rate = 0.001,
+        .beta1 = 0.9,
+        .beta2 = 0.999,
+        .epsilon = 1.0e-8,
+        .global_gradient_norm_clip = 5.0,
+        .seed = 0xADAA050ULL,
+        .residual_weight = 0.10,
+        .policy_temperature = 0.10,
+    };
+
+    const auto parent_priority =
+        old_school::learned_policy_head_logits(
+            options,
+            old_school::LearnedPolicyDecisionKind::Priority,
+            parent);
+    std::array<std::vector<double>, 3> parent_combat_heads = {
+        old_school::learned_policy_head_logits(
+            options,
+            old_school::LearnedPolicyDecisionKind::Attack,
+            parent),
+        old_school::learned_policy_head_logits(
+            options,
+            old_school::LearnedPolicyDecisionKind::Block,
+            parent),
+        old_school::learned_policy_head_logits(
+            options,
+            old_school::LearnedPolicyDecisionKind::DamageOrder,
+            parent),
+    };
+    std::array<std::uint64_t, 2> parent_critic_bits{};
+    for (std::size_t perspective = 0; perspective < 2;
+         ++perspective) {
+        parent_critic_bits[perspective] =
+            std::bit_cast<std::uint64_t>(
+                old_school::learned_critic_value(
+                    state, perspective, parent));
+    }
+
+    const auto candidate =
+        old_school::update_learned_value_priority_head(
+            parent, {example}, config);
+    const auto repeated =
+        old_school::update_learned_value_priority_head(
+            parent, {example}, config);
+    CHECK(old_school::learned_model_fingerprint(candidate) ==
+          old_school::learned_model_fingerprint(repeated));
+    CHECK(old_school::learned_model_fingerprint(candidate) !=
+          parent_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+
+    const auto candidate_components =
+        old_school::learned_model_component_fingerprints(candidate);
+    CHECK(candidate_components ==
+          old_school::learned_model_component_fingerprints(
+              repeated));
+    CHECK(candidate_components.critic == parent_components.critic);
+    CHECK(candidate_components.priority !=
+          parent_components.priority);
+    CHECK(candidate_components.attack == parent_components.attack);
+    CHECK(candidate_components.block == parent_components.block);
+    CHECK(candidate_components.damage_order ==
+          parent_components.damage_order);
+
+    const auto candidate_priority =
+        old_school::learned_policy_head_logits(
+            options,
+            old_school::LearnedPolicyDecisionKind::Priority,
+            candidate);
+    CHECK(candidate_priority != parent_priority);
+    CHECK(candidate_priority ==
+          old_school::learned_policy_head_logits(
+              options,
+              old_school::LearnedPolicyDecisionKind::Priority,
+              repeated));
+    const std::array<old_school::LearnedPolicyDecisionKind, 3>
+        combat_kinds = {
+            old_school::LearnedPolicyDecisionKind::Attack,
+            old_school::LearnedPolicyDecisionKind::Block,
+            old_school::LearnedPolicyDecisionKind::DamageOrder,
+        };
+    for (std::size_t index = 0; index < combat_kinds.size();
+         ++index) {
+        CHECK(old_school::learned_policy_head_logits(
+                  options, combat_kinds[index], candidate) ==
+              parent_combat_heads[index]);
+    }
+    for (std::size_t perspective = 0; perspective < 2;
+         ++perspective) {
+        CHECK(std::bit_cast<std::uint64_t>(
+                  old_school::learned_critic_value(
+                      state, perspective, candidate)) ==
+              parent_critic_bits[perspective]);
+    }
+
+    const auto residual =
+        old_school::diagnose_learned_value_priority_residual(
+            state, 0, true, old_school::TurnPhase::FirstMain, 1,
+            actions, candidate, 0.10);
+    CHECK(residual.policy_logits == candidate_priority);
+    CHECK(std::abs(std::accumulate(
+              residual.centered_policy_logits.begin(),
+              residual.centered_policy_logits.end(), 0.0)) <
+          1.0e-12);
+    CHECK(std::any_of(
+        residual.residuals.begin(), residual.residuals.end(),
+        [](double value) { return value != 0.0; }));
+    for (std::size_t index = 0;
+         index < residual.residuals.size(); ++index) {
+        CHECK(std::abs(residual.residuals[index]) <= 0.10);
+        CHECK(residual.residuals[index] ==
+              0.10 *
+                  std::tanh(
+                      residual.centered_policy_logits[index]));
+    }
+
+    const auto hidden = hidden_repartition(state, 0);
+    const auto hidden_residual =
+        old_school::diagnose_learned_value_priority_residual(
+            hidden, 0, true, old_school::TurnPhase::FirstMain, 1,
+            actions, candidate, 0.10);
+    CHECK(hidden_residual.policy_logits ==
+          residual.policy_logits);
+    CHECK(hidden_residual.centered_policy_logits ==
+          residual.centered_policy_logits);
+    CHECK(hidden_residual.residuals == residual.residuals);
+
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
+    };
+    const auto scored =
+        old_school::diagnose_learned_value_priority(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 1, candidate, 0,
+            0xADAA050ULL, 0.0, 0.10);
+    CHECK(scored.policy_logits == residual.policy_logits);
+    CHECK(scored.centered_policy_logits ==
+          residual.centered_policy_logits);
+    CHECK(scored.priority_residuals == residual.residuals);
+    CHECK(scored.scores.size() == scored.base_scores.size());
+    for (std::size_t index = 0;
+         index < scored.scores.size(); ++index) {
+        CHECK(scored.scores[index] ==
+              scored.base_scores[index] +
+                  scored.priority_residuals[index]);
+    }
+
+    const auto behavior_cross_entropy =
+        [&](const std::shared_ptr<const old_school::LearnedModel>&
+                model) {
+            const auto logits =
+                old_school::learned_policy_head_logits(
+                    options,
+                    old_school::LearnedPolicyDecisionKind::Priority,
+                    model);
+            const double mean =
+                std::accumulate(
+                    logits.begin(), logits.end(), 0.0) /
+                static_cast<double>(logits.size());
+            std::vector<double> softmax(logits.size());
+            double maximum =
+                -std::numeric_limits<double>::infinity();
+            for (std::size_t index = 0;
+                 index < logits.size(); ++index) {
+                softmax[index] =
+                    (base_scores[index] +
+                     0.10 * std::tanh(logits[index] - mean)) /
+                    0.10;
+                maximum = std::max(maximum, softmax[index]);
+            }
+            double total = 0.0;
+            for (double& value : softmax) {
+                value = std::exp(value - maximum);
+                total += value;
+            }
+            double loss = 0.0;
+            for (std::size_t index = 0;
+                 index < softmax.size(); ++index) {
+                const double behavior =
+                    0.90 * softmax[index] / total +
+                    0.10 /
+                        static_cast<double>(softmax.size());
+                if (targets[index] != 0.0) {
+                    loss -= targets[index] *
+                            std::log(behavior);
+                }
+            }
+            return loss;
+        };
+    CHECK(behavior_cross_entropy(candidate) <
+          behavior_cross_entropy(parent));
+}
+
+TEST(value_priority_head_ce_uses_behavior_mixture_and_rejects_bad_targets) {
+    const auto parent = small_value_model();
+    const auto state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() >= 2);
+    std::vector<std::vector<double>> options;
+    for (std::size_t index = 0; index < 2; ++index) {
+        options.push_back(
+            old_school::learned_priority_policy_features(
+                state, 0, actions[index], true,
+                old_school::TurnPhase::FirstMain, 1));
+    }
+
+    // exp((-100 - 100) / .10) underflows to exactly zero, so the
+    // parent behavior is exactly {.9 * 1 + .1 / 2, .1 / 2}. A bare
+    // softmax CE would update this target; CE against the deployed
+    // 90/10 behavior mixture must leave the model bit-identical.
+    const double uniform = 0.10 / 2.0;
+    const old_school::LearnedValuePriorityTrainingExample stationary = {
+        .options = options,
+        .base_scores = {100.0, -100.0},
+        .target_probabilities = {
+            0.90 * 1.0 + uniform,
+            0.90 * 0.0 + uniform,
+        },
+        .weight = 1.0,
+    };
+    const auto unchanged =
+        old_school::update_learned_value_priority_head(
+            parent, {stationary}, {});
+    CHECK(old_school::learned_model_fingerprint(unchanged) ==
+          old_school::learned_model_fingerprint(parent));
+
+    const auto rejects_invalid =
+        [](const std::function<void()>& operation) {
+            try {
+                operation();
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::update_learned_value_priority_head(
+                nullptr, {stationary}, {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::update_learned_value_priority_head(
+                small_actor_model(), {stationary}, {}));
+    }));
+
+    auto malformed = stationary;
+    malformed.base_scores.pop_back();
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::update_learned_value_priority_head(
+                parent, {malformed}, {}));
+    }));
+    malformed = stationary;
+    malformed.options[0].pop_back();
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::update_learned_value_priority_head(
+                parent, {malformed}, {}));
+    }));
+    malformed = stationary;
+    malformed.target_probabilities = {0.4, 0.4};
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::update_learned_value_priority_head(
+                parent, {malformed}, {}));
+    }));
+    malformed = stationary;
+    malformed.target_probabilities[0] =
+        std::numeric_limits<double>::quiet_NaN();
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::update_learned_value_priority_head(
+                parent, {malformed}, {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::update_learned_value_priority_head(
+                parent, {stationary},
+                {
+                    .batch_size = 64,
+                    .epochs = 0,
                 }));
     }));
 }

@@ -268,6 +268,17 @@ atomically replace the selected challenger artifact. Challenger artifacts use
 their own magic and recipe and can never be loaded as legacy G0 or a G8
 bundle.
 
+The preregistered decision-context ablation has three additional, immutable
+families at the same `C<N>` generation count. `learned-value-context-cN` is
+S1 (sparse roots with live decision context),
+`learned-value-dense-masked-cN` is D0 (bounded dense roots with context
+masked), and `learned-value-dense-context-cN` is D1 (the same bounded dense
+collection rule with live context). Each token can be used directly as either
+side of
+`--benchmark`; artifacts, fingerprints, and decision-root coverage are
+reported separately and fail closed across families. These are research
+candidates, not promoted defaults.
+
 `learned-actor` keeps the separate unified policy-head experiment: its priority,
 attack, block, and damage-order heads train from information-safe search and
 self-play data. It remains available for direct comparison but is not the
@@ -393,6 +404,24 @@ This fixed 3x3 study trains each row model once and reuses it across all three
 evaluation-seed columns. `EXPERIMENTS.md` is the lab notebook for successful
 and failed tuning and evaluation runs.
 
+To audit whether a frozen S0 search is a sufficient teacher for policy-head
+distillation:
+
+```sh
+./build/old-school-sim --diagnose-force-spike-teacher \
+  --learned-generations 16 \
+  --train-games 800 --train-seed 424242
+```
+
+This eval-only route compares Force Spike with Pass in both the live and
+payable-tax controls, plus Pass with opponent-targeted Disintegrate X=0 in the
+harvested RU state. Its primary row is fixed at unblended K=256/H=4 Value
+mirror search; unblended S0 H=0 and Actor G0 H=0 are diagnostic controls. Each
+row reports the oriented paired Q difference, standard error and 95% interval,
+the complete exact-max key set, and how many of 32 ordered K=8 blocks have the
+correct sign. It verifies bit-identical hidden repartitions and never reads or
+writes a probe-label cache.
+
 ## Offline decision probes
 
 The probe CLI labels and scores a fixed 20-position development corpus without
@@ -428,10 +457,22 @@ reading the opponent's hidden cards:
   --probe-worlds 8 --probe-horizon 0 \
   --train-games 800 --train-seed 424242 \
   --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
+
+./build/old-school-sim --score-probes \
+  --learned-generations 16 \
+  --challenger learned-value-dense-context-c16 \
+  --learned-rollouts 8 \
+  --probe-worlds 8 --probe-horizon 0 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv
 ```
 
 The context-candidate form reports the frozen state-only C16 control followed
-by its S1 context-aware treatment. Dev-v3 runs also print a supplemental
+by its S1 context-aware treatment. The dense-context form reports the exact
+ordered S0, S1, D0, and D1 cells under one transition family, common worlds,
+and the same Actor-owned label cache; selecting the dense-masked form stops
+after D0. This ordering supports offline cell selection without consulting a
+gameplay seed. Dev-v3 runs also print a supplemental
 Force Spike gate through the real deployed `K`/`H=4` Value path: one state
 where a tapped-out Red player cannot pay `{1}`, and one reachable control with
 a fourth untapped Mountain. A model passes only if it uniquely chooses Force
