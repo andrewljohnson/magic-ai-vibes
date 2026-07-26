@@ -502,15 +502,41 @@ without moving focus or replacing the last authoritative game snapshot.
 
 ### P5 — Rendered interaction harness
 
-Status: **target/stack drag automated at both target viewports; deterministic
+Status: **target/stack drag automated at both target viewports; real-engine
+auto-pass/Bluff behavior automated at 1280 × 720; deterministic
 cleanup/blocking and full-flow browser fixtures available; broader automation
 planned**
 
+#### Preregistered real-engine auto-pass regression
+
+Hypothesis: the production browser can distinguish engine-forced priority from
+an engine-authored empty attacker choice without recreating card or combat
+legality in JavaScript.
+
+- The fixed real-engine match is Green/human versus Red/Random at game seed
+  `42`, one training game, training seed `424242`, and the default `2/8/2`
+  rollout settings (unused by the Random opponent). Its opening Forest is the
+  only non-Pass legal action.
+- With Bluff mode off, playing that Forest returns the engine's empty
+  `attackers` decision directly rather than exposing a sole-Pass first-main
+  decision. The client submits that exact decision ID with `ids: []` once and
+  reaches the next authoritative human decision.
+- With Bluff mode on, the same land play retains the engine's sole-Pass
+  first-main decision. Passing it retains the sole-Pass beginning-combat
+  decision; passing again exposes the empty `attackers` decision, which stays
+  visibly paused with no automatic fourth action request.
+- The regression observes action requests and responses rather than waiting a
+  fixed duration. It asserts only engine-emitted decision kinds, option counts,
+  eligible attacker IDs, and exact opaque response payloads.
+- Acceptance requires `make test-web-ui` and `make test-web-rendered`. No
+  bridge, server, or action-contract change is in scope.
+
 The repository-pinned Playwright gate is intentionally separate from the fast
-port-free tests. `make test-web-rendered` currently drives the target-stack
-fixture through Chromium with stable semantic selectors and viewport geometry
-checks. The next harness increment should drive the deterministic full journey
-at 1440 × 900 and 1280 × 720 in the same way, asserting visibility and
+port-free tests. `make test-web-rendered` drives the target-stack fixture
+through Chromium at both target viewports and a real-engine auto-pass/Bluff
+match at 1280 × 720, using stable semantic selectors and authoritative action
+responses. The next harness increment should drive the deterministic full
+journey at 1440 × 900 and 1280 × 720 in the same way, asserting visibility and
 interaction rather than pixel snapshots.
 
 The first manual fixture is launchable without waiting for a naturally
@@ -1197,3 +1223,23 @@ For each web issue:
   regression now preserves it. Final results: `make test-web-ui` 75/75,
   `make test-web` 9/9 C++ bridge tests plus 82/82 Node tests, and
   `make test-web-rendered` 2/2 rendered journeys. Port `4173` was untouched.
+- 2026-07-26 — Closed the auto-pass rendered-coverage gap with two
+  response-driven Playwright journeys against the production server and real
+  C++ bridge. Both use Green/human versus Red/Random, game seed `42`, one
+  training game, training seed `424242`, and the default `2/8/2` rollout
+  settings (unused by Random) at 1280 × 720. With Bluff off, playing the
+  opening Forest returned decision `2` as engine-authored `attackers` with no
+  eligible IDs; the client then submitted exactly
+  `{decisionId: 2, ids: []}` and reached the next human first main on turn 3.
+  No sole-Pass first-main or beginning-combat decision was exposed. With Bluff
+  on, the same play retained the sole-Pass first-main decision, a deliberate
+  pass retained the sole-Pass beginning-combat decision, and the next pass
+  left the zero-eligible attacker prompt visibly paused with `Bluff mode paused
+  before declaring no attackers.` Exactly three deliberate action requests
+  were observed and no fourth auto-submit occurred.
+  The gate listens for authoritative HTTP responses and DOM transitions; it
+  contains no fixed sleep or browser-side legality model. The rendered target
+  now builds the real bridge as an explicit prerequisite. Final results:
+  `make test-web-ui` 75/75 and `make test-web-rendered` 4/4. The first
+  sandboxed rendered invocation was infrastructure-only `listen EPERM`;
+  rerunning the identical target with localhost permission passed.

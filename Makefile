@@ -91,7 +91,7 @@ test-web: $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 test-web-ui: $(WEB_DEPENDENCIES)
 	npm --prefix web run test:ui
 
-test-web-rendered: $(WEB_DEPENDENCIES)
+test-web-rendered: $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 	npm --prefix web run test:rendered:target-stack
 
 web-build: $(WEB_BRIDGE) $(WEB_DEPENDENCIES)

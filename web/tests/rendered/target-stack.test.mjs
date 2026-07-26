@@ -14,10 +14,19 @@ const TARGET_STACK_BRIDGE = path.join(
   "fixtures",
   "target-stack-bridge.mjs",
 );
+const REAL_ENGINE_BRIDGE = path.resolve(
+  TEST_DIRECTORY,
+  "..",
+  "..",
+  "..",
+  "build",
+  "old-school-web-bridge",
+);
 const VIEWPORTS = [
   { width: 1280, height: 720 },
   { width: 1440, height: 900 },
 ];
+const REAL_ENGINE_VIEWPORT = { width: 1280, height: 720 };
 const ACTION_PATH = /^\/api\/games\/[^/]+\/actions$/;
 
 async function launchBrowser() {
@@ -63,6 +72,23 @@ async function startFixture() {
   };
 }
 
+async function startRealEngine() {
+  const server = await startServer({
+    port: 0,
+    host: "127.0.0.1",
+    bridgePath: REAL_ENGINE_BRIDGE,
+  });
+  const address = server.address();
+  assert.ok(
+    typeof address === "object" && address !== null,
+    "real-engine server must expose a TCP address",
+  );
+  return {
+    server,
+    url: `http://127.0.0.1:${address.port}`,
+  };
+}
+
 async function closeServer(server) {
   if (!server.listening) return;
   await new Promise((resolve, reject) => {
@@ -93,6 +119,113 @@ async function configureFixedMatch(page) {
 
   await setup.getByRole("button", { name: "Start match" }).click();
   await setup.waitFor({ state: "hidden" });
+}
+
+async function configureRealEngineMatch(page, { bluffMode }) {
+  const setup = page.getByRole("dialog", { name: "Set the table" });
+  await setup.waitFor();
+  const nearSeat = setup.locator(".seat-0");
+  const farSeat = setup.locator(".seat-1");
+  await nearSeat.locator("select").nth(0).selectOption("green");
+  await farSeat.locator("select").nth(0).selectOption("red");
+  await farSeat.locator("select").nth(1).selectOption("random");
+
+  const numberInputs = setup.locator('input[type="number"]');
+  await numberInputs.nth(0).fill("42");
+  await numberInputs.nth(1).fill("1");
+  await numberInputs.nth(2).fill("424242");
+  const toggles = setup.locator('input[type="checkbox"]');
+  assert.equal(
+    await toggles.nth(0).isChecked(),
+    false,
+    "debug reveal must be off",
+  );
+  assert.equal(
+    await toggles.nth(1).isChecked(),
+    false,
+    "Bluff mode must begin off",
+  );
+  if (bluffMode) {
+    await setup.getByText("Bluff mode", { exact: true }).click();
+    assert.equal(
+      await toggles.nth(1).isChecked(),
+      true,
+      "visible Bluff mode label must enable the checkbox",
+    );
+  }
+
+  await setup.getByRole("button", { name: "Start match" }).click();
+  await setup.waitFor({ state: "hidden" });
+}
+
+function isActionRequest(request) {
+  const requestUrl = new URL(request.url());
+  return (
+    request.method() === "POST" &&
+    ACTION_PATH.test(requestUrl.pathname)
+  );
+}
+
+async function captureActionResponses(page, count, trigger) {
+  return new Promise((resolve, reject) => {
+    const bodies = [];
+    const timer = setTimeout(() => {
+      page.off("response", onResponse);
+      reject(
+        new Error(
+          `expected ${count} action responses, received ${bodies.length}`,
+        ),
+      );
+    }, 10_000);
+    const settle = (result, error) => {
+      clearTimeout(timer);
+      page.off("response", onResponse);
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const onResponse = async (response) => {
+      if (!isActionRequest(response.request())) return;
+      try {
+        assert.equal(response.ok(), true, "action response must succeed");
+        bodies.push(await response.json());
+        if (bodies.length === count) settle(bodies);
+      } catch (error) {
+        settle(undefined, error);
+      }
+    };
+    page.on("response", onResponse);
+    Promise.resolve()
+      .then(trigger)
+      .catch((error) => settle(undefined, error));
+  });
+}
+
+async function playOpeningForest(page) {
+  const hand = page.getByRole("list", { name: "Cards in your hand" });
+  const forest = hand
+    .getByRole("button", { name: "Forest, land", exact: true })
+    .last();
+  const handLabels = await hand
+    .locator(".card-face")
+    .evaluateAll((cards) => cards.map((card) => card.getAttribute("aria-label")));
+  assert.equal(
+    await forest.count(),
+    1,
+    `opening Forest must render; hand labels were ${JSON.stringify(handLabels)}`,
+  );
+  assert.equal(await forest.isEnabled(), true, "opening Forest must be legal");
+  await forest.press("Enter");
+  await page.waitForFunction(
+    () =>
+      document.querySelector(
+        '.face-hand:not(.debug-hand) .card-face[aria-pressed="true"]',
+      ) !== null,
+  );
+  const playSurface = page.locator(
+    '.battlefield-side.player-side[data-priority-play-target="true"] ' +
+      ".permanent-zone",
+  );
+  await playSurface.click({ position: { x: 8, y: 8 } });
 }
 
 async function renderedGeometry(page) {
@@ -183,6 +316,154 @@ function assertVisibleRectangle(rectangle, viewport, label) {
     `${label} bottom ${rectangle.bottom} exceeds viewport ${viewport.height}`,
   );
 }
+
+test(
+  "real engine auto-passes forced priority and empty attackers with Bluff off",
+  { timeout: 60_000 },
+  async (t) => {
+    const { server, url } = await startRealEngine();
+    t.after(() => closeServer(server));
+    const browser = await launchBrowser();
+    t.after(() => browser.close());
+    const context = await browser.newContext({ viewport: REAL_ENGINE_VIEWPORT });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const actionPayloads = [];
+    page.on("request", (request) => {
+      if (isActionRequest(request)) {
+        actionPayloads.push(request.postDataJSON());
+      }
+    });
+
+    await page.goto(url, { waitUntil: "networkidle" });
+    await configureRealEngineMatch(page, { bluffMode: false });
+
+    const responses = await captureActionResponses(page, 2, () =>
+      playOpeningForest(page),
+    );
+
+    assert.equal(responses[0].game.snapshot.phase, "declare_attackers");
+    assert.equal(responses[0].game.config.bluffMode, false);
+    assert.equal(responses[0].game.decision.kind, "attackers");
+    assert.deepEqual(responses[0].game.decision.eligible, []);
+    assert.equal(
+      responses[0].game.events.at(-1).kind,
+      "priority_action",
+      "engine must settle forced priority before asking for attackers",
+    );
+    assert.equal(responses[1].game.snapshot.turnNumber, 3);
+    assert.equal(responses[1].game.snapshot.phase, "first_main");
+    assert.equal(responses[1].game.decision.kind, "priority");
+    assert.deepEqual(actionPayloads, [
+      { decisionId: 1, index: 1 },
+      {
+        decisionId: responses[0].game.decision.id,
+        ids: [],
+      },
+    ]);
+
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".turn-marker strong")?.textContent?.trim() ===
+        "3",
+    );
+    assert.equal(
+      await page.getByLabel("Current phase: first_main").count(),
+      1,
+    );
+    assert.equal(
+      await page.getByText("Continue — no attackers", { exact: true }).count(),
+      0,
+    );
+    assert.equal(await page.getByRole("alert").count(), 0);
+
+    t.diagnostic(
+      "Bluff off: land action reached engine empty attackers, then the client " +
+        "submitted that exact decision once and advanced to turn 3",
+    );
+  },
+);
+
+test(
+  "real engine keeps forced priority and empty attackers visible in Bluff mode",
+  { timeout: 60_000 },
+  async (t) => {
+    const { server, url } = await startRealEngine();
+    t.after(() => closeServer(server));
+    const browser = await launchBrowser();
+    t.after(() => browser.close());
+    const context = await browser.newContext({ viewport: REAL_ENGINE_VIEWPORT });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const actionPayloads = [];
+    page.on("request", (request) => {
+      if (isActionRequest(request)) {
+        actionPayloads.push(request.postDataJSON());
+      }
+    });
+
+    await page.goto(url, { waitUntil: "networkidle" });
+    await configureRealEngineMatch(page, { bluffMode: true });
+
+    const [afterLand] = await captureActionResponses(page, 1, () =>
+      playOpeningForest(page),
+    );
+    assert.equal(afterLand.game.snapshot.phase, "first_main");
+    assert.equal(afterLand.game.config.bluffMode, true);
+    assert.equal(afterLand.game.decision.kind, "priority");
+    assert.deepEqual(
+      afterLand.game.decision.options.map(({ kind }) => kind),
+      ["pass"],
+    );
+    assert.deepEqual(actionPayloads, [{ decisionId: 1, index: 1 }]);
+
+    const [afterFirstMainPass] = await captureActionResponses(page, 1, () =>
+      page.getByRole("button", { name: "Pass priority" }).click(),
+    );
+    assert.equal(afterFirstMainPass.game.snapshot.phase, "begin_combat");
+    assert.equal(afterFirstMainPass.game.decision.kind, "priority");
+    assert.deepEqual(
+      afterFirstMainPass.game.decision.options.map(({ kind }) => kind),
+      ["pass"],
+    );
+    assert.deepEqual(actionPayloads, [
+      { decisionId: 1, index: 1 },
+      { decisionId: afterLand.game.decision.id, index: 0 },
+    ]);
+
+    const [emptyAttackers] = await captureActionResponses(page, 1, () =>
+      page.getByRole("button", { name: "Pass priority" }).click(),
+    );
+    assert.equal(emptyAttackers.game.snapshot.phase, "declare_attackers");
+    assert.equal(emptyAttackers.game.decision.kind, "attackers");
+    assert.deepEqual(emptyAttackers.game.decision.eligible, []);
+    assert.equal(
+      await page
+        .getByText(
+          "Bluff mode paused before declaring no attackers.",
+          { exact: true },
+        )
+        .count(),
+      1,
+    );
+    const continueWithoutAttackers = page.getByRole("button", {
+      name: "Continue — no attackers",
+    });
+    assert.equal(await continueWithoutAttackers.count(), 1);
+    assert.equal(await continueWithoutAttackers.isEnabled(), true);
+    assert.deepEqual(actionPayloads, [
+      { decisionId: 1, index: 1 },
+      { decisionId: afterLand.game.decision.id, index: 0 },
+      { decisionId: afterFirstMainPass.game.decision.id, index: 0 },
+    ]);
+    assert.equal(await page.getByRole("alert").count(), 0);
+
+    t.diagnostic(
+      "Bluff on: first-main Pass, beginning-combat Pass, and the empty " +
+        "attacker decision all remained explicit with no fourth request",
+    );
+  },
+);
 
 function assertStableGeometry(metrics) {
   assert.equal(metrics.documentWidth, metrics.viewport.width);
