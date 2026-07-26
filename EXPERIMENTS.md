@@ -6073,6 +6073,23 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_certify.py
 `git diff --check` also passed. Decision: **accept the infrastructure fix**.
 It changes no model, seed schedule, sample size, parser, or scientific gate.
 
+Post-commit integration then archived exact source `69c8b2e` into a fresh
+temporary directory and ran the certification-equivalent environment:
+
+```sh
+env CXX=/usr/bin/c++ \
+  NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false \
+  NPM_CONFIG_IGNORE_SCRIPTS=true NPM_CONFIG_OFFLINE=true \
+  NPM_CONFIG_CACHE=/Users/andrewjohnson/.npm \
+  PYTHONDONTWRITEBYTECODE=1 make -B test
+```
+
+Offline `npm ci` installed all 41 locked packages in 712 ms. The complete
+fresh-archive gate passed: 126 engine, 16 learned-iteration, 40 probe, 11
+probe-metric, 24 probe-runner, 9 web-bridge, CLI, capture-once, 82 web, and
+42 certification tests. This closes the exact failure path rather than only
+the pure environment-builder seam.
+
 Review reconciliation after the fix: the independent 02:03 PDT review
 reported the first at-scale committed-v3 control result from its separate
 harness: frozen C16 went `970-1070-0` (`47.5%`, 95% interval
