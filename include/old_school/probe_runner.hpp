@@ -17,15 +17,20 @@
 namespace old_school::probe_runner {
 
 inline constexpr std::string_view kProbeCacheSchema =
-    "old-school-probe-label-cache-v2";
+    "old-school-probe-label-cache-v3";
 inline constexpr std::string_view kProbeReferenceAlgorithm =
-    "actor-mirror-common-world-v2";
+    "actor-mirror-common-world-v3";
 inline constexpr std::string_view kProbeSemanticRevision =
-    "old-school-probe-score-semantics-v2";
+    "old-school-probe-score-semantics-v3";
+// A rules correction changes continuation outcomes even when a probe's
+// visible position is unchanged. Persist that boundary explicitly instead of
+// relying on an incidental model or corpus fingerprint mismatch.
+inline constexpr std::string_view kProbeEnvironmentRevision =
+    "old-school-environment-v3-cleanup-discard";
 inline constexpr std::string_view kProbeValidationCacheSchema =
-    "old-school-probe-validation-label-cache-v1";
+    "old-school-probe-validation-label-cache-v2";
 inline constexpr std::string_view kProbeValidationSemanticRevision =
-    "old-school-probe-validation-score-semantics-v1";
+    "old-school-probe-validation-score-semantics-v2";
 inline constexpr std::uint64_t kProbeReferenceSeed =
     0x50524F4245524546ULL;
 inline constexpr std::uint64_t kProbeProductionPolicySeed =
@@ -51,7 +56,7 @@ struct ProbeScoreConfig {
     // Actor-owned cache metadata and serialization.
     double scoring_value_continuation_epsilon = 0.0;
     std::filesystem::path cache_path =
-        "data/old-school-probe-dev-v3.labels.tsv";
+        "data/old-school-probe-dev-v3-env-v3.labels.tsv";
     bool refresh_cache = false;
 };
 
@@ -59,6 +64,7 @@ struct ProbeCacheMetadata {
     std::string schema;
     std::string algorithm;
     std::string semantic_revision;
+    std::string environment_revision;
     std::string corpus_id;
     std::uint64_t reference_seed = 0;
     std::uint64_t production_policy_seed = 0;

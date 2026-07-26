@@ -397,6 +397,7 @@ enum class GameEventKind : std::uint8_t {
     BlockersDeclared,
     DamageOrderChosen,
     CombatResolved,
+    CardsDiscarded,
 };
 
 // Event payloads contain public game information only. `blocks` uses
@@ -410,6 +411,7 @@ struct GameEvent {
     std::optional<StackObject> stack_object;
     std::vector<PermanentId> attackers;
     std::vector<std::pair<PermanentId, PermanentId>> blocks;
+    std::vector<CardId> cards;
 
     bool operator==(const GameEvent&) const = default;
 };
@@ -438,6 +440,11 @@ struct HumanController {
         const PlayerObservation&, PermanentId,
         const std::vector<PermanentId>&)>
         choose_damage_order;
+    // Return exactly `excess` unique zero-based positions from this
+    // observation's hand. Cleanup publishes the discarded card identities.
+    std::function<std::vector<std::size_t>(
+        const PlayerObservation&, std::size_t excess)>
+        choose_cleanup_discards;
     // Optional transcript hook. It receives this controller's observation
     // after public state changes (or at the declaration point for passes).
     std::function<void(const PlayerObservation&, const GameEvent&)>
@@ -465,7 +472,10 @@ bool resolve_combat(
     const std::vector<std::pair<PermanentId, PermanentId>>& blocks);
 
 void begin_turn(GameState& state, std::size_t player);
-void cleanup_turn(GameState& state);
+inline constexpr std::size_t kMaximumHandSize = 7;
+std::vector<CardId> cleanup_turn(
+    GameState& state, std::size_t active_player,
+    const std::vector<std::size_t>& discard_indices);
 
 enum class EndReason : std::uint8_t {
     LifeTotal,
@@ -959,6 +969,10 @@ class Game {
     double rollout_action(const PriorityAction& action,
                           std::size_t player, bool sorcery_actions,
                           std::uint64_t seed) const;
+    std::vector<std::size_t>
+    choose_cleanup_discards(std::size_t player,
+                            std::size_t excess);
+    void perform_cleanup();
     GameResult run_from_turn(std::size_t first_turn);
     std::optional<GameResult> life_total_result() const;
     GameResult make_result(int winner, EndReason reason) const;

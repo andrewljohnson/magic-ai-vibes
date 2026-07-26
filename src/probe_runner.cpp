@@ -38,13 +38,13 @@ constexpr std::size_t kMaximumReferenceWorlds = 4096;
 constexpr std::size_t kMaximumReferenceHorizon = 128;
 constexpr std::size_t kMaximumReferenceRollouts = 256;
 constexpr std::string_view kProbeCacheMagic =
-    "# old-school-probe-label-cache-v2";
+    "# old-school-probe-label-cache-v3";
 constexpr std::string_view kProbeValidationCacheMagic =
-    "# old-school-probe-validation-label-cache-v1";
+    "# old-school-probe-validation-label-cache-v2";
 constexpr std::string_view kProbeDevDefaultCachePath =
-    "data/old-school-probe-dev-v3.labels.tsv";
+    "data/old-school-probe-dev-v3-env-v3.labels.tsv";
 constexpr std::string_view kProbeValidationDefaultCachePath =
-    "data/old-school-probe-validation-v1.labels.tsv";
+    "data/old-school-probe-validation-v1-env-v3.labels.tsv";
 
 struct ProbeCorpusDefinition {
     std::string_view corpus_id;
@@ -585,6 +585,8 @@ ProbeCacheMetadata read_metadata(
     metadata.algorithm = read_meta_value(input, "algorithm");
     metadata.semantic_revision =
         read_meta_value(input, "semantic_revision");
+    metadata.environment_revision =
+        read_meta_value(input, "environment_revision");
     metadata.corpus_id = read_meta_value(input, "corpus");
     metadata.reference_seed =
         parse_u64_strict(read_meta_value(input, "reference_seed"),
@@ -629,6 +631,10 @@ std::string metadata_mismatch(
     }
     if (actual.semantic_revision != expected.semantic_revision) {
         return "semantic_revision";
+    }
+    if (actual.environment_revision !=
+        expected.environment_revision) {
+        return "environment_revision";
     }
     if (actual.corpus_id != expected.corpus_id) {
         return "corpus";
@@ -730,6 +736,8 @@ void write_cache_contents(
            << "meta\talgorithm\t" << metadata.algorithm << '\n'
            << "meta\tsemantic_revision\t"
            << metadata.semantic_revision << '\n'
+           << "meta\tenvironment_revision\t"
+           << metadata.environment_revision << '\n'
            << "meta\tcorpus\t" << metadata.corpus_id << '\n'
            << "meta\treference_seed\t" << metadata.reference_seed
            << '\n'
@@ -2756,6 +2764,7 @@ std::uint64_t reference_seed_for_probe(
     std::string_view corpus_id, std::string_view stable_id,
     std::uint64_t reference_seed) {
     Fnv1a hash;
+    hash.text(kProbeEnvironmentRevision);
     hash.text(corpus_id);
     hash.text(stable_id);
     hash.unsigned_integer(reference_seed);
@@ -2772,6 +2781,7 @@ std::string corpus_information_set_fingerprint(
     ProbeCorpusKind corpus_kind,
     const std::vector<probes::DecisionProbe>& corpus) {
     Fnv1a hash;
+    hash.text(kProbeEnvironmentRevision);
     hash.text(corpus_definition(corpus_kind).corpus_id);
     const auto sorted = sorted_probes(corpus);
     hash.unsigned_integer(sorted.size());
@@ -2883,6 +2893,8 @@ ProbeCacheMetadata make_probe_cache_metadata(
         .algorithm = std::string(kProbeReferenceAlgorithm),
         .semantic_revision =
             std::string(definition.semantic_revision),
+        .environment_revision =
+            std::string(kProbeEnvironmentRevision),
         .corpus_id = std::string(definition.corpus_id),
         .reference_seed = kProbeReferenceSeed,
         .production_policy_seed = kProbeProductionPolicySeed,
@@ -2932,6 +2944,8 @@ void write_probe_label_cache_atomic(
         metadata.algorithm != kProbeReferenceAlgorithm ||
         metadata.semantic_revision !=
             definition.semantic_revision ||
+        metadata.environment_revision !=
+            kProbeEnvironmentRevision ||
         metadata.corpus_id != definition.corpus_id ||
         metadata.reference_seed != kProbeReferenceSeed ||
         metadata.production_policy_seed !=
@@ -3045,6 +3059,9 @@ std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
         } else if (expected_metadata.semantic_revision !=
                    definition.semantic_revision) {
             expected_mismatch = "semantic_revision";
+        } else if (expected_metadata.environment_revision !=
+                   kProbeEnvironmentRevision) {
+            expected_mismatch = "environment_revision";
         } else if (expected_metadata.corpus_id !=
                    definition.corpus_id) {
             expected_mismatch = "corpus";
@@ -3800,6 +3817,8 @@ std::string format_probe_score_report(
            << "Reference algorithm/revision: "
            << report.metadata.algorithm << " / "
            << report.metadata.semantic_revision << '\n'
+           << "Rules environment: "
+           << report.metadata.environment_revision << '\n'
            << "Fixed reference seed: 0x"
            << hex_u64(report.metadata.reference_seed)
            << "\nProduction-policy RNG domain seed: 0x"

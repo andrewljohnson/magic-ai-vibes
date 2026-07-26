@@ -374,7 +374,7 @@ input:focus-visible {
 
 .game-shell {
   --player-hand-height: 142px;
-  --player-decision-height: 140px;
+  --player-decision-height: 150px;
   --player-console-height: var(--player-hand-height);
   height: 100vh;
   display: flex;
@@ -674,6 +674,30 @@ input:focus-visible {
     0 0 24px rgba(200, 167, 102, 0.07);
 }
 
+.surface-action {
+  position: absolute;
+  z-index: 12;
+  border: 2px solid #75d7c3;
+  border-radius: 7px;
+  color: #07100d;
+  background: rgba(117, 215, 195, 0.9);
+  box-shadow: 0 0 0 4px rgba(104, 183, 167, 0.15);
+  font-size: var(--type-floor);
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.surface-action.is-drop-target {
+  border-color: var(--gold-bright);
+  background: var(--gold-bright);
+  box-shadow: 0 0 0 5px rgba(241, 211, 138, 0.2);
+}
+
+.player-surface-action {
+  inset: 5px;
+}
+
 .identity-orb {
   width: 35px;
   height: 35px;
@@ -944,6 +968,20 @@ input:focus-visible {
     0 0 20px rgba(240, 187, 115, 0.28);
 }
 
+.card-face.is-choice-target {
+  outline: 3px solid #75d7c3;
+  outline-offset: 3px;
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 0, 0, 0.3),
+    0 0 0 6px rgba(104, 183, 167, 0.16),
+    0 0 24px rgba(104, 183, 167, 0.35);
+}
+
+.card-face.is-choice-origin {
+  outline: 2px dashed var(--gold-bright);
+  outline-offset: 3px;
+}
+
 .card-edge {
   pointer-events: none;
   position: absolute;
@@ -1090,6 +1128,26 @@ input:focus-visible {
   transform: translateX(-50%);
   border: 1px solid #f6d7a8;
   background: #5f482b;
+  letter-spacing: 0.08em;
+}
+
+.status-choice {
+  left: 50%;
+  bottom: -7px;
+  transform: translateX(-50%);
+  border: 1px solid #bdf3e8;
+  color: #07100d;
+  background: #75d7c3;
+  letter-spacing: 0.08em;
+}
+
+.status-origin {
+  left: 50%;
+  bottom: -7px;
+  transform: translateX(-50%);
+  border: 1px solid var(--gold-bright);
+  color: #17140c;
+  background: var(--gold-bright);
   letter-spacing: 0.08em;
 }
 
@@ -1297,6 +1355,16 @@ input:focus-visible {
   transform: translateY(-5px) scale(1.04);
 }
 
+.hand-card-wrap.is-selected:not(.is-dragging) {
+  z-index: 11;
+  transform: translateY(-7px) scale(1.04);
+}
+
+.hand-card-wrap.is-selected .card-face {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
 .hand-card-wrap.is-playable::after {
   content: "PLAY";
   position: absolute;
@@ -1387,6 +1455,17 @@ input:focus-visible {
 .stack-entry:first-child {
   border-color: rgba(241, 211, 138, 0.4);
   z-index: 2;
+}
+
+.stack-entry.is-priority-destination {
+  border-color: #75d7c3;
+  box-shadow:
+    0 0 0 3px rgba(104, 183, 167, 0.14),
+    0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+.stack-surface-action {
+  inset: 5px;
 }
 
 .stack-entry > strong {
@@ -1576,117 +1655,143 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.priority-options {
+.arena-priority-actions {
+  min-width: 0;
+  height: 100%;
   display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 2px;
-  scrollbar-width: thin;
+  align-items: stretch;
+  gap: 9px;
 }
 
-.action-card {
-  flex: 1 0 148px;
-  max-width: 230px;
-  min-height: 79px;
-  display: grid;
-  grid-template-columns: 22px 31px 1fr;
-  align-items: center;
-  gap: 7px;
-  padding: 9px;
-  text-align: left;
+.priority-selection {
+  min-width: 145px;
+  flex: 1 1 210px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 9px 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.025);
-  cursor: pointer;
-  position: relative;
-  transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    transform 140ms ease;
 }
 
-.action-card.no-card {
-  grid-template-columns: 22px minmax(0, 1fr);
+.priority-selection > strong {
+  overflow: hidden;
+  font-family: Georgia, serif;
+  font-size: 13px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.action-card:hover:not(:disabled) {
-  border-color: rgba(241, 211, 138, 0.44);
-  background: rgba(200, 167, 102, 0.07);
-  transform: translateY(-2px);
-}
-
-.action-card.is-drop-target {
-  border: 2px solid var(--gold-bright);
-  background:
-    linear-gradient(rgba(241, 211, 138, 0.16), rgba(241, 211, 138, 0.08)),
-    rgba(255, 255, 255, 0.03);
-  box-shadow:
-    0 0 0 3px rgba(241, 211, 138, 0.16),
-    inset 0 0 20px rgba(241, 211, 138, 0.08);
-}
-
-.action-card.is-drop-target .action-copy {
-  padding-bottom: 16px;
-}
-
-.drop-cue {
-  position: absolute;
-  right: 8px;
-  bottom: 5px;
-  color: var(--gold-bright);
+.priority-selection > small {
+  color: var(--muted);
   font-size: var(--type-floor);
+}
+
+.clear-priority-selection {
+  align-self: flex-start;
+  padding: 2px 0;
+  border: 0;
+  color: var(--gold);
+  background: transparent;
+  font-size: var(--type-floor);
+  cursor: pointer;
+}
+
+.play-cast-zone {
+  min-width: 178px;
+  flex: 1 1 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 2px dashed #75d7c3;
+  border-radius: 8px;
+  color: #bdf3e8;
+  background: rgba(104, 183, 167, 0.08);
+  cursor: pointer;
+}
+
+.play-cast-zone > span {
+  font-size: var(--type-label);
   font-weight: 800;
   letter-spacing: 0.1em;
 }
 
-.action-card:disabled {
-  opacity: 0.45;
+.play-cast-zone > strong {
+  font-family: Georgia, serif;
+  font-size: 14px;
+  font-weight: 400;
 }
 
-.hotkey {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  color: var(--faint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.play-cast-zone.is-drop-target {
+  border-style: solid;
+  border-color: var(--gold-bright);
+  color: var(--gold-bright);
+  background: rgba(241, 211, 138, 0.16);
+  box-shadow: 0 0 0 4px rgba(241, 211, 138, 0.13);
+}
+
+.priority-parameter-chooser {
+  min-width: 190px;
+  flex: 2 1 320px;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.priority-parameter-chooser > span {
+  align-self: center;
+  max-width: 65px;
+  color: var(--gold);
   font-size: var(--type-floor);
+  letter-spacing: 0.1em;
 }
 
-.action-swatch {
-  width: 30px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--card-accent), #101312 65%);
-  color: white;
-  font-size: var(--type-floor);
-  font-weight: 700;
-}
-
-.action-copy {
-  min-width: 0;
+.priority-parameter-chooser button {
+  min-width: 132px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--ink);
+  background: rgba(200, 167, 102, 0.08);
+  text-align: left;
+  cursor: pointer;
 }
 
-.action-copy strong {
+.priority-parameter-chooser strong {
   font-family: Georgia, serif;
   font-size: var(--type-label);
   font-weight: 400;
-  line-height: 1.2;
 }
 
-.action-copy span {
-  color: var(--faint);
+.priority-parameter-chooser small {
+  color: var(--muted);
   font-size: var(--type-floor);
-  line-height: 1.25;
-  text-transform: capitalize;
+}
+
+.pass-priority-controls {
+  flex: 0 0 auto;
+  display: flex;
+}
+
+.pass-priority-controls button {
+  min-width: 112px;
+  padding: 8px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: var(--type-floor);
+  cursor: pointer;
 }
 
 .combat-control,
@@ -2238,153 +2343,6 @@ select {
   backdrop-filter: blur(8px);
 }
 
-.card-inspect-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(4, 7, 6, 0.84);
-  backdrop-filter: blur(9px);
-}
-
-.card-inspector {
-  width: min(650px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
-  overflow: auto;
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 27px;
-  padding: 25px;
-  border: 1px solid rgba(200, 167, 102, 0.4);
-  border-radius: 13px;
-  background:
-    radial-gradient(circle at 20% 10%, rgba(200, 167, 102, 0.12), transparent 18rem),
-    #111815;
-  box-shadow: 0 35px 100px rgba(0, 0, 0, 0.7);
-}
-
-.card-inspect-face {
-  align-self: center;
-}
-
-.card-inspect-face .card-face {
-  width: 220px;
-  height: 306px;
-  border-width: 2px;
-}
-
-.card-inspect-face .card-heading {
-  padding: 7px 7px 0;
-}
-
-.card-inspect-face .card-name {
-  font-size: 20px;
-  line-height: 1.1;
-}
-
-.card-inspect-face .mana-cost {
-  font-size: 15px;
-}
-
-.card-inspect-face .card-field {
-  margin: 8px 6px;
-}
-
-.card-inspect-face .card-glyph {
-  font-size: 44px;
-}
-
-.card-inspect-face .card-footer {
-  min-height: 28px;
-  padding: 0 7px 7px;
-}
-
-.card-inspect-face .card-type {
-  font-size: 12px;
-}
-
-.card-inspect-face .combat-stats {
-  min-width: 34px;
-  font-size: 16px;
-}
-
-.card-inspect-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.card-inspect-copy > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.card-inspect-copy h2 {
-  margin: 5px 0 0;
-  font-family: Georgia, serif;
-  font-size: 27px;
-  font-weight: 400;
-}
-
-.card-inspect-copy .icon-button {
-  flex: none;
-  width: 36px;
-  height: 36px;
-}
-
-.card-inspect-copy > p {
-  margin: 17px 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.card-inspect-actions {
-  display: grid;
-  gap: 8px;
-  overflow: auto;
-}
-
-.card-inspect-actions button {
-  min-height: 58px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  padding: 9px 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.035);
-  text-align: left;
-  cursor: pointer;
-}
-
-.card-inspect-actions button:hover {
-  border-color: rgba(241, 211, 138, 0.6);
-  background: rgba(200, 167, 102, 0.11);
-}
-
-.card-inspect-actions strong {
-  font-family: Georgia, serif;
-  font-size: 14px;
-  font-weight: 400;
-}
-
-.card-inspect-actions span,
-.card-inspect-copy > small {
-  color: var(--muted);
-  font-size: var(--type-floor);
-}
-
-.card-inspect-copy > small {
-  margin-top: 13px;
-}
-
 .game-over-layer > section {
   width: min(520px, calc(100vw - 40px));
   padding: 42px;
@@ -2478,7 +2436,7 @@ select {
 @media (max-height: 780px) {
   .game-shell {
     --player-hand-height: 112px;
-    --player-decision-height: 140px;
+    --player-decision-height: 150px;
   }
 
   .table-stage {

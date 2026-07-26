@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -1087,6 +1088,12 @@ HumanController land_then_pass_controller(
         [](const PlayerObservation&, PermanentId,
            const std::vector<PermanentId>& blockers) {
             return blockers;
+        };
+    controller.choose_cleanup_discards =
+        [](const PlayerObservation&, std::size_t excess) {
+            std::vector<std::size_t> indices(excess);
+            std::iota(indices.begin(), indices.end(), 0);
+            return indices;
         };
     return controller;
 }

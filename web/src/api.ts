@@ -5,6 +5,7 @@ import type {
   GameSnapshot,
   MetaResponse,
 } from "./types";
+import { apiRequestErrorFromResponse } from "./errors";
 
 const apiBase = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
@@ -147,11 +148,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    const message =
-      body && typeof body === "object" && "error" in body
-        ? errorMessage(body.error, `Request failed (${response.status})`)
-        : `Request failed (${response.status})`;
-    throw new Error(message);
+    throw apiRequestErrorFromResponse(response.status, body);
   }
   return body as T;
 }

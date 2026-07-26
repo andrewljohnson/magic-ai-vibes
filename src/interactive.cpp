@@ -994,6 +994,12 @@ class TerminalSession {
                     return choose_damage_order(
                         observation, attacker, blockers);
                 },
+            .choose_cleanup_discards =
+                [this](const PlayerObservation& observation,
+                       std::size_t excess) {
+                    return choose_cleanup_discards(
+                        observation, excess);
+                },
             .observe =
                 [this](const PlayerObservation& observation,
                        const GameEvent& event) {
@@ -1175,6 +1181,55 @@ class TerminalSession {
         return ordered;
     }
 
+    std::vector<std::size_t> choose_cleanup_discards(
+        const PlayerObservation& observation,
+        std::size_t excess) {
+        render_decision_state(observation);
+        struct HandChoice {
+            std::size_t original_position = 0;
+            CardId card = CardId::Forest;
+        };
+        std::vector<HandChoice> remaining;
+        remaining.reserve(observation.hand.size());
+        for (std::size_t index = 0;
+             index < observation.hand.size(); ++index) {
+            remaining.push_back({
+                .original_position = index,
+                .card = observation.hand[index],
+            });
+        }
+
+        std::vector<std::size_t> selected;
+        selected.reserve(excess);
+        while (selected.size() < excess) {
+            std::vector<std::string> choices;
+            choices.reserve(remaining.size());
+            for (const auto& choice : remaining) {
+                choices.push_back(
+                    std::string(card_definition(choice.card).name) +
+                    " (hand #" +
+                    std::to_string(
+                        choice.original_position + 1) +
+                    ")");
+            }
+            print_choice_box(
+                output_,
+                "CLEANUP | DISCARD " +
+                    std::to_string(
+                        excess - selected.size()) +
+                    " MORE",
+                choices);
+            const std::size_t chosen =
+                read_index("discard> ", remaining.size() - 1);
+            selected.push_back(
+                remaining[chosen].original_position);
+            remaining.erase(
+                remaining.begin() +
+                static_cast<std::ptrdiff_t>(chosen));
+        }
+        return selected;
+    }
+
     void observe(const PlayerObservation& observation,
                  const GameEvent& event) {
         switch (event.kind) {
@@ -1308,6 +1363,26 @@ class TerminalSession {
         case GameEventKind::CombatResolved:
             output_ << "[COMBAT] Combat resolves.\n";
             return;
+        case GameEventKind::CardsDiscarded: {
+            std::ostringstream discard_log;
+            discard_log
+                << "[DISCARD] "
+                << player_name(observation, event.player)
+                << (event.player == observation.observer
+                        ? " discard: "
+                        : " discards: ");
+            for (std::size_t index = 0;
+                 index < event.cards.size(); ++index) {
+                if (index != 0) {
+                    discard_log << ", ";
+                }
+                discard_log
+                    << card_definition(event.cards[index]).name;
+            }
+            print_log_line(output_, discard_log.str());
+            last_rendered_ = observation;
+            return;
+        }
         }
         throw std::logic_error("unknown interactive game event");
     }

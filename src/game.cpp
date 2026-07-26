@@ -9034,7 +9034,69 @@ void begin_turn(GameState& state, std::size_t player) {
     }
 }
 
-void cleanup_turn(GameState& state) {
+std::vector<CardId> cleanup_turn(
+    GameState& state, std::size_t active_player,
+    const std::vector<std::size_t>& discard_indices) {
+    if (active_player >= state.players.size()) {
+        throw std::out_of_range(
+            "cleanup active player must be 0 or 1");
+    }
+
+    const auto& active_hand =
+        state.players[active_player].hand;
+    const std::size_t excess =
+        active_hand.size() > kMaximumHandSize
+            ? active_hand.size() - kMaximumHandSize
+            : 0;
+    if (discard_indices.size() != excess) {
+        throw std::invalid_argument(
+            "cleanup must discard exactly the excess hand cards");
+    }
+
+    std::vector<std::size_t> ordered_indices =
+        discard_indices;
+    std::sort(ordered_indices.begin(), ordered_indices.end());
+    if (std::adjacent_find(
+            ordered_indices.begin(),
+            ordered_indices.end()) != ordered_indices.end()) {
+        throw std::invalid_argument(
+            "cleanup discard positions must be unique");
+    }
+    if (!ordered_indices.empty() &&
+        ordered_indices.back() >= active_hand.size()) {
+        throw std::invalid_argument(
+            "cleanup discard position is outside the hand");
+    }
+
+    std::vector<CardId> discarded;
+    discarded.reserve(excess);
+    std::vector<CardId> retained;
+    retained.reserve(active_hand.size() - excess);
+    std::size_t discard_cursor = 0;
+    for (std::size_t hand_index = 0;
+         hand_index < active_hand.size(); ++hand_index) {
+        if (discard_cursor < ordered_indices.size() &&
+            ordered_indices[discard_cursor] == hand_index) {
+            discarded.push_back(active_hand[hand_index]);
+            ++discard_cursor;
+        } else {
+            retained.push_back(active_hand[hand_index]);
+        }
+    }
+
+    // Complete all potentially allocating work before mutating the state so
+    // malformed input (and allocation failures) cannot produce a partial
+    // cleanup.
+    std::vector<CardId> graveyard =
+        state.players[active_player].graveyard;
+    graveyard.insert(
+        graveyard.end(), discarded.begin(), discarded.end());
+    state.players[active_player].hand = std::move(retained);
+    state.players[active_player].graveyard =
+        std::move(graveyard);
+
+    // Cleanup discards precede the removal of damage and until-end-of-turn
+    // effects.
     for (auto& player : state.players) {
         player.mana_pool = {};
         for (auto& creature : player.creatures) {
@@ -9044,6 +9106,7 @@ void cleanup_turn(GameState& state) {
             creature.exile_on_death_this_turn = false;
         }
     }
+    return discarded;
 }
 
 PlayerObservation observe_game_state(const GameState& state,
@@ -9110,7 +9173,8 @@ Game::Game(std::vector<CardId> player_zero_deck,
         if (!controller->choose_priority_action ||
             !controller->choose_attackers ||
             !controller->choose_blockers ||
-            !controller->choose_damage_order) {
+            !controller->choose_damage_order ||
+            !controller->choose_cleanup_discards) {
             throw std::invalid_argument(
                 "human controller requires every decision callback");
         }
@@ -9178,6 +9242,141 @@ void Game::notify_human_observers(const GameEvent& event) const {
 std::shared_ptr<const LearnedModel>
 Game::learned_model_for(std::size_t player) const {
     return configured_learned_model(config_, player);
+}
+
+std::vector<std::size_t>
+Game::choose_cleanup_discards(std::size_t player,
+                              std::size_t excess) {
+    if (player >= state_.players.size()) {
+        throw std::out_of_range(
+            "cleanup player must be 0 or 1");
+    }
+    const auto& hand = state_.players[player].hand;
+    if (hand.size() <= kMaximumHandSize ||
+        excess != hand.size() - kMaximumHandSize) {
+        throw std::invalid_argument(
+            "cleanup discard count does not match hand size");
+    }
+
+    ++state_.stats[player].decisions;
+    if (const auto* controller = human_controller(player);
+        controller != nullptr) {
+        return controller->choose_cleanup_discards(
+            human_observation(player), excess);
+    }
+
+    const BotKind kind = config_.bots[player].kind;
+    if (kind == BotKind::Handcrafted) {
+        std::vector<std::size_t> positions(hand.size());
+        std::iota(positions.begin(), positions.end(), 0);
+        std::stable_sort(
+            positions.begin(), positions.end(),
+            [&hand](std::size_t left, std::size_t right) {
+                return handcrafted_card_value(hand[left]) <
+                       handcrafted_card_value(hand[right]);
+            });
+        positions.resize(excess);
+        std::sort(positions.begin(), positions.end());
+        return positions;
+    }
+
+    if (kind == BotKind::Learned) {
+        const auto model = learned_model_for(player);
+        if (!model) {
+            throw std::logic_error(
+                "Learned cleanup has no frozen model");
+        }
+        struct RemainingCard {
+            std::size_t original_position = 0;
+            CardId card = CardId::Forest;
+        };
+        std::vector<RemainingCard> remaining;
+        remaining.reserve(hand.size());
+        for (std::size_t index = 0; index < hand.size(); ++index) {
+            remaining.push_back({
+                .original_position = index,
+                .card = hand[index],
+            });
+        }
+
+        GameState after = state_;
+        std::vector<std::size_t> selected;
+        selected.reserve(excess);
+        for (std::size_t discard = 0; discard < excess;
+             ++discard) {
+            std::size_t best_index = 0;
+            double best_score =
+                -std::numeric_limits<double>::infinity();
+            GameState best_after;
+            for (std::size_t index = 0;
+                 index < remaining.size(); ++index) {
+                GameState candidate = after;
+                auto& candidate_player =
+                    candidate.players[player];
+                const CardId card =
+                    candidate_player.hand[index];
+                candidate_player.hand.erase(
+                    candidate_player.hand.begin() +
+                    static_cast<std::ptrdiff_t>(index));
+                candidate_player.graveyard.push_back(card);
+                const double score =
+                    predict_learned_critic_with_context(
+                        model, candidate, player, {});
+                if (index == 0 || score > best_score) {
+                    best_index = index;
+                    best_score = score;
+                    best_after = std::move(candidate);
+                }
+            }
+            selected.push_back(
+                remaining[best_index].original_position);
+            remaining.erase(
+                remaining.begin() +
+                static_cast<std::ptrdiff_t>(best_index));
+            after = std::move(best_after);
+        }
+        std::sort(selected.begin(), selected.end());
+        return selected;
+    }
+
+    // Random and rollout-based policies use an unbiased legal cleanup
+    // choice. The seeded game RNG keeps the choice reproducible.
+    std::vector<std::size_t> positions(hand.size());
+    std::iota(positions.begin(), positions.end(), 0);
+    std::shuffle(
+        positions.begin(), positions.end(), random_);
+    positions.resize(excess);
+    std::sort(positions.begin(), positions.end());
+    return positions;
+}
+
+void Game::perform_cleanup() {
+    const std::size_t active_player = state_.active_player;
+    if (active_player >= state_.players.size()) {
+        throw std::logic_error(
+            "game cleanup has an invalid active player");
+    }
+    const std::size_t hand_size =
+        state_.players[active_player].hand.size();
+    const std::size_t excess =
+        hand_size > kMaximumHandSize
+            ? hand_size - kMaximumHandSize
+            : 0;
+    std::vector<std::size_t> selected;
+    if (excess != 0) {
+        selected =
+            choose_cleanup_discards(active_player, excess);
+    }
+    const std::vector<CardId> discarded =
+        cleanup_turn(state_, active_player, selected);
+    if (!discarded.empty() && has_human_observer()) {
+        notify_human_observers({
+            .kind = GameEventKind::CardsDiscarded,
+            .player = active_player,
+            .phase = TurnPhase::SecondMain,
+            .cards = discarded,
+        });
+    }
 }
 
 void Game::initialize() {
@@ -9873,7 +10072,7 @@ double Game::learned_information_set_action_score(
             "priority search started from a declaration phase");
     }
 
-    cleanup_turn(simulation.state_);
+    simulation.perform_cleanup();
     if (simulation.state_.turn_number >=
         simulation.config_.max_turns) {
         return result_score(
@@ -10000,7 +10199,7 @@ Game::finish_turn_after_priority_phase(TurnPhase phase) {
         throw std::logic_error(
             "priority search started from a declaration phase");
     }
-    cleanup_turn(state_);
+    perform_cleanup();
     return std::nullopt;
 }
 
@@ -10063,7 +10262,7 @@ Game::finish_learned_evaluation_horizon(
                 result.has_value()) {
                 return result;
             }
-            cleanup_turn(state_);
+            perform_cleanup();
             return std::nullopt;
         };
 
@@ -10693,7 +10892,7 @@ double Game::rollout_action(const PriorityAction& action,
         }
     }
 
-    cleanup_turn(rollout.state_);
+    rollout.perform_cleanup();
     const GameResult result =
         rollout.run_from_turn(rollout.state_.turn_number + 1);
     if (result.winner < 0) {
@@ -11473,7 +11672,7 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
             result.has_value()) {
             return *result;
         }
-        cleanup_turn(state_);
+        perform_cleanup();
     }
 
     return make_result(-1, EndReason::TurnLimit);
@@ -15908,7 +16107,7 @@ LearnedActionSamples learned_binary_attack_samples(
                         true, TurnPhase::SecondMain);
                 }
                 if (!terminal.has_value()) {
-                    cleanup_turn(simulation.state_);
+                    simulation.perform_cleanup();
                 }
 
                 double continuation = 0.0;

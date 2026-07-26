@@ -15,14 +15,19 @@ import {
   fetchMeta,
   submitAction,
 } from "./api";
+import { ApiRequestError } from "./errors";
 import {
   blockerPairsFromKeys,
   concisePriorityOptionLabel,
   describeTopOfStack,
   formatStackEntryLabel,
   formatStackTargets,
+  formatGameResultReason,
+  formatGameResultTitle,
   formatTargetLabel,
+  priorityDestinationKey,
   priorityOptionsForCard,
+  priorityOptionsForSourcePermanent,
   restoreOpaqueIds,
   stackPermanentTargetIds,
   type ActionRequest,
@@ -41,6 +46,7 @@ import {
   type PlayerState,
   type PolicyMeta,
   type PriorityDecision,
+  type PriorityDestinationKey,
   type PriorityOption,
   type StackInteraction,
   type StackEntry,
@@ -266,10 +272,15 @@ interface CardFaceProps {
   selected?: boolean;
   actionable?: boolean;
   targeted?: boolean;
+  choiceTarget?: boolean;
+  choiceOrigin?: boolean;
   draggable?: boolean;
   onClick?: () => void;
+  onDoubleClick?: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
   onDragEnd?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragOver?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDrop?: (event: ReactDragEvent<HTMLButtonElement>) => void;
 }
 
 function CardFace({
@@ -280,10 +291,15 @@ function CardFace({
   selected = false,
   actionable = false,
   targeted = false,
+  choiceTarget = false,
+  choiceOrigin = false,
   draggable = false,
   onClick,
+  onDoubleClick,
   onDragStart,
   onDragEnd,
+  onDragOver,
+  onDrop,
 }: CardFaceProps) {
   const power = permanent?.power ?? card.power;
   const toughness = permanent?.toughness ?? card.toughness;
@@ -298,6 +314,8 @@ function CardFace({
     permanent?.summoningSick ? "Summoning sick" : undefined,
     permanent?.damage ? `${permanent.damage} damage marked` : undefined,
     targeted ? "Targeted by an object on the stack" : undefined,
+    choiceTarget ? "Legal destination for the selected action" : undefined,
+    choiceOrigin ? "Legal activated-ability origin" : undefined,
   ]
     .filter(Boolean)
     .join(" • ");
@@ -308,13 +326,18 @@ function CardFace({
         compact ? "card-compact" : ""
       } ${selected ? "is-selected" : ""} ${
         actionable ? "is-actionable" : ""
-      } ${targeted ? "is-targeted" : ""} ${className}`}
+      } ${targeted ? "is-targeted" : ""} ${
+        choiceTarget ? "is-choice-target" : ""
+      } ${choiceOrigin ? "is-choice-origin" : ""} ${className}`}
       type="button"
       title={title}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       disabled={!onClick && !draggable}
       aria-pressed={actionable ? selected : undefined}
       aria-label={`${card.name}${permanent?.tapped ? ", tapped" : ""}${
@@ -350,6 +373,10 @@ function CardFace({
         <span className="status-token status-damage">−{permanent.damage}</span>
       )}
       {targeted && <span className="status-token status-targeted">TARGET</span>}
+      {choiceTarget && <span className="status-token status-choice">CHOOSE</span>}
+      {choiceOrigin && (
+        <span className="status-token status-origin">ACTIVATE</span>
+      )}
     </button>
   );
 }
@@ -387,6 +414,8 @@ function FaceUpHand({
   debug = false,
   playableCardIds,
   onCardClick,
+  onCardDoubleClick,
+  selectedCardKey,
   draggedCardKey,
   onCardDragStart,
   onCardDragEnd,
@@ -396,6 +425,8 @@ function FaceUpHand({
   debug?: boolean;
   playableCardIds?: ReadonlySet<string>;
   onCardClick?: (card: Card, renderKey: string) => void;
+  onCardDoubleClick?: (card: Card, renderKey: string) => void;
+  selectedCardKey?: string;
   draggedCardKey?: string;
   onCardDragStart?: (
     card: Card,
@@ -426,42 +457,50 @@ function FaceUpHand({
             !debug && (playableCardIds?.has(String(card.id)) ?? false);
           const renderKey = `${String(card.id)}:${index}`;
           return (
-          <div
-            className={`hand-card-wrap ${playable ? "is-playable" : ""} ${
-              draggedCardKey === renderKey ? "is-dragging" : ""
-            }`}
-            key={`${card.id}-${index}`}
-            role="listitem"
-            style={
-              {
-                "--fan-angle": `${
-                  (index - (cards.length - 1) / 2) * 1.25
-                }deg`,
-                "--fan-lift": `${
-                  Math.min(Math.abs(index - (cards.length - 1) / 2) * 1.2, 8)
-                }px`,
-              } as CSSProperties
-            }
-          >
-            <CardFace
-              card={card}
-              actionable={playable}
-              draggable={playable && Boolean(onCardDragStart)}
-              onDragStart={
-                playable && onCardDragStart
-                  ? (event) => onCardDragStart(card, renderKey, event)
-                  : undefined
+            <div
+              className={`hand-card-wrap ${playable ? "is-playable" : ""} ${
+                selectedCardKey === renderKey ? "is-selected" : ""
+              } ${
+                draggedCardKey === renderKey ? "is-dragging" : ""
+              }`}
+              key={`${card.id}-${index}`}
+              role="listitem"
+              style={
+                {
+                  "--fan-angle": `${
+                    (index - (cards.length - 1) / 2) * 1.25
+                  }deg`,
+                  "--fan-lift": `${Math.min(
+                    Math.abs(index - (cards.length - 1) / 2) * 1.2,
+                    8,
+                  )}px`,
+                } as CSSProperties
               }
-              onDragEnd={
-                playable && onCardDragEnd ? onCardDragEnd : undefined
-              }
-              onClick={
-                playable && onCardClick
-                  ? () => onCardClick(card, renderKey)
-                  : undefined
-              }
-            />
-          </div>
+            >
+              <CardFace
+                card={card}
+                actionable={playable}
+                draggable={playable && Boolean(onCardDragStart)}
+                onDragStart={
+                  playable && onCardDragStart
+                    ? (event) => onCardDragStart(card, renderKey, event)
+                    : undefined
+                }
+                onDragEnd={
+                  playable && onCardDragEnd ? onCardDragEnd : undefined
+                }
+                onClick={
+                  playable && onCardClick
+                    ? () => onCardClick(card, renderKey)
+                    : undefined
+                }
+                onDoubleClick={
+                  playable && onCardDoubleClick
+                    ? () => onCardDoubleClick(card, renderKey)
+                    : undefined
+                }
+              />
+            </div>
           );
         })}
       </div>
@@ -513,6 +552,10 @@ function PlayerHud({
   policy,
   active,
   opponent,
+  priorityTarget,
+  draggingPriority,
+  onChoosePriorityTarget,
+  onDropPriorityTarget,
 }: {
   player: PlayerState;
   label: string;
@@ -520,6 +563,10 @@ function PlayerHud({
   policy: string;
   active: boolean;
   opponent?: boolean;
+  priorityTarget?: boolean;
+  draggingPriority?: boolean;
+  onChoosePriorityTarget?: () => void;
+  onDropPriorityTarget?: () => void;
 }) {
   return (
     <div
@@ -556,6 +603,28 @@ function PlayerHud({
       {!!player.extraTurns && (
         <div className="extra-turns">+{player.extraTurns} TURN</div>
       )}
+      {priorityTarget && (
+        <button
+          className={`surface-action player-surface-action ${
+            draggingPriority ? "is-drop-target" : ""
+          }`}
+          type="button"
+          onClick={onChoosePriorityTarget}
+          onDragOver={(event) => {
+            if (!draggingPriority) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }}
+          onDrop={(event) => {
+            if (!draggingPriority) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onDropPriorityTarget?.();
+          }}
+        >
+          {draggingPriority ? "DROP ON PLAYER" : "CHOOSE PLAYER"}
+        </button>
+      )}
     </div>
   );
 }
@@ -566,14 +635,33 @@ function PermanentRow({
   eligibleIds,
   selectedIds,
   targetedIds,
+  priorityDestinationIds,
+  priorityOriginIds,
+  selectedPriorityOriginId,
+  draggingPriority,
   onToggle,
+  onChoosePriorityDestination,
+  onSelectPriorityOrigin,
+  onStartPriorityOriginDrag,
+  onEndPriorityDrag,
 }: {
   title: string;
   permanents: Permanent[];
   eligibleIds?: Set<string>;
   selectedIds?: Set<string>;
   targetedIds?: ReadonlySet<string>;
+  priorityDestinationIds?: ReadonlySet<string>;
+  priorityOriginIds?: ReadonlySet<string>;
+  selectedPriorityOriginId?: string;
+  draggingPriority?: boolean;
   onToggle?: (id: string) => void;
+  onChoosePriorityDestination?: (id: string) => void;
+  onSelectPriorityOrigin?: (id: string) => void;
+  onStartPriorityOriginDrag?: (
+    id: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => void;
+  onEndPriorityDrag?: () => void;
 }) {
   if (permanents.length === 0) return null;
   return (
@@ -583,20 +671,65 @@ function PermanentRow({
         {permanents.map((permanent) => {
           const id = permanentId(permanent);
           const eligible = eligibleIds?.has(id) ?? false;
+          const priorityDestination =
+            priorityDestinationIds?.has(id) ?? false;
+          const priorityOrigin = priorityOriginIds?.has(id) ?? false;
+          const onClick = priorityDestination
+            ? () => onChoosePriorityDestination?.(id)
+            : priorityOrigin
+              ? () => onSelectPriorityOrigin?.(id)
+              : eligible && onToggle
+                ? () => onToggle(id)
+                : undefined;
           return (
             <div
               className={`permanent-slot ${
                 permanent.tapped ? "is-tapped" : ""
+              } ${priorityDestination ? "is-priority-destination" : ""} ${
+                priorityOrigin ? "is-priority-origin" : ""
               }`}
               key={id}
             >
               <CardFace
                 card={permanent.card}
                 permanent={permanent}
-                selected={selectedIds?.has(id)}
-                actionable={eligible}
+                selected={
+                  selectedIds?.has(id) || selectedPriorityOriginId === id
+                }
+                actionable={eligible || priorityDestination || priorityOrigin}
                 targeted={targetedIds?.has(id)}
-                onClick={eligible && onToggle ? () => onToggle(id) : undefined}
+                choiceTarget={priorityDestination}
+                choiceOrigin={priorityOrigin}
+                onClick={onClick}
+                draggable={priorityOrigin && Boolean(onStartPriorityOriginDrag)}
+                onDragStart={
+                  priorityOrigin && onStartPriorityOriginDrag
+                    ? (event) => onStartPriorityOriginDrag(id, event)
+                    : undefined
+                }
+                onDragEnd={
+                  priorityOrigin && onEndPriorityDrag
+                    ? onEndPriorityDrag
+                    : undefined
+                }
+                onDragOver={
+                  priorityDestination && draggingPriority
+                    ? (event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                      }
+                    : undefined
+                }
+                onDrop={
+                  priorityDestination && draggingPriority
+                    ? (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onEndPriorityDrag?.();
+                        onChoosePriorityDestination?.(id);
+                      }
+                    : undefined
+                }
               />
             </div>
           );
@@ -616,7 +749,19 @@ function BattlefieldSide({
   attackerDecision,
   selectedAttackers,
   targetedPermanentIds,
+  priorityDestinationIds,
+  priorityOriginIds,
+  priorityPlayerTargets,
+  priorityPlayTarget,
+  selectedPriorityOriginId,
+  draggingPriority,
   onToggleAttacker,
+  onChoosePriorityDestination,
+  onChoosePriorityPlayer,
+  onChoosePriorityPlay,
+  onSelectPriorityOrigin,
+  onStartPriorityOriginDrag,
+  onEndPriorityDrag,
 }: {
   player: PlayerState;
   seat: PlayerIndex;
@@ -627,7 +772,22 @@ function BattlefieldSide({
   attackerDecision?: AttackersDecision;
   selectedAttackers?: Set<string>;
   targetedPermanentIds?: ReadonlySet<string>;
+  priorityDestinationIds?: ReadonlySet<string>;
+  priorityOriginIds?: ReadonlySet<string>;
+  priorityPlayerTargets?: ReadonlySet<number>;
+  priorityPlayTarget?: boolean;
+  selectedPriorityOriginId?: string;
+  draggingPriority?: boolean;
   onToggleAttacker?: (id: string) => void;
+  onChoosePriorityDestination?: (id: string) => void;
+  onChoosePriorityPlayer?: (seat: PlayerIndex) => void;
+  onChoosePriorityPlay?: () => void;
+  onSelectPriorityOrigin?: (id: string) => void;
+  onStartPriorityOriginDrag?: (
+    id: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => void;
+  onEndPriorityDrag?: () => void;
 }) {
   const eligibleIds = useMemo(
     () =>
@@ -647,8 +807,29 @@ function BattlefieldSide({
     <section
       className={`battlefield-side ${opponent ? "opponent-side" : "player-side"} ${
         active ? "is-active" : ""
+      } ${priorityPlayTarget ? "is-play-destination" : ""} ${
+        priorityPlayTarget && draggingPriority ? "is-drop-target" : ""
       }`}
       aria-label={`${playerLabel(snapshot, seat)} battlefield`}
+      data-priority-play-target={priorityPlayTarget || undefined}
+      onClick={(event) => {
+        if (!priorityPlayTarget) return;
+        const target = event.target as HTMLElement;
+        if (target.closest("button")) return;
+        if (target.closest(".permanent-zone")) onChoosePriorityPlay?.();
+      }}
+      onDragOver={(event) => {
+        if (!priorityPlayTarget || !draggingPriority) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        if (!priorityPlayTarget || !draggingPriority) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onEndPriorityDrag?.();
+        onChoosePriorityPlay?.();
+      }}
     >
       <PlayerHud
         player={player}
@@ -657,6 +838,13 @@ function BattlefieldSide({
         policy={policyLabel(snapshot, meta, seat)}
         active={active}
         opponent={opponent}
+        priorityTarget={priorityPlayerTargets?.has(seat)}
+        draggingPriority={draggingPriority}
+        onChoosePriorityTarget={() => onChoosePriorityPlayer?.(seat)}
+        onDropPriorityTarget={() => {
+          onEndPriorityDrag?.();
+          onChoosePriorityPlayer?.(seat);
+        }}
       />
       {opponent && (
         <div className="opponent-hand-space">
@@ -677,12 +865,28 @@ function BattlefieldSide({
           eligibleIds={eligibleIds}
           selectedIds={selectedAttackers}
           targetedIds={targetedPermanentIds}
+          priorityDestinationIds={priorityDestinationIds}
+          priorityOriginIds={priorityOriginIds}
+          selectedPriorityOriginId={selectedPriorityOriginId}
+          draggingPriority={draggingPriority}
           onToggle={onToggleAttacker}
+          onChoosePriorityDestination={onChoosePriorityDestination}
+          onSelectPriorityOrigin={onSelectPriorityOrigin}
+          onStartPriorityOriginDrag={onStartPriorityOriginDrag}
+          onEndPriorityDrag={onEndPriorityDrag}
         />
         <PermanentRow
           title="Lands"
           permanents={player.lands ?? []}
           targetedIds={targetedPermanentIds}
+          priorityDestinationIds={priorityDestinationIds}
+          priorityOriginIds={priorityOriginIds}
+          selectedPriorityOriginId={selectedPriorityOriginId}
+          draggingPriority={draggingPriority}
+          onChoosePriorityDestination={onChoosePriorityDestination}
+          onSelectPriorityOrigin={onSelectPriorityOrigin}
+          onStartPriorityOriginDrag={onStartPriorityOriginDrag}
+          onEndPriorityDrag={onEndPriorityDrag}
         />
         {nonlands.length === 0 && (player.lands ?? []).length === 0 && (
           <span className="open-ground">Open battlefield</span>
@@ -784,7 +988,19 @@ function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
   );
 }
 
-function StackRail({ stack }: { stack: StackEntry[] }) {
+function StackRail({
+  stack,
+  priorityStackTargetIds,
+  draggingPriority,
+  onChoosePriorityStack,
+  onEndPriorityDrag,
+}: {
+  stack: StackEntry[];
+  priorityStackTargetIds?: ReadonlySet<string>;
+  draggingPriority?: boolean;
+  onChoosePriorityStack?: (id: string) => void;
+  onEndPriorityDrag?: () => void;
+}) {
   if (stack.length === 0) return null;
   return (
     <aside className="stack-rail" aria-label="The stack" aria-live="polite">
@@ -797,10 +1013,16 @@ function StackRail({ stack }: { stack: StackEntry[] }) {
         {[...stack].reverse().map((entry, index) => {
           const label = formatStackEntryLabel(entry);
           const targets = formatStackTargets(entry);
+          const stackId = entry.stackId ?? entry.id;
+          const priorityTarget =
+            stackId !== undefined &&
+            priorityStackTargetIds?.has(String(stackId));
           return (
             <div
-              className="stack-entry"
-              key={entry.stackId ?? entry.id ?? `${label}-${index}`}
+              className={`stack-entry ${
+                priorityTarget ? "is-priority-destination" : ""
+              }`}
+              key={stackId ?? `${label}-${index}`}
             >
               <span className="stack-order">
                 {index === 0 ? "NEXT" : `+${index}`}
@@ -820,6 +1042,29 @@ function StackRail({ stack }: { stack: StackEntry[] }) {
                   <strong>{targets.join(", ")}</strong>
                 </span>
               ) : null}
+              {priorityTarget && (
+                <button
+                  className={`surface-action stack-surface-action ${
+                    draggingPriority ? "is-drop-target" : ""
+                  }`}
+                  type="button"
+                  onClick={() => onChoosePriorityStack?.(String(stackId))}
+                  onDragOver={(event) => {
+                    if (!draggingPriority) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event) => {
+                    if (!draggingPriority) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onEndPriorityDrag?.();
+                    onChoosePriorityStack?.(String(stackId));
+                  }}
+                >
+                  {draggingPriority ? "DROP ON SPELL" : "CHOOSE SPELL"}
+                </button>
+              )}
             </div>
           );
         })}
@@ -837,101 +1082,27 @@ function priorityOptionDetail(option: PriorityOption): string {
   return target ? `Target → ${target}` : option.kind.replaceAll("_", " ");
 }
 
-function CardInspector({
-  card,
-  options,
-  onClose,
-  onFocusOption,
-}: {
-  card: Card;
-  options: PriorityOption[];
-  onClose: () => void;
-  onFocusOption: (option: PriorityOption) => void;
-}) {
-  const closeButton = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    closeButton.current?.focus();
-  }, []);
-
-  return (
-    <div
-      className="card-inspect-layer"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        className="card-inspector"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="card-inspector-title"
-      >
-        <div className="card-inspect-face" aria-hidden="true">
-          <CardFace card={card} />
-        </div>
-        <div className="card-inspect-copy">
-          <header>
-            <div>
-              <span className="eyebrow">HAND CARD</span>
-              <h2 id="card-inspector-title">{card.name}</h2>
-            </div>
-            <button
-              ref={closeButton}
-              className="icon-button"
-              type="button"
-              onClick={onClose}
-            >
-              <span aria-hidden="true">×</span>
-              <span className="sr-only">Close card inspection</span>
-            </button>
-          </header>
-          <p>
-            Inspecting never plays a card. Choose an exact legal action below
-            to reveal it in the decision tray, or close and drag the card onto
-            one.
-          </p>
-          <div
-            className="card-inspect-actions"
-            aria-label={`Legal actions for ${card.name}`}
-          >
-            {options.map((option) => (
-              <button
-                type="button"
-                key={`${option.index}-${option.label}`}
-                title={option.label}
-                onClick={() => onFocusOption(option)}
-              >
-                <strong>{concisePriorityOptionLabel(option)}</strong>
-                <span>{priorityOptionDetail(option)}</span>
-              </button>
-            ))}
-          </div>
-          <small>Escape closes this view without taking an action.</small>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function PriorityControls({
   decision,
   stackInteraction,
   onSubmit,
   busy,
-  draggedCardId,
-  onDragComplete,
+  pendingOptions,
+  onChooseExact,
 }: {
   decision: PriorityDecision;
   stackInteraction: StackInteraction | null;
   onSubmit: (action: ActionRequest) => void;
   busy: boolean;
-  draggedCardId?: string;
-  onDragComplete: () => void;
+  pendingOptions: PriorityOption[];
+  onChooseExact: (option: PriorityOption) => void;
 }) {
+  const passOptions = decision.options.filter(
+    (option) => option.kind === "pass",
+  );
   return (
     <div
-      className={`priority-control ${
+      className={`priority-control arena-priority ${
         stackInteraction ? "has-stack-context" : ""
       }`}
     >
@@ -946,31 +1117,31 @@ function PriorityControls({
           )}
         </div>
       )}
-      <div className="priority-options">
-        {decision.options.map((option, index) => {
-          const target =
-            formatTargetLabel(option.target) ??
-            (option.spellTarget !== undefined
-              ? `Stack #${option.spellTarget}`
-              : null);
-          const detail =
-            target
-              ? `Target → ${target}`
-              : option.kind === "pass" && stackInteraction
-              ? `continue toward resolving ${stackInteraction.label}`
-              : option.kind.replaceAll("_", " ");
-          const isDropTarget =
-            draggedCardId !== undefined &&
-            option.card !== undefined &&
-            String(option.card.id) === draggedCardId;
-          return (
+      <div className="arena-priority-actions">
+        {pendingOptions.length > 1 && (
+          <div className="priority-parameter-chooser">
+            <span>CHOOSE EXACT VERSION</span>
+            {pendingOptions.map((option) => (
+              <button
+                id={priorityOptionElementId(decision.decisionId, option.index)}
+                type="button"
+                title={option.label}
+                key={`${option.index}-${option.label}`}
+                onClick={() => onChooseExact(option)}
+                disabled={busy}
+              >
+                <strong>{concisePriorityOptionLabel(option)}</strong>
+                <small>{priorityOptionDetail(option)}</small>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="pass-priority-controls">
+          {passOptions.map((option) => (
             <button
               id={priorityOptionElementId(decision.decisionId, option.index)}
-              className={`action-card action-${option.kind.toLowerCase()} ${
-                option.card ? "has-card" : "no-card"
-              } ${isDropTarget ? "is-drop-target" : ""}`}
               type="button"
-              title={option.label}
               key={`${option.index}-${option.label}`}
               onClick={() =>
                 onSubmit({
@@ -978,43 +1149,12 @@ function PriorityControls({
                   index: option.index,
                 })
               }
-              onDragOver={
-                isDropTarget && !busy
-                  ? (event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                    }
-                  : undefined
-              }
-              onDrop={
-                isDropTarget && !busy
-                  ? (event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onDragComplete();
-                      onSubmit({
-                        decisionId: decision.decisionId,
-                        index: option.index,
-                      });
-                    }
-                  : undefined
-              }
               disabled={busy}
             >
-              <span className="hotkey">{index < 9 ? index + 1 : "•"}</span>
-              {option.card && (
-                <span className={`action-swatch card-${cardColor(option.card)}`}>
-                  {formatCost(option.card.cost, option.card.costLabel) || "◇"}
-                </span>
-              )}
-              <span className="action-copy">
-                <strong>{concisePriorityOptionLabel(option)}</strong>
-                <span>{detail}</span>
-              </span>
-              {isDropTarget && <span className="drop-cue">DROP TO PLAY</span>}
+              {stackInteraction ? "Pass toward resolution" : "Pass priority"}
             </button>
-          );
-        })}
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -1250,8 +1390,8 @@ function DecisionDock({
   selectedAttackers,
   setSelectedAttackers,
   onSubmit,
-  draggedCardId,
-  onDragComplete,
+  pendingPriorityOptions,
+  onChoosePriorityExact,
 }: {
   decision: Decision;
   state: NonNullable<GameSnapshot["state"]>;
@@ -1259,8 +1399,8 @@ function DecisionDock({
   selectedAttackers: Set<string>;
   setSelectedAttackers: (next: Set<string>) => void;
   onSubmit: (action: ActionRequest) => void;
-  draggedCardId?: string;
-  onDragComplete: () => void;
+  pendingPriorityOptions: PriorityOption[];
+  onChoosePriorityExact: (option: PriorityOption) => void;
 }) {
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [damageOrder, setDamageOrder] = useState<Array<string | number>>([]);
@@ -1281,30 +1421,29 @@ function DecisionDock({
   const stackInteraction =
     decision.kind === "priority" ? describeTopOfStack(state.stack ?? []) : null;
 
-  const heading =
-    decision.kind === "priority"
-      ? stackInteraction
-        ? "Respond to the stack"
-        : "Choose your play"
-      : decision.kind === "attackers"
-        ? decision.eligible.length === 0
-          ? "Continue combat"
-          : "Declare attackers"
-        : decision.kind === "blockers"
-          ? "Declare blockers"
-          : "Order combat damage";
-  const helper =
-    decision.kind === "priority"
-      ? stackInteraction
-        ? `${stackInteraction.summary} Cast a response, or pass priority to continue.`
-        : "The game is waiting for your priority decision."
-      : decision.kind === "attackers"
-        ? decision.eligible.length === 0
-          ? "Automatic advance was interrupted. Continue without attackers."
-          : "Select any creatures you want to send into combat."
-        : decision.kind === "blockers"
-          ? "Each blocker can intercept one legal attacker."
-          : "Damage is assigned from left to right.";
+  let heading = "Make a game choice";
+  let helper = "The engine is waiting for your exact selection.";
+  if (decision.kind === "priority") {
+    heading = stackInteraction ? "Respond to the stack" : "Choose your play";
+    helper = stackInteraction
+      ? `${stackInteraction.summary} Cast a response, or pass priority to continue.`
+      : "Select a playable card or permanent, then choose its highlighted destination.";
+  } else if (decision.kind === "attackers") {
+    heading =
+      decision.eligible.length === 0
+        ? "Continue combat"
+        : "Declare attackers";
+    helper =
+      decision.eligible.length === 0
+        ? "Automatic advance was interrupted. Continue without attackers."
+        : "Select any creatures you want to send into combat.";
+  } else if (decision.kind === "blockers") {
+    heading = "Declare blockers";
+    helper = "Each blocker can intercept one legal attacker.";
+  } else if (decision.kind === "damage_order") {
+    heading = "Order combat damage";
+    helper = "Damage is assigned from left to right.";
+  }
 
   return (
     <section className="decision-dock" aria-live="polite">
@@ -1323,8 +1462,8 @@ function DecisionDock({
             stackInteraction={stackInteraction}
             onSubmit={onSubmit}
             busy={busy}
-            draggedCardId={draggedCardId}
-            onDragComplete={onDragComplete}
+            pendingOptions={pendingPriorityOptions}
+            onChooseExact={onChoosePriorityExact}
           />
         )}
         {decision.kind === "attackers" && (
@@ -1717,11 +1856,13 @@ function WelcomeTable({
 function GameOver({
   snapshot,
   meta,
+  busy,
   onRematch,
   onNewGame,
 }: {
   snapshot: GameSnapshot;
   meta: MetaResponse | null;
+  busy: boolean;
   onRematch: () => void;
   onNewGame: () => void;
 }) {
@@ -1729,14 +1870,16 @@ function GameOver({
   const winner = snapshot.result?.winner;
   const winnerSeat =
     winner === 0 || winner === 1 ? (winner as PlayerIndex) : undefined;
-  const title =
-    snapshot.status === "error"
-      ? "Match interrupted"
-      : winnerSeat === undefined
-        ? "The match is a draw"
-        : winnerSeat === 0
-          ? "Victory at the near seat"
-          : "Victory across the table";
+  const config = snapshot.config as GameConfig | undefined;
+  const configuredHumanSeat = config?.players.findIndex(
+    ({ policyId }) => policyId === "human",
+  );
+  const humanSeat =
+    configuredHumanSeat === 0 || configuredHumanSeat === 1
+      ? configuredHumanSeat
+      : 0;
+  const title = formatGameResultTitle(snapshot.status, winner, humanSeat);
+  const reason = formatGameResultReason(snapshot.result?.reason);
   return (
     <div className="game-over-layer" role="dialog" aria-modal="true">
       <section>
@@ -1749,7 +1892,7 @@ function GameOver({
         <h1>{title}</h1>
         <p>
           {snapshot.error ??
-            snapshot.result?.reason ??
+            reason ??
             (winnerSeat !== undefined
               ? `${playerLabel(snapshot, winnerSeat)} piloted ${deckLabel(
                   snapshot,
@@ -1769,17 +1912,47 @@ function GameOver({
           </span>
         </div>
         <div className="result-actions">
-          <button type="button" className="button-secondary" onClick={onNewGame}>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={onNewGame}
+            disabled={busy}
+          >
             Change matchup
           </button>
-          <button type="button" className="button-primary" onClick={onRematch}>
-            Replay seed
+          <button
+            type="button"
+            className="button-primary"
+            onClick={onRematch}
+            disabled={busy}
+          >
+            {busy ? (
+              <>
+                <span className="spinner" />
+                Preparing rematch…
+              </>
+            ) : (
+              "Replay seed"
+            )}
           </button>
         </div>
       </section>
     </div>
   );
 }
+
+type PriorityOriginSelection =
+  | {
+      kind: "hand";
+      cardId: string;
+      renderKey: string;
+      label: string;
+    }
+  | {
+      kind: "permanent";
+      permanentId: string;
+      label: string;
+    };
 
 export default function App() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
@@ -1790,11 +1963,13 @@ export default function App() {
   const [acting, setActing] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [gameError, setGameError] = useState<string | null>(null);
-  const [inspectedHandCard, setInspectedHandCard] = useState<Card | null>(null);
-  const [draggedHandCard, setDraggedHandCard] = useState<{
-    renderKey: string;
-    cardId: string;
-  } | null>(null);
+  const [selectedPriorityOrigin, setSelectedPriorityOrigin] =
+    useState<PriorityOriginSelection | null>(null);
+  const [draggedPriorityOrigin, setDraggedPriorityOrigin] =
+    useState<PriorityOriginSelection | null>(null);
+  const [pendingPriorityOptions, setPendingPriorityOptions] = useState<
+    PriorityOption[]
+  >([]);
   const [selectedAttackers, setSelectedAttackers] = useState<Set<string>>(
     new Set(),
   );
@@ -1802,6 +1977,8 @@ export default function App() {
     string | null
   >(null);
   const autoSubmittedAttackerDecision = useRef<string | null>(null);
+  const creatingRef = useRef(false);
+  const actingRef = useRef(false);
 
   const loadMeta = useCallback(() => {
     const controller = new AbortController();
@@ -1883,6 +2060,8 @@ export default function App() {
 
   const startGame = useCallback(
     (config: GameConfig) => {
+      if (creatingRef.current) return;
+      creatingRef.current = true;
       const previousGameId = snapshot?.id;
       setCreating(true);
       setGameError(null);
@@ -1890,7 +2069,6 @@ export default function App() {
         .then((next) => {
           setSnapshot(next);
           setSetupOpen(false);
-          setCreating(false);
           if (previousGameId && previousGameId !== next.id) {
             void deleteGame(previousGameId).catch(() => {
               // The server also cleans every child up on shutdown.
@@ -1899,6 +2077,9 @@ export default function App() {
         })
         .catch((error: unknown) => {
           setGameError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          creatingRef.current = false;
           setCreating(false);
         });
     },
@@ -1922,21 +2103,45 @@ export default function App() {
 
   const act = useCallback(
     (action: ActionRequest, onError?: () => void) => {
-      if (!snapshot || acting) return;
+      if (!snapshot || actingRef.current) return;
+      actingRef.current = true;
+      const gameId = snapshot.id;
       setActing(true);
       setGameError(null);
-      submitAction(snapshot.id, action)
+      submitAction(gameId, action)
         .then((next) => {
           setSnapshot(next);
-          setActing(false);
         })
-        .catch((error: unknown) => {
+        .catch(async (error: unknown) => {
           onError?.();
+          if (
+            error instanceof ApiRequestError &&
+            ["stale_decision", "not_awaiting_action", "game_over"].includes(
+              error.code,
+            )
+          ) {
+            try {
+              setSnapshot(await fetchGame(gameId));
+              setGameError(
+                `${error.message}. The current game state was refreshed.`,
+              );
+            } catch (refreshError: unknown) {
+              const refreshMessage =
+                refreshError instanceof Error
+                  ? refreshError.message
+                  : String(refreshError);
+              setGameError(`${error.message}. Refresh failed: ${refreshMessage}`);
+            }
+            return;
+          }
           setGameError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          actingRef.current = false;
           setActing(false);
         });
     },
-    [snapshot, acting],
+    [snapshot],
   );
 
   useEffect(() => {
@@ -1984,36 +2189,22 @@ export default function App() {
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && inspectedHandCard) {
+      if (event.key === "Escape" && selectedPriorityOrigin) {
         event.preventDefault();
-        setInspectedHandCard(null);
+        setSelectedPriorityOrigin(null);
+        setPendingPriorityOptions([]);
         return;
       }
       if (event.key === "Escape" && setupOpen && snapshot) setSetupOpen(false);
-      if (
-        !setupOpen &&
-        !inspectedHandCard &&
-        snapshot?.decision?.kind === "priority" &&
-        !acting &&
-        /^[1-9]$/.test(event.key)
-      ) {
-        const option = snapshot.decision.options[Number(event.key) - 1];
-        if (option) {
-          event.preventDefault();
-          act({
-            decisionId: snapshot.decision.decisionId,
-            index: option.index,
-          });
-        }
-      }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [act, acting, inspectedHandCard, setupOpen, snapshot]);
+  }, [selectedPriorityOrigin, setupOpen, snapshot]);
 
   useEffect(() => {
-    setInspectedHandCard(null);
-    setDraggedHandCard(null);
+    setSelectedPriorityOrigin(null);
+    setDraggedPriorityOrigin(null);
+    setPendingPriorityOptions([]);
   }, [snapshot?.id, snapshot?.decision?.decisionId]);
 
   const replay = () => {
@@ -2083,29 +2274,106 @@ export default function App() {
       : undefined;
   const playableHandCardIds = new Set(
     priorityDecision?.options
-      .flatMap((option) => (option.card ? [String(option.card.id)] : [])) ??
+      .flatMap((option) =>
+        option.card && option.sourcePermanent === undefined
+          ? [String(option.card.id)]
+          : [],
+      ) ??
       [],
   );
-  const focusPriorityOption = (
-    decision: PriorityDecision,
-    option: PriorityOption,
-  ) => {
-    setInspectedHandCard(null);
-    window.requestAnimationFrame(() => {
-      const element = document.getElementById(
-        priorityOptionElementId(decision.decisionId, option.index),
-      );
-      element?.focus({ preventScroll: true });
-      element?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-        inline: "center",
-      });
-    });
+  const selectedPriorityOptions =
+    selectedPriorityOrigin?.kind === "hand"
+      ? priorityOptionsForCard(
+          priorityDecision,
+          selectedPriorityOrigin.cardId,
+        )
+      : selectedPriorityOrigin?.kind === "permanent"
+        ? priorityOptionsForSourcePermanent(
+            priorityDecision,
+            selectedPriorityOrigin.permanentId,
+          )
+        : [];
+  const priorityDestinationGroups = new Map<
+    PriorityDestinationKey,
+    PriorityOption[]
+  >();
+  for (const option of selectedPriorityOptions) {
+    const destination = priorityDestinationKey(option);
+    if (!destination) continue;
+    const group = priorityDestinationGroups.get(destination) ?? [];
+    group.push(option);
+    priorityDestinationGroups.set(destination, group);
+  }
+  const priorityPlayOptions =
+    priorityDestinationGroups.get("play") ?? [];
+  const priorityPermanentDestinationIds = new Set(
+    [...priorityDestinationGroups.keys()].flatMap((key) =>
+      key.startsWith("permanent:") ? [key.slice("permanent:".length)] : [],
+    ),
+  );
+  const priorityPlayerTargets = new Set(
+    [...priorityDestinationGroups.keys()].flatMap((key) =>
+      key.startsWith("player:")
+        ? [Number(key.slice("player:".length))]
+        : [],
+    ),
+  );
+  const priorityStackTargetIds = new Set(
+    [...priorityDestinationGroups.keys()].flatMap((key) =>
+      key.startsWith("stack:") ? [key.slice("stack:".length)] : [],
+    ),
+  );
+  const priorityOriginIds = new Set(
+    selectedPriorityOrigin?.kind === "permanent"
+      ? [selectedPriorityOrigin.permanentId]
+      : selectedPriorityOrigin?.kind === "hand"
+        ? []
+        : (priorityDecision?.options.flatMap((option) =>
+            option.sourcePermanent === undefined
+              ? []
+              : [String(option.sourcePermanent)],
+          ) ?? []),
+  );
+  const clearPrioritySelection = () => {
+    setSelectedPriorityOrigin(null);
+    setDraggedPriorityOrigin(null);
+    setPendingPriorityOptions([]);
   };
-  const inspectHandCard = (card: Card) => {
+  const submitPriorityOption = (option: PriorityOption) => {
+    const decision = priorityDecision;
+    if (!decision) return;
+    clearPrioritySelection();
+    act({ decisionId: decision.decisionId, index: option.index });
+  };
+  const choosePriorityDestination = (destination: PriorityDestinationKey) => {
+    const options = priorityDestinationGroups.get(destination) ?? [];
+    if (options.length === 1) {
+      submitPriorityOption(options[0]);
+    } else if (options.length > 1) {
+      setPendingPriorityOptions(options);
+    }
+  };
+  const selectHandCard = (card: Card, renderKey: string) => {
     if (priorityOptionsForCard(priorityDecision, card.id).length === 0) return;
-    setInspectedHandCard(card);
+    setSelectedPriorityOrigin({
+      kind: "hand",
+      cardId: String(card.id),
+      renderKey,
+      label: card.name,
+    });
+    setPendingPriorityOptions([]);
+  };
+  const doubleClickHandCard = (card: Card, renderKey: string) => {
+    const options = priorityOptionsForCard(priorityDecision, card.id);
+    const playOptions = options.filter(
+      (option) => priorityDestinationKey(option) === "play",
+    );
+    selectHandCard(card, renderKey);
+    if (playOptions.length === 1) {
+      submitPriorityOption(playOptions[0]);
+    } else if (playOptions.length > 1) {
+      setPendingPriorityOptions(playOptions);
+    }
   };
   const startHandCardDrag = (
     card: Card,
@@ -2118,16 +2386,68 @@ export default function App() {
     }
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", renderKey);
-    setInspectedHandCard(null);
-    setDraggedHandCard({ renderKey, cardId: String(card.id) });
+    setPendingPriorityOptions([]);
+    const origin: PriorityOriginSelection = {
+      kind: "hand",
+      cardId: String(card.id),
+      renderKey,
+      label: card.name,
+    };
+    setSelectedPriorityOrigin(origin);
+    setDraggedPriorityOrigin(origin);
   };
-  const inspectedCardOptions = inspectedHandCard
-    ? priorityOptionsForCard(priorityDecision, inspectedHandCard.id)
-    : [];
-  const focusInspectedCardOption = (option: PriorityOption) => {
-    const decision = priorityDecision;
-    if (!decision) return;
-    focusPriorityOption(decision, option);
+  const selectPriorityPermanentOrigin = (permanentId: string) => {
+    const options = priorityOptionsForSourcePermanent(
+      priorityDecision,
+      permanentId,
+    );
+    if (options.length === 0) return;
+    const permanent =
+      findPermanent(state?.players[0], permanentId) ??
+      findPermanent(state?.players[1], permanentId);
+    const origin: PriorityOriginSelection = {
+      kind: "permanent",
+      permanentId,
+      label: permanent?.card.name ?? `Permanent ${permanentId}`,
+    };
+    setSelectedPriorityOrigin(origin);
+    setPendingPriorityOptions([]);
+    const destinations = new Set(
+      options.map(priorityDestinationKey).filter((key) => key !== null),
+    );
+    if (
+      options.length === 1 &&
+      destinations.size === 1 &&
+      destinations.has("play")
+    ) {
+      submitPriorityOption(options[0]);
+    }
+  };
+  const startPriorityPermanentDrag = (
+    permanentId: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => {
+    const options = priorityOptionsForSourcePermanent(
+      priorityDecision,
+      permanentId,
+    );
+    if (options.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const permanent =
+      findPermanent(state?.players[0], permanentId) ??
+      findPermanent(state?.players[1], permanentId);
+    const origin: PriorityOriginSelection = {
+      kind: "permanent",
+      permanentId,
+      label: permanent?.card.name ?? `Permanent ${permanentId}`,
+    };
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", `permanent:${permanentId}`);
+    setSelectedPriorityOrigin(origin);
+    setDraggedPriorityOrigin(origin);
+    setPendingPriorityOptions([]);
   };
   const toggleAttacker = (id: string) => {
     const next = new Set(selectedAttackers);
@@ -2171,6 +2491,24 @@ export default function App() {
                   active={state.activePlayer === farSeat}
                   opponent
                   targetedPermanentIds={targetedPermanentIds}
+                  priorityDestinationIds={priorityPermanentDestinationIds}
+                  priorityOriginIds={priorityOriginIds}
+                  priorityPlayerTargets={priorityPlayerTargets}
+                  selectedPriorityOriginId={
+                    selectedPriorityOrigin?.kind === "permanent"
+                      ? selectedPriorityOrigin.permanentId
+                      : undefined
+                  }
+                  draggingPriority={Boolean(draggedPriorityOrigin)}
+                  onChoosePriorityDestination={(id) =>
+                    choosePriorityDestination(`permanent:${id}`)
+                  }
+                  onChoosePriorityPlayer={(seat) =>
+                    choosePriorityDestination(`player:${seat}`)
+                  }
+                  onSelectPriorityOrigin={selectPriorityPermanentOrigin}
+                  onStartPriorityOriginDrag={startPriorityPermanentDrag}
+                  onEndPriorityDrag={() => setDraggedPriorityOrigin(null)}
                 />
                 <div className="midline">
                   <span />
@@ -2188,7 +2526,29 @@ export default function App() {
                   }
                   selectedAttackers={selectedAttackers}
                   targetedPermanentIds={targetedPermanentIds}
+                  priorityDestinationIds={priorityPermanentDestinationIds}
+                  priorityOriginIds={priorityOriginIds}
+                  priorityPlayerTargets={priorityPlayerTargets}
+                  priorityPlayTarget={priorityPlayOptions.length > 0}
+                  selectedPriorityOriginId={
+                    selectedPriorityOrigin?.kind === "permanent"
+                      ? selectedPriorityOrigin.permanentId
+                      : undefined
+                  }
+                  draggingPriority={Boolean(draggedPriorityOrigin)}
                   onToggleAttacker={toggleAttacker}
+                  onChoosePriorityDestination={(id) =>
+                    choosePriorityDestination(`permanent:${id}`)
+                  }
+                  onChoosePriorityPlayer={(seat) =>
+                    choosePriorityDestination(`player:${seat}`)
+                  }
+                  onChoosePriorityPlay={() =>
+                    choosePriorityDestination("play")
+                  }
+                  onSelectPriorityOrigin={selectPriorityPermanentOrigin}
+                  onStartPriorityOriginDrag={startPriorityPermanentDrag}
+                  onEndPriorityDrag={() => setDraggedPriorityOrigin(null)}
                 />
               </div>
               <div
@@ -2202,10 +2562,20 @@ export default function App() {
                   cards={state.players[nearSeat].hand ?? []}
                   label={`${playerLabel(snapshot, nearSeat)} · hand`}
                   playableCardIds={playableHandCardIds}
-                  draggedCardKey={draggedHandCard?.renderKey}
-                  onCardClick={inspectHandCard}
+                  selectedCardKey={
+                    selectedPriorityOrigin?.kind === "hand"
+                      ? selectedPriorityOrigin.renderKey
+                      : undefined
+                  }
+                  draggedCardKey={
+                    draggedPriorityOrigin?.kind === "hand"
+                      ? draggedPriorityOrigin.renderKey
+                      : undefined
+                  }
+                  onCardClick={selectHandCard}
+                  onCardDoubleClick={doubleClickHandCard}
                   onCardDragStart={startHandCardDrag}
-                  onCardDragEnd={() => setDraggedHandCard(null)}
+                  onCardDragEnd={() => setDraggedPriorityOrigin(null)}
                 />
                 {snapshot.decision && hasVisibleDecision && (
                   <DecisionDock
@@ -2215,13 +2585,21 @@ export default function App() {
                     selectedAttackers={selectedAttackers}
                     setSelectedAttackers={setSelectedAttackers}
                     onSubmit={act}
-                    draggedCardId={draggedHandCard?.cardId}
-                    onDragComplete={() => setDraggedHandCard(null)}
+                    pendingPriorityOptions={pendingPriorityOptions}
+                    onChoosePriorityExact={submitPriorityOption}
                   />
                 )}
               </div>
             </main>
-            <StackRail stack={stack} />
+            <StackRail
+              stack={stack}
+              priorityStackTargetIds={priorityStackTargetIds}
+              draggingPriority={Boolean(draggedPriorityOrigin)}
+              onChoosePriorityStack={(id) =>
+                choosePriorityDestination(`stack:${id}`)
+              }
+              onEndPriorityDrag={() => setDraggedPriorityOrigin(null)}
+            />
           </div>
           {!snapshot.decision && snapshot.status === "playing" ? (
             <div className="watching-banner">
@@ -2235,15 +2613,6 @@ export default function App() {
           <span className="spinner" />
           Waiting for the battlefield…
         </div>
-      )}
-
-      {inspectedHandCard && inspectedCardOptions.length > 0 && (
-        <CardInspector
-          card={inspectedHandCard}
-          options={inspectedCardOptions}
-          onClose={() => setInspectedHandCard(null)}
-          onFocusOption={focusInspectedCardOption}
-        />
       )}
 
       <SetupDrawer
@@ -2260,6 +2629,7 @@ export default function App() {
       <GameOver
         snapshot={snapshot}
         meta={meta}
+        busy={creating}
         onRematch={replay}
         onNewGame={() => setSetupOpen(true)}
       />

@@ -32,6 +32,7 @@ test("production structured targets have stable readable labels", async () => {
     describeTopOfStack,
     formatStackEntryLabel,
     formatTargetLabel,
+    priorityOptionsForCard,
     stackPermanentTargetIds,
   } = await loadTargetFormatter();
 
@@ -129,6 +130,42 @@ test("production structured targets have stable readable labels", async () => {
     }),
     "Millstone ability",
   );
+
+  const giantGrowthDecision = {
+    kind: "priority",
+    decisionId: "target-stack-priority-1",
+    options: [
+      { index: 0, label: "Pass priority", kind: "pass" },
+      {
+        index: 3,
+        label: "Cast Giant Growth → Grizzly Bears #110",
+        kind: "cast",
+        card: { id: "card-3", name: "Giant Growth" },
+        target: { player: 0, creature: 110, label: "Grizzly Bears #110" },
+      },
+      {
+        index: 4,
+        label: "Cast Giant Growth → Ironclaw Orcs #210",
+        kind: "cast",
+        card: { id: "card-3", name: "Giant Growth" },
+        target: { player: 1, creature: 210, label: "Ironclaw Orcs #210" },
+      },
+      {
+        index: 5,
+        label: "Cast Lightning Bolt → Grizzly Bears #110",
+        kind: "cast",
+        card: { id: "card-5", name: "Lightning Bolt" },
+      },
+    ],
+  };
+  assert.deepEqual(
+    priorityOptionsForCard(giantGrowthDecision, "card-3").map(
+      (option) => option.index,
+    ),
+    [3, 4],
+    "one dragged card definition must expose every exact target-specific option",
+  );
+  assert.deepEqual(priorityOptionsForCard(undefined, "card-3"), []);
 });
 
 test("stack, priority, and battlefield rendering share bridge-shaped targets", async () => {
@@ -166,6 +203,67 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   assert.match(css, /\.stack-choice-context\s*\{/);
   assert.doesNotMatch(app, /\{entry\.target\}/);
   assert.doesNotMatch(app, /entry\.targets\?\.join/);
+});
+
+test("playable hand cards inspect safely and drag onto exact engine options", async () => {
+  const [app, css] = await Promise.all([
+    source("src/App.tsx"),
+    source("src/styles.css"),
+  ]);
+  const inspector = app.slice(
+    app.indexOf("function CardInspector"),
+    app.indexOf("function PriorityControls"),
+  );
+  const priorityControls = app.slice(
+    app.indexOf("function PriorityControls"),
+    app.indexOf("function AttackersControls"),
+  );
+  const dragHandler = app.slice(
+    app.indexOf("const startHandCardDrag"),
+    app.indexOf("const inspectedCardOptions"),
+  );
+
+  assert.match(app, /draggable=\{playable && Boolean\(onCardDragStart\)\}/);
+  assert.match(
+    dragHandler,
+    /priorityOptionsForCard\(priorityDecision, card\.id\)\.length === 0/,
+  );
+  assert.doesNotMatch(
+    dragHandler,
+    /card\.name/,
+    "drag legality must come from engine options, not card-name knowledge",
+  );
+
+  assert.match(inspector, /role="dialog"/);
+  assert.match(inspector, /aria-modal="true"/);
+  assert.match(inspector, /Inspecting never plays a card/);
+  assert.match(inspector, /onFocusOption\(option\)/);
+  assert.doesNotMatch(
+    inspector,
+    /onSubmit/,
+    "inspection links focus actions and never submit them",
+  );
+  assert.match(app, /event\.key === "Escape" && inspectedHandCard/);
+  const inspectorShortcutGuard = app.indexOf("!inspectedHandCard");
+  const numericShortcut = app.indexOf('/^[1-9]$/.test', inspectorShortcutGuard);
+  assert.ok(
+    inspectorShortcutGuard >= 0 && numericShortcut > inspectorShortcutGuard,
+    "the open inspector must suppress numeric action shortcuts",
+  );
+
+  assert.match(
+    priorityControls,
+    /String\(option\.card\.id\) === draggedCardId/,
+  );
+  assert.match(
+    priorityControls,
+    /onDrop=[\s\S]+?index: option\.index/,
+    "dropping must submit the exact engine option, including its target",
+  );
+  assert.match(priorityControls, />DROP TO PLAY<\/span>/);
+  assert.match(css, /\.action-card\.is-drop-target\s*\{/);
+  assert.match(css, /\.drop-cue\s*\{/);
+  assert.match(css, /\.card-inspect-face \.card-face\s*\{[^}]*width:\s*220px;[^}]*height:\s*306px;/s);
 });
 
 test("browser selections preserve opaque numeric IDs in every combat request", async () => {

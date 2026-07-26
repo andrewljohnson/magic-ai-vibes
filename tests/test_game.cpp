@@ -6224,7 +6224,8 @@ TEST(lightning_bolt_does_not_kill_an_ironroot_treefolk) {
     CHECK(state.players[1].creatures.size() == 1);
     CHECK(state.players[1].creatures[0].damage == 3);
 
-    old_school::cleanup_turn(state);
+    old_school::cleanup_turn(
+        state, state.active_player, {});
     CHECK(state.players[1].creatures[0].damage == 0);
 }
 
@@ -6487,7 +6488,8 @@ TEST(disintegrate_exiles_immediate_and_later_same_turn_deaths) {
     CHECK(old_school::resolve_top_of_stack(cleaned));
     CHECK(cleaned.players[1].creatures[0].damage == 1);
     CHECK(cleaned.players[1].creatures[0].exile_on_death_this_turn);
-    old_school::cleanup_turn(cleaned);
+    old_school::cleanup_turn(
+        cleaned, cleaned.active_player, {});
     CHECK(cleaned.players[1].creatures[0].damage == 0);
     CHECK(!cleaned.players[1].creatures[0].exile_on_death_this_turn);
 }
@@ -6656,7 +6658,8 @@ TEST(giant_growth_is_an_instant_that_can_save_a_bear_from_bolt) {
               state.players[1].graveyard,
               old_school::CardId::LightningBolt) == 1);
 
-    old_school::cleanup_turn(state);
+    old_school::cleanup_turn(
+        state, state.active_player, {});
     CHECK(state.players[0].creatures[0].damage == 0);
     CHECK(state.players[0].creatures[0].temporary_power_bonus == 0);
     CHECK(state.players[0].creatures[0].temporary_toughness_bonus == 0);
@@ -6759,7 +6762,8 @@ TEST(giant_growth_changes_combat_damage_and_expires_at_cleanup) {
     CHECK(count_card(
               state.players[1].graveyard,
               old_school::CardId::HillGiant) == 1);
-    old_school::cleanup_turn(state);
+    old_school::cleanup_turn(
+        state, state.active_player, {});
     CHECK(state.players[0].creatures[0].damage == 0);
     CHECK(state.players[0].creatures[0].temporary_power_bonus == 0);
     CHECK(state.players[0].creatures[0].temporary_toughness_bonus == 0);
@@ -7609,6 +7613,14 @@ old_school::HumanController developing_human_controller() {
                const std::vector<old_school::PermanentId>& blockers) {
                 return blockers;
             },
+        .choose_cleanup_discards =
+            [](const old_school::PlayerObservation&,
+               std::size_t excess) {
+                std::vector<std::size_t> indices(excess);
+                std::iota(
+                    indices.begin(), indices.end(), 0);
+                return indices;
+            },
     };
 }
 
@@ -8130,7 +8142,8 @@ TEST(contextual_horizon_bootstraps_at_next_first_main_and_window_end_is_neutral)
     CHECK(old_school::pass_priority(
               next_turn, priority) ==
           old_school::PriorityPassResult::WindowEnded);
-    old_school::cleanup_turn(next_turn);
+    old_school::cleanup_turn(
+        next_turn, next_turn.active_player, {});
     ++next_turn.turn_number;
     next_turn.active_player = 1;
     old_school::begin_turn(next_turn, 1);

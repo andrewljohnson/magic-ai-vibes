@@ -836,7 +836,8 @@ void test_giant_growth_push_and_hold_traces() {
                true),
            "final-main Growth failed to apply");
     resolve_cast_spell(wasted);
-    old_school::cleanup_turn(wasted);
+    old_school::cleanup_turn(
+        wasted, wasted.active_player, {});
     expect(wasted.players[0].hand.empty() &&
                std::count(wasted.players[0].graveyard.begin(),
                           wasted.players[0].graveyard.end(),

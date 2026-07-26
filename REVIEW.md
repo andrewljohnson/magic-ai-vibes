@@ -8,69 +8,31 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 21:16 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 22:15 PDT — refreshed every review cycle.*
 
-- **P1R rejected: the outcome signal overcorrects.** With the
-  optimizer fixed (all mechanism gates passed), the learned residual
-  holds indiscriminately — inverting even the live Force Spike. The
-  question is now foundational: FT128 (declared) tests whether
-  full-game counterfactuals contain the payable/live distinction at
-  all. Seven treatments rejected on the defect; each narrowed the
-  space.
-- **W-family A/B: gate FAIL at 49.6% — and maximally informative.**
-  Three deck slices identical game-for-game between weighted and
-  uniform sides: with the priority head untrained, behavioral
-  weighting is a near-no-op, exactly as theory predicts. Family HOLDS
-  (no tuning) until the first accepted P-family head makes the
-  likelihoods nondegenerate, then the A/B reruns. Eighth preregistered
-  rejection on the broader defect; the composition thesis stands.
-- Also delivered to Codex: commit `6a1c898` fails its own make test in
-  pristine checkout — recommend atomic script+code commits.
-
-- **Teacher audit now permanently reproducible** — the CLI reproduces
-  the retired harness to six decimals (reviewer-verified). Orthogonal
-  track pivoted honestly: pure distillation withdrawn, W-family
-  (behavior-consistent world sampling, deployment-only) declared.
-
-- **Both purist paths are now closed by evidence:** the value-side 2×2
-  (all four cells rejected) and pure search distillation (teacher
-  audit: the K=256 teacher confidently prefers the dominated action in
-  both option-value probes; deeper search widens the error). The
-  defect is invisible to state values AND to the search teacher.
-- **Active mainline: outcome-tilted priority residual (P-family)** —
-  bounded ±0.10 advantage-weighted correction from the recipe's own
-  game outcomes over frozen S0 scores, zero-init identity (P0 ≡ S0),
-  P1/P4 mechanism checkpoints, full five-rung promotion ladder
-  attached. The only signal left that can know what search cannot:
-  what actually wins games.
-- Lift gate: 3 of 5 (v2 baseline; Red −3.7, Blue −2.5).
-
-- **ENVIRONMENT v2 (user-directed):** Blue runs Power (Ancestral, Time
-  Walk, Mox Sapphire, Sol Ring, Braingeyser) plus Force Spike and Air
-  Elementals; Red is a curve deck; seven new cards; schema v2
-  fail-closed; 129 tests + ASan/UBSan clean. All prior champion and
-  milestone claims are noncomparable. Blue/White 90.4% random
-  imbalance recorded honestly with a full-matrix guard.
-- **Lift gate (v2 baseline): 3 of 5** at default deployment — Green,
-  White, and RU pass (RU flipped!); Red −3.7 and Blue −2.5 are the
-  narrowest misses the default view has ever shown, before any
-  retraining in this world.
-- **ROOT CAUSE CONFIRMED + FIX PREREGISTERED:** the Value critic is
-  context-blind — bit-identical features between "pass and retain
-  priority" and "pass and a lethal spell resolves" (independently
-  verified). Codex's staged 2×2 retrain (context features × dense
-  decision-root traces, bit-identical S0 control, K=8 throughout) is
-  the strongest experimental design of the project and targets the
-  last defect class directly.
-- **Program history in one line:** the challenger recipe (bootstrapped
-  targets → 16 generations → search-on collection → K=8) beat
-  Handcrafted at 95% confidence on virgin seeds in two prior
-  environments, beat the legacy champion on every deck (verified
-  bit-for-bit by both agents), and its lift table reached 4 of 5
-  before the v2 reset; full detail in the timestamped entries below.
-- **Top program risk: environment churn** — three world-resets today;
-  an explicit version/freeze policy is recommended so a champion
-  promotion can complete inside one world.
+- **THE TARGET (user-precise): the all-decks LIFT GATE** — in the
+  mixed field, Learned's lift over Random must be the largest of any
+  policy on EVERY deck (the "Bot benefit by deck" table). Best
+  verified: 4 of 5 at C16/K=8 in v2, RU short by 5.0pp — one deck from
+  the crown before the v3 rules fix. Everything below serves closing
+  that last deck and re-certifying the table per environment.
+- **The real asset: a recipe that keeps winning on retrain.** Bootstrap
+  targets + 16 generations + K=8 has beaten Handcrafted in every
+  environment it's been retrained in (55.1% four-deck, 53.5% five-deck,
+  both at 95% confidence on virgin seeds; 4/5 then 3/5 lift gates as
+  worlds grew richer). Each environment change is a ~15-minute retrain —
+  a regression test the recipe keeps passing.
+- **Environment v3 live** (cleanup-discard rules fix — engine now more
+  correct). FT128 and the HRC sweep finish tonight as signal science on
+  the one remaining generic weakness (hold-vs-spend); their answers
+  carry into v3.
+- **Pipeline target (the actual goal):** one command that retrains,
+  runs the gate panel, and certifies per environment version — so
+  improvement is repeatable and autonomous. Both agents' preregistered
+  machinery (frozen artifacts, fingerprints, verbatim reproduction) is
+  most of that pipeline already; wiring it end-to-end is the near-term
+  engineering.
+- **Web track:** Old School Arena browser client in progress.
 
 ## Goal under review
 
@@ -91,6 +53,67 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 22:15 PDT
+
+No new Codex claims (v3 rules-fix implementation in progress; FT128
+still scoring — with searching mirror continuations played to natural
+termination at K=1024, wall time in hours is plausible; a cost note
+belongs with the result). Lift table (v2 binary, historical): 3 of 5.
+
+Research-thread finding delivered for Codex (full table in
+CLAUDE-PLAN.md): the **HRC saturation law** — the live Force Spike
+preference is horizon-stable through H=8 (+0.037 to +0.043) then
+annihilated by terminal saturation (all worlds lost by H=32; zero
+delta, zero variance). Combined with the teacher audit's wrong-signed
+payable state at H=0/H=4, mirror continuations appear to have NO
+horizon window that scores the payable state correctly. Registered
+prediction: FT128's payable gate fails. Queued axes if confirmed:
+card-advantage auxiliary credit (material delta at horizon end as a
+shaped signal — the information terminal outcomes erase) and
+opponent-tempo-aware asymmetric evaluation. Both ideas are available
+to Codex now rather than after FT128.
+
+## 2026-07-25 21:48 PDT
+
+**Environment v3 declared: a cleanup-discard rules correction.** A
+genuine rules bug (cleanup-step discard) affected real trajectories,
+most for Blue and RU. The correction is non-negotiable — a rules
+engine must be right before anything else — and the declaration
+handles the fallout correctly: v2 artifacts/lift tables/strength
+results are non-comparable and nothing v2 gets promoted; the running
+FT128 remains valid strictly as a v2 signal-sufficiency audit, its
+ANSWER (does terminal credit contain the hold/spend distinction)
+transferring conceptually even though its artifact cannot.
+
+Reviewer's note: this is the fourth world-reset today but the first
+forced by correctness rather than design. The v1→v2→v3 pattern
+strengthens the earlier recommendation — a rules-conformance fixture
+suite (cleanup, priority, mana, SBAs against known-correct game logs)
+would catch this class before it invalidates a day of artifacts.
+Suggest adding it to the v3 gate list; the reviewer's research thread
+can contribute fixtures.
+
+Lift table (v2, now historical): 3 of 5. HRC extraction and FT128
+continue; both will be recorded as v2 science.
+
+## 2026-07-25 21:45 PDT
+
+Two developments: (1) **Codex opened the web track** — "Old School
+Arena," a browser-playable client with a disciplined three-level
+verification ladder (data contract → structural UI invariants →
+rendered browser journey, with only level 3 closing visual
+milestones). The same evidence culture, applied to UI. (2) FT128
+remains unrecorded on Codex's side; the reviewer's verbatim K=1024
+run is deep in its scoring phase (~35 min — full-terminal
+counterfactuals are expensive by design).
+
+Reviewer's research thread (now permanently active per user
+direction): the horizon-response curve sweep (H ∈ {2..32} on the
+live/payable fixtures) is running; its curve plus FT128's endpoint
+will bracket the terminal-credit question from both sides tonight.
+
+Lift table deterministic-identical (3 of 5).
 
 ## 2026-07-25 21:16 PDT
 

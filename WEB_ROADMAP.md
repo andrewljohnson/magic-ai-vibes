@@ -41,7 +41,8 @@ rendered checks at both target viewports.
 
 ### P1 — Complete, unambiguous game flow
 
-Status: **adapter journey and real-engine smoke green; rendered check pending**
+Status: **adapter journey, real-engine smoke, and rendered stack/hand flow
+green; full combat/result journey pending**
 
 Acceptance criteria:
 
@@ -49,14 +50,56 @@ Acceptance criteria:
 - The current player, phase, priority holder, and required choice are obvious.
 - Land play, spell cast, priority pass, stack resolution, attackers, blockers,
   damage order, game over, and rematch can each be completed without guessing.
+- Clicking a playable hand card opens a large, non-committing inspection view
+  with links to every corresponding engine action; Escape closes it.
+- A playable hand card can be dragged onto any matching exact legal action,
+  including separate target-specific choices, while illegal cards and
+  unrelated actions never become drop targets.
 - An action can be submitted only once; stale or illegal actions produce a
   recoverable explanation.
 - Game over names the winner and reason, and rematch starts a fresh session
   while retaining the selected matchup.
 
+#### Preregistered Arena-surface priority slice
+
+Hypothesis: replacing the horizontal priority-option wall with
+engine-addressed board surfaces will make card play unambiguous without
+reimplementing rules in React. The first acceptance slice is deliberately
+bounded to Giant Growth targeting permanent `110` and a non-targeted Forest
+play in the deterministic stack fixture.
+
+- A selected or dragged hand card may match only current priority options with
+  the same structured card ID and no `sourcePermanent`.
+- `target.creature`, player-only `target.player`, and `spellTarget` route to
+  exact permanent, player-HUD, and stack-object IDs respectively. An option
+  with none of those routes to one explicit play/cast zone.
+- A surface submits only when one exact option remains. Multiple options after
+  card and destination selection open a compact engine-label/parameter chooser
+  instead of being guessed.
+- Engine `sourcePermanent` identifies an actionable origin. Selecting that
+  permanent then routes any structured `target` or `spellTarget` to its exact
+  destination; only a targetless unique ability may submit or activate through
+  the source/generic activation zone. Pass priority remains a compact dedicated
+  engine option.
+- Click opens the large card inspection and selects the card; closing the
+  inspection preserves selection and reveals legal board surfaces. Drag uses
+  the same selection model. Unrelated surfaces never accept the choice.
+- The bridge's permanent IDs, player seats, and stack IDs are sufficient for
+  this slice. Hand cards currently expose definition IDs rather than stable
+  instance IDs, and priority options expose no origin-zone/hand-instance ID.
+  Duplicate copies are therefore intentionally equivalent until the engine
+  gains per-copy state; stable instance/origin IDs are a prerequisite for that
+  future rules work.
+
+Before accepting the slice, the fixture contract must prove both exact actions
+and the structural gate must prove generic ID routing with no card-name/type
+policy. Rendered checks remain required for click selection, permanent/player/
+stack highlighting, the play zone, and a real pointer drag.
+
 ### P2 — Arena-quality board readability
 
-Status: **structured stack/target regression covered; visual work in progress**
+Status: **stack/targets rendered at both target viewports; broader visual work
+in progress**
 
 Acceptance criteria:
 
@@ -301,3 +344,30 @@ For each web issue:
   `make test-web-ui` passed the production build and all 43 layout, type-floor,
   target-stack, opaque-ID, and 30-case journey checks. Rendered typography
   verification at 1440 × 900 and 1280 × 720 remains required.
+- 2026-07-25 — Added non-committing click inspection and exact-action drag/drop
+  for playable hand cards. Both affordances are derived solely from the
+  current priority decision's structured card IDs: an inspection link only
+  focuses its exact tray action, while a drop submits that action's untouched
+  engine option index. Multiple target-specific choices for one card remain
+  separate visible drop targets. The current bridge identifies card
+  definitions rather than unique hand copies, which is sufficient while
+  duplicate copies have no private per-instance state; stable hand-instance
+  IDs are required before adding such state. The decision dock now constrains
+  its grid child to the reserved row and uses a 150px decision region so
+  content scrolls instead of escaping below the viewport. `make test-web-ui`
+  passed the production build and all 44 focused/matrix tests; `make test-web`
+  passed 4 C++ bridge tests and all 50 Node build/session/UI tests.
+- 2026-07-25 — Reloaded the targeted-stack fixture in a real browser. At
+  1280 × 720 the decision heading had equal 150px client/scroll heights, its
+  paragraph ended at viewport pixel 720, and the legal action occupied pixels
+  586–706. At 1440 × 900 the same measurements were 150/150, pixel 900, and
+  pixels 766–886. Clicking playable Giant Growth displayed the 220 × 306
+  inspector; Escape closed it. Clicking the inspector's legal-action link
+  closed and focused `priority-option-target-stack-priority-1-1` without
+  changing the seven-card hand or two-object stack. Only the two playable
+  Growth cards had `draggable=true`. Activating the exact option separately
+  grew the stack from two objects to three, reduced the hand from seven cards
+  to six, and tapped the remaining Forest; passing then reduced the stack to
+  two. Native pointer drag was unavailable in the browser wrapper, so the
+  exact drop path remains contract-tested and explicitly awaits a user/manual
+  drag smoke.

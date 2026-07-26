@@ -200,8 +200,63 @@ export function priorityOptionsForCard(
   const key = String(cardId);
   return decision.options.filter(
     (option) =>
-      option.card !== undefined && String(option.card.id) === key,
+      option.card !== undefined &&
+      option.sourcePermanent === undefined &&
+      String(option.card.id) === key,
   );
+}
+
+export function priorityOptionsForSourcePermanent(
+  decision: PriorityDecision | undefined,
+  permanentId: string | number,
+): PriorityOption[] {
+  if (!decision) return [];
+  const key = String(permanentId);
+  return decision.options.filter(
+    (option) =>
+      option.sourcePermanent !== undefined &&
+      String(option.sourcePermanent) === key,
+  );
+}
+
+export type PriorityDestinationKey =
+  | "play"
+  | `permanent:${string}`
+  | `player:${number}`
+  | `stack:${string}`;
+
+export function priorityDestinationKey(
+  option: PriorityOption,
+): PriorityDestinationKey | null {
+  if (
+    option.target &&
+    typeof option.target === "object" &&
+    !Array.isArray(option.target)
+  ) {
+    if (
+      typeof option.target.creature === "string" ||
+      (typeof option.target.creature === "number" &&
+        Number.isFinite(option.target.creature))
+    ) {
+      return `permanent:${String(option.target.creature)}`;
+    }
+    if (
+      typeof option.target.player === "number" &&
+      Number.isFinite(option.target.player)
+    ) {
+      return `player:${option.target.player}`;
+    }
+    return null;
+  }
+  if (
+    typeof option.spellTarget === "string" ||
+    (typeof option.spellTarget === "number" &&
+      Number.isFinite(option.spellTarget))
+  ) {
+    return `stack:${String(option.spellTarget)}`;
+  }
+  if (option.target !== undefined) return null;
+  return "play";
 }
 
 export interface AttackersDecision {
@@ -273,6 +328,35 @@ export interface GameResult {
   reason?: string;
   turns?: number;
   [key: string]: unknown;
+}
+
+export function formatGameResultTitle(
+  status: GameSnapshot["status"],
+  winner: unknown,
+  humanSeat = 0,
+): string {
+  if (status === "error") return "Match interrupted";
+  if (winner !== 0 && winner !== 1) return "The match is a draw";
+  return winner === humanSeat ? "You won" : "Opponent won";
+}
+
+export function formatGameResultReason(reason: unknown): string | null {
+  if (typeof reason !== "string" || !reason.trim()) return null;
+  const normalized = reason.trim().toLowerCase();
+  if (normalized === "life" || normalized === "life_total") {
+    return "The losing player’s life total reached zero.";
+  }
+  if (normalized === "empty_library") {
+    return "The losing player tried to draw from an empty library.";
+  }
+  if (normalized === "turn_limit") {
+    return "The match reached the turn limit.";
+  }
+  const readable = normalized
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\s+/g, " ");
+  return `Match ended: ${readable.charAt(0).toUpperCase()}${readable.slice(1)}.`;
 }
 
 export interface GameSnapshot {

@@ -91,6 +91,8 @@ std::string_view event_kind_name(GameEventKind kind) {
         return "damage_order";
     case GameEventKind::CombatResolved:
         return "combat_resolved";
+    case GameEventKind::CardsDiscarded:
+        return "cards_discarded";
     }
     throw std::logic_error("unknown game event");
 }
@@ -588,6 +590,74 @@ parse_unsigned_array_field(std::string_view line,
     return values;
 }
 
+std::vector<std::uint64_t>
+parse_strict_unsigned_array_field(std::string_view line,
+                                  std::string_view field) {
+    std::size_t cursor = find_field_value(line, field);
+    const auto skip_whitespace = [&line](std::size_t& position) {
+        while (position < line.size() &&
+               std::isspace(static_cast<unsigned char>(
+                   line[position])) != 0) {
+            ++position;
+        }
+    };
+    const auto malformed = [field]() {
+        throw std::invalid_argument(
+            "response field " + std::string(field) +
+            " must be an array of unsigned integers");
+    };
+
+    skip_whitespace(cursor);
+    if (cursor >= line.size() || line[cursor] != '[') {
+        malformed();
+    }
+    ++cursor;
+    skip_whitespace(cursor);
+
+    std::vector<std::uint64_t> values;
+    if (cursor < line.size() && line[cursor] == ']') {
+        ++cursor;
+    } else {
+        while (true) {
+            if (cursor >= line.size() ||
+                std::isdigit(static_cast<unsigned char>(
+                    line[cursor])) == 0) {
+                malformed();
+            }
+            std::uint64_t value = 0;
+            const auto parsed = std::from_chars(
+                line.data() + cursor, line.data() + line.size(),
+                value);
+            if (parsed.ec != std::errc{}) {
+                malformed();
+            }
+            cursor = static_cast<std::size_t>(
+                parsed.ptr - line.data());
+            values.push_back(value);
+            skip_whitespace(cursor);
+            if (cursor >= line.size()) {
+                malformed();
+            }
+            if (line[cursor] == ']') {
+                ++cursor;
+                break;
+            }
+            if (line[cursor] != ',') {
+                malformed();
+            }
+            ++cursor;
+            skip_whitespace(cursor);
+        }
+    }
+
+    skip_whitespace(cursor);
+    if (cursor < line.size() &&
+        line[cursor] != ',' && line[cursor] != '}') {
+        malformed();
+    }
+    return values;
+}
+
 template <typename Value>
 bool unique_values(const std::vector<Value>& values) {
     return std::set<Value>(values.begin(), values.end()).size() ==
@@ -630,6 +700,12 @@ class JsonController {
                        const std::vector<PermanentId>& blockers) {
                     return choose_damage_order(
                         observation, attacker, blockers);
+                },
+            .choose_cleanup_discards =
+                [this](const PlayerObservation& observation,
+                       std::size_t excess) {
+                    return choose_cleanup_discards(
+                        observation, excess);
                 },
             .observe =
                 [this](const PlayerObservation& observation,
@@ -878,6 +954,51 @@ class JsonController {
             selected.begin(), selected.end());
     }
 
+    std::vector<std::size_t> choose_cleanup_discards(
+        const PlayerObservation& observation,
+        std::size_t excess) {
+        phase_ = TurnPhase::SecondMain;
+        const std::uint64_t id = next_decision_id();
+        output_ << "{\"type\":\"decision\",\"state\":";
+        write_state(output_, observation, phase_);
+        output_ << ",\"decision\":{\"id\":" << id
+                << ",\"kind\":\"cleanup_discard\",\"count\":"
+                << excess << ",\"options\":[";
+        for (std::size_t index = 0;
+             index < observation.hand.size(); ++index) {
+            if (index != 0) {
+                output_ << ',';
+            }
+            output_ << "{\"index\":" << index
+                    << ",\"card\":";
+            write_card(output_, observation.hand[index]);
+            output_ << '}';
+        }
+        output_ << "]}}\n" << std::flush;
+
+        const auto selected = parse_strict_unsigned_array_field(
+            read_response(id), "indices");
+        if (selected.size() != excess) {
+            throw std::invalid_argument(
+                "cleanup response must select exactly the excess");
+        }
+        if (!unique_values(selected)) {
+            throw std::invalid_argument(
+                "cleanup response contains duplicate positions");
+        }
+        std::vector<std::size_t> result;
+        result.reserve(selected.size());
+        for (const std::uint64_t position : selected) {
+            if (position >= observation.hand.size()) {
+                throw std::invalid_argument(
+                    "cleanup response selects an illegal position");
+            }
+            result.push_back(
+                static_cast<std::size_t>(position));
+        }
+        return result;
+    }
+
     std::string event_label(
         const PlayerObservation& observation,
         const GameEvent& event) const {
@@ -922,6 +1043,12 @@ class JsonController {
             return actor + " ordered combat damage";
         case GameEventKind::CombatResolved:
             return "Combat damage resolved";
+        case GameEventKind::CardsDiscarded:
+            return actor + " discarded " +
+                   std::to_string(event.cards.size()) +
+                   (event.cards.size() == 1
+                        ? " card"
+                        : " cards");
         }
         throw std::logic_error("unknown event");
     }
@@ -939,6 +1066,10 @@ class JsonController {
         output_ << ",\"label\":";
         write_json_string(
             output_, event_label(observation, event));
+        if (event.kind == GameEventKind::CardsDiscarded) {
+            output_ << ",\"cards\":";
+            write_cards(output_, event.cards);
+        }
         output_ << "}}\n" << std::flush;
     }
 

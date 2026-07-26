@@ -433,7 +433,7 @@ void test_cache_roundtrip_and_stale_rejection() {
             config, probes, "synthetic-model-fingerprint-v1");
     expect(
         metadata.schema ==
-            "old-school-probe-label-cache-v2",
+            "old-school-probe-label-cache-v3",
         "cache metadata did not use the Old School hard-cut schema");
     expect(
         metadata.corpus_id ==
@@ -441,12 +441,16 @@ void test_cache_roundtrip_and_stale_rejection() {
         "cache metadata retained the pre-Old-School corpus identity");
     expect(
         metadata.semantic_revision ==
-            "old-school-probe-score-semantics-v2",
+            "old-school-probe-score-semantics-v3",
         "cache metadata retained the pre-Old-School semantics identity");
+    expect(
+        metadata.environment_revision ==
+            old_school::probe_runner::kProbeEnvironmentRevision,
+        "cache metadata omitted the cleanup-discard environment identity");
     expect(
         ProbeScoreConfig{}.cache_path ==
             std::filesystem::path(
-                "data/old-school-probe-dev-v3.labels.tsv"),
+                "data/old-school-probe-dev-v3-env-v3.labels.tsv"),
         "default cache path can collide with the legacy cache");
     const auto samples = synthetic_samples(probes, 2);
     TemporaryDirectory directory;
@@ -460,7 +464,7 @@ void test_cache_roundtrip_and_stale_rejection() {
         std::string magic;
         std::getline(cache, magic);
         expect(
-            magic == "# old-school-probe-label-cache-v2",
+            magic == "# old-school-probe-label-cache-v3",
             "cache writer emitted the legacy magic header");
     }
     const std::string temporary_prefix =
@@ -519,6 +523,18 @@ void test_cache_roundtrip_and_stale_rejection() {
                std::string::npos,
            "semantic-revision mismatch was not identified");
 
+    stale = metadata;
+    stale.environment_revision = "old-school-environment-v2";
+    const std::string environment_error = expect_invalid(
+        [&]() {
+            (void)old_school::probe_runner::load_probe_label_cache(
+                path, stale, probes);
+        },
+        "cache from a different rules environment was accepted");
+    expect(environment_error.find("environment_revision") !=
+               std::string::npos,
+           "rules-environment mismatch was not identified");
+
     const auto legacy_path =
         directory.path() / "legacy-alpha-cache.tsv";
     {
@@ -535,21 +551,21 @@ void test_cache_roundtrip_and_stale_rejection() {
                std::string::npos,
            "legacy cache rejection did not identify its magic");
 
-    const auto v2_path =
-        directory.path() / "old-school-probe-dev-v2.labels.tsv";
+    const auto v2_path = directory.path() /
+                         "old-school-probe-dev-v3-env-v2.labels.tsv";
     {
         std::ofstream v2(v2_path);
-        v2 << "# old-school-probe-label-cache-v1\n";
+        v2 << "# old-school-probe-label-cache-v2\n";
     }
     const std::string v2_error = expect_invalid(
         [&]() {
             (void)old_school::probe_runner::load_probe_label_cache(
                 v2_path, metadata, probes);
         },
-        "probe-dev-v2 cache magic was accepted by v3");
+        "Environment-v2 cache magic was accepted by Environment-v3");
     expect(v2_error.find("unknown magic header") !=
                std::string::npos,
-           "v2 cache rejection did not identify its magic");
+           "Environment-v2 cache rejection did not identify its magic");
 }
 
 void test_validation_cache_identity_is_fail_closed() {
@@ -593,7 +609,13 @@ void test_validation_cache_identity_is_fail_closed() {
                     kProbeValidationSemanticRevision &&
             validation_metadata.semantic_revision !=
                 dev_metadata.semantic_revision,
-        "validation cache did not receive a distinct semantic revision");
+            "validation cache did not receive a distinct semantic revision");
+    expect(
+        dev_metadata.environment_revision ==
+                old_school::probe_runner::kProbeEnvironmentRevision &&
+            validation_metadata.environment_revision ==
+                old_school::probe_runner::kProbeEnvironmentRevision,
+        "probe caches did not bind the cleanup-discard environment");
     expect(
         old_school::probe_runner::default_probe_cache_path(
             ProbeCorpusKind::DevV3) !=
@@ -656,7 +678,7 @@ void test_validation_cache_identity_is_fail_closed() {
         std::getline(cache, magic);
         expect(
             magic ==
-                "# old-school-probe-validation-label-cache-v1",
+                "# old-school-probe-validation-label-cache-v2",
             "validation cache did not receive a distinct magic header");
     }
     expect(
@@ -1742,6 +1764,9 @@ void test_report_contains_required_schema_and_caveats() {
         .semantic_revision =
             std::string(old_school::probe_runner::
                             kProbeSemanticRevision),
+        .environment_revision =
+            std::string(old_school::probe_runner::
+                            kProbeEnvironmentRevision),
         .corpus_id =
             std::string(old_school::probes::kProbeDevV3),
         .reference_seed =
@@ -1919,6 +1944,11 @@ void test_report_contains_required_schema_and_caveats() {
                output.find("Attack: raw masked policy head") !=
                    std::string::npos,
            "report does not state exact Actor attack semantics");
+    expect(output.find("Rules environment: " +
+                       std::string(old_school::probe_runner::
+                                       kProbeEnvironmentRevision)) !=
+               std::string::npos,
+           "report omitted its rules-environment identity");
     expect(output.find("Green") != std::string::npos &&
                output.find("Red") != std::string::npos &&
                output.find("Blue") != std::string::npos &&
@@ -1937,6 +1967,9 @@ void test_compact_checkpoint_report_shows_actionable_transitions() {
         .semantic_revision =
             std::string(old_school::probe_runner::
                             kProbeSemanticRevision),
+        .environment_revision =
+            std::string(old_school::probe_runner::
+                            kProbeEnvironmentRevision),
         .corpus_id =
             std::string(old_school::probes::kProbeDevV3),
         .reference_seed =

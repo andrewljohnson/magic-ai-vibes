@@ -3448,7 +3448,7 @@ int main(int argc, char** argv) {
         old_school::LearnedActorGenerationConfig
             actor_generation_config;
         std::string probe_cache =
-            "data/old-school-probe-dev-v3.labels.tsv";
+            "data/old-school-probe-dev-v3-env-v3.labels.tsv";
         std::size_t stability_runs = 8;
         std::size_t generations = 10;
         std::size_t population = 16;
@@ -4209,9 +4209,9 @@ int main(int argc, char** argv) {
             constexpr std::uint64_t kP1RRootSeed = 577215;
             constexpr std::size_t kP1RTrainingGames = 800;
             constexpr std::uint64_t kP1RTrainingSeed = 424242;
-            const std::filesystem::path dev_cache =
+            const std::filesystem::path legacy_v2_dev_cache =
                 "data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv";
-            const std::filesystem::path validation_cache =
+            const std::filesystem::path legacy_v2_validation_cache =
                 "data/old-school-probe-validation-v1-exact-v2-k128-h0-t800-s424242.labels.tsv";
             if (seed != kP1RRootSeed ||
                 training_games != kP1RTrainingGames ||
@@ -4220,13 +4220,19 @@ int main(int argc, char** argv) {
                     "--score-p1r-probes requires exact --seed "
                     "577215 --train-games 800 --train-seed 424242");
             }
-            if (!std::filesystem::exists(dev_cache) ||
-                !std::filesystem::exists(validation_cache)) {
+            if (!std::filesystem::exists(legacy_v2_dev_cache) ||
+                !std::filesystem::exists(
+                    legacy_v2_validation_cache)) {
                 throw std::runtime_error(
                     "--score-p1r-probes requires both immutable "
-                    "preregistered probe caches; generate the "
-                    "exact-v2 validation cache first");
+                    "preregistered probe caches from Environment-v2; "
+                    "the exact-v2 validation cache is legacy");
             }
+            throw std::runtime_error(
+                "--score-p1r-probes is pinned to immutable "
+                "Environment-v2 probe caches and cannot run under "
+                "Environment-v3 cleanup-discard rules; preregister a "
+                "fresh v3 route and labels");
 
             std::cout
                 << "P1R Revised-Optimizer Offline Gate\n"

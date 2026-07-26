@@ -4943,3 +4943,92 @@ same terminal scorer to mirrored Giant Growth and lethal/zero Disintegrate
 contrasts before fitting an all-action counterfactual target. Any primary gate
 failure rejects this terminal teacher as the immediate training signal; it
 must not be repaired by tuning on these fixtures.
+
+### FT128 full-terminal counterfactual credit audit (result: rejected)
+
+Recorded on 2026-07-25 after rereading the independent review updated at
+22:15 PDT. The immutable Environment-v2 command completed:
+
+```sh
+./build/old-school-sim --diagnose-terminal-credit \
+  --train-games 800 --train-seed 424242
+```
+
+It loaded exact frozen P0 fingerprint
+`bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc`
+from
+`build/model-cache/old-school-value-challenger-v2-c16-t800-s424242.bin`
+and used the declared Value-mirror `K=1024/H=128` configuration with one
+rollout per world, epsilon zero, residual zero, shallow-prior blend disabled,
+and natural terminal results required.
+
+The live Force Spike control passed cleanly:
+`Q(Force Spike)-Q(Pass)=+0.240234`, paired SE `0.013357`, 95% CI
+`[0.214054,0.266415]`, exact best `{Force Spike}`, and `117/128` correctly
+signed K=8 blocks. The payable control failed decisively in the opposite
+direction:
+`Q(Pass)-Q(Force Spike)=-0.167969`, paired SE `0.011770`, 95% CI
+`[-0.191037,-0.144900]`, exact best `{Force Spike}`, and only `1/128`
+correctly signed K=8 blocks. Both primary rows had exact accounting
+(`2,048/2,048` terminal evaluations apiece, zero bootstraps), passed their
+conservative terminal bounds, and were bit-identical under hidden
+repartition.
+
+The diagnostic RU X=0 row weakly preferred Pass but did not resolve the
+contrast: `Q(Pass)-Q(X=0)=+0.005859`, paired SE `0.015994`, 95% CI
+`[-0.025488,0.037207]`, `53/128` correctly signed blocks. Pass was the exact
+best action and X=0 was excluded; all `8,192/8,192` candidate evaluations
+were terminal with zero bootstraps and the hidden clone was bit-identical.
+
+Decision: **reject full-terminal Learned-mirror outcome credit as the next
+teacher**. It passed all integrity and hidden-information checks, but failed
+one of two preregistered primary signs by a wide margin. This independently
+matches the reviewer's horizon-response finding: terminal saturation does not
+recover the payable hold-versus-spend distinction. Do not proceed to the
+previously conditional all-action terminal fit. The next research experiment
+must be separately declared under Environment v3 after its rules correction
+and artifact reset; the leading generic candidate is an auxiliary
+card/resource-advantage signal that preserves nonterminal causal information
+instead of relying on saturated mirror outcomes. This result is probe science,
+not a five-deck playing-strength claim.
+
+### Environment v3 cleanup-discard correction (declared)
+
+Declared on 2026-07-25 after the user observed that an interactive player could
+finish a turn with more than seven cards. Inspection confirmed a rules bug:
+`cleanup_turn` removes damage and until-end-of-turn modifiers but never makes
+the active player discard to the maximum hand size.
+
+Hypothesis: implementing an engine-authoritative cleanup discard decision will
+leave the active player with exactly seven cards whenever cleanup begins above
+seven, move exactly the chosen excess cards to the public graveyard, preserve
+card conservation and fixed-seed determinism, and expose the same legal choice
+through terminal and web human controllers. Bot choices must remain legal;
+Learned may rank discard afterstates with its own frozen value model but must
+not receive card-specific rules or Handcrafted values.
+
+Acceptance is rules-level rather than a strength claim:
+
+1. only the active player discards, and exactly `hand_size - 7` unique legal
+   hand positions are moved to the graveyard before cleanup completes;
+2. human controllers can choose the discarded cards, malformed choices fail
+   closed, and Random/Monte-Carlo/Deep/Handcrafted/Learned games all complete
+   legally and deterministically;
+3. Ancestral Recall and Braingeyser overdraw regressions, duplicate-card
+   selections, public observation/event output, CLI interaction, web bridge
+   action validation, and card conservation are covered;
+4. strict tests plus ASan/UBSan pass.
+
+This is **Environment v3**. It changes real trajectories, especially for Blue
+and RU decks, so v2 trained artifacts, lift tables, and playing-strength
+results are not comparable and cannot be promoted after the fix. The already
+running FT128 command remains an immutable v2 signal-sufficiency audit; record
+its result honestly when it finishes, but do not treat it as a v3 policy
+promotion or silently reuse its model artifact in v3.
+
+Review reconciliation: the 2026-07-25 21:48 PDT `REVIEW.md` entry describes
+Environment v3 as “live,” but that status is premature. At the time of this
+note the authoritative source still has the v2 cleanup implementation and its
+raw call sites; v3 becomes live only after the rules implementation, cache
+invalidation, and declared tests pass. This is a status disagreement, not a
+disagreement with the reviewer's recommendation to make the correction.

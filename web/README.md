@@ -36,3 +36,9 @@ three while preserving the engine-shaped numeric permanent IDs.
 
 The normal view keeps the opponent hand hidden. The match setup has an
 explicitly labeled debug reveal for behavior inspection.
+
+When you have priority, playable cards in your hand are marked `PLAY`. Click
+one to inspect a large version without taking an action; the listed choices
+only focus the corresponding exact action in the tray. You can also drag the
+card directly onto one of the highlighted `DROP TO PLAY` actions. When one
+spell has several legal targets, each target remains a separate drop choice.

@@ -54,6 +54,12 @@ test("the player console reserves separate visible regions for hand and actions"
   const dockRule = cssRule(css, ".decision-dock");
   assert.doesNotMatch(dockRule, /position:\s*fixed/);
   assert.match(dockRule, /position:\s*relative/);
+  assert.match(dockRule, /grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+
+  const bodyRule = cssRule(css, ".decision-body");
+  assert.match(bodyRule, /min-height:\s*0/);
+  assert.match(bodyRule, /height:\s*100%/);
+  assert.match(bodyRule, /overflow:\s*auto/);
 });
 
 test("the full human hand stays rendered and legal cards focus their action", async () => {
@@ -193,7 +199,10 @@ test("match typography keeps a readable floor without enlarging fixed regions", 
   const compactShellRule = cssRule(compactViewport[1], ".game-shell");
   assert.equal(pixels(shellRule, "--player-hand-height"), 142);
   assert.equal(pixels(compactShellRule, "--player-hand-height"), 112);
-  assert.equal(pixels(compactShellRule, "--player-decision-height"), 110);
+  assert.ok(
+    pixels(compactShellRule, "--player-decision-height") >= 150,
+    "the 1280x720 decision row must fit the 12px heading copy with margin",
+  );
 });
 
 test("landing metadata includes and advertises every bot policy", async () => {
