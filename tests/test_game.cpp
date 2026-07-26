@@ -8332,6 +8332,9 @@ TEST(five_deck_tournament_runs_all_ten_pairings) {
     const auto result = old_school::run_tournament(100, 0xC0FFEEULL);
     CHECK(result.games_per_matchup == 100);
     CHECK(result.total_games == 1000);
+    CHECK(result.evaluation_seed == 0xC0FFEEULL);
+    CHECK(!result.effective_learned_bot.has_value());
+    CHECK(result.effective_learned_model_fingerprint.empty());
     const std::array<std::pair<old_school::DeckId, old_school::DeckId>, 10>
         expected_pairings = {{
             {old_school::DeckId::Green, old_school::DeckId::Red},
@@ -8481,10 +8484,25 @@ TEST(mixed_tournament_rotates_all_five_bot_kinds) {
             CHECK(deck_bot.games == 20);
             CHECK(deck_bot.wins + deck_bot.losses + deck_bot.draws ==
                   deck_bot.games);
+            CHECK(deck_bot.on_play_games == 10);
+            CHECK(deck_bot.on_draw_games == 10);
             deck_bot_games += deck_bot.games;
         }
         CHECK(deck_bot_games == result.decks[deck].games);
     }
+    CHECK(result.evaluation_seed == 0xDEC1DEULL);
+    CHECK(result.effective_learned_bot.has_value());
+    CHECK(result.effective_learned_bot->kind ==
+          old_school::BotKind::Learned);
+    CHECK(result.effective_learned_bot->learned_variant ==
+          old_school::LearnedVariant::ValueSearchChampion);
+    CHECK(result.effective_learned_bot->rollouts_per_action ==
+          bots.learned_rollouts);
+    CHECK(result.effective_learned_bot->learned_model);
+    CHECK(
+        result.effective_learned_model_fingerprint ==
+        old_school::learned_model_fingerprint(
+            result.effective_learned_bot->learned_model));
 
     const auto repeated =
         old_school::run_tournament(25, 0xDEC1DEULL, {}, bots);
@@ -8540,6 +8558,205 @@ TEST(tournament_threads_and_validates_learned_rollout_budget) {
         rejected_zero = true;
     }
     CHECK(rejected_zero);
+}
+
+TEST(tournament_frozen_learned_override_propagates_exact_treatment) {
+    const auto model = small_value_model();
+    const old_school::BotConfig treatment = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 8,
+        .exploration_rate = 0.0,
+        .value_continuation_epsilon = 0.0,
+        .value_priority_residual_weight = 0.0,
+        .value_pass_dominance = true,
+        .value_continuation_controller =
+            old_school::LearnedContinuationController::
+                PublicStackPassV1,
+        .training_games = 17,
+        .learned_model = model,
+    };
+    const old_school::TournamentConfig tournament = {
+        .bot_field = old_school::BotField::Mixed,
+        .learned_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .monte_carlo_rollouts = 1,
+        .deep_monte_carlo_rollouts = 2,
+        // These legacy scalar values are deliberately different. The exact
+        // frozen BotConfig is authoritative when the override is present.
+        .learned_rollouts = 1,
+        .value_continuation_epsilon = 0.75,
+        .learned_training_games = 0,
+        .frozen_learned_bot = treatment,
+    };
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+    constexpr std::uint64_t kEvaluationSeed =
+        0xF202E4C7ULL;
+    const auto result = old_school::run_tournament(
+        1, kEvaluationSeed, bounded, tournament);
+
+    CHECK(result.evaluation_seed == kEvaluationSeed);
+    CHECK(result.effective_learned_bot.has_value());
+    const auto& effective =
+        *result.effective_learned_bot;
+    CHECK(effective.kind == treatment.kind);
+    CHECK(effective.learned_variant ==
+          treatment.learned_variant);
+    CHECK(effective.rollouts_per_action ==
+          treatment.rollouts_per_action);
+    CHECK(effective.exploration_rate ==
+          treatment.exploration_rate);
+    CHECK(effective.value_continuation_epsilon ==
+          treatment.value_continuation_epsilon);
+    CHECK(effective.value_priority_residual_weight ==
+          treatment.value_priority_residual_weight);
+    CHECK(effective.value_pass_dominance ==
+          treatment.value_pass_dominance);
+    CHECK(effective.value_continuation_controller ==
+          treatment.value_continuation_controller);
+    CHECK(effective.training_games ==
+          treatment.training_games);
+    CHECK(effective.learned_model == model);
+    CHECK(
+        result.effective_learned_model_fingerprint ==
+        old_school::learned_model_fingerprint(model));
+}
+
+TEST(tournament_frozen_override_matches_legacy_rng_when_equivalent) {
+    const auto model = small_value_model();
+    old_school::GameConfig bounded;
+    bounded.max_turns = 2;
+    bounded.learned_model = model;
+    const old_school::TournamentConfig legacy = {
+        .bot_field = old_school::BotField::Learned,
+        .learned_rollouts = 1,
+        .learned_training_games = 1,
+    };
+    old_school::TournamentConfig frozen = legacy;
+    frozen.frozen_learned_bot = old_school::BotConfig{
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 1,
+        .training_games = 1,
+        .learned_model = model,
+    };
+    constexpr std::uint64_t kEvaluationSeed =
+        0xAB5E470FFULL;
+    const auto implicit = old_school::run_tournament(
+        2, kEvaluationSeed, bounded, legacy);
+    const auto explicit_frozen =
+        old_school::run_tournament(
+            2, kEvaluationSeed, bounded, frozen);
+
+    CHECK(implicit.total_games ==
+          explicit_frozen.total_games);
+    CHECK(implicit.draws == explicit_frozen.draws);
+    CHECK(implicit.life_total_finishes ==
+          explicit_frozen.life_total_finishes);
+    CHECK(implicit.empty_library_finishes ==
+          explicit_frozen.empty_library_finishes);
+    CHECK(implicit.turn_limit_draws ==
+          explicit_frozen.turn_limit_draws);
+    CHECK(implicit.total_turns ==
+          explicit_frozen.total_turns);
+    for (std::size_t deck = 0; deck < old_school::kDeckCount;
+         ++deck) {
+        CHECK(implicit.decks[deck].games ==
+              explicit_frozen.decks[deck].games);
+        CHECK(implicit.decks[deck].wins ==
+              explicit_frozen.decks[deck].wins);
+        CHECK(implicit.decks[deck].losses ==
+              explicit_frozen.decks[deck].losses);
+        CHECK(implicit.decks[deck].draws ==
+              explicit_frozen.decks[deck].draws);
+    }
+    const std::size_t learned =
+        static_cast<std::size_t>(
+            old_school::BotKind::Learned);
+    CHECK(implicit.bots[learned].wins ==
+          explicit_frozen.bots[learned].wins);
+    CHECK(implicit.bots[learned].losses ==
+          explicit_frozen.bots[learned].losses);
+    CHECK(implicit.bots[learned].draws ==
+          explicit_frozen.bots[learned].draws);
+    CHECK(implicit.bots[learned].total_decisions ==
+          explicit_frozen.bots[learned].total_decisions);
+    CHECK(implicit.bots[learned].total_rollouts ==
+          explicit_frozen.bots[learned].total_rollouts);
+    CHECK(
+        implicit.effective_learned_model_fingerprint ==
+        explicit_frozen
+            .effective_learned_model_fingerprint);
+}
+
+TEST(tournament_rejects_malformed_frozen_learned_overrides) {
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+    const auto rejects =
+        [&](old_school::BotConfig frozen,
+            old_school::BotField field) {
+            old_school::TournamentConfig tournament = {
+                .bot_field = field,
+                .monte_carlo_rollouts = 1,
+                .deep_monte_carlo_rollouts = 2,
+                .learned_rollouts = 1,
+                .learned_training_games = 0,
+                .frozen_learned_bot = std::move(frozen),
+            };
+            bool rejected = false;
+            try {
+                static_cast<void>(
+                    old_school::run_tournament(
+                        1, 0xBADF202EULL, bounded,
+                        tournament));
+            } catch (const std::invalid_argument&) {
+                rejected = true;
+            }
+            CHECK(rejected);
+        };
+
+    rejects(
+        {
+            .kind = old_school::BotKind::Random,
+            .rollouts_per_action = 1,
+            .learned_model = small_value_model(),
+        },
+        old_school::BotField::Mixed);
+    rejects(
+        {
+            .kind = old_school::BotKind::Learned,
+            .rollouts_per_action = 1,
+        },
+        old_school::BotField::Learned);
+    rejects(
+        {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 1,
+            .learned_model = small_actor_model(),
+        },
+        old_school::BotField::Learned);
+    rejects(
+        {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 1,
+            .learned_model = small_actor_model(),
+        },
+        old_school::BotField::Mixed);
+    rejects(
+        {
+            .kind = old_school::BotKind::Learned,
+            .rollouts_per_action = 1,
+            .learned_model = small_value_model(),
+        },
+        old_school::BotField::Random);
 }
 
 TEST(learned_deck_lift_gate_requires_every_policy_and_allows_ties) {
@@ -8616,7 +8833,10 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
     const auto result = old_school::run_bot_benchmark(
         2, 0xB07B07ULL, challenger, baseline);
 
+    CHECK(result.evaluation_seed == 0xB07B07ULL);
     CHECK(result.total_games == 120);
+    CHECK(result.challenger_model_fingerprint.empty());
+    CHECK(result.baseline_model_fingerprint.empty());
     CHECK(result.challenger_stats.games == 120);
     CHECK(result.baseline_stats.games == 120);
     CHECK(result.challenger_stats.wins +
@@ -8631,6 +8851,30 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
         CHECK(result.challenger_decks[deck].on_draw_games == 12);
         CHECK(result.baseline_decks[deck].on_play_games == 12);
         CHECK(result.baseline_decks[deck].on_draw_games == 12);
+        for (std::size_t policy_seat = 0;
+             policy_seat < 2; ++policy_seat) {
+            for (std::size_t play_draw = 0;
+                 play_draw < 2; ++play_draw) {
+                const auto& challenger_quadrant =
+                    result.challenger_outcome_quadrants
+                        [deck][policy_seat][play_draw];
+                const auto& baseline_quadrant =
+                    result.baseline_outcome_quadrants
+                        [deck][policy_seat][play_draw];
+                CHECK(challenger_quadrant.games == 6);
+                CHECK(
+                    challenger_quadrant.wins +
+                        challenger_quadrant.losses +
+                        challenger_quadrant.draws ==
+                    challenger_quadrant.games);
+                CHECK(baseline_quadrant.games == 6);
+                CHECK(
+                    baseline_quadrant.wins +
+                        baseline_quadrant.losses +
+                        baseline_quadrant.draws ==
+                    baseline_quadrant.games);
+            }
+        }
     }
     std::size_t matrix_games = 0;
     std::size_t matrix_wins = 0;
@@ -8704,6 +8948,131 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
           result.challenger_win_rate());
     CHECK(result.confidence_high_95() >=
           result.challenger_win_rate());
+    CHECK(result.challenger_quartet_cr1.clusters == 30);
+    CHECK(result.challenger_quartet_cr1.records == 120);
+    CHECK(
+        result.challenger_quartet_cr1.mean ==
+        (static_cast<double>(result.challenger_stats.wins) +
+         0.5 *
+             static_cast<double>(
+                 result.challenger_stats.draws)) /
+            120.0);
+    CHECK(std::isfinite(
+        result.challenger_quartet_cr1.standard_error));
+    CHECK(
+        result.challenger_quartet_cr1.confidence_low_95 <=
+        result.challenger_quartet_cr1.mean);
+    CHECK(
+        result.challenger_quartet_cr1.confidence_high_95 >=
+        result.challenger_quartet_cr1.mean);
+}
+
+TEST(bot_benchmark_exact_cyclic_quadrants_at_gate_repetitions) {
+    const old_school::BotConfig random = {
+        .kind = old_school::BotKind::Random,
+        .rollouts_per_action = 1,
+    };
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+    const std::array<std::size_t, 2> repetitions = {
+        5,
+        34,
+    };
+    for (const std::size_t repetition : repetitions) {
+        const std::uint64_t evaluation_seed =
+            0xC1C11C5EEDULL + repetition;
+        const auto first = old_school::run_bot_benchmark(
+            repetition, evaluation_seed, random, random,
+            bounded, true);
+        const auto repeated =
+            old_school::run_bot_benchmark(
+                repetition, evaluation_seed, random, random,
+                bounded, true);
+        const std::size_t expected_quadrant =
+            3 * repetition;
+        const std::size_t expected_clusters =
+            15 * repetition;
+        const std::size_t expected_records =
+            60 * repetition;
+        CHECK(first.evaluation_seed == evaluation_seed);
+        CHECK(first.total_games == expected_records);
+        CHECK(first.challenger_quartet_cr1.clusters ==
+              expected_clusters);
+        CHECK(first.challenger_quartet_cr1.records ==
+              expected_records);
+        CHECK(first.challenger_quartet_cr1.mean == 0.5);
+        CHECK(
+            first.challenger_quartet_cr1.standard_error ==
+            0.0);
+        CHECK(
+            first.challenger_quartet_cr1 ==
+            repeated.challenger_quartet_cr1);
+        CHECK(
+            first.challenger_outcome_quadrants ==
+            repeated.challenger_outcome_quadrants);
+        CHECK(
+            first.baseline_outcome_quadrants ==
+            repeated.baseline_outcome_quadrants);
+        for (std::size_t deck = 0;
+             deck < old_school::kDeckCount; ++deck) {
+            for (std::size_t policy_seat = 0;
+                 policy_seat < 2; ++policy_seat) {
+                for (std::size_t play_draw = 0;
+                     play_draw < 2; ++play_draw) {
+                    const auto& challenger_quadrant =
+                        first.challenger_outcome_quadrants
+                            [deck][policy_seat][play_draw];
+                    const auto& baseline_quadrant =
+                        first.baseline_outcome_quadrants
+                            [deck][policy_seat][play_draw];
+                    CHECK(challenger_quadrant.games ==
+                          expected_quadrant);
+                    CHECK(baseline_quadrant.games ==
+                          expected_quadrant);
+                    CHECK(challenger_quadrant.draws ==
+                          expected_quadrant);
+                    CHECK(baseline_quadrant.draws ==
+                          expected_quadrant);
+                }
+            }
+        }
+    }
+}
+
+TEST(benchmark_strength_gate_is_challenger_deck_perspective) {
+    old_school::BotBenchmarkSummary summary;
+    summary.challenger_stats = {
+        .games = 1'000,
+        .wins = 600,
+        .losses = 400,
+    };
+    for (std::size_t deck = 0;
+         deck < old_school::kDeckCount; ++deck) {
+        summary.challenger_decks[deck] = {
+            .games = 200,
+            .wins = 120,
+            .losses = 80,
+        };
+        // Baseline deck buckets cover a different set of ordered
+        // matchups. Their win counts are accounting evidence, not the
+        // strength comparator for challenger deck `deck`.
+        summary.baseline_decks[deck] = {
+            .games = 200,
+            .wins = 150,
+            .losses = 50,
+        };
+    }
+    CHECK(summary.confidence_low_95() > 50.0);
+    CHECK(summary.challenger_is_better_95());
+
+    summary.challenger_decks[
+        static_cast<std::size_t>(
+            old_school::DeckId::RUAggro)] = {
+        .games = 200,
+        .wins = 100,
+        .losses = 100,
+    };
+    CHECK(!summary.challenger_is_better_95());
 }
 
 TEST(benchmark_training_seed_is_independent_and_model_is_reusable) {
@@ -8736,12 +9105,26 @@ TEST(benchmark_training_seed_is_independent_and_model_is_reusable) {
     CHECK(repeated.learned_training_seed == kTrainingSeed);
     CHECK(other_evaluation_seed.learned_training_seed ==
           kTrainingSeed);
+    CHECK(first.evaluation_seed == 101);
+    CHECK(repeated.evaluation_seed == 101);
+    CHECK(other_evaluation_seed.evaluation_seed == 424242);
+    CHECK(
+        first.challenger_model_fingerprint ==
+        old_school::learned_model_fingerprint(
+            shared_config.learned_model));
+    CHECK(first.baseline_model_fingerprint.empty());
     CHECK(first.challenger_stats.wins ==
           repeated.challenger_stats.wins);
     CHECK(first.challenger_stats.losses ==
           repeated.challenger_stats.losses);
     CHECK(first.challenger_stats.draws ==
           repeated.challenger_stats.draws);
+    CHECK(first.challenger_quartet_cr1 ==
+          repeated.challenger_quartet_cr1);
+    CHECK(first.challenger_outcome_quadrants ==
+          repeated.challenger_outcome_quadrants);
+    CHECK(first.baseline_outcome_quadrants ==
+          repeated.baseline_outcome_quadrants);
 }
 
 TEST(benchmark_policy_identity_includes_value_continuation_epsilon) {

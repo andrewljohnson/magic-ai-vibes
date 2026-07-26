@@ -14238,6 +14238,23 @@ std::size_t bot_matchup_index(BotKind first, BotKind second) {
     throw std::logic_error("bot matchup requires two different bots");
 }
 
+BotConfig legacy_tournament_learned_bot(
+    const TournamentConfig& tournament_config) {
+    return {
+        .kind = BotKind::Learned,
+        .learned_variant =
+            tournament_config.bot_field == BotField::Mixed
+                ? LearnedVariant::ValueSearchChampion
+                : tournament_config.learned_variant,
+        .rollouts_per_action =
+            tournament_config.learned_rollouts,
+        .value_continuation_epsilon =
+            tournament_config.value_continuation_epsilon,
+        .training_games =
+            tournament_config.learned_training_games,
+    };
+}
+
 void configure_bots(GameConfig& game_config, std::size_t game_index,
                     const TournamentConfig& tournament_config) {
     const BotConfig random = {
@@ -14259,18 +14276,10 @@ void configure_bots(GameConfig& game_config, std::size_t game_index,
         .kind = BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
-    const BotConfig learned = {
-        .kind = BotKind::Learned,
-        .learned_variant =
-            tournament_config.bot_field == BotField::Mixed
-                ? LearnedVariant::ValueSearchChampion
-                : tournament_config.learned_variant,
-        .rollouts_per_action =
-            tournament_config.learned_rollouts,
-        .value_continuation_epsilon =
-            tournament_config.value_continuation_epsilon,
-        .training_games = tournament_config.learned_training_games,
-    };
+    const BotConfig learned =
+        tournament_config.frozen_learned_bot.value_or(
+            legacy_tournament_learned_bot(
+                tournament_config));
 
     switch (tournament_config.bot_field) {
     case BotField::Random:
@@ -14712,6 +14721,42 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
     const bool uses_learned =
         tournament_config.bot_field == BotField::Learned ||
         tournament_config.bot_field == BotField::Mixed;
+    const bool has_frozen_learned_bot =
+        tournament_config.frozen_learned_bot.has_value();
+    if (has_frozen_learned_bot && !uses_learned) {
+        throw std::invalid_argument(
+            "frozen Learned tournament bot requires a Learned or Mixed "
+            "field");
+    }
+    if (has_frozen_learned_bot) {
+        const BotConfig& frozen =
+            *tournament_config.frozen_learned_bot;
+        validate_bot_research_config(frozen);
+        if (frozen.kind != BotKind::Learned) {
+            throw std::invalid_argument(
+                "frozen tournament bot must be Learned");
+        }
+        if (!frozen.learned_model) {
+            throw std::invalid_argument(
+                "frozen tournament Learned bot requires a model");
+        }
+        if (frozen.learned_model->variant() !=
+            frozen.learned_variant) {
+            throw std::invalid_argument(
+                "frozen tournament Learned model does not match its "
+                "configuration");
+        }
+        if (tournament_config.bot_field == BotField::Mixed &&
+            frozen.learned_variant !=
+                LearnedVariant::ValueSearchChampion) {
+            throw std::invalid_argument(
+                "Mixed tournament requires frozen Learned Value");
+        }
+    }
+    const BotConfig scheduled_learned =
+        tournament_config.frozen_learned_bot.value_or(
+            legacy_tournament_learned_bot(
+                tournament_config));
     if (uses_monte_carlo &&
         tournament_config.monte_carlo_rollouts == 0) {
         throw std::invalid_argument(
@@ -14729,13 +14774,14 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
             "deep Monte Carlo must use more rollouts than Monte Carlo");
     }
     if (uses_learned &&
-        tournament_config.learned_rollouts == 0) {
+        scheduled_learned.rollouts_per_action == 0) {
         throw std::invalid_argument(
             "Learned rollouts per action must be positive");
     }
     validate_value_continuation_epsilon(
         tournament_config.value_continuation_epsilon);
-    if (tournament_config.value_continuation_epsilon != 0.0 &&
+    if (!has_frozen_learned_bot &&
+        tournament_config.value_continuation_epsilon != 0.0 &&
         (!uses_learned ||
          (tournament_config.bot_field == BotField::Learned &&
           tournament_config.learned_variant !=
@@ -14743,13 +14789,19 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
         throw std::invalid_argument(
             "Value continuation epsilon requires a Value tournament");
     }
-    if (uses_learned &&
+    if (uses_learned && !has_frozen_learned_bot &&
         tournament_config.learned_training_games == 0 &&
         !game_config.learned_model) {
         throw std::invalid_argument(
             "Learned bot training games must be positive");
     }
-    if (uses_learned && !game_config.learned_model) {
+    if (has_frozen_learned_bot) {
+        // The per-seat model is authoritative. Keeping the fallback aligned
+        // prevents any future Learned seat assembled by this tournament from
+        // silently observing a different model.
+        game_config.learned_model =
+            scheduled_learned.learned_model;
+    } else if (uses_learned && !game_config.learned_model) {
         const LearnedVariant variant =
             tournament_config.bot_field == BotField::Mixed
                 ? LearnedVariant::ValueSearchChampion
@@ -14767,8 +14819,26 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
     TournamentSummary summary;
     summary.games_per_matchup = games_per_matchup;
     summary.total_games = games_per_matchup * summary.matchups.size();
+    summary.evaluation_seed = seed;
     summary.learned_training_seed =
         game_config.learned_training_seed;
+    if (uses_learned) {
+        summary.effective_learned_bot = scheduled_learned;
+        if (!summary.effective_learned_bot->learned_model) {
+            summary.effective_learned_bot->learned_model =
+                game_config.learned_model;
+        }
+        if (!summary.effective_learned_bot->learned_model ||
+            summary.effective_learned_bot->learned_model->variant() !=
+                summary.effective_learned_bot->learned_variant) {
+            throw std::invalid_argument(
+                "tournament Learned model does not match its effective "
+                "configuration");
+        }
+        summary.effective_learned_model_fingerprint =
+            learned_model_fingerprint(
+                summary.effective_learned_bot->learned_model);
+    }
     summary.bot_matchups = empty_bot_matchups();
 
     constexpr std::array<std::pair<DeckId, DeckId>,
@@ -21612,10 +21682,10 @@ bool BotBenchmarkSummary::challenger_is_better_95() const {
     }
     for (std::size_t deck = 0;
          deck < challenger_decks.size(); ++deck) {
-        if (challenger_decks[deck].games == 0 ||
-            baseline_decks[deck].games == 0 ||
-            challenger_decks[deck].wins <=
-                baseline_decks[deck].wins) {
+        const auto& challenger_deck =
+            challenger_decks[deck];
+        if (challenger_deck.games == 0 ||
+            challenger_deck.wins <= challenger_deck.losses) {
             return false;
         }
     }
@@ -21643,6 +21713,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         (challenger.kind != BotKind::Learned ||
          (challenger.learned_variant ==
               baseline.learned_variant &&
+          challenger.exploration_rate ==
+              baseline.exploration_rate &&
           challenger.value_continuation_epsilon ==
               baseline.value_continuation_epsilon &&
           challenger.value_priority_residual_weight ==
@@ -21659,19 +21731,23 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         throw std::invalid_argument(
             "benchmark bots must use different policies or rollout counts");
     }
-    const bool distinct_learned_variants =
-        challenger.kind == BotKind::Learned &&
-        baseline.kind == BotKind::Learned &&
-        challenger.learned_variant != baseline.learned_variant;
-    if (!game_config.learned_model || distinct_learned_variants) {
-        std::array<std::shared_ptr<const LearnedModel>, 2>
-            trained_by_variant;
-        const auto ensure_frozen_model =
-            [&](BotConfig& bot) {
-                if (bot.kind != BotKind::Learned ||
-                    bot.learned_model) {
-                    return;
-                }
+    std::array<std::shared_ptr<const LearnedModel>, 2>
+        trained_by_variant;
+    const auto ensure_frozen_model =
+        [&](BotConfig& bot) {
+            if (bot.kind != BotKind::Learned) {
+                return;
+            }
+            validate_value_continuation_epsilon(
+                bot.exploration_rate);
+            if (!bot.learned_model &&
+                game_config.learned_model &&
+                game_config.learned_model->variant() ==
+                    bot.learned_variant) {
+                bot.learned_model =
+                    game_config.learned_model;
+            }
+            if (!bot.learned_model) {
                 const std::size_t variant =
                     static_cast<std::size_t>(
                         bot.learned_variant);
@@ -21690,16 +21766,33 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
                 }
                 bot.learned_model =
                     trained_by_variant[variant];
-            };
-        ensure_frozen_model(challenger);
-        ensure_frozen_model(baseline);
-    }
+            }
+            if (bot.learned_model->variant() !=
+                bot.learned_variant) {
+                throw std::invalid_argument(
+                    "benchmark Learned model does not match its "
+                    "configuration");
+            }
+        };
+    ensure_frozen_model(challenger);
+    ensure_frozen_model(baseline);
 
     BotBenchmarkSummary summary = {
         .challenger = challenger,
         .baseline = baseline,
+        .evaluation_seed = seed,
         .learned_training_seed =
             game_config.learned_training_seed,
+        .challenger_model_fingerprint =
+            challenger.kind == BotKind::Learned
+                ? learned_model_fingerprint(
+                      challenger.learned_model)
+                : std::string{},
+        .baseline_model_fingerprint =
+            baseline.kind == BotKind::Learned
+                ? learned_model_fingerprint(
+                      baseline.learned_model)
+                : std::string{},
         .repetitions_per_deck_pairing =
             repetitions_per_deck_pairing,
     };
@@ -21707,6 +21800,7 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
     struct BenchmarkTask {
         std::size_t first_deck;
         std::size_t second_deck;
+        std::size_t cluster;
         std::size_t challenger_player;
         std::size_t baseline_player;
         std::size_t challenger_deck;
@@ -21714,46 +21808,167 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         std::size_t starting_player;
         std::uint64_t seed;
     };
+    // The ten distinct K5 edges form the regular cyclic tournament:
+    // d -> d+1 and d -> d+2 (mod 5). Thus every physical deck is in seat
+    // zero twice and seat one twice across its distinct opponents.
+    constexpr std::array<std::pair<std::size_t, std::size_t>, 15>
+        benchmark_pairings = {{
+            {0, 0},
+            {1, 1},
+            {2, 2},
+            {3, 3},
+            {4, 4},
+            {0, 1},
+            {0, 2},
+            {1, 2},
+            {1, 3},
+            {2, 3},
+            {2, 4},
+            {3, 4},
+            {3, 0},
+            {4, 0},
+            {4, 1},
+        }};
+    std::array<std::size_t, kDeckCount> diagonal_counts{};
+    std::array<std::size_t, kDeckCount> physical_seat_zero{};
+    std::array<std::size_t, kDeckCount> physical_seat_one{};
+    std::array<std::array<bool, kDeckCount>, kDeckCount>
+        distinct_edges{};
+    for (const auto [first_deck, second_deck] :
+         benchmark_pairings) {
+        if (first_deck >= kDeckCount ||
+            second_deck >= kDeckCount) {
+            throw std::logic_error(
+                "benchmark pairing contains an invalid deck");
+        }
+        if (first_deck == second_deck) {
+            ++diagonal_counts[first_deck];
+            continue;
+        }
+        const std::size_t low =
+            std::min(first_deck, second_deck);
+        const std::size_t high =
+            std::max(first_deck, second_deck);
+        if (distinct_edges[low][high]) {
+            throw std::logic_error(
+                "benchmark cyclic schedule repeats a deck edge");
+        }
+        distinct_edges[low][high] = true;
+        ++physical_seat_zero[first_deck];
+        ++physical_seat_one[second_deck];
+    }
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        if (diagonal_counts[deck] != 1 ||
+            physical_seat_zero[deck] != 2 ||
+            physical_seat_one[deck] != 2) {
+            throw std::logic_error(
+                "benchmark cyclic schedule is not seat balanced");
+        }
+        for (std::size_t opponent = deck + 1;
+             opponent < kDeckCount; ++opponent) {
+            if (!distinct_edges[deck][opponent]) {
+                throw std::logic_error(
+                    "benchmark cyclic schedule omits a deck edge");
+            }
+        }
+    }
     std::vector<BenchmarkTask> tasks;
-    const std::size_t benchmark_pairings =
-        kDeckCount * (kDeckCount + 1) / 2;
     tasks.reserve(repetitions_per_deck_pairing *
-                  benchmark_pairings * 4);
-    for (std::size_t first_deck = 0;
-         first_deck < kDeckCount; ++first_deck) {
-        for (std::size_t second_deck = first_deck;
-             second_deck < kDeckCount; ++second_deck) {
-            for (std::size_t repetition = 0;
-                 repetition < repetitions_per_deck_pairing;
-                 ++repetition) {
-                const std::uint64_t game_seed = seed_generator();
-                for (std::size_t assignment = 0; assignment < 2;
-                     ++assignment) {
-                    const std::size_t challenger_player = assignment;
-                    const std::size_t baseline_player =
-                        opponent_of(challenger_player);
-                    const std::size_t challenger_deck =
-                        challenger_player == 0 ? first_deck
-                                               : second_deck;
-                    const std::size_t baseline_deck =
-                        baseline_player == 0 ? first_deck
-                                            : second_deck;
+                  benchmark_pairings.size() * 4);
+    std::size_t cluster = 0;
+    for (const auto [first_deck, second_deck] :
+         benchmark_pairings) {
+        for (std::size_t repetition = 0;
+             repetition < repetitions_per_deck_pairing;
+             ++repetition, ++cluster) {
+            const std::uint64_t game_seed = seed_generator();
+            for (std::size_t assignment = 0; assignment < 2;
+                 ++assignment) {
+                const std::size_t challenger_player = assignment;
+                const std::size_t baseline_player =
+                    opponent_of(challenger_player);
+                const std::size_t challenger_deck =
+                    challenger_player == 0 ? first_deck
+                                           : second_deck;
+                const std::size_t baseline_deck =
+                    baseline_player == 0 ? first_deck
+                                         : second_deck;
 
-                    for (std::size_t starting_player = 0;
-                         starting_player < 2; ++starting_player) {
-                        tasks.push_back({
-                            .first_deck = first_deck,
-                            .second_deck = second_deck,
-                            .challenger_player = challenger_player,
-                            .baseline_player = baseline_player,
-                            .challenger_deck = challenger_deck,
-                            .baseline_deck = baseline_deck,
-                            .starting_player = starting_player,
-                            .seed = game_seed,
-                        });
-                    }
+                for (std::size_t starting_player = 0;
+                     starting_player < 2; ++starting_player) {
+                    tasks.push_back({
+                        .first_deck = first_deck,
+                        .second_deck = second_deck,
+                        .cluster = cluster,
+                        .challenger_player = challenger_player,
+                        .baseline_player = baseline_player,
+                        .challenger_deck = challenger_deck,
+                        .baseline_deck = baseline_deck,
+                        .starting_player = starting_player,
+                        .seed = game_seed,
+                    });
                 }
             }
+        }
+    }
+    const std::size_t expected_clusters =
+        repetitions_per_deck_pairing *
+        benchmark_pairings.size();
+    if (cluster != expected_clusters ||
+        tasks.size() != expected_clusters * 4) {
+        throw std::logic_error(
+            "benchmark quartet schedule accounting mismatch");
+    }
+    struct ClusterScheduleEvidence {
+        bool initialized = false;
+        std::size_t first_deck = 0;
+        std::size_t second_deck = 0;
+        std::uint64_t seed = 0;
+        std::array<bool, 4> assignment_starters{};
+    };
+    std::vector<ClusterScheduleEvidence> cluster_evidence(
+        expected_clusters);
+    for (const BenchmarkTask& task : tasks) {
+        if (task.cluster >= cluster_evidence.size() ||
+            task.baseline_player !=
+                opponent_of(task.challenger_player) ||
+            task.starting_player >= 2) {
+            throw std::logic_error(
+                "benchmark quartet contains malformed task metadata");
+        }
+        ClusterScheduleEvidence& evidence =
+            cluster_evidence[task.cluster];
+        if (!evidence.initialized) {
+            evidence.initialized = true;
+            evidence.first_deck = task.first_deck;
+            evidence.second_deck = task.second_deck;
+            evidence.seed = task.seed;
+        } else if (
+            evidence.first_deck != task.first_deck ||
+            evidence.second_deck != task.second_deck ||
+            evidence.seed != task.seed) {
+            throw std::logic_error(
+                "benchmark quartet does not share deck pair and seed");
+        }
+        const std::size_t assignment_starter =
+            task.challenger_player * 2 +
+            task.starting_player;
+        if (evidence.assignment_starters
+                [assignment_starter]) {
+            throw std::logic_error(
+                "benchmark quartet repeats an assignment/starter");
+        }
+        evidence.assignment_starters[assignment_starter] = true;
+    }
+    for (const ClusterScheduleEvidence& evidence :
+         cluster_evidence) {
+        if (!evidence.initialized ||
+            !std::all_of(
+                evidence.assignment_starters.begin(),
+                evidence.assignment_starters.end(),
+                [](bool present) { return present; })) {
+            throw std::logic_error(
+                "benchmark quartet is incomplete");
         }
     }
 
@@ -21796,10 +22011,29 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
     for (auto& worker : workers) {
         worker.join();
     }
+    std::vector<double> challenger_scores(tasks.size());
+    const auto record_outcome =
+        [](BotBenchmarkOutcomeCounts& counts,
+           const GameResult& result, std::size_t player) {
+            ++counts.games;
+            if (result.winner < 0) {
+                ++counts.draws;
+            } else if (
+                result.winner == static_cast<int>(player)) {
+                ++counts.wins;
+            } else {
+                ++counts.losses;
+            }
+        };
     for (std::size_t task_index = 0; task_index < tasks.size();
          ++task_index) {
         const auto& task = tasks[task_index];
         const auto& result = results[task_index];
+        if (result.starting_player != task.starting_player ||
+            result.winner < -1 || result.winner > 1) {
+            throw std::logic_error(
+                "benchmark result does not match its scheduled task");
+        }
         ++summary.total_games;
         record_bot_result(summary.challenger_stats, result,
                           task.challenger_player);
@@ -21815,7 +22049,260 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
             summary.challenger_deck_matchups[task.challenger_deck]
                                               [task.baseline_deck],
             result, task.challenger_player);
+        const std::size_t challenger_play_draw =
+            result.starting_player == task.challenger_player
+                ? 0
+                : 1;
+        const std::size_t baseline_play_draw =
+            result.starting_player == task.baseline_player
+                ? 0
+                : 1;
+        record_outcome(
+            summary.challenger_outcome_quadrants
+                [task.challenger_deck]
+                [task.challenger_player]
+                [challenger_play_draw],
+            result, task.challenger_player);
+        record_outcome(
+            summary.baseline_outcome_quadrants
+                [task.baseline_deck]
+                [task.baseline_player]
+                [baseline_play_draw],
+            result, task.baseline_player);
+        challenger_scores[task_index] =
+            result.winner < 0
+                ? 0.5
+                : (result.winner ==
+                           static_cast<int>(
+                               task.challenger_player)
+                       ? 1.0
+                       : 0.0);
     }
+
+    const auto validate_outcome_counts =
+        [](const BotBenchmarkOutcomeCounts& counts) {
+            return counts.wins + counts.losses +
+                       counts.draws ==
+                   counts.games;
+        };
+    const std::size_t expected_quadrant_games =
+        repetitions_per_deck_pairing * 3;
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        BotBenchmarkOutcomeCounts challenger_deck_outcomes;
+        BotBenchmarkOutcomeCounts baseline_deck_outcomes;
+        for (std::size_t policy_seat = 0; policy_seat < 2;
+             ++policy_seat) {
+            for (std::size_t play_draw = 0; play_draw < 2;
+                 ++play_draw) {
+                const auto& challenger_quadrant =
+                    summary.challenger_outcome_quadrants
+                        [deck][policy_seat][play_draw];
+                const auto& baseline_quadrant =
+                    summary.baseline_outcome_quadrants
+                        [deck][policy_seat][play_draw];
+                if (challenger_quadrant.games !=
+                        expected_quadrant_games ||
+                    baseline_quadrant.games !=
+                        expected_quadrant_games ||
+                    !validate_outcome_counts(
+                        challenger_quadrant) ||
+                    !validate_outcome_counts(
+                        baseline_quadrant)) {
+                    throw std::logic_error(
+                        "benchmark outcome quadrant accounting "
+                        "mismatch");
+                }
+                challenger_deck_outcomes.games +=
+                    challenger_quadrant.games;
+                challenger_deck_outcomes.wins +=
+                    challenger_quadrant.wins;
+                challenger_deck_outcomes.losses +=
+                    challenger_quadrant.losses;
+                challenger_deck_outcomes.draws +=
+                    challenger_quadrant.draws;
+                baseline_deck_outcomes.games +=
+                    baseline_quadrant.games;
+                baseline_deck_outcomes.wins +=
+                    baseline_quadrant.wins;
+                baseline_deck_outcomes.losses +=
+                    baseline_quadrant.losses;
+                baseline_deck_outcomes.draws +=
+                    baseline_quadrant.draws;
+            }
+        }
+        const DeckSimulationStats& challenger_deck =
+            summary.challenger_decks[deck];
+        const DeckSimulationStats& baseline_deck =
+            summary.baseline_decks[deck];
+        if (challenger_deck_outcomes.games !=
+                challenger_deck.games ||
+            challenger_deck_outcomes.wins !=
+                challenger_deck.wins ||
+            challenger_deck_outcomes.losses !=
+                challenger_deck.losses ||
+            challenger_deck_outcomes.draws !=
+                challenger_deck.draws ||
+            baseline_deck_outcomes.games !=
+                baseline_deck.games ||
+            baseline_deck_outcomes.wins !=
+                baseline_deck.wins ||
+            baseline_deck_outcomes.losses !=
+                baseline_deck.losses ||
+            baseline_deck_outcomes.draws !=
+                baseline_deck.draws) {
+            throw std::logic_error(
+                "benchmark quadrant/deck outcomes disagree");
+        }
+    }
+
+    BotBenchmarkOutcomeCounts matrix_outcomes;
+    for (std::size_t challenger_deck = 0;
+         challenger_deck < kDeckCount; ++challenger_deck) {
+        BotBenchmarkOutcomeCounts row;
+        for (std::size_t baseline_deck = 0;
+             baseline_deck < kDeckCount; ++baseline_deck) {
+            const DeckSimulationStats& cell =
+                summary.challenger_deck_matchups
+                    [challenger_deck][baseline_deck];
+            const std::size_t expected_cell_games =
+                repetitions_per_deck_pairing *
+                (challenger_deck == baseline_deck ? 4 : 2);
+            if (cell.games != expected_cell_games ||
+                cell.wins + cell.losses + cell.draws !=
+                    cell.games) {
+                throw std::logic_error(
+                    "benchmark deck matrix accounting mismatch");
+            }
+            row.games += cell.games;
+            row.wins += cell.wins;
+            row.losses += cell.losses;
+            row.draws += cell.draws;
+            matrix_outcomes.games += cell.games;
+            matrix_outcomes.wins += cell.wins;
+            matrix_outcomes.losses += cell.losses;
+            matrix_outcomes.draws += cell.draws;
+        }
+        const DeckSimulationStats& deck =
+            summary.challenger_decks[challenger_deck];
+        if (row.games != deck.games ||
+            row.wins != deck.wins ||
+            row.losses != deck.losses ||
+            row.draws != deck.draws) {
+            throw std::logic_error(
+                "benchmark deck matrix row disagrees with deck "
+                "outcomes");
+        }
+    }
+    for (std::size_t baseline_deck = 0;
+         baseline_deck < kDeckCount; ++baseline_deck) {
+        BotBenchmarkOutcomeCounts column;
+        for (std::size_t challenger_deck = 0;
+             challenger_deck < kDeckCount; ++challenger_deck) {
+            const DeckSimulationStats& cell =
+                summary.challenger_deck_matchups
+                    [challenger_deck][baseline_deck];
+            column.games += cell.games;
+            column.wins += cell.losses;
+            column.losses += cell.wins;
+            column.draws += cell.draws;
+        }
+        const DeckSimulationStats& deck =
+            summary.baseline_decks[baseline_deck];
+        if (column.games != deck.games ||
+            column.wins != deck.wins ||
+            column.losses != deck.losses ||
+            column.draws != deck.draws) {
+            throw std::logic_error(
+                "benchmark deck matrix column disagrees with deck "
+                "outcomes");
+        }
+    }
+    if (summary.total_games != tasks.size() ||
+        matrix_outcomes.games != summary.total_games ||
+        matrix_outcomes.wins != summary.challenger_stats.wins ||
+        matrix_outcomes.losses !=
+            summary.challenger_stats.losses ||
+        matrix_outcomes.draws != summary.challenger_stats.draws ||
+        summary.challenger_stats.games != summary.total_games ||
+        summary.baseline_stats.games != summary.total_games ||
+        summary.challenger_stats.wins !=
+            summary.baseline_stats.losses ||
+        summary.challenger_stats.losses !=
+            summary.baseline_stats.wins ||
+        summary.challenger_stats.draws !=
+            summary.baseline_stats.draws) {
+        throw std::logic_error(
+            "benchmark aggregate outcome accounting mismatch");
+    }
+
+    long double score_sum = 0.0L;
+    for (const double score : challenger_scores) {
+        score_sum += score;
+    }
+    const long double score_mean =
+        score_sum /
+        static_cast<long double>(
+            challenger_scores.size());
+    std::vector<long double> cluster_residual_sums(
+        expected_clusters, 0.0L);
+    std::vector<std::size_t> cluster_records(
+        expected_clusters, 0);
+    for (std::size_t task_index = 0;
+         task_index < tasks.size(); ++task_index) {
+        const std::size_t task_cluster =
+            tasks[task_index].cluster;
+        if (task_cluster >= expected_clusters) {
+            throw std::logic_error(
+                "benchmark score contains an invalid cluster");
+        }
+        cluster_residual_sums[task_cluster] +=
+            static_cast<long double>(
+                challenger_scores[task_index]) -
+            score_mean;
+        ++cluster_records[task_cluster];
+    }
+    long double cluster_square_sum = 0.0L;
+    for (std::size_t cluster_index = 0;
+         cluster_index < expected_clusters; ++cluster_index) {
+        if (cluster_records[cluster_index] != 4) {
+            throw std::logic_error(
+                "benchmark score cluster is not an exact quartet");
+        }
+        cluster_square_sum +=
+            cluster_residual_sums[cluster_index] *
+            cluster_residual_sums[cluster_index];
+    }
+    if (expected_clusters < 2 ||
+        challenger_scores.empty()) {
+        throw std::logic_error(
+            "benchmark CR1 estimate requires multiple clusters");
+    }
+    const long double cluster_count =
+        static_cast<long double>(expected_clusters);
+    const long double record_count =
+        static_cast<long double>(challenger_scores.size());
+    const long double variance =
+        cluster_count / (cluster_count - 1.0L) *
+        cluster_square_sum /
+        (record_count * record_count);
+    const double standard_error =
+        std::sqrt(std::max(
+            0.0, static_cast<double>(variance)));
+    constexpr double kNormal95CriticalValue =
+        1.959963984540054;
+    const double mean = static_cast<double>(score_mean);
+    summary.challenger_quartet_cr1 = {
+        .clusters = expected_clusters,
+        .records = challenger_scores.size(),
+        .mean = mean,
+        .standard_error = standard_error,
+        .confidence_low_95 =
+            mean -
+            kNormal95CriticalValue * standard_error,
+        .confidence_high_95 =
+            mean +
+            kNormal95CriticalValue * standard_error,
+    };
 
     return summary;
 }
