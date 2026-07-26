@@ -6842,3 +6842,81 @@ from TW-C17's already published trace-distance accounting and the independent
 metric, or seed result existed. The formula, seed, exact parent, balance,
 hidden-information requirements, and conditional training license are
 unchanged.
+
+#### TA4-0 execution and gate freeze
+
+Recorded at 2026-07-26 05:03 PDT after rereading `REVIEW.md` through 05:02
+PDT and an independent preimplementation audit. No audit code had run and seed
+`202607260501` remained unopened. These definitions resolve execution and
+metric ambiguities without changing the treatment.
+
+The only canonical route is:
+
+```sh
+./build/old-school-sim --audit-calendar-turn-targets
+```
+
+It accepts no other option, uses the fixed seed internally, loads the existing
+exact C16 artifact only, and never trains, refreshes, caches, or writes a
+model. It fingerprints and snapshots artifact content, size, and modification
+time before collection and on every completed/exceptional route. Missing or
+wrong C16 must fail before collection begins. Exit `0` means mechanism pass,
+`1` means valid scientific rejection, and `2` means infrastructure or
+incomplete evidence. The mode is mutually exclusive with every other main
+mode, and generic seed routes reject reserved seed `202607260501`. One
+captured invocation independently constructs the entire fixed 2,000-game
+corpus twice from fresh `Game` instances, compares semantic reports plus
+raw/target hashes bit-for-bit, and emits one report. This is one deterministic
+dataset reproduced internally, not two independent samples.
+
+Exact metric semantics:
+
+- Common eligibility requires both `i+4 < trace.size()` and an aligned `j`.
+  Existence of `j` without `i+4` is an invariant failure.
+- Every aligned row asserts `turn[j]-turn[i] == 4` and that every record
+  strictly between `i` and `j` has a smaller turn number. Control targets must
+  be bit-identical to the existing
+  `n_state_bootstrap_targets(parent_values,z,4)` output. Control and treatment
+  tails must be bit-identical to `z`.
+- Hashes bind globally unique physical-game ID
+  `block*40 + schedule_index`, block and schedule coordinates, perspective,
+  root record index, eligibility/future index, and both target bit patterns.
+  Completed worker slots are reduced only in fixed semantic schedule order.
+- Every paired CR1 estimate is formed directly from row-level paired deltas
+  and clustered by globally unique physical game; it is never the subtraction
+  of two separately estimated uncertainties.
+- Equal-actor-game weighting first averages row deltas within each
+  `(physical_game,perspective)`, weights the resulting actor-games equally,
+  and still clusters the two shared-trajectory perspectives by physical game.
+  Actor-games with no common row are explicitly excluded and reported.
+  Evidence is incomplete unless at least 95% of the 4,000 actor-games, at
+  least 760 of 800 for every deck, and at least 1,900 of 2,000 unique physical
+  games contribute common rows. Reports include eligible records,
+  actor-games, and physical-game clusters pooled and per deck.
+- Gate 1 additionally requires Green absolute bias to shrink under both
+  record and equal-actor-game weighting. Gate 3 is evaluated on common rows:
+  the same one of Blue or RU must move in its registered direction and have
+  strictly smaller absolute bias under both weighting schemes; ties fail.
+  Blue's direction is `a-c > 0`, RU's is `a-c < 0`.
+- Gate 4's `0.005` all-record per-deck Brier guard is a point-estimate guard.
+  “New material bias” exactly reuses TW-C17: treatment absolute bias at least
+  0.05 with its physical-game-clustered 95% interval excluding zero, unless
+  control already has a same-sign material bias.
+- The earlier broad sensitivity wording applies only to Green and the one
+  qualifying Blue/RU row. All other equal-game metrics remain reported
+  diagnostics.
+- For each perspective, an executable hidden-zone audit repartitions only its
+  opponent's hand/library while preserving public state and zone sizes.
+  Encoded root/future critic features, future C16 value, eligibility, control
+  and treatment targets, and scoring hashes must remain bit-identical.
+- In addition to pooled and five-deck scopes, report descriptive
+  treatment-minus-control bias deltas by root-turn stratum `<=3`, `4-7`, and
+  `>=8`. These strata do not add a post-hoc gate.
+
+Focused tests must cover same-turn priority roots, ordinary turn starts,
+terminal tails, skipped/regressing/overflowing synthetic traces, Time Walk
+extra-turn numbering, uneven record counts, paired clustering, zero-common
+actor-games, 1-versus-N worker determinism on a small nonreserved schedule,
+hidden repartition, missing artifact fail-before-collection, option
+exclusivity, artifact immutability, and the `0/1/2` taxonomy. No canonical
+audit execution is part of implementation verification.

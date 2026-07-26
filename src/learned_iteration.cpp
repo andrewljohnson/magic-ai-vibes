@@ -1190,6 +1190,107 @@ std::vector<double> n_state_bootstrap_targets(
         chronological_parent_values, terminal_z, distance, 0.5);
 }
 
+std::vector<std::optional<std::size_t>>
+turn_aligned_bootstrap_indices(
+    std::span<const std::size_t> chronological_turn_numbers,
+    std::size_t turn_advances) {
+    if (turn_advances == 0) {
+        throw std::invalid_argument(
+            "turn-aligned bootstrap advances must be nonzero");
+    }
+    for (std::size_t index = 1;
+         index < chronological_turn_numbers.size(); ++index) {
+        const std::size_t previous =
+            chronological_turn_numbers[index - 1];
+        const std::size_t current =
+            chronological_turn_numbers[index];
+        if (current < previous) {
+            throw std::invalid_argument(
+                "turn-aligned bootstrap turns must not regress");
+        }
+        if (current - previous > 1) {
+            throw std::invalid_argument(
+                "turn-aligned bootstrap trace must not skip turns");
+        }
+    }
+
+    std::vector<std::optional<std::size_t>> indices(
+        chronological_turn_numbers.size());
+    std::size_t future = 0;
+    for (std::size_t root = 0;
+         root < chronological_turn_numbers.size(); ++root) {
+        const std::size_t root_turn =
+            chronological_turn_numbers[root];
+        if (root_turn >
+            std::numeric_limits<std::size_t>::max() -
+                turn_advances) {
+            throw std::overflow_error(
+                "turn-aligned bootstrap turn overflow");
+        }
+        const std::size_t target_turn =
+            root_turn + turn_advances;
+        future = std::max(future, root + 1);
+        while (future < chronological_turn_numbers.size() &&
+               chronological_turn_numbers[future] <
+                   target_turn) {
+            ++future;
+        }
+        if (future == chronological_turn_numbers.size()) {
+            continue;
+        }
+        if (chronological_turn_numbers[future] != target_turn) {
+            throw std::invalid_argument(
+                "turn-aligned bootstrap trace skipped its target "
+                "turn");
+        }
+        indices[root] = future;
+    }
+    return indices;
+}
+
+std::vector<double> weighted_turn_aligned_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    std::span<const std::size_t> chronological_turn_numbers,
+    double terminal_z, std::size_t turn_advances,
+    double terminal_weight) {
+    if (chronological_parent_values.size() !=
+        chronological_turn_numbers.size()) {
+        throw std::invalid_argument(
+            "turn-aligned bootstrap values and turns must have "
+            "equal size");
+    }
+    if (!valid_probability(terminal_weight)) {
+        throw std::invalid_argument(
+            "terminal weight must be finite and in [0, 1]");
+    }
+    if (!valid_probability(terminal_z)) {
+        throw std::invalid_argument(
+            "terminal value must be a probability");
+    }
+    for (const double value : chronological_parent_values) {
+        if (!valid_probability(value)) {
+            throw std::invalid_argument(
+                "bootstrap values must be probabilities");
+        }
+    }
+
+    const auto indices =
+        turn_aligned_bootstrap_indices(
+            chronological_turn_numbers, turn_advances);
+    std::vector<double> targets(
+        chronological_parent_values.size(), terminal_z);
+    for (std::size_t root = 0; root < indices.size(); ++root) {
+        if (!indices[root].has_value()) {
+            continue;
+        }
+        targets[root] =
+            terminal_weight * terminal_z +
+            (1.0 - terminal_weight) *
+                chronological_parent_values[*indices[root]];
+    }
+    return targets;
+}
+
 double annealed_terminal_weight(
     std::size_t published_generation,
     std::size_t total_generations) {

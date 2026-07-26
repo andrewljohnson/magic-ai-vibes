@@ -81,6 +81,18 @@ void expect_invalid(Function&& function,
     expect(threw, message);
 }
 
+template <typename Function>
+void expect_overflow(Function&& function,
+                     std::string_view message) {
+    bool threw = false;
+    try {
+        std::forward<Function>(function)();
+    } catch (const std::overflow_error&) {
+        threw = true;
+    }
+    expect(threw, message);
+}
+
 double test_distribution_kl(
     const std::vector<double>& target,
     const std::vector<double>& distribution) {
@@ -1719,6 +1731,107 @@ void test_n_state_bootstrap_large_distance_cannot_overflow() {
         "a distance larger than the trace must leave terminal targets");
 }
 
+void test_turn_aligned_bootstrap_uses_earliest_exact_future_turn() {
+    const std::vector<std::size_t> turns = {
+        1, 1, 2, 3, 4, 5, 5,
+    };
+    const auto indices =
+        iteration::turn_aligned_bootstrap_indices(turns, 4);
+    expect(indices.size() == turns.size(),
+           "turn-aligned index count must match the trace");
+    expect(
+        indices[0] == std::optional<std::size_t>(5) &&
+            indices[1] == std::optional<std::size_t>(5),
+        "same-turn roots must select the earliest exact future turn");
+    for (std::size_t index = 2; index < indices.size(); ++index) {
+        expect(
+            !indices[index].has_value(),
+            "roots without four future turns must remain terminal");
+    }
+
+    const std::vector<double> values = {
+        0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70,
+    };
+    const auto targets =
+        iteration::weighted_turn_aligned_bootstrap_targets(
+            values, turns, 0.80, 4, 0.50);
+    expect(
+        targets ==
+            std::vector<double>({
+                0.70, 0.70, 0.80, 0.80, 0.80, 0.80, 0.80,
+            }),
+        "turn-aligned targets must use the selected parent value "
+        "and terminal tails");
+}
+
+void test_turn_aligned_bootstrap_validates_trace_and_values() {
+    expect_invalid(
+        [] {
+            const std::vector<std::size_t> turns = {1, 2};
+            static_cast<void>(
+                iteration::turn_aligned_bootstrap_indices(
+                    turns, 0));
+        },
+        "turn-aligned bootstrap must reject zero advances");
+    expect_invalid(
+        [] {
+            const std::vector<std::size_t> turns = {1, 3};
+            static_cast<void>(
+                iteration::turn_aligned_bootstrap_indices(
+                    turns, 1));
+        },
+        "turn-aligned bootstrap must reject skipped turns");
+    expect_invalid(
+        [] {
+            const std::vector<std::size_t> turns = {2, 1};
+            static_cast<void>(
+                iteration::turn_aligned_bootstrap_indices(
+                    turns, 1));
+        },
+        "turn-aligned bootstrap must reject regressing turns");
+    expect_overflow(
+        [] {
+            const std::vector<std::size_t> turns = {
+                std::numeric_limits<std::size_t>::max(),
+            };
+            static_cast<void>(
+                iteration::turn_aligned_bootstrap_indices(
+                    turns, 1));
+        },
+        "turn-aligned bootstrap must reject turn overflow");
+    expect_invalid(
+        [] {
+            const std::vector<double> values = {0.25};
+            const std::vector<std::size_t> turns = {1, 2};
+            static_cast<void>(
+                iteration::
+                    weighted_turn_aligned_bootstrap_targets(
+                        values, turns, 0.5, 1, 0.5));
+        },
+        "turn-aligned bootstrap must reject mismatched arrays");
+    expect_invalid(
+        [] {
+            const std::vector<double> values = {1.25};
+            const std::vector<std::size_t> turns = {1};
+            static_cast<void>(
+                iteration::
+                    weighted_turn_aligned_bootstrap_targets(
+                        values, turns, 0.5, 1, 0.5));
+        },
+        "turn-aligned bootstrap must reject invalid parent values");
+    expect_invalid(
+        [] {
+            const std::vector<double> values = {0.25};
+            const std::vector<std::size_t> turns = {1};
+            static_cast<void>(
+                iteration::
+                    weighted_turn_aligned_bootstrap_targets(
+                        values, turns, 0.5, 1,
+                        std::numeric_limits<double>::quiet_NaN()));
+        },
+        "turn-aligned bootstrap must reject invalid weights");
+}
+
 void test_value_g8_mix50_assignment_is_exact_and_rng_free() {
     for (std::size_t generation = 1; generation <= 4;
          ++generation) {
@@ -1907,6 +2020,12 @@ int main() {
     runner.run(
         "n-state Value bootstrap overflow safety",
         test_n_state_bootstrap_large_distance_cannot_overflow);
+    runner.run(
+        "turn-aligned bootstrap exact future turn",
+        test_turn_aligned_bootstrap_uses_earliest_exact_future_turn);
+    runner.run(
+        "turn-aligned bootstrap validation",
+        test_turn_aligned_bootstrap_validates_trace_and_values);
     runner.run(
         "annealed terminal-weight schedule",
         test_annealed_terminal_weight_has_exact_endpoints_and_is_monotonic);

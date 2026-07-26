@@ -8,6 +8,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -279,6 +280,25 @@ std::vector<double> weighted_n_state_bootstrap_targets(
 std::vector<double> n_state_bootstrap_targets(
     std::span<const double> chronological_parent_values,
     double terminal_z, std::size_t distance);
+
+// Finds the earliest future trace record exactly `turn_advances` turn-number
+// advances after each root. Trace turns must be chronological and may repeat
+// for multiple decision roots in one turn, but they may not skip a turn.
+// Roots without the requested future turn receive nullopt. This is a physical
+// turn-alignment primitive; it does not claim equivalence with a search
+// horizon's phase boundary.
+std::vector<std::optional<std::size_t>>
+turn_aligned_bootstrap_indices(
+    std::span<const std::size_t> chronological_turn_numbers,
+    std::size_t turn_advances);
+
+// Weighted bootstrap using the turn-aligned indices above. A root with no
+// aligned future record retains terminal_z.
+std::vector<double> weighted_turn_aligned_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    std::span<const std::size_t> chronological_turn_numbers,
+    double terminal_z, std::size_t turn_advances,
+    double terminal_weight);
 
 // Fixed one-based terminal-credit schedule:
 //   0.50 + 0.25 * (published_generation - 1)
