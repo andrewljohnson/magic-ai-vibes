@@ -7600,3 +7600,87 @@ responsible for exit `2`; its hypothesis, estimands, weights, scopes,
 thresholds, qualifications, sample size, and analysis remain frozen. Any
 substantive scientific change retires RB0-0 and requires a genuinely new
 family and hypothesis rather than a rerun.
+
+### RB0-0 implementation freeze (no audit data opened)
+
+Frozen at 2026-07-26 08:04 PDT on implementation commit `6c44ae8`. The
+reserved audit seed `202607260731` has not been executed. `REVIEW.md` was
+reread through its 07:53 cycle before this freeze. Its independent FEAT-0b
+result found zero early-Green board-exposure variance because the sampled
+early boards were empty. That closes the proposed board-vulnerability
+representation fallback on the reviewer's branch and strengthens the reason
+to run RB0-0 next, but it is not evidence that replay weighting passes.
+
+The frozen route is:
+
+```sh
+./build/old-school-sim --audit-replay-weights
+```
+
+It exclusively loads the exact C16 artifact and runs the declared 60-block,
+2,400-physical-game corpus. It trains no model, writes no artifact, scores no
+probe, invokes no Handcoded action or label, and accepts no other CLI option.
+The scientific report uses the first canonical capture. Three additional
+complete fresh captures isolate repeatability, reversed task input, and fixed
+one-versus-four-worker determinism rather than confounding those checks.
+
+The implementation includes:
+
+- the exact complete-corpus
+  `N/(A*T_a*n_(a,t))` actor-game/calendar-turn weights, global mass
+  preservation, and global-weight/scope-renormalized estimands;
+- the corrected paired two-ratio physical-game cluster score
+  `U_g = sum_g[(w_i/W)*(m_i-mu_w) - (1/n)*(m_i-mu_u)]`, with variance
+  `G/(G-1) * sum_g(U_g^2)` and no second mean division;
+- bit-exact all-unit compatibility, RO4/tail identities, weight/multiplicity
+  diagnostics, target distributions, Kish ESS, and stable schedule, trace,
+  outcome, feature, grouping, target, weight, and scoring hashes;
+- a genuine opponent hand/library repartition whose public observation,
+  features, critic values, targets, grouping, complete-corpus weights, and
+  target/scoring hashes must all remain identical;
+- exact binding of every task to the declared seed/generation/block schedule,
+  all 20 ordered distinct-deck pairing counts, both seats, and play/draw;
+- the amended all-five bias, Brier, and soft-log safety gates, with coverage,
+  positive-control, and ESS misses classified as complete exit-`1`
+  unqualified scientific rejections rather than restartable infrastructure
+  failures.
+
+The first independent implementation review blocked the run before data on
+three real proof gaps: hidden clones did not yet rebuild weighted scoring
+records, schedule checks covered only marginals, and reversal/worker
+determinism was confounded. All three were fixed. A second review then cleared
+the reserved run with no remaining blocker. Its only API note—an unusable
+default `CaptureConfig`—was removed before this freeze.
+
+Verification on the frozen tree:
+
+```sh
+make test-replay-weight-audit
+sh tests/test_cli.sh ./build/old-school-sim
+make test
+c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/probe_eval.cpp src/replay_weight_audit.cpp \
+  tests/test_replay_weight_audit.cpp \
+  -o /tmp/test-replay-weight-audit-asan
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+  /tmp/test-replay-weight-audit-asan
+```
+
+Results:
+
+- 13/13 dedicated replay-weight audit tests passed under `-Werror`;
+- the same 13/13 dedicated tests passed under AddressSanitizer and
+  UndefinedBehaviorSanitizer;
+- CLI exclusivity, reserved-seed fencing, and missing-artifact/no-write guards
+  passed;
+- the full gate passed: 128 engine, 27 learned-iteration, 40 probe,
+  11 probe-metric, 25 probe-runner, 10 terminal-weight, 10 TA4, 7 CT8,
+  13 RB0, and 9 web-bridge C++ tests; CLI and capture-once tests; 82 Node/web
+  tests; and 48 certification tests.
+
+Next: capture the exclusive route exactly once with
+`tools/capture_once.sh`, retain exit `0/1/2` without reinterpretation, reread
+the newest independent review, and have a separate agent audit the sealed
+transcript before recording the result.
