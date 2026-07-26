@@ -6748,20 +6748,20 @@ not a reason to retry terminal weight.
 
 Hypothesis: on frozen-C16 mirror traces, replacing record offset four with the
 earliest future trace record whose `turn_number` is at least the root's
-`turn_number + 4` will improve the quality of the canonical 0.50 terminal /
-0.50 parent bootstrap target. On common bootstrap-eligible rows it will reduce
-pooled Brier and soft-label log loss against discounted terminal outcome,
-shrink Green and RU optimism and Blue pessimism, and leave honestly priced Red
-without a material new bias.
+`turn_number + 4` will materially reduce Green's optimistic canonical 0.50
+terminal / 0.50 parent bootstrap target. On common bootstrap-eligible rows it
+will preserve pooled Brier quality, move at least one of RU optimism or Blue
+pessimism in the registered direction, and leave Red/White without a new
+material bias.
 
 #### Frozen construction
 
 - Exact parent: Environment-v3 C16, T800, training seed `424242`, fingerprint
   `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
 - Audit seed: `202607260501`, repository-searched and unused before this
-  declaration. Generate five exact 40-game balanced blocks using generation
-  coordinate 18: 200 physical games, 400 perspectives, and 80 perspectives
-  per Green, Red, Blue, White, and RU Aggro.
+  declaration. Generate 50 exact 40-game balanced blocks using generation
+  coordinate 18: 2,000 physical games, 4,000 perspectives, and 800
+  perspectives per Green, Red, Blue, White, and RU Aggro.
 - Both seats are frozen C16 Learned mirrors with K=1, H=4, exploration 0.05,
   residual zero, no Handcrafted policy, and a 500-turn bound.
 - For record `i` and perspective `p`, let `z` be the unchanged discounted
@@ -6777,31 +6777,45 @@ without a material new bias.
 - Primary comparisons use only the common eligible rows where `j` exists.
   This prevents the treatment's larger terminal tail (`a=z`) from winning
   mechanically. All-record metrics, record-offset and calendar-turn tail
-  counts, actual distances, target hashes, target means/variances, and
-  saturation are descriptive and fully reported.
+  counts, the complete record-offset physical-turn-distance histogram, target
+  hashes, target means/variances, and saturation are descriptive and fully
+  reported.
 - Losses are record-weighted and uncertainty clusters by physical game using
   the same CR1 estimator and 95% interval as TW-C17. Report control, treatment,
-  and paired deltas pooled and per deck.
+  and paired deltas pooled and per deck. Also report an equal-actor-game
+  sensitivity analysis so a long, decision-dense game cannot dominate merely
+  by contributing more trace records; its directional conclusions must agree
+  with the record-weighted primary result.
+- “Four turns” means four `turn_number` advances. It is not asserted to be
+  identical to the deployed search boundary unless a focused rules test proves
+  that equivalence.
 
 #### Fixed reject-only gate
 
 TA4 passes as a target mechanism only if all of the following hold:
 
-1. pooled `a-c` Brier and soft-label log-loss upper 95% bounds are below zero
-   on common eligible rows;
-2. absolute signed bias strictly shrinks for Green, RU Aggro, and Blue;
-3. Red absolute bias does not increase by more than 0.01, neither loss worsens
-   by more than 0.01 on any deck, and no new material deck bias is created;
-4. treatment bootstrap distances are exactly four turns, all five decks have
-   exact schedule balance, repeated fixed-seed reports are bit-identical, the
-   parent artifact is unchanged, and the target computation remains
-   hidden-information safe.
+1. on common-bootstrap rows, Green's paired signed-bias change `a-c` is at
+   most `-0.010`, its physical-game-clustered 95% upper bound is below zero,
+   and the equal-actor-game sensitivity estimate also points downward;
+2. common-bootstrap pooled Brier is noninferior with the `a-c` upper 95%
+   bound below `+0.001`, while all-record pooled Brier has a nonpositive point
+   estimate;
+3. at least one additional registered biased deck moves correctly: Blue
+   signed bias increases toward zero or RU Aggro signed bias decreases toward
+   zero, with record- and equal-actor-game weighting agreeing in direction;
+4. no deck's all-record Brier worsens by more than `0.005`, Red and White
+   acquire no new material bias, treatment bootstrap distances are exactly
+   four turns, all five decks have exact schedule balance, repeated fixed-seed
+   reports are bit-identical, the parent artifact is unchanged, and target
+   computation is hidden-information safe.
 
-White is reported under the loss/no-new-bias guards but receives no
-directional bias gate because the independent mispricing map did not register
-a White sign. Per-deck strict shrink is a directional mechanism check, not a
-small-effect significance claim; the 200-game audit cannot establish playing
-strength.
+Soft-label log loss remains a mandatory pooled/per-deck report and
+corroborating readout, not another conjunctive veto. White has no directional
+bias gate because the independent mispricing map did not register a White
+sign. Green movement smaller than the declared one-point threshold is
+inconclusive and does not license training; a wrong-direction move rejects the
+mechanism. The 2,000-game audit is still target science, not playing-strength
+evidence.
 
 Passing licenses a separately preregistered, same-shard paired C17 critic fit:
 canonical record-offset-4 control versus calendar-turn-4 treatment with all
@@ -6809,3 +6823,22 @@ other data, order, parent, optimizer, seeds, and terminal weight identical.
 Failure rejects calendar alignment as the immediate training target without
 changing the four-turn endpoint, retrying a seed, or inspecting gameplay.
 No benchmark or training run is licensed by this declaration itself.
+
+#### TA4-0 preimplementation statistical clarification
+
+Recorded at 2026-07-26 04:57 PDT before implementation and before audit seed
+`202607260501` was opened. The initial declaration used a five-block HOLD1-size
+sample and a broad all-deck improvement conjunction. Independent design review
+correctly noted that this would be underpowered for the one-point Green
+mechanism effect and would confuse a focused target-sufficiency audit with
+model promotion.
+
+The frozen design above therefore uses 50 blocks (2,000 physical games), adds
+equal-actor-game sensitivity weighting, fixes a one-point Green MDE and
+clustered direction gate, treats common-row pooled Brier as a noninferiority
+guard, and makes log loss corroborative. These changes were selected entirely
+from TW-C17's already published trace-distance accounting and the independent
+04:55 PDT early/late Green stratification; no TA4 implementation, target,
+metric, or seed result existed. The formula, seed, exact parent, balance,
+hidden-information requirements, and conditional training license are
+unchanged.
