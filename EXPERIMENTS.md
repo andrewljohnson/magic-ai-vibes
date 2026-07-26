@@ -7817,3 +7817,35 @@ seed under a different capture prefix to isolate that mechanical fix. If the
 hypothesis fails, fix only the different exact flag exposed by the preflight.
 Only a clean post-fix preflight can license preregistration of one fresh sealed
 RB0-0 seed; it cannot itself license a learning change or mechanism claim.
+
+### Calendar-8 composite authorization (user delegated; accepted)
+
+Recorded 2026-07-26 after rereading `REVIEW.md` through its 08:32 cycle. The
+user explicitly delegated the closed-family decision: “i dont know if we
+shiuld reopen, u decide.” We decide to reopen calendar-turn-eight targets
+**only as one fixed component of a future jointly preregistered multi-family
+composite**, not as a standalone CT8 retry, best-cell salvage, or threshold
+reinterpretation.
+
+The evidence for that narrow decision is unusually convergent:
+
+- sealed CT8-0 cut early-Green bias from `+0.032105` to `+0.007353`, with
+  `CT8-RO4=-0.024752` and a 95% interval wholly below zero;
+- it improved pooled loss and every registered constituent comparison, fixed
+  Blue pessimism, and passed every mechanical and all-deck material-bias guard;
+- its only miss was RU crossing from a small positive bias to a small negative
+  bias, increasing absolute bias by only `0.002371` beyond the later
+  prospectively justified `0.010` safety band;
+- independent OSC-1 then confirmed a disjoint continuation mechanism:
+  self-counter pruning raised its registered Blue mirror to 55.9%, although
+  the standalone five-deck challenger remained rejected at 47.8%.
+
+This authorization does not promote CT8, continuation pruning, or replay
+weighting individually. The future composite may include calendar-8 and the
+confirmed card-agnostic continuation component. It may include hierarchical
+replay weighting only if a repaired, newly sealed RB0 audit passes its frozen
+mechanism gates. Before any fit, the exact composite recipe, common training
+shard, artifact identity, offline all-five gates, direct C16 comparison,
+Handcoded milestone, sample size, MDE, and fixed eight-seed certification
+panel must be declared together. Green, Red, Blue, White, and RU Aggro retain
+equal status; the final Learned-is-king thresholds are unchanged.
