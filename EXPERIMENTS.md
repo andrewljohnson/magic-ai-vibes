@@ -6658,3 +6658,74 @@ arm is accepted or rejected yet. Raw-shard seed `202607260311` is now
 consumed. HOLD1 seed `202607260312` and gameplay seed `202607260313` remain
 unopened. Next: commit this provenance, then invoke the exclusive sealed
 evaluator once; it will stop after HOLD1 unless every offline gate passes.
+
+#### TW-C17 sealed result: rejected on the Green bias gate
+
+Recorded after rereading `REVIEW.md` through its 04:32 PDT cycle. Source and
+training provenance were frozen at commit `892d9f3`. The exclusive one-shot
+evaluation command was:
+
+```sh
+sh tools/capture_once.sh \
+  /Users/andrewjohnson/proj/magic-ai-vibes/build/experiments/tw-c17-sealed-eval-892d9f3 \
+  ./build/old-school-sim --evaluate-terminal-weight-c17
+```
+
+It exited `1`, the evaluator's valid-scientific-rejection status, in 4.83
+seconds. The 23,300-byte, 202-line complete transcript has SHA-256
+`07a31648bc9be4bc47125ebfe145e5b70f9d865955b47c8bd9a79058f078ad02`.
+The paired bundle remained byte-identical after evaluation: 6,224,082 bytes
+and external SHA-256
+`7df4c122b46ca5256ea09c48831bb04dbfe472e2f27eae9bc5c251884f031ec0`.
+The evaluator also reported both frozen artifact snapshots unchanged.
+
+HOLD1 opened holdout seed `202607260312` exactly once and produced 10,694
+record-weighted trace perspectives from 200 physical C16-mirror games, with
+80 perspectives per deck. Pooled results were:
+
+| Model / contrast | Brier | Soft log loss | Signed bias |
+| --- | ---: | ---: | ---: |
+| C16 | 0.079574 | 0.589600 | -0.012049 |
+| TW50-C17 | 0.078107 | 0.586657 | +0.007598 |
+| TW75-C17 | 0.077647 | 0.585682 | +0.007972 |
+| TW75 - TW50 | -0.000460 `[-0.000717, -0.000203]` | -0.000975 `[-0.001511, -0.000439]` | — |
+| TW75 - C16 | -0.001927 `[-0.002917, -0.000937]` | -0.003919 `[-0.005970, -0.001867]` | — |
+
+Thus TW75 passed all four prespecified pooled paired-loss comparisons with
+their physical-game-clustered 95% upper bounds below zero. No deck's Brier or
+log loss worsened by 0.01, no new material signed bias was created, and Blue's
+absolute bias strictly shrank against both controls. The complete per-deck
+readout was:
+
+| Deck | Records | C16 bias | TW50 bias | TW75 bias | TW75-TW50 dBrier / dLogLoss | TW75-C16 dBrier / dLogLoss |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Green | 2,072 | +0.078265 | +0.085781 | +0.084001 | -0.000821 / -0.001711 | -0.001269 / -0.002481 |
+| Red | 1,828 | -0.023658 | +0.002205 | +0.000187 | -0.000284 / -0.000619 | -0.001210 / -0.002623 |
+| Blue | 2,036 | -0.087186 | -0.060748 | -0.058301 | -0.000354 / -0.000776 | -0.004751 / -0.010430 |
+| White | 2,888 | -0.032160 | -0.009962 | -0.006661 | -0.000597 / -0.001279 | -0.001899 / -0.003315 |
+| RU Aggro | 1,870 | +0.012098 | +0.027772 | +0.026095 | -0.000137 / -0.000255 | -0.000327 / -0.000622 |
+
+The sole failed gate was registered Green bias shrinkage:
+`abs(+0.084001)` improved slightly over TW50's `abs(+0.085781)` but did not
+improve over C16's `abs(+0.078265)`. This is a real rejection under the
+precommitted conjunctive gate even though every pooled loss result favored
+TW75. Cache-free deployed-policy hidden-repartition invariance passed
+bit-identically for all three policies across all 20 Environment-v3 probes.
+Action agreement/regret remained explicitly unavailable because no qualified
+immutable v3 deep-reference cache exists.
+
+Decision: **reject TW75-C17 as a licensed endpoint**. Panel 1 (TW75 versus
+TW50) and panel 2 (TW75 versus C16) were both correctly suppressed, so
+gameplay seed `202607260313` was not opened; under the declaration it is still
+retired with the other TW-C17 seeds. We do not reinterpret favorable pooled
+calibration as a gameplay win and do not weaken the Green gate after seeing
+the result.
+
+Interpretation relative to the independent review: the result supports the
+reviewer's claim that the terminal-weight surface is live—TW75 made small,
+precisely estimated pooled calibration gains, especially on Blue—but it does
+not supply the paired gameplay evidence that would have licensed the proposed
+combined distance/terminal-weight recipe. Red's near-zero bias also agrees
+with the independently registered VC-2 correction that Red's target error was
+not chiefly calibration. The next experiment must therefore be a separately
+declared axis, not an endpoint retry or a seed substitution.
