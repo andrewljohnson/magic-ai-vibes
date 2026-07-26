@@ -7950,14 +7950,30 @@ The exact command is:
   --seed 202607260947
 ```
 
-The treatment then runs a 240-game paired all-five large-regression smoke:
+The smoke seed `202607260948` is reserved for exactly two 240-game paired
+all-five configurations, run in this fixed order. First, the unfiltered
+C16/K8 control:
 
 ```sh
-./build/old-school-sim --benchmark --games 4 \
+/usr/bin/time -p ./build/old-school-sim --benchmark --games 4 \
+  --seed 202607260948 --train-seed 424242 --train-games 800 \
+  --challenger learned-value-c16 --baseline learned-value-c16 \
+  --learned-rollouts 8
+```
+
+Second, the otherwise identical challenger-only treatment:
+
+```sh
+/usr/bin/time -p ./build/old-school-sim --benchmark --games 4 \
   --seed 202607260948 --train-seed 424242 --train-games 800 \
   --challenger learned-value-c16 --baseline learned-value-c16 \
   --learned-rollouts 8 --value-pass-dominance
 ```
+
+This prospective command clarification was made before the smoke seed was
+used. The CLI must accept the seed for exactly these off/off and on/off
+configurations; it must reject every other use. The treatment flag applies to
+the challenger seat only.
 
 The paired smoke is sensitive only to a large effect. Reject the treatment if
 its aggregate win rate is below 40%; do not accept or reject a few-point change
