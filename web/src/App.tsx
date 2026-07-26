@@ -10,10 +10,12 @@ import {
   useState,
 } from "react";
 import {
+  createEvolution,
   createGame,
   deleteGame,
   fetchGame,
   fetchMeta,
+  saveEvolution,
   submitAction,
 } from "./api";
 import { ApiRequestError } from "./errors";
@@ -22,6 +24,8 @@ import {
   concisePriorityOptionLabel,
   chronicleEntries,
   describeTopOfStack,
+  evolvedDeckCardCount,
+  formatEvolutionPercent,
   formatStackController,
   formatStackEntryLabel,
   formatStackTargets,
@@ -46,6 +50,9 @@ import {
   type DamageOrderDecision,
   type Decision,
   type DeckMeta,
+  type EvolutionConfig,
+  type EvolutionMeta,
+  type EvolutionResult,
   type GameConfig,
   type GameSnapshot,
   type LogEntry,
@@ -2370,6 +2377,552 @@ function SetupDrawer({
   );
 }
 
+function EvolutionDialog({
+  open,
+  meta,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  meta: MetaResponse | null;
+  onClose: () => void;
+  onSaved: (deck: DeckMeta) => void;
+}) {
+  const evolution = meta?.evolution;
+  const savedDecks = meta?.decks.filter((deck) => deck.ephemeral) ?? [];
+  const [config, setConfig] = useState<EvolutionConfig | null>(null);
+  const [result, setResult] = useState<EvolutionResult | null>(null);
+  const [completedConfig, setCompletedConfig] =
+    useState<EvolutionConfig | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saveName, setSaveName] = useState("");
+  const [savedResultId, setSavedResultId] = useState<string | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (open && evolution && !config) {
+      setConfig({ ...evolution.defaults });
+    }
+  }, [config, evolution, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    closeButtonRef.current?.focus({ preventScroll: true });
+    return () => {
+      const restoreTarget = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      if (restoreTarget?.isConnected) {
+        restoreTarget.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  const updateNumber = (
+    field: "seed" | "generations" | "population" | "games" | "learnedRollouts",
+    value: string,
+  ) => {
+    if (!config) return;
+    setConfig({ ...config, [field]: Number(value) });
+  };
+  const submitEvolution = (event: FormEvent) => {
+    event.preventDefault();
+    if (!config || generating) return;
+    const submitted = { ...config };
+    setGenerating(true);
+    setError(null);
+    setSavedResultId(null);
+    createEvolution(submitted)
+      .then((next) => {
+        setResult(next);
+        setCompletedConfig(next.config ?? submitted);
+        const pilotName =
+          evolution?.pilots.find((pilot) => pilot.id === next.pilot)?.name ??
+          next.pilot;
+        setSaveName(`Evolved ${pilotName} · seed ${next.seed}`);
+      })
+      .catch((nextError: unknown) => {
+        setError(
+          nextError instanceof Error ? nextError.message : String(nextError),
+        );
+      })
+      .finally(() => setGenerating(false));
+  };
+  const saveResult = () => {
+    const name = saveName.trim();
+    if (!result || !name || saving || savedResultId === result.id) return;
+    setSaving(true);
+    setError(null);
+    saveEvolution(result.id, name)
+      .then((deck) => {
+        onSaved(deck);
+        setSavedResultId(result.id);
+      })
+      .catch((nextError: unknown) => {
+        setError(
+          nextError instanceof Error ? nextError.message : String(nextError),
+        );
+      })
+      .finally(() => setSaving(false));
+  };
+  const handleDialogKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const controls = Array.from(
+      panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (controls.length === 0) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !panel.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  const runConfig = result?.config ?? completedConfig;
+  const selectedPilot = evolution?.pilots.find(
+    (pilot) => pilot.id === config?.pilot,
+  );
+
+  return (
+    <div
+      className="evolution-layer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="evolution-dialog-title"
+      aria-describedby="evolution-dialog-description"
+      onKeyDown={handleDialogKeyDown}
+    >
+      <button
+        className="evolution-scrim"
+        type="button"
+        tabIndex={-1}
+        onClick={onClose}
+        aria-label="Close deck evolution"
+      />
+      <section
+        className="evolution-dialog"
+        ref={panelRef}
+        aria-busy={generating || saving}
+      >
+        <header>
+          <div>
+            <span className="eyebrow">DECK LAB</span>
+            <h1 id="evolution-dialog-title">Evolve a deck</h1>
+            <p id="evolution-dialog-description">
+              Search the shared card pool against the five-deck metagame, then
+              bring the result straight to the match room.
+            </p>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            ref={closeButtonRef}
+          >
+            <span aria-hidden="true">×</span>
+            <span className="sr-only">Close</span>
+          </button>
+        </header>
+
+        {!evolution || !config ? (
+          <div className="evolution-unavailable" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Waiting for the engine’s evolution controls…
+          </div>
+        ) : (
+          <div className="evolution-workspace">
+            <aside className="evolution-controls">
+              <form onSubmit={submitEvolution}>
+                <div className="evolution-section-heading">
+                  <span className="eyebrow">SEARCH SETTINGS</span>
+                  <strong>Bounded engine run</strong>
+                </div>
+                <label>
+                  <span>Evolution seed</span>
+                  <input
+                    type="number"
+                    required
+                    step="1"
+                    min={evolution.limits.seed.min}
+                    max={evolution.limits.seed.max}
+                    value={config.seed}
+                    onChange={(event) =>
+                      updateNumber("seed", event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Generations</span>
+                  <input
+                    type="number"
+                    required
+                    step="1"
+                    min={evolution.limits.generations.min}
+                    max={evolution.limits.generations.max}
+                    value={config.generations}
+                    onChange={(event) =>
+                      updateNumber("generations", event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Population</span>
+                  <input
+                    type="number"
+                    required
+                    step="1"
+                    min={evolution.limits.population.min}
+                    max={evolution.limits.population.max}
+                    value={config.population}
+                    onChange={(event) =>
+                      updateNumber("population", event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Paired repetitions</span>
+                  <input
+                    type="number"
+                    required
+                    step="1"
+                    min={evolution.limits.games.min}
+                    max={evolution.limits.games.max}
+                    value={config.games}
+                    onChange={(event) =>
+                      updateNumber("games", event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Pilot</span>
+                  <select
+                    value={config.pilot}
+                    onChange={(event) =>
+                      setConfig({ ...config, pilot: event.target.value })
+                    }
+                  >
+                    {evolution.pilots.map((pilot) => (
+                      <option key={pilot.id} value={pilot.id}>
+                        {pilot.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Learned rollouts</span>
+                  <input
+                    type="number"
+                    required
+                    step="1"
+                    min={evolution.limits.learnedRollouts.min}
+                    max={evolution.limits.learnedRollouts.max}
+                    value={config.learnedRollouts}
+                    disabled={!config.pilot.includes("learned")}
+                    onChange={(event) =>
+                      updateNumber("learnedRollouts", event.target.value)
+                    }
+                  />
+                </label>
+                {selectedPilot?.description && (
+                  <p className="evolution-pilot-description">
+                    {selectedPilot.description}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  className="button-primary evolution-generate"
+                  disabled={generating || evolution.active === true}
+                >
+                  {generating ? (
+                    <>
+                      <span className="spinner" aria-hidden="true" />
+                      Evolving and scoring…
+                    </>
+                  ) : (
+                    <>
+                      Generate deck
+                      <span aria-hidden="true">→</span>
+                    </>
+                  )}
+                </button>
+                <p className="evolution-resource-note">
+                  One bounded engine job runs at a time. Larger populations,
+                  generations, and Learned rollouts take longer.
+                </p>
+              </form>
+
+              <section
+                className="saved-evolution-decks"
+                aria-labelledby="saved-evolution-title"
+              >
+                <div className="evolution-section-heading">
+                  <span className="eyebrow">THIS SERVER SESSION</span>
+                  <strong id="saved-evolution-title">Saved decks</strong>
+                </div>
+                <p>{evolution.lifetime}</p>
+                {savedDecks.length > 0 ? (
+                  <ul>
+                    {savedDecks.map((deck) => (
+                      <li key={deck.id}>
+                        <span>{deck.name}</span>
+                        <strong>
+                          {deck.cards.reduce(
+                            (sum, card) =>
+                              sum +
+                              (typeof card === "string" ? 1 : card.count ?? 1),
+                            0,
+                          )}{" "}
+                          cards
+                        </strong>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <small>No evolved decks saved yet.</small>
+                )}
+              </section>
+            </aside>
+
+            <main className="evolution-result">
+              {generating && !result ? (
+                <div className="evolution-progress" role="status" aria-live="polite">
+                  <span className="spinner" aria-hidden="true" />
+                  <div>
+                    <strong>Exploring candidate decks</strong>
+                    <span>
+                      Every candidate is scored by the engine against all five
+                      metagame decks.
+                    </span>
+                  </div>
+                </div>
+              ) : result ? (
+                <>
+                  <header className="evolution-result-header">
+                    <div>
+                      <span className="eyebrow">BEST CANDIDATE</span>
+                      <h2>40-card evolved deck</h2>
+                    </div>
+                    <div className="evolution-fitness">
+                      <span>Aggregate fitness</span>
+                      <strong>
+                        {formatEvolutionPercent(result.best.stats.winRate)}
+                      </strong>
+                      <small>
+                        {result.best.stats.wins}–{result.best.stats.losses}–
+                        {result.best.stats.draws} · {result.best.stats.games}{" "}
+                        games
+                      </small>
+                    </div>
+                  </header>
+
+                  <dl className="evolution-run-facts">
+                    <div>
+                      <dt>Seed</dt>
+                      <dd>{String(result.seed)}</dd>
+                    </div>
+                    <div>
+                      <dt>Pilot</dt>
+                      <dd>
+                        {evolution.pilots.find(
+                          (pilot) => pilot.id === result.pilot,
+                        )?.name ?? result.pilot}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Generations</dt>
+                      <dd>{result.generations.length}</dd>
+                    </div>
+                    <div>
+                      <dt>Population</dt>
+                      <dd>{runConfig?.population ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Paired reps</dt>
+                      <dd>{runConfig?.games ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Learned rollouts</dt>
+                      <dd>{runConfig?.learnedRollouts ?? "—"}</dd>
+                    </div>
+                  </dl>
+
+                  <div className="evolution-result-grid">
+                    <section
+                      className="evolution-card-list"
+                      aria-labelledby="evolved-manifest-title"
+                    >
+                      <div className="evolution-section-heading">
+                        <span className="eyebrow">EXACT MANIFEST</span>
+                        <strong id="evolved-manifest-title">
+                          {evolvedDeckCardCount(result.best.cards)}{" "}
+                          cards
+                        </strong>
+                      </div>
+                      <ul>
+                        {result.best.cards.map((card) => (
+                          <li key={String(card.id)}>
+                            <strong>×{card.count}</strong>
+                            <span>{card.name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+
+                    <section
+                      className="evolution-trace"
+                      aria-labelledby="evolution-trace-title"
+                    >
+                      <div className="evolution-section-heading">
+                        <span className="eyebrow">FITNESS TRACE</span>
+                        <strong id="evolution-trace-title">
+                          Best by generation
+                        </strong>
+                      </div>
+                      <ol>
+                        {result.generations.map((fitness, index) => (
+                          <li key={index}>
+                            <span>G{index + 1}</span>
+                            <i>
+                              <span
+                                style={{
+                                  width: `${Math.max(
+                                    0,
+                                    Math.min(100, fitness),
+                                  )}%`,
+                                }}
+                              />
+                            </i>
+                            <strong>{formatEvolutionPercent(fitness)}</strong>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  </div>
+
+                  <section
+                    className="evolution-metagame"
+                    aria-labelledby="evolution-metagame-title"
+                  >
+                    <div className="evolution-section-heading">
+                      <span className="eyebrow">FIVE-DECK FIELD</span>
+                      <strong id="evolution-metagame-title">
+                        By metagame opponent
+                      </strong>
+                    </div>
+                    <div className="evolution-table-scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th scope="col">Opponent</th>
+                            <th scope="col">Win rate</th>
+                            <th scope="col">Record</th>
+                            <th scope="col">Games</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.best.byOpponent.map((opponent) => (
+                            <tr key={opponent.deckId}>
+                              <th scope="row">{opponent.name}</th>
+                              <td>
+                                {formatEvolutionPercent(opponent.winRate)}
+                              </td>
+                              <td>
+                                {opponent.wins}–{opponent.losses}–
+                                {opponent.draws}
+                              </td>
+                              <td>{opponent.games}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section className="evolution-save">
+                    <label>
+                      <span>Deck name</span>
+                      <input
+                        type="text"
+                        required
+                        maxLength={60}
+                        value={saveName}
+                        onChange={(event) => setSaveName(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="button-primary"
+                      onClick={saveResult}
+                      disabled={
+                        saving ||
+                        !saveName.trim() ||
+                        savedResultId === result.id
+                      }
+                    >
+                      {saving
+                        ? "Saving…"
+                        : savedResultId === result.id
+                          ? "Saved for this session"
+                          : "Save for this session"}
+                    </button>
+                    <p>
+                      Session-only: this deck appears in both match seats now
+                      and disappears when the Node server restarts.
+                    </p>
+                  </section>
+                </>
+              ) : (
+                <div className="evolution-empty">
+                  <span aria-hidden="true">◇</span>
+                  <strong>Your evolved deck will appear here.</strong>
+                  <p>
+                    The simulator owns mutation, legality, and all five-deck
+                    fitness games. This screen only submits bounded settings
+                    and displays its result.
+                  </p>
+                </div>
+              )}
+              {error && (
+                <div className="evolution-error" role="alert">
+                  <span>{error}</span>
+                  <button type="button" onClick={() => setError(null)}>
+                    Dismiss
+                  </button>
+                </div>
+              )}
+            </main>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function WelcomeTable({
   loading,
   error,
@@ -2563,6 +3116,7 @@ export default function App() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [setupOpen, setSetupOpen] = useState(true);
+  const [evolutionOpen, setEvolutionOpen] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [creating, setCreating] = useState(false);
   const [acting, setActing] = useState(false);
@@ -2693,6 +3247,27 @@ export default function App() {
         : null,
     [currentConfig],
   );
+  const openMatchSetup = useCallback(() => {
+    setEvolutionOpen(false);
+    setSetupOpen(true);
+  }, []);
+  const openEvolution = useCallback(() => {
+    setSetupOpen(false);
+    setEvolutionOpen(true);
+  }, []);
+  const addSavedDeck = useCallback((deck: DeckMeta) => {
+    setMeta((current) =>
+      current
+        ? {
+            ...current,
+            decks: [
+              ...current.decks.filter((candidate) => candidate.id !== deck.id),
+              deck,
+            ],
+          }
+        : current,
+    );
+  }, []);
 
   const startGame = useCallback(
     (config: GameConfig) => {
@@ -2884,7 +3459,8 @@ export default function App() {
       <div className="app-shell">
         <TopBar
           inGame={false}
-          onNewGame={() => setSetupOpen(true)}
+          onNewGame={openMatchSetup}
+          onEvolveDeck={openEvolution}
           seed={initialConfig?.seed}
         />
         <WelcomeTable
@@ -2892,7 +3468,7 @@ export default function App() {
           error={metaError}
           deckCount={meta?.decks.length || 5}
           policyCount={meta?.policies.length || FALLBACK_POLICIES.length}
-          onNewGame={() => setSetupOpen(true)}
+          onNewGame={openMatchSetup}
           onRetry={loadMeta}
         />
         <SetupDrawer
@@ -2905,6 +3481,12 @@ export default function App() {
           onClose={() => setSetupOpen(false)}
           onRetryMeta={loadMeta}
           onCreate={startGame}
+        />
+        <EvolutionDialog
+          open={evolutionOpen}
+          meta={meta}
+          onClose={() => setEvolutionOpen(false)}
+          onSaved={addSavedDeck}
         />
         {(gameError || creating) && (
           <div
@@ -3305,7 +3887,8 @@ export default function App() {
     >
       <TopBar
         inGame
-        onNewGame={() => setSetupOpen(true)}
+        onNewGame={openMatchSetup}
+        onEvolveDeck={openEvolution}
         seed={currentConfig?.seed}
         gameId={snapshot.id}
         config={currentConfig}
@@ -3516,7 +4099,13 @@ export default function App() {
         meta={meta}
         busy={creating}
         onRematch={replay}
-        onNewGame={() => setSetupOpen(true)}
+        onNewGame={openMatchSetup}
+      />
+      <EvolutionDialog
+        open={evolutionOpen}
+        meta={meta}
+        onClose={() => setEvolutionOpen(false)}
+        onSaved={addSavedDeck}
       />
       {gameError && (
         <div
@@ -3644,6 +4233,7 @@ function TopBar({
   snapshot,
   meta,
   onNewGame,
+  onEvolveDeck,
 }: {
   inGame: boolean;
   seed?: number | string;
@@ -3652,6 +4242,7 @@ function TopBar({
   snapshot?: GameSnapshot | null;
   meta?: MetaResponse | null;
   onNewGame: () => void;
+  onEvolveDeck: () => void;
 }) {
   return (
     <header className="top-bar">
@@ -3689,10 +4280,20 @@ function TopBar({
         )}
         {inGame && <span className="live-indicator">LIVE</span>}
       </div>
-      <button className="new-game-button" type="button" onClick={onNewGame}>
-        <span aria-hidden="true">＋</span>
-        New match
-      </button>
+      <div className="top-actions">
+        <button
+          className="evolve-deck-button"
+          type="button"
+          onClick={onEvolveDeck}
+        >
+          <span aria-hidden="true">⌁</span>
+          Evolve deck
+        </button>
+        <button className="new-game-button" type="button" onClick={onNewGame}>
+          <span aria-hidden="true">＋</span>
+          New match
+        </button>
+      </div>
     </header>
   );
 }

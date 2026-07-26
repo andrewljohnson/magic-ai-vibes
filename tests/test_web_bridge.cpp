@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -96,11 +97,24 @@ old_school::web::BridgeConfig fast_config() {
     };
 }
 
+std::string card_id_csv(
+    const std::vector<old_school::CardId>& cards) {
+    std::ostringstream output;
+    for (std::size_t index = 0; index < cards.size(); ++index) {
+        if (index != 0) {
+            output << ',';
+        }
+        output << static_cast<unsigned int>(cards[index]);
+    }
+    return output.str();
+}
+
 void test_names_parse_strictly() {
     using old_school::BotKind;
     using old_school::DeckId;
     using old_school::LearnedVariant;
     using old_school::web::parse_deck_id;
+    using old_school::web::parse_evolution_pilot;
     using old_school::web::parse_opponent_bot;
 
     expect(parse_deck_id("green") == DeckId::Green,
@@ -138,6 +152,60 @@ void test_names_parse_strictly() {
         bad_deck = true;
     }
     expect(bad_deck, "unknown deck must be rejected");
+
+    expect(
+        parse_evolution_pilot("handcrafted") ==
+            old_school::web::EvolutionPilot::Handcrafted,
+        "Handcrafted evolution pilot did not parse");
+    expect(
+        parse_evolution_pilot("learned-value-c16") ==
+            old_school::web::EvolutionPilot::LearnedValueC16,
+        "Learned Value C16 evolution pilot did not parse");
+    bool bad_pilot = false;
+    try {
+        static_cast<void>(
+            parse_evolution_pilot("learned-value-g0"));
+    } catch (const std::invalid_argument&) {
+        bad_pilot = true;
+    }
+    expect(
+        bad_pilot,
+        "non-whitelisted evolution pilot must be rejected");
+}
+
+void test_exact_custom_deck_transport_is_strict() {
+    const auto deck = old_school::blue_deck();
+    expect(
+        old_school::web::parse_exact_deck_cards(
+            card_id_csv(deck)) == deck,
+        "exact 40-card transport did not round-trip");
+
+    const auto expect_rejected =
+        [](std::string_view encoded) {
+            bool rejected = false;
+            try {
+                static_cast<void>(
+                    old_school::web::parse_exact_deck_cards(
+                        encoded));
+            } catch (const std::invalid_argument&) {
+                rejected = true;
+            }
+            expect(rejected,
+                   "malformed exact deck was accepted");
+        };
+    std::vector<old_school::CardId> short_deck(
+        39, old_school::CardId::Forest);
+    expect_rejected(card_id_csv(short_deck));
+    std::vector<old_school::CardId> long_deck(
+        41, old_school::CardId::Forest);
+    expect_rejected(card_id_csv(long_deck));
+    std::vector<old_school::CardId> valid_deck(
+        40, old_school::CardId::Forest);
+    std::string unknown = card_id_csv(valid_deck);
+    unknown.replace(0, 1, std::to_string(old_school::kCardCount));
+    expect_rejected(unknown);
+    expect_rejected("0,,0");
+    expect_rejected("0, 0");
 }
 
 void test_frozen_c16_load_boundary_fails_actionably() {
@@ -293,6 +361,174 @@ std::string complete_transcript(
                input, output, config) == 0,
            "bridge session did not complete");
     return output.str();
+}
+
+void test_custom_decks_are_exact_session_inputs() {
+    auto named = fast_config();
+    named.human_deck = old_school::DeckId::Green;
+    named.opponent_deck = old_school::DeckId::Red;
+
+    auto custom = named;
+    custom.human_deck = old_school::DeckId::RUAggro;
+    custom.opponent_deck = old_school::DeckId::White;
+    custom.human_deck_cards = old_school::green_deck();
+    custom.opponent_deck_cards = old_school::red_deck();
+
+    expect(
+        complete_transcript(custom) ==
+            complete_transcript(named),
+        "custom vectors were not the exact session decks");
+}
+
+void test_invalid_programmatic_custom_deck_fails_closed() {
+    for (const std::vector<old_school::CardId>& invalid : {
+             std::vector<old_school::CardId>(
+                 39, old_school::CardId::Forest),
+             std::vector<old_school::CardId>(
+                 40, static_cast<old_school::CardId>(
+                         old_school::kCardCount)),
+         }) {
+        auto config = fast_config();
+        config.human_deck_cards = invalid;
+        std::istringstream input(passive_responses(1));
+        std::ostringstream output;
+        bool rejected = false;
+        try {
+            static_cast<void>(
+                old_school::web::run_bridge_session(
+                    input, output, config));
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        expect(rejected,
+               "invalid programmatic custom deck was accepted");
+        expect(output.str().empty(),
+               "invalid custom deck emitted partial session JSON");
+    }
+}
+
+old_school::DeckEvolutionSummary sample_evolution_summary() {
+    old_school::DeckEvolutionSummary summary;
+    summary.best.cards.insert(
+        summary.best.cards.end(), 20,
+        old_school::CardId::Forest);
+    summary.best.cards.insert(
+        summary.best.cards.end(), 20,
+        old_school::CardId::GrizzlyBears);
+    summary.best.total = {
+        .games = 20,
+        .wins = 12,
+        .losses = 6,
+        .draws = 2,
+    };
+    for (std::size_t opponent = 0;
+         opponent < summary.best.by_opponent.size();
+         ++opponent) {
+        summary.best.by_opponent[opponent] = {
+            .games = 4,
+            .wins = opponent,
+            .losses = 4 - opponent,
+            .draws = 0,
+        };
+    }
+    summary.generation_best_win_rates = {55.0, 60.0};
+    return summary;
+}
+
+void test_evolution_json_is_complete_and_deterministic() {
+    const old_school::web::EvolutionJsonConfig config = {
+        .generations = 2,
+        .population = 5,
+        .games_per_opponent = 1,
+        .seed = 987654321,
+        .pilot =
+            old_school::web::EvolutionPilot::LearnedValueC16,
+        .learned_rollouts = 8,
+    };
+    const auto summary = sample_evolution_summary();
+    std::ostringstream first;
+    std::ostringstream second;
+    old_school::web::write_evolution_json(
+        first, summary, config);
+    old_school::web::write_evolution_json(
+        second, summary, config);
+    const std::string json = first.str();
+    expect(json == second.str(),
+           "evolution JSON serialization is not deterministic");
+    expect(
+        json.find(
+            "{\"type\":\"evolution_result\","
+            "\"schemaVersion\":1,\"seed\":987654321,"
+            "\"pilot\":\"learned-value-c16\"") == 0,
+        "evolution JSON omitted seed, schema, or pilot");
+    expect(
+        json.find(
+            "\"parameters\":{\"generations\":2,"
+            "\"population\":5,\"gamesPerOpponent\":1,"
+            "\"learnedRollouts\":8}") != std::string::npos,
+        "evolution JSON omitted its exact parameters");
+    expect(
+        json.find(
+            "\"cards\":[{\"id\":0,\"name\":\"Forest\","
+            "\"count\":20},{\"id\":2,"
+            "\"name\":\"Grizzly Bears\",\"count\":20}]") !=
+            std::string::npos,
+        "evolution JSON manifest omitted numeric IDs, names, or "
+        "counts");
+    expect(
+        json.find(
+            "\"fitness\":{\"games\":20,\"wins\":12,"
+            "\"losses\":6,\"draws\":2,\"winRate\":60}") !=
+            std::string::npos,
+        "evolution JSON omitted aggregate fitness");
+    expect(
+        json.find("\"deck\":\"ru-aggro\","
+                  "\"name\":\"RU Aggro\"") !=
+            std::string::npos,
+        "evolution JSON omitted a metagame opponent");
+    expect(
+        json.find(
+            "\"generationBestWinRates\":[55,60]}\\n") ==
+            std::string::npos,
+        "evolution JSON encoded its trailing newline as text");
+    expect(
+        !json.empty() && json.back() == '\n' &&
+            json.find('\n') == json.size() - 1,
+        "evolution result must be exactly one JSON line");
+}
+
+void test_learned_evolution_is_frozen_load_only() {
+    old_school::web::EvolutionJsonConfig config = {
+        .generations = 1,
+        .population = 5,
+        .games_per_opponent = 1,
+        .seed = 42,
+        .pilot =
+            old_school::web::EvolutionPilot::LearnedValueC16,
+        .learned_rollouts = 1,
+        .frozen_c16_artifact_path =
+            "build/model-cache/"
+            "deliberately-missing-evolution-c16.bin",
+    };
+    std::ostringstream output;
+    bool rejected = false;
+    std::string message;
+    try {
+        static_cast<void>(
+            old_school::web::run_evolution_json(
+                output, config));
+    } catch (const std::runtime_error& error) {
+        rejected = true;
+        message = error.what();
+    }
+    expect(rejected,
+           "Learned evolution substituted or trained a missing C16");
+    expect(
+        message.find("missing, stale, or invalid") !=
+            std::string::npos,
+        "Learned evolution did not use the frozen load boundary");
+    expect(output.str().empty(),
+           "failed Learned evolution emitted partial JSON");
 }
 
 std::string sole_pass_decision(std::string_view phase) {
@@ -484,6 +720,8 @@ int main() {
     TestRunner runner;
     runner.run("strict deck and policy names",
                test_names_parse_strictly);
+    runner.run("exact custom deck transport",
+               test_exact_custom_deck_transport_is_strict);
     runner.run("frozen C16 failure is actionable",
                test_frozen_c16_load_boundary_fails_actionably);
     runner.run("C16 training identity is canonical",
@@ -496,6 +734,14 @@ int main() {
                test_invalid_legal_option_is_rejected);
     runner.run("debug reveal is explicit",
                test_debug_reveal_is_explicit);
+    runner.run("custom decks are exact session inputs",
+               test_custom_decks_are_exact_session_inputs);
+    runner.run("invalid custom decks fail closed",
+               test_invalid_programmatic_custom_deck_fails_closed);
+    runner.run("evolution JSON is complete",
+               test_evolution_json_is_complete_and_deterministic);
+    runner.run("Learned evolution is frozen load-only",
+               test_learned_evolution_is_frozen_load_only);
     runner.run("cleanup decision and event",
                test_cleanup_decision_and_public_event_are_emitted);
     runner.run("cleanup array syntax is strict",

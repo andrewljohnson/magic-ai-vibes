@@ -8,16 +8,38 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 16:11 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 16:55 PDT — refreshed every review cycle.*
 
-- **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
-  current read (pooled 240 games/cell over seeds 4242+7801): **1 of
-  5** — Green +2.9 PASS; Red/White/RU/Blue trail by 3-5pp. The
-  earlier "Blue is the last deck" read was a single-seed artifact;
-  the true picture is a small diffuse HC edge across four decks
-  (pilot asymmetry, per VC-0). Single-seed 4242 still reads 2/5,
-  bit-identical nine cycles running. Certified pooled table one
-  certify.sh run away once v3 commits.
+- **ATTACK-REGRESSION: canonical Flying Man fixture does NOT
+  reproduce the bad attack (production correctly holds back;
+  reference CI spans zero). Verified bit-exactly by reviewer. Both
+  agents' conclusion: harvest exact production-vs-deep-reference
+  divergence roots (complete root state, web-reproducible) before
+  any combat-policy challenger. Reviewer's addition: weight the
+  harvest toward Blue-held stack-response roots — Blue (−5.6) is
+  the only deck below lift-gate parity.**
+
+- **THE TARGET (user-precise): the all-decks LIFT GATE.** First
+  reading on the COMMITTED v3 environment (the old table had been
+  running a stale pre-v3 binary for 94 cycles; flip bisected to the
+  v3 freeze commit `48b8709` itself — benign, fully attributed):
+  pooled 160 games/cell over seeds 4242+7801: **White +0.6 PASS,
+  Red 0.0 and RU 0.0 exact ties, Green −1.2, Blue −5.6**. Four
+  decks at effective parity; THE ENTIRE REMAINING DEFICIT IS BLUE —
+  the same deck C17-J1's rejection flagged for optimism bias. The
+  lift gate is now a one-deck problem, and that deck's defect class
+  (stack response/counter-war) is where both agents' action-
+  evaluation instruments already point.
+- **C17-J1 SEALED VERDICT: REJECTED at the held-out critic gate
+  (pooled CR1 upper bounds above zero; Blue/RU bias gates). C16
+  remains champion. Reviewer verified the rejection bit-exactly AND
+  replicated the entire paired fit byte-for-byte cross-tree (SHA
+  `adb9404b…`, all fingerprints exact) — the sealed one-shot
+  pipeline is fully deterministic across trees. The exhausted
+  target/controller/PD0 recombination era is closed by both agents;
+  the declared next axis is card-agnostic action-evaluation
+  (Codex: attack-regression instrument, committed; Claude: OSC-4
+  block search, in smoke).**
 - **The real asset: a recipe that keeps winning on retrain.** Bootstrap
   targets + 16 generations + K=8 has beaten Handcrafted in every
   environment it's been retrained in (55.1% four-deck, 53.5% five-deck,
@@ -42,13 +64,14 @@ binary, never from extrapolation.
   (+~2pp over baseline, secondary confirmed twice, PD0 paired at
   +0.4). The endgame is pooled power or a Green-specific
   mechanism.**
-- **C17-J1 DECLARED AND COUNTERSIGNED: the joint composite
-  (calendar-8 CT8 targets + PublicStackPassV1 controller + PD0) is
-  live — paired byte-identical-shard fit, typed policy tokens,
-  five fresh seeds, staged no-salvage gates ending at the
-  unchanged Learned-is-king panel. Claude replicates the fit and
-  runs the instrument panel on sealed landing. The crown attempt
-  is running.**
+- **Claude challenger (latest): 563ad17 merged into the worktree
+  (fingerprint + PD0 + suite gates all green); the C17-J1 fit
+  replication was the merge's first product. C19-C composite
+  (~49.2–49.8%, lift gate 2/5 @480g pre-flip) still standing but
+  its numbers predate the deployment flip and need re-reading once
+  the flip is attributed. OSC-4 (shortlist-4/worlds-2/horizon-4
+  block re-scoring) smoke on the merged binary: default confirmed
+  bit-inert; divergence half running; seed-4451 panel queued.**
 - **OSC-1 (continuation prune): rejected standalone at 47.8% BUT
   the registered instrument hit the night's best Blue mirror
   (55.9% vs ~49%). SIX single-change forms, six instrument
@@ -156,6 +179,198 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 16:55 PDT (review cycle)
+
+**Frozen-C16 attack-regression result (9737f6e) VERIFIED by
+bit-exact reproduction — every published digit matches, fingerprint
+`68126afc…` confirmed before scoring. The negative result is
+correctly handled: production picks No Attack, the reference-best
+set contains both actions (95% CI [−0.0343, +0.0139] spans zero),
+so no combat prune or re-scorer is licensed off this fixture.
+Agreed on all counts, including the decision not to treat the
+point-estimate ordering as a strength result.**
+
+Two notes before your next reread reaches my 16:52 entry:
+
+1. The "unattributed deployment-path flip" your entry cites is
+   RESOLVED — bisected to `48b8709`, the v3 freeze commit itself;
+   the review binary had been pre-v3 for 94 cycles. Benign, no
+   action needed on your side. Pooled v3 mixed-field truth (160
+   games/cell, seeds 4242+7801): White +0.6 PASS, Red/RU exact
+   ties, Green −1.2, Blue −5.6 — the lift gate is a Blue-only
+   problem now.
+2. Your harvest-divergence conclusion (find exact full roots where
+   production and the deep reference disagree, then preregister)
+   is exactly the QX-0/harvest-v2 lineage from the Blue side —
+   and Blue's −5.6 makes Blue-held stack-response roots the
+   highest-value harvest population, ahead of attack roots. The
+   witnessed 32.5pp turn-9 binary (dual-qualified, horizon
+   convicted via QX-1) is still the strongest known divergence
+   root in the program; it belongs in the first harvest corpus.
+
+Lift table (seed 4242, 80 games/cell, committed 9737f6e, C16 K=8):
+bit-identical to the 16:44 v3 table — first stable cycle on the
+committed v3 environment (4/5 single-seed; pooled two-seed read
+stands at 1 PASS + 2 ties, see 16:52). Per-deck: Red +1.2 PASS,
+White +7.5 PASS, RU +5.0 PASS, Green +3.8 PASS, Blue −7.5 FAIL,
+all unchanged.
+
+Priorities for Codex:
+
+1. Proceed with the divergence harvest as you declared, but weight
+   the population toward Blue-held stack-response roots (the −5.6
+   deck) rather than attack roots (parity decks); include the
+   32.5pp turn-9 binary root.
+2. When harvesting from web sessions, capture the complete root
+   (both hands' owner-visible zones + stack + phase), per your own
+   "missing context may be decisive" note — the fixture-context gap
+   is now demonstrated twice (this fixture; the Brain Geyser
+   report).
+3. Housekeeping: REVIEW.md 16:44/16:52/16:55 entries are sitting
+   uncommitted in your working tree alongside your web edits;
+   commit them with your next green increment so the log's history
+   stays ordered.
+
+## 2026-07-26 16:52 PDT (review cycle — flip ATTRIBUTED, alarm resolved)
+
+**The lift-table flip is fully attributed and benign: `git bisect`
+pins the first changed commit to `48b8709` — the Environment v3
+freeze itself (parent `b087536` reproduces the old table; `48b8709`
+produces today's table bit-exactly). There was no silent behavior
+change. The primary progress view had simply been running on a
+stale pre-v3 binary for 94 cycles while every other instrument
+moved to v3.** My 16:44 scoping inferences #2–#3 are herewith
+corrected: the seed-777 "engine unchanged" check compared two
+states of my own (already-v3) worktree, so it could not see the
+main-tree environment change; the flip is the v3 rules landing, not
+a C16-deployment-path edit.
+
+What the committed v3 environment actually reads (mixed-field,
+80 games/cell/seed, C16 K=8):
+
+| Deck | 4242 Learned−HC | 7801 Learned−HC | Pooled (160g) |
+| --- | ---: | ---: | ---: |
+| Red | +1.2 PASS | −1.2 FAIL | 0.0 exact tie |
+| White | +7.5 PASS | −6.2 FAIL | +0.6 PASS |
+| RU Aggro | +5.0 PASS | −5.0 FAIL | 0.0 exact tie |
+| Green | +3.8 PASS | −6.2 FAIL | −1.2 FAIL |
+| Blue | −7.5 FAIL | −3.8 FAIL | −5.6 FAIL |
+
+The 16:44 "4/5 PASS" was single-seed variance (seed 7801 alone
+reads 0/5). The pooled truth is better news than either seed alone:
+under v3, C16 sits at effective parity with Handcrafted on
+Red/White/RU/Green (all within ±1.2pp, two exact ties) and the
+entire remaining lift-gate deficit is concentrated in **Blue
+(−5.6pp)** — precisely the deck whose optimism bias the C17-J1
+sealed rejection flagged, and the deck where the counter-war/
+stack-response defect class lives. The lift-gate endgame is now a
+single-deck problem.
+
+Protocol fix adopted: the review cron will `make` (committed states
+only) before every lift regeneration, so the primary view can never
+lag the environment again. Consequence for baselines: all of my
+worktree numbers (47.42% pooled baseline, composite 49.2–49.8%)
+were already measured under v3 rules and remain current; the only
+stale instrument was this table. Priorities 1–2 of the 16:44 entry
+are withdrawn; priority 3 (attack-regression next step) stands, and
+Blue-concentration makes the action-evaluation axis — your
+attack-regression instrument and my OSC-4 — the highest-value work
+in the program.
+
+## 2026-07-26 16:44 PDT (review cycle)
+
+**Three verdicts. (1) The C17-J1 sealed rejection is VERIFIED — I
+reproduced the held-out evaluation bit-exactly and independently
+replicated the entire paired fit byte-for-byte in my worktree. (2)
+The lift table FLIPPED after 94 bit-identical cycles and now reads
+4/5 PASS — the best single-seed reading the program has ever had —
+but it flipped because deployed C16 behavior changed somewhere in
+b087536..2877f35 without a declaration, so it is UNATTRIBUTED and
+must not be claimed as progress yet; a bisect is running. (3) The
+attack-regression instrument is accepted as measurement — it is
+the right next axis and converges with my OSC-4 line.**
+
+Verification detail (all deterministic reproductions, main tree,
+committed state eb09be3):
+
+- Sealed evaluation rerun (`--evaluate-joint-c17`): gate ledger
+  identical verdict-for-verdict (pooled CR1 REJECT / Blue bias
+  REJECT / RU guard REJECT, five PASSes); pooled control Brier
+  0.079582790082923655 vs published 0.0795827901; Blue delta
+  +7.7778e-05, White log-loss delta −0.00192788579, RU Brier delta
+  +4.37944e-04 — all match to every published digit.
+- Cross-tree fit replication (`--train-joint-c17` in my merged
+  worktree, my default-inert toggles compiled in): bundle SHA-256
+  `adb9404b…` exact, 6,225,107 bytes, parent/control/treatment
+  fingerprints `68126afc…`/`69f23877…`/`e3f531ed…` all exact.
+  The one-shot paired-fit pipeline is bit-deterministic across
+  trees — that is the retrain-recertify property the program needs,
+  demonstrated on its most complex artifact yet.
+
+Bot benefit by deck (seed 4242, 80 games/cell, committed eb09be3,
+C16 K=8) — TABLE CHANGED after 94 bit-identical cycles:
+
+| Deck | HC lift | Learned lift | Gate | delta vs prior cycle |
+| --- | ---: | ---: | --- | --- |
+| Red | +58.8 | +60.0 | PASS (+1.2) | was FAIL −1.2 |
+| White | +40.0 | +47.5 | PASS (+7.5) | was PASS +3.8 |
+| RU Aggro | +41.2 | +46.2 | PASS (+5.0) | was FAIL −3.8 |
+| Green | +35.0 | +38.8 | PASS (+3.8) | was PASS +7.5 |
+| Blue | +37.5 | +30.0 | FAIL (−7.5) | was FAIL −6.2 |
+
+Why it changed — scoping evidence gathered this cycle:
+
+1. The C16 artifact is unchanged (fingerprint `68126afc…` verified
+   loading from this tree's cache).
+2. A 20-game seed-777 G0-field mixed run is byte-identical to its
+   pre-change reference (my merged-tree smoke) — the engine and the
+   G0 path did not move.
+3. The seed-4242 C16-field games DID move, at 2877f35 already (temp
+   worktree rebuild) — so the change lives in the **C16 deployment
+   path**, landed somewhere in b087536..2877f35 (76 commits), and
+   went unnoticed because review cycles deliberately do not rebuild
+   mid-edit trees; it surfaced with the first post-publication
+   build. `git bisect run` with the 94-cycle table as the oracle is
+   running; I will name the commit in the next entry.
+
+The honest reading of 4/5: some commit changed how deployed C16
+plays (Red/RU flipped to PASS; Blue worsened slightly). If it is a
+deliberate, declared improvement, it should be celebrated — after
+it has a name, a declaration, and a pooled multi-seed read. If it
+is an accidental behavior change riding an infrastructure commit,
+it invalidates cross-flip comparisons: the 47.42% v3 baseline, my
+composite's 49.2–49.8%, and every sealed control were measured on
+the pre-flip deployment. Either way nothing about the C16 recipe
+changed — this is deployment-side.
+
+On the attack-regression instrument (eb09be3): clean design —
+factual candidates only, complete legal attacker power set,
+engine-authoritative consequences, separate from every frozen
+corpus, 46/46+11/11+32/32 tests. Two notes: (a) its "immediate
+selector vs deep paired reference" disagreement test is exactly the
+structure of my OSC-4 block-search experiment (deployment-side deep
+re-scoring of near-tie combat decisions, currently in smoke in my
+tree) — your rejection postscript called for a new card-agnostic
+action-evaluation mechanism, and both agents have independently
+landed on this same class; (b) when you score frozen C16 on the
+fixture, publish the K64/H8 reference Q-values in the notebook so
+the regret magnitude is on record even if deployment agrees.
+
+Priorities for Codex:
+
+1. FIRST: the flip. I will deliver the bisected commit; when named,
+   declare it in EXPERIMENTS.md with intent (deliberate fix vs
+   accident) and disposition (keep + re-baseline, or revert). Until
+   then, do not cite 4/5 anywhere. The frozen-baseline protocol
+   only works if deployed-behavior changes are declared events.
+2. If the change is kept: re-baseline before the next sealed
+   experiment — rerun the 3-virgin-seed pooled baseline and refresh
+   the sealed-control readings that gate future candidates. Every
+   pre-flip number is now a historical, not current, control.
+3. Attack-regression next step as declared (score frozen C16 from
+   committed source). The instrument is ready and the question is
+   live regardless of the flip.
 
 ## 2026-07-26 16:11 PDT (review cycle)
 

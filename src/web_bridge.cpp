@@ -4,8 +4,10 @@
 #include <array>
 #include <charconv>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
 #include <istream>
 #include <memory>
 #include <optional>
@@ -35,6 +37,60 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return ru_aggro_deck();
     }
     throw std::out_of_range("unknown deck");
+}
+
+void validate_exact_deck_cards(
+    const std::vector<CardId>& cards,
+    std::string_view option_name) {
+    if (cards.size() != 40) {
+        throw std::invalid_argument(
+            std::string(option_name) +
+            " requires exactly 40 card IDs");
+    }
+    for (const CardId card : cards) {
+        if (static_cast<std::size_t>(card) >= kCardCount) {
+            throw std::invalid_argument(
+                std::string(option_name) +
+                " contains an unknown card ID");
+        }
+    }
+}
+
+std::vector<CardId> configured_deck_cards(
+    DeckId fallback,
+    const std::optional<std::vector<CardId>>& custom,
+    std::string_view option_name) {
+    if (!custom.has_value()) {
+        return deck_cards(fallback);
+    }
+    validate_exact_deck_cards(*custom, option_name);
+    return *custom;
+}
+
+std::string_view deck_id_token(DeckId deck) {
+    switch (deck) {
+    case DeckId::Green:
+        return "green";
+    case DeckId::Red:
+        return "red";
+    case DeckId::Blue:
+        return "blue";
+    case DeckId::White:
+        return "white";
+    case DeckId::RUAggro:
+        return "ru-aggro";
+    }
+    throw std::out_of_range("unknown deck");
+}
+
+std::string_view evolution_pilot_token(EvolutionPilot pilot) {
+    switch (pilot) {
+    case EvolutionPilot::Handcrafted:
+        return "handcrafted";
+    case EvolutionPilot::LearnedValueC16:
+        return "learned-value-c16";
+    }
+    throw std::out_of_range("unknown evolution pilot");
 }
 
 std::string_view card_type_name(CardType type) {
@@ -181,6 +237,27 @@ void write_json_string(std::ostream& output,
         }
     }
     output << '"';
+}
+
+void write_json_real(std::ostream& output, double value) {
+    if (!std::isfinite(value)) {
+        throw std::invalid_argument(
+            "evolution result contains a non-finite number");
+    }
+    const std::streamsize old_precision = output.precision();
+    output << std::setprecision(17) << value;
+    output.precision(old_precision);
+}
+
+void write_evolution_stats(std::ostream& output,
+                           const DeckSimulationStats& stats) {
+    output << "{\"games\":" << stats.games
+           << ",\"wins\":" << stats.wins
+           << ",\"losses\":" << stats.losses
+           << ",\"draws\":" << stats.draws
+           << ",\"winRate\":";
+    write_json_real(output, stats.win_rate());
+    output << '}';
 }
 
 void write_model_status(
@@ -1134,6 +1211,58 @@ DeckId parse_deck_id(std::string_view value) {
         "unknown deck: " + std::string(value));
 }
 
+EvolutionPilot parse_evolution_pilot(std::string_view value) {
+    if (value == "handcrafted") {
+        return EvolutionPilot::Handcrafted;
+    }
+    if (value == "learned-value-c16") {
+        return EvolutionPilot::LearnedValueC16;
+    }
+    throw std::invalid_argument(
+        "unknown evolution pilot: " + std::string(value));
+}
+
+std::vector<CardId> parse_exact_deck_cards(
+    std::string_view value) {
+    std::vector<CardId> cards;
+    std::size_t cursor = 0;
+    while (cursor < value.size()) {
+        const std::size_t comma = value.find(',', cursor);
+        const std::size_t end =
+            comma == std::string_view::npos
+                ? value.size()
+                : comma;
+        const std::string_view token =
+            value.substr(cursor, end - cursor);
+        std::uint64_t parsed = 0;
+        const auto result = std::from_chars(
+            token.data(), token.data() + token.size(), parsed);
+        if (token.empty() || result.ec != std::errc{} ||
+            result.ptr != token.data() + token.size()) {
+            throw std::invalid_argument(
+                "custom deck requires comma-separated decimal "
+                "card IDs");
+        }
+        if (parsed >= kCardCount) {
+            throw std::invalid_argument(
+                "custom deck contains an unknown card ID");
+        }
+        cards.push_back(static_cast<CardId>(parsed));
+        if (comma == std::string_view::npos) {
+            cursor = value.size();
+        } else {
+            cursor = comma + 1;
+            if (cursor == value.size()) {
+                throw std::invalid_argument(
+                    "custom deck requires comma-separated decimal "
+                    "card IDs");
+            }
+        }
+    }
+    validate_exact_deck_cards(cards, "custom deck");
+    return cards;
+}
+
 std::shared_ptr<const LearnedModel>
 load_frozen_learned_value_c16(const std::string& path) {
     std::shared_ptr<const LearnedModel> model;
@@ -1166,6 +1295,160 @@ load_frozen_learned_value_c16(const std::string& path) {
             "substitute a model");
     }
     return model;
+}
+
+void write_evolution_json(
+    std::ostream& output,
+    const DeckEvolutionSummary& summary,
+    const EvolutionJsonConfig& config) {
+    validate_exact_deck_cards(
+        summary.best.cards, "evolved deck");
+    if (summary.generation_best_win_rates.size() !=
+        config.generations) {
+        throw std::invalid_argument(
+            "evolution result generation trace length does not "
+            "match its configuration");
+    }
+    const auto validate_stats =
+        [](const DeckSimulationStats& stats) {
+            if (stats.wins + stats.losses + stats.draws !=
+                stats.games) {
+                throw std::invalid_argument(
+                    "evolution result contains inconsistent stats");
+            }
+        };
+    validate_stats(summary.best.total);
+    for (const auto& stats : summary.best.by_opponent) {
+        validate_stats(stats);
+    }
+
+    output << "{\"type\":\"evolution_result\","
+              "\"schemaVersion\":1,\"seed\":"
+           << config.seed << ",\"pilot\":";
+    write_json_string(output, evolution_pilot_token(config.pilot));
+    output << ",\"parameters\":{\"generations\":"
+           << config.generations
+           << ",\"population\":" << config.population
+           << ",\"gamesPerOpponent\":"
+           << config.games_per_opponent
+           << ",\"learnedRollouts\":"
+           << config.learned_rollouts
+           << "},\"deck\":{\"size\":40,\"cardIds\":[";
+    for (std::size_t index = 0;
+         index < summary.best.cards.size(); ++index) {
+        if (index != 0) {
+            output << ',';
+        }
+        output << static_cast<unsigned int>(
+            summary.best.cards[index]);
+    }
+    output << "],\"cards\":[";
+    std::array<std::size_t, kCardCount> counts{};
+    for (const CardId card : summary.best.cards) {
+        ++counts[static_cast<std::size_t>(card)];
+    }
+    bool wrote_card = false;
+    for (std::size_t card = 0; card < counts.size(); ++card) {
+        if (counts[card] == 0) {
+            continue;
+        }
+        if (wrote_card) {
+            output << ',';
+        }
+        wrote_card = true;
+        const auto id = static_cast<CardId>(card);
+        output << "{\"id\":" << card << ",\"name\":";
+        write_json_string(output, card_definition(id).name);
+        output << ",\"count\":" << counts[card] << '}';
+    }
+    output << "]},\"fitness\":";
+    write_evolution_stats(output, summary.best.total);
+    output << ",\"byOpponent\":[";
+    for (std::size_t opponent = 0;
+         opponent < summary.best.by_opponent.size();
+         ++opponent) {
+        if (opponent != 0) {
+            output << ',';
+        }
+        const auto deck = static_cast<DeckId>(opponent);
+        output << "{\"deck\":";
+        write_json_string(output, deck_id_token(deck));
+        output << ",\"name\":";
+        write_json_string(output, deck_name(deck));
+        output << ",\"fitness\":";
+        write_evolution_stats(
+            output, summary.best.by_opponent[opponent]);
+        output << '}';
+    }
+    output << "],\"generationBestWinRates\":[";
+    for (std::size_t generation = 0;
+         generation <
+         summary.generation_best_win_rates.size();
+         ++generation) {
+        if (generation != 0) {
+            output << ',';
+        }
+        write_json_real(
+            output,
+            summary.generation_best_win_rates[generation]);
+    }
+    output << "]}\n";
+}
+
+int run_evolution_json(
+    std::ostream& output,
+    const EvolutionJsonConfig& config) {
+    if (config.generations == 0 ||
+        config.games_per_opponent == 0 ||
+        config.learned_rollouts == 0) {
+        throw std::invalid_argument(
+            "evolution generations, games, and rollout budget "
+            "must be positive");
+    }
+    if (config.population < kDeckCount) {
+        throw std::invalid_argument(
+            "evolution population must be at least five");
+    }
+
+    BotConfig pilot = {
+        .kind = BotKind::Handcrafted,
+        .rollouts_per_action = 1,
+    };
+    GameConfig game_config;
+    game_config.learned_training_seed =
+        kFrozenWebC16TrainingSeed;
+    if (config.pilot == EvolutionPilot::LearnedValueC16) {
+        const std::string artifact_path =
+            config.frozen_c16_artifact_path.empty()
+                ? learned_value_challenger_cache_path(
+                      kFrozenWebC16TrainingGames,
+                      kFrozenWebC16TrainingSeed,
+                      kFrozenWebC16Generations)
+                : config.frozen_c16_artifact_path;
+        const auto model =
+            load_frozen_learned_value_c16(artifact_path);
+        pilot = {
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = config.learned_rollouts,
+            .training_games = kFrozenWebC16TrainingGames,
+            .learned_model = model,
+        };
+        game_config.learned_model = model;
+    }
+
+    const DeckEvolutionSummary summary = evolve_deck(
+        {
+            .generations = config.generations,
+            .population = config.population,
+            .repetitions_per_opponent =
+                config.games_per_opponent,
+            .pilot = std::move(pilot),
+        },
+        config.seed, std::move(game_config));
+    write_evolution_json(output, summary, config);
+    return 0;
 }
 
 BotKind parse_opponent_bot(
@@ -1245,6 +1528,14 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             "--train-seed 424242; select Learned Value G0 for "
             "custom match training");
     }
+    const std::vector<CardId> human_cards =
+        configured_deck_cards(
+            config.human_deck, config.human_deck_cards,
+            "--human-deck-cards");
+    const std::vector<CardId> opponent_cards =
+        configured_deck_cards(
+            config.opponent_deck, config.opponent_deck_cards,
+            "--opponent-deck-cards");
 
     output << "{\"type\":\"status\",\"message\":";
     write_json_string(
@@ -1324,8 +1615,7 @@ int run_bridge_session(std::istream& input, std::ostream& output,
     game_config.human_controllers[0] =
         controller.controller();
 
-    Game game(deck_cards(config.human_deck),
-              deck_cards(config.opponent_deck),
+    Game game(human_cards, opponent_cards,
               config.game_seed, game_config);
     const GameResult result = game.run();
     PlayerObservation final_observation =

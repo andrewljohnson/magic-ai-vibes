@@ -345,6 +345,37 @@ Acceptance criteria:
 - A bug report can copy a compact reproduction containing matchup, seeds,
   settings, turn, phase, and latest event.
 
+#### Preregistered ephemeral deck-evolution menu slice
+
+Hypothesis: exposing the existing engine evolution loop in a separate bounded
+web workflow will let a player generate, inspect, and immediately play a deck
+without turning match setup into a deck editor or introducing durable server
+state.
+
+- A top-level `Evolve deck` control opens a distinct dialog from `New match`.
+  It exposes engine-owned generation count, population, paired repetitions,
+  seed, and a whitelisted Handcoded Policy or frozen Learned Value C16 pilot.
+- Generation runs in a separate bounded child process using
+  `evolve_deck`; the browser never implements fitness, mutation, card-pool, or
+  legality rules. The server validates strict resource caps, allows only one
+  active evolution per process, bounds output and runtime, and never invokes a
+  shell.
+- The completed result shows its exact 40-card manifest, aggregate fitness,
+  per-metagame results, generation trace, seed, and pilot. `Save for this
+  session` stores only that server-produced result in Node process memory.
+- A saved deck receives an opaque ID, appears in both seat selectors and deck
+  manifests, and is passed to the C++ bridge as the exact validated card-ID
+  vector. It survives new matches but disappears when the Node server restarts;
+  no filesystem, database, cookie, or browser-storage persistence is added.
+- The normal metadata and game APIs remain engine-authoritative and never
+  accept a client-authored arbitrary deck list. Opponent hidden-card identities
+  remain private during play.
+- Acceptance requires focused C++ JSON/custom-deck tests, Node validation,
+  lifecycle, save, and play-through contract tests, `make test-web-ui`,
+  `make test-web`, and a real-Chromium 1280 × 720 and 1440 × 900 smoke proving
+  the separate dialog, result manifest, session-only save notice, and saved
+  deck selection without horizontal overflow.
+
 #### Preregistered explicit Learned-model identity slice
 
 Hypothesis: replacing the web's ambiguous, freshly trained `learned-value`

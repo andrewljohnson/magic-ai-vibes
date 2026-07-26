@@ -352,6 +352,7 @@ textarea:focus-visible,
 }
 
 .new-game-button,
+.evolve-deck-button,
 .icon-button {
   border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.035);
@@ -362,7 +363,14 @@ textarea:focus-visible,
     background 160ms ease;
 }
 
-.new-game-button {
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.new-game-button,
+.evolve-deck-button {
   height: 37px;
   display: flex;
   align-items: center;
@@ -373,6 +381,7 @@ textarea:focus-visible,
 }
 
 .new-game-button:hover,
+.evolve-deck-button:hover,
 .icon-button:hover {
   border-color: rgba(241, 211, 138, 0.55);
   background: rgba(200, 167, 102, 0.1);
@@ -2416,6 +2425,511 @@ select {
   font-size: var(--type-floor);
 }
 
+.evolution-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.evolution-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(1, 4, 3, 0.84);
+  backdrop-filter: blur(7px);
+  cursor: default;
+}
+
+.evolution-dialog {
+  width: min(1120px, 100%);
+  max-height: calc(100vh - 48px);
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(200, 167, 102, 0.32);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(104, 183, 167, 0.1), transparent 30rem),
+    #101614;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.68);
+  animation: dialog-in 220ms ease-out;
+}
+
+.evolution-dialog > header {
+  flex: none;
+  min-height: 108px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 23px 27px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.evolution-dialog h1 {
+  margin: 7px 0 8px;
+  font-family: Georgia, serif;
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 400;
+}
+
+.evolution-dialog > header p {
+  max-width: 680px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-label);
+  line-height: 1.45;
+}
+
+.evolution-unavailable {
+  min-height: 250px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+
+.evolution-workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.evolution-controls,
+.evolution-result {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.evolution-controls {
+  padding: 20px;
+  border-right: 1px solid var(--line);
+  background: rgba(4, 8, 7, 0.26);
+}
+
+.evolution-controls form {
+  display: grid;
+  gap: 10px;
+}
+
+.evolution-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.evolution-section-heading strong {
+  font-family: Georgia, serif;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.evolution-controls label {
+  display: grid;
+  grid-template-columns: 1fr 112px;
+  align-items: center;
+  gap: 12px;
+}
+
+.evolution-controls label > span,
+.evolution-save label > span {
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+
+.evolution-controls input,
+.evolution-controls select {
+  width: 100%;
+  min-width: 0;
+}
+
+.evolution-controls input:disabled {
+  opacity: 0.42;
+}
+
+.evolution-pilot-description,
+.evolution-resource-note,
+.saved-evolution-decks p {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--type-label);
+  line-height: 1.45;
+}
+
+.evolution-pilot-description {
+  padding: 8px 10px;
+  border-left: 2px solid rgba(104, 183, 167, 0.44);
+  background: rgba(104, 183, 167, 0.04);
+}
+
+.evolution-generate {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 3px;
+}
+
+.evolution-resource-note {
+  text-align: center;
+}
+
+.saved-evolution-decks {
+  margin-top: 19px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
+}
+
+.saved-evolution-decks p {
+  margin-top: 8px;
+}
+
+.saved-evolution-decks ul {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  margin: 11px 0 0;
+  padding: 0;
+}
+
+.saved-evolution-decks li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.018);
+  font-size: var(--type-label);
+}
+
+.saved-evolution-decks li strong,
+.saved-evolution-decks > small {
+  color: var(--faint);
+  font-size: var(--type-label);
+  font-weight: 500;
+}
+
+.saved-evolution-decks > small {
+  display: block;
+  margin-top: 11px;
+}
+
+.evolution-result {
+  padding: 21px 23px 24px;
+}
+
+.evolution-progress,
+.evolution-empty {
+  min-height: 390px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.evolution-progress {
+  gap: 12px;
+}
+
+.evolution-progress div {
+  display: grid;
+  gap: 4px;
+}
+
+.evolution-progress span,
+.evolution-empty p {
+  color: var(--faint);
+  font-size: var(--type-label);
+  line-height: 1.5;
+}
+
+.evolution-empty {
+  flex-direction: column;
+  text-align: center;
+}
+
+.evolution-empty > span {
+  margin-bottom: 12px;
+  color: var(--gold);
+  font-family: Georgia, serif;
+  font-size: 42px;
+}
+
+.evolution-empty strong {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.evolution-empty p {
+  max-width: 420px;
+  margin: 9px 0 0;
+}
+
+.evolution-result-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--line);
+}
+
+.evolution-result-header h2 {
+  margin: 6px 0 0;
+  font-family: Georgia, serif;
+  font-size: 23px;
+  font-weight: 400;
+}
+
+.evolution-fitness {
+  display: grid;
+  text-align: right;
+}
+
+.evolution-fitness > span,
+.evolution-fitness small {
+  color: var(--faint);
+  font-size: var(--type-label);
+}
+
+.evolution-fitness strong {
+  margin: 1px 0;
+  color: var(--gold-bright);
+  font-family: Georgia, serif;
+  font-size: 26px;
+  font-weight: 400;
+}
+
+.evolution-run-facts {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  margin: 15px 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.evolution-run-facts > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  background: #111816;
+}
+
+.evolution-run-facts dt {
+  color: var(--faint);
+  font-size: var(--type-floor);
+  text-transform: uppercase;
+}
+
+.evolution-run-facts dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evolution-result-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(260px, 1.15fr);
+  gap: 14px;
+}
+
+.evolution-card-list,
+.evolution-trace,
+.evolution-metagame {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.evolution-card-list ul,
+.evolution-trace ol {
+  list-style: none;
+  display: grid;
+  gap: 5px;
+  margin: 11px 0 0;
+  padding: 0;
+}
+
+.evolution-card-list ul {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.evolution-card-list li {
+  min-width: 0;
+  display: flex;
+  gap: 7px;
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+
+.evolution-card-list li strong {
+  flex: none;
+  color: var(--gold);
+}
+
+.evolution-card-list li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evolution-trace ol {
+  max-height: 158px;
+  overflow-y: auto;
+}
+
+.evolution-trace li {
+  display: grid;
+  grid-template-columns: 25px minmax(60px, 1fr) 48px;
+  align-items: center;
+  gap: 7px;
+  color: var(--faint);
+  font-size: var(--type-floor);
+}
+
+.evolution-trace li > i {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.evolution-trace li > i > span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--teal), var(--gold));
+}
+
+.evolution-trace li > strong {
+  color: var(--muted);
+  font-weight: 600;
+  text-align: right;
+}
+
+.evolution-metagame {
+  margin-top: 14px;
+}
+
+.evolution-table-scroll {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.evolution-metagame table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-label);
+}
+
+.evolution-metagame th,
+.evolution-metagame td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  text-align: right;
+}
+
+.evolution-metagame thead th {
+  color: var(--faint);
+  font-size: var(--type-floor);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.evolution-metagame th:first-child {
+  text-align: left;
+}
+
+.evolution-metagame tbody th {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.evolution-metagame td {
+  color: var(--muted);
+}
+
+.evolution-save {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) auto;
+  align-items: end;
+  gap: 8px 10px;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid rgba(200, 167, 102, 0.25);
+  border-radius: 8px;
+  background: rgba(200, 167, 102, 0.035);
+}
+
+.evolution-save label {
+  display: grid;
+  gap: 6px;
+}
+
+.evolution-save input[type="text"] {
+  width: 100%;
+  height: 39px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #0c1210;
+}
+
+.evolution-save > button {
+  min-height: 39px;
+}
+
+.evolution-save p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--type-label);
+}
+
+.evolution-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(224, 119, 103, 0.34);
+  border-radius: 7px;
+  color: #f3c2ba;
+  background: rgba(112, 38, 30, 0.2);
+  font-size: var(--type-label);
+}
+
+.evolution-error button {
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .drawer-layer {
   position: fixed;
   inset: 0;
@@ -2912,6 +3426,13 @@ select {
   }
 }
 
+@keyframes dialog-in {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+}
+
 @media (max-height: 780px) {
   .game-shell {
     --player-hand-height: 112px;
@@ -3007,6 +3528,25 @@ select {
   .setup-drawer {
     width: min(680px, 100vw);
   }
+
+  .evolution-dialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .evolution-workspace {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .evolution-controls,
+  .evolution-result {
+    overflow: visible;
+  }
+
+  .evolution-controls {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 @media (max-width: 680px) {
@@ -3028,7 +3568,8 @@ select {
     display: none;
   }
 
-  .new-game-button {
+  .new-game-button,
+  .evolve-deck-button {
     /* Intentional exception: the adjacent 17px icon replaces this text label. */
     font-size: 0;
     width: 39px;
@@ -3036,8 +3577,57 @@ select {
     justify-content: center;
   }
 
-  .new-game-button span {
+  .new-game-button span,
+  .evolve-deck-button span {
     font-size: 17px;
+  }
+
+  .evolution-layer {
+    padding: 0;
+  }
+
+  .evolution-dialog {
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .evolution-dialog > header {
+    padding: 19px 18px 17px;
+  }
+
+  .evolution-dialog h1 {
+    font-size: 27px;
+  }
+
+  .evolution-controls,
+  .evolution-result {
+    padding: 17px;
+  }
+
+  .evolution-result-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .evolution-fitness {
+    text-align: left;
+  }
+
+  .evolution-run-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .evolution-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .evolution-save {
+    grid-template-columns: 1fr;
+  }
+
+  .evolution-save p {
+    grid-column: auto;
   }
 
   .setup-drawer > header,

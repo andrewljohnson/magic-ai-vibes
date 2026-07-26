@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -49,9 +50,11 @@ std::size_t parse_size(std::string_view option,
 
 void print_help(std::ostream& output) {
     output
-        << "Usage: old-school-web-bridge [options]\n"
+        << "Usage: old-school-web-bridge [session options]\n"
         << "  --human-deck green|red|blue|white|ru-aggro\n"
+        << "  --human-deck-cards ID,ID,... (exactly 40)\n"
         << "  --opponent-deck green|red|blue|white|ru-aggro\n"
+        << "  --opponent-deck-cards ID,ID,... (exactly 40)\n"
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
            "handcrafted|learned-value-c16|learned-value-g0|"
            "learned-actor\n"
@@ -59,20 +62,98 @@ void print_help(std::ostream& output) {
         << "  --rollouts N --deep-rollouts N --learned-rollouts N\n"
         << "  --learned-generations 0|16\n"
         << "  --debug-reveal\n"
-        << "  --bluff-mode\n";
+        << "  --bluff-mode\n"
+        << "\n"
+        << "       old-school-web-bridge --evolve-json "
+           "[evolution options]\n"
+        << "  --evolve-pilot handcrafted|learned-value-c16\n"
+        << "  --generations N --population N --games N --seed N\n"
+        << "  --learned-rollouts N\n";
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     try {
-        old_school::web::BridgeConfig config;
         const std::filesystem::path executable =
             std::filesystem::absolute(argv[0]);
-        config.frozen_c16_artifact_path =
+        const std::string frozen_c16_artifact_path =
             (executable.parent_path() / "model-cache" /
              "old-school-value-challenger-v3-c16-t800-s424242.bin")
                 .string();
+        if (argc == 2 &&
+            std::string_view(argv[1]) == "--help") {
+            print_help(std::cout);
+            return 0;
+        }
+
+        bool evolve_json = false;
+        for (int argument = 1; argument < argc; ++argument) {
+            if (std::string_view(argv[argument]) ==
+                "--evolve-json") {
+                evolve_json = true;
+            }
+        }
+        if (evolve_json) {
+            old_school::web::EvolutionJsonConfig config;
+            config.frozen_c16_artifact_path =
+                frozen_c16_artifact_path;
+            std::set<std::string> seen_options;
+            for (int argument = 1; argument < argc; ++argument) {
+                const std::string_view option(argv[argument]);
+                if (!seen_options.insert(
+                         std::string(option))
+                         .second) {
+                    throw std::invalid_argument(
+                        "duplicate option: " +
+                        std::string(option));
+                }
+                if (option == "--evolve-json") {
+                    continue;
+                }
+                if (option != "--evolve-pilot" &&
+                    option != "--generations" &&
+                    option != "--population" &&
+                    option != "--games" &&
+                    option != "--seed" &&
+                    option != "--learned-rollouts") {
+                    throw std::invalid_argument(
+                        "unknown evolution option: " +
+                        std::string(option));
+                }
+                if (argument + 1 >= argc) {
+                    throw std::invalid_argument(
+                        std::string(option) +
+                        " requires a value");
+                }
+                const std::string_view value(argv[++argument]);
+                if (option == "--evolve-pilot") {
+                    config.pilot =
+                        old_school::web::parse_evolution_pilot(
+                            value);
+                } else if (option == "--generations") {
+                    config.generations =
+                        parse_positive_size(option, value);
+                } else if (option == "--population") {
+                    config.population =
+                        parse_positive_size(option, value);
+                } else if (option == "--games") {
+                    config.games_per_opponent =
+                        parse_positive_size(option, value);
+                } else if (option == "--seed") {
+                    config.seed = parse_u64(option, value);
+                } else {
+                    config.learned_rollouts =
+                        parse_positive_size(option, value);
+                }
+            }
+            return old_school::web::run_evolution_json(
+                std::cout, config);
+        }
+
+        old_school::web::BridgeConfig config;
+        config.frozen_c16_artifact_path =
+            frozen_c16_artifact_path;
         for (int argument = 1; argument < argc; ++argument) {
             const std::string_view option(argv[argument]);
             if (option == "--help") {
@@ -95,9 +176,17 @@ int main(int argc, char** argv) {
             if (option == "--human-deck") {
                 config.human_deck =
                     old_school::web::parse_deck_id(value);
+            } else if (option == "--human-deck-cards") {
+                config.human_deck_cards =
+                    old_school::web::parse_exact_deck_cards(
+                        value);
             } else if (option == "--opponent-deck") {
                 config.opponent_deck =
                     old_school::web::parse_deck_id(value);
+            } else if (option == "--opponent-deck-cards") {
+                config.opponent_deck_cards =
+                    old_school::web::parse_exact_deck_cards(
+                        value);
             } else if (option == "--opponent-policy") {
                 config.opponent_bot =
                     old_school::web::parse_opponent_bot(

@@ -1,6 +1,11 @@
 import type {
   ActionRequest,
   DeckCard,
+  DeckMeta,
+  EvolutionConfig,
+  EvolutionMeta,
+  EvolutionPilotMeta,
+  EvolutionResult,
   GameConfig,
   GameSnapshot,
   MetaResponse,
@@ -68,6 +73,80 @@ function parseDeckList(value: unknown): DeckCard[] {
     });
 }
 
+function normalizeDeck(value: {
+  id: string;
+  name?: string;
+  label?: string;
+  cards?: unknown;
+  deckList?: unknown;
+  ephemeral?: unknown;
+}): DeckMeta {
+  return {
+    id: value.id,
+    name: value.name ?? value.label ?? value.id,
+    cards: parseDeckList(value.cards ?? value.deckList),
+    ...(value.ephemeral === true ? { ephemeral: true } : {}),
+  };
+}
+
+function parseEvolutionPilots(value: unknown): EvolutionPilotMeta[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry === "string") return [{ id: entry, name: entry }];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const pilot = entry as {
+      id?: unknown;
+      name?: unknown;
+      label?: unknown;
+      description?: unknown;
+    };
+    if (typeof pilot.id !== "string") return [];
+    return [
+      {
+        id: pilot.id,
+        name:
+          typeof pilot.name === "string"
+            ? pilot.name
+            : typeof pilot.label === "string"
+              ? pilot.label
+              : pilot.id,
+        ...(typeof pilot.description === "string"
+          ? { description: pilot.description }
+          : {}),
+      },
+    ];
+  });
+}
+
+function normalizeEvolutionMeta(value: unknown): EvolutionMeta | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as {
+    pilots?: unknown;
+    defaults?: unknown;
+    limits?: unknown;
+    lifetime?: unknown;
+    notice?: unknown;
+    storage?: unknown;
+    active?: unknown;
+  };
+  if (!raw.defaults || !raw.limits) return undefined;
+  return {
+    pilots: parseEvolutionPilots(raw.pilots),
+    defaults: raw.defaults as EvolutionConfig,
+    limits: raw.limits as EvolutionMeta["limits"],
+    lifetime:
+      typeof raw.lifetime === "string"
+        ? raw.lifetime
+        : typeof raw.notice === "string"
+          ? raw.notice
+        : "Saved decks last until this server restarts.",
+    ...(typeof raw.storage === "string" ? { storage: raw.storage } : {}),
+    ...(typeof raw.active === "boolean" ? { active: raw.active } : {}),
+  };
+}
+
 function normalizeMeta(value: unknown): MetaResponse {
   const raw = value as {
     decks?: Array<{
@@ -76,27 +155,32 @@ function normalizeMeta(value: unknown): MetaResponse {
       label?: string;
       cards?: unknown;
       deckList?: unknown;
+      ephemeral?: unknown;
     }>;
     policies?: Array<{
       id: string;
       name?: string;
       label?: string;
       description?: string;
+      versionDate?: string;
+      versionDateLabel?: string;
+      lifecycle?: string;
     }>;
     defaults?: Record<string, unknown>;
+    evolution?: unknown;
   };
   return {
-    decks: (raw.decks ?? []).map((deck) => ({
-      id: deck.id,
-      name: deck.name ?? deck.label ?? deck.id,
-      cards: parseDeckList(deck.cards ?? deck.deckList),
-    })),
+    decks: (raw.decks ?? []).map(normalizeDeck),
     policies: (raw.policies ?? []).map((policy) => ({
       id: policy.id,
       name: policy.name ?? policy.label ?? policy.id,
       description: policy.description,
+      versionDate: policy.versionDate,
+      versionDateLabel: policy.versionDateLabel,
+      lifecycle: policy.lifecycle,
     })),
     defaults: raw.defaults,
+    evolution: normalizeEvolutionMeta(raw.evolution),
   };
 }
 
@@ -194,4 +278,29 @@ export function deleteGame(id: string): Promise<void> {
     `/api/games/${encodeURIComponent(id)}`,
     { method: "DELETE" },
   ).then(() => undefined);
+}
+
+export function createEvolution(
+  config: EvolutionConfig,
+): Promise<EvolutionResult> {
+  return request<{ evolution: EvolutionResult }>("/api/evolutions", {
+    method: "POST",
+    body: JSON.stringify(config),
+  }).then(({ evolution }) => evolution);
+}
+
+export function saveEvolution(id: string, name: string): Promise<DeckMeta> {
+  return request<{
+    deck: {
+      id: string;
+      name?: string;
+      label?: string;
+      cards?: unknown;
+      deckList?: unknown;
+      ephemeral?: unknown;
+    };
+  }>(`/api/evolutions/${encodeURIComponent(id)}/save`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  }).then(({ deck }) => normalizeDeck(deck));
 }

@@ -504,6 +504,7 @@ export interface DeckMeta {
   id: string;
   name: string;
   cards: DeckCard[];
+  ephemeral?: boolean;
 }
 
 export interface PolicyMeta {
@@ -513,6 +514,84 @@ export interface PolicyMeta {
   versionDate?: string;
   versionDateLabel?: string;
   lifecycle?: string;
+}
+
+export interface EvolutionPilotMeta {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface EvolutionNumericLimit {
+  min: number;
+  max: number;
+}
+
+export interface EvolutionConfig {
+  seed: number;
+  generations: number;
+  population: number;
+  games: number;
+  pilot: string;
+  learnedRollouts: number;
+}
+
+export interface EvolutionMeta {
+  pilots: EvolutionPilotMeta[];
+  defaults: EvolutionConfig;
+  limits: {
+    seed: EvolutionNumericLimit;
+    generations: EvolutionNumericLimit;
+    population: EvolutionNumericLimit;
+    games: EvolutionNumericLimit;
+    learnedRollouts: EvolutionNumericLimit;
+  };
+  lifetime: string;
+  active?: boolean;
+  storage?: string;
+}
+
+export interface EvolutionStats {
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  winRate: number;
+}
+
+export interface EvolvedCard {
+  id: string | number;
+  name: string;
+  count: number;
+}
+
+export function evolvedDeckCardCount(cards: readonly EvolvedCard[]): number {
+  return cards.reduce((total, card) => total + card.count, 0);
+}
+
+export function formatEvolutionPercent(value: number): string {
+  return `${Number.isFinite(value) ? value.toFixed(1) : "0.0"}%`;
+}
+
+export interface EvolutionOpponentStats extends EvolutionStats {
+  deckId: string;
+  name: string;
+}
+
+export interface EvolutionResult {
+  id: string;
+  seed: number;
+  pilot: string;
+  config?: EvolutionConfig;
+  generations: number[];
+  population?: number;
+  games?: number;
+  learnedRollouts?: number;
+  best: {
+    cards: EvolvedCard[];
+    stats: EvolutionStats;
+    byOpponent: EvolutionOpponentStats[];
+  };
 }
 
 export function formatPolicyVersionDate(value: string): string {
@@ -544,6 +623,7 @@ export interface MetaResponse {
   decks: DeckMeta[];
   policies: PolicyMeta[];
   defaults?: Record<string, unknown>;
+  evolution?: EvolutionMeta;
 }
 
 export interface SeatConfig {

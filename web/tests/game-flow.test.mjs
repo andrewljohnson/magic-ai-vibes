@@ -67,6 +67,23 @@ test("policy version dates render deterministically without locale drift", async
   assert.equal(formatPolicyVersionDate("2026-13-01"), "2026-13-01");
 });
 
+test("evolution result helpers preserve the exact manifest and percent scale", async () => {
+  const { evolvedDeckCardCount, formatEvolutionPercent } =
+    await loadTypeScriptModule("src/types.ts");
+
+  assert.equal(
+    evolvedDeckCardCount([
+      { id: 1, name: "Island", count: 15 },
+      { id: 2, name: "Flying Men", count: 4 },
+      { id: 3, name: "Counterspell", count: 8 },
+      { id: 4, name: "Other", count: 13 },
+    ]),
+    40,
+  );
+  assert.equal(formatEvolutionPercent(62.456), "62.5%");
+  assert.equal(formatEvolutionPercent(Number.NaN), "0.0%");
+});
+
 test("reproduction summaries keep setup stable while public context advances", async () => {
   const {
     formatReproductionSummary,
@@ -651,4 +668,81 @@ test("new-match dialog owns focus and restores its exact opener", async () => {
     setupDrawer,
     /!event\.shiftKey && active === last[\s\S]+?first\.focus\(\)/,
   );
+});
+
+test("deck evolution is a separate bounded session-only workflow", async () => {
+  const [app, api, styles] = await Promise.all([
+    source("src/App.tsx"),
+    source("src/api.ts"),
+    source("src/styles.css"),
+  ]);
+  const evolutionDialog = app.slice(
+    app.indexOf("function EvolutionDialog"),
+    app.indexOf("function WelcomeTable"),
+  );
+  const topBar = app.slice(app.indexOf("function TopBar"));
+
+  assert.match(
+    topBar,
+    /className="evolve-deck-button"[\s\S]+?Evolve deck[\s\S]+?className="new-game-button"[\s\S]+?New match/,
+  );
+  assert.match(
+    evolutionDialog,
+    /role="dialog"[\s\S]+?aria-modal="true"[\s\S]+?aria-labelledby="evolution-dialog-title"[\s\S]+?aria-describedby="evolution-dialog-description"/,
+  );
+  assert.match(
+    evolutionDialog,
+    /<h1 id="evolution-dialog-title">Evolve a deck<\/h1>/,
+  );
+  assert.match(evolutionDialog, /event\.key === "Escape"/);
+  assert.match(evolutionDialog, /event\.key !== "Tab"/);
+  assert.match(evolutionDialog, /restoreFocusRef/);
+
+  for (const field of [
+    "seed",
+    "generations",
+    "population",
+    "games",
+    "learnedRollouts",
+  ]) {
+    assert.match(
+      evolutionDialog,
+      new RegExp(`evolution\\.limits\\.${field}\\.min`),
+    );
+    assert.match(
+      evolutionDialog,
+      new RegExp(`evolution\\.limits\\.${field}\\.max`),
+    );
+  }
+  assert.match(evolutionDialog, /createEvolution\(submitted\)/);
+  assert.match(evolutionDialog, /result\.generations\.map/);
+  assert.match(evolutionDialog, /result\.best\.cards\.map/);
+  assert.match(evolutionDialog, /result\.best\.byOpponent\.map/);
+  assert.match(evolutionDialog, /Aggregate fitness/);
+  assert.match(evolutionDialog, /Save for this session/);
+  assert.match(
+    evolutionDialog,
+    /disappears when the Node server restarts/,
+  );
+  assert.match(evolutionDialog, /meta\?\.decks\.filter\(\(deck\) => deck\.ephemeral\)/);
+  assert.doesNotMatch(evolutionDialog, /localStorage|sessionStorage|indexedDB/);
+
+  assert.match(api, /request<\{ evolution: EvolutionResult \}>\("\/api\/evolutions"/);
+  assert.match(
+    api,
+    /`\/api\/evolutions\/\$\{encodeURIComponent\(id\)\}\/save`/,
+  );
+  assert.match(api, /body: JSON\.stringify\(\{ name \}\)/);
+  assert.match(app, /const addSavedDeck = useCallback/);
+  assert.match(
+    app,
+    /current\.decks\.filter\(\(candidate\) => candidate\.id !== deck\.id\)/,
+  );
+
+  assert.match(styles, /\.evolution-layer\s*\{[\s\S]+?z-index:\s*55/);
+  assert.match(
+    styles,
+    /\.evolution-workspace\s*\{[\s\S]+?grid-template-columns:\s*300px minmax\(0,\s*1fr\)/,
+  );
+  assert.match(styles, /\.evolution-table-scroll\s*\{[\s\S]+?overflow-x:\s*auto/);
 });

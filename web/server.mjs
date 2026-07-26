@@ -15,6 +15,39 @@ const MAX_LOG_ENTRIES = 2_000;
 const FROZEN_C16_GENERATIONS = 16;
 const FROZEN_C16_TRAIN_GAMES = 800;
 const FROZEN_C16_TRAIN_SEED = "424242";
+const EVOLUTION_TIMEOUT_MS = 120_000;
+const MAX_EVOLUTION_OUTPUT_BYTES = 512 * 1024;
+const MAX_EVOLUTION_RESULTS = 32;
+const MAX_SAVED_DECKS = 32;
+
+const CARD_NAMES = Object.freeze([
+  "Forest",
+  "Mountain",
+  "Grizzly Bears",
+  "Lightning Bolt",
+  "Ironroot Treefolk",
+  "Fire Elemental",
+  "Island",
+  "Counterspell",
+  "Water Elemental",
+  "Tsunami",
+  "Plains",
+  "Millstone",
+  "Moat",
+  "Flying Men",
+  "Ironclaw Orcs",
+  "Gray Ogre",
+  "Hill Giant",
+  "Disintegrate",
+  "Giant Growth",
+  "Mox Sapphire",
+  "Sol Ring",
+  "Ancestral Recall",
+  "Time Walk",
+  "Braingeyser",
+  "Force Spike",
+  "Air Elemental",
+]);
 
 export const DECKS = Object.freeze([
   {
@@ -183,6 +216,40 @@ const LIMITS = Object.freeze({
   learnedGenerations: { min: 0, max: FROZEN_C16_GENERATIONS },
 });
 
+export const EVOLUTION_PILOTS = Object.freeze([
+  {
+    id: "handcrafted",
+    label: "Handcoded Policy",
+    name: "Handcoded Policy",
+    description: "Fast rules-aware evaluation against the five-deck metagame.",
+  },
+  {
+    id: "learned-value-c16",
+    label: "Learned Value C16",
+    name: "Learned Value C16",
+    description:
+      "Frozen C16 Value model with bounded information-set rollouts.",
+  },
+]);
+
+export const EVOLUTION_DEFAULTS = Object.freeze({
+  generations: 3,
+  population: 8,
+  games: 1,
+  pilot: "handcrafted",
+  seed: FROZEN_C16_TRAIN_SEED,
+  learnedRollouts: 8,
+});
+
+export const EVOLUTION_LIMITS = Object.freeze({
+  generations: { min: 1, max: 20 },
+  population: { min: 5, max: 32 },
+  games: { min: 1, max: 16 },
+  learnedRollouts: { min: 1, max: 64 },
+  retainedResults: MAX_EVOLUTION_RESULTS,
+  savedDecks: MAX_SAVED_DECKS,
+});
+
 const MIME_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".gif", "image/gif"],
@@ -316,13 +383,18 @@ function boundedInteger(value, fieldName, limits, fallback) {
   return candidate;
 }
 
-function validatedDeck(value, fieldName, fallback) {
+function validatedDeck(
+  value,
+  fieldName,
+  fallback,
+  validDeckIds = DECK_IDS,
+) {
   const candidate = value === undefined ? fallback : value;
-  if (typeof candidate !== "string" || !DECK_IDS.has(candidate)) {
+  if (typeof candidate !== "string" || !validDeckIds.has(candidate)) {
     throw new ApiError(
       400,
       "invalid_config",
-      `${fieldName} must be one of: ${[...DECK_IDS].join(", ")}`,
+      `${fieldName} must identify an available server deck`,
     );
   }
   return candidate;
@@ -344,7 +416,7 @@ function freshSeed() {
   return BigInt(`0x${randomBytes(8).toString("hex")}`).toString();
 }
 
-export function normalizeGameConfig(body) {
+export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
   if (!isRecord(body)) {
     throw new ApiError(
       400,
@@ -455,6 +527,7 @@ export function normalizeGameConfig(body) {
           humanDeck,
           "players[0].deckId",
           DEFAULT_CONFIG.players[0].deckId,
+          validDeckIds,
         ),
         policyId: "human",
       },
@@ -463,6 +536,7 @@ export function normalizeGameConfig(body) {
           opponentDeck,
           "players[1].deckId",
           DEFAULT_CONFIG.players[1].deckId,
+          validDeckIds,
         ),
         policyId: normalizedOpponentPolicy,
       },
@@ -494,12 +568,688 @@ export function normalizeGameConfig(body) {
   };
 }
 
-function bridgeArguments(config) {
+export function normalizeEvolutionConfig(body) {
+  if (!isRecord(body)) {
+    throw new ApiError(
+      400,
+      "invalid_evolution_config",
+      "The evolution body must be a JSON object",
+    );
+  }
+  const pilot =
+    body.pilot === undefined ? EVOLUTION_DEFAULTS.pilot : body.pilot;
+  const validPilots = new Set(EVOLUTION_PILOTS.map(({ id }) => id));
+  if (typeof pilot !== "string" || !validPilots.has(pilot)) {
+    throw new ApiError(
+      400,
+      "invalid_evolution_config",
+      "pilot must be handcrafted or learned-value-c16",
+    );
+  }
+  try {
+    return {
+      generations: positiveBoundedInteger(
+        body.generations,
+        "generations",
+        EVOLUTION_LIMITS.generations,
+        EVOLUTION_DEFAULTS.generations,
+      ),
+      population: positiveBoundedInteger(
+        body.population,
+        "population",
+        EVOLUTION_LIMITS.population,
+        EVOLUTION_DEFAULTS.population,
+      ),
+      games: positiveBoundedInteger(
+        body.games,
+        "games",
+        EVOLUTION_LIMITS.games,
+        EVOLUTION_DEFAULTS.games,
+      ),
+      pilot,
+      seed: normalizedUint64(
+        body.seed,
+        "seed",
+        EVOLUTION_DEFAULTS.seed,
+      ),
+      learnedRollouts: positiveBoundedInteger(
+        body.learnedRollouts,
+        "learnedRollouts",
+        EVOLUTION_LIMITS.learnedRollouts,
+        EVOLUTION_DEFAULTS.learnedRollouts,
+      ),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "invalid_config") {
+      throw new ApiError(
+        error.status,
+        "invalid_evolution_config",
+        error.message,
+      );
+    }
+    throw error;
+  }
+}
+
+function validatedPercentage(value, fieldName) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 100
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      `${fieldName} must be a finite percentage from 0 to 100`,
+    );
+  }
+  return value;
+}
+
+function validatedEvolutionStats(value, fieldName, expectedGames) {
+  if (!isRecord(value)) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      `${fieldName} must be a result object`,
+    );
+  }
+  const integers = ["games", "wins", "losses", "draws"];
+  for (const field of integers) {
+    if (!Number.isSafeInteger(value[field]) || value[field] < 0) {
+      throw new ApiError(
+        502,
+        "evolution_protocol_error",
+        `${fieldName}.${field} must be a non-negative integer`,
+      );
+    }
+  }
+  if (
+    value.games !== expectedGames ||
+    value.wins + value.losses + value.draws !== value.games
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      `${fieldName} has inconsistent game totals`,
+    );
+  }
+  const winRate = validatedPercentage(
+    value.winRate,
+    `${fieldName}.winRate`,
+  );
+  const expectedWinRate = (100 * value.wins) / value.games;
+  if (Math.abs(winRate - expectedWinRate) > 1e-6) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      `${fieldName}.winRate does not match its outcomes`,
+    );
+  }
+  return {
+    games: value.games,
+    wins: value.wins,
+    losses: value.losses,
+    draws: value.draws,
+    winRate,
+  };
+}
+
+export function validateEvolutionResult(value, config) {
+  if (
+    !isRecord(value) ||
+    value.type !== "evolution_result" ||
+    value.schemaVersion !== 1 ||
+    !isRecord(value.parameters) ||
+    !isRecord(value.deck)
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The evolution engine returned an invalid result",
+    );
+  }
+  const seed = normalizedUint64(value.seed, "seed", undefined);
+  if (seed !== config.seed || value.pilot !== config.pilot) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The evolution result does not match the requested seed and pilot",
+    );
+  }
+  if (
+    value.parameters.generations !== config.generations ||
+    value.parameters.population !== config.population ||
+    value.parameters.gamesPerOpponent !== config.games ||
+    value.parameters.learnedRollouts !== config.learnedRollouts
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The evolution result parameters do not match the request",
+    );
+  }
+  if (
+    !Array.isArray(value.generationBestWinRates) ||
+    value.generationBestWinRates.length !== config.generations
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The evolution result has an invalid generation trace",
+    );
+  }
+  const generations = value.generationBestWinRates.map((rate, index) =>
+    validatedPercentage(rate, `generationBestWinRates[${index}]`),
+  );
+
+  if (
+    value.deck.size !== 40 ||
+    !Array.isArray(value.deck.cardIds) ||
+    value.deck.cardIds.length !== 40 ||
+    !value.deck.cardIds.every(
+      (id) =>
+        Number.isSafeInteger(id) && id >= 0 && id < CARD_NAMES.length,
+    ) ||
+    !Array.isArray(value.deck.cards) ||
+    value.deck.cards.length === 0
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The evolution result has an invalid 40-card deck",
+    );
+  }
+  const seenCards = new Set();
+  let cardTotal = 0;
+  const cards = value.deck.cards.map((card, index) => {
+    if (
+      !isRecord(card) ||
+      !Number.isSafeInteger(card.id) ||
+      card.id < 0 ||
+      card.id >= CARD_NAMES.length ||
+      typeof card.name !== "string" ||
+      card.name !== CARD_NAMES[card.id] ||
+      !Number.isSafeInteger(card.count) ||
+      card.count < 1 ||
+      seenCards.has(card.id)
+    ) {
+      throw new ApiError(
+        502,
+        "evolution_protocol_error",
+        `deck.cards[${index}] is not a valid unique card row`,
+      );
+    }
+    seenCards.add(card.id);
+    cardTotal += card.count;
+    return { id: card.id, name: card.name, count: card.count };
+  });
+  if (cardTotal !== 40) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The evolved deck must contain exactly 40 cards",
+    );
+  }
+  const compactCounts = new Array(CARD_NAMES.length).fill(0);
+  for (const { id, count } of cards) compactCounts[id] = count;
+  const vectorCounts = new Array(CARD_NAMES.length).fill(0);
+  for (const id of value.deck.cardIds) ++vectorCounts[id];
+  if (
+    compactCounts.some((count, index) => count !== vectorCounts[index])
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The compact card manifest does not match the exact card vector",
+    );
+  }
+
+  const gamesPerOpponent = config.games * 4;
+  const stats = validatedEvolutionStats(
+    value.fitness,
+    "fitness",
+    gamesPerOpponent * DECKS.length,
+  );
+  if (
+    !Array.isArray(value.byOpponent) ||
+    value.byOpponent.length !== DECKS.length
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "The evolution result must report every metagame opponent",
+    );
+  }
+  const seenOpponents = new Set();
+  const byOpponent = value.byOpponent.map((entry, index) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.deck !== "string" ||
+      !isRecord(entry.fitness) ||
+      seenOpponents.has(entry.deck)
+    ) {
+      throw new ApiError(
+        502,
+        "evolution_protocol_error",
+        `byOpponent[${index}] is invalid`,
+      );
+    }
+    const expectedDeck = DECKS.find(({ id }) => id === entry.deck);
+    if (expectedDeck === undefined || entry.name !== expectedDeck.name) {
+      throw new ApiError(
+        502,
+        "evolution_protocol_error",
+        `byOpponent[${index}] does not identify a metagame deck`,
+      );
+    }
+    seenOpponents.add(entry.deck);
+    return {
+      deckId: entry.deck,
+      name: entry.name,
+      ...validatedEvolutionStats(
+        entry.fitness,
+        `byOpponent[${index}].fitness`,
+        gamesPerOpponent,
+      ),
+    };
+  });
+
+  return {
+    result: {
+      seed,
+      pilot: value.pilot,
+      generations,
+      population: config.population,
+      games: config.games,
+      learnedRollouts: config.learnedRollouts,
+      best: { cards, stats, byOpponent },
+    },
+    cardIds: [...value.deck.cardIds],
+  };
+}
+
+function validatedSavedDeckName(body) {
+  if (
+    !isRecord(body) ||
+    Object.keys(body).some((key) => key !== "name") ||
+    typeof body.name !== "string"
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_deck_name",
+      "The save body must contain only a deck name",
+    );
+  }
+  const name = body.name.trim();
+  if (
+    name.length < 1 ||
+    name.length > 48 ||
+    /[\u0000-\u001f\u007f]/.test(name)
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_deck_name",
+      "Deck names must contain 1 to 48 visible characters",
+    );
+  }
+  return name;
+}
+
+class EphemeralDeckCatalog {
+  constructor(options = {}) {
+    this.evolutions = new Map();
+    this.decks = new Map();
+    this.savedByEvolution = new Map();
+    this.evolutionIdFactory =
+      options.evolutionIdFactory ?? (() => randomUUID());
+    this.deckIdFactory = options.deckIdFactory ?? (() => randomUUID());
+  }
+
+  #uniqueId(factory, occupied, kind) {
+    for (let attempt = 0; attempt < 16; ++attempt) {
+      const id = factory();
+      if (
+        typeof id === "string" &&
+        id.length > 0 &&
+        !id.includes("/") &&
+        !occupied.has(id) &&
+        !DECK_IDS.has(id)
+      ) {
+        return id;
+      }
+    }
+    throw new ApiError(
+      500,
+      "id_generation_failed",
+      `Could not allocate an opaque ${kind} ID`,
+    );
+  }
+
+  record(config, validated) {
+    const id = this.#uniqueId(
+      this.evolutionIdFactory,
+      this.evolutions,
+      "evolution",
+    );
+    const publicEvolution = {
+      id,
+      ...structuredClone(validated.result),
+    };
+    this.evolutions.set(id, {
+      publicEvolution,
+      config: structuredClone(config),
+      cardIds: [...validated.cardIds],
+    });
+    while (this.evolutions.size > MAX_EVOLUTION_RESULTS) {
+      const oldest = this.evolutions.keys().next().value;
+      this.evolutions.delete(oldest);
+    }
+    return structuredClone(publicEvolution);
+  }
+
+  save(evolutionId, body) {
+    const name = validatedSavedDeckName(body);
+    const stored = this.evolutions.get(evolutionId);
+    if (stored === undefined) {
+      throw new ApiError(
+        404,
+        "evolution_not_found",
+        "No such completed evolution result",
+      );
+    }
+    const evolution = stored.publicEvolution;
+    if (this.savedByEvolution.has(evolutionId)) {
+      throw new ApiError(
+        409,
+        "evolution_already_saved",
+        "That evolution result is already saved",
+      );
+    }
+    if (this.decks.size >= MAX_SAVED_DECKS) {
+      throw new ApiError(
+        409,
+        "saved_deck_limit",
+        "This server session has reached its saved-deck limit",
+      );
+    }
+    const id = this.#uniqueId(this.deckIdFactory, this.decks, "deck");
+    const colors = [
+      evolution.best.cards.some(({ id: card }) => card === 0)
+        ? "green"
+        : null,
+      evolution.best.cards.some(({ id: card }) => card === 1) ? "red" : null,
+      evolution.best.cards.some(({ id: card }) => card === 6)
+        ? "blue"
+        : null,
+      evolution.best.cards.some(({ id: card }) => card === 10)
+        ? "white"
+        : null,
+    ].filter((color) => color !== null);
+    const cards = structuredClone(evolution.best.cards);
+    const metadata = {
+      id,
+      label: name,
+      name,
+      colors,
+      deckList: cards
+        .map(({ name: cardName, count }) => `${count} ${cardName}`)
+        .join(" / "),
+      cards,
+      ephemeral: true,
+      evolution: {
+        id: evolution.id,
+        seed: evolution.seed,
+        pilot: evolution.pilot,
+        generations: stored.config.generations,
+        population: evolution.population,
+        games: evolution.games,
+        learnedRollouts: evolution.learnedRollouts,
+        winRate: evolution.best.stats.winRate,
+      },
+    };
+    this.decks.set(id, {
+      metadata,
+      cardIds: [...stored.cardIds],
+    });
+    this.savedByEvolution.set(evolutionId, id);
+    return structuredClone(metadata);
+  }
+
+  publicDecks() {
+    return [...this.decks.values()].map(({ metadata }) =>
+      structuredClone(metadata),
+    );
+  }
+
+  availableDeckIds() {
+    return new Set([...DECK_IDS, ...this.decks.keys()]);
+  }
+
+  customCardIds(deckId) {
+    return this.decks.get(deckId)?.cardIds ?? null;
+  }
+}
+
+export function evolutionArguments(config) {
+  return [
+    "--evolve-json",
+    "--generations",
+    String(config.generations),
+    "--population",
+    String(config.population),
+    "--games",
+    String(config.games),
+    "--evolve-pilot",
+    config.pilot,
+    "--seed",
+    config.seed,
+    "--learned-rollouts",
+    String(config.learnedRollouts),
+  ];
+}
+
+class EvolutionManager {
+  constructor(options) {
+    this.bridgePath = options.bridgePath;
+    this.bridgeArgsPrefix = options.bridgeArgsPrefix;
+    this.spawnImpl = options.spawnImpl;
+    this.timeoutMs = options.timeoutMs;
+    this.maxOutputBytes = options.maxOutputBytes;
+    this.deckCatalog = options.deckCatalog;
+    this.active = null;
+  }
+
+  async create(config) {
+    if (this.active !== null) {
+      throw new ApiError(
+        409,
+        "evolution_busy",
+        "Another deck evolution is already running",
+      );
+    }
+
+    let child;
+    try {
+      child = this.spawnImpl(
+        this.bridgePath,
+        [...this.bridgeArgsPrefix, ...evolutionArguments(config)],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+          shell: false,
+        },
+      );
+    } catch (error) {
+      throw new ApiError(
+        502,
+        "evolution_start_failed",
+        `Could not start deck evolution: ${error.message}`,
+      );
+    }
+
+    this.active = { child };
+    try {
+      const raw = await this.#readResult(child);
+      const validated = validateEvolutionResult(raw, config);
+      return this.deckCatalog.record(config, validated);
+    } finally {
+      if (this.active?.child === child) this.active = null;
+    }
+  }
+
+  #readResult(child) {
+    return new Promise((resolve, reject) => {
+      if (
+        child?.stdout === undefined ||
+        child?.stderr === undefined ||
+        typeof child.once !== "function"
+      ) {
+        reject(
+          new ApiError(
+            502,
+            "evolution_start_failed",
+            "Deck evolution did not start with bounded output streams",
+          ),
+        );
+        return;
+      }
+
+      let stdout = "";
+      let stderr = "";
+      let outputBytes = 0;
+      let settled = false;
+      const timer = setTimeout(() => {
+        finish(
+          new ApiError(
+            504,
+            "evolution_timeout",
+            "Deck evolution exceeded its runtime limit",
+          ),
+          true,
+        );
+      }, this.timeoutMs);
+
+      const finish = (error, kill = false) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (kill && typeof child.kill === "function") {
+          child.kill("SIGTERM");
+        }
+        if (error !== null) {
+          reject(error);
+          return;
+        }
+        const text = stdout.trim();
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          reject(
+            new ApiError(
+              502,
+              "evolution_protocol_error",
+              "The evolution engine did not return one valid JSON object",
+            ),
+          );
+          return;
+        }
+        if (!isRecord(parsed)) {
+          reject(
+            new ApiError(
+              502,
+              "evolution_protocol_error",
+              "The evolution engine returned a non-object result",
+            ),
+          );
+          return;
+        }
+        resolve(parsed);
+      };
+
+      const receive = (channel, chunk) => {
+        if (settled) return;
+        const text = String(chunk);
+        outputBytes += Buffer.byteLength(text);
+        if (outputBytes > this.maxOutputBytes) {
+          finish(
+            new ApiError(
+              502,
+              "evolution_output_too_large",
+              "Deck evolution exceeded its output limit",
+            ),
+            true,
+          );
+          return;
+        }
+        if (channel === "stdout") stdout += text;
+        else stderr += text;
+      };
+
+      child.stdout.setEncoding?.("utf8");
+      child.stderr.setEncoding?.("utf8");
+      child.stdout.on("data", (chunk) => receive("stdout", chunk));
+      child.stderr.on("data", (chunk) => receive("stderr", chunk));
+      child.once("error", (error) => {
+        finish(
+          new ApiError(
+            502,
+            "evolution_start_failed",
+            `Could not start deck evolution: ${error.message}`,
+          ),
+        );
+      });
+      child.once("close", (code, signal) => {
+        if (code !== 0) {
+          const reason =
+            signal === null
+              ? `code ${code ?? "unknown"}`
+              : `signal ${signal}`;
+          finish(
+            new ApiError(
+              502,
+              "evolution_failed",
+              `The deck evolution engine exited with ${reason}`,
+              stderr.trim()
+                ? { stderr: stderr.trim().slice(-2_048) }
+                : undefined,
+            ),
+          );
+          return;
+        }
+        finish(null);
+      });
+    });
+  }
+
+  isActive() {
+    return this.active !== null;
+  }
+
+  shutdown() {
+    if (
+      this.active?.child !== undefined &&
+      typeof this.active.child.kill === "function"
+    ) {
+      this.active.child.kill("SIGTERM");
+    }
+  }
+}
+
+function bridgeArguments(config, deckCatalog) {
+  const humanCustomCards =
+    deckCatalog?.customCardIds(config.players[0].deckId) ?? null;
+  const opponentCustomCards =
+    deckCatalog?.customCardIds(config.players[1].deckId) ?? null;
   const args = [
     "--human-deck",
-    config.players[0].deckId,
+    humanCustomCards === null ? config.players[0].deckId : "ru-aggro",
     "--opponent-deck",
-    config.players[1].deckId,
+    opponentCustomCards === null
+      ? config.players[1].deckId
+      : "ru-aggro",
     "--opponent-policy",
     config.players[1].policyId,
     "--seed",
@@ -517,6 +1267,15 @@ function bridgeArguments(config) {
     "--learned-generations",
     String(config.learnedGenerations),
   ];
+  if (humanCustomCards !== null) {
+    args.push("--human-deck-cards", humanCustomCards.join(","));
+  }
+  if (opponentCustomCards !== null) {
+    args.push(
+      "--opponent-deck-cards",
+      opponentCustomCards.join(","),
+    );
+  }
   if (config.debugReveal) {
     args.push("--debug-reveal");
   }
