@@ -36,6 +36,13 @@ PANEL_REPETITIONS = 5
 PANEL_SEEDS = (101, 202, 303, 404, 505, 606, 707, 808)
 ARTIFACT_SMOKE_SEED = 919190
 DECKS = ("Green", "Red", "Blue", "White", "RU Aggro")
+PANEL_PAIRING_REPETITIONS = len(PANEL_SEEDS) * PANEL_REPETITIONS
+PANEL_TOTAL_DIRECT_GAMES = PANEL_PAIRING_REPETITIONS * 60
+POOLED_DIRECT_REPETITIONS = PRIMARY_REPETITIONS + PANEL_PAIRING_REPETITIONS
+POOLED_DIRECT_DIAGONAL_GAMES = 4 * POOLED_DIRECT_REPETITIONS
+POOLED_DIRECT_OFF_DIAGONAL_GAMES = 2 * POOLED_DIRECT_REPETITIONS
+POOLED_DIRECT_GAMES_PER_DECK = 12 * POOLED_DIRECT_REPETITIONS
+POOLED_DIRECT_TOTAL_GAMES = 60 * POOLED_DIRECT_REPETITIONS
 POLICIES = (
     "Random",
     "Monte Carlo",
@@ -592,6 +599,317 @@ def _matrix_report(matrix: ParsedDeckMatrix) -> dict[str, Any]:
     }
 
 
+def _matrix_from_cells(
+    cells: dict[str, dict[str, Record]], label: str
+) -> ParsedDeckMatrix:
+    if set(cells) != set(DECKS):
+        raise ContractError(
+            f"{label} challenger rows are incomplete: "
+            f"expected {sorted(DECKS)}, got {sorted(cells)}"
+        )
+    for challenger in DECKS:
+        if set(cells[challenger]) != set(DECKS):
+            raise ContractError(
+                f"{label} baseline columns for {challenger} are incomplete: "
+                f"expected {sorted(DECKS)}, "
+                f"got {sorted(cells[challenger])}"
+            )
+        if not all(
+            isinstance(cells[challenger][baseline], Record)
+            for baseline in DECKS
+        ):
+            raise ContractError(f"{label} contains a non-record cell")
+
+    challenger_rows = {
+        challenger: _sum_records(cells[challenger].values())
+        for challenger in DECKS
+    }
+    baseline_columns = {
+        baseline: Record(
+            sum(cells[challenger][baseline].losses for challenger in DECKS),
+            sum(cells[challenger][baseline].wins for challenger in DECKS),
+            sum(cells[challenger][baseline].draws for challenger in DECKS),
+        )
+        for baseline in DECKS
+    }
+    aggregate = _sum_records(challenger_rows.values())
+    return ParsedDeckMatrix(
+        cells=cells,
+        challenger_rows=challenger_rows,
+        baseline_columns=baseline_columns,
+        aggregate=aggregate,
+    )
+
+
+def _record_from_report(value: Any, label: str) -> Record:
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} is not a record object")
+    expected_fields = {"wins", "losses", "draws", "games"}
+    if set(value) != expected_fields:
+        raise ContractError(
+            f"{label} fields are {sorted(value)}, "
+            f"expected {sorted(expected_fields)}"
+        )
+    for field in expected_fields:
+        if type(value[field]) is not int or value[field] < 0:
+            raise ContractError(f"{label} {field} is not a nonnegative integer")
+    record = Record(value["wins"], value["losses"], value["draws"])
+    if record.games != value["games"]:
+        raise ContractError(
+            f"{label} has {record.games} outcomes but reports "
+            f"{value['games']} games"
+        )
+    return record
+
+
+def _record_from_summary(value: Any, label: str) -> Record:
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} is not a summary object")
+    required_fields = ("wins", "losses", "draws")
+    if any(field not in value for field in required_fields):
+        raise ContractError(f"{label} is missing outcome counts")
+    for field in required_fields:
+        if type(value[field]) is not int or value[field] < 0:
+            raise ContractError(f"{label} {field} is not a nonnegative integer")
+    return Record(value["wins"], value["losses"], value["draws"])
+
+
+def _matrix_from_report(value: Any, label: str) -> ParsedDeckMatrix:
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} is not a matrix object")
+    expected_fields = {
+        "aggregate",
+        "challenger_rows",
+        "baseline_columns",
+        "cells",
+    }
+    if set(value) != expected_fields:
+        raise ContractError(
+            f"{label} fields are {sorted(value)}, "
+            f"expected {sorted(expected_fields)}"
+        )
+    raw_cells = value["cells"]
+    if not isinstance(raw_cells, dict):
+        raise ContractError(f"{label} cells are not an object")
+    if set(raw_cells) != set(DECKS):
+        raise ContractError(
+            f"{label} cell rows are incomplete: "
+            f"expected {sorted(DECKS)}, got {sorted(raw_cells)}"
+        )
+    cells: dict[str, dict[str, Record]] = {}
+    for challenger in DECKS:
+        raw_row = raw_cells[challenger]
+        if not isinstance(raw_row, dict):
+            raise ContractError(
+                f"{label} cell row {challenger} is not an object"
+            )
+        if set(raw_row) != set(DECKS):
+            raise ContractError(
+                f"{label} cell row {challenger} is incomplete: "
+                f"expected {sorted(DECKS)}, got {sorted(raw_row)}"
+            )
+        cells[challenger] = {
+            baseline: _record_from_report(
+                raw_row[baseline],
+                f"{label} cell {challenger} vs {baseline}",
+            )
+            for baseline in DECKS
+        }
+
+    matrix = _matrix_from_cells(cells, label)
+    if _matrix_report(matrix) != value:
+        raise ContractError(
+            f"{label} cells do not reconstruct its exact rows, columns, "
+            "and aggregate"
+        )
+    return matrix
+
+
+def pool_direct_evidence(
+    primary: dict[str, Any], stability: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        primary_report = primary["exact_deck_matrix"]
+        panel_report = stability["pooled_handcrafted"]["exact_deck_matrix"]
+    except (KeyError, TypeError) as error:
+        raise ContractError(
+            "pooled direct evidence is missing an exact source matrix"
+        ) from error
+
+    primary_matrix = _matrix_from_report(
+        primary_report, "primary exact deck matrix report"
+    )
+    panel_matrix = _matrix_from_report(
+        panel_report, "fixed-panel exact deck matrix report"
+    )
+    try:
+        primary_summary = _record_from_summary(
+            primary["record"], "primary parsed aggregate"
+        )
+        panel_summary = _record_from_summary(
+            stability["pooled_handcrafted"],
+            "fixed-panel parsed aggregate",
+        )
+    except (KeyError, TypeError) as error:
+        raise ContractError(
+            "pooled direct evidence is missing a parsed source aggregate"
+        ) from error
+    if primary_matrix.aggregate != primary_summary:
+        raise ContractError(
+            "primary exact deck matrix report disagrees with its "
+            "parsed aggregate"
+        )
+    if panel_matrix.aggregate != panel_summary:
+        raise ContractError(
+            "fixed-panel exact deck matrix report disagrees with its "
+            "parsed aggregate"
+        )
+    if primary_matrix.aggregate.games != PRIMARY_TOTAL_GAMES:
+        raise ContractError(
+            "primary exact deck matrix report has "
+            f"{primary_matrix.aggregate.games} games, "
+            f"expected {PRIMARY_TOTAL_GAMES}"
+        )
+    if panel_matrix.aggregate.games != PANEL_TOTAL_DIRECT_GAMES:
+        raise ContractError(
+            "fixed-panel exact deck matrix report has "
+            f"{panel_matrix.aggregate.games} games, "
+            f"expected {PANEL_TOTAL_DIRECT_GAMES}"
+        )
+
+    cells = {
+        challenger: {
+            baseline: _sum_records(
+                (
+                    primary_matrix.cells[challenger][baseline],
+                    panel_matrix.cells[challenger][baseline],
+                )
+            )
+            for baseline in DECKS
+        }
+        for challenger in DECKS
+    }
+    matrix = _matrix_from_cells(cells, "pooled direct exact deck matrix")
+    expected_aggregate = _sum_records(
+        (primary_matrix.aggregate, panel_matrix.aggregate)
+    )
+    if matrix.aggregate != expected_aggregate:
+        raise ContractError(
+            "pooled direct aggregate is not the component-wise sum "
+            "of its source aggregates"
+        )
+    if matrix.aggregate.games != POOLED_DIRECT_TOTAL_GAMES:
+        raise ContractError(
+            f"pooled direct aggregate has {matrix.aggregate.games} games, "
+            f"expected {POOLED_DIRECT_TOTAL_GAMES}"
+        )
+
+    for challenger in DECKS:
+        for baseline in DECKS:
+            record = matrix.cells[challenger][baseline]
+            expected_games = (
+                POOLED_DIRECT_DIAGONAL_GAMES
+                if challenger == baseline
+                else POOLED_DIRECT_OFF_DIAGONAL_GAMES
+            )
+            if record.games != expected_games:
+                raise ContractError(
+                    f"pooled direct cell {challenger} vs {baseline} has "
+                    f"{record.games} games, expected {expected_games}"
+                )
+        if (
+            matrix.challenger_rows[challenger].games
+            != POOLED_DIRECT_GAMES_PER_DECK
+        ):
+            raise ContractError(
+                f"pooled direct challenger row {challenger} has "
+                f"{matrix.challenger_rows[challenger].games} games, "
+                f"expected {POOLED_DIRECT_GAMES_PER_DECK}"
+            )
+        if (
+            matrix.baseline_columns[challenger].games
+            != POOLED_DIRECT_GAMES_PER_DECK
+        ):
+            raise ContractError(
+                f"pooled direct baseline column {challenger} has "
+                f"{matrix.baseline_columns[challenger].games} games, "
+                f"expected {POOLED_DIRECT_GAMES_PER_DECK}"
+            )
+
+    challenger_cross_sum = _sum_records(matrix.challenger_rows.values())
+    if challenger_cross_sum != matrix.aggregate:
+        raise ContractError(
+            "pooled direct challenger rows do not sum component-wise "
+            "to the aggregate"
+        )
+    baseline_cross_sum = _sum_records(matrix.baseline_columns.values())
+    expected_baseline = Record(
+        matrix.aggregate.losses,
+        matrix.aggregate.wins,
+        matrix.aggregate.draws,
+    )
+    if baseline_cross_sum != expected_baseline:
+        raise ContractError(
+            "pooled direct baseline columns do not sum component-wise "
+            "to the reciprocal aggregate"
+        )
+
+    interval = wilson95(matrix.aggregate.wins, matrix.aggregate.games)
+    per_deck = {
+        deck: {
+            "challenger_wins": matrix.challenger_rows[deck].wins,
+            "baseline_wins": matrix.baseline_columns[deck].wins,
+            "challenger_record": _record_report(
+                matrix.challenger_rows[deck]
+            ),
+            "baseline_record": _record_report(
+                matrix.baseline_columns[deck]
+            ),
+            "games_per_policy": POOLED_DIRECT_GAMES_PER_DECK,
+            "challenger_won": (
+                matrix.challenger_rows[deck].wins
+                > matrix.baseline_columns[deck].wins
+            ),
+        }
+        for deck in DECKS
+    }
+    aggregate_over_50 = matrix.aggregate.win_rate > 0.5
+    wilson_lower_over_50 = interval[0] > 0.5
+    direct_wins_all_decks = all(
+        entry["challenger_won"] for entry in per_deck.values()
+    )
+    return {
+        "source_repetitions": {
+            "primary": PRIMARY_REPETITIONS,
+            "fixed_panel": PANEL_PAIRING_REPETITIONS,
+        },
+        "repetitions": POOLED_DIRECT_REPETITIONS,
+        "total_games": POOLED_DIRECT_TOTAL_GAMES,
+        "games_per_deck": POOLED_DIRECT_GAMES_PER_DECK,
+        "diagonal_games_per_cell": POOLED_DIRECT_DIAGONAL_GAMES,
+        "off_diagonal_games_per_cell":
+            POOLED_DIRECT_OFF_DIAGONAL_GAMES,
+        "record": {
+            **_record_report(matrix.aggregate),
+            "win_rate": matrix.aggregate.win_rate,
+        },
+        "wilson95": {
+            "low": interval[0],
+            "high": interval[1],
+        },
+        "per_deck": per_deck,
+        "exact_deck_matrix": _matrix_report(matrix),
+        "aggregate_over_50": aggregate_over_50,
+        "wilson_lower_over_50": wilson_lower_over_50,
+        "direct_wins_all_decks": direct_wins_all_decks,
+        "gate_pass": (
+            aggregate_over_50
+            and wilson_lower_over_50
+            and direct_wins_all_decks
+        ),
+    }
+
+
 def _parse_exact_deck_matrix(
     text: str,
     *,
@@ -681,25 +999,7 @@ def _parse_exact_deck_matrix(
             f"extra={sorted(actual_pairs - expected_pairs)}"
         )
 
-    challenger_rows = {
-        challenger: _sum_records(cells[challenger].values())
-        for challenger in DECKS
-    }
-    baseline_columns = {
-        baseline: Record(
-            sum(cells[challenger][baseline].losses for challenger in DECKS),
-            sum(cells[challenger][baseline].wins for challenger in DECKS),
-            sum(cells[challenger][baseline].draws for challenger in DECKS),
-        )
-        for baseline in DECKS
-    }
-    aggregate = _sum_records(challenger_rows.values())
-    return ParsedDeckMatrix(
-        cells=cells,
-        challenger_rows=challenger_rows,
-        baseline_columns=baseline_columns,
-        aggregate=aggregate,
-    )
+    return _matrix_from_cells(cells, label)
 
 
 def _parse_benchmark_decks(
@@ -902,18 +1202,22 @@ def parse_benchmark_log(
             "reconstructed reciprocal baseline columns do not sum "
             "component-wise to the aggregate record"
         )
-    gate_pass = (
+    smoke_gate_pass = (
         record.win_rate > 0.5
         and computed_interval[0] > 0.5
+    )
+    standalone_gate_pass = (
+        smoke_gate_pass
         and all(entry["challenger_won"] for entry in decks.values())
     )
     verdict = _single(
         r"^  Verdict: (.+)$", text, "benchmark verdict", re.MULTILINE
     ).group(1)
     cli_pass = verdict.startswith("PASS")
-    if cli_pass != gate_pass:
+    if cli_pass != standalone_gate_pass:
         raise ContractError(
-            "CLI benchmark verdict disagrees with independently parsed gate"
+            "CLI benchmark verdict disagrees with independently parsed "
+            "standalone gate"
         )
     return {
         "evaluation_seed": evaluation_seed,
@@ -940,7 +1244,9 @@ def parse_benchmark_log(
         },
         "exact_deck_matrix": _matrix_report(matrix),
         "cache_path_reported": cache_path,
-        "gate_pass": gate_pass,
+        "smoke_gate_pass": smoke_gate_pass,
+        "standalone_gate_pass": standalone_gate_pass,
+        "cli_verdict_pass": cli_pass,
     }
 
 
@@ -1058,7 +1364,7 @@ def parse_stability_log(
     _validate_printed_percentage(
         "pooled Handcrafted", float(pooled_match.group(4)), pooled
     )
-    expected_pooled_games = len(PANEL_SEEDS) * PANEL_REPETITIONS * 60
+    expected_pooled_games = PANEL_TOTAL_DIRECT_GAMES
     if pooled.games != expected_pooled_games:
         raise ContractError(
             f"pooled Handcrafted games are {pooled.games}, "
@@ -1085,15 +1391,14 @@ def parse_stability_log(
             "stability Wilson interval disagrees with pooled record"
         )
 
-    pooled_pairing_repetitions = len(PANEL_SEEDS) * PANEL_REPETITIONS
     matrix = _parse_exact_deck_matrix(
         text,
         header=(
             "Pooled Handcrafted exact challenger-deck x baseline-deck "
             "matrix (challenger perspective)"
         ),
-        diagonal_games=4 * pooled_pairing_repetitions,
-        off_diagonal_games=2 * pooled_pairing_repetitions,
+        diagonal_games=4 * PANEL_PAIRING_REPETITIONS,
+        off_diagonal_games=2 * PANEL_PAIRING_REPETITIONS,
         label="pooled Handcrafted exact deck matrix",
     )
     if matrix.aggregate != pooled:
@@ -1341,7 +1646,7 @@ def parse_stability_log(
         ).group(1)
         == "PASS"
     )
-    exact_gate_pass = (
+    standalone_gate_pass = (
         all(entry["not_losing"] for entry in per_seed.values())
         and pooled.win_rate > 0.5
         and computed_interval[0] > 0.5
@@ -1350,16 +1655,19 @@ def parse_stability_log(
         )
         and pooled_lift_gate
     )
-    if overall_pass and not exact_gate_pass:
+    if overall_pass and not standalone_gate_pass:
         raise ContractError(
-            "CLI Overall PASS contradicts a failed required certification gate"
+            "CLI Overall PASS contradicts the independently parsed "
+            "standalone panel verdict"
         )
+    no_losing_seed = all(
+        entry["not_losing"] for entry in per_seed.values()
+    )
+    panel_gate_pass = no_losing_seed and pooled_lift_gate
     return {
         "seeds": list(PANEL_SEEDS),
         "per_seed_handcrafted": per_seed,
-        "no_losing_seed": all(
-            entry["not_losing"] for entry in per_seed.values()
-        ),
+        "no_losing_seed": no_losing_seed,
         "pooled_handcrafted": {
             "wins": pooled.wins,
             "losses": pooled.losses,
@@ -1377,17 +1685,17 @@ def parse_stability_log(
             "all_five": pooled_lift_gate,
         },
         "cache_path_reported": cache_path,
-        "exact_gate_pass": exact_gate_pass,
+        "standalone_gate_pass": standalone_gate_pass,
+        "panel_gate_pass": panel_gate_pass,
         "cli_overall_pass": overall_pass,
-        "gate_pass": exact_gate_pass,
     }
 
 
 def validate_primary_exit_code(exit_code: int, result: dict[str, Any]) -> None:
-    expected = 0 if result["gate_pass"] else 1
+    expected = 0 if result["cli_verdict_pass"] else 1
     if exit_code != expected:
         raise ContractError(
-            "primary benchmark exit code contradicts its exact gate: "
+            "primary benchmark exit code contradicts its CLI verdict: "
             f"got {exit_code}, expected {expected}"
         )
 
@@ -1395,10 +1703,10 @@ def validate_primary_exit_code(exit_code: int, result: dict[str, Any]) -> None:
 def validate_stability_exit_code(
     exit_code: int, result: dict[str, Any]
 ) -> None:
-    # The simulator's Overall includes additional all-policy gates beyond the
-    # AGENTS.md certification contract. Its exit code must match that printed
-    # status, but a stricter CLI rejection does not reject an otherwise exact
-    # required-gate pass.
+    # The simulator's Overall includes standalone direct and additional
+    # all-policy gates beyond the v4 certification contract. Its exit code
+    # must match that printed status, but a stricter CLI rejection does not
+    # reject an otherwise exact v4 panel/pooled-direct pass.
     expected = 0 if result["cli_overall_pass"] else 1
     if exit_code != expected:
         raise ContractError(
@@ -1487,7 +1795,7 @@ class CertificationRunner:
         self.runtime_dir: Path | None = None
         self.source_entries: tuple[str, ...] = ()
         self.report: dict[str, Any] = {
-            "schema": "learned-value-certification/v3",
+            "schema": "learned-value-certification/v4",
             "status": "infrastructure-incomplete",
             "certified": False,
             "started_utc": self.started.isoformat(),
@@ -1501,6 +1809,19 @@ class CertificationRunner:
                 "deep_monte_carlo_k": DEEP_MONTE_CARLO_ROLLOUTS,
                 "primary_repetitions": PRIMARY_REPETITIONS,
                 "primary_total_games": PRIMARY_TOTAL_GAMES,
+                "fixed_panel_repetitions_per_seed": PANEL_REPETITIONS,
+                "fixed_panel_pooled_repetitions":
+                    PANEL_PAIRING_REPETITIONS,
+                "fixed_panel_total_direct_games":
+                    PANEL_TOTAL_DIRECT_GAMES,
+                "pooled_direct_repetitions": POOLED_DIRECT_REPETITIONS,
+                "pooled_direct_total_games": POOLED_DIRECT_TOTAL_GAMES,
+                "pooled_direct_games_per_deck":
+                    POOLED_DIRECT_GAMES_PER_DECK,
+                "pooled_direct_diagonal_games_per_cell":
+                    POOLED_DIRECT_DIAGONAL_GAMES,
+                "pooled_direct_off_diagonal_games_per_cell":
+                    POOLED_DIRECT_OFF_DIAGONAL_GAMES,
                 "primary_effect_of_interest_percentage_points":
                     PRIMARY_EFFECT_OF_INTEREST_PERCENTAGE_POINTS,
                 "alpha_two_sided": PRIMARY_ALPHA_TWO_SIDED,
@@ -1514,20 +1835,20 @@ class CertificationRunner:
             },
             "cli_contract": {
                 "native_structured_output": False,
-                "parser": "strict-text-v3-integrity-bound",
+                "parser": "strict-text-v4-pooled-direct-integrity-bound",
                 "on_missing_or_changed_evidence": "infrastructure-incomplete",
             },
             "stages": [],
             "integrity_checks": [],
             "source_integrity_checks": [],
             "criteria": {
-                "aggregate_over_50": None,
-                "wilson_lower_over_50": None,
-                "direct_wins_all_decks": None,
+                "primary_aggregate_over_50": None,
+                "primary_wilson_lower_over_50": None,
                 "mixed_lift_all_decks": None,
                 "no_losing_validation_seed": None,
-                "validation_wilson_lower_over_50": None,
-                "validation_direct_wins_all_decks": None,
+                "pooled_direct_aggregate_over_50": None,
+                "pooled_direct_wilson_lower_over_50": None,
+                "pooled_direct_wins_all_decks": None,
                 "tests_and_sanitizers": None,
             },
             "probes": {
@@ -2122,22 +2443,20 @@ class CertificationRunner:
             self.report["primary_benchmark"] = benchmark
             self.report["criteria"].update(
                 {
-                    "aggregate_over_50": (
+                    "primary_aggregate_over_50": (
                         benchmark["record"]["win_rate"] > 0.5
                     ),
-                    "wilson_lower_over_50": (
+                    "primary_wilson_lower_over_50": (
                         benchmark["wilson95"]["low"] > 0.5
-                    ),
-                    "direct_wins_all_decks": all(
-                        row["challenger_won"]
-                        for row in benchmark["per_deck"].values()
                     ),
                 }
             )
             self._write_report()
-            if not benchmark["gate_pass"]:
+            if not benchmark["smoke_gate_pass"]:
                 self.report["status"] = "not-certified"
-                self.report["reason"] = "primary benchmark rejected"
+                self.report["reason"] = (
+                    "primary aggregate/Wilson smoke rejected"
+                )
                 self._write_report(completed=True)
                 print(
                     f"NOT CERTIFIED: primary benchmark; "
@@ -2158,6 +2477,8 @@ class CertificationRunner:
             )
             validate_stability_exit_code(stability_rc, stability)
             self.report["validation"] = stability
+            pooled_direct = pool_direct_evidence(benchmark, stability)
+            self.report["pooled_direct"] = pooled_direct
             self.report["criteria"].update(
                 {
                     "mixed_lift_all_decks": (
@@ -2166,25 +2487,29 @@ class CertificationRunner:
                     "no_losing_validation_seed": (
                         stability["no_losing_seed"]
                     ),
-                    "validation_wilson_lower_over_50": (
-                        stability["pooled_handcrafted"]["wilson95"]["low"]
-                        > 0.5
+                    "pooled_direct_aggregate_over_50": (
+                        pooled_direct["aggregate_over_50"]
                     ),
-                    "validation_direct_wins_all_decks": all(
-                        row["challenger_won"]
-                        for row in stability["pooled_handcrafted"][
-                            "per_deck"
-                        ].values()
+                    "pooled_direct_wilson_lower_over_50": (
+                        pooled_direct["wilson_lower_over_50"]
+                    ),
+                    "pooled_direct_wins_all_decks": (
+                        pooled_direct["direct_wins_all_decks"]
                     ),
                 }
             )
             self._write_report()
-            if not stability["gate_pass"]:
+            if (
+                not stability["panel_gate_pass"]
+                or not pooled_direct["gate_pass"]
+            ):
                 self.report["status"] = "not-certified"
-                self.report["reason"] = "fixed-panel stability rejected"
+                self.report["reason"] = (
+                    "fixed-panel or pooled-direct gate rejected"
+                )
                 self._write_report(completed=True)
                 print(
-                    f"NOT CERTIFIED: fixed-panel stability; "
+                    f"NOT CERTIFIED: fixed-panel/pooled-direct; "
                     f"report {self.report_path}"
                 )
                 return 1

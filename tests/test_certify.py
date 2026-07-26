@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import re
 import subprocess
@@ -123,30 +124,49 @@ def exact_deck_matrix_rows(
     return lines
 
 
-def benchmark_log(*, passing: bool = True, duplicate_ru: bool = False) -> str:
-    if passing:
-        records = {
-            "Green": (220, 188),
-            "Red": (225, 183),
-            "Blue": (215, 193),
-            "White": (230, 178),
-            "RU Aggro": (230, 178),
-        }
-    else:
-        records = {
-            "Green": (190, 218),
-            "Red": (195, 213),
-            "Blue": (200, 208),
-            "White": (205, 203),
-            "RU Aggro": (210, 198),
-        }
+def benchmark_log(
+    *,
+    passing: bool = True,
+    duplicate_ru: bool = False,
+    row_wins: dict[str, int] | None = None,
+) -> str:
+    if row_wins is None:
+        row_wins = (
+            {
+                "Green": 220,
+                "Red": 225,
+                "Blue": 215,
+                "White": 230,
+                "RU Aggro": 230,
+            }
+            if passing
+            else {
+                "Green": 190,
+                "Red": 195,
+                "Blue": 200,
+                "White": 205,
+                "RU Aggro": 210,
+            }
+        )
+    if set(row_wins) != set(certify.DECKS):
+        raise AssertionError("benchmark fixture deck set is incomplete")
+    games_per_deck = certify.PRIMARY_TOTAL_GAMES // len(certify.DECKS)
+    records = {
+        name: (row_wins[name], games_per_deck - row_wins[name])
+        for name in certify.DECKS
+    }
     wins = sum(row[0] for row in records.values())
     losses = sum(row[1] for row in records.values())
     low, high = interval(wins, 2040)
+    exact_low, _ = certify.wilson95(wins, certify.PRIMARY_TOTAL_GAMES)
+    cli_pass = exact_low > 0.5 and all(
+        challenger_wins > baseline_wins
+        for challenger_wins, baseline_wins in records.values()
+    )
     verdict = (
         "PASS — aggregate lower bound exceeds 50% and challenger wins "
         "on all five decks"
-        if passing
+        if cli_pass
         else "FAIL — baseline is better at 95% confidence"
     )
     lines = [
@@ -183,7 +203,7 @@ def benchmark_log(*, passing: bool = True, duplicate_ru: bool = False) -> str:
                 "Exact challenger-deck x baseline-deck matrix "
                 "(challenger perspective)"
             ),
-            {name: records[name][0] for name in certify.DECKS},
+            row_wins,
             certify.PRIMARY_REPETITIONS,
         )
     )
@@ -196,8 +216,22 @@ def stability_log(
     duplicate_ru: bool = False,
     omit_exact_row: bool = False,
     overall_pass: bool = True,
+    row_wins: dict[str, int] | None = None,
+    seed_wins: int = 160,
 ) -> str:
-    low, high = interval(1280, 2400)
+    if row_wins is None:
+        row_wins = {name: 256 for name in certify.DECKS}
+    if set(row_wins) != set(certify.DECKS):
+        raise AssertionError("stability fixture deck set is incomplete")
+    games_per_seed = certify.PANEL_REPETITIONS * 60
+    seed_losses = games_per_seed - seed_wins
+    pooled_wins = seed_wins * len(certify.PANEL_SEEDS)
+    pooled_losses = seed_losses * len(certify.PANEL_SEEDS)
+    if sum(row_wins.values()) != pooled_wins:
+        raise AssertionError(
+            "stability fixture rows do not sum to its per-seed pool"
+        )
+    low, high = interval(pooled_wins, certify.PANEL_TOTAL_DIRECT_GAMES)
     seeds = certify.PANEL_SEEDS[:-1] if missing_seed else certify.PANEL_SEEDS
     lines = [
         identity().rstrip(),
@@ -216,7 +250,12 @@ def stability_log(
                 "    vs Random: 200-100-0 (66.7%) PASS",
                 "    vs Monte Carlo: 190-110-0 (63.3%) PASS",
                 "    vs Deep Monte Carlo: 180-120-0 (60.0%) PASS",
-                "    vs Handcrafted Policy: 160-140-0 (53.3%) PASS",
+                (
+                    f"    vs Handcrafted Policy: "
+                    f"{seed_wins}-{seed_losses}-0 "
+                    f"({seed_wins / games_per_seed * 100.0:.1f}%) "
+                    f"{'PASS' if seed_wins > seed_losses else 'FAIL'}"
+                ),
                 (
                     "    mixed-field lift: Green=PASS Red=PASS "
                     "Blue=PASS White=PASS RU Aggro=PASS => PASS"
@@ -227,13 +266,22 @@ def stability_log(
         [
             "Pooled results",
             (
-                f"  vs Handcrafted Policy: 1280-1120-0 "
-                f"(53.3%, 95% interval {low:.1f}% to {high:.1f}%)"
+                f"  vs Handcrafted Policy: {pooled_wins}-{pooled_losses}-0 "
+                f"({pooled_wins / certify.PANEL_TOTAL_DIRECT_GAMES * 100.0:.1f}%, "
+                f"95% interval {low:.1f}% to {high:.1f}%)"
             ),
         ]
     )
     for name in certify.DECKS:
-        lines.append(f"    {name}: 256 vs 224 PASS")
+        challenger_wins = row_wins[name]
+        baseline_wins = (
+            certify.PANEL_TOTAL_DIRECT_GAMES // len(certify.DECKS)
+            - challenger_wins
+        )
+        lines.append(
+            f"    {name}: {challenger_wins} vs {baseline_wins} "
+            f"{'PASS' if challenger_wins > baseline_wins else 'FAIL'}"
+        )
     lines.append("    Seeds 8/8, confidence PASS, decks PASS => PASS")
     lines.extend(
         exact_deck_matrix_rows(
@@ -241,7 +289,7 @@ def stability_log(
                 "Pooled Handcrafted exact challenger-deck x baseline-deck "
                 "matrix (challenger perspective)"
             ),
-            {name: 256 for name in certify.DECKS},
+            row_wins,
             len(certify.PANEL_SEEDS) * certify.PANEL_REPETITIONS,
         )
     )
@@ -302,6 +350,7 @@ class CertificationParserTests(unittest.TestCase):
         self.assertEqual(
             stability[stability.index("--stability-runs") + 1], "8"
         )
+        self.assertEqual(stability[stability.index("--games") + 1], "5")
         self.assertEqual(stability[stability.index("--seed") + 1], "0")
         for command in (artifact, benchmark, stability):
             self.assertEqual(
@@ -386,7 +435,9 @@ class CertificationParserTests(unittest.TestCase):
         result = certify.parse_benchmark_log(
             benchmark_log(), FINGERPRINT, 314159
         )
-        self.assertTrue(result["gate_pass"])
+        self.assertTrue(result["smoke_gate_pass"])
+        self.assertTrue(result["standalone_gate_pass"])
+        self.assertTrue(result["cli_verdict_pass"])
         self.assertEqual(set(result["per_deck"]), set(certify.DECKS))
         self.assertEqual(result["total_games"], 2040)
         matrix = result["exact_deck_matrix"]
@@ -532,7 +583,9 @@ class CertificationParserTests(unittest.TestCase):
         result = certify.parse_benchmark_log(
             benchmark_log(passing=False), FINGERPRINT, 314159
         )
-        self.assertFalse(result["gate_pass"])
+        self.assertFalse(result["smoke_gate_pass"])
+        self.assertFalse(result["standalone_gate_pass"])
+        self.assertFalse(result["cli_verdict_pass"])
 
     def test_primary_rejects_duplicate_deck(self) -> None:
         with self.assertRaises(certify.ContractError):
@@ -556,7 +609,8 @@ class CertificationParserTests(unittest.TestCase):
         result = certify.parse_stability_log(
             stability_log(), FINGERPRINT
         )
-        self.assertTrue(result["gate_pass"])
+        self.assertTrue(result["standalone_gate_pass"])
+        self.assertTrue(result["panel_gate_pass"])
         self.assertEqual(result["seeds"], list(certify.PANEL_SEEDS))
         self.assertTrue(result["mixed_field"]["all_five"])
         self.assertEqual(
@@ -670,7 +724,8 @@ class CertificationParserTests(unittest.TestCase):
         for original, replacement in replacements.items():
             rounded = rounded.replace(original, replacement)
         result = certify.parse_stability_log(rounded, FINGERPRINT)
-        self.assertTrue(result["gate_pass"])
+        self.assertTrue(result["standalone_gate_pass"])
+        self.assertTrue(result["panel_gate_pass"])
 
     def test_stability_rejects_seed_pool_cross_accounting_mismatch(self) -> None:
         malformed = stability_log().replace(
@@ -692,7 +747,8 @@ class CertificationParserTests(unittest.TestCase):
         result = certify.parse_stability_log(
             stability_log(overall_pass=False), FINGERPRINT
         )
-        self.assertTrue(result["gate_pass"])
+        self.assertTrue(result["standalone_gate_pass"])
+        self.assertTrue(result["panel_gate_pass"])
         self.assertFalse(result["cli_overall_pass"])
         certify.validate_stability_exit_code(1, result)
 
@@ -746,8 +802,276 @@ class CertificationParserTests(unittest.TestCase):
         )
         result = certify.parse_stability_log(tied, FINGERPRINT)
         self.assertTrue(result["no_losing_seed"])
-        self.assertTrue(result["gate_pass"])
+        self.assertTrue(result["standalone_gate_pass"])
+        self.assertTrue(result["panel_gate_pass"])
         self.assertFalse(result["cli_overall_pass"])
+
+    def test_pooled_direct_exact_component_cross_sums(self) -> None:
+        primary = certify.parse_benchmark_log(
+            benchmark_log(), FINGERPRINT, 314159
+        )
+        stability = certify.parse_stability_log(
+            stability_log(), FINGERPRINT
+        )
+        pooled = certify.pool_direct_evidence(primary, stability)
+
+        self.assertEqual(
+            pooled["source_repetitions"],
+            {"primary": 34, "fixed_panel": 40},
+        )
+        self.assertEqual(pooled["repetitions"], 74)
+        self.assertEqual(pooled["total_games"], 4440)
+        self.assertEqual(pooled["games_per_deck"], 888)
+        self.assertEqual(pooled["diagonal_games_per_cell"], 296)
+        self.assertEqual(pooled["off_diagonal_games_per_cell"], 148)
+        self.assertEqual(
+            pooled["record"],
+            {
+                "wins": 2400,
+                "losses": 2040,
+                "draws": 0,
+                "games": 4440,
+                "win_rate": 2400 / 4440,
+            },
+        )
+        self.assertTrue(pooled["gate_pass"])
+
+        primary_matrix = primary["exact_deck_matrix"]
+        panel_matrix = stability["pooled_handcrafted"][
+            "exact_deck_matrix"
+        ]
+        matrix = pooled["exact_deck_matrix"]
+        for challenger in certify.DECKS:
+            self.assertEqual(
+                matrix["challenger_rows"][challenger]["games"], 888
+            )
+            self.assertEqual(
+                matrix["baseline_columns"][challenger]["games"], 888
+            )
+            for baseline in certify.DECKS:
+                pooled_cell = matrix["cells"][challenger][baseline]
+                primary_cell = primary_matrix["cells"][challenger][baseline]
+                panel_cell = panel_matrix["cells"][challenger][baseline]
+                for field in ("wins", "losses", "draws", "games"):
+                    self.assertEqual(
+                        pooled_cell[field],
+                        primary_cell[field] + panel_cell[field],
+                    )
+                expected_games = 296 if challenger == baseline else 148
+                self.assertEqual(pooled_cell["games"], expected_games)
+
+        challenger_totals = {
+            field: sum(
+                matrix["challenger_rows"][deck][field]
+                for deck in certify.DECKS
+            )
+            for field in ("wins", "losses", "draws", "games")
+        }
+        self.assertEqual(
+            challenger_totals,
+            {
+                field: matrix["aggregate"][field]
+                for field in ("wins", "losses", "draws", "games")
+            },
+        )
+        baseline_totals = {
+            field: sum(
+                matrix["baseline_columns"][deck][field]
+                for deck in certify.DECKS
+            )
+            for field in ("wins", "losses", "draws", "games")
+        }
+        self.assertEqual(baseline_totals["wins"], matrix["aggregate"]["losses"])
+        self.assertEqual(
+            baseline_totals["losses"], matrix["aggregate"]["wins"]
+        )
+        self.assertEqual(baseline_totals["draws"], matrix["aggregate"]["draws"])
+        self.assertEqual(baseline_totals["games"], matrix["aggregate"]["games"])
+
+    def test_primary_weak_slice_does_not_veto_repaired_pool(self) -> None:
+        primary = certify.parse_benchmark_log(
+            benchmark_log(
+                row_wins={
+                    "Green": 190,
+                    "Red": 255,
+                    "Blue": 215,
+                    "White": 230,
+                    "RU Aggro": 230,
+                }
+            ),
+            FINGERPRINT,
+            314159,
+        )
+        self.assertTrue(primary["smoke_gate_pass"])
+        self.assertFalse(primary["standalone_gate_pass"])
+        self.assertFalse(primary["cli_verdict_pass"])
+        certify.validate_primary_exit_code(1, primary)
+        with self.assertRaises(certify.ContractError):
+            certify.validate_primary_exit_code(0, primary)
+
+        stability = certify.parse_stability_log(
+            stability_log(), FINGERPRINT
+        )
+        pooled = certify.pool_direct_evidence(primary, stability)
+        self.assertEqual(pooled["per_deck"]["Green"]["challenger_wins"], 446)
+        self.assertEqual(pooled["per_deck"]["Green"]["baseline_wins"], 442)
+        self.assertTrue(pooled["direct_wins_all_decks"])
+        self.assertTrue(pooled["gate_pass"])
+
+    def test_panel_weak_slice_does_not_veto_repaired_pool(self) -> None:
+        stability = certify.parse_stability_log(
+            stability_log(
+                overall_pass=False,
+                row_wins={
+                    "Green": 230,
+                    "Red": 282,
+                    "Blue": 256,
+                    "White": 256,
+                    "RU Aggro": 256,
+                },
+            ),
+            FINGERPRINT,
+        )
+        self.assertFalse(stability["standalone_gate_pass"])
+        self.assertTrue(stability["panel_gate_pass"])
+        self.assertFalse(stability["cli_overall_pass"])
+        certify.validate_stability_exit_code(1, stability)
+        with self.assertRaises(certify.ContractError):
+            certify.validate_stability_exit_code(0, stability)
+
+        primary = certify.parse_benchmark_log(
+            benchmark_log(), FINGERPRINT, 314159
+        )
+        pooled = certify.pool_direct_evidence(primary, stability)
+        self.assertEqual(pooled["per_deck"]["Green"]["challenger_wins"], 450)
+        self.assertEqual(pooled["per_deck"]["Green"]["baseline_wins"], 438)
+        self.assertTrue(pooled["direct_wins_all_decks"])
+        self.assertTrue(pooled["gate_pass"])
+
+    def test_pooled_direct_strictly_rejects_deck_ties_and_losses(self) -> None:
+        stability = certify.parse_stability_log(
+            stability_log(), FINGERPRINT
+        )
+        for green_wins, red_wins, expected in (
+            (188, 257, (444, 444)),
+            (187, 258, (443, 445)),
+        ):
+            with self.subTest(green_wins=green_wins):
+                primary = certify.parse_benchmark_log(
+                    benchmark_log(
+                        row_wins={
+                            "Green": green_wins,
+                            "Red": red_wins,
+                            "Blue": 215,
+                            "White": 230,
+                            "RU Aggro": 230,
+                        }
+                    ),
+                    FINGERPRINT,
+                    314159,
+                )
+                self.assertTrue(primary["smoke_gate_pass"])
+                self.assertFalse(primary["standalone_gate_pass"])
+                pooled = certify.pool_direct_evidence(primary, stability)
+                self.assertEqual(
+                    (
+                        pooled["per_deck"]["Green"]["challenger_wins"],
+                        pooled["per_deck"]["Green"]["baseline_wins"],
+                    ),
+                    expected,
+                )
+                self.assertTrue(pooled["aggregate_over_50"])
+                self.assertTrue(pooled["wilson_lower_over_50"])
+                self.assertFalse(pooled["direct_wins_all_decks"])
+                self.assertFalse(pooled["gate_pass"])
+
+    def test_pooled_direct_wilson_failure_is_a_final_veto(self) -> None:
+        primary = certify.parse_benchmark_log(
+            benchmark_log(
+                row_wins={name: 213 for name in certify.DECKS}
+            ),
+            FINGERPRINT,
+            314159,
+        )
+        self.assertTrue(primary["smoke_gate_pass"])
+        self.assertTrue(primary["standalone_gate_pass"])
+
+        stability = certify.parse_stability_log(
+            stability_log(
+                overall_pass=False,
+                row_wins={name: 240 for name in certify.DECKS},
+                seed_wins=150,
+            ),
+            FINGERPRINT,
+        )
+        self.assertTrue(stability["no_losing_seed"])
+        self.assertTrue(stability["panel_gate_pass"])
+        self.assertFalse(stability["standalone_gate_pass"])
+        pooled = certify.pool_direct_evidence(primary, stability)
+        self.assertEqual(pooled["record"]["wins"], 2265)
+        self.assertTrue(pooled["aggregate_over_50"])
+        self.assertFalse(pooled["wilson_lower_over_50"])
+        self.assertTrue(pooled["direct_wins_all_decks"])
+        self.assertFalse(pooled["gate_pass"])
+
+    def test_pooled_direct_rejects_tampered_source_cross_sums(self) -> None:
+        primary = certify.parse_benchmark_log(
+            benchmark_log(), FINGERPRINT, 314159
+        )
+        stability = certify.parse_stability_log(
+            stability_log(), FINGERPRINT
+        )
+
+        tampered_cell = copy.deepcopy(primary)
+        cell = tampered_cell["exact_deck_matrix"]["cells"]["Green"]["Red"]
+        cell["wins"] -= 1
+        cell["losses"] += 1
+        with self.assertRaisesRegex(
+            certify.ContractError, "do not reconstruct"
+        ):
+            certify.pool_direct_evidence(tampered_cell, stability)
+
+        tampered_row = copy.deepcopy(primary)
+        row = tampered_row["exact_deck_matrix"]["challenger_rows"]["Blue"]
+        row["wins"] += 1
+        row["losses"] -= 1
+        with self.assertRaisesRegex(
+            certify.ContractError, "do not reconstruct"
+        ):
+            certify.pool_direct_evidence(tampered_row, stability)
+
+        tampered_aggregate = copy.deepcopy(stability)
+        aggregate = tampered_aggregate["pooled_handcrafted"][
+            "exact_deck_matrix"
+        ]["aggregate"]
+        aggregate["wins"] += 1
+        aggregate["losses"] -= 1
+        with self.assertRaisesRegex(
+            certify.ContractError, "do not reconstruct"
+        ):
+            certify.pool_direct_evidence(primary, tampered_aggregate)
+
+        tampered_consistent = copy.deepcopy(primary)
+        source = certify._matrix_from_report(
+            tampered_consistent["exact_deck_matrix"], "test source"
+        )
+        cells = {
+            challenger: dict(source.cells[challenger])
+            for challenger in certify.DECKS
+        }
+        original = cells["Green"]["Red"]
+        cells["Green"]["Red"] = certify.Record(
+            original.wins - 1,
+            original.losses + 1,
+            original.draws,
+        )
+        tampered_consistent["exact_deck_matrix"] = certify._matrix_report(
+            certify._matrix_from_cells(cells, "tampered test matrix")
+        )
+        with self.assertRaisesRegex(
+            certify.ContractError, "disagrees with its parsed aggregate"
+        ):
+            certify.pool_direct_evidence(tampered_consistent, stability)
 
     def test_exit_code_disagreement_is_incomplete_evidence(self) -> None:
         benchmark = certify.parse_benchmark_log(
@@ -926,9 +1250,38 @@ class CertificationRunnerLifecycleTests(unittest.TestCase):
             runner.verify_integrity("mutated-binary")
 
     def test_recipe_records_effect_power_and_actual_mde(self) -> None:
-        recipe = self._runner().report["recipe"]
+        runner = self._runner()
+        self.assertEqual(
+            runner.report["schema"], "learned-value-certification/v4"
+        )
+        recipe = runner.report["recipe"]
         self.assertEqual(
             recipe["primary_effect_of_interest_percentage_points"], 3.0
+        )
+        self.assertEqual(recipe["fixed_panel_repetitions_per_seed"], 5)
+        self.assertEqual(recipe["fixed_panel_pooled_repetitions"], 40)
+        self.assertEqual(recipe["fixed_panel_total_direct_games"], 2400)
+        self.assertEqual(recipe["pooled_direct_repetitions"], 74)
+        self.assertEqual(recipe["pooled_direct_total_games"], 4440)
+        self.assertEqual(recipe["pooled_direct_games_per_deck"], 888)
+        self.assertEqual(
+            recipe["pooled_direct_diagonal_games_per_cell"], 296
+        )
+        self.assertEqual(
+            recipe["pooled_direct_off_diagonal_games_per_cell"], 148
+        )
+        self.assertEqual(
+            set(runner.report["criteria"]),
+            {
+                "primary_aggregate_over_50",
+                "primary_wilson_lower_over_50",
+                "mixed_lift_all_decks",
+                "no_losing_validation_seed",
+                "pooled_direct_aggregate_over_50",
+                "pooled_direct_wilson_lower_over_50",
+                "pooled_direct_wins_all_decks",
+                "tests_and_sanitizers",
+            },
         )
         self.assertEqual(recipe["alpha_two_sided"], 0.05)
         power = recipe["power"]

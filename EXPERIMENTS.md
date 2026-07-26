@@ -6285,3 +6285,41 @@ No evaluation seed is claimed by this declaration. After implementation,
 focused tests, complete integration tests, and a committed source snapshot,
 any certification using v4 requires a new repository-searched virgin primary
 seed. Seeds `11235813` and `202607260219` remain permanently consumed.
+
+#### Certification v4 implementation (accepted)
+
+Implemented the declaration without changing either simulator command.
+Primary parsing now distinguishes its original standalone CLI verdict from
+the aggregate/Wilson smoke gate, and fixed-panel parsing distinguishes its
+original standalone verdict from the no-losing-seed plus all-five-lift
+contribution required by v4. Exit codes remain bound to the CLI's own printed
+verdicts even when a stricter standalone deck slice no longer vetoes collection
+of the second prespecified matrix.
+
+The implementation reconstructs both source matrices from their 25 cells,
+checks their printed rows, reciprocal columns, and aggregates, then sums them
+component-wise. It fails closed unless the pooled evidence is exactly 74
+repetitions, 296 games per diagonal cell, 148 per off-diagonal cell, 888 per
+row and column, and 4,440 aggregate. The final direct report includes the
+combined Wilson interval, all five strict deck signs, both source matrices,
+and a `learned-value-certification/v4` schema marker.
+
+Verification:
+
+```sh
+make test-certify
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  tools/certify.py tests/test_certify.py
+git diff --check
+```
+
+All 48 certification tests passed. New coverage proves exact cell/row/column
+cross-sums; repaired weak slices in either source; strict pooled tie/loss and
+Wilson rejection; source-cell, row, and aggregate tamper rejection; and CLI
+exit-code disagreement failure. Decision: **accept the metrology
+implementation**. It collects no new gameplay evidence and claims no seed.
+
+Review reconciliation before this conclusion: the 02:47 PDT independent entry
+explicitly endorsed the v4 pooling discipline as sound and not threshold
+weakening. The newer 02:55 PDT research entry reported C17-DB8 separately; it
+does not alter this measurement-only decision.
