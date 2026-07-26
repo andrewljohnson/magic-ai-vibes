@@ -6729,3 +6729,83 @@ combined distance/terminal-weight recipe. Red's near-zero bias also agrees
 with the independently registered VC-2 correction that Red's target error was
 not chiefly calibration. The next experiment must therefore be a separately
 declared axis, not an endpoint retry or a seed substitution.
+
+### TA4-0 calendar-turn bootstrap-target audit (declared)
+
+Declared at 2026-07-26 04:53 PDT after rereading `REVIEW.md` through its
+04:47 PDT independent reproduction of TW-C17. This is a new, measurement-only
+target-semantics axis. It does not train or promote a model, open any retired
+TW-C17 seed, change terminal weight, or weaken the failed Green gate.
+
+TW-C17 exposed a concrete mismatch in the canonical label recipe. The
+so-called four-state bootstrap uses trace record `i+4`, but `run_with_trace`
+retains both turn-start states and nontrivial priority roots. On sealed HOLD1,
+`i -> i+4` advanced only 2.949 actual turns pooled, with range 0–4; the means
+were Green 3.130, Red 3.116, Blue 2.711, White 2.768, and RU Aggro 3.147.
+Thus the target horizon is both shorter than the deployed four-turn search and
+systematically deck-dependent. This is a card-agnostic target-semantics defect,
+not a reason to retry terminal weight.
+
+Hypothesis: on frozen-C16 mirror traces, replacing record offset four with the
+earliest future trace record whose `turn_number` is at least the root's
+`turn_number + 4` will improve the quality of the canonical 0.50 terminal /
+0.50 parent bootstrap target. On common bootstrap-eligible rows it will reduce
+pooled Brier and soft-label log loss against discounted terminal outcome,
+shrink Green and RU optimism and Blue pessimism, and leave honestly priced Red
+without a material new bias.
+
+#### Frozen construction
+
+- Exact parent: Environment-v3 C16, T800, training seed `424242`, fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+- Audit seed: `202607260501`, repository-searched and unused before this
+  declaration. Generate five exact 40-game balanced blocks using generation
+  coordinate 18: 200 physical games, 400 perspectives, and 80 perspectives
+  per Green, Red, Blue, White, and RU Aggro.
+- Both seats are frozen C16 Learned mirrors with K=1, H=4, exploration 0.05,
+  residual zero, no Handcrafted policy, and a 500-turn bound.
+- For record `i` and perspective `p`, let `z` be the unchanged discounted
+  terminal target. The control is
+  `c = 0.50*z + 0.50*V_C16(trace[i+4], p)` when `i+4` exists, else `z`.
+- Let `j` be the earliest record after `i` with
+  `trace[j].turn_number >= trace[i].turn_number + 4`. The treatment is
+  `a = 0.50*z + 0.50*V_C16(trace[j], p)` when `j` exists, else `z`.
+  Because every real turn has an unconditional turn-start snapshot, every
+  treatment bootstrap must land at exactly four elapsed turns; fail closed on
+  a skipped/regressing turn, invalid probability, empty trace, schedule
+  imbalance, parent mismatch, or nondeterministic rerun.
+- Primary comparisons use only the common eligible rows where `j` exists.
+  This prevents the treatment's larger terminal tail (`a=z`) from winning
+  mechanically. All-record metrics, record-offset and calendar-turn tail
+  counts, actual distances, target hashes, target means/variances, and
+  saturation are descriptive and fully reported.
+- Losses are record-weighted and uncertainty clusters by physical game using
+  the same CR1 estimator and 95% interval as TW-C17. Report control, treatment,
+  and paired deltas pooled and per deck.
+
+#### Fixed reject-only gate
+
+TA4 passes as a target mechanism only if all of the following hold:
+
+1. pooled `a-c` Brier and soft-label log-loss upper 95% bounds are below zero
+   on common eligible rows;
+2. absolute signed bias strictly shrinks for Green, RU Aggro, and Blue;
+3. Red absolute bias does not increase by more than 0.01, neither loss worsens
+   by more than 0.01 on any deck, and no new material deck bias is created;
+4. treatment bootstrap distances are exactly four turns, all five decks have
+   exact schedule balance, repeated fixed-seed reports are bit-identical, the
+   parent artifact is unchanged, and the target computation remains
+   hidden-information safe.
+
+White is reported under the loss/no-new-bias guards but receives no
+directional bias gate because the independent mispricing map did not register
+a White sign. Per-deck strict shrink is a directional mechanism check, not a
+small-effect significance claim; the 200-game audit cannot establish playing
+strength.
+
+Passing licenses a separately preregistered, same-shard paired C17 critic fit:
+canonical record-offset-4 control versus calendar-turn-4 treatment with all
+other data, order, parent, optimizer, seeds, and terminal weight identical.
+Failure rejects calendar alignment as the immediate training target without
+changing the four-turn endpoint, retrying a seed, or inspecting gameplay.
+No benchmark or training run is licensed by this declaration itself.
