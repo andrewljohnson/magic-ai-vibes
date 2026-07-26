@@ -23,7 +23,7 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-learned-iteration test-probes test-web test-web-ui web web-target-stack web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-capture test-certify test-learned-iteration test-probes test-web test-web-ui web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -65,8 +65,16 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(PROBE_RUNNER_TEST_RUNNER)
 	./$(WEB_BRIDGE_TEST_RUNNER)
 	sh tests/test_cli.sh ./$(SIMULATOR)
+	sh tests/test_capture_once.sh
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
 	npm --prefix web test
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_certify.py
+
+test-certify:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_certify.py
+
+test-capture:
+	sh tests/test_capture_once.sh
 
 test-learned-iteration: $(LEARNED_ITERATION_TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
@@ -92,6 +100,18 @@ web: web-build
 web-target-stack: $(WEB_DEPENDENCIES)
 	npm --prefix web run build
 	npm --prefix web run fixture:target-stack
+
+web-interaction: $(WEB_DEPENDENCIES)
+	npm --prefix web run build
+	npm --prefix web run fixture:interaction
+
+web-journey: $(WEB_DEPENDENCIES)
+	npm --prefix web run build
+	npm --prefix web run fixture:journey
+
+web-delayed-journey: $(WEB_DEPENDENCIES)
+	npm --prefix web run build
+	npm --prefix web run fixture:delayed-journey
 
 benchmark: $(SIMULATOR)
 	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger handcrafted --baseline monte-carlo --rollouts 2

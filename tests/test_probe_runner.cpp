@@ -199,10 +199,10 @@ void test_seed_and_fingerprint_ignore_iteration_order() {
             old_school::probes::kProbeDevV3,
             probes[1].stable_id);
     expect(
-        first_fingerprint == "d7168adf7e1aaa27",
-        "frozen probe-dev-v3 information-set fingerprint changed");
-    expect(first_seed == 0x89D27C5C0BC11CB5ULL,
-           "stable FNV-1a seed derivation changed");
+        first_fingerprint == "cf4729a535378a12",
+        "frozen Environment-v3 probe information-set fingerprint changed");
+    expect(first_seed == 0x9926A408617AD414ULL,
+           "stable Environment-v3 FNV-1a seed derivation changed");
     std::reverse(probes.begin(), probes.end());
     expect(
         old_school::probe_runner::corpus_information_set_fingerprint(
@@ -2832,12 +2832,13 @@ void test_validation_scoring_reports_pass_x_zero_pair() {
 void test_validation_corpus_identity_is_golden() {
     const auto corpus =
         old_school::probes::make_probe_validation_v1();
+    const std::string fingerprint =
+        old_school::probe_runner::corpus_information_set_fingerprint(
+            ProbeCorpusKind::ValidationV1, corpus);
     expect(
-        old_school::probe_runner::
-                corpus_information_set_fingerprint(
-                    ProbeCorpusKind::ValidationV1, corpus) ==
-            "9bb67ff6e8b476b2",
-        "validation-v1 information-set fingerprint drifted");
+        fingerprint == "cac989a21b0d18cb",
+        "Environment-v3 validation-v1 information-set fingerprint "
+        "drifted");
     expect(corpus.size() == 1 &&
                corpus.front().harvest.has_value(),
            "validation-v1 golden probe lost harvest provenance");

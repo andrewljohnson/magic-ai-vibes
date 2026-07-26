@@ -68,8 +68,9 @@ Learned opponent's hand so you can inspect
 why it may be choosing an action. That opponent-hand reveal is terminal-only
 debugging information: the Learned model still receives only the hand size
 and never receives the card identities. Library identities and order remain
-hidden. Every legal priority, attack, block, and combat-damage-order choice is
-presented as a numbered menu; enter `q` at any prompt to abandon the game. It
+hidden. Every legal priority, attack, block, combat-damage-order, and
+cleanup-discard choice is presented as a numbered menu; enter `q` at any
+prompt to abandon the game. It
 uses the same rules and current Learned Value policy as simulation mode. The
 MVP timing limitation still applies interactively: there is no priority
 window after attackers or blockers are declared.
@@ -171,7 +172,8 @@ and candidate decks can be well outside the model's training distribution.
 
 - 20 starting life, shuffled 40-card decks, seven-card opening hands
 - Random starting player; the starting player skips their first draw
-- Untap, draw, first main, combat, second main, and cleanup
+- Untap, draw, first main, combat, second main, and cleanup, including the
+  active player's required discard to seven cards
 - One land play per turn and colored/generic mana payment
 - Mox Sapphire and Sol Ring use implicit mana abilities; unspent mana remains
   in the pool through the current phase
@@ -294,7 +296,7 @@ deliberately excludes it.
 Challenger training is cached independently for every `(N, training games,
 training seed)` identity. For example, C16 at the default training settings
 uses
-`build/model-cache/old-school-value-challenger-v2-c16-t800-s424242.bin`.
+`build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`.
 The artifact also binds the exact challenger recipe, Old School engine/model
 schema, and final content fingerprint. The first matching interactive,
 benchmark, stability, probe, or tournament route prints `generated`; later
@@ -335,7 +337,7 @@ It retains its base checkpoint and G1 through G8, so probe runs can attribute
 the first generation where a decision changes. Because the canonical
 800-game recipe is expensive, benchmark and probe routes transparently cache
 the complete frozen bundle at
-`build/model-cache/old-school-value-g8-v2-t800-s424242.bin` (with the
+`build/model-cache/old-school-value-g8-v3-t800-s424242.bin` (with the
 requested training game count and seed in the filename). The first route
 prints `generated`;
 later matching routes print `loaded` and reproduce the exact report,
@@ -355,7 +357,7 @@ Its base and G1-G4 use the canonical recipe; in G5-G8, consecutive game pairs
 alternate raw Value and information-safe K=1/H=4 Value search, exactly 50/50
 by games. The progress report prints raw/search game and example counts
 separately. Its artifact is isolated at
-`build/model-cache/old-school-value-g8-mix50-v2-t800-s424242.bin` (parameterized by the
+`build/model-cache/old-school-value-g8-mix50-v3-t800-s424242.bin` (parameterized by the
 requested game count and seed), and `--refresh-value-mix50-cache` refreshes
 only that recipe. Canonical and Mix50 bundles are validated independently and
 cannot be substituted for one another. Model artifacts and probe caches use
@@ -430,6 +432,46 @@ across every evaluation seed, and requires aggregate, per-seed, confidence,
 and per-deck gates. It uses legacy G0 unless `--learned-generations N` is
 passed explicitly, and applies `--learned-rollouts N` to both its paired and
 mixed-field evaluations.
+
+For a promotion claim, use the fail-closed C16 certification harness from a
+committed executable tree with the prebuilt v3 artifact. The worktree must be
+clean except that the independent reviewer may have the exact unstaged status
+` M REVIEW.md`; that one drift is hashed and recorded, while staged review
+changes and every other worktree change fail closed. The first argument must
+be a new evaluation seed; a claimed seed cannot be reused. The second argument
+is the complete expected model fingerprint:
+
+```sh
+./tools/certify.sh 161803398 \
+  68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+```
+
+This runs the ordinary tests from the archived commit (including a lockfile
+bound `npm ci --ignore-scripts`), ASan/UBSan, a 2,040-game paired benchmark,
+and the fixed `101,202,303,404,505,606,707,808` stability panel. Source-input
+hashes bracket every archived-tree test/build stage. It writes collision-safe
+logs, the committed source snapshot, copied model artifact, resolved
+compiler/tool hashes, and a JSON verdict under `certification-runs/`.
+Direct-policy evidence includes the complete challenger-deck by baseline-deck
+5×5 outcome matrix. The harness reconstructs challenger row marginals,
+reciprocal baseline column marginals, and aggregate records from those cells;
+the displayed deck summaries are cross-checks, not the source of the gates.
+
+The primary design records a three-percentage-point effect of interest,
+two-sided alpha `0.05`, and target power `0.80`. Under its nominal
+exact-binomial definition (the first count whose two-sided 95% Wilson lower
+bound exceeds 50%, with draws treated as non-wins), 2,040 games achieve about
+77.1% power; the corresponding 80%-power MDE is about 3.11 points. That
+calculation assumes independent, fixed-probability game outcomes and records
+that deck heterogeneity or within-pair dependence can reduce effective power.
+The report preserves both figures rather than overstating the nominal
+three-point screen. The primary seed is permanently claimed when the run
+begins. Exit status `0`
+alone means certified, `1` means a complete scientific rejection, and `2` or
+higher means the evidence was incomplete or invalid. Current probe corpora
+are descriptive and are deliberately excluded from promotion until a
+qualified five-deck corpus exists. Run the fast parser tests alone with
+`make test-certify`.
 
 To measure training-seed and evaluation-seed variance separately:
 

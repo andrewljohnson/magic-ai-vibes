@@ -2,6 +2,7 @@
 #include "old_school/interactive.hpp"
 #include "old_school/learned_iteration.hpp"
 #include "old_school/probe_runner.hpp"
+#include "old_school/probes.hpp"
 
 #include <algorithm>
 #include <array>
@@ -207,6 +208,15 @@ void print_help(std::string_view executable) {
         << " --diagnose-terminal-credit --train-games 800"
            " --train-seed 424242\n"
         << "       " << executable
+        << " --audit-dc1-dominance --train-games 800"
+           " --train-seed 424242 --learned-generations 16\n"
+        << "       " << executable
+        << " --audit-dc1-action-census --train-games 800"
+           " --train-seed 424242 --learned-generations 16\n"
+        << "       " << executable
+        << " --audit-v3-blue-stack-regret --train-games 800"
+           " --train-seed 424242 --learned-generations 16\n"
+        << "       " << executable
         << " --variance-study [--games N] [--train-games N]\n"
         << "       " << executable
         << " --score-probes [--probe-worlds N] [--probe-horizon N]"
@@ -314,6 +324,18 @@ void print_help(std::string_view executable) {
            "Priority residual, shallow-prior blend off, and required "
            "terminal results; accepts only --train-games and "
            "--train-seed\n"
+        << "  --audit-dc1-dominance  Evaluation-only Environment-v3 "
+           "resource-dominance mining audit of exact C16; fixed "
+           "all-five 2x40-game train/heldout blocks and K=8; trains "
+           "and deploys nothing\n"
+        << "  --audit-dc1-action-census  Load-only DC1-B0 replay of "
+           "every Priority legal-action set; fixed all-five 2x40-game "
+           "train/heldout blocks, K=8, max_turns=128, and diagnostic "
+           "ceiling 512; performs no pair or density evaluation\n"
+        << "  --audit-v3-blue-stack-regret  Load-only BSR0 audit of "
+           "actual Blue-held opponent-stack choices from 200 balanced "
+           "loss-source games; fixed C16, K64+64/H8 Learned-mirror "
+           "reference, hidden clone, and 40-root rare-error gate\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
            "study (default: 5 games)\n"
         << "  --score-probes   Label/score an offline decision-probe "
@@ -941,6 +963,62 @@ train_value_challenger_with_progress(
                       ? "loaded "
                       : "generated ")
               << cache_path << '\n';
+    return model;
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+load_value_challenger_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed,
+    std::size_t generations) {
+    const std::string cache_path =
+        old_school::learned_value_challenger_cache_path(
+            training_games, training_seed, generations);
+    std::error_code exists_error;
+    const bool cache_exists =
+        std::filesystem::exists(cache_path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect pinned Value Challenger C" +
+            std::to_string(generations) + " artifact '" +
+            cache_path + "': " + exists_error.message());
+    }
+    if (!cache_exists) {
+        throw std::runtime_error(
+            "evaluation-only route requires the existing pinned "
+            "Value Challenger C" +
+            std::to_string(generations) + " artifact '" +
+            cache_path + "'; generate and freeze it in a separate "
+            "training run");
+    }
+
+    std::cout
+        << "Loading pinned Value Challenger C" << generations
+        << " artifact (seed " << training_seed << ", "
+        << training_games << " initial games) from "
+        << cache_path << "..." << std::flush;
+    const auto started = std::chrono::steady_clock::now();
+    std::shared_ptr<const old_school::LearnedModel> model;
+    try {
+        model =
+            old_school::load_learned_value_challenger_artifact(
+                cache_path, training_games, training_seed,
+                generations)
+                .model();
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            "pinned Value Challenger C" +
+            std::to_string(generations) + " artifact '" +
+            cache_path + "' is invalid: " + error.what());
+    }
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout
+        << " done (" << std::fixed << std::setprecision(2)
+        << elapsed.count() << "s)\n"
+        << "  Pinned Value Challenger C" << generations
+        << " fingerprint: "
+        << old_school::learned_model_fingerprint(model) << '\n';
     return model;
 }
 
@@ -1735,6 +1813,31 @@ void print_benchmark(const old_school::BotBenchmarkSummary& result,
                   << baseline.average_cards_milled() << '/'
                   << baseline.average_ending_life() << '\n';
     }
+    std::cout
+        << "\nExact challenger-deck x baseline-deck matrix "
+           "(challenger perspective)\n";
+    for (std::size_t challenger_deck = 0;
+         challenger_deck <
+         result.challenger_deck_matchups.size();
+         ++challenger_deck) {
+        for (std::size_t baseline_deck = 0;
+             baseline_deck <
+             result.challenger_deck_matchups[challenger_deck].size();
+             ++baseline_deck) {
+            const auto challenger_id =
+                static_cast<old_school::DeckId>(challenger_deck);
+            const auto baseline_id =
+                static_cast<old_school::DeckId>(baseline_deck);
+            const auto& cell =
+                result.challenger_deck_matchups[challenger_deck]
+                                                [baseline_deck];
+            std::cout
+                << "  " << old_school::deck_name(challenger_id)
+                << " vs " << old_school::deck_name(baseline_id)
+                << ": " << cell.wins << '-' << cell.losses << '-'
+                << cell.draws << " (" << cell.games << " games)\n";
+        }
+    }
 }
 
 bool run_stability_panel(std::size_t runs,
@@ -1754,6 +1857,7 @@ bool run_stability_panel(std::size_t runs,
         old_school::BotKind::DeepMonteCarlo,
         old_school::BotKind::Handcrafted,
     };
+    constexpr std::size_t kHandcraftedBaselineIndex = 3;
     old_school::BotConfig learned_config =
         bot_config(old_school::BotKind::Learned, rollouts,
                    deep_rollouts, training_games,
@@ -1887,6 +1991,25 @@ bool run_stability_panel(std::size_t runs,
                 merge_deck(pooled[baseline].baseline_decks[deck],
                            result.baseline_decks[deck]);
             }
+            for (std::size_t challenger_deck = 0;
+                 challenger_deck <
+                 result.challenger_deck_matchups.size();
+                 ++challenger_deck) {
+                for (std::size_t baseline_deck = 0;
+                     baseline_deck <
+                     result
+                         .challenger_deck_matchups[challenger_deck]
+                         .size();
+                     ++baseline_deck) {
+                    merge_deck(
+                        pooled[baseline]
+                            .challenger_deck_matchups[challenger_deck]
+                                                     [baseline_deck],
+                        result
+                            .challenger_deck_matchups[challenger_deck]
+                                                     [baseline_deck]);
+                }
+            }
             std::cout << "    vs "
                       << old_school::bot_name(baseline_kinds[baseline])
                       << ": " << result.challenger_stats.wins << '-'
@@ -1967,6 +2090,64 @@ bool run_stability_panel(std::size_t runs,
                   << " => " << (policy_pass ? "PASS" : "FAIL")
                   << '\n';
     }
+    const auto& pooled_handcrafted =
+        pooled[kHandcraftedBaselineIndex];
+    std::cout
+        << "\nPooled Handcrafted exact challenger-deck x "
+           "baseline-deck matrix (challenger perspective)\n";
+    for (std::size_t challenger_deck = 0;
+         challenger_deck <
+         pooled_handcrafted.challenger_deck_matchups.size();
+         ++challenger_deck) {
+        for (std::size_t baseline_deck = 0;
+             baseline_deck <
+             pooled_handcrafted
+                 .challenger_deck_matchups[challenger_deck]
+                 .size();
+             ++baseline_deck) {
+            const auto challenger_id =
+                static_cast<old_school::DeckId>(challenger_deck);
+            const auto baseline_id =
+                static_cast<old_school::DeckId>(baseline_deck);
+            const auto& cell =
+                pooled_handcrafted
+                    .challenger_deck_matchups[challenger_deck]
+                                             [baseline_deck];
+            std::cout
+                << "  " << old_school::deck_name(challenger_id)
+                << " vs " << old_school::deck_name(baseline_id)
+                << ": " << cell.wins << '-' << cell.losses << '-'
+                << cell.draws << " (" << cell.games << " games)\n";
+        }
+    }
+    constexpr std::array<old_school::BotKind, 5>
+        exact_mixed_policy_order = {
+            old_school::BotKind::Random,
+            old_school::BotKind::MonteCarlo,
+            old_school::BotKind::DeepMonteCarlo,
+            old_school::BotKind::Handcrafted,
+            old_school::BotKind::Learned,
+        };
+    std::cout
+        << "\nPooled mixed-field exact deck-policy counts\n";
+    for (std::size_t deck = 0;
+         deck < pooled_mixed.deck_bots.size(); ++deck) {
+        const auto deck_id =
+            static_cast<old_school::DeckId>(deck);
+        for (const old_school::BotKind policy :
+             exact_mixed_policy_order) {
+            const auto& stats =
+                pooled_mixed
+                    .deck_bots[deck]
+                              [static_cast<std::size_t>(policy)];
+            std::cout << "  " << old_school::deck_name(deck_id)
+                      << " | " << old_school::bot_name(policy)
+                      << ": " << stats.wins << '-'
+                      << stats.losses << '-' << stats.draws
+                      << " (" << stats.games << " games)\n";
+        }
+    }
+
     const auto pooled_lift =
         old_school::compare_learned_deck_lifts(pooled_mixed);
     const bool mixed_lift_pass =
@@ -2178,6 +2359,8 @@ void print_evolution(const old_school::DeckEvolutionSummary& result,
 
 constexpr std::string_view kCanonicalP0Fingerprint =
     "bda1ea4401388bac3f26cf773623bac8848482f68e73d45a968473105a6d8dbc";
+constexpr std::string_view kDc1EnvironmentV3P0Fingerprint =
+    "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
 constexpr std::string_view kCanonicalActorG0Fingerprint =
     "7639176465b7b7c240e9d0d0067d352b0cac052a7083b47e6504073206068a84";
 constexpr std::string_view kP1RExpectedFingerprint =
@@ -2187,6 +2370,670 @@ bool approximately_equal(double left, double right) {
     constexpr double kTolerance = 1.0e-9;
     return std::isfinite(left) && std::isfinite(right) &&
            std::abs(left - right) <= kTolerance;
+}
+
+void print_dc1_mining_split(
+    std::string_view name,
+    const old_school::probes::Dc1MiningSplitReport& split) {
+    std::cout
+        << name << ": seed=" << split.seed
+        << ", games=" << split.games
+        << ", seat-games=" << split.seat_games
+        << ", priority-roots=" << split.raw_priority_roots
+        << ", multi-roots=" << split.raw_multi_action_roots
+        << ", retained-roots=" << split.retained_roots
+        << ", pair-groups=" << split.pair_groups
+        << ", paired-world-cells=" << split.paired_world_cells
+        << ", settlements=" << split.settlement_operations
+        << ", caps/sums="
+        << (split.accounting_passed ? "PASS" : "FAIL")
+        << ", hidden="
+        << (split.hidden_repartition_passed ? "PASS" : "FAIL")
+        << ", density="
+        << (split.density_passed ? "PASS" : "FAIL") << '\n';
+    for (std::size_t deck = 0;
+         deck < old_school::kDeckCount; ++deck) {
+        const auto& summary = split.decks[deck];
+        std::cout
+            << "  "
+            << old_school::deck_name(
+                   static_cast<old_school::DeckId>(deck))
+            << ": seat-games=" << summary.seat_games
+            << ", priority-roots=" << summary.raw_priority_roots
+            << ", multi-roots="
+            << summary.raw_multi_action_roots
+            << ", retained-roots=" << summary.retained_roots
+            << ", pair-groups=" << summary.pair_groups
+            << ", paired-world-cells="
+            << summary.paired_world_cells
+            << ", settlements="
+            << summary.settlement_operations
+            << ", unique +=" << summary.unique_positive_pairs
+            << ", unique incomparable="
+            << summary.unique_incomparable_pairs
+            << ", matched controls="
+            << summary.unique_matched_incomparable_controls
+            << ", conflicting keys="
+            << summary.conflicting_pair_keys
+            << ", seat coverage "
+            << summary.positive_seat_games << '/'
+            << summary.incomparable_control_seat_games
+            << " ["
+            << (summary.density_passed ? "PASS" : "FAIL")
+            << "]\n";
+    }
+}
+
+void print_dc1_mining_report(
+    const old_school::probes::Dc1DominanceAuditReport& report) {
+    std::cout
+        << "DC1 Immediate Resource-Dominance Mining Audit\n"
+        << "Evaluation-only; no fit, filter, model write, or "
+           "deployment.\n"
+        << "Environment: v3 cleanup-discard\n"
+        << "Frozen parent: " << report.model_fingerprint << '\n'
+        << "Canonical settlement: K=" << report.config.worlds
+        << ", max_legal_actions="
+        << report.config.max_legal_actions
+        << ", max_turns=" << report.config.max_game_turns
+        << ", max roots/seat-game="
+        << report.config.max_roots_per_seat_game
+        << ", max pairs/root="
+        << report.config.max_pairs_per_root << '\n'
+        << "Fixture gate: "
+        << (report.fixture_gate_passed ? "PASS" : "FAIL")
+        << " (X=0 positive; payable/live Spike and productive "
+           "actions nontriggers)\n";
+    print_dc1_mining_split("Training mining", report.training);
+    print_dc1_mining_split("Held-out mining", report.heldout);
+    std::cout
+        << "Accounting: "
+        << (report.accounting_passed ? "PASS" : "FAIL")
+        << "\nVerdict: "
+        << (report.gate_passed ? "PASS" : "REJECT")
+        << (report.gate_passed
+                ? " (licenses a separate preregistered treatment)"
+                : " (density insufficient; no treatment)")
+        << '\n';
+}
+
+std::string_view dc1_phase_name(old_school::TurnPhase phase) {
+    switch (phase) {
+    case old_school::TurnPhase::FirstMain:
+        return "first-main";
+    case old_school::TurnPhase::BeginCombat:
+        return "begin-combat";
+    case old_school::TurnPhase::DeclareAttackers:
+        return "declare-attackers";
+    case old_school::TurnPhase::DeclareBlockers:
+        return "declare-blockers";
+    case old_school::TurnPhase::DamageOrder:
+        return "damage-order";
+    case old_school::TurnPhase::EndCombat:
+        return "end-combat";
+    case old_school::TurnPhase::SecondMain:
+        return "second-main";
+    }
+    throw std::logic_error("unknown DC1 census phase");
+}
+
+std::string_view dc1_action_kind_name(
+    old_school::PriorityActionKind kind) {
+    switch (kind) {
+    case old_school::PriorityActionKind::Pass:
+        return "pass";
+    case old_school::PriorityActionKind::PlayLand:
+        return "play-land";
+    case old_school::PriorityActionKind::CastCreature:
+        return "cast-creature";
+    case old_school::PriorityActionKind::CastSorcery:
+        return "cast-sorcery";
+    case old_school::PriorityActionKind::CastArtifact:
+        return "cast-artifact";
+    case old_school::PriorityActionKind::CastEnchantment:
+        return "cast-enchantment";
+    case old_school::PriorityActionKind::CastLightningBolt:
+        return "bolt";
+    case old_school::PriorityActionKind::CastDisintegrate:
+        return "disintegrate";
+    case old_school::PriorityActionKind::CastGiantGrowth:
+        return "giant-growth";
+    case old_school::PriorityActionKind::CastCounterspell:
+        return "counterspell";
+    case old_school::PriorityActionKind::CastAncestralRecall:
+        return "ancestral";
+    case old_school::PriorityActionKind::CastBraingeyser:
+        return "braingeyser";
+    case old_school::PriorityActionKind::CastForceSpike:
+        return "force-spike";
+    case old_school::PriorityActionKind::ActivateMillstone:
+        return "millstone";
+    }
+    throw std::logic_error("unknown DC1 census action kind");
+}
+
+void print_dc1_count_histogram(
+    const std::vector<std::size_t>& histogram) {
+    std::cout << '{';
+    bool first = true;
+    for (std::size_t count = 0;
+         count < histogram.size(); ++count) {
+        if (histogram[count] == 0) {
+            continue;
+        }
+        std::cout << (first ? "" : ", ")
+                  << count << ':' << histogram[count];
+        first = false;
+    }
+    std::cout << '}';
+}
+
+void print_dc1_action_kind_histogram(
+    const std::array<
+        std::size_t,
+        old_school::probes::kDc1PriorityActionKindCount>&
+        histogram) {
+    std::cout << '{';
+    bool first = true;
+    for (std::size_t kind = 0;
+         kind < histogram.size(); ++kind) {
+        if (histogram[kind] == 0) {
+            continue;
+        }
+        std::cout
+            << (first ? "" : ", ")
+            << dc1_action_kind_name(
+                   static_cast<
+                       old_school::PriorityActionKind>(kind))
+            << ':' << histogram[kind];
+        first = false;
+    }
+    std::cout << '}';
+}
+
+std::string dc1_hex64(std::uint64_t value) {
+    std::ostringstream output;
+    output << std::hex << std::setfill('0')
+           << std::setw(16) << value;
+    return output.str();
+}
+
+void print_dc1_census_split(
+    std::string_view name,
+    const old_school::probes::Dc1ActionCensusSplitReport&
+        split) {
+    std::cout
+        << name << ": seed=" << split.seed
+        << ", games=" << split.games
+        << ", seat-games=" << split.seat_games
+        << ", priority-roots=" << split.priority_roots
+        << ", over-64-roots=" << split.over_threshold_roots
+        << ", max-actions=" << split.maximum_legal_actions
+        << ", descriptors="
+        << (split.descriptors_distinct ? "distinct" : "DUPLICATE")
+        << ", accounting="
+        << (split.accounting_passed ? "PASS" : "FAIL")
+        << "\n  global legal-count histogram=";
+    print_dc1_count_histogram(split.legal_action_histogram);
+    std::cout << '\n';
+    for (std::size_t deck_index = 0;
+         deck_index < old_school::kDeckCount; ++deck_index) {
+        const auto& deck = split.decks[deck_index];
+        const auto deck_id =
+            static_cast<old_school::DeckId>(deck_index);
+        std::cout
+            << "  " << old_school::deck_name(deck_id)
+            << '(' << deck_index << ')'
+            << ": seat-games=" << deck.seat_games
+            << ", roots=" << deck.priority_roots
+            << ", over-64=" << deck.over_threshold_roots
+            << ", max=" << deck.maximum_legal_actions
+            << ", histogram=";
+        print_dc1_count_histogram(
+            deck.legal_action_histogram);
+        std::cout << '\n';
+    }
+    std::cout << "  over-64 contexts:";
+    if (split.over_threshold_contexts.empty()) {
+        std::cout << " none\n";
+        return;
+    }
+    std::cout << '\n';
+    for (const auto& context :
+         split.over_threshold_contexts) {
+        const auto root_id =
+            static_cast<std::size_t>(context.root_deck);
+        const auto opponent_id =
+            static_cast<std::size_t>(
+                context.opponent_deck);
+        std::cout
+            << "    split="
+            << (context.training_split
+                    ? "training"
+                    : "heldout")
+            << " block=" << context.block
+            << " schedule=" << context.schedule_index
+            << " seat=" << context.seat
+            << " root="
+            << old_school::deck_name(context.root_deck)
+            << '(' << root_id << ')'
+            << " opponent="
+            << old_school::deck_name(context.opponent_deck)
+            << '(' << opponent_id << ')'
+            << " trace-root=" << context.trace_ordinal
+            << " turn=" << context.turn_number
+            << " phase=" << dc1_phase_name(context.phase)
+            << " passes=" << context.consecutive_passes
+            << " stack=" << context.stack_size
+            << " actions=" << context.actions.legal_actions
+            << " kinds=";
+        print_dc1_action_kind_histogram(
+            context.actions.action_kinds);
+        std::cout
+            << " descriptors="
+            << (context.actions.descriptors_distinct
+                    ? "distinct"
+                    : "DUPLICATE")
+            << " fnv1a64="
+            << dc1_hex64(
+                   context.actions
+                       .sorted_descriptor_fnv1a64)
+            << '\n';
+    }
+}
+
+void print_dc1_census_report(
+    const old_school::probes::Dc1ActionCensusReport&
+        report) {
+    std::cout
+        << "DC1-B0 Legal-Action Census\n"
+        << "Evaluation-only; no pair settlement, density "
+           "evaluation, fit, filter, model write, or deployment.\n"
+        << "Frozen parent: " << report.model_fingerprint << '\n'
+        << "Configuration: K=" << report.config.worlds
+        << ", blocks/split=" << report.config.blocks_per_split
+        << ", max_turns=" << report.config.max_game_turns
+        << ", threshold=" << report.config.threshold
+        << ", diagnostic-ceiling="
+        << report.config.diagnostic_ceiling
+        << ", training-exploration="
+        << format_real(
+               report.config.training_exploration_rate)
+        << "\n";
+    print_dc1_census_split("Training census", report.training);
+    print_dc1_census_split("Held-out census", report.heldout);
+    std::cout
+        << "Split seeds distinct: "
+        << (report.config.training_seed !=
+                    report.config.heldout_seed
+                ? "PASS"
+                : "FAIL")
+        << "\nPair comparisons evaluated: "
+        << report.pair_comparisons
+        << "\nDensity examples evaluated: "
+        << report.density_examples
+        << "\nAccounting: "
+        << (report.accounting_passed ? "PASS" : "FAIL")
+        << "\nReproduced >64 root: "
+        << (report.reproduced_over_threshold_root
+                ? "PASS"
+                : "FAIL")
+        << "\nMaximum <=512: "
+        << (report.ceiling_passed ? "PASS" : "FAIL")
+        << "\nVerdict: "
+        << (report.gate_passed ? "ACCEPT" : "REJECT")
+        << (report.gate_passed
+                ? " (licenses only a separately declared density bound)"
+                : " (density remains unlicensed)")
+        << '\n';
+}
+
+void print_bsr_best_actions(
+    const std::vector<std::string>& actions) {
+    std::cout << '{';
+    for (std::size_t index = 0;
+         index < actions.size(); ++index) {
+        std::cout << (index == 0 ? "" : ",")
+                  << actions[index];
+    }
+    std::cout << '}';
+}
+
+void print_bsr_report(
+    const old_school::probes::BsrAuditReport& report,
+    double elapsed_seconds) {
+    std::cout
+        << "BSR0 Environment-v3 Blue-Held Stack-Regret Audit\n"
+        << "Load-only diagnostic; Handcrafted supplies source-game "
+           "opposition only. Every score/continuation is frozen "
+           "Learned mirror play.\n"
+        << "Environment: "
+        << old_school::probes::kBsrEnvironmentRevision
+        << '\n'
+        << "Frozen model: " << report.model_fingerprint
+        << "\nSource: seed=" << report.config.source_seed
+        << ", blocks=" << report.config.source_blocks
+        << ", games=" << report.source_games
+        << ", max-turns=" << report.config.source_max_turns
+        << ", production=K"
+        << report.config.production_worlds
+        << "/H4, roots/loss<="
+        << report.config.roots_per_loss
+        << ", roots/opponent="
+        << report.config.roots_per_opponent
+        << "\nReference: seed="
+        << report.config.reference_seed
+        << ", scout=K"
+        << report.config.reference.scout_worlds
+        << ", confirmation=K"
+        << report.config.reference.confirmation_worlds
+        << ", H=" << report.config.reference.horizon_turns
+        << ", rollouts/world="
+        << report.config.reference.rollouts_per_world
+        << ", threads="
+        << report.config.reference.evaluation_threads
+        << ", Value mirror, epsilon=0, residual=0, "
+           "shallow blend=off\n"
+        << "Source totals: losses=" << report.tracked_losses
+        << ", draws=" << report.draws
+        << ", turn-limit-draws="
+        << report.turn_limit_draws
+        << ", trace-roots=" << report.trace_roots
+        << ", Blue-held/opponent-top="
+        << report.tracked_held_opponent_stack_roots
+        << ", rejected opponent-held/opponent-top="
+        << report.opponent_held_opponent_stack_roots
+        << ", eligible loss roots="
+        << report.eligible_loss_roots
+        << ", losses with eligible roots="
+        << report.loss_games_with_eligible_roots
+        << "\n\nSource cells (opponent, tracked seat, play/draw):\n";
+    for (const auto& cell : report.source_cells) {
+        std::cout
+            << "  "
+            << old_school::deck_name(cell.opponent_deck)
+            << " seat=" << cell.tracked_seat
+            << ' '
+            << (cell.tracked_starts ? "play" : "draw")
+            << ": games=" << cell.games
+            << ", losses=" << cell.tracked_losses
+            << ", draws=" << cell.draws
+            << ", turn-limit-draws="
+            << cell.turn_limit_draws
+            << ", roots=" << cell.trace_roots
+            << ", Blue-held=" <<
+                cell.tracked_held_opponent_stack_roots
+            << ", opponent-held="
+            << cell.opponent_held_opponent_stack_roots
+            << ", eligible-loss=" << cell.eligible_loss_roots
+            << ", eligible-loss-games="
+            << cell.loss_games_with_eligible_roots
+            << ", retained=" << cell.retained_roots << '\n';
+    }
+    std::cout << "\nOpponent strata:\n";
+    for (const auto& deck : report.decks) {
+        std::cout
+            << "  " << old_school::deck_name(
+                   deck.opponent_deck)
+            << ": games=" << deck.games
+            << ", losses=" << deck.tracked_losses
+            << ", draws=" << deck.draws
+            << ", turn-limit-draws="
+            << deck.turn_limit_draws
+            << ", trace-roots=" << deck.trace_roots
+            << ", Blue-held=" <<
+                deck.tracked_held_opponent_stack_roots
+            << ", opponent-held="
+            << deck.opponent_held_opponent_stack_roots
+            << ", eligible-loss=" << deck.eligible_loss_roots
+            << ", eligible-loss-games="
+            << deck.loss_games_with_eligible_roots
+            << ", retained=" << deck.retained_roots
+            << " from " << deck.retained_distinct_losses
+            << " losses, diagnostic mistakes="
+            << deck.diagnostic_stable_mistakes
+            << ", practical mistakes="
+            << deck.practical_high_cost_mistakes
+            << ", reference="
+            << deck.reference_rollout_evaluations
+            << " (terminal="
+            << deck.reference_terminal_evaluations
+            << ", bootstrap="
+            << deck.reference_bootstrapped_evaluations
+            << ")\n";
+    }
+
+    std::size_t deck_games = 0;
+    std::size_t deck_losses = 0;
+    std::size_t deck_draws = 0;
+    std::size_t deck_turn_limit_draws = 0;
+    std::size_t deck_trace_roots = 0;
+    std::size_t deck_tracked_held = 0;
+    std::size_t deck_opponent_held = 0;
+    std::size_t deck_eligible = 0;
+    std::size_t deck_eligible_games = 0;
+    std::size_t deck_retained = 0;
+    std::size_t deck_diagnostic = 0;
+    std::size_t deck_practical = 0;
+    std::size_t deck_reference_rollouts = 0;
+    std::size_t deck_reference_terminal = 0;
+    std::size_t deck_reference_bootstrapped = 0;
+    for (const auto& deck : report.decks) {
+        deck_games += deck.games;
+        deck_losses += deck.tracked_losses;
+        deck_draws += deck.draws;
+        deck_turn_limit_draws += deck.turn_limit_draws;
+        deck_trace_roots += deck.trace_roots;
+        deck_tracked_held +=
+            deck.tracked_held_opponent_stack_roots;
+        deck_opponent_held +=
+            deck.opponent_held_opponent_stack_roots;
+        deck_eligible += deck.eligible_loss_roots;
+        deck_eligible_games +=
+            deck.loss_games_with_eligible_roots;
+        deck_retained += deck.retained_roots;
+        deck_diagnostic +=
+            deck.diagnostic_stable_mistakes;
+        deck_practical +=
+            deck.practical_high_cost_mistakes;
+        deck_reference_rollouts +=
+            deck.reference_rollout_evaluations;
+        deck_reference_terminal +=
+            deck.reference_terminal_evaluations;
+        deck_reference_bootstrapped +=
+            deck.reference_bootstrapped_evaluations;
+    }
+    std::size_t root_reference_rollouts = 0;
+    std::size_t root_reference_terminal = 0;
+    std::size_t root_reference_bootstrapped = 0;
+    for (const auto& root : report.roots) {
+        root_reference_rollouts +=
+            root.score.rollout_evaluations;
+        root_reference_terminal +=
+            root.score.terminal_evaluations;
+        root_reference_bootstrapped +=
+            root.score.bootstrapped_evaluations;
+    }
+    std::cout
+        << "\nAccounting cross-sums "
+           "(opponent-strata sum/aggregate):\n"
+        << "  games=" << deck_games << '/'
+        << report.source_games
+        << ", losses=" << deck_losses << '/'
+        << report.tracked_losses
+        << ", draws=" << deck_draws << '/'
+        << report.draws
+        << ", turn-limit-draws="
+        << deck_turn_limit_draws << '/'
+        << report.turn_limit_draws
+        << ", trace-roots=" << deck_trace_roots << '/'
+        << report.trace_roots << '\n'
+        << "  Blue-held=" << deck_tracked_held << '/'
+        << report.tracked_held_opponent_stack_roots
+        << ", opponent-held=" << deck_opponent_held << '/'
+        << report.opponent_held_opponent_stack_roots
+        << ", eligible-loss=" << deck_eligible << '/'
+        << report.eligible_loss_roots
+        << ", eligible-loss-games="
+        << deck_eligible_games << '/'
+        << report.loss_games_with_eligible_roots
+        << ", retained=" << deck_retained << '/'
+        << report.roots.size() << '\n'
+        << "  diagnostic=" << deck_diagnostic << '/'
+        << report.diagnostic_stable_mistakes
+        << ", practical=" << deck_practical << '/'
+        << report.practical_high_cost_mistakes
+        << ", reference-rollouts="
+        << deck_reference_rollouts << '/'
+        << report.reference_rollout_evaluations
+        << ", terminal=" << deck_reference_terminal << '/'
+        << report.reference_terminal_evaluations
+        << ", bootstrap=" << deck_reference_bootstrapped << '/'
+        << report.reference_bootstrapped_evaluations << '\n'
+        << "  root-reference-rollouts="
+        << root_reference_rollouts << '/'
+        << report.reference_rollout_evaluations
+        << ", terminal=" << root_reference_terminal << '/'
+        << report.reference_terminal_evaluations
+        << ", bootstrap="
+        << root_reference_bootstrapped << '/'
+        << report.reference_bootstrapped_evaluations
+        << ", retained distinct losses="
+        << report.retained_distinct_losses << '\n';
+
+    std::cout << "\nRetained roots and split-sample reference:\n";
+    for (std::size_t index = 0;
+         index < report.roots.size(); ++index) {
+        const auto& root = report.roots[index];
+        const auto& score = root.score;
+        std::cout
+            << "  [" << index + 1 << "] "
+            << root.stable_id
+            << "\n      opponent="
+            << old_school::deck_name(root.opponent_deck)
+            << ", stable-root="
+            << root.stable_root_fingerprint
+            << ", info/actions="
+            << root.information_action_fingerprint
+            << ", block=" << root.block
+            << ", cell=" << root.schedule_index
+            << ", seat=" << root.tracked_seat
+            << ", " << (root.tracked_starts ? "play" : "draw")
+            << ", game-seed=" << root.game_seed
+            << ", trace=" << root.trace_ordinal
+            << ", turn=" << root.turn_number
+            << ", phase=" << dc1_phase_name(root.phase)
+            << ", actions=" << root.action_count
+            << ", actual[" << score.actual_action_index
+            << "]=" << root.actual_action_descriptor
+            << "\n      scout seed=" << score.scout_seed
+            << ", best=";
+        print_bsr_best_actions(score.scout_best_actions);
+        std::cout
+            << ", Q(actual)="
+            << format_real(score.scout_actual_mean)
+            << ", Q(best)="
+            << format_real(score.scout_best_mean)
+            << "\n      confirm seed="
+            << score.confirmation_seed << ", best=";
+        print_bsr_best_actions(
+            score.confirmation_best_actions);
+        std::cout
+            << ", Q(actual)="
+            << format_real(
+                   score.confirmation_actual_mean)
+            << ", Q(best)="
+            << format_real(
+                   score.confirmation_best_mean)
+            << ", regret="
+            << format_real(score.confirmation_regret)
+            << ", paired-SE="
+            << format_real(score.paired_standard_error)
+            << ", lower95="
+            << format_real(score.paired_lower_95)
+            << "\n      stable-best="
+            << (score
+                        .scout_confirmation_best_set_stable
+                    ? "PASS"
+                    : "FAIL")
+            << ", actual-outside="
+            << (score.actual_outside_best_sets
+                    ? "yes"
+                    : "no")
+            << ", diagnostic>=0.05/lower>0="
+            << (score.diagnostic_stable_mistake
+                    ? "YES"
+                    : "no")
+            << ", practical>=0.20/lower>0.10="
+            << (score.practical_high_cost_mistake
+                    ? "YES"
+                    : "no")
+            << ", descriptor-order="
+            << (score.descriptor_order_invariant
+                    ? "PASS"
+                    : "FAIL")
+            << ", hidden eligibility/scores="
+            << (score.hidden_repartition_eligible
+                    ? "PASS"
+                    : "FAIL")
+            << '/'
+            << (score.hidden_repartition_bit_identical
+                    ? "PASS"
+                    : "FAIL")
+            << ", evals=" << score.rollout_evaluations
+            << " (terminal=" << score.terminal_evaluations
+            << ", bootstrap="
+            << score.bootstrapped_evaluations
+            << "), accounting="
+            << (score.accounting_passed ? "PASS" : "FAIL")
+            << '\n';
+    }
+
+    std::cout
+        << "\nAggregate mistakes: diagnostic="
+        << report.diagnostic_stable_mistakes
+        << ", practical-high-cost="
+        << report.practical_high_cost_mistakes
+        << ", practical opponent strata="
+        << report.mistake_opponent_strata
+        << "\nReference evaluations: "
+        << report.reference_rollout_evaluations
+        << " (terminal="
+        << report.reference_terminal_evaluations
+        << ", bootstrap="
+        << report.reference_bootstrapped_evaluations
+        << "; declared max="
+        << old_school::probes::
+               kBsrMaximumReferenceEvaluations
+        << ")\nChecks: source-balance="
+        << (report.source_balance_passed ? "PASS" : "FAIL")
+        << ", retention="
+        << (report.retention_passed ? "PASS" : "FAIL")
+        << ", traced-actions="
+        << (report.traced_actions_valid ? "PASS" : "FAIL")
+        << ", descriptor-order="
+        << (report.descriptor_order_invariant ? "PASS" : "FAIL")
+        << ", hidden="
+        << (report.hidden_repartition_passed ? "PASS" : "FAIL")
+        << ", split-seeds="
+        << (report.scout_confirmation_seeds_disjoint
+                ? "PASS"
+                : "FAIL")
+        << ", accounting="
+        << (report.accounting_passed ? "PASS" : "FAIL")
+        << ", bounds="
+        << (report.bounds_passed ? "PASS" : "FAIL")
+        << "\nAudit validity: "
+        << (report.audit_valid ? "PASS" : "INVALID")
+        << "\nMinimum diagnostic replication: "
+        << (report.diagnostic_replication_found
+                ? "FOUND"
+                : "NOT FOUND")
+        << "\nBSR0 practical high-cost verdict: "
+        << (report.gate_passed ? "PASS" : "INCONCLUSIVE")
+        << "\nAudit time: " << format_real(elapsed_seconds)
+        << " seconds\nIntended process exit: "
+        << (report.gate_passed ? 0 : 1) << '\n';
 }
 
 void require_p_family_invariant(bool condition,
@@ -3422,6 +4269,12 @@ int main(int argc, char** argv) {
         bool p1r_probe_unsupported_option_used = false;
         bool diagnose_terminal_credit = false;
         bool terminal_credit_unsupported_option_used = false;
+        bool audit_dc1_dominance = false;
+        bool dc1_unsupported_option_used = false;
+        bool audit_dc1_action_census = false;
+        bool dc1_census_unsupported_option_used = false;
+        bool audit_v3_blue_stack_regret = false;
+        bool bsr0_unsupported_option_used = false;
         bool variance_study = false;
         bool score_probes = false;
         bool refresh_probe_cache = false;
@@ -3491,6 +4344,24 @@ int main(int argc, char** argv) {
                 option != "--train-seed") {
                 terminal_credit_unsupported_option_used = true;
             }
+            if (option != "--audit-dc1-dominance" &&
+                option != "--train-games" &&
+                option != "--train-seed" &&
+                option != "--learned-generations") {
+                dc1_unsupported_option_used = true;
+            }
+            if (option != "--audit-dc1-action-census" &&
+                option != "--train-games" &&
+                option != "--train-seed" &&
+                option != "--learned-generations") {
+                dc1_census_unsupported_option_used = true;
+            }
+            if (option != "--audit-v3-blue-stack-regret" &&
+                option != "--train-games" &&
+                option != "--train-seed" &&
+                option != "--learned-generations") {
+                bsr0_unsupported_option_used = true;
+            }
             if (option != "--diagnose-force-spike-teacher" &&
                 option != "--train-games" &&
                 option != "--train-seed" &&
@@ -3535,6 +4406,18 @@ int main(int argc, char** argv) {
             }
             if (option == "--diagnose-terminal-credit") {
                 diagnose_terminal_credit = true;
+                continue;
+            }
+            if (option == "--audit-dc1-dominance") {
+                audit_dc1_dominance = true;
+                continue;
+            }
+            if (option == "--audit-dc1-action-census") {
+                audit_dc1_action_census = true;
+                continue;
+            }
+            if (option == "--audit-v3-blue-stack-regret") {
+                audit_v3_blue_stack_regret = true;
                 continue;
             }
             if (option == "--variance-study") {
@@ -3811,6 +4694,9 @@ int main(int argc, char** argv) {
                 static_cast<int>(diagnose_p1_fit) +
                 static_cast<int>(score_p1r_probes) +
                 static_cast<int>(diagnose_terminal_credit) +
+                static_cast<int>(audit_dc1_dominance) +
+                static_cast<int>(audit_dc1_action_census) +
+                static_cast<int>(audit_v3_blue_stack_regret) +
                 static_cast<int>(variance_study) +
                 static_cast<int>(score_probes) >
             1) {
@@ -3821,6 +4707,9 @@ int main(int argc, char** argv) {
                 "--diagnose-force-spike-teacher, --train-p-family, "
                 "--diagnose-p1-fit, --score-p1r-probes, "
                 "--diagnose-terminal-credit, "
+                "--audit-dc1-dominance, "
+                "--audit-dc1-action-census, "
+                "--audit-v3-blue-stack-regret, "
                 "--variance-study, and "
                 "--score-probes cannot be "
                 "combined");
@@ -3873,6 +4762,57 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "--diagnose-terminal-credit requires exact "
                 "--train-games 800 --train-seed 424242");
+        }
+        if (audit_dc1_dominance &&
+            dc1_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--audit-dc1-dominance accepts only "
+                "--train-games, --train-seed, and "
+                "--learned-generations");
+        }
+        if (audit_dc1_dominance &&
+            (training_games != 800 ||
+             training_seed != 424242 ||
+             !learned_generations_option_used ||
+             learned_generations != 16)) {
+            throw std::invalid_argument(
+                "--audit-dc1-dominance requires exact "
+                "--train-games 800 --train-seed 424242 "
+                "--learned-generations 16");
+        }
+        if (audit_dc1_action_census &&
+            dc1_census_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--audit-dc1-action-census accepts only "
+                "--train-games, --train-seed, and "
+                "--learned-generations");
+        }
+        if (audit_dc1_action_census &&
+            (training_games != 800 ||
+             training_seed != 424242 ||
+             !learned_generations_option_used ||
+             learned_generations != 16)) {
+            throw std::invalid_argument(
+                "--audit-dc1-action-census requires exact "
+                "--train-games 800 --train-seed 424242 "
+                "--learned-generations 16");
+        }
+        if (audit_v3_blue_stack_regret &&
+            bsr0_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--audit-v3-blue-stack-regret accepts only "
+                "--train-games, --train-seed, and "
+                "--learned-generations");
+        }
+        if (audit_v3_blue_stack_regret &&
+            (training_games != 800 ||
+             training_seed != 424242 ||
+             !learned_generations_option_used ||
+             learned_generations != 16)) {
+            throw std::invalid_argument(
+                "--audit-v3-blue-stack-regret requires exact "
+                "--train-games 800 --train-seed 424242 "
+                "--learned-generations 16");
         }
         if (interactive &&
             interactive_unsupported_option_used) {
@@ -4014,6 +4954,9 @@ int main(int argc, char** argv) {
             !diagnose_p1_fit &&
             !score_p1r_probes &&
             !diagnose_terminal_credit &&
+            !audit_dc1_dominance &&
+            !audit_dc1_action_census &&
+            !audit_v3_blue_stack_regret &&
             !variance_study && !score_probes &&
             (bot_field == old_school::BotField::Mixed ||
              bot_field == old_school::BotField::Learned);
@@ -4037,12 +4980,18 @@ int main(int argc, char** argv) {
         }
         if (learned_generations_option_used &&
             !(interactive || stability ||
-              diagnose_force_spike_teacher || score_probes ||
+              diagnose_force_spike_teacher ||
+              audit_dc1_dominance ||
+              audit_dc1_action_census ||
+              audit_v3_blue_stack_regret || score_probes ||
               tournament_uses_value)) {
             throw std::invalid_argument(
                 "--learned-generations requires --interactive, "
                 "--stability, --diagnose-force-spike-teacher, "
-                "--score-probes, or a mixed/learned-value simulation; "
+                "--audit-dc1-dominance, "
+                "--audit-dc1-action-census, "
+                "--audit-v3-blue-stack-regret, --score-probes, or a "
+                "mixed/learned-value simulation; "
                 "benchmark challengers use "
                 "learned-value-cN");
         }
@@ -4132,7 +5081,10 @@ int main(int argc, char** argv) {
               selects_mix50_value_bundle(baseline)));
         const bool value_challenger_will_be_used =
             ((interactive || stability ||
-              diagnose_force_spike_teacher || score_probes ||
+              diagnose_force_spike_teacher ||
+              audit_dc1_dominance ||
+              audit_dc1_action_census ||
+              audit_v3_blue_stack_regret || score_probes ||
               tournament_uses_value) &&
              learned_generations > 0) ||
             (benchmark &&
@@ -4209,9 +5161,9 @@ int main(int argc, char** argv) {
             constexpr std::uint64_t kP1RRootSeed = 577215;
             constexpr std::size_t kP1RTrainingGames = 800;
             constexpr std::uint64_t kP1RTrainingSeed = 424242;
-            const std::filesystem::path legacy_v2_dev_cache =
+            const std::filesystem::path dev_cache =
                 "data/old-school-probe-dev-v3-k8-h0-audit.labels.tsv";
-            const std::filesystem::path legacy_v2_validation_cache =
+            const std::filesystem::path validation_cache =
                 "data/old-school-probe-validation-v1-exact-v2-k128-h0-t800-s424242.labels.tsv";
             if (seed != kP1RRootSeed ||
                 training_games != kP1RTrainingGames ||
@@ -4220,19 +5172,19 @@ int main(int argc, char** argv) {
                     "--score-p1r-probes requires exact --seed "
                     "577215 --train-games 800 --train-seed 424242");
             }
-            if (!std::filesystem::exists(legacy_v2_dev_cache) ||
-                !std::filesystem::exists(
-                    legacy_v2_validation_cache)) {
+            if (!std::filesystem::exists(dev_cache) ||
+                !std::filesystem::exists(validation_cache)) {
                 throw std::runtime_error(
                     "--score-p1r-probes requires both immutable "
                     "preregistered probe caches from Environment-v2; "
                     "the exact-v2 validation cache is legacy");
             }
             throw std::runtime_error(
-                "--score-p1r-probes is pinned to immutable "
-                "Environment-v2 probe caches and cannot run under "
-                "Environment-v3 cleanup-discard rules; preregister a "
-                "fresh v3 route and labels");
+                "--score-p1r-probes requires both immutable "
+                "preregistered probe caches, but its Environment-v2 "
+                "caches are legacy and cannot run under Environment-v3 "
+                "cleanup-discard rules; preregister a fresh v3 route "
+                "and labels");
 
             std::cout
                 << "P1R Revised-Optimizer Offline Gate\n"
@@ -4441,6 +5393,69 @@ int main(int argc, char** argv) {
                                    report)
                        ? 0
                        : 1;
+        }
+        if (audit_v3_blue_stack_regret) {
+            std::cout
+                << "Preparing pinned Environment-v3 Value "
+                   "Challenger C16 for BSR0...\n";
+            const auto parent =
+                load_value_challenger_with_progress(
+                    training_games, training_seed,
+                    learned_generations);
+            old_school::probes::BsrAuditConfig config;
+            config.required_model_fingerprint =
+                std::string(kDc1EnvironmentV3P0Fingerprint);
+            const auto started =
+                std::chrono::steady_clock::now();
+            const auto report =
+                old_school::probes::
+                    audit_bsr_blue_stack_regret(
+                        parent, config);
+            const std::chrono::duration<double> elapsed =
+                std::chrono::steady_clock::now() - started;
+            print_bsr_report(report, elapsed.count());
+            return report.gate_passed ? 0 : 1;
+        }
+        if (audit_dc1_action_census) {
+            std::cout
+                << "Preparing pinned Environment-v3 Value "
+                   "Challenger C16 for the DC1-B0 census...\n";
+            const auto parent =
+                load_value_challenger_with_progress(
+                    training_games, training_seed,
+                    learned_generations);
+            old_school::probes::Dc1ActionCensusConfig config;
+            config.required_model_fingerprint =
+                std::string(kDc1EnvironmentV3P0Fingerprint);
+            const auto report =
+                old_school::probes::
+                    audit_dc1_action_census(parent, config);
+            print_dc1_census_report(report);
+            return report.gate_passed ? 0 : 1;
+        }
+        if (audit_dc1_dominance) {
+            std::cout
+                << "Preparing frozen Environment-v3 Value "
+                   "Challenger C16 for the DC1 audit...\n";
+            const auto parent =
+                load_value_challenger_with_progress(
+                    training_games, training_seed,
+                    learned_generations);
+            old_school::probes::Dc1MiningConfig config;
+            config.required_model_fingerprint =
+                std::string(kDc1EnvironmentV3P0Fingerprint);
+            const auto started =
+                std::chrono::steady_clock::now();
+            const auto report =
+                old_school::probes::
+                    audit_dc1_dominance_mining(parent, config);
+            const std::chrono::duration<double> elapsed =
+                std::chrono::steady_clock::now() - started;
+            print_dc1_mining_report(report);
+            std::cout
+                << "Audit time: " << format_real(elapsed.count())
+                << " seconds\n";
+            return report.gate_passed ? 0 : 1;
         }
         if (train_p_family) {
             std::cout

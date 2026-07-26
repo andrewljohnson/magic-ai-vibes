@@ -33,6 +33,7 @@ test("the production session manager drives the real engine bridge without HTTP"
     trainGames: 1,
     trainSeed: 424242,
     debugReveal: false,
+    bluffMode: false,
     rollouts: 1,
     deepRollouts: 1,
     learnedRollouts: 1,

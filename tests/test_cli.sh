@@ -15,14 +15,14 @@ cd "$cli_workspace"
 
 cli_output=
 cli_status=0
-g8_cache=build/model-cache/old-school-value-g8-v2-t1-s424242.bin
-g8_t8_cache=build/model-cache/old-school-value-g8-v2-t8-s424242.bin
-mix50_cache=build/model-cache/old-school-value-g8-mix50-v2-t8-s424242.bin
-challenger_c1_cache=build/model-cache/old-school-value-challenger-v2-c1-t1-s424242.bin
-challenger_c2_cache=build/model-cache/old-school-value-challenger-v2-c2-t1-s424242.bin
-context_challenger_c1_cache=build/model-cache/old-school-value-context-s1-v2-c1-t1-s424242.bin
-dense_masked_c1_cache=build/model-cache/old-school-value-context-d0-v2-c1-t1-s424242.bin
-dense_context_c1_cache=build/model-cache/old-school-value-context-d1-v2-c1-t1-s424242.bin
+g8_cache=build/model-cache/old-school-value-g8-v3-t1-s424242.bin
+g8_t8_cache=build/model-cache/old-school-value-g8-v3-t8-s424242.bin
+mix50_cache=build/model-cache/old-school-value-g8-mix50-v3-t8-s424242.bin
+challenger_c1_cache=build/model-cache/old-school-value-challenger-v3-c1-t1-s424242.bin
+challenger_c2_cache=build/model-cache/old-school-value-challenger-v3-c2-t1-s424242.bin
+context_challenger_c1_cache=build/model-cache/old-school-value-context-s1-v3-c1-t1-s424242.bin
+dense_masked_c1_cache=build/model-cache/old-school-value-context-d0-v3-c1-t1-s424242.bin
+dense_context_c1_cache=build/model-cache/old-school-value-context-d1-v3-c1-t1-s424242.bin
 probe_cache=
 mix50_probe_cache=
 validation_probe_cache=
@@ -203,6 +203,40 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--audit-dc1-dominance --train-games 800"*\
+"--train-seed 424242 --learned-generations 16"*\
+"Evaluation-only Environment-v3 resource-dominance mining audit"*\
+"all-five 2x40-game train/heldout blocks and K=8"*\
+"trains and deploys nothing"*) ;;
+    *)
+        printf 'DC1 dominance-audit contract missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+case $help_output in
+    *"--audit-dc1-action-census --train-games 800"*\
+"--train-seed 424242 --learned-generations 16"*\
+"Load-only DC1-B0 replay of every Priority legal-action set"*\
+"2x40-game train/heldout blocks, K=8, max_turns=128"*\
+"diagnostic ceiling 512"*\
+"performs no pair or density evaluation"*) ;;
+    *)
+        printf 'DC1-B0 action-census contract missing from --help\n' >&2
+        exit 1
+        ;;
+esac
+case $help_output in
+    *"--audit-v3-blue-stack-regret --train-games 800"*\
+"--train-seed 424242 --learned-generations 16"*\
+"Load-only BSR0 audit of actual Blue-held opponent-stack choices"*\
+"K64+64/H8 Learned-mirror reference"*\
+"40-root rare-error gate"*) ;;
+    *)
+        printf 'BSR0 load-only audit contract missing from --help\n' >&2
+        exit 1
+        ;;
+esac
 
 run_cli --diagnose-value-context
 if [ "$cli_status" -ne 0 ]; then
@@ -295,6 +329,77 @@ expect_error "--diagnose-terminal-credit requires exact --train-games 800 --trai
 expect_error "--diagnose-terminal-credit requires exact --train-games 800 --train-seed 424242" \
     --diagnose-terminal-credit \
     --train-games 800 --train-seed 1
+expect_error "--audit-dc1-dominance accepts only --train-games, --train-seed, and --learned-generations" \
+    --audit-dc1-dominance --learned-generations 16 --seed 1
+expect_error "cannot be combined" \
+    --audit-dc1-dominance --learned-generations 16 --benchmark
+expect_error "--audit-dc1-dominance requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-dc1-dominance \
+    --train-games 800 --train-seed 424242
+expect_error "--audit-dc1-dominance requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-dc1-dominance --learned-generations 15 \
+    --train-games 800 --train-seed 424242
+expect_error "--audit-dc1-dominance requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-dc1-dominance --learned-generations 16 \
+    --train-games 800 --train-seed 1
+expect_error "evaluation-only route requires the existing pinned Value Challenger C16 artifact" \
+    --audit-dc1-dominance --learned-generations 16 \
+    --train-games 800 --train-seed 424242
+case $cli_output in
+    *"Training frozen Value Challenger"*)
+        printf 'DC1 evaluation-only route tried to train\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+expect_error "--audit-dc1-action-census accepts only --train-games, --train-seed, and --learned-generations" \
+    --audit-dc1-action-census --learned-generations 16 --seed 1
+expect_error "cannot be combined" \
+    --audit-dc1-action-census --learned-generations 16 \
+    --audit-dc1-dominance
+expect_error "--audit-dc1-action-census requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-dc1-action-census \
+    --train-games 800 --train-seed 424242
+expect_error "--audit-dc1-action-census requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-dc1-action-census --learned-generations 15 \
+    --train-games 800 --train-seed 424242
+expect_error "--audit-dc1-action-census requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-dc1-action-census --learned-generations 16 \
+    --train-games 800 --train-seed 1
+expect_error "evaluation-only route requires the existing pinned Value Challenger C16 artifact" \
+    --audit-dc1-action-census --learned-generations 16 \
+    --train-games 800 --train-seed 424242
+case $cli_output in
+    *"Training frozen Value Challenger"*)
+        printf 'DC1-B0 load-only route tried to train\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+expect_error "--audit-v3-blue-stack-regret accepts only --train-games, --train-seed, and --learned-generations" \
+    --audit-v3-blue-stack-regret --learned-generations 16 --seed 1
+expect_error "cannot be combined" \
+    --audit-v3-blue-stack-regret --learned-generations 16 \
+    --audit-dc1-dominance
+expect_error "--audit-v3-blue-stack-regret requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-v3-blue-stack-regret \
+    --train-games 800 --train-seed 424242
+expect_error "--audit-v3-blue-stack-regret requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-v3-blue-stack-regret --learned-generations 15 \
+    --train-games 800 --train-seed 424242
+expect_error "--audit-v3-blue-stack-regret requires exact --train-games 800 --train-seed 424242 --learned-generations 16" \
+    --audit-v3-blue-stack-regret --learned-generations 16 \
+    --train-games 800 --train-seed 1
+expect_error "evaluation-only route requires the existing pinned Value Challenger C16 artifact" \
+    --audit-v3-blue-stack-regret --learned-generations 16 \
+    --train-games 800 --train-seed 424242
+case $cli_output in
+    *"Training frozen Value Challenger"*)
+        printf 'BSR0 load-only route tried to train\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
 
 teacher_probe_files_before=$(
     find . -type f -name '*probe*.tsv' -print | sort
@@ -835,6 +940,27 @@ case $dense_first_output in
         exit 1
         ;;
 esac
+benchmark_matrix_rows=$(
+    printf '%s\n' "$dense_first_output" |
+        awk '
+            /^Exact challenger-deck x baseline-deck matrix / {
+                inside = 1
+                next
+            }
+            inside &&
+                /^  (Green|Red|Blue|White|RU Aggro) vs (Green|Red|Blue|White|RU Aggro): [0-9]+-[0-9]+-[0-9]+ \([0-9]+ games\)$/ {
+                ++count
+            }
+            END {
+                print count + 0
+            }
+        '
+)
+if [ "$benchmark_matrix_rows" -ne 25 ]; then
+    printf 'benchmark exact deck-matchup matrix has %s rows, expected 25\n%s\n' \
+        "$benchmark_matrix_rows" "$dense_first_output" >&2
+    exit 1
+fi
 dense_masked_first_fingerprint=$(
     printf '%s\n' "$dense_first_output" |
         sed -n 's/^  Value Dense Masked C1 fingerprint: //p'
@@ -1160,6 +1286,66 @@ case $cli_output in
 "Value Challenger C1 artifact cache: loaded $challenger_c1_cache"*) ;;
     *)
         printf 'stability route did not reuse challenger cache\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+pooled_handcrafted_matrix_rows=$(
+    printf '%s\n' "$cli_output" |
+        awk '
+            /^Pooled Handcrafted exact challenger-deck x baseline-deck matrix / {
+                inside = 1
+                next
+            }
+            /^Pooled mixed-field exact deck-policy counts$/ {
+                inside = 0
+            }
+            inside &&
+                /^  (Green|Red|Blue|White|RU Aggro) vs (Green|Red|Blue|White|RU Aggro): [0-9]+-[0-9]+-[0-9]+ \([0-9]+ games\)$/ {
+                ++count
+            }
+            END {
+                print count + 0
+            }
+        '
+)
+if [ "$pooled_handcrafted_matrix_rows" -ne 25 ]; then
+    printf 'pooled Handcrafted exact deck-matchup matrix has %s rows, expected 25\n%s\n' \
+        "$pooled_handcrafted_matrix_rows" "$cli_output" >&2
+    exit 1
+fi
+exact_mixed_count=$(
+    printf '%s\n' "$cli_output" |
+        awk '
+            /^Pooled mixed-field exact deck-policy counts$/ {
+                inside = 1
+                next
+            }
+            /^Pooled mixed-field lift over Random$/ {
+                inside = 0
+            }
+            inside &&
+                /^  (Green|Red|Blue|White|RU Aggro) \| / {
+                ++count
+            }
+            END {
+                print count + 0
+            }
+        '
+)
+if [ "$exact_mixed_count" -ne 25 ]; then
+    printf 'stability exact deck-policy matrix has %s rows, expected 25\n%s\n' \
+        "$exact_mixed_count" "$cli_output" >&2
+    exit 1
+fi
+case $cli_output in
+    *" | Random: "*" games)"*\
+" | Monte Carlo: "*" games)"*\
+" | Deep Monte Carlo: "*" games)"*\
+" | Handcrafted Policy: "*" games)"*\
+" | Learned Value: "*" games)"*) ;;
+    *)
+        printf 'stability exact deck-policy matrix is missing a policy\n%s\n' \
             "$cli_output" >&2
         exit 1
         ;;

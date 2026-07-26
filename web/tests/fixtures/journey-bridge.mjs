@@ -7,6 +7,11 @@ const valueAfter = (flag) => {
   const index = args.indexOf(flag);
   return index < 0 ? null : args[index + 1];
 };
+const requestedDelay = Number(valueAfter("--fixture-delay-ms") ?? 0);
+const fixtureDelayMs =
+  Number.isSafeInteger(requestedDelay) && requestedDelay >= 0
+    ? requestedDelay
+    : 0;
 
 function manaCost({ generic = 0, green = 0 } = {}) {
   return { generic, green, red: 0, blue: 0, white: 0 };
@@ -200,6 +205,7 @@ function fail(line) {
   process.stderr.write(`unexpected journey action: ${line}\n`);
   process.exitCode = 3;
   input.close();
+  process.stdin.destroy();
 }
 
 const initialState = state();
@@ -250,6 +256,36 @@ input.on("line", (line) => {
     return;
   }
 
+  if (step === 0 && action.decisionId === 1 && action.index === 0) {
+    step = 7;
+    const settlePass = () => {
+      write(
+        event(
+          "priority_action",
+          0,
+          "first_main",
+          "You: Pass priority",
+          initialState,
+        ),
+      );
+      write({
+        type: "decision",
+        state: state({ phase: "declare_attackers" }),
+        decision: {
+          id: 7,
+          kind: "attackers",
+          eligible: [102],
+        },
+      });
+    };
+    if (fixtureDelayMs === 0) {
+      settlePass();
+    } else {
+      setTimeout(settlePass, fixtureDelayMs);
+    }
+    return;
+  }
+
   if (step === 0 && action.decisionId === 1 && action.index === 1) {
     step = 1;
     const afterLand = state({
@@ -290,7 +326,7 @@ input.on("line", (line) => {
   }
 
   if (step === 1 && action.decisionId === 2 && action.index === 1) {
-    step = 2;
+    step = 3;
     const spellState = state({
       human: humanPlayer({
         hand: postCastHand,
@@ -321,42 +357,6 @@ input.on("line", (line) => {
         spellState,
       ),
     );
-    write({
-      type: "decision",
-      state: spellState,
-      decision: {
-        id: 3,
-        kind: "priority",
-        phase: "first_main",
-        options: [{ index: 0, label: "Pass priority", kind: "pass" }],
-      },
-    });
-    return;
-  }
-
-  if (step === 2 && action.decisionId === 3 && action.index === 0) {
-    step = 3;
-    const spellState = state({
-      human: humanPlayer({
-        hand: postCastHand,
-        lands: [
-          { ...oldForestOne, tapped: true },
-          { ...oldForestTwo, tapped: true },
-          playedForest,
-        ],
-        landPlayedThisTurn: true,
-      }),
-      stack: [
-        {
-          stackId: 1,
-          kind: "spell",
-          controller: 0,
-          card: grizzlyBears,
-          xValue: 0,
-          label: "Your Grizzly Bears",
-        },
-      ],
-    });
     write(
       event(
         "priority_action",
@@ -506,7 +506,7 @@ input.on("line", (line) => {
         creatures: [oldBear],
       }),
       opponent: opponentPlayer({
-        creatures: [secondOpponentBear],
+        creatures: [firstOpponentBear],
       }),
     });
     write(
@@ -527,7 +527,7 @@ input.on("line", (line) => {
         creatures: [oldBear],
       }),
       opponent: opponentPlayer({
-        creatures: [secondOpponentBear],
+        creatures: [firstOpponentBear],
       }),
     });
     write(
@@ -549,7 +549,7 @@ input.on("line", (line) => {
         creatures: [oldBear],
       }),
       opponent: opponentPlayer({
-        creatures: [{ ...secondOpponentBear, tapped: true }],
+        creatures: [{ ...firstOpponentBear, tapped: true }],
       }),
     });
     write(
@@ -571,7 +571,7 @@ input.on("line", (line) => {
         creatures: [oldBear],
       }),
       opponent: opponentPlayer({
-        creatures: [{ ...secondOpponentBear, tapped: true }],
+        creatures: [{ ...firstOpponentBear, tapped: true }],
       }),
     });
     write({
@@ -580,8 +580,8 @@ input.on("line", (line) => {
       decision: {
         id: 6,
         kind: "blockers",
-        attackers: [202],
-        choices: [{ blocker: 102, legalAttackers: [202] }],
+        attackers: [201],
+        choices: [{ blocker: 102, legalAttackers: [201] }],
       },
     });
     return;
@@ -591,7 +591,7 @@ input.on("line", (line) => {
     step === 5 &&
     action.decisionId === 6 &&
     Array.isArray(action.pairs) &&
-    JSON.stringify(action.pairs) === JSON.stringify([[202, 102]])
+    JSON.stringify(action.pairs) === JSON.stringify([[201, 102]])
   ) {
     step = 6;
     const blockedState = state({
@@ -605,7 +605,7 @@ input.on("line", (line) => {
       }),
       opponent: opponentPlayer({
         librarySize: 0,
-        creatures: [{ ...secondOpponentBear, tapped: true }],
+        creatures: [{ ...firstOpponentBear, tapped: true }],
       }),
     });
     write(
@@ -624,11 +624,11 @@ input.on("line", (line) => {
       human: humanPlayer({
         hand: postCastHand,
         lands: [oldForestOne, oldForestTwo, playedForest],
-        creatures: [oldBear],
+        creatures: [],
       }),
       opponent: opponentPlayer({
         librarySize: 0,
-        creatures: [{ ...secondOpponentBear, tapped: true }],
+        creatures: [],
       }),
     });
     write(

@@ -45,7 +45,8 @@ void print_help(std::ostream& output) {
            "handcrafted|learned-value|learned-actor\n"
         << "  --seed N --train-games N --train-seed N\n"
         << "  --rollouts N --deep-rollouts N --learned-rollouts N\n"
-        << "  --debug-reveal\n";
+        << "  --debug-reveal\n"
+        << "  --bluff-mode\n";
 }
 
 } // namespace
@@ -61,6 +62,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--debug-reveal") {
                 config.reveal_opponent_hand = true;
+                continue;
+            }
+            if (option == "--bluff-mode") {
+                config.bluff_mode = true;
                 continue;
             }
             if (argument + 1 >= argc) {

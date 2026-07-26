@@ -14,6 +14,7 @@
 #include <iterator>
 #include <limits>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1928,7 +1929,7 @@ TEST(value_trainer_is_seeded_deterministic_in_the_old_school_schema) {
     const auto fingerprint =
         old_school::learned_model_fingerprint(model);
     CHECK(fingerprint ==
-          "1dde23548e5733638d5174dddd5bdd47c5b50bd4c0c4c266a0f1225ffccc0bf4");
+          "2dff8887e931364973c02bfc6fc6b196908ad834232b4dd923012d44036f65af");
     CHECK(old_school::learned_model_fingerprint(repeated) ==
           fingerprint);
     CHECK(old_school::learned_model_fingerprint(changed) != fingerprint);
@@ -1962,7 +1963,7 @@ TEST(value_challenger_is_explicit_deterministic_and_generation_bound) {
     CHECK(old_school::learned_model_fingerprint(generation_two) !=
           generation_one_fingerprint);
     CHECK(old_school::learned_model_fingerprint(generation_two) ==
-          "573c972b69239242fb21d15615f19c99829a4bb4c48ff9a1470e6f9ee99b6e61");
+          "8b9696870ca43087cddb3987a3d80759ac0528b552f1ead5447091d526cf2e06");
 
     bool rejected_zero_generations = false;
     try {
@@ -2003,7 +2004,7 @@ TEST(value_challenger_artifact_is_versioned_bit_exact_and_fail_closed) {
     const std::string fingerprint =
         old_school::learned_model_fingerprint(original);
     CHECK(fingerprint ==
-          "573c972b69239242fb21d15615f19c99829a4bb4c48ff9a1470e6f9ee99b6e61");
+          "8b9696870ca43087cddb3987a3d80759ac0528b552f1ead5447091d526cf2e06");
     CHECK(old_school::learned_model_fingerprint(loaded) ==
           fingerprint);
     CHECK(loaded_artifact.training_games() == 1);
@@ -2012,7 +2013,7 @@ TEST(value_challenger_artifact_is_versioned_bit_exact_and_fail_closed) {
     CHECK(old_school::learned_value_challenger_cache_path(
               800, 424242, 16) ==
           "build/model-cache/"
-          "old-school-value-challenger-v2-c16-t800-s424242.bin");
+          "old-school-value-challenger-v3-c16-t800-s424242.bin");
 
     const std::array<old_school::GameState, 2> states = {
         old_school::white_lock_plan_diagnostic_state(),
@@ -2229,7 +2230,7 @@ TEST(value_context_challenger_artifact_roundtrips_and_fails_closed) {
               learned_value_context_challenger_cache_path(
                   800, 424242, 16) ==
           "build/model-cache/"
-          "old-school-value-context-s1-v2-c16-t800-s424242.bin");
+          "old-school-value-context-s1-v3-c16-t800-s424242.bin");
 
     const old_school::GameState state =
         determinization_fixture().state;
@@ -2634,13 +2635,13 @@ TEST(value_dense_context_artifacts_roundtrip_and_cross_load_fail) {
                   800, 424242, 16,
                   Treatment::ContextMasked) ==
           "build/model-cache/"
-          "old-school-value-context-d0-v2-c16-t800-s424242.bin");
+          "old-school-value-context-d0-v3-c16-t800-s424242.bin");
     CHECK(old_school::
               learned_value_dense_context_challenger_cache_path(
                   800, 424242, 16,
                   Treatment::ContextLive) ==
           "build/model-cache/"
-          "old-school-value-context-d1-v2-c16-t800-s424242.bin");
+          "old-school-value-context-d1-v3-c16-t800-s424242.bin");
     CHECK(throws_with_text(
         [] {
             static_cast<void>(
@@ -3422,7 +3423,7 @@ TEST(learned_value_g8_mix50_artifact_is_distinct_and_fail_closed) {
     CHECK(old_school::learned_value_g8_mix50_cache_path(
               800, 424242) ==
           "build/model-cache/"
-          "old-school-value-g8-mix50-v2-t800-s424242.bin");
+          "old-school-value-g8-mix50-v3-t800-s424242.bin");
 
     CHECK(throws_with_text(
         [&] {
@@ -3550,7 +3551,7 @@ TEST(learned_value_g8_artifact_roundtrips_every_checkpoint_bit_exact) {
         }
     }
     CHECK(old_school::learned_value_g8_cache_path(800, 424242) ==
-          "build/model-cache/old-school-value-g8-v2-t800-s424242.bin");
+          "build/model-cache/old-school-value-g8-v3-t800-s424242.bin");
     std::filesystem::remove(path);
 }
 
@@ -5955,6 +5956,184 @@ TEST(braingeyser_enumerates_x_zero_and_draws_the_chosen_player) {
     CHECK(opponent_decking.failed_draw[1]);
 }
 
+TEST(cleanup_discards_only_the_active_players_chosen_excess) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.players[0].hand = {
+        old_school::CardId::Forest,
+        old_school::CardId::LightningBolt,
+        old_school::CardId::Mountain,
+        old_school::CardId::AncestralRecall,
+        old_school::CardId::LightningBolt,
+        old_school::CardId::GrayOgre,
+        old_school::CardId::Island,
+        old_school::CardId::Moat,
+        old_school::CardId::Counterspell,
+        old_school::CardId::Plains,
+    };
+    state.players[0].graveyard = {
+        old_school::CardId::GrizzlyBears,
+    };
+    state.players[1].hand.assign(
+        9, old_school::CardId::Forest);
+    state.players[0].mana_pool = {.green = 2};
+    state.players[1].mana_pool = {.red = 1};
+    state.players[0].creatures = {
+        creature(11, old_school::CardId::GrizzlyBears),
+    };
+    state.players[1].creatures = {
+        creature(12, old_school::CardId::GrayOgre),
+    };
+    state.players[0].creatures[0].damage = 1;
+    state.players[0].creatures[0].temporary_power_bonus = 3;
+    state.players[0].creatures[0].temporary_toughness_bonus = 4;
+    state.players[0].creatures[0]
+        .exile_on_death_this_turn = true;
+    state.players[1].creatures[0].damage = 2;
+    state.players[1].creatures[0].temporary_power_bonus = 1;
+    state.players[1].creatures[0].temporary_toughness_bonus = 2;
+    const auto first_cards = physical_cards(state, 0);
+    const auto second_cards = physical_cards(state, 1);
+
+    const auto discarded = old_school::cleanup_turn(
+        state, 0, {1, 4, 8});
+    CHECK((discarded ==
+           std::vector<old_school::CardId>{
+               old_school::CardId::LightningBolt,
+               old_school::CardId::LightningBolt,
+               old_school::CardId::Counterspell}));
+    CHECK(state.players[0].hand.size() ==
+          old_school::kMaximumHandSize);
+    CHECK(state.players[1].hand.size() == 9);
+    CHECK((state.players[0].graveyard ==
+           std::vector<old_school::CardId>{
+               old_school::CardId::GrizzlyBears,
+               old_school::CardId::LightningBolt,
+               old_school::CardId::LightningBolt,
+               old_school::CardId::Counterspell}));
+    CHECK(physical_cards(state, 0) == first_cards);
+    CHECK(physical_cards(state, 1) == second_cards);
+    for (const auto& player : state.players) {
+        CHECK(player.mana_pool == old_school::ManaCost{});
+        for (const auto& permanent : player.creatures) {
+            CHECK(permanent.damage == 0);
+            CHECK(permanent.temporary_power_bonus == 0);
+            CHECK(permanent.temporary_toughness_bonus == 0);
+            CHECK(!permanent.exile_on_death_this_turn);
+        }
+    }
+}
+
+TEST(cleanup_rejects_malformed_choices_without_mutation) {
+    old_school::GameState original;
+    original.active_player = 0;
+    original.players[0].hand = {
+        old_school::CardId::Forest,
+        old_school::CardId::Forest,
+        old_school::CardId::Mountain,
+        old_school::CardId::Island,
+        old_school::CardId::Plains,
+        old_school::CardId::LightningBolt,
+        old_school::CardId::Counterspell,
+        old_school::CardId::GiantGrowth,
+        old_school::CardId::Moat,
+    };
+    original.players[0].creatures = {
+        creature(17, old_school::CardId::GrizzlyBears),
+    };
+    original.players[0].creatures[0].damage = 1;
+    original.players[0].creatures[0].temporary_power_bonus = 1;
+    original.players[0].creatures[0].temporary_toughness_bonus = 1;
+
+    for (const std::vector<std::size_t>& invalid : {
+             std::vector<std::size_t>{0},
+             std::vector<std::size_t>{0, 0},
+             std::vector<std::size_t>{0, 9},
+         }) {
+        auto state = original;
+        CHECK(throws_with_text(
+            [&] {
+                static_cast<void>(
+                    old_school::cleanup_turn(
+                        state, 0, invalid));
+            },
+            "cleanup"));
+        CHECK(state == original);
+    }
+
+    auto invalid_player = original;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(old_school::cleanup_turn(
+                invalid_player, 2, {0, 1}));
+        },
+        "active player"));
+    CHECK(invalid_player == original);
+
+    auto inactive_player = original;
+    inactive_player.players[1].hand =
+        original.players[0].hand;
+    const auto inactive_before = inactive_player;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(old_school::cleanup_turn(
+                inactive_player, 1, {0, 1}));
+        },
+        "active player"));
+    CHECK(inactive_player == inactive_before);
+}
+
+TEST(ancestral_and_braingeyser_overdraw_clean_up_to_seven) {
+    const auto exercise_overdraw =
+        [](old_school::CardId draw_spell,
+           const old_school::PriorityAction& action,
+           std::size_t land_count) {
+            old_school::GameState state;
+            state.active_player = 0;
+            state.players[0].hand = {
+                draw_spell,
+                old_school::CardId::Forest,
+                old_school::CardId::Forest,
+                old_school::CardId::Mountain,
+                old_school::CardId::LightningBolt,
+                old_school::CardId::GrizzlyBears,
+                old_school::CardId::GiantGrowth,
+            };
+            state.players[0].library = {
+                old_school::CardId::Plains,
+                old_school::CardId::Island,
+                old_school::CardId::Counterspell,
+            };
+            state.players[0].lands.assign(
+                land_count,
+                old_school::LandPermanent{
+                    .card = old_school::CardId::Island,
+                });
+            const auto before = physical_cards(state, 0);
+            CHECK(old_school::apply_priority_action(
+                state, 0, action, true));
+            CHECK(old_school::resolve_top_of_stack(state));
+            CHECK(state.players[0].hand.size() == 9);
+            const auto discarded = old_school::cleanup_turn(
+                state, 0, {0, 8});
+            CHECK(discarded.size() == 2);
+            CHECK(state.players[0].hand.size() ==
+                  old_school::kMaximumHandSize);
+            CHECK(physical_cards(state, 0) == before);
+        };
+
+    exercise_overdraw(
+        old_school::CardId::AncestralRecall,
+        old_school::PriorityAction::cast_ancestral_recall(
+            old_school::Target::player_target(0)),
+        1);
+    exercise_overdraw(
+        old_school::CardId::Braingeyser,
+        old_school::PriorityAction::cast_braingeyser(
+            3, old_school::Target::player_target(0)),
+        5);
+}
+
 TEST(time_walk_queues_and_consumes_an_extra_turn) {
     old_school::GameState state;
     state.active_player = 0;
@@ -7313,6 +7492,72 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
         CHECK(result.baseline_decks[deck].on_play_games == 12);
         CHECK(result.baseline_decks[deck].on_draw_games == 12);
     }
+    std::size_t matrix_games = 0;
+    std::size_t matrix_wins = 0;
+    std::size_t matrix_losses = 0;
+    std::size_t matrix_draws = 0;
+    for (std::size_t challenger_deck = 0;
+         challenger_deck <
+         result.challenger_deck_matchups.size();
+         ++challenger_deck) {
+        old_school::DeckSimulationStats row;
+        for (std::size_t baseline_deck = 0;
+             baseline_deck <
+             result.challenger_deck_matchups[challenger_deck].size();
+             ++baseline_deck) {
+            const auto& cell =
+                result.challenger_deck_matchups[challenger_deck]
+                                                [baseline_deck];
+            CHECK(
+                cell.games ==
+                (challenger_deck == baseline_deck ? 8 : 4));
+            CHECK(cell.wins + cell.losses + cell.draws == cell.games);
+            row.games += cell.games;
+            row.wins += cell.wins;
+            row.losses += cell.losses;
+            row.draws += cell.draws;
+            matrix_games += cell.games;
+            matrix_wins += cell.wins;
+            matrix_losses += cell.losses;
+            matrix_draws += cell.draws;
+        }
+        CHECK(row.games == result.challenger_decks[challenger_deck].games);
+        CHECK(row.wins == result.challenger_decks[challenger_deck].wins);
+        CHECK(row.losses == result.challenger_decks[challenger_deck].losses);
+        CHECK(row.draws == result.challenger_decks[challenger_deck].draws);
+    }
+    for (std::size_t baseline_deck = 0;
+         baseline_deck < old_school::kDeckCount;
+         ++baseline_deck) {
+        old_school::DeckSimulationStats reciprocal_column;
+        for (std::size_t challenger_deck = 0;
+             challenger_deck < old_school::kDeckCount;
+             ++challenger_deck) {
+            const auto& cell =
+                result.challenger_deck_matchups[challenger_deck]
+                                                [baseline_deck];
+            reciprocal_column.games += cell.games;
+            reciprocal_column.wins += cell.losses;
+            reciprocal_column.losses += cell.wins;
+            reciprocal_column.draws += cell.draws;
+        }
+        CHECK(
+            reciprocal_column.games ==
+            result.baseline_decks[baseline_deck].games);
+        CHECK(
+            reciprocal_column.wins ==
+            result.baseline_decks[baseline_deck].wins);
+        CHECK(
+            reciprocal_column.losses ==
+            result.baseline_decks[baseline_deck].losses);
+        CHECK(
+            reciprocal_column.draws ==
+            result.baseline_decks[baseline_deck].draws);
+    }
+    CHECK(matrix_games == result.total_games);
+    CHECK(matrix_wins == result.challenger_stats.wins);
+    CHECK(matrix_losses == result.challenger_stats.losses);
+    CHECK(matrix_draws == result.challenger_stats.draws);
     CHECK(result.confidence_low_95() >= 0.0);
     CHECK(result.confidence_high_95() <= 100.0);
     CHECK(result.confidence_low_95() <=
@@ -7799,7 +8044,10 @@ TEST(dense_contextual_trace_is_a_chronological_sparse_superset) {
     std::size_t dense_index = 0;
     for (const auto& sparse_point : sparse) {
         while (dense_index < dense.size() &&
-               !(dense[dense_index] == sparse_point)) {
+               !(dense[dense_index].state ==
+                     sparse_point.state &&
+                 dense[dense_index].context ==
+                     sparse_point.context)) {
             ++dense_index;
         }
         CHECK(dense_index < dense.size());
@@ -7899,6 +8147,42 @@ TEST(dense_contextual_trace_smokes_all_five_decks) {
                        point.context.consecutive_passes >= 0 &&
                        point.context.consecutive_passes <= 1;
             }));
+    }
+}
+
+TEST(priority_root_trace_records_the_selected_legal_action_without_changing_play) {
+    old_school::GameConfig config;
+    config.max_turns = 12;
+    config.starting_player = 1;
+    constexpr std::uint64_t kSeed = 0xB5A0AC710ULL;
+
+    old_school::Game untraced(
+        old_school::blue_deck(), old_school::red_deck(),
+        kSeed, config);
+    const auto untraced_result = untraced.run();
+    const old_school::GameState untraced_state =
+        untraced.state();
+
+    old_school::Game traced(
+        old_school::blue_deck(), old_school::red_deck(),
+        kSeed, config);
+    std::vector<old_school::LearnedDecisionTracePoint> roots;
+    const auto traced_result =
+        traced.run_with_priority_root_trace(roots);
+
+    CHECK(traced_result == untraced_result);
+    CHECK(traced.state() == untraced_state);
+    CHECK(!roots.empty());
+    for (const auto& root : roots) {
+        CHECK(root.context.valid);
+        CHECK(root.context.decision_player < 2);
+        CHECK(root.selected_priority_action.has_value());
+        const auto legal = old_school::legal_priority_actions(
+            root.state, root.context.decision_player,
+            root.context.sorcery_actions);
+        CHECK(std::count(
+                  legal.begin(), legal.end(),
+                  *root.selected_priority_action) == 1);
     }
 }
 
@@ -8359,6 +8643,254 @@ TEST(scripted_human_game_is_deterministic_and_observes_public_stack) {
         }));
 }
 
+TEST(human_cleanup_choice_is_public_and_malformed_input_fails_closed) {
+    const auto deck = two_card_deck(
+        old_school::CardId::Forest,
+        old_school::CardId::GrizzlyBears);
+    const auto pass_priority =
+        [](const old_school::PlayerObservation&,
+           old_school::TurnPhase,
+           const std::vector<old_school::PriorityAction>& actions) {
+            return priority_action_index(
+                actions,
+                old_school::PriorityActionKind::Pass);
+        };
+
+    std::size_t cleanup_calls = 0;
+    old_school::CardId chosen_card =
+        old_school::CardId::Forest;
+    std::vector<old_school::GameEvent> events;
+    std::vector<old_school::PlayerObservation> observations;
+    auto human = developing_human_controller();
+    human.choose_priority_action = pass_priority;
+    human.choose_attackers =
+        [](const old_school::PlayerObservation&,
+           const std::vector<old_school::PermanentId>&) {
+            return std::vector<old_school::PermanentId>{};
+        };
+    human.choose_cleanup_discards =
+        [&cleanup_calls, &chosen_card](
+            const old_school::PlayerObservation& observation,
+            std::size_t excess) {
+            CHECK(excess == 1);
+            CHECK(observation.hand.size() == 8);
+            ++cleanup_calls;
+            chosen_card = observation.hand[1];
+            return std::vector<std::size_t>{1};
+        };
+    human.observe =
+        [&events, &observations](
+            const old_school::PlayerObservation& observation,
+            const old_school::GameEvent& event) {
+            events.push_back(event);
+            observations.push_back(observation);
+        };
+
+    old_school::GameConfig config;
+    config.max_turns = 3;
+    config.starting_player = 0;
+    config.human_controllers[0] = std::move(human);
+    old_school::Game game(deck, deck, 0xC1EA7E57ULL, config);
+    static_cast<void>(game.run());
+
+    CHECK(cleanup_calls == 1);
+    CHECK(game.state().players[0].hand.size() ==
+          old_school::kMaximumHandSize);
+    CHECK(game.state().players[0].graveyard ==
+          std::vector<old_school::CardId>{chosen_card});
+    const auto discard_event = std::find_if(
+        events.begin(), events.end(),
+        [](const old_school::GameEvent& event) {
+            return event.kind ==
+                       old_school::GameEventKind::CardsDiscarded &&
+                   event.player == 0;
+        });
+    CHECK(discard_event != events.end());
+    const std::size_t discard_index =
+        static_cast<std::size_t>(
+            std::distance(events.begin(), discard_event));
+    CHECK(discard_event->cards ==
+          std::vector<old_school::CardId>{chosen_card});
+    CHECK(observations[discard_index].players[0].hand_size ==
+          old_school::kMaximumHandSize);
+    CHECK(observations[discard_index].players[0].graveyard ==
+          std::vector<old_school::CardId>{chosen_card});
+
+    auto malformed = developing_human_controller();
+    malformed.choose_priority_action = pass_priority;
+    malformed.choose_attackers =
+        [](const old_school::PlayerObservation&,
+           const std::vector<old_school::PermanentId>&) {
+            return std::vector<old_school::PermanentId>{};
+        };
+    malformed.choose_cleanup_discards =
+        [](const old_school::PlayerObservation& observation,
+           std::size_t) {
+            return std::vector<std::size_t>{
+                observation.hand.size()};
+        };
+    old_school::GameConfig malformed_config;
+    malformed_config.max_turns = 3;
+    malformed_config.starting_player = 0;
+    malformed_config.human_controllers[0] =
+        std::move(malformed);
+    old_school::Game malformed_game(
+        deck, deck, 0xC1EA7E57ULL, malformed_config);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(malformed_game.run());
+        },
+        "cleanup"));
+    CHECK(malformed_game.state().players[0].hand.size() == 8);
+    CHECK(malformed_game.state().players[0].graveyard.empty());
+}
+
+TEST(terminal_interactive_prompts_for_cleanup_discard) {
+    std::ostringstream commands;
+    for (std::size_t decision = 0; decision < 48;
+         ++decision) {
+        commands << "0\n";
+    }
+    commands << "q\n";
+    std::istringstream input(commands.str());
+    std::ostringstream output;
+    const auto result = old_school::run_interactive_match(
+        input, output, 0xC1E47E42ULL,
+        small_value_model(),
+        {
+            .human_deck = old_school::DeckId::Blue,
+            .learned_deck = old_school::DeckId::Green,
+        },
+        1);
+    const std::string transcript = output.str();
+    CHECK(result.abandoned || result.game.has_value());
+    CHECK(transcript.find("CLEANUP | DISCARD 1 MORE") !=
+          std::string::npos);
+    CHECK(transcript.find("[DISCARD] You discard:") !=
+          std::string::npos);
+}
+
+TEST(all_bot_kinds_complete_cleanup_deterministically) {
+    struct Policy {
+        old_school::BotKind kind =
+            old_school::BotKind::Random;
+        old_school::LearnedVariant variant =
+            old_school::LearnedVariant::
+                ValueSearchChampion;
+    };
+    for (const auto policy : std::array{
+             Policy{.kind = old_school::BotKind::Random},
+             Policy{.kind = old_school::BotKind::MonteCarlo},
+             Policy{
+                 .kind =
+                     old_school::BotKind::DeepMonteCarlo},
+             Policy{.kind = old_school::BotKind::Handcrafted},
+             Policy{
+                 .kind = old_school::BotKind::Learned,
+                 .variant =
+                     old_school::LearnedVariant::
+                         ValueSearchChampion,
+             },
+             Policy{
+                 .kind = old_school::BotKind::Learned,
+                 .variant =
+                     old_school::LearnedVariant::UnifiedActor,
+             },
+         }) {
+        old_school::GameConfig config;
+        config.max_turns = 4;
+        config.starting_player = 0;
+        const auto model =
+            policy.kind != old_school::BotKind::Learned
+                ? std::shared_ptr<
+                      const old_school::LearnedModel>{}
+                : policy.variant ==
+                          old_school::LearnedVariant::
+                              UnifiedActor
+                      ? small_actor_model()
+                      : small_value_model();
+        for (auto& bot : config.bots) {
+            bot = {
+                .kind = policy.kind,
+                .learned_variant = policy.variant,
+                .rollouts_per_action = 1,
+                .training_games = 1,
+                .learned_model = model,
+            };
+        }
+        config.learned_model = model;
+        const auto run = [&config] {
+            old_school::Game game(
+                old_school::blue_deck(),
+                old_school::blue_deck(),
+                0xB07C1EA4ULL, config);
+            const auto result = game.run();
+            return std::pair{
+                result, game.state()};
+        };
+        const auto first = run();
+        const auto repeated = run();
+        CHECK(first == repeated);
+        for (const auto& player : first.second.players) {
+            CHECK(player.hand.size() <=
+                  old_school::kMaximumHandSize);
+        }
+    }
+}
+
+TEST(learned_continuation_performs_overfull_cleanup) {
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::blue_deck(),
+        old_school::green_deck(),
+    };
+    old_school::GameState state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 5;
+    state.players[0].hand.assign(
+        decks[0].begin(), decks[0].begin() + 8);
+    state.players[0].library.assign(
+        decks[0].begin() + 8, decks[0].end());
+    state.players[1].hand.assign(
+        decks[1].begin(), decks[1].begin() + 7);
+    state.players[1].library.assign(
+        decks[1].begin() + 7, decks[1].end());
+    const std::vector<old_school::PriorityAction> candidates = {
+        old_school::PriorityAction::pass(),
+    };
+    const old_school::LearnedSearchConfig search = {
+        .seed = 0xC1EA4C017ULL,
+        .worlds = 2,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .blend_shallow_prior = false,
+    };
+    const auto samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            candidates, small_actor_model(), search);
+    CHECK(samples.rollout_evaluations == 2);
+    CHECK(samples.q_samples.size() == 1);
+    CHECK(samples.q_samples[0].size() == 2);
+    CHECK(std::all_of(
+        samples.q_samples[0].begin(),
+        samples.q_samples[0].end(),
+        [](double value) {
+            return std::isfinite(value);
+        }));
+
+    const auto hidden = hidden_repartition(state, 0);
+    const auto repeated =
+        old_school::learned_priority_action_samples(
+            hidden, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            candidates, small_actor_model(), search);
+    CHECK(repeated.q_samples == samples.q_samples);
+}
+
 TEST(human_priority_attack_block_and_damage_choices_are_validated) {
     const auto lands =
         std::vector<old_school::CardId>(
@@ -8546,8 +9078,8 @@ TEST(five_deck_random_matrix_tracks_the_exact_current_lists) {
     const auto result = old_school::run_tournament(30'000, 303);
     CHECK(result.total_games == 300'000);
     const std::array<double, 10> expected_first_deck_rates = {
-        62.7, 56.7, 55.0, 68.2, 48.6,
-        55.6, 42.2, 90.4, 49.5, 38.2,
+        61.7, 56.4, 54.7, 67.6, 48.9,
+        54.9, 42.0, 90.1, 48.8, 38.6,
     };
     CHECK(result.matchups.size() ==
           expected_first_deck_rates.size());

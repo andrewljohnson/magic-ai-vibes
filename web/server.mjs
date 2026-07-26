@@ -147,6 +147,7 @@ const DEFAULT_CONFIG = Object.freeze({
   trainGames: 800,
   trainSeed: "424242",
   debugReveal: false,
+  bluffMode: false,
   rollouts: 2,
   deepRollouts: 8,
   learnedRollouts: 2,
@@ -328,6 +329,14 @@ export function normalizeGameConfig(body) {
       "debugReveal must be a boolean",
     );
   }
+  const bluffMode = body.bluffMode ?? false;
+  if (typeof bluffMode !== "boolean") {
+    throw new ApiError(
+      400,
+      "invalid_config",
+      "bluffMode must be a boolean",
+    );
+  }
 
   return {
     players: [
@@ -365,6 +374,7 @@ export function normalizeGameConfig(body) {
       DEFAULT_CONFIG.trainSeed,
     ),
     debugReveal,
+    bluffMode,
     rollouts: positiveBoundedInteger(
       body.rollouts,
       "rollouts",
@@ -409,6 +419,9 @@ function bridgeArguments(config) {
   ];
   if (config.debugReveal) {
     args.push("--debug-reveal");
+  }
+  if (config.bluffMode) {
+    args.push("--bluff-mode");
   }
   return args;
 }
@@ -559,6 +572,32 @@ function validateActionForDecision(input, decision) {
       );
     }
     return { decisionId: decision.id, ids: input.ids };
+  }
+
+  if (decision.kind === "cleanup_discard") {
+    const count = decision.count;
+    const options = Array.isArray(decision.options) ? decision.options : [];
+    if (
+      !Number.isSafeInteger(count) ||
+      count < 0 ||
+      !Array.isArray(input.indices) ||
+      input.indices.length !== count ||
+      !input.indices.every(Number.isSafeInteger) ||
+      !uniqueScalars(input.indices) ||
+      !input.indices.every((index) =>
+        options.some(
+          (option) =>
+            Number.isSafeInteger(option?.index) && option.index === index,
+        ),
+      )
+    ) {
+      throw new ApiError(
+        422,
+        "illegal_action",
+        `Cleanup requires exactly ${Number.isSafeInteger(count) ? count : 0} unique legal hand positions`,
+      );
+    }
+    return { decisionId: decision.id, indices: input.indices };
   }
 
   throw new ApiError(
@@ -970,6 +1009,7 @@ export function webGameMetadata() {
       "attackers",
       "blockers",
       "damage_order",
+      "cleanup_discard",
     ],
     defaults: DEFAULT_CONFIG,
     limits: LIMITS,

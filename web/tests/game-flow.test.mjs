@@ -57,6 +57,153 @@ test("game results use player-facing titles and readable reasons", async () => {
   assert.equal(formatGameResultReason(null), null);
 });
 
+test("reproduction summaries keep setup stable while public context advances", async () => {
+  const {
+    formatReproductionSummary,
+    latestPublicEventMessage,
+    reproductionPriorityHolder,
+  } = await loadTypeScriptModule("src/types.ts");
+
+  const config = {
+    players: [
+      { deckId: "ru-aggro", policyId: "human" },
+      { deckId: "blue", policyId: "learned-value" },
+    ],
+    seed: "18446744073709551615",
+    trainGames: 800,
+    trainSeed: "424242",
+    rollouts: 2,
+    deepRollouts: 8,
+    learnedRollouts: 3,
+    bluffMode: true,
+    debugReveal: false,
+  };
+  const first = formatReproductionSummary(config, {
+    turnNumber: 1,
+    phase: "first_main",
+    priorityHolder: "You",
+    latestEvent: "You started turn 1",
+    opponentHand: ["Counterspell"],
+  });
+  const advanced = formatReproductionSummary(config, {
+    turnNumber: 3,
+    phase: "declare_attackers",
+    priorityHolder: "None",
+    latestEvent: "You declared 2 attacker(s)",
+    opponentHand: ["Lightning Bolt"],
+  });
+
+  assert.equal(
+    first,
+    'you=ru-aggro/human | opponent=blue/learned-value | game-seed=18446744073709551615 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=3 | bluff=on | reveal=off | turn=1 | phase=first_main | priority-holder=You | latest-event="You started turn 1"',
+  );
+  assert.equal(
+    advanced,
+    'you=ru-aggro/human | opponent=blue/learned-value | game-seed=18446744073709551615 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=3 | bluff=on | reveal=off | turn=3 | phase=declare_attackers | priority-holder=None | latest-event="You declared 2 attacker(s)"',
+  );
+  assert.equal(
+    first.slice(0, first.indexOf(" | turn=")),
+    advanced.slice(0, advanced.indexOf(" | turn=")),
+  );
+  assert.doesNotMatch(`${first}\n${advanced}`, /Counterspell|Lightning Bolt/);
+  assert.equal(reproductionPriorityHolder("priority", true), "You");
+  for (const kind of [
+    "attackers",
+    "blockers",
+    "damage_order",
+    "cleanup_discard",
+  ]) {
+    assert.equal(reproductionPriorityHolder(kind, true), "None");
+  }
+  assert.equal(reproductionPriorityHolder(undefined, false), "Unknown");
+  assert.match(
+    formatReproductionSummary(config, {
+      priorityHolder: "Unknown",
+    }),
+    / \| turn=unknown \| phase=unknown \| priority-holder=Unknown \| latest-event=none$/,
+  );
+
+  assert.equal(
+    latestPublicEventMessage([
+      {
+        message: "Opponent discarded 2 cards",
+        cards: [{ name: "Ancestral Recall" }],
+      },
+    ]),
+    "Opponent discarded 2 cards",
+  );
+  assert.equal(
+    latestPublicEventMessage([
+      { kind: "private_payload_only", cards: [{ name: "Ancestral Recall" }] },
+    ]),
+    undefined,
+  );
+});
+
+test("event prose cannot fall back to serializing incidental payloads", async () => {
+  const { formatPublicLogEntry, latestPublicEventMessage } =
+    await loadTypeScriptModule("src/types.ts");
+  const hiddenShaped = {
+    kind: "private_payload_only",
+    turn: 4,
+    player: 1,
+    cards: [{ name: "Ancestral Recall" }],
+    hand: ["Counterspell"],
+    graveyard: [{ name: "Lightning Bolt" }],
+  };
+
+  assert.deepEqual(formatPublicLogEntry("You started turn 1"), {
+    message: "You started turn 1",
+  });
+  assert.deepEqual(
+    formatPublicLogEntry({
+      message: "You cast Grizzly Bears",
+      text: "ignored lower-priority text",
+      label: "ignored lower-priority label",
+      turn: 3,
+      player: 0,
+      kind: "priority_action",
+    }),
+    {
+      message: "You cast Grizzly Bears",
+      turn: 3,
+      player: 0,
+      kind: "priority_action",
+    },
+  );
+  assert.deepEqual(formatPublicLogEntry(hiddenShaped), {
+    message: "Game event",
+    turn: 4,
+    player: 1,
+    kind: "private_payload_only",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(formatPublicLogEntry(hiddenShaped)),
+    /Ancestral Recall|Counterspell|Lightning Bolt|cards|hand|graveyard/,
+  );
+  assert.equal(latestPublicEventMessage([hiddenShaped]), undefined);
+
+  const app = await source("src/App.tsx");
+  const matchLog = app.slice(
+    app.indexOf("function MatchLog"),
+    app.indexOf("function StackRail"),
+  );
+  assert.match(matchLog, /const entry = formatPublicLogEntry\(raw\)/);
+  assert.doesNotMatch(matchLog, /JSON\.stringify|Object\.(?:entries|values)/);
+});
+
+test("combat stats follow public card type instead of bridge zero defaults", async () => {
+  const { hasPublicCombatStats } =
+    await loadTypeScriptModule("src/types.ts");
+
+  assert.equal(hasPublicCombatStats("creature", 0, 0), true);
+  assert.equal(hasPublicCombatStats("Artifact Creature", 2, 2), true);
+  assert.equal(hasPublicCombatStats("land", 0, 0), false);
+  assert.equal(hasPublicCombatStats("instant", 0, 0), false);
+  assert.equal(hasPublicCombatStats(undefined, 2, 1), true);
+  assert.equal(hasPublicCombatStats(undefined, undefined, undefined), false);
+});
+
 test("API errors retain status, code, details, and readable fallback text", async () => {
   const { ApiRequestError, apiRequestErrorFromResponse } =
     await loadTypeScriptModule("src/errors.ts");
@@ -133,4 +280,234 @@ test("create and action paths are synchronously single-flight and stale-safe", a
   assert.equal(gameOver.match(/disabled=\{busy\}/g)?.length, 2);
   assert.match(gameOver, /Preparing rematch…/);
   assert.match(app, /<GameOver[\s\S]+?busy=\{creating\}/);
+});
+
+test("in-flight actions show recoverable non-blocking opponent status", async () => {
+  const [app, css] = await Promise.all([
+    source("src/App.tsx"),
+    source("src/styles.css"),
+  ]);
+  const act = app.slice(
+    app.indexOf("const act = useCallback"),
+    app.indexOf("useEffect(() => {", app.indexOf("const act = useCallback")),
+  );
+  const decisionDock = app.slice(
+    app.indexOf("function DecisionDock"),
+    app.indexOf("function DeckManifest"),
+  );
+  const thinking = app.slice(
+    app.indexOf('{acting && snapshot.status === "playing"'),
+    app.indexOf("</>", app.indexOf('{acting && snapshot.status === "playing"')),
+  );
+
+  assert.match(
+    thinking,
+    /className="opponent-thinking-banner"[\s\S]+?role="status"[\s\S]+?aria-live="polite"[\s\S]+?Opponent thinking…[\s\S]+?Resolving your action/,
+  );
+  assert.doesNotMatch(thinking, /phase|priority|decision\.kind/);
+  assert.match(decisionDock, /aria-busy=\{busy\}/);
+  assert.doesNotMatch(decisionDock, /decision-busy|Playing out the response/);
+
+  const catchStart = act.indexOf(".catch");
+  const finallyStart = act.indexOf(".finally");
+  assert.ok(catchStart >= 0 && finallyStart > catchStart);
+  assert.match(
+    act.slice(finallyStart),
+    /actingRef\.current = false;[\s\S]+?setActing\(false\)/,
+  );
+  assert.doesNotMatch(
+    act.slice(catchStart, finallyStart),
+    /setSnapshot\(null\)/,
+    "ordinary request errors must retain the last legal controls",
+  );
+  assert.match(act, /setGameError\(error instanceof Error \? error\.message : String\(error\)\)/);
+  assert.match(app, /className="toast toast-error"[\s\S]+?>\s*Dismiss\s*</);
+
+  const bannerRule = css.match(
+    /\.opponent-thinking-banner\s*\{([^}]+)\}/s,
+  )?.[1];
+  assert.ok(bannerRule, "missing opponent thinking banner CSS");
+  assert.match(bannerRule, /position:\s*fixed/);
+  assert.match(bannerRule, /pointer-events:\s*none/);
+});
+
+test("request failures are atomic dismissible alerts without replacing game state", async () => {
+  const app = await source("src/App.tsx");
+  const noSnapshot = app.slice(
+    app.indexOf("if (!snapshot)"),
+    app.indexOf("const state = snapshot.state"),
+  );
+  const activeToast = app.slice(
+    app.lastIndexOf("{gameError && ("),
+    app.indexOf("function ReproductionSummary"),
+  );
+  const act = app.slice(
+    app.indexOf("const act = useCallback"),
+    app.indexOf("useEffect(() => {", app.indexOf("const act = useCallback")),
+  );
+
+  assert.match(noSnapshot, /role=\{gameError \? "alert" : "status"\}/);
+  assert.match(
+    noSnapshot,
+    /aria-live=\{gameError \? "assertive" : "polite"\}/,
+  );
+  assert.match(noSnapshot, /aria-atomic="true"/);
+  assert.match(
+    noSnapshot,
+    /gameError \? \([\s\S]+?<span>\{gameError\}<\/span>[\s\S]+?>\s*Dismiss\s*</,
+  );
+  assert.match(
+    noSnapshot,
+    /creating && <span className="spinner" aria-hidden="true" \/>/,
+  );
+  assert.match(noSnapshot, /<span>Shuffling and training the selected pilot…<\/span>/);
+
+  assert.match(activeToast, /className="toast toast-error"[\s\S]+?role="alert"/);
+  assert.match(activeToast, /aria-atomic="true"/);
+  assert.match(activeToast, /<span>\{gameError\}<\/span>[\s\S]+?>\s*Dismiss\s*</);
+  assert.doesNotMatch(activeToast, /\.focus\(/);
+
+  assert.doesNotMatch(
+    act.slice(act.indexOf(".catch"), act.indexOf(".finally")),
+    /setSnapshot\(null\)/,
+  );
+  assert.match(
+    act.slice(act.indexOf(".finally")),
+    /actingRef\.current = false;[\s\S]+?setActing\(false\)/,
+  );
+});
+
+test("decision prompts and match results have narrow announcement semantics", async () => {
+  const app = await source("src/App.tsx");
+  const decisionDock = app.slice(
+    app.indexOf("function DecisionDock"),
+    app.indexOf("function DeckManifest"),
+  );
+  const dockOpeningTag = decisionDock.slice(
+    decisionDock.indexOf("<section"),
+    decisionDock.indexOf(">", decisionDock.indexOf("<section")) + 1,
+  );
+  const announcement = decisionDock.slice(
+    decisionDock.indexOf('className="sr-only"'),
+    decisionDock.indexOf("{decision.kind !=="),
+  );
+  const gameOver = app.slice(
+    app.indexOf("function GameOver"),
+    app.indexOf("type PriorityOriginSelection"),
+  );
+
+  assert.doesNotMatch(dockOpeningTag, /aria-live/);
+  assert.match(announcement, /role="status"/);
+  assert.match(announcement, /aria-live="polite"/);
+  assert.match(announcement, /aria-atomic="true"/);
+  assert.match(announcement, /key=\{String\(decision\.decisionId\)\}/);
+  assert.match(announcement, /state\.turnNumber/);
+  assert.match(announcement, /formatPhase\(state\.phase\)/);
+  assert.match(announcement, /\{heading\}/);
+  assert.match(announcement, /\{helper\}/);
+  assert.doesNotMatch(
+    announcement,
+    /\.players|\.hand|revealedHand|graveyard|library/,
+  );
+
+  assert.match(
+    gameOver,
+    /role="dialog"[\s\S]+?aria-modal="true"[\s\S]+?aria-labelledby="game-result-title"[\s\S]+?aria-describedby="game-result-reason"/,
+  );
+  assert.match(gameOver, /<h1 id="game-result-title">\{title\}<\/h1>/);
+  assert.match(gameOver, /<p id="game-result-reason">/);
+});
+
+test("result dialog receives focus without trapping its explicit actions", async () => {
+  const app = await source("src/App.tsx");
+  const gameOver = app.slice(
+    app.indexOf("function GameOver"),
+    app.indexOf("type PriorityOriginSelection"),
+  );
+  const visibilityCheck = gameOver.indexOf("if (!visible) return null");
+
+  assert.ok(gameOver.indexOf("const dialogRef = useRef") < visibilityCheck);
+  assert.ok(gameOver.indexOf("useEffect(() =>") < visibilityCheck);
+  assert.match(
+    gameOver,
+    /if \(visible\) dialogRef\.current\?\.focus\(\{ preventScroll: true \}\)/,
+  );
+  assert.match(gameOver, /\[snapshot\.id, visible\]/);
+  assert.match(gameOver, /ref=\{dialogRef\}/);
+  assert.match(gameOver, /tabIndex=\{-1\}/);
+  assert.match(gameOver, /onKeyDown=\{keepResultOpen\}/);
+  assert.match(
+    gameOver,
+    /event\.key !== "Escape"[\s\S]+?event\.preventDefault\(\)[\s\S]+?event\.stopPropagation\(\)/,
+  );
+  assert.equal(gameOver.match(/<button/g)?.length, 2);
+  assert.match(gameOver, />\s*Change matchup\s*<\/button>/);
+  assert.match(gameOver, /"Replay seed"/);
+  assert.doesNotMatch(gameOver, /event\.key === "Tab"|querySelector.*button|autoFocus/);
+});
+
+test("new-match dialog owns focus and restores its exact opener", async () => {
+  const app = await source("src/App.tsx");
+  const setupDrawer = app.slice(
+    app.indexOf("function SetupDrawer"),
+    app.indexOf("function WelcomeTable"),
+  );
+  const visibilityCheck = setupDrawer.indexOf("if (!open) return null");
+
+  assert.ok(setupDrawer.indexOf("const drawerRef = useRef") < visibilityCheck);
+  assert.ok(
+    setupDrawer.indexOf("const closeButtonRef = useRef") < visibilityCheck,
+  );
+  assert.ok(
+    setupDrawer.indexOf("const restoreFocusRef = useRef") < visibilityCheck,
+  );
+  assert.match(
+    setupDrawer,
+    /restoreFocusRef\.current =[\s\S]+?document\.activeElement instanceof HTMLElement/,
+  );
+  assert.match(
+    setupDrawer,
+    /closeButtonRef\.current\?\.focus\(\{ preventScroll: true \}\)/,
+  );
+  assert.match(
+    setupDrawer,
+    /const restoreTarget = restoreFocusRef\.current[\s\S]+?restoreTarget\?\.isConnected[\s\S]+?restoreTarget\.focus\(\{ preventScroll: true \}\)/,
+  );
+  assert.match(setupDrawer, /\}, \[open\]\)/);
+
+  assert.match(
+    setupDrawer,
+    /role="dialog"[\s\S]+?aria-modal="true"[\s\S]+?aria-labelledby="setup-dialog-title"[\s\S]+?onKeyDown=\{handleDialogKeyDown\}/,
+  );
+  assert.match(
+    setupDrawer,
+    /className="drawer-scrim"[\s\S]+?tabIndex=\{-1\}/,
+  );
+  assert.match(
+    setupDrawer,
+    /<h1 id="setup-dialog-title">Set the table<\/h1>/,
+  );
+  assert.match(
+    setupDrawer,
+    /className="icon-button"[\s\S]+?onClick=\{onClose\}[\s\S]+?ref=\{closeButtonRef\}/,
+  );
+  assert.doesNotMatch(setupDrawer, /aria-label="New match"/);
+
+  assert.match(
+    setupDrawer,
+    /event\.key === "Escape"[\s\S]+?event\.preventDefault\(\)[\s\S]+?event\.stopPropagation\(\)[\s\S]+?onClose\(\)/,
+  );
+  assert.match(setupDrawer, /event\.key !== "Tab"/);
+  assert.match(
+    setupDrawer,
+    /drawer\.querySelectorAll<HTMLElement>[\s\S]+?button:not\(\[disabled\]\):not\(\[tabindex="-1"\]\)[\s\S]+?select:not\(\[disabled\]\)/,
+  );
+  assert.match(
+    setupDrawer,
+    /event\.shiftKey && \(active === first \|\| !drawer\.contains\(active\)\)[\s\S]+?last\.focus\(\)/,
+  );
+  assert.match(
+    setupDrawer,
+    /!event\.shiftKey && active === last[\s\S]+?first\.focus\(\)/,
+  );
 });

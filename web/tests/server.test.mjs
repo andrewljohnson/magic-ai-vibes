@@ -14,6 +14,11 @@ const FAKE_BRIDGE = path.join(
   "fixtures",
   "fake-bridge.mjs",
 );
+const FAKE_CLEANUP_BRIDGE = path.join(
+  TEST_DIRECTORY,
+  "fixtures",
+  "fake-cleanup-bridge.mjs",
+);
 
 function dispatch(server, pathname, init = {}) {
   const request = Readable.from(
@@ -63,7 +68,7 @@ function dispatch(server, pathname, init = {}) {
   });
 }
 
-async function startTestServer(t) {
+async function startTestServer(t, bridgePath = FAKE_BRIDGE) {
   const distDirectory = await mkdtemp(
     path.join(tmpdir(), "old-school-web-test-"),
   );
@@ -78,7 +83,7 @@ async function startTestServer(t) {
 
   const server = createServer({
     bridgePath: process.execPath,
-    bridgeArgsPrefix: [FAKE_BRIDGE],
+    bridgeArgsPrefix: [bridgePath],
     distDirectory,
     initialTimeoutMs: 5_000,
     actionTimeoutMs: 5_000,
@@ -124,12 +129,76 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   );
   assert.ok(body.policies.some(({ id }) => id === "learned-value"));
   assert.ok(body.policies.some(({ id }) => id === "learned-actor"));
+  assert.equal(body.defaults.bluffMode, false);
   assert.deepEqual(body.decisionKinds, [
     "priority",
     "attackers",
     "blockers",
     "damage_order",
+    "cleanup_discard",
   ]);
+});
+
+test("cleanup discard validates exact duplicate-card hand positions", async (t) => {
+  const { request } = await startTestServer(t, FAKE_CLEANUP_BRIDGE);
+  const created = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ seed: 42 }),
+    }),
+  );
+  assert.equal(created.response.status, 201);
+  assert.equal(created.body.game.decision.kind, "cleanup_discard");
+  assert.equal(created.body.game.decision.count, 2);
+  assert.deepEqual(
+    created.body.game.decision.options.map(({ index, card }) => [
+      index,
+      card.name,
+    ]),
+    [
+      [0, "Forest"],
+      [1, "Forest"],
+      [2, "Mountain"],
+    ],
+  );
+
+  for (const action of [
+    { decisionId: "stale", indices: [0, 1], status: 409, code: "stale_decision" },
+    { decisionId: "cleanup-1", indices: [0], status: 422, code: "illegal_action" },
+    { decisionId: "cleanup-1", indices: [0, 0], status: 422, code: "illegal_action" },
+    { decisionId: "cleanup-1", indices: [0, 9], status: 422, code: "illegal_action" },
+    { decisionId: "cleanup-1", indices: [0, 1.5], status: 422, code: "illegal_action" },
+  ]) {
+    const rejected = await json(
+      await request("/api/games/test-game/actions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(action),
+      }),
+    );
+    assert.equal(rejected.response.status, action.status);
+    assert.equal(rejected.body.error.code, action.code);
+  }
+
+  const accepted = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "cleanup-1",
+        kind: "cleanup_discard",
+        indices: [0, 1],
+      }),
+    }),
+  );
+  assert.equal(accepted.response.status, 200);
+  assert.equal(accepted.body.game.status, "finished");
+  assert.equal(accepted.body.game.events.at(-1).kind, "cards_discarded");
+  assert.deepEqual(
+    accepted.body.game.events.at(-1).cards.map(({ name }) => name),
+    ["Forest", "Forest"],
+  );
 });
 
 test("creates a session and maps canonical config to bridge flags", async (t) => {
@@ -147,6 +216,7 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
         trainGames: 321,
         trainSeed: 424242,
         debugReveal: true,
+        bluffMode: true,
         rollouts: 3,
         deepRollouts: 9,
         learnedRollouts: 5,
@@ -170,6 +240,7 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
     deepRollouts: "9",
     learnedRollouts: "5",
     debugReveal: true,
+    bluffMode: true,
   });
   assert.deepEqual(body.game.snapshot.players[1], {
     handSize: 7,
@@ -377,6 +448,7 @@ test("rejects malformed config without spawning a game", async (t) => {
     { trainGames: 0 },
     { learnedRollouts: 4_097 },
     { debugReveal: "yes" },
+    { bluffMode: "yes" },
   ];
 
   for (const candidate of cases) {

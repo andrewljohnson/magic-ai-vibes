@@ -71,8 +71,8 @@ const humanBear = {
   permanentId: 110,
   card: grizzlyBears,
   tapped: false,
-  summoningSick: false,
-  damage: 0,
+  summoningSick: true,
+  damage: 1,
   power: 2,
   toughness: 2,
 };

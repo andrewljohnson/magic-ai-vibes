@@ -106,14 +106,14 @@ namespace {
 constexpr std::array<std::uint8_t, 8> kValueG8ArtifactMagic = {
     'O', 'S', 'M', 'V', 'G', '8', 'B', '1',
 };
-constexpr std::uint32_t kValueG8ArtifactSchema = 1;
+constexpr std::uint32_t kValueG8ArtifactSchema = 2;
 constexpr std::string_view kValueG8RecipeId =
     "old-school.learned-value-g8.bootstrap-replay-k1h4.v1";
 constexpr std::array<std::uint8_t, 8>
     kValueG8Mix50ArtifactMagic = {
         'O', 'S', 'M', 'V', 'M', '5', 'B', '1',
     };
-constexpr std::uint32_t kValueG8Mix50ArtifactSchema = 1;
+constexpr std::uint32_t kValueG8Mix50ArtifactSchema = 2;
 constexpr std::string_view kValueG8Mix50RecipeId =
     "old-school.learned-value-g8.bootstrap-replay-k1h4."
     "late-mix50.v1";
@@ -126,7 +126,7 @@ constexpr std::uint32_t kValueChallengerArtifactSchema = 1;
 // trainer changes, and the cache-path version for either. A stale artifact
 // must never silently stand in for a newly defined C<N>.
 constexpr std::string_view kValueChallengerEngineSchemaId =
-    "old-school.engine-five-deck-rules-observation.v2";
+    "old-school.engine-five-deck-rules-observation.v3";
 constexpr std::string_view kValueChallengerRecipeId =
     "old-school.learned-value-challenger."
     "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
@@ -2578,14 +2578,14 @@ train_learned_value_dense_context_challenger_artifact(
 
 std::string learned_value_g8_cache_path(
     std::size_t training_games, std::uint64_t seed) {
-    return "build/model-cache/old-school-value-g8-v2-t" +
+    return "build/model-cache/old-school-value-g8-v3-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
 }
 
 std::string learned_value_g8_mix50_cache_path(
     std::size_t training_games, std::uint64_t seed) {
-    return "build/model-cache/old-school-value-g8-mix50-v2-t" +
+    return "build/model-cache/old-school-value-g8-mix50-v3-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
 }
@@ -2604,7 +2604,7 @@ std::string learned_value_challenger_cache_path(
             "positive");
     }
     return "build/model-cache/"
-           "old-school-value-challenger-v2-c" +
+           "old-school-value-challenger-v3-c" +
            std::to_string(self_play_generations) + "-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
@@ -2624,7 +2624,7 @@ std::string learned_value_context_challenger_cache_path(
             "must be positive");
     }
     return "build/model-cache/"
-           "old-school-value-context-s1-v2-c" +
+           "old-school-value-context-s1-v3-c" +
            std::to_string(self_play_generations) + "-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
@@ -2648,7 +2648,7 @@ std::string learned_value_dense_context_challenger_cache_path(
         value_dense_context_treatment_definition(treatment);
     return "build/model-cache/"
            "old-school-value-context-" +
-           std::string(definition.cache_cell) + "-v2-c" +
+           std::string(definition.cache_cell) + "-v3-c" +
            std::to_string(self_play_generations) + "-t" +
            std::to_string(training_games) + "-s" +
            std::to_string(seed) + ".bin";
@@ -4105,6 +4105,7 @@ void write_learned_value_g8_bundle_atomic(
 
     ValueG8BinaryWriter payload;
     payload.text(kValueG8RecipeId);
+    payload.text(kValueChallengerEngineSchemaId);
     payload.size(kLearnedCardCount);
     payload.size(LearnedModel::kScalarFeatureCount);
     payload.size(LearnedModel::kCardPlanes);
@@ -4221,6 +4222,7 @@ void write_learned_value_g8_mix50_bundle_atomic(
 
     ValueG8BinaryWriter payload;
     payload.text(kValueG8Mix50RecipeId);
+    payload.text(kValueChallengerEngineSchemaId);
     payload.size(kLearnedCardCount);
     payload.size(LearnedModel::kScalarFeatureCount);
     payload.size(LearnedModel::kCardPlanes);
@@ -4395,6 +4397,16 @@ LearnedValueG8Result load_learned_value_g8_bundle(
             "Value G8 artifact '" + path +
             "' recipe mismatch: found '" + recipe +
             "', expected '" + std::string(kValueG8RecipeId) +
+            "'");
+    }
+    const std::string engine_schema =
+        payload.text("engine schema ID");
+    if (engine_schema != kValueChallengerEngineSchemaId) {
+        throw std::runtime_error(
+            "Value G8 artifact '" + path +
+            "' engine schema mismatch: found '" +
+            engine_schema + "', expected '" +
+            std::string(kValueChallengerEngineSchemaId) +
             "'");
     }
     const auto require_dimension =
@@ -4715,6 +4727,16 @@ LearnedValueG8Result load_learned_value_g8_mix50_bundle(
             "' recipe mismatch: found '" + recipe +
             "', expected '" +
             std::string(kValueG8Mix50RecipeId) + "'");
+    }
+    const std::string engine_schema =
+        payload.text("engine schema ID");
+    if (engine_schema != kValueChallengerEngineSchemaId) {
+        throw std::runtime_error(
+            "Value G8 Late-Mix50 artifact '" + path +
+            "' engine schema mismatch: found '" +
+            engine_schema + "', expected '" +
+            std::string(kValueChallengerEngineSchemaId) +
+            "'");
     }
     const auto require_dimension =
         [&](std::string_view name, std::size_t expected) {
@@ -9041,6 +9063,10 @@ std::vector<CardId> cleanup_turn(
         throw std::out_of_range(
             "cleanup active player must be 0 or 1");
     }
+    if (active_player != state.active_player) {
+        throw std::invalid_argument(
+            "cleanup may discard only for the active player");
+    }
 
     const auto& active_hand =
         state.players[active_player].hand;
@@ -9478,10 +9504,27 @@ Game::continue_priority_window(bool sorcery_actions,
         const auto actions =
             legal_priority_actions(state_, priority.player,
                                    sorcery_actions);
+        const std::size_t trace_size_before_choice =
+            learned_decision_trace_ == nullptr
+                ? 0
+                : learned_decision_trace_->size();
         const PriorityAction action =
             choose_priority_action(actions, priority.player,
                                    sorcery_actions, phase,
                                    priority.consecutive_passes);
+        if (learned_decision_trace_ != nullptr) {
+            if (learned_decision_trace_->size() ==
+                trace_size_before_choice + 1) {
+                learned_decision_trace_->back()
+                    .selected_priority_action = action;
+            } else if (
+                learned_decision_trace_->size() !=
+                trace_size_before_choice) {
+                throw std::logic_error(
+                    "priority selection recorded an unexpected "
+                    "number of trace roots");
+            }
+        }
 
         if (action.kind == PriorityActionKind::Pass) {
             if (notify_observers) {
@@ -9586,13 +9629,16 @@ PriorityAction Game::choose_priority_action(
             },
         });
     }
-    if (actions.size() == 1) {
+    const auto* controller = human_controller(player);
+    if (actions.size() == 1 &&
+        (controller == nullptr || !controller->bluff_mode)) {
         return actions.front();
     }
 
-    ++state_.stats[player].decisions;
-    if (const auto* controller = human_controller(player);
-        controller != nullptr) {
+    if (actions.size() > 1) {
+        ++state_.stats[player].decisions;
+    }
+    if (controller != nullptr) {
         const std::size_t chosen =
             controller->choose_priority_action(
                 human_observation(player), phase,
@@ -11606,6 +11652,26 @@ GameResult Game::run_with_learned_decision_trace(
         if (mode == LearnedDecisionTraceMode::Dense) {
             cap_dense_decision_trace(trace);
         }
+        return result;
+    } catch (...) {
+        learned_decision_trace_ = nullptr;
+        learned_decision_trace_mode_ =
+            LearnedDecisionTraceMode::Sparse;
+        throw;
+    }
+}
+
+GameResult Game::run_with_priority_root_trace(
+    std::vector<LearnedDecisionTracePoint>& trace) {
+    trace.clear();
+    learned_decision_trace_ = &trace;
+    learned_decision_trace_mode_ =
+        LearnedDecisionTraceMode::Dense;
+    try {
+        const GameResult result = run();
+        learned_decision_trace_ = nullptr;
+        learned_decision_trace_mode_ =
+            LearnedDecisionTraceMode::Sparse;
         return result;
     } catch (...) {
         learned_decision_trace_ = nullptr;
@@ -17037,6 +17103,10 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         record_deck_result(
             summary.baseline_decks[task.baseline_deck], result,
             task.baseline_player);
+        record_deck_result(
+            summary.challenger_deck_matchups[task.challenger_deck]
+                                              [task.baseline_deck],
+            result, task.challenger_player);
     }
 
     return summary;

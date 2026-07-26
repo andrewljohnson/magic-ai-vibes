@@ -68,6 +68,9 @@ test("targeted-stack fixture exposes both public targets and a legal response", 
   const [human, opponent] = initial.snapshot.players;
   assert.equal(human.hand.length, 7);
   assert.equal(human.handSize, 7);
+  assert.equal(human.creatures[0].permanentId, 110);
+  assert.equal(human.creatures[0].summoningSick, true);
+  assert.equal(human.creatures[0].damage, 1);
   assert.equal(opponent.handSize, 5);
   assert.equal(Object.hasOwn(opponent, "hand"), false);
   assert.equal(Object.hasOwn(opponent, "revealedHand"), false);

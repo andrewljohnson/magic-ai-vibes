@@ -326,6 +326,9 @@ enum class LearnedCriticSchema : std::uint8_t {
 struct LearnedDecisionTracePoint {
     GameState state;
     LearnedDecisionContext context;
+    // Present for Priority roots captured by the engine. Recording happens
+    // after policy selection, so the snapshot and RNG stream are unchanged.
+    std::optional<PriorityAction> selected_priority_action;
 
     bool operator==(const LearnedDecisionTracePoint&) const = default;
 };
@@ -453,6 +456,10 @@ struct HumanController {
     // callbacks; bot observations, training features, and rollouts stay
     // hidden-information safe.
     bool reveal_opponent_hand = false;
+    // A human bluffing interface may need to pause even when Pass is the
+    // sole legal priority action. The default preserves automatic forced
+    // passes for terminal play, simulations, and tests.
+    bool bluff_mode = false;
 };
 
 enum class PriorityPassResult : std::uint8_t {
@@ -858,6 +865,11 @@ class Game {
     GameResult run_with_learned_decision_trace(
         std::vector<LearnedDecisionTracePoint>& trace,
         LearnedDecisionTraceMode mode);
+    // Evaluation-only full Priority-root capture. Unlike Dense training
+    // traces this does not apply the 64-root training cap; callers must bound
+    // the game and perform their own deterministic retention.
+    GameResult run_with_priority_root_trace(
+        std::vector<LearnedDecisionTracePoint>& trace);
     const GameState& state() const;
 
   private:
@@ -1168,6 +1180,10 @@ struct BotBenchmarkSummary {
     BotSimulationStats baseline_stats;
     std::array<DeckSimulationStats, kDeckCount> challenger_decks;
     std::array<DeckSimulationStats, kDeckCount> baseline_decks;
+    // Challenger-perspective outcomes for each exact ordered deck matchup.
+    // Rows are challenger decks and columns are baseline decks.
+    std::array<std::array<DeckSimulationStats, kDeckCount>, kDeckCount>
+        challenger_deck_matchups;
 
     double challenger_win_rate() const;
     double confidence_low_95() const;

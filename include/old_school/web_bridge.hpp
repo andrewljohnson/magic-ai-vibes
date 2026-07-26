@@ -22,6 +22,7 @@ struct BridgeConfig {
     std::size_t training_games = 100;
     std::uint64_t training_seed = kDefaultLearnedTrainingSeed;
     bool reveal_opponent_hand = false;
+    bool bluff_mode = false;
 
     bool operator==(const BridgeConfig&) const = default;
 };

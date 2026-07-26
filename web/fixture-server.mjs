@@ -11,9 +11,25 @@ const fixtures = new Map([
     "target-stack",
     path.join(directory, "tests", "fixtures", "target-stack-bridge.mjs"),
   ],
+  [
+    "interaction",
+    path.join(directory, "tests", "fixtures", "interaction-bridge.mjs"),
+  ],
+  [
+    "journey",
+    path.join(directory, "tests", "fixtures", "journey-bridge.mjs"),
+  ],
+  [
+    "delayed-journey",
+    path.join(directory, "tests", "fixtures", "journey-bridge.mjs"),
+  ],
 ]);
 const fixtureName = process.argv[2] ?? "target-stack";
 const fixturePath = fixtures.get(fixtureName);
+const fixtureArgs =
+  fixtureName === "delayed-journey"
+    ? ["--fixture-delay-ms", "650"]
+    : [];
 
 if (!fixturePath) {
   process.stderr.write(
@@ -25,7 +41,7 @@ if (!fixturePath) {
 } else {
   const server = await startServer({
     bridgePath: process.execPath,
-    bridgeArgsPrefix: [fixturePath],
+    bridgeArgsPrefix: [fixturePath, ...fixtureArgs],
   });
   const address = server.address();
   const host =

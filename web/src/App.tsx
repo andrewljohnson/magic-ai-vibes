@@ -1,6 +1,7 @@
 import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   FormEvent,
   useCallback,
   useEffect,
@@ -24,16 +25,22 @@ import {
   formatStackTargets,
   formatGameResultReason,
   formatGameResultTitle,
+  formatPublicLogEntry,
+  formatReproductionSummary,
   formatTargetLabel,
+  hasPublicCombatStats,
+  latestPublicEventMessage,
   priorityDestinationKey,
   priorityOptionsForCard,
   priorityOptionsForSourcePermanent,
+  reproductionPriorityHolder,
   restoreOpaqueIds,
   stackPermanentTargetIds,
   type ActionRequest,
   type AttackersDecision,
   type BlockersDecision,
   type Card,
+  type CleanupDiscardDecision,
   type DamageOrderDecision,
   type Decision,
   type DeckMeta,
@@ -274,9 +281,11 @@ interface CardFaceProps {
   targeted?: boolean;
   choiceTarget?: boolean;
   choiceOrigin?: boolean;
+  choiceOriginLabel?: string;
   draggable?: boolean;
   onClick?: () => void;
   onDoubleClick?: () => void;
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
   onDragEnd?: (event: ReactDragEvent<HTMLButtonElement>) => void;
   onDragOver?: (event: ReactDragEvent<HTMLButtonElement>) => void;
@@ -293,9 +302,11 @@ function CardFace({
   targeted = false,
   choiceTarget = false,
   choiceOrigin = false,
+  choiceOriginLabel = "",
   draggable = false,
   onClick,
   onDoubleClick,
+  onKeyDown,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -303,22 +314,30 @@ function CardFace({
 }: CardFaceProps) {
   const power = permanent?.power ?? card.power;
   const toughness = permanent?.toughness ?? card.toughness;
-  const hasStats = power !== undefined || toughness !== undefined;
-  const title = [
+  const hasStats = hasPublicCombatStats(card.type, power, toughness);
+  const instanceId = permanent ? permanentId(permanent) : null;
+  const cost = formatCost(card.cost, card.costLabel);
+  const publicDescription = [
     card.name,
+    instanceId ? `permanent #${instanceId}` : undefined,
     card.type,
-    card.cost || card.costLabel
-      ? `Cost ${formatCost(card.cost, card.costLabel)}`
-      : undefined,
+    cost ? `Cost ${cost}` : undefined,
+    card.flying ? "Flying" : undefined,
+    hasStats && power !== undefined ? `${power} power` : undefined,
+    hasStats && toughness !== undefined ? `${toughness} toughness` : undefined,
     permanent?.tapped ? "Tapped" : undefined,
     permanent?.summoningSick ? "Summoning sick" : undefined,
     permanent?.damage ? `${permanent.damage} damage marked` : undefined,
     targeted ? "Targeted by an object on the stack" : undefined,
     choiceTarget ? "Legal destination for the selected action" : undefined,
-    choiceOrigin ? "Legal activated-ability origin" : undefined,
-  ]
-    .filter(Boolean)
-    .join(" • ");
+    choiceOrigin
+      ? `Legal action origin${
+          choiceOriginLabel ? `: ${choiceOriginLabel}` : ""
+        }`
+      : undefined,
+  ].filter((value): value is string => Boolean(value));
+  const title = publicDescription.join(" • ");
+  const accessibleLabel = publicDescription.join(", ");
 
   return (
     <button
@@ -333,6 +352,7 @@ function CardFace({
       title={title}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onKeyDown={onKeyDown}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -340,9 +360,7 @@ function CardFace({
       onDrop={onDrop}
       disabled={!onClick && !draggable}
       aria-pressed={actionable ? selected : undefined}
-      aria-label={`${card.name}${permanent?.tapped ? ", tapped" : ""}${
-        targeted ? ", targeted by the stack" : ""
-      }`}
+      aria-label={accessibleLabel}
     >
       <span className="card-edge" />
       <span className="card-heading">
@@ -354,9 +372,18 @@ function CardFace({
         )}
       </span>
       <span className="card-field">
-        <span className="card-glyph" aria-hidden="true">
-          {card.flying ? "✦" : card.type?.toLowerCase().includes("land") ? "◆" : "◇"}
-        </span>
+        {card.flying ? (
+          <span className="card-flying-cue" aria-hidden="true">
+            FLYING
+          </span>
+        ) : (
+          <span className="card-glyph" aria-hidden="true">
+            {card.type?.toLowerCase().includes("land") ? "◆" : "◇"}
+          </span>
+        )}
+        {instanceId && (
+          <span className="card-instance-cue">#{instanceId}</span>
+        )}
       </span>
       <span className="card-footer">
         <span className="card-type">{card.type ?? "Card"}</span>
@@ -370,12 +397,14 @@ function CardFace({
         <span className="status-token status-sick">SICK</span>
       )}
       {!!permanent?.damage && (
-        <span className="status-token status-damage">−{permanent.damage}</span>
+        <span className="status-token status-damage">
+          DMG {permanent.damage}
+        </span>
       )}
       {targeted && <span className="status-token status-targeted">TARGET</span>}
       {choiceTarget && <span className="status-token status-choice">CHOOSE</span>}
-      {choiceOrigin && (
-        <span className="status-token status-origin">ACTIVATE</span>
+      {choiceOrigin && choiceOriginLabel && (
+        <span className="status-token status-origin">{choiceOriginLabel}</span>
       )}
     </button>
   );
@@ -419,6 +448,10 @@ function FaceUpHand({
   draggedCardKey,
   onCardDragStart,
   onCardDragEnd,
+  discardOptionIndices,
+  selectedDiscardIndices,
+  discardRequiredCount,
+  onDiscardToggle,
 }: {
   cards: Card[];
   label: string;
@@ -434,6 +467,10 @@ function FaceUpHand({
     event: ReactDragEvent<HTMLButtonElement>,
   ) => void;
   onCardDragEnd?: () => void;
+  discardOptionIndices?: ReadonlySet<number>;
+  selectedDiscardIndices?: ReadonlySet<number>;
+  discardRequiredCount?: number;
+  onDiscardToggle?: (index: number) => void;
 }) {
   const playableCount = cards.filter((card) =>
     playableCardIds?.has(String(card.id)),
@@ -450,18 +487,31 @@ function FaceUpHand({
         {!debug && playableCount > 0 && (
           <small>{playableCount} playable</small>
         )}
+        {!debug && discardRequiredCount !== undefined && (
+          <small>
+            {selectedDiscardIndices?.size ?? 0}/{discardRequiredCount} selected
+          </small>
+        )}
       </div>
       <div className="hand-fan" role="list" aria-label="Cards in your hand">
         {cards.map((card, index) => {
           const playable =
             !debug && (playableCardIds?.has(String(card.id)) ?? false);
+          const discardable =
+            !debug && (discardOptionIndices?.has(index) ?? false);
+          const discardSelected =
+            discardable && (selectedDiscardIndices?.has(index) ?? false);
           const renderKey = `${String(card.id)}:${index}`;
           return (
             <div
               className={`hand-card-wrap ${playable ? "is-playable" : ""} ${
-                selectedCardKey === renderKey ? "is-selected" : ""
+                selectedCardKey === renderKey || discardSelected
+                  ? "is-selected"
+                  : ""
               } ${
                 draggedCardKey === renderKey ? "is-dragging" : ""
+              } ${discardable ? "is-discardable" : ""} ${
+                discardSelected ? "is-discard-selected" : ""
               }`}
               key={`${card.id}-${index}`}
               role="listitem"
@@ -479,7 +529,10 @@ function FaceUpHand({
             >
               <CardFace
                 card={card}
-                actionable={playable}
+                actionable={playable || discardable}
+                selected={
+                  selectedCardKey === renderKey || discardSelected
+                }
                 draggable={playable && Boolean(onCardDragStart)}
                 onDragStart={
                   playable && onCardDragStart
@@ -490,13 +543,26 @@ function FaceUpHand({
                   playable && onCardDragEnd ? onCardDragEnd : undefined
                 }
                 onClick={
-                  playable && onCardClick
+                  discardable && onDiscardToggle
+                    ? () => onDiscardToggle(index)
+                    : playable && onCardClick
                     ? () => onCardClick(card, renderKey)
                     : undefined
                 }
                 onDoubleClick={
                   playable && onCardDoubleClick
                     ? () => onCardDoubleClick(card, renderKey)
+                    : undefined
+                }
+                onKeyDown={
+                  playable &&
+                  selectedCardKey === renderKey &&
+                  onCardDoubleClick
+                    ? (event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        onCardDoubleClick(card, renderKey);
+                      }
                     : undefined
                 }
               />
@@ -547,6 +613,7 @@ function ManaPool({ value }: { value: PlayerState["manaPool"] }) {
 
 function PlayerHud({
   player,
+  seat,
   label,
   deck,
   policy,
@@ -556,8 +623,11 @@ function PlayerHud({
   draggingPriority,
   onChoosePriorityTarget,
   onDropPriorityTarget,
+  onPriorityDragOver,
+  onPriorityDrop,
 }: {
   player: PlayerState;
+  seat: PlayerIndex;
   label: string;
   deck: string;
   policy: string;
@@ -567,12 +637,24 @@ function PlayerHud({
   draggingPriority?: boolean;
   onChoosePriorityTarget?: () => void;
   onDropPriorityTarget?: () => void;
+  onPriorityDragOver?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  onPriorityDrop?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
 }) {
   return (
     <div
       className={`player-hud ${active ? "is-active" : ""} ${
         opponent ? "is-opponent" : ""
       }`}
+      onDragOver={(event) =>
+        onPriorityDragOver?.(`player:${seat}`, event)
+      }
+      onDrop={(event) => onPriorityDrop?.(`player:${seat}`, event)}
     >
       <div className="identity-orb" aria-hidden="true">
         {label.slice(0, 1)}
@@ -638,12 +720,20 @@ function PermanentRow({
   priorityDestinationIds,
   priorityOriginIds,
   selectedPriorityOriginId,
+  blockerOriginIds,
+  selectedBlockerId,
+  blockAssignments,
   draggingPriority,
   onToggle,
   onChoosePriorityDestination,
   onSelectPriorityOrigin,
   onStartPriorityOriginDrag,
   onEndPriorityDrag,
+  onPriorityDragOver,
+  onPriorityDrop,
+  onSelectBlocker,
+  onStartBlockerDrag,
+  onEndBlockerDrag,
 }: {
   title: string;
   permanents: Permanent[];
@@ -653,6 +743,9 @@ function PermanentRow({
   priorityDestinationIds?: ReadonlySet<string>;
   priorityOriginIds?: ReadonlySet<string>;
   selectedPriorityOriginId?: string;
+  blockerOriginIds?: ReadonlySet<string>;
+  selectedBlockerId?: string;
+  blockAssignments?: Readonly<Record<string, string>>;
   draggingPriority?: boolean;
   onToggle?: (id: string) => void;
   onChoosePriorityDestination?: (id: string) => void;
@@ -662,6 +755,20 @@ function PermanentRow({
     event: ReactDragEvent<HTMLButtonElement>,
   ) => void;
   onEndPriorityDrag?: () => void;
+  onPriorityDragOver?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  onPriorityDrop?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  onSelectBlocker?: (id: string) => void;
+  onStartBlockerDrag?: (
+    id: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => void;
+  onEndBlockerDrag?: () => void;
 }) {
   if (permanents.length === 0) return null;
   return (
@@ -674,10 +781,13 @@ function PermanentRow({
           const priorityDestination =
             priorityDestinationIds?.has(id) ?? false;
           const priorityOrigin = priorityOriginIds?.has(id) ?? false;
+          const blockerOrigin = blockerOriginIds?.has(id) ?? false;
           const onClick = priorityDestination
             ? () => onChoosePriorityDestination?.(id)
             : priorityOrigin
               ? () => onSelectPriorityOrigin?.(id)
+              : blockerOrigin
+                ? () => onSelectBlocker?.(id)
               : eligible && onToggle
                 ? () => onToggle(id)
                 : undefined;
@@ -687,29 +797,50 @@ function PermanentRow({
                 permanent.tapped ? "is-tapped" : ""
               } ${priorityDestination ? "is-priority-destination" : ""} ${
                 priorityOrigin ? "is-priority-origin" : ""
-              }`}
+              } ${blockerOrigin ? "is-blocker-origin" : ""}`}
               key={id}
+              onDragOver={(event) =>
+                onPriorityDragOver?.(`permanent:${id}`, event)
+              }
+              onDrop={(event) =>
+                onPriorityDrop?.(`permanent:${id}`, event)
+              }
             >
               <CardFace
                 card={permanent.card}
                 permanent={permanent}
                 selected={
-                  selectedIds?.has(id) || selectedPriorityOriginId === id
+                  selectedIds?.has(id) ||
+                  selectedPriorityOriginId === id ||
+                  selectedBlockerId === id
                 }
-                actionable={eligible || priorityDestination || priorityOrigin}
+                actionable={
+                  eligible ||
+                  priorityDestination ||
+                  priorityOrigin ||
+                  blockerOrigin
+                }
                 targeted={targetedIds?.has(id)}
                 choiceTarget={priorityDestination}
-                choiceOrigin={priorityOrigin}
+                choiceOrigin={priorityOrigin || blockerOrigin}
+                choiceOriginLabel={blockerOrigin ? "BLOCK" : ""}
                 onClick={onClick}
-                draggable={priorityOrigin && Boolean(onStartPriorityOriginDrag)}
+                draggable={
+                  (priorityOrigin && Boolean(onStartPriorityOriginDrag)) ||
+                  (blockerOrigin && Boolean(onStartBlockerDrag))
+                }
                 onDragStart={
                   priorityOrigin && onStartPriorityOriginDrag
                     ? (event) => onStartPriorityOriginDrag(id, event)
+                    : blockerOrigin && onStartBlockerDrag
+                      ? (event) => onStartBlockerDrag(id, event)
                     : undefined
                 }
                 onDragEnd={
                   priorityOrigin && onEndPriorityDrag
                     ? onEndPriorityDrag
+                    : blockerOrigin && onEndBlockerDrag
+                      ? onEndBlockerDrag
                     : undefined
                 }
                 onDragOver={
@@ -731,6 +862,82 @@ function PermanentRow({
                     : undefined
                 }
               />
+              {blockAssignments?.[id] && (
+                <span className="block-assignment-badge">
+                  BLOCKS #{blockAssignments[id]}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CombatLane({
+  attackers,
+  legalTargetIds,
+  assignments,
+  draggingBlocker,
+  onChooseTarget,
+  onDragOverTarget,
+  onDropTarget,
+}: {
+  attackers: Permanent[];
+  legalTargetIds?: ReadonlySet<string>;
+  assignments?: Readonly<Record<string, string>>;
+  draggingBlocker?: boolean;
+  onChooseTarget?: (id: string) => void;
+  onDragOverTarget?: (
+    id: string,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  onDropTarget?: (
+    id: string,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+}) {
+  if (attackers.length === 0) return null;
+  return (
+    <div className="combat-lane" aria-label="Attacking creatures">
+      <span className="row-label">Combat</span>
+      <div className="combat-attacker-list">
+        {attackers.map((attacker) => {
+          const id = permanentId(attacker);
+          const legalTarget = legalTargetIds?.has(id) ?? false;
+          const blockerCount = Object.values(assignments ?? {}).filter(
+            (attackerId) => attackerId === id,
+          ).length;
+          return (
+            <div
+              className={`combat-attacker-slot ${
+                legalTarget ? "is-legal-block-target" : ""
+              }`}
+              key={id}
+              onDragOver={(event) => onDragOverTarget?.(id, event)}
+              onDrop={(event) => onDropTarget?.(id, event)}
+            >
+              <div className="combat-attacker-card">
+                <CardFace
+                  card={attacker.card}
+                  permanent={attacker}
+                  actionable={legalTarget}
+                  choiceTarget={legalTarget}
+                  onClick={
+                    legalTarget ? () => onChooseTarget?.(id) : undefined
+                  }
+                />
+              </div>
+              <span className="combat-attacking-label">ATTACKING</span>
+              {blockerCount > 0 && (
+                <span className="combat-blocked-label">
+                  BLOCKED{blockerCount > 1 ? ` ×${blockerCount}` : ""}
+                </span>
+              )}
+              {legalTarget && draggingBlocker && (
+                <span className="combat-drop-label">DROP BLOCKER</span>
+              )}
             </div>
           );
         })}
@@ -762,6 +969,20 @@ function BattlefieldSide({
   onSelectPriorityOrigin,
   onStartPriorityOriginDrag,
   onEndPriorityDrag,
+  onPriorityDragOver,
+  onPriorityDrop,
+  combatAttackerIds,
+  blockerOriginIds,
+  selectedBlockerId,
+  blockTargetIds,
+  blockAssignments,
+  draggingBlocker,
+  onSelectBlocker,
+  onStartBlockerDrag,
+  onEndBlockerDrag,
+  onChooseBlockTarget,
+  onBlockDragOver,
+  onBlockDrop,
 }: {
   player: PlayerState;
   seat: PlayerIndex;
@@ -788,6 +1009,35 @@ function BattlefieldSide({
     event: ReactDragEvent<HTMLButtonElement>,
   ) => void;
   onEndPriorityDrag?: () => void;
+  onPriorityDragOver?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  onPriorityDrop?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  combatAttackerIds?: ReadonlySet<string>;
+  blockerOriginIds?: ReadonlySet<string>;
+  selectedBlockerId?: string;
+  blockTargetIds?: ReadonlySet<string>;
+  blockAssignments?: Readonly<Record<string, string>>;
+  draggingBlocker?: boolean;
+  onSelectBlocker?: (id: string) => void;
+  onStartBlockerDrag?: (
+    id: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => void;
+  onEndBlockerDrag?: () => void;
+  onChooseBlockTarget?: (id: string) => void;
+  onBlockDragOver?: (
+    id: string,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  onBlockDrop?: (
+    id: string,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
 }) {
   const eligibleIds = useMemo(
     () =>
@@ -797,8 +1047,13 @@ function BattlefieldSide({
       ),
     [attackerDecision],
   );
+  const combatAttackers = (player.creatures ?? []).filter((permanent) =>
+    combatAttackerIds?.has(permanentId(permanent)),
+  );
   const nonlands = [
-    ...(player.creatures ?? []),
+    ...(player.creatures ?? []).filter(
+      (permanent) => !combatAttackerIds?.has(permanentId(permanent)),
+    ),
     ...(player.artifacts ?? []),
     ...(player.enchantments ?? []),
   ];
@@ -816,23 +1071,14 @@ function BattlefieldSide({
         if (!priorityPlayTarget) return;
         const target = event.target as HTMLElement;
         if (target.closest("button")) return;
-        if (target.closest(".permanent-zone")) onChoosePriorityPlay?.();
-      }}
-      onDragOver={(event) => {
-        if (!priorityPlayTarget || !draggingPriority) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-      }}
-      onDrop={(event) => {
-        if (!priorityPlayTarget || !draggingPriority) return;
-        event.preventDefault();
-        event.stopPropagation();
-        onEndPriorityDrag?.();
         onChoosePriorityPlay?.();
       }}
+      onDragOver={(event) => onPriorityDragOver?.("play", event)}
+      onDrop={(event) => onPriorityDrop?.("play", event)}
     >
       <PlayerHud
         player={player}
+        seat={seat}
         label={playerLabel(snapshot, seat)}
         deck={deckLabel(snapshot, meta, seat)}
         policy={policyLabel(snapshot, meta, seat)}
@@ -845,6 +1091,8 @@ function BattlefieldSide({
           onEndPriorityDrag?.();
           onChoosePriorityPlayer?.(seat);
         }}
+        onPriorityDragOver={onPriorityDragOver}
+        onPriorityDrop={onPriorityDrop}
       />
       {opponent && (
         <div className="opponent-hand-space">
@@ -874,6 +1122,14 @@ function BattlefieldSide({
           onSelectPriorityOrigin={onSelectPriorityOrigin}
           onStartPriorityOriginDrag={onStartPriorityOriginDrag}
           onEndPriorityDrag={onEndPriorityDrag}
+          onPriorityDragOver={onPriorityDragOver}
+          onPriorityDrop={onPriorityDrop}
+          blockerOriginIds={blockerOriginIds}
+          selectedBlockerId={selectedBlockerId}
+          blockAssignments={blockAssignments}
+          onSelectBlocker={onSelectBlocker}
+          onStartBlockerDrag={onStartBlockerDrag}
+          onEndBlockerDrag={onEndBlockerDrag}
         />
         <PermanentRow
           title="Lands"
@@ -887,10 +1143,29 @@ function BattlefieldSide({
           onSelectPriorityOrigin={onSelectPriorityOrigin}
           onStartPriorityOriginDrag={onStartPriorityOriginDrag}
           onEndPriorityDrag={onEndPriorityDrag}
+          onPriorityDragOver={onPriorityDragOver}
+          onPriorityDrop={onPriorityDrop}
+          blockerOriginIds={blockerOriginIds}
+          selectedBlockerId={selectedBlockerId}
+          blockAssignments={blockAssignments}
+          onSelectBlocker={onSelectBlocker}
+          onStartBlockerDrag={onStartBlockerDrag}
+          onEndBlockerDrag={onEndBlockerDrag}
         />
-        {nonlands.length === 0 && (player.lands ?? []).length === 0 && (
+        <CombatLane
+          attackers={combatAttackers}
+          legalTargetIds={blockTargetIds}
+          assignments={blockAssignments}
+          draggingBlocker={draggingBlocker}
+          onChooseTarget={onChooseBlockTarget}
+          onDragOverTarget={onBlockDragOver}
+          onDropTarget={onBlockDrop}
+        />
+        {nonlands.length === 0 &&
+          combatAttackers.length === 0 &&
+          (player.lands ?? []).length === 0 && (
           <span className="open-ground">Open battlefield</span>
-        )}
+          )}
       </div>
     </section>
   );
@@ -929,21 +1204,6 @@ function PhaseRibbon({
   );
 }
 
-function formatLogEntry(entry: string | LogEntry): {
-  message: string;
-  turn?: number;
-  player?: number;
-  kind?: string;
-} {
-  if (typeof entry === "string") return { message: entry };
-  return {
-    message: entry.message ?? entry.text ?? entry.label ?? JSON.stringify(entry),
-    turn: entry.turn,
-    player: entry.player,
-    kind: entry.kind,
-  };
-}
-
 function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -964,7 +1224,7 @@ function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
           </div>
         )}
         {entries.map((raw, index) => {
-          const entry = formatLogEntry(raw);
+          const entry = formatPublicLogEntry(raw);
           return (
             <div
               className={`event event-${entry.kind ?? "game"} ${
@@ -994,12 +1254,22 @@ function StackRail({
   draggingPriority,
   onChoosePriorityStack,
   onEndPriorityDrag,
+  onPriorityDragOver,
+  onPriorityDrop,
 }: {
   stack: StackEntry[];
   priorityStackTargetIds?: ReadonlySet<string>;
   draggingPriority?: boolean;
   onChoosePriorityStack?: (id: string) => void;
   onEndPriorityDrag?: () => void;
+  onPriorityDragOver?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
+  onPriorityDrop?: (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => void;
 }) {
   if (stack.length === 0) return null;
   return (
@@ -1023,6 +1293,14 @@ function StackRail({
                 priorityTarget ? "is-priority-destination" : ""
               }`}
               key={stackId ?? `${label}-${index}`}
+              onDragOver={(event) => {
+                if (stackId === undefined) return;
+                onPriorityDragOver?.(`stack:${String(stackId)}`, event);
+              }}
+              onDrop={(event) => {
+                if (stackId === undefined) return;
+                onPriorityDrop?.(`stack:${String(stackId)}`, event);
+              }}
             >
               <span className="stack-order">
                 {index === 0 ? "NEXT" : `+${index}`}
@@ -1264,54 +1542,65 @@ function BlockersControls({
   onSubmit: (action: ActionRequest) => void;
   busy: boolean;
 }) {
+  const pairs = blockerPairsFromKeys(assignments, decision.choices);
   return (
-    <div className="blocker-control">
-      <div className="blocker-grid">
-        {decision.choices.map((choice) => {
-          const blocker = findPermanent(player, choice.blocker);
-          const blockerKey = String(choice.blocker);
-          return (
-            <label key={blockerKey}>
-              <span>
-                <strong>
-                  {cardFromPermanent(blocker)?.name ?? `Blocker ${choice.blocker}`}
-                </strong>
-                blocks
-              </span>
-              <select
-                value={assignments[blockerKey] ?? ""}
-                onChange={(event) =>
-                  setAssignments({
-                    ...assignments,
-                    [blockerKey]: event.target.value,
-                  })
-                }
+    <div className="blocker-control board-blocker-control">
+      <div className="block-pair-links" aria-label="Current blocks">
+        {pairs.length === 0 ? (
+          <span>Select a glowing blocker, then an attacking creature.</span>
+        ) : (
+          pairs.map(([attackerId, blockerId]) => {
+            const blocker = findPermanent(player, blockerId);
+            const attacker = findPermanent(opponent, attackerId);
+            return (
+              <button
+                type="button"
+                className="block-pair-link"
+                key={String(blockerId)}
+                onClick={() => {
+                  const next = { ...assignments };
+                  delete next[String(blockerId)];
+                  setAssignments(next);
+                }}
+                disabled={busy}
+                title="Remove this block"
               >
-                <option value="">No one</option>
-                {choice.legalAttackers.map((attacker) => {
-                  const permanent = findPermanent(opponent, attacker);
-                  return (
-                    <option value={String(attacker)} key={String(attacker)}>
-                      {cardFromPermanent(permanent)?.name ?? `Attacker ${attacker}`}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-          );
-        })}
+                <strong>
+                  {cardFromPermanent(blocker)?.name ?? `Blocker ${blockerId}`}
+                </strong>
+                <span>→</span>
+                <strong>
+                  {cardFromPermanent(attacker)?.name ??
+                    `Attacker ${attackerId}`}
+                </strong>
+                <small>REMOVE</small>
+              </button>
+            );
+          })
+        )}
       </div>
-      <button
-        type="button"
-        className="button-primary"
-        onClick={() => {
-          const pairs = blockerPairsFromKeys(assignments, decision.choices);
-          onSubmit({ decisionId: decision.decisionId, pairs });
-        }}
-        disabled={busy}
-      >
-        Confirm blocks
-      </button>
+      <div className="decision-actions">
+        <button
+          type="button"
+          className="button-secondary"
+          onClick={() =>
+            onSubmit({ decisionId: decision.decisionId, pairs: [] })
+          }
+          disabled={busy}
+        >
+          No blocks
+        </button>
+        <button
+          type="button"
+          className="button-primary"
+          onClick={() =>
+            onSubmit({ decisionId: decision.decisionId, pairs })
+          }
+          disabled={busy || pairs.length === 0}
+        >
+          Confirm {pairs.length === 1 ? "block" : `${pairs.length} blocks`}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1343,14 +1632,27 @@ function DamageOrderControls({
       <div className="damage-order-list">
         {order.map((id, index) => {
           const permanent = findPermanent(opponent, id);
+          const card = cardFromPermanent(permanent);
+          const power = permanent?.power ?? card?.power;
+          const toughness = permanent?.toughness ?? card?.toughness;
+          const stats =
+            power !== undefined || toughness !== undefined
+              ? `${power ?? "–"}/${toughness ?? "–"}`
+              : null;
           return (
             <div key={id}>
               <span className="order-number">{index + 1}</span>
-              <strong>{cardFromPermanent(permanent)?.name ?? `Blocker ${id}`}</strong>
+              <span className="damage-order-identity">
+                <strong>{card?.name ?? `Blocker ${id}`}</strong>
+                <small>
+                  #{String(id)}
+                  {stats ? ` · ${stats}` : ""}
+                </small>
+              </span>
               <span className="reorder-buttons">
                 <button
                   type="button"
-                  aria-label="Move earlier"
+                  aria-label={`Move #${String(id)} earlier in damage order`}
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
                 >
@@ -1358,7 +1660,7 @@ function DamageOrderControls({
                 </button>
                 <button
                   type="button"
-                  aria-label="Move later"
+                  aria-label={`Move #${String(id)} later in damage order`}
                   onClick={() => move(index, 1)}
                   disabled={index === order.length - 1}
                 >
@@ -1383,6 +1685,54 @@ function DamageOrderControls({
   );
 }
 
+function CleanupDiscardControls({
+  decision,
+  selected,
+  setSelected,
+  onSubmit,
+  busy,
+}: {
+  decision: CleanupDiscardDecision;
+  selected: Set<number>;
+  setSelected: (next: Set<number>) => void;
+  onSubmit: (action: ActionRequest) => void;
+  busy: boolean;
+}) {
+  const ready = selected.size === decision.count;
+  return (
+    <div className="cleanup-discard-control">
+      <span className="cleanup-progress">
+        Choose {decision.count} · {selected.size} selected
+      </span>
+      <div className="decision-actions">
+        {selected.size > 0 && (
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => setSelected(new Set())}
+            disabled={busy}
+          >
+            Clear
+          </button>
+        )}
+        <button
+          type="button"
+          className="button-primary"
+          onClick={() =>
+            onSubmit({
+              decisionId: decision.decisionId,
+              indices: [...selected].sort((left, right) => left - right),
+            })
+          }
+          disabled={busy || !ready}
+        >
+          Confirm discard
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DecisionDock({
   decision,
   state,
@@ -1392,6 +1742,11 @@ function DecisionDock({
   onSubmit,
   pendingPriorityOptions,
   onChoosePriorityExact,
+  selectedDiscardIndices,
+  setSelectedDiscardIndices,
+  blockAssignments,
+  setBlockAssignments,
+  bluffMode,
 }: {
   decision: Decision;
   state: NonNullable<GameSnapshot["state"]>;
@@ -1401,12 +1756,15 @@ function DecisionDock({
   onSubmit: (action: ActionRequest) => void;
   pendingPriorityOptions: PriorityOption[];
   onChoosePriorityExact: (option: PriorityOption) => void;
+  selectedDiscardIndices: Set<number>;
+  setSelectedDiscardIndices: (next: Set<number>) => void;
+  blockAssignments: Record<string, string>;
+  setBlockAssignments: (next: Record<string, string>) => void;
+  bluffMode: boolean;
 }) {
-  const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [damageOrder, setDamageOrder] = useState<Array<string | number>>([]);
 
   useEffect(() => {
-    setAssignments({});
     setSelectedAttackers(new Set());
     setDamageOrder(
       decision.kind === "damage_order"
@@ -1424,10 +1782,10 @@ function DecisionDock({
   let heading = "Make a game choice";
   let helper = "The engine is waiting for your exact selection.";
   if (decision.kind === "priority") {
-    heading = stackInteraction ? "Respond to the stack" : "Choose your play";
-    helper = stackInteraction
-      ? `${stackInteraction.summary} Cast a response, or pass priority to continue.`
-      : "Select a playable card or permanent, then choose its highlighted destination.";
+    heading = stackInteraction ? "Respond to the stack" : "Priority actions";
+    helper =
+      stackInteraction?.summary ??
+      "Choose a legal action from the battlefield or pass priority.";
   } else if (decision.kind === "attackers") {
     heading =
       decision.eligible.length === 0
@@ -1435,7 +1793,9 @@ function DecisionDock({
         : "Declare attackers";
     helper =
       decision.eligible.length === 0
-        ? "Automatic advance was interrupted. Continue without attackers."
+        ? bluffMode
+          ? "Bluff mode paused before declaring no attackers."
+          : "Automatic advance was interrupted. Continue without attackers."
         : "Select any creatures you want to send into combat.";
   } else if (decision.kind === "blockers") {
     heading = "Declare blockers";
@@ -1443,18 +1803,48 @@ function DecisionDock({
   } else if (decision.kind === "damage_order") {
     heading = "Order combat damage";
     helper = "Damage is assigned from left to right.";
+  } else if (decision.kind === "cleanup_discard") {
+    heading = "Discard to hand size";
+    helper = `Select exactly ${decision.count} ${
+      decision.count === 1 ? "card" : "cards"
+    } from your hand.`;
   }
 
   return (
-    <section className="decision-dock" aria-live="polite">
-      <div className="decision-heading">
-        <span className="decision-pulse" />
-        <div>
-          <span className="eyebrow">YOUR DECISION</span>
-          <h2>{heading}</h2>
-          <p>{helper}</p>
-        </div>
+    <section
+      className={`decision-dock ${
+        decision.kind === "priority" ? "is-priority" : ""
+      }`}
+      aria-busy={busy}
+      aria-label={
+        decision.kind === "priority"
+          ? stackInteraction
+            ? "Respond to the stack"
+            : "Priority actions"
+          : undefined
+      }
+    >
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <span key={String(decision.decisionId)}>
+          Turn {state.turnNumber}, {formatPhase(state.phase)}. {heading}.{" "}
+          {helper}
+        </span>
       </div>
+      {decision.kind !== "priority" && (
+        <div className="decision-heading">
+          <span className="decision-pulse" />
+          <div>
+            <span className="eyebrow">YOUR DECISION</span>
+            <h2>{heading}</h2>
+            <p>{helper}</p>
+          </div>
+        </div>
+      )}
       <div className="decision-body">
         {decision.kind === "priority" && (
           <PriorityControls
@@ -1481,8 +1871,8 @@ function DecisionDock({
             decision={decision}
             player={player}
             opponent={opponent}
-            assignments={assignments}
-            setAssignments={setAssignments}
+            assignments={blockAssignments}
+            setAssignments={setBlockAssignments}
             onSubmit={onSubmit}
             busy={busy}
           />
@@ -1497,13 +1887,16 @@ function DecisionDock({
             busy={busy}
           />
         )}
+        {decision.kind === "cleanup_discard" && (
+          <CleanupDiscardControls
+            decision={decision}
+            selected={selectedDiscardIndices}
+            setSelected={setSelectedDiscardIndices}
+            onSubmit={onSubmit}
+            busy={busy}
+          />
+        )}
       </div>
-      {busy && (
-        <div className="decision-busy">
-          <span className="spinner" />
-          Playing out the response…
-        </div>
-      )}
     </section>
   );
 }
@@ -1554,10 +1947,34 @@ function SetupDrawer({
   onCreate: (config: GameConfig) => void;
 }) {
   const [config, setConfig] = useState<GameConfig | null>(initialConfig);
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (initialConfig) setConfig(initialConfig);
-  }, [initialConfig]);
+    if (open && initialConfig) {
+      setConfig({
+        ...initialConfig,
+        debugReveal: false,
+      });
+    }
+  }, [initialConfig, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    closeButtonRef.current?.focus({ preventScroll: true });
+    return () => {
+      const restoreTarget = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      if (restoreTarget?.isConnected) {
+        restoreTarget.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -1579,25 +1996,66 @@ function SetupDrawer({
     event.preventDefault();
     if (config) onCreate(config);
   };
+  const handleDialogKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const drawer = drawerRef.current;
+    if (!drawer) return;
+    const controls = Array.from(
+      drawer.querySelectorAll<HTMLElement>(
+        'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (controls.length === 0) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !drawer.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
-    <div className="drawer-layer" role="dialog" aria-modal="true" aria-label="New match">
+    <div
+      className="drawer-layer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="setup-dialog-title"
+      onKeyDown={handleDialogKeyDown}
+    >
       <button
         className="drawer-scrim"
         type="button"
+        tabIndex={-1}
         onClick={onClose}
         aria-label="Close new match setup"
       />
-      <aside className="setup-drawer">
+      <aside className="setup-drawer" ref={drawerRef}>
         <header>
           <div>
             <span className="eyebrow">MATCH ROOM</span>
-            <h1>Set the table</h1>
+            <h1 id="setup-dialog-title">Set the table</h1>
             <p>
               Choose both decks and pilots. Every seed replays the same match.
             </p>
           </div>
-          <button className="icon-button" type="button" onClick={onClose}>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            ref={closeButtonRef}
+          >
             <span aria-hidden="true">×</span>
             <span className="sr-only">Close</span>
           </button>
@@ -1752,6 +2210,27 @@ function SetupDrawer({
                   <small>Debug display only — never given to the bot</small>
                 </span>
               </label>
+              <label className="toggle-field">
+                <input
+                  type="checkbox"
+                  checked={config.bluffMode}
+                  onChange={(event) =>
+                    setConfig({
+                      ...config,
+                      bluffMode: event.target.checked,
+                    })
+                  }
+                />
+                <span className="toggle-track">
+                  <span />
+                </span>
+                <span>
+                  <strong>Bluff mode</strong>
+                  <small>
+                    Pause for forced passes and empty attacks to preserve timing
+                  </small>
+                </span>
+              </label>
             </section>
 
             <footer>
@@ -1866,7 +2345,19 @@ function GameOver({
   onRematch: () => void;
   onNewGame: () => void;
 }) {
-  if (snapshot.status !== "finished" && snapshot.status !== "error") return null;
+  const visible =
+    snapshot.status === "finished" || snapshot.status === "error";
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (visible) dialogRef.current?.focus({ preventScroll: true });
+  }, [snapshot.id, visible]);
+  const keepResultOpen = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  if (!visible) return null;
   const winner = snapshot.result?.winner;
   const winnerSeat =
     winner === 0 || winner === 1 ? (winner as PlayerIndex) : undefined;
@@ -1881,7 +2372,16 @@ function GameOver({
   const title = formatGameResultTitle(snapshot.status, winner, humanSeat);
   const reason = formatGameResultReason(snapshot.result?.reason);
   return (
-    <div className="game-over-layer" role="dialog" aria-modal="true">
+    <div
+      className="game-over-layer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="game-result-title"
+      aria-describedby="game-result-reason"
+      ref={dialogRef}
+      tabIndex={-1}
+      onKeyDown={keepResultOpen}
+    >
       <section>
         <span className="result-sigil" aria-hidden="true">
           {snapshot.status === "error" ? "!" : "✦"}
@@ -1889,8 +2389,8 @@ function GameOver({
         <span className="eyebrow">
           {snapshot.status === "error" ? "ENGINE MESSAGE" : "MATCH COMPLETE"}
         </span>
-        <h1>{title}</h1>
-        <p>
+        <h1 id="game-result-title">{title}</h1>
+        <p id="game-result-reason">
           {snapshot.error ??
             reason ??
             (winnerSeat !== undefined
@@ -1946,12 +2446,10 @@ type PriorityOriginSelection =
       kind: "hand";
       cardId: string;
       renderKey: string;
-      label: string;
     }
   | {
       kind: "permanent";
       permanentId: string;
-      label: string;
     };
 
 export default function App() {
@@ -1973,10 +2471,23 @@ export default function App() {
   const [selectedAttackers, setSelectedAttackers] = useState<Set<string>>(
     new Set(),
   );
+  const [selectedDiscardIndices, setSelectedDiscardIndices] = useState<
+    Set<number>
+  >(new Set());
+  const [blockAssignments, setBlockAssignments] = useState<
+    Record<string, string>
+  >({});
+  const [selectedBlockerId, setSelectedBlockerId] = useState<string | null>(
+    null,
+  );
   const [autoAdvanceFailedDecision, setAutoAdvanceFailedDecision] = useState<
     string | null
   >(null);
   const autoSubmittedAttackerDecision = useRef<string | null>(null);
+  const draggedPriorityOriginRef = useRef<PriorityOriginSelection | null>(
+    null,
+  );
+  const draggedBlockerRef = useRef<string | null>(null);
   const creatingRef = useRef(false);
   const actingRef = useRef(false);
 
@@ -2019,8 +2530,12 @@ export default function App() {
       trainSeed: Number(
         readDefault(defaults, ["trainSeed", "learnedTrainSeed"], 424242),
       ),
-      debugReveal: Boolean(
-        readDefault(defaults, ["debugReveal", "revealHands"], false),
+      debugReveal: false,
+      bluffMode: Boolean(readDefault(defaults, ["bluffMode"], false)),
+      rollouts: Number(readDefault(defaults, ["rollouts"], 2)),
+      deepRollouts: Number(readDefault(defaults, ["deepRollouts"], 8)),
+      learnedRollouts: Number(
+        readDefault(defaults, ["learnedRollouts"], 2),
       ),
       players: [
         {
@@ -2057,6 +2572,16 @@ export default function App() {
 
   const currentConfig =
     (snapshot?.config as GameConfig | undefined) ?? initialConfig;
+  const newMatchConfig = useMemo<GameConfig | null>(
+    () =>
+      currentConfig
+        ? {
+            ...currentConfig,
+            debugReveal: false,
+          }
+        : null,
+    [currentConfig],
+  );
 
   const startGame = useCallback(
     (config: GameConfig) => {
@@ -2150,6 +2675,7 @@ export default function App() {
       snapshot?.status !== "playing" ||
       decision?.kind !== "attackers" ||
       decision.eligible.length !== 0 ||
+      currentConfig?.bluffMode ||
       acting
     )
       return;
@@ -2162,7 +2688,13 @@ export default function App() {
       { decisionId: decision.decisionId, ids: [] },
       () => setAutoAdvanceFailedDecision(decisionKey),
     );
-  }, [act, acting, autoAdvanceFailedDecision, snapshot]);
+  }, [
+    act,
+    acting,
+    autoAdvanceFailedDecision,
+    currentConfig?.bluffMode,
+    snapshot,
+  ]);
 
   useEffect(() => {
     if (
@@ -2204,7 +2736,12 @@ export default function App() {
   useEffect(() => {
     setSelectedPriorityOrigin(null);
     setDraggedPriorityOrigin(null);
+    draggedPriorityOriginRef.current = null;
     setPendingPriorityOptions([]);
+    setSelectedDiscardIndices(new Set());
+    setBlockAssignments({});
+    setSelectedBlockerId(null);
+    draggedBlockerRef.current = null;
   }, [snapshot?.id, snapshot?.decision?.decisionId]);
 
   const replay = () => {
@@ -2239,9 +2776,23 @@ export default function App() {
           onCreate={startGame}
         />
         {(gameError || creating) && (
-          <div className={`toast ${gameError ? "toast-error" : ""}`}>
-            {creating && <span className="spinner" />}
-            {gameError ?? "Shuffling and training the selected pilot…"}
+          <div
+            className={`toast ${gameError ? "toast-error" : ""}`}
+            role={gameError ? "alert" : "status"}
+            aria-live={gameError ? "assertive" : "polite"}
+            aria-atomic="true"
+          >
+            {creating && <span className="spinner" aria-hidden="true" />}
+            {gameError ? (
+              <>
+                <span>{gameError}</span>
+                <button type="button" onClick={() => setGameError(null)}>
+                  Dismiss
+                </button>
+              </>
+            ) : (
+              <span>Shuffling and training the selected pilot…</span>
+            )}
           </div>
         )}
       </div>
@@ -2266,12 +2817,36 @@ export default function App() {
       ? `${snapshot.id}:${String(attackerDecision.decisionId)}`
       : null;
   const hasVisibleDecision =
+    Boolean(currentConfig?.bluffMode) ||
     emptyAttackDecisionKey === null ||
     autoAdvanceFailedDecision === emptyAttackDecisionKey;
   const priorityDecision =
     snapshot.decision?.kind === "priority"
       ? snapshot.decision
       : undefined;
+  const cleanupDiscardDecision =
+    snapshot.decision?.kind === "cleanup_discard"
+      ? snapshot.decision
+      : undefined;
+  const blockerDecision =
+    snapshot.decision?.kind === "blockers"
+      ? snapshot.decision
+      : undefined;
+  const blockerOriginIds = new Set(
+    blockerDecision?.choices.map((choice) => String(choice.blocker)) ?? [],
+  );
+  const combatAttackerIds = new Set(
+    blockerDecision?.attackers.map((id) => String(id)) ?? [],
+  );
+  const selectedBlockerChoice = blockerDecision?.choices.find(
+    (choice) => String(choice.blocker) === selectedBlockerId,
+  );
+  const blockTargetIds = new Set(
+    selectedBlockerChoice?.legalAttackers.map((id) => String(id)) ?? [],
+  );
+  const discardOptionIndices = new Set(
+    cleanupDiscardDecision?.options.map((option) => option.index) ?? [],
+  );
   const playableHandCardIds = new Set(
     priorityDecision?.options
       .flatMap((option) =>
@@ -2281,18 +2856,19 @@ export default function App() {
       ) ??
       [],
   );
-  const selectedPriorityOptions =
-    selectedPriorityOrigin?.kind === "hand"
-      ? priorityOptionsForCard(
-          priorityDecision,
-          selectedPriorityOrigin.cardId,
-        )
-      : selectedPriorityOrigin?.kind === "permanent"
+  const priorityOptionsForOrigin = (
+    origin: PriorityOriginSelection | null,
+  ): PriorityOption[] =>
+    origin?.kind === "hand"
+      ? priorityOptionsForCard(priorityDecision, origin.cardId)
+      : origin?.kind === "permanent"
         ? priorityOptionsForSourcePermanent(
             priorityDecision,
-            selectedPriorityOrigin.permanentId,
+            origin.permanentId,
           )
         : [];
+  const selectedPriorityOptions =
+    priorityOptionsForOrigin(selectedPriorityOrigin);
   const priorityDestinationGroups = new Map<
     PriorityDestinationKey,
     PriorityOption[]
@@ -2337,6 +2913,7 @@ export default function App() {
   const clearPrioritySelection = () => {
     setSelectedPriorityOrigin(null);
     setDraggedPriorityOrigin(null);
+    draggedPriorityOriginRef.current = null;
     setPendingPriorityOptions([]);
   };
   const submitPriorityOption = (option: PriorityOption) => {
@@ -2353,13 +2930,52 @@ export default function App() {
       setPendingPriorityOptions(options);
     }
   };
+  const finishPriorityDrag = () => {
+    draggedPriorityOriginRef.current = null;
+    setDraggedPriorityOrigin(null);
+  };
+  const matchingPriorityDropOptions = (
+    origin: PriorityOriginSelection,
+    destination: PriorityDestinationKey,
+  ) =>
+    priorityOptionsForOrigin(origin).filter(
+      (option) => priorityDestinationKey(option) === destination,
+    );
+  const dragOverPriorityDestination = (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => {
+    const origin = draggedPriorityOriginRef.current;
+    if (!origin || matchingPriorityDropOptions(origin, destination).length === 0)
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+  };
+  const dropPriorityDestination = (
+    destination: PriorityDestinationKey,
+    event: ReactDragEvent<HTMLElement>,
+  ) => {
+    const origin = draggedPriorityOriginRef.current;
+    if (!origin) return;
+    const options = matchingPriorityDropOptions(origin, destination);
+    if (options.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    finishPriorityDrag();
+    setSelectedPriorityOrigin(origin);
+    if (options.length === 1) {
+      submitPriorityOption(options[0]);
+    } else {
+      setPendingPriorityOptions(options);
+    }
+  };
   const selectHandCard = (card: Card, renderKey: string) => {
     if (priorityOptionsForCard(priorityDecision, card.id).length === 0) return;
     setSelectedPriorityOrigin({
       kind: "hand",
       cardId: String(card.id),
       renderKey,
-      label: card.name,
     });
     setPendingPriorityOptions([]);
   };
@@ -2391,9 +3007,9 @@ export default function App() {
       kind: "hand",
       cardId: String(card.id),
       renderKey,
-      label: card.name,
     };
     setSelectedPriorityOrigin(origin);
+    draggedPriorityOriginRef.current = origin;
     setDraggedPriorityOrigin(origin);
   };
   const selectPriorityPermanentOrigin = (permanentId: string) => {
@@ -2402,13 +3018,9 @@ export default function App() {
       permanentId,
     );
     if (options.length === 0) return;
-    const permanent =
-      findPermanent(state?.players[0], permanentId) ??
-      findPermanent(state?.players[1], permanentId);
     const origin: PriorityOriginSelection = {
       kind: "permanent",
       permanentId,
-      label: permanent?.card.name ?? `Permanent ${permanentId}`,
     };
     setSelectedPriorityOrigin(origin);
     setPendingPriorityOptions([]);
@@ -2435,19 +3047,109 @@ export default function App() {
       event.preventDefault();
       return;
     }
-    const permanent =
-      findPermanent(state?.players[0], permanentId) ??
-      findPermanent(state?.players[1], permanentId);
     const origin: PriorityOriginSelection = {
       kind: "permanent",
       permanentId,
-      label: permanent?.card.name ?? `Permanent ${permanentId}`,
     };
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", `permanent:${permanentId}`);
     setSelectedPriorityOrigin(origin);
+    draggedPriorityOriginRef.current = origin;
     setDraggedPriorityOrigin(origin);
     setPendingPriorityOptions([]);
+  };
+  const toggleDiscardIndex = (index: number) => {
+    const decision = cleanupDiscardDecision;
+    if (!decision || !discardOptionIndices.has(index)) return;
+    const next = new Set(selectedDiscardIndices);
+    if (next.has(index)) {
+      next.delete(index);
+    } else if (next.size < decision.count) {
+      next.add(index);
+    }
+    setSelectedDiscardIndices(next);
+  };
+  const selectBlocker = (blockerId: string) => {
+    if (!blockerOriginIds.has(blockerId)) return;
+    setSelectedBlockerId(blockerId);
+  };
+  const assignSelectedBlocker = (
+    blockerId: string,
+    attackerId: string,
+  ) => {
+    const choice = blockerDecision?.choices.find(
+      ({ blocker }) => String(blocker) === blockerId,
+    );
+    if (
+      !choice?.legalAttackers.some(
+        (attacker) => String(attacker) === attackerId,
+      )
+    )
+      return;
+    setBlockAssignments({
+      ...blockAssignments,
+      [blockerId]: attackerId,
+    });
+    setSelectedBlockerId(null);
+  };
+  const chooseBlockTarget = (attackerId: string) => {
+    if (!selectedBlockerId) return;
+    assignSelectedBlocker(selectedBlockerId, attackerId);
+  };
+  const startBlockerDrag = (
+    blockerId: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => {
+    if (!blockerOriginIds.has(blockerId)) {
+      event.preventDefault();
+      return;
+    }
+    draggedBlockerRef.current = blockerId;
+    setSelectedBlockerId(blockerId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", `blocker:${blockerId}`);
+  };
+  const finishBlockerDrag = () => {
+    draggedBlockerRef.current = null;
+  };
+  const dragOverBlockTarget = (
+    attackerId: string,
+    event: ReactDragEvent<HTMLElement>,
+  ) => {
+    const blockerId = draggedBlockerRef.current;
+    if (!blockerId) return;
+    const choice = blockerDecision?.choices.find(
+      ({ blocker }) => String(blocker) === blockerId,
+    );
+    if (
+      !choice?.legalAttackers.some(
+        (attacker) => String(attacker) === attackerId,
+      )
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+  };
+  const dropBlockTarget = (
+    attackerId: string,
+    event: ReactDragEvent<HTMLElement>,
+  ) => {
+    const blockerId = draggedBlockerRef.current;
+    if (!blockerId) return;
+    const choice = blockerDecision?.choices.find(
+      ({ blocker }) => String(blocker) === blockerId,
+    );
+    if (
+      !choice?.legalAttackers.some(
+        (attacker) => String(attacker) === attackerId,
+      )
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    finishBlockerDrag();
+    assignSelectedBlocker(blockerId, attackerId);
   };
   const toggleAttacker = (id: string) => {
     const next = new Set(selectedAttackers);
@@ -2460,13 +3162,18 @@ export default function App() {
     <div
       className={`app-shell game-shell ${
         stack.length ? "has-stack" : ""
-      } ${snapshot.decision && hasVisibleDecision ? "has-decision" : ""}`}
+      } ${snapshot.decision && hasVisibleDecision ? "has-decision" : ""} ${
+        priorityDecision && hasVisibleDecision ? "has-priority-decision" : ""
+      }`}
     >
       <TopBar
         inGame
         onNewGame={() => setSetupOpen(true)}
         seed={currentConfig?.seed}
         gameId={snapshot.id}
+        config={currentConfig}
+        snapshot={snapshot}
+        meta={meta}
       />
       {state ? (
         <>
@@ -2508,7 +3215,16 @@ export default function App() {
                   }
                   onSelectPriorityOrigin={selectPriorityPermanentOrigin}
                   onStartPriorityOriginDrag={startPriorityPermanentDrag}
-                  onEndPriorityDrag={() => setDraggedPriorityOrigin(null)}
+                  onEndPriorityDrag={finishPriorityDrag}
+                  onPriorityDragOver={dragOverPriorityDestination}
+                  onPriorityDrop={dropPriorityDestination}
+                  combatAttackerIds={combatAttackerIds}
+                  blockTargetIds={blockTargetIds}
+                  blockAssignments={blockAssignments}
+                  draggingBlocker={Boolean(selectedBlockerId)}
+                  onChooseBlockTarget={chooseBlockTarget}
+                  onBlockDragOver={dragOverBlockTarget}
+                  onBlockDrop={dropBlockTarget}
                 />
                 <div className="midline">
                   <span />
@@ -2548,7 +3264,15 @@ export default function App() {
                   }
                   onSelectPriorityOrigin={selectPriorityPermanentOrigin}
                   onStartPriorityOriginDrag={startPriorityPermanentDrag}
-                  onEndPriorityDrag={() => setDraggedPriorityOrigin(null)}
+                  onEndPriorityDrag={finishPriorityDrag}
+                  onPriorityDragOver={dragOverPriorityDestination}
+                  onPriorityDrop={dropPriorityDestination}
+                  blockerOriginIds={blockerOriginIds}
+                  selectedBlockerId={selectedBlockerId ?? undefined}
+                  blockAssignments={blockAssignments}
+                  onSelectBlocker={selectBlocker}
+                  onStartBlockerDrag={startBlockerDrag}
+                  onEndBlockerDrag={finishBlockerDrag}
                 />
               </div>
               <div
@@ -2575,7 +3299,11 @@ export default function App() {
                   onCardClick={selectHandCard}
                   onCardDoubleClick={doubleClickHandCard}
                   onCardDragStart={startHandCardDrag}
-                  onCardDragEnd={() => setDraggedPriorityOrigin(null)}
+                  onCardDragEnd={finishPriorityDrag}
+                  discardOptionIndices={discardOptionIndices}
+                  selectedDiscardIndices={selectedDiscardIndices}
+                  discardRequiredCount={cleanupDiscardDecision?.count}
+                  onDiscardToggle={toggleDiscardIndex}
                 />
                 {snapshot.decision && hasVisibleDecision && (
                   <DecisionDock
@@ -2587,6 +3315,11 @@ export default function App() {
                     onSubmit={act}
                     pendingPriorityOptions={pendingPriorityOptions}
                     onChoosePriorityExact={submitPriorityOption}
+                    selectedDiscardIndices={selectedDiscardIndices}
+                    setSelectedDiscardIndices={setSelectedDiscardIndices}
+                    blockAssignments={blockAssignments}
+                    setBlockAssignments={setBlockAssignments}
+                    bluffMode={Boolean(currentConfig?.bluffMode)}
                   />
                 )}
               </div>
@@ -2598,10 +3331,24 @@ export default function App() {
               onChoosePriorityStack={(id) =>
                 choosePriorityDestination(`stack:${id}`)
               }
-              onEndPriorityDrag={() => setDraggedPriorityOrigin(null)}
+              onEndPriorityDrag={finishPriorityDrag}
+              onPriorityDragOver={dragOverPriorityDestination}
+              onPriorityDrop={dropPriorityDestination}
             />
           </div>
-          {!snapshot.decision && snapshot.status === "playing" ? (
+          {acting && snapshot.status === "playing" ? (
+            <div
+              className="opponent-thinking-banner"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="spinner" aria-hidden="true" />
+              <span>
+                <strong>Opponent thinking…</strong>
+                <small>Resolving your action</small>
+              </span>
+            </div>
+          ) : !snapshot.decision && snapshot.status === "playing" ? (
             <div className="watching-banner">
               <span className="spinner" />
               The pilots are thinking…
@@ -2620,7 +3367,7 @@ export default function App() {
         meta={meta}
         loadingMeta={loadingMeta}
         metaError={metaError}
-        initialConfig={currentConfig}
+        initialConfig={newMatchConfig}
         creating={creating}
         onClose={() => setSetupOpen(false)}
         onRetryMeta={loadMeta}
@@ -2634,7 +3381,11 @@ export default function App() {
         onNewGame={() => setSetupOpen(true)}
       />
       {gameError && (
-        <div className="toast toast-error">
+        <div
+          className="toast toast-error"
+          role="alert"
+          aria-atomic="true"
+        >
           <span>{gameError}</span>
           <button type="button" onClick={() => setGameError(null)}>
             Dismiss
@@ -2645,15 +3396,106 @@ export default function App() {
   );
 }
 
+function ReproductionSummary({
+  config,
+  snapshot,
+  meta,
+}: {
+  config: GameConfig;
+  snapshot: GameSnapshot;
+  meta: MetaResponse | null;
+}) {
+  const exactSummary = formatReproductionSummary(config, {
+    turnNumber: snapshot.state?.turnNumber,
+    phase: snapshot.state?.phase,
+    priorityHolder: reproductionPriorityHolder(
+      snapshot.decision?.kind,
+      Boolean(snapshot.state),
+    ),
+    latestEvent: latestPublicEventMessage(snapshot.log ?? []),
+  });
+  return (
+    <details className="repro-summary">
+      <summary aria-label="Open exact reproduction settings">
+        <span>REPRO</span>
+        {config.debugReveal && <em>REVEAL</em>}
+      </summary>
+      <section className="repro-panel" aria-label="Exact reproduction settings">
+        <header>
+          <span className="eyebrow">REPRODUCTION</span>
+          <strong>Exact setup + public state</strong>
+        </header>
+        <div className="repro-seats">
+          {([0, 1] as PlayerIndex[]).map((seat) => (
+            <span key={seat}>
+              <small>{seat === 0 ? "YOU" : "OPPONENT"}</small>
+              <strong>
+                {deckLabel(snapshot, meta, seat)} ·{" "}
+                {policyLabel(snapshot, meta, seat)}
+              </strong>
+            </span>
+          ))}
+        </div>
+        <dl className="repro-settings">
+          <div>
+            <dt>Game seed</dt>
+            <dd>{String(config.seed)}</dd>
+          </div>
+          <div>
+            <dt>Training</dt>
+            <dd>
+              {config.trainGames} games · seed {String(config.trainSeed)}
+            </dd>
+          </div>
+          <div>
+            <dt>Rollouts</dt>
+            <dd>
+              {config.rollouts} normal · {config.deepRollouts} deep ·{" "}
+              {config.learnedRollouts} learned
+            </dd>
+          </div>
+          <div>
+            <dt>Modes</dt>
+            <dd>
+              Bluff {config.bluffMode ? "on" : "off"} · Reveal{" "}
+              {config.debugReveal ? "on" : "off"}
+            </dd>
+          </div>
+        </dl>
+        <label className="repro-copy-field">
+          <span>SELECT TO COPY</span>
+          <textarea
+            aria-label="Selectable exact reproduction summary"
+            value={exactSummary}
+            readOnly
+            rows={4}
+            spellCheck={false}
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </label>
+        <small className="repro-privacy">
+          Setup + public turn context · no hand contents included
+        </small>
+      </section>
+    </details>
+  );
+}
+
 function TopBar({
   inGame,
   seed,
   gameId,
+  config,
+  snapshot,
+  meta,
   onNewGame,
 }: {
   inGame: boolean;
-  seed?: number;
+  seed?: number | string;
   gameId?: string;
+  config?: GameConfig | null;
+  snapshot?: GameSnapshot | null;
+  meta?: MetaResponse | null;
   onNewGame: () => void;
 }) {
   return (
@@ -2676,6 +3518,18 @@ function TopBar({
         {gameId && (
           <span className="game-id" title={gameId}>
             MATCH <strong>{gameId.slice(0, 8).toUpperCase()}</strong>
+          </span>
+        )}
+        {inGame && config && snapshot && (
+          <ReproductionSummary
+            config={config}
+            snapshot={snapshot}
+            meta={meta ?? null}
+          />
+        )}
+        {inGame && config?.debugReveal && (
+          <span className="debug-reveal-warning" role="status">
+            DEBUG REVEAL ON
           </span>
         )}
         {inGame && <span className="live-indicator">LIVE</span>}

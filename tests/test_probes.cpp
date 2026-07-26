@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -24,6 +26,7 @@ using old_school::PriorityPassResult;
 using old_school::PriorityState;
 using old_school::TurnPhase;
 using old_school::probes::Category;
+using old_school::probes::Dc1Dominance;
 using old_school::probes::DecisionProbe;
 using old_school::probes::Validation;
 
@@ -96,6 +99,38 @@ const PriorityAction& priority_candidate(
             "named candidate is not a priority action");
     }
     return *action;
+}
+
+std::size_t candidate_index(
+    const DecisionProbe& probe, std::string_view descriptor) {
+    const auto found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [descriptor](const old_school::probes::Candidate& candidate) {
+            return candidate.descriptor == descriptor;
+        });
+    if (found == probe.candidates.end()) {
+        throw std::runtime_error(
+            "required candidate index is missing");
+    }
+    return static_cast<std::size_t>(
+        std::distance(probe.candidates.begin(), found));
+}
+
+std::size_t candidate_index(
+    const DecisionProbe& probe, const PriorityAction& wanted) {
+    const auto found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [&wanted](const old_school::probes::Candidate& candidate) {
+            const auto* action =
+                std::get_if<PriorityAction>(&candidate.action);
+            return action != nullptr && *action == wanted;
+        });
+    if (found == probe.candidates.end()) {
+        throw std::runtime_error(
+            "required Priority candidate index is missing");
+    }
+    return static_cast<std::size_t>(
+        std::distance(probe.candidates.begin(), found));
 }
 
 PermanentId creature_id(const GameState& state, std::size_t player,
@@ -183,6 +218,83 @@ bool game_states_equal(const GameState& left,
            left.next_permanent_id == right.next_permanent_id &&
            left.next_stack_object_id ==
                right.next_stack_object_id;
+}
+
+std::array<std::size_t, old_school::kCardCount>
+physical_card_counts(const GameState& state, std::size_t player) {
+    std::array<std::size_t, old_school::kCardCount> counts{};
+    const auto add = [&](CardId card) {
+        ++counts.at(static_cast<std::size_t>(card));
+    };
+    const auto& seat = state.players.at(player);
+    for (const CardId card : seat.library) {
+        add(card);
+    }
+    for (const CardId card : seat.hand) {
+        add(card);
+    }
+    for (const CardId card : seat.graveyard) {
+        add(card);
+    }
+    for (const CardId card : seat.exile) {
+        add(card);
+    }
+    for (const auto& land : seat.lands) {
+        add(land.card);
+    }
+    for (const auto& creature : seat.creatures) {
+        add(creature.card);
+    }
+    for (const auto& artifact : seat.artifacts) {
+        add(artifact.card);
+    }
+    for (const CardId card : seat.enchantments) {
+        add(card);
+    }
+    for (const auto& object : state.stack) {
+        if (object.controller == player &&
+            object.kind ==
+                old_school::StackObjectKind::Spell) {
+            add(object.card);
+        }
+    }
+    return counts;
+}
+
+std::array<std::size_t, old_school::kCardCount>
+deck_card_counts(const std::vector<CardId>& deck) {
+    std::array<std::size_t, old_school::kCardCount> counts{};
+    for (const CardId card : deck) {
+        ++counts.at(static_cast<std::size_t>(card));
+    }
+    return counts;
+}
+
+void expect_dc1_raw_card_conservation(
+    const DecisionProbe& probe,
+    const std::vector<std::size_t>& candidate_indices,
+    std::uint64_t seed) {
+    for (std::size_t world_index = 0; world_index < 8;
+         ++world_index) {
+        const GameState world = old_school::sample_determinization(
+            probe.state, probe.original_decks, probe.root_player,
+            seed + world_index);
+        for (const std::size_t candidate : candidate_indices) {
+            const auto settlement =
+                old_school::probes::
+                    settle_dc1_priority_candidate(
+                        probe, world, candidate);
+            for (std::size_t player = 0; player < 2; ++player) {
+                expect(
+                    physical_card_counts(
+                        settlement.settled_state, player) ==
+                        deck_card_counts(
+                            probe.original_decks[player]),
+                    "raw DC1 settlement violated physical card "
+                    "conservation");
+            }
+        }
+    }
 }
 
 std::string validation_errors(const Validation& validation) {
@@ -1156,6 +1268,1321 @@ void test_harvested_x_zero_has_no_effect_and_pass_holds() {
         "held Disintegrate was not available on a later main phase");
 }
 
+void test_dc1_x_zero_is_strictly_dominated_and_hidden_exact() {
+    const DecisionProbe probe =
+        old_school::probes::make_probe_validation_v1().front();
+    const std::size_t pass =
+        candidate_index(probe, PriorityAction::pass());
+    const auto x_zero_found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [](const old_school::probes::Candidate& candidate) {
+            const auto* action =
+                std::get_if<PriorityAction>(&candidate.action);
+            return action != nullptr &&
+                   action->kind ==
+                       PriorityActionKind::CastDisintegrate &&
+                   action->x_value == 0;
+        });
+    expect(x_zero_found != probe.candidates.end(),
+           "validation probe lost its X=0 candidate");
+    const std::size_t x_zero = static_cast<std::size_t>(
+        std::distance(probe.candidates.begin(), x_zero_found));
+
+    const auto comparison =
+        old_school::probes::compare_dc1_priority_pair(
+            probe, pass, x_zero, 8, 577215);
+    expect(comparison.unanimous_orientation ==
+               Dc1Dominance::FirstDominatesSecond,
+           "DC1 did not classify Pass as strictly dominating X=0");
+    expect(comparison.hidden_repartition_bit_identical,
+           "DC1 X=0 comparison changed under hidden repartition");
+    expect(comparison.world_orientations.size() == 8 &&
+               std::all_of(
+                   comparison.world_orientations.begin(),
+                   comparison.world_orientations.end(),
+                   [](Dc1Dominance orientation) {
+                       return orientation ==
+                              Dc1Dominance::FirstDominatesSecond;
+                   }),
+           "DC1 X=0 orientation was not unanimous over K=8");
+
+    const GameState world = old_school::sample_determinization(
+        probe.state, probe.original_decks, probe.root_player, 577215);
+    const auto settled =
+        old_school::probes::settle_dc1_priority_candidate(
+            probe, world, x_zero);
+    expect(settled.window_ended && !settled.terminal &&
+               settled.settled_state.stack.empty(),
+           "DC1 X=0 branch did not stop at the settled window");
+    const auto mountain = std::find_if(
+        probe.state.players[probe.root_player].lands.begin(),
+        probe.state.players[probe.root_player].lands.end(),
+        [](const old_school::LandPermanent& land) {
+            return land.card == CardId::Mountain && !land.tapped;
+        });
+    expect(
+        mountain !=
+            probe.state.players[probe.root_player].lands.end(),
+        "DC1 X=0 fixture lost its payable Mountain");
+    old_school::probes::Dc1PlayerResourceCost expected_cost;
+    expected_cost.hand_cards_consumed[
+        static_cast<std::size_t>(CardId::Disintegrate)] = 1;
+    expected_cost.mana_depleted.red = 1;
+    expected_cost.preexisting_sources_newly_tapped.push_back({
+        .kind =
+            old_school::probes::Dc1ManaSourceKind::Land,
+        .key = static_cast<std::uint64_t>(
+            std::distance(
+                probe.state.players[probe.root_player].lands.begin(),
+                mountain)),
+        .card = CardId::Mountain,
+    });
+    expect(
+        settled.resources[probe.root_player] == expected_cost &&
+            settled.resources[1 - probe.root_player] ==
+                old_school::probes::Dc1PlayerResourceCost{},
+        "DC1 did not record X=0's exact one-card, one-red-source "
+        "ledger");
+}
+
+void test_dc1_payable_force_spike_is_a_tradeoff() {
+    const auto controls =
+        old_school::probes::make_force_spike_policy_controls_v1();
+    const DecisionProbe& live = controls.at(0);
+    const DecisionProbe& payable = controls.at(1);
+    const auto compare = [](const DecisionProbe& probe) {
+        return old_school::probes::compare_dc1_priority_pair(
+            probe, candidate_index(probe, "pass"),
+            candidate_index(probe, "force-spike-gray-ogre"),
+            8, 577215);
+    };
+
+    const auto payable_result = compare(payable);
+    expect(payable_result.unanimous_orientation ==
+               Dc1Dominance::Incomparable,
+           "payable Force Spike was mislabeled as dominance");
+    expect(payable_result.hidden_repartition_bit_identical &&
+               std::all_of(
+                   payable_result.world_orientations.begin(),
+                   payable_result.world_orientations.end(),
+                   [](Dc1Dominance orientation) {
+                       return orientation ==
+                              Dc1Dominance::Incomparable;
+                   }),
+           "payable Force Spike tradeoff was not hidden-exact");
+
+    const std::size_t payable_pass =
+        candidate_index(payable, "pass");
+    const std::size_t payable_spike =
+        candidate_index(
+            payable, "force-spike-gray-ogre");
+    const GameState payable_world =
+        old_school::sample_determinization(
+            payable.state, payable.original_decks,
+            payable.root_player, 577215);
+    const auto pass_settlement =
+        old_school::probes::settle_dc1_priority_candidate(
+            payable, payable_world, payable_pass);
+    const auto spike_settlement =
+        old_school::probes::settle_dc1_priority_candidate(
+            payable, payable_world, payable_spike);
+    const auto& actor_spend =
+        spike_settlement.resources[payable.root_player];
+    const auto& opponent_spend =
+        spike_settlement.resources[1 - payable.root_player];
+    expect(
+        old_school::probes::
+            dc1_settlements_have_equal_normalized_effect(
+                payable, pass_settlement, spike_settlement),
+        "payable Force Spike branches did not reduce to their "
+        "two-sided resource tradeoff");
+    expect(
+        actor_spend.hand_cards_consumed[
+            static_cast<std::size_t>(CardId::ForceSpike)] == 1 &&
+            actor_spend.mana_depleted.blue == 1 &&
+            actor_spend.preexisting_sources_newly_tapped.size() ==
+                1 &&
+            actor_spend.preexisting_sources_newly_tapped.front()
+                    .card == CardId::Island,
+        "payable Force Spike did not record the actor's exact "
+        "card/blue-source cost");
+    expect(
+        opponent_spend.mana_depleted.red == 1 &&
+            opponent_spend
+                    .preexisting_sources_newly_tapped.size() == 1 &&
+            opponent_spend
+                    .preexisting_sources_newly_tapped.front()
+                    .card == CardId::Mountain,
+        "payable Force Spike did not record the opponent's exact "
+        "tax payment");
+    expect(
+        pass_settlement.resources[payable.root_player] ==
+                old_school::probes::Dc1PlayerResourceCost{} &&
+            pass_settlement.resources[1 - payable.root_player] ==
+                old_school::probes::Dc1PlayerResourceCost{},
+        "payable Pass branch unexpectedly consumed a resource");
+    const auto has_gray_ogre = [](const GameState& state) {
+        return std::any_of(
+            state.players[1].creatures.begin(),
+            state.players[1].creatures.end(),
+            [](const old_school::CreaturePermanent& creature) {
+                return creature.card == CardId::GrayOgre;
+            });
+    };
+    expect(
+        has_gray_ogre(pass_settlement.settled_state) &&
+            has_gray_ogre(spike_settlement.settled_state),
+        "payable Force Spike changed the target spell's resolved "
+        "effect");
+
+    const auto live_result = compare(live);
+    expect(live_result.unanimous_orientation ==
+               Dc1Dominance::Incomparable &&
+               live_result.hidden_repartition_bit_identical,
+           "live Force Spike's different spell outcome triggered "
+           "resource dominance");
+    const GameState live_world =
+        old_school::sample_determinization(
+            live.state, live.original_decks, live.root_player,
+            577215);
+    const auto live_pass =
+        old_school::probes::settle_dc1_priority_candidate(
+            live, live_world, candidate_index(live, "pass"));
+    const auto live_spike =
+        old_school::probes::settle_dc1_priority_candidate(
+            live, live_world,
+            candidate_index(
+                live, "force-spike-gray-ogre"));
+    expect(
+        !old_school::probes::
+             dc1_settlements_have_equal_normalized_effect(
+                 live, live_pass, live_spike) &&
+            has_gray_ogre(live_pass.settled_state) &&
+            !has_gray_ogre(live_spike.settled_state),
+        "live Force Spike negative did not preserve its unequal "
+        "spell outcome");
+}
+
+void test_dc1_productive_actions_do_not_trigger() {
+    const auto dev = old_school::probes::make_probe_dev_v3();
+    const auto expect_incomparable =
+        [](const DecisionProbe& probe, std::string_view first,
+           std::string_view second) {
+            const auto comparison =
+                old_school::probes::compare_dc1_priority_pair(
+                    probe, candidate_index(probe, first),
+                    candidate_index(probe, second), 8, 577215);
+            expect(
+                comparison.unanimous_orientation ==
+                        Dc1Dominance::Incomparable &&
+                    comparison.hidden_repartition_bit_identical,
+                "productive action triggered DC1 dominance");
+        };
+
+    expect_incomparable(
+        find_probe(dev, Category::GreenGrowthSaveBolt),
+        "pass", "growth-own-grizzly-bears");
+    expect_incomparable(
+        find_probe(dev, Category::GreenDevelop),
+        "pass", "cast-grizzly-bears");
+    expect_incomparable(
+        find_probe(dev, Category::RULandColor),
+        "pass", "play-mountain");
+    expect_incomparable(
+        find_probe(dev, Category::WhiteEstablishMillstone),
+        "pass", "cast-millstone");
+    expect_incomparable(
+        find_probe(dev, Category::RUDisintegrateLethal),
+        "pass", "disintegrate-x3-opponent-player");
+}
+
+void test_dc1_order_invariance_and_malformed_fail_closed() {
+    const DecisionProbe original =
+        old_school::probes::make_probe_validation_v1().front();
+    const std::size_t original_pass =
+        candidate_index(original, PriorityAction::pass());
+    const PriorityAction x_zero_action =
+        PriorityAction::cast_disintegrate(
+            0, old_school::Target::player_target(1));
+    const std::size_t original_x_zero =
+        candidate_index(original, x_zero_action);
+    const auto first =
+        old_school::probes::compare_dc1_priority_pair(
+            original, original_pass, original_x_zero, 8, 271828);
+    const auto reversed =
+        old_school::probes::compare_dc1_priority_pair(
+            original, original_x_zero, original_pass, 8, 271828);
+    expect(
+        reversed.unanimous_orientation ==
+                Dc1Dominance::SecondDominatesFirst &&
+            reversed.hidden_repartition_bit_identical &&
+            std::all_of(
+                reversed.world_orientations.begin(),
+                reversed.world_orientations.end(),
+                [](Dc1Dominance orientation) {
+                    return orientation ==
+                           Dc1Dominance::SecondDominatesFirst;
+                }),
+        "reversing the DC1 candidate pair did not reverse its "
+        "strict orientation");
+
+    DecisionProbe reordered = original;
+    std::reverse(reordered.candidates.begin(),
+                 reordered.candidates.end());
+    const auto second =
+        old_school::probes::compare_dc1_priority_pair(
+            reordered,
+            candidate_index(reordered, PriorityAction::pass()),
+            candidate_index(reordered, x_zero_action), 8, 271828);
+    expect(first.first_descriptor == second.first_descriptor &&
+               first.second_descriptor == second.second_descriptor &&
+               first.world_seeds == second.world_seeds &&
+               first.world_orientations ==
+                   second.world_orientations &&
+               first.unanimous_orientation ==
+                   second.unanimous_orientation &&
+               first.hidden_repartition_bit_identical &&
+               second.hidden_repartition_bit_identical,
+           "candidate order changed descriptor-keyed DC1 result");
+
+    DecisionProbe renamed = original;
+    renamed.stable_id = "unrelated.trajectory.provenance";
+    const auto renamed_result =
+        old_school::probes::compare_dc1_priority_pair(
+            renamed,
+            candidate_index(renamed, PriorityAction::pass()),
+            candidate_index(renamed, x_zero_action), 8, 271828);
+    expect(
+        renamed_result.world_seeds == first.world_seeds &&
+            renamed_result.world_orientations ==
+                first.world_orientations &&
+            renamed_result.unanimous_orientation ==
+                first.unanimous_orientation,
+        "trajectory stable ID changed exact-pair world seeds");
+
+    DecisionProbe relabeled = original;
+    relabeled.candidates[original_pass].descriptor +=
+        ".different-exact-pair";
+    const auto relabeled_result =
+        old_school::probes::compare_dc1_priority_pair(
+            relabeled, original_pass, original_x_zero, 8, 271828);
+    expect(
+        relabeled_result.world_seeds != first.world_seeds,
+        "changing an exact action descriptor did not change pair-world "
+        "seeds");
+
+    DecisionProbe malformed = original;
+    const GameState before = malformed.state;
+    std::get<PriorityAction>(
+        malformed.candidates[original_x_zero].action) =
+        PriorityAction::cast_disintegrate(
+            99, old_school::Target::player_target(1));
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::settle_dc1_priority_candidate(
+                malformed, malformed.state, original_x_zero));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    expect(rejected && game_states_equal(malformed.state, before),
+           "malformed DC1 root mutated before failing closed");
+}
+
+void test_dc1_pair_label_dedupe_drops_conflicts() {
+    const auto result =
+        old_school::probes::dedupe_dc1_pair_labels({
+            {
+                .exact_pair_key = "consistent-positive",
+                .seat_game_key = "seat-b",
+                .positive = true,
+            },
+            {
+                .exact_pair_key = "consistent-positive",
+                .seat_game_key = "seat-a",
+                .positive = true,
+            },
+            {
+                .exact_pair_key = "consistent-control",
+                .seat_game_key = "seat-d",
+                .positive = false,
+            },
+            {
+                .exact_pair_key = "consistent-control",
+                .seat_game_key = "seat-c",
+                .positive = false,
+            },
+            {
+                .exact_pair_key = "conflict",
+                .seat_game_key = "seat-e",
+                .positive = false,
+            },
+            {
+                .exact_pair_key = "conflict",
+                .seat_game_key = "seat-f",
+                .positive = true,
+            },
+        });
+    expect(
+        result.conflicting_pair_keys == 1 &&
+            result.retained.size() == 2,
+        "DC1 exact-pair dedupe did not drop one conflicting key");
+    const auto positive = std::find_if(
+        result.retained.begin(), result.retained.end(),
+        [](const auto& observation) {
+            return observation.exact_pair_key ==
+                   "consistent-positive";
+        });
+    const auto control = std::find_if(
+        result.retained.begin(), result.retained.end(),
+        [](const auto& observation) {
+            return observation.exact_pair_key ==
+                   "consistent-control";
+        });
+    expect(
+        positive != result.retained.end() &&
+            positive->positive &&
+            positive->seat_game_key == "seat-a" &&
+            control != result.retained.end() &&
+            !control->positive &&
+            control->seat_game_key == "seat-c" &&
+            std::none_of(
+                result.retained.begin(), result.retained.end(),
+                [](const auto& observation) {
+                    return observation.exact_pair_key ==
+                           "conflict";
+                }),
+        "DC1 exact-pair dedupe retained the wrong deterministic "
+        "representatives");
+}
+
+void test_dc1_action_summary_enforces_exact_90_action_bound() {
+    GameState state;
+    state.active_player = 0;
+    state.players[0].hand = {CardId::Disintegrate};
+    state.players[0].land_played_this_turn = true;
+    state.players[0].lands.assign(
+        32, old_school::LandPermanent{
+                .card = CardId::Mountain,
+            });
+
+    const auto summary =
+        old_school::probes::summarize_dc1_legal_actions(
+            state, 0, true,
+            old_school::probes::Dc1MiningConfig{}
+                .max_legal_actions);
+    expect(
+        summary.legal_actions == 65 &&
+            summary.action_kinds[
+                static_cast<std::size_t>(
+                    PriorityActionKind::Pass)] == 1 &&
+            summary.action_kinds[
+                static_cast<std::size_t>(
+                    PriorityActionKind::CastDisintegrate)] == 64 &&
+            summary.descriptors_distinct &&
+            summary.sorted_descriptor_fnv1a64 != 0,
+        "DC1 census did not preserve the complete synthetic "
+        "65-action set");
+
+    expect(
+        old_school::probes::Dc1MiningConfig{}
+                .max_legal_actions == 90,
+        "DC1 mining did not use the evidence-bound 90-action "
+        "ceiling");
+
+    state.players[0].lands.assign(
+        45, old_school::LandPermanent{
+                .card = CardId::Mountain,
+            });
+    const auto over_bound =
+        old_school::probes::summarize_dc1_legal_actions(
+            state, 0, true, 512);
+    expect(
+        over_bound.legal_actions == 91 &&
+            over_bound.action_kinds[
+                static_cast<std::size_t>(
+                    PriorityActionKind::Pass)] == 1 &&
+            over_bound.action_kinds[
+                static_cast<std::size_t>(
+                    PriorityActionKind::CastDisintegrate)] == 90,
+        "DC1 census did not preserve the complete synthetic "
+        "91-action set");
+
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::summarize_dc1_legal_actions(
+                state, 0, true,
+                old_school::probes::Dc1MiningConfig{}
+                    .max_legal_actions));
+    } catch (const std::logic_error&) {
+        rejected = true;
+    }
+    expect(
+        rejected,
+        "DC1 density bound did not fail closed on a 91-action root");
+}
+
+void test_dc1_raw_settlements_conserve_cards_and_context() {
+    const DecisionProbe validation =
+        old_school::probes::make_probe_validation_v1().front();
+    const PriorityAction validation_x_zero =
+        PriorityAction::cast_disintegrate(
+            0, old_school::Target::player_target(1));
+    expect_dc1_raw_card_conservation(
+        validation,
+        {
+            candidate_index(validation, PriorityAction::pass()),
+            candidate_index(validation, validation_x_zero),
+        },
+        577215);
+
+    const auto controls =
+        old_school::probes::make_force_spike_policy_controls_v1();
+    for (const DecisionProbe& control : controls) {
+        expect_dc1_raw_card_conservation(
+            control,
+            {
+                candidate_index(control, "pass"),
+                candidate_index(
+                    control, "force-spike-gray-ogre"),
+            },
+            271828);
+    }
+
+    const auto dev = old_school::probes::make_probe_dev_v3();
+    const DecisionProbe& creature =
+        find_probe(dev, Category::GreenDevelop);
+    expect_dc1_raw_card_conservation(
+        creature,
+        {candidate_index(creature, "cast-grizzly-bears")},
+        314159);
+    const DecisionProbe& growth =
+        find_probe(dev, Category::GreenGrowthSaveBolt);
+    expect_dc1_raw_card_conservation(
+        growth,
+        {candidate_index(
+            growth, "growth-own-grizzly-bears")},
+        314160);
+    const DecisionProbe& artifact =
+        find_probe(dev, Category::WhiteEstablishMillstone);
+    expect_dc1_raw_card_conservation(
+        artifact,
+        {candidate_index(artifact, "cast-millstone")},
+        314161);
+
+    const DecisionProbe& nonzero_pass = controls.front();
+    expect(nonzero_pass.consecutive_passes == 1,
+           "DC1 context control lost its prior pass");
+    const auto world = old_school::sample_determinization(
+        nonzero_pass.state, nonzero_pass.original_decks,
+        nonzero_pass.root_player, 424242);
+    const auto settled =
+        old_school::probes::settle_dc1_priority_candidate(
+            nonzero_pass, world,
+            candidate_index(nonzero_pass, "pass"));
+    expect(
+        settled.phase == nonzero_pass.phase &&
+            settled.settled_state.active_player ==
+                nonzero_pass.state.active_player &&
+            settled.settled_state.turn_number ==
+                nonzero_pass.state.turn_number &&
+            settled.settled_state.starting_player ==
+                nonzero_pass.state.starting_player &&
+            settled.settled_state.extra_turns_pending ==
+                nonzero_pass.state.extra_turns_pending &&
+            settled.final_priority_player ==
+                1 - nonzero_pass.state.active_player &&
+            settled.final_consecutive_passes == 2 &&
+            settled.window_ended && !settled.terminal &&
+            settled.settled_state.stack.empty(),
+        "DC1 nonzero-pass root lost exact phase/active/pass/window "
+        "settlement context");
+
+    const auto zero_pass_settled =
+        old_school::probes::settle_dc1_priority_candidate(
+            validation,
+            old_school::sample_determinization(
+                validation.state, validation.original_decks,
+                validation.root_player, 424242),
+            candidate_index(validation, PriorityAction::pass()));
+    expect(
+        validation.consecutive_passes == 0 &&
+            zero_pass_settled.phase == validation.phase &&
+            zero_pass_settled.settled_state.active_player ==
+                validation.state.active_player &&
+            zero_pass_settled.settled_state.turn_number ==
+                validation.state.turn_number &&
+            zero_pass_settled.settled_state.starting_player ==
+                validation.state.starting_player &&
+            zero_pass_settled.settled_state.extra_turns_pending ==
+                validation.state.extra_turns_pending &&
+            zero_pass_settled.final_priority_player ==
+                1 - validation.root_player &&
+            zero_pass_settled.final_consecutive_passes == 2 &&
+            zero_pass_settled.window_ended,
+        "DC1 zero-pass empty-stack root did not end after exactly "
+        "two forced passes");
+}
+
+void test_dc1_mox_and_sol_ring_ledgers_are_exact() {
+    DecisionProbe mox;
+    mox.stable_id = "synthetic.dc1.mox-ancestral";
+    mox.root_player = 0;
+    mox.phase = TurnPhase::FirstMain;
+    mox.state.active_player = 0;
+    mox.state.turn_number = 2;
+    mox.state.players[0].hand = {CardId::AncestralRecall};
+    mox.state.players[0].library = {
+        CardId::Island, CardId::Island, CardId::Island,
+    };
+    constexpr PermanentId kMoxId = 41;
+    mox.state.players[0].artifacts = {{
+        .id = kMoxId,
+        .card = CardId::MoxSapphire,
+    }};
+    mox.candidates = {{
+        .descriptor = "ancestral-self",
+        .action = PriorityAction::cast_ancestral_recall(
+            old_school::Target::player_target(0)),
+    }};
+
+    const auto mox_settlement =
+        old_school::probes::settle_dc1_priority_candidate(
+            mox, mox.state, 0);
+    old_school::probes::Dc1PlayerResourceCost expected_mox;
+    expected_mox.hand_cards_consumed[
+        static_cast<std::size_t>(CardId::AncestralRecall)] = 1;
+    expected_mox.mana_depleted.blue = 1;
+    expected_mox.preexisting_sources_newly_tapped.push_back({
+        .kind =
+            old_school::probes::Dc1ManaSourceKind::Artifact,
+        .key = kMoxId,
+        .card = CardId::MoxSapphire,
+    });
+    expect(
+        mox_settlement.resources[0] == expected_mox &&
+            mox_settlement.resources[1] ==
+                old_school::probes::Dc1PlayerResourceCost{} &&
+            mox_settlement.settled_state.players[0].hand.size() == 3 &&
+            mox_settlement.settled_state.players[0].library.empty(),
+        "DC1 Mox Sapphire ledger or resolved Ancestral effect "
+        "was not exact");
+
+    DecisionProbe sol;
+    sol.stable_id = "synthetic.dc1.sol-disesintegrate";
+    sol.root_player = 0;
+    sol.phase = TurnPhase::FirstMain;
+    sol.state.active_player = 0;
+    sol.state.turn_number = 2;
+    sol.state.players[0].hand = {CardId::Disintegrate};
+    sol.state.players[0].lands = {{
+        .card = CardId::Mountain,
+    }};
+    constexpr PermanentId kSolRingId = 73;
+    sol.state.players[0].artifacts = {{
+        .id = kSolRingId,
+        .card = CardId::SolRing,
+    }};
+    sol.candidates = {{
+        .descriptor = "disintegrate-x1-opponent",
+        .action = PriorityAction::cast_disintegrate(
+            1, old_school::Target::player_target(1)),
+    }};
+
+    const auto sol_settlement =
+        old_school::probes::settle_dc1_priority_candidate(
+            sol, sol.state, 0);
+    old_school::probes::Dc1PlayerResourceCost expected_sol;
+    expected_sol.hand_cards_consumed[
+        static_cast<std::size_t>(CardId::Disintegrate)] = 1;
+    expected_sol.mana_depleted.generic = 1;
+    expected_sol.mana_depleted.red = 1;
+    expected_sol.preexisting_sources_newly_tapped = {
+        {
+            .kind =
+                old_school::probes::Dc1ManaSourceKind::Land,
+            .key = 0,
+            .card = CardId::Mountain,
+        },
+        {
+            .kind =
+                old_school::probes::Dc1ManaSourceKind::Artifact,
+            .key = kSolRingId,
+            .card = CardId::SolRing,
+        },
+    };
+    expect(
+        sol_settlement.resources[0] == expected_sol &&
+            sol_settlement.resources[1] ==
+                old_school::probes::Dc1PlayerResourceCost{} &&
+            sol_settlement.settled_state.players[1].life == 19 &&
+            sol_settlement.settled_state.players[0].mana_pool ==
+                old_school::ManaCost{},
+        "DC1 Sol Ring ledger did not distinguish one generic paid "
+        "from the phase-local excess cleared at window end");
+}
+
+void test_dc1_bounded_mining_smoke_is_deterministic() {
+    const auto model =
+        old_school::train_learned_value_champion(1, 8675309);
+    old_school::probes::Dc1MiningConfig config;
+    config.training_seed = 101;
+    config.heldout_seed = 202;
+    config.blocks_per_split = 1;
+    config.worlds = 1;
+    config.max_roots_per_seat_game = 1;
+    config.max_pairs_per_root = 1;
+    config.max_game_turns = 2;
+    config.training_exploration_rate = 0.10;
+    config.training_minimum_examples_per_deck = 0;
+    config.training_minimum_seat_games_per_deck = 0;
+    config.heldout_minimum_examples_per_deck = 0;
+    config.heldout_minimum_seat_games_per_deck = 0;
+    config.required_model_fingerprint =
+        old_school::learned_model_fingerprint(model);
+
+    const auto first =
+        old_school::probes::audit_dc1_dominance_mining(
+            model, config);
+    const auto second =
+        old_school::probes::audit_dc1_dominance_mining(
+            model, config);
+    expect(first == second,
+           "bounded DC1 mining smoke was not deterministic");
+    expect(
+        first.fixture_gate_passed &&
+            first.accounting_passed && first.gate_passed &&
+            first.training.games == 40 &&
+            first.heldout.games == 40 &&
+            first.training.seat_games == 80 &&
+            first.heldout.seat_games == 80 &&
+            first.training.paired_world_cells ==
+                first.training.pair_groups &&
+            first.heldout.paired_world_cells ==
+                first.heldout.pair_groups &&
+            first.training.settlement_operations ==
+                first.training.paired_world_cells * 4 &&
+            first.heldout.settlement_operations ==
+                first.heldout.paired_world_cells * 4,
+        "bounded DC1 mining smoke failed exact accounting");
+    expect(
+        old_school::learned_model_fingerprint(model) ==
+            config.required_model_fingerprint,
+        "DC1 mining mutated its frozen parent");
+
+    config.required_model_fingerprint.assign(64, '0');
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::audit_dc1_dominance_mining(
+                model, config));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    expect(rejected,
+           "DC1 mining accepted the wrong parent fingerprint");
+
+    old_school::probes::Dc1MiningConfig equal_seeds = config;
+    equal_seeds.heldout_seed = equal_seeds.training_seed;
+    rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::audit_dc1_dominance_mining(
+                model, equal_seeds));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    expect(
+        rejected,
+        "DC1 mining accepted identical train/held-out seeds");
+}
+
+void test_dc1_bounded_action_census_is_deterministic() {
+    const auto model =
+        old_school::train_learned_value_champion(1, 112358);
+    old_school::probes::Dc1ActionCensusConfig config;
+    config.training_seed = 101;
+    config.heldout_seed = 202;
+    config.blocks_per_split = 1;
+    config.worlds = 1;
+    config.max_game_turns = 2;
+    config.training_exploration_rate = 0.10;
+    config.threshold = 1;
+    config.diagnostic_ceiling = 512;
+    config.required_model_fingerprint =
+        old_school::learned_model_fingerprint(model);
+
+    const auto first =
+        old_school::probes::audit_dc1_action_census(
+            model, config);
+    const auto second =
+        old_school::probes::audit_dc1_action_census(
+            model, config);
+    expect(
+        first == second &&
+            first.accounting_passed &&
+            first.training.accounting_passed &&
+            first.heldout.accounting_passed &&
+            first.pair_comparisons == 0 &&
+            first.density_examples == 0 &&
+            first.training.games == 40 &&
+            first.heldout.games == 40 &&
+            first.training.seat_games == 80 &&
+            first.heldout.seat_games == 80,
+        "bounded DC1 action census was nondeterministic or "
+        "misaccounted");
+    for (std::size_t deck = 0;
+         deck < old_school::kDeckCount; ++deck) {
+        expect(
+            first.training.decks[deck].seat_games == 16 &&
+                first.heldout.decks[deck].seat_games == 16,
+            "bounded DC1 census lost exact per-deck seat balance");
+    }
+
+    old_school::probes::Dc1ActionCensusConfig equal_seeds =
+        config;
+    equal_seeds.heldout_seed = equal_seeds.training_seed;
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::audit_dc1_action_census(
+                model, equal_seeds));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    expect(
+        rejected,
+        "DC1 action census accepted identical split seeds");
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+tiny_bsr_model() {
+    static const auto model =
+        old_school::train_learned_value_champion(
+            1, 0xB5A0C16ULL);
+    return model;
+}
+
+void test_bsr_source_schedule_is_exactly_balanced() {
+    const auto first =
+        old_school::probes::bsr_source_schedule();
+    const auto second =
+        old_school::probes::bsr_source_schedule();
+    expect(
+        first == second &&
+            first.size() ==
+                old_school::probes::kBsrSourceGames,
+        "BSR source schedule is not fixed and reproducible");
+
+    std::array<std::array<std::array<std::size_t, 2>, 2>,
+               old_school::kDeckCount>
+        counts{};
+    for (const auto& game : first) {
+        const std::size_t opponent =
+            static_cast<std::size_t>(
+                game.opponent_deck);
+        expect(
+            opponent < old_school::kDeckCount &&
+                game.block <
+                    old_school::probes::kBsrSourceBlocks &&
+                game.schedule_index <
+                    old_school::probes::
+                        kBsrSourceGamesPerBlock &&
+                game.tracked_seat < 2 &&
+                game.starting_player ==
+                    (game.tracked_starts
+                         ? game.tracked_seat
+                         : 1 - game.tracked_seat),
+            "BSR source schedule contains invalid metadata");
+        ++counts[opponent][game.tracked_seat]
+                [game.tracked_starts ? 1 : 0];
+    }
+    for (const auto& opponent : counts) {
+        for (const auto& seat : opponent) {
+            expect(
+                seat[0] ==
+                        old_school::probes::
+                            kBsrSourceBlocks &&
+                    seat[1] ==
+                        old_school::probes::
+                            kBsrSourceBlocks,
+                "BSR source schedule lost opponent/seat/play-draw "
+                "balance");
+        }
+    }
+}
+
+void test_bsr_owner_filter_retains_binary_and_maps_action() {
+    const DecisionProbe probe =
+        old_school::probes::
+            make_force_spike_policy_controls_v1()
+                .front();
+    const PriorityAction pass = PriorityAction::pass();
+    old_school::LearnedDecisionTracePoint point{
+        .state = probe.state,
+        .context = {
+            .valid = true,
+            .phase = probe.phase,
+            .decision_player = probe.root_player,
+            .consecutive_passes =
+                probe.consecutive_passes,
+            .sorcery_actions = false,
+        },
+        .selected_priority_action = pass,
+    };
+    const auto retained =
+        old_school::probes::classify_bsr_trace_root(
+            point, probe.root_player);
+    expect(
+        retained.eligible() &&
+            retained.legal_actions.size() == 2 &&
+            retained.descriptors.size() == 2 &&
+            retained.selected_action_matches == 1 &&
+            retained.selected_action_index.has_value() &&
+            retained.legal_actions[
+                *retained.selected_action_index] == pass,
+        "BSR owner filter failed to retain and map a legal "
+        "two-action Blue-held stack root");
+
+    point.context.decision_player =
+        1 - probe.root_player;
+    const auto opponent_held =
+        old_school::probes::classify_bsr_trace_root(
+            point, probe.root_player);
+    expect(
+        opponent_held.eligibility ==
+            old_school::probes::BsrRootEligibility::
+                WrongDecisionOwner &&
+            !opponent_held.eligible(),
+        "BSR owner filter accepted an opponent-held root");
+
+    point.context.decision_player = probe.root_player;
+    point.selected_priority_action =
+        PriorityAction::cast_lightning_bolt(
+            old_school::Target::player_target(0));
+    const auto illegal_mapping =
+        old_school::probes::classify_bsr_trace_root(
+            point, probe.root_player);
+    expect(
+        illegal_mapping.eligibility ==
+            old_school::probes::BsrRootEligibility::
+                SelectedActionNotLegal,
+        "BSR trace mapping accepted an action outside the legal set");
+}
+
+void test_bsr_reference_is_order_hidden_and_seed_invariant() {
+    DecisionProbe probe =
+        old_school::probes::
+            make_force_spike_policy_controls_v1()
+                .front();
+    old_school::probes::BsrReferenceConfig config;
+    config.seed = 0x1414213562ULL;
+    config.scout_worlds = 2;
+    config.confirmation_worlds = 2;
+    config.horizon_turns = 0;
+    config.rollouts_per_world = 1;
+    config.evaluation_threads = 1;
+    const auto first =
+        old_school::probes::score_bsr_priority_probe(
+            probe, "pass", tiny_bsr_model(), config);
+    std::reverse(
+        probe.candidates.begin(), probe.candidates.end());
+    const auto reversed =
+        old_school::probes::score_bsr_priority_probe(
+            probe, "pass", tiny_bsr_model(), config);
+    expect(
+        first == reversed &&
+            first.action_count == 2 &&
+            first.scout_seed !=
+                first.confirmation_seed &&
+            first.descriptor_order_invariant &&
+            first.hidden_repartition_eligible &&
+            first.hidden_repartition_bit_identical &&
+            first.accounting_passed &&
+            first.sampled_worlds == 8 &&
+            first.rollout_evaluations == 16 &&
+            first.terminal_evaluations +
+                    first.bootstrapped_evaluations ==
+                first.rollout_evaluations,
+        "BSR reference changed under candidate order or hidden "
+        "repartition, reused seeds, or misaccounted samples");
+}
+
+void test_bsr_stable_root_key_binds_actual_and_model_not_hidden() {
+    DecisionProbe probe =
+        old_school::probes::
+            make_force_spike_policy_controls_v1()
+                .front();
+    const old_school::probes::BsrRootKeyContext provenance{
+        .game_seed = 123456789,
+        .block = 3,
+        .schedule_index = 9,
+        .tracked_seat = probe.root_player,
+        .tracked_starts = false,
+        .trace_ordinal = 17,
+    };
+    const std::string model_fingerprint =
+        old_school::learned_model_fingerprint(
+            tiny_bsr_model());
+    const std::string pass =
+        old_school::probes::bsr_stable_root_fingerprint(
+            probe, "pass", model_fingerprint, provenance);
+    const std::string force_spike =
+        old_school::probes::bsr_stable_root_fingerprint(
+            probe, "force-spike-gray-ogre",
+            model_fingerprint, provenance);
+    const std::string other_model =
+        old_school::probes::bsr_stable_root_fingerprint(
+            probe, "pass", model_fingerprint + "x",
+            provenance);
+
+    DecisionProbe hidden = probe;
+    auto& opponent =
+        hidden.state.players[1 - hidden.root_player];
+    const std::size_t hand_size = opponent.hand.size();
+    std::vector<CardId> unknown = opponent.hand;
+    unknown.insert(
+        unknown.end(), opponent.library.begin(),
+        opponent.library.end());
+    if (unknown.size() > 1) {
+        std::rotate(
+            unknown.begin(), unknown.begin() + 1,
+            unknown.end());
+        std::reverse(unknown.begin(), unknown.end());
+    }
+    const auto hand_end =
+        unknown.begin() +
+        static_cast<std::ptrdiff_t>(hand_size);
+    opponent.hand.assign(unknown.begin(), hand_end);
+    opponent.library.assign(hand_end, unknown.end());
+    const std::string hidden_pass =
+        old_school::probes::bsr_stable_root_fingerprint(
+            hidden, "pass", model_fingerprint,
+            provenance);
+
+    expect(
+        pass.size() == 16 &&
+            pass != force_spike &&
+            pass != other_model &&
+            pass == hidden_pass,
+        "BSR stable-root key failed to bind actual/model identity "
+        "or leaked opponent hidden identities");
+}
+
+void test_bsr_paired_regret_math() {
+    const auto estimate =
+        old_school::probes::bsr_paired_regret_estimate(
+            {0.9, 0.5, 0.9, 0.5},
+            {0.5, 0.5, 0.5, 0.5});
+    const double expected_se =
+        std::sqrt(0.16 / 3.0 / 4.0);
+    expect(
+        std::abs(estimate.regret - 0.2) < 1.0e-12 &&
+            std::abs(
+                estimate.standard_error -
+                expected_se) < 1.0e-12 &&
+            std::abs(
+                estimate.lower_95 -
+                (0.2 - 1.96 * expected_se)) <
+                1.0e-12,
+        "BSR paired regret, standard error, or lower bound is "
+        "incorrect");
+    const auto constant =
+        old_school::probes::bsr_paired_regret_estimate(
+            {0.75, 0.75}, {0.50, 0.50});
+    expect(
+        constant.regret == 0.25 &&
+            constant.standard_error == 0.0 &&
+            constant.lower_95 == 0.25,
+        "BSR zero-variance paired estimate is incorrect");
+}
+
+void test_bsr_retention_amendment_is_exact_and_permutation_safe() {
+    std::vector<old_school::probes::BsrRetentionCandidate>
+        candidates;
+    const std::array<std::string, 3> stable_keys = {
+        "z-information", "a-information", "b-information"};
+    for (std::size_t opponent = 0;
+         opponent < old_school::kDeckCount; ++opponent) {
+        for (std::size_t loss = 0; loss < 5; ++loss) {
+            const std::string loss_key =
+                "d" + std::to_string(opponent) + ".l" +
+                std::to_string(loss);
+            for (std::size_t root = 0; root < 3; ++root) {
+                candidates.push_back({
+                    .opponent_deck =
+                        static_cast<DeckId>(opponent),
+                    .source_loss_key = loss_key,
+                    .provenance_key =
+                        loss_key + ".r" +
+                        std::to_string(root),
+                    .stable_selection_key =
+                        stable_keys[root],
+                });
+            }
+        }
+    }
+
+    const auto selected =
+        old_school::probes::
+            select_bsr_retained_candidate_indices(candidates);
+    std::vector<old_school::probes::BsrRetentionCandidate>
+        retained;
+    std::vector<std::string> retained_identities;
+    for (const std::size_t index : selected) {
+        retained.push_back(candidates.at(index));
+        const auto& candidate = candidates.at(index);
+        retained_identities.push_back(
+            std::to_string(static_cast<std::size_t>(
+                candidate.opponent_deck)) +
+            "|" + candidate.source_loss_key + "|" +
+            candidate.provenance_key + "|" +
+            candidate.stable_selection_key);
+    }
+
+    expect(
+        retained.size() ==
+                old_school::probes::kBsrRetainedRoots &&
+            old_school::probes::
+                bsr_retention_requirements_met(retained),
+        "BSR amendment did not retain exact 8/opponent across "
+        "at least four losses with a two-root loss cap");
+    for (std::size_t opponent = 0;
+         opponent < old_school::kDeckCount; ++opponent) {
+        std::vector<std::string> loss_keys;
+        std::size_t opponent_roots = 0;
+        for (const auto& candidate : retained) {
+            if (static_cast<std::size_t>(
+                    candidate.opponent_deck) != opponent) {
+                continue;
+            }
+            ++opponent_roots;
+            loss_keys.push_back(candidate.source_loss_key);
+            expect(
+                candidate.stable_selection_key !=
+                    "z-information",
+                "BSR per-loss selection followed provenance "
+                "instead of the information/action key");
+        }
+        std::sort(loss_keys.begin(), loss_keys.end());
+        std::size_t distinct_losses = 0;
+        for (auto loss = loss_keys.begin();
+             loss != loss_keys.end();) {
+            const auto loss_end =
+                std::upper_bound(
+                    loss, loss_keys.end(), *loss);
+            expect(
+                static_cast<std::size_t>(
+                    std::distance(loss, loss_end)) <=
+                    old_school::probes::kBsrRootsPerLoss,
+                "BSR retained more than two roots from one loss");
+            ++distinct_losses;
+            loss = loss_end;
+        }
+        expect(
+            opponent_roots ==
+                    old_school::probes::kBsrRootsPerOpponent &&
+                distinct_losses == 4,
+            "BSR stratum did not retain eight roots from exactly "
+            "four earliest source losses");
+    }
+
+    std::reverse(candidates.begin(), candidates.end());
+    const auto reversed_selected =
+        old_school::probes::
+            select_bsr_retained_candidate_indices(candidates);
+    std::vector<std::string> reversed_identities;
+    for (const std::size_t index : reversed_selected) {
+        const auto& candidate = candidates.at(index);
+        reversed_identities.push_back(
+            std::to_string(static_cast<std::size_t>(
+                candidate.opponent_deck)) +
+            "|" + candidate.source_loss_key + "|" +
+            candidate.provenance_key + "|" +
+            candidate.stable_selection_key);
+    }
+    expect(
+        retained_identities == reversed_identities,
+        "BSR retention changed when candidate input order changed");
+
+    std::vector<old_school::probes::BsrRetentionCandidate>
+        seven_in_one_stratum = retained;
+    const auto green = std::find_if(
+        seven_in_one_stratum.begin(),
+        seven_in_one_stratum.end(),
+        [](const auto& candidate) {
+            return candidate.opponent_deck == DeckId::Green;
+        });
+    seven_in_one_stratum.erase(green);
+    expect(
+        !old_school::probes::bsr_retention_requirements_met(
+            seven_in_one_stratum),
+        "BSR retention accepted a seven-root opponent stratum");
+
+    std::vector<old_school::probes::BsrRetentionCandidate>
+        three_loss_stratum = retained;
+    std::size_t green_root = 0;
+    for (auto& candidate : three_loss_stratum) {
+        if (candidate.opponent_deck != DeckId::Green) {
+            continue;
+        }
+        candidate.source_loss_key =
+            "green-concentrated-" +
+            std::to_string(green_root % 3);
+        ++green_root;
+    }
+    expect(
+        !old_school::probes::bsr_retention_requirements_met(
+            three_loss_stratum, 3, 8, 4),
+        "BSR retention accepted eight roots spanning only three "
+        "losses");
+}
+
+void test_bsr_practical_gate_boundaries_are_exact() {
+    const double just_above_lower = std::nextafter(
+        old_school::probes::kBsrPracticalLower95Threshold,
+        std::numeric_limits<double>::infinity());
+    const double just_below_regret = std::nextafter(
+        old_school::probes::kBsrPracticalRegretThreshold,
+        0.0);
+    const auto estimate =
+        [](double regret, double lower) {
+            return old_school::probes::BsrPairedRegretEstimate{
+                .regret = regret,
+                .standard_error = 0.0,
+                .lower_95 = lower,
+            };
+        };
+    expect(
+        old_school::probes::
+            bsr_practical_high_cost_mistake(
+                true, true,
+                estimate(
+                    old_school::probes::
+                        kBsrPracticalRegretThreshold,
+                    just_above_lower)) &&
+            !old_school::probes::
+                bsr_practical_high_cost_mistake(
+                    true, true,
+                    estimate(
+                        old_school::probes::
+                            kBsrPracticalRegretThreshold,
+                        old_school::probes::
+                            kBsrPracticalLower95Threshold)) &&
+            !old_school::probes::
+                bsr_practical_high_cost_mistake(
+                    true, true,
+                    estimate(
+                        just_below_regret,
+                        just_above_lower)) &&
+            !old_school::probes::
+                bsr_practical_high_cost_mistake(
+                    false, true,
+                    estimate(0.30, 0.20)) &&
+            !old_school::probes::
+                bsr_practical_high_cost_mistake(
+                    true, false,
+                    estimate(0.30, 0.20)),
+        "BSR practical root gate lost inclusive 0.20 regret, "
+        "strict >0.10 lower bound, or stability preconditions");
+    const double just_above_zero =
+        std::nextafter(
+            0.0, std::numeric_limits<double>::infinity());
+    const double just_below_diagnostic =
+        std::nextafter(
+            old_school::probes::
+                kBsrDiagnosticRegretThreshold,
+            0.0);
+    expect(
+        old_school::probes::bsr_diagnostic_stable_mistake(
+            true, true,
+            estimate(
+                old_school::probes::
+                    kBsrDiagnosticRegretThreshold,
+                just_above_zero)) &&
+            !old_school::probes::
+                bsr_diagnostic_stable_mistake(
+                    true, true,
+                    estimate(
+                        old_school::probes::
+                            kBsrDiagnosticRegretThreshold,
+                        0.0)) &&
+            !old_school::probes::
+                bsr_diagnostic_stable_mistake(
+                    true, true,
+                    estimate(
+                        just_below_diagnostic,
+                        just_above_zero)),
+        "BSR diagnostic root gate lost inclusive 0.05 regret "
+        "or strict positive lower-bound edges");
+    expect(
+        old_school::probes::bsr_practical_audit_gate(true, 1) &&
+            !old_school::probes::bsr_practical_audit_gate(
+                true, 0) &&
+            !old_school::probes::bsr_practical_audit_gate(
+                false, 1),
+        "BSR aggregate practical gate ignored audit validity or "
+        "mistake count");
+}
+
+void test_bsr_bounded_source_accounting_smoke() {
+    old_school::probes::BsrAuditConfig config;
+    config.source_seed = 0x1618033ULL;
+    config.source_blocks = 1;
+    config.source_max_turns = 3;
+    config.production_worlds = 1;
+    config.roots_per_loss = 1;
+    config.roots_per_opponent = 1;
+    config.minimum_losses_per_opponent = 1;
+    config.reference.scout_worlds = 1;
+    config.reference.confirmation_worlds = 1;
+    config.reference.horizon_turns = 0;
+    config.reference.rollouts_per_world = 1;
+    config.reference.evaluation_threads = 1;
+    config.required_model_fingerprint =
+        old_school::learned_model_fingerprint(
+            tiny_bsr_model());
+
+    const auto report =
+        old_school::probes::
+            audit_bsr_blue_stack_regret(
+                tiny_bsr_model(), config);
+    expect(
+        report.source_balance_passed &&
+            report.traced_actions_valid &&
+            report.accounting_passed &&
+            report.bounds_passed &&
+            report.source_games == 20 &&
+            report.schedule.size() == 20,
+        "bounded BSR source smoke failed exact balance, action "
+        "trace, accounting, or bounds");
+    for (const auto& cell : report.source_cells) {
+        expect(
+            cell.games == 1,
+            "bounded BSR source cell did not contain one game");
+    }
+    for (const auto& deck : report.decks) {
+        expect(
+            deck.games == 4,
+            "bounded BSR opponent stratum did not contain four "
+            "games");
+    }
+    std::size_t expected_evaluations = 0;
+    for (const auto& root : report.roots) {
+        expected_evaluations +=
+            root.action_count * 4;
+    }
+    expect(
+        report.reference_rollout_evaluations ==
+                expected_evaluations &&
+            old_school::learned_model_fingerprint(
+                tiny_bsr_model()) ==
+                config.required_model_fingerprint,
+        "bounded BSR reference accounting changed or mutated the "
+        "frozen model");
+}
+
 } // namespace
 
 int main() {
@@ -1204,5 +2631,41 @@ int main() {
                test_harvested_validation_probe_is_reproducible_and_valid);
     runner.run("harvested X=0 hold-versus-waste trace",
                test_harvested_x_zero_has_no_effect_and_pass_holds);
+    runner.run("DC1 X=0 strict dominance",
+               test_dc1_x_zero_is_strictly_dominated_and_hidden_exact);
+    runner.run("DC1 payable Force Spike tradeoff",
+               test_dc1_payable_force_spike_is_a_tradeoff);
+    runner.run("DC1 productive-action controls",
+               test_dc1_productive_actions_do_not_trigger);
+    runner.run("DC1 order invariance and fail-closed roots",
+               test_dc1_order_invariance_and_malformed_fail_closed);
+    runner.run("DC1 exact-pair conflict dedupe",
+               test_dc1_pair_label_dedupe_drops_conflicts);
+    runner.run("DC1 exact 90-action mining bound",
+               test_dc1_action_summary_enforces_exact_90_action_bound);
+    runner.run("DC1 raw conservation and stop context",
+               test_dc1_raw_settlements_conserve_cards_and_context);
+    runner.run("DC1 Mox and Sol Ring exact ledgers",
+               test_dc1_mox_and_sol_ring_ledgers_are_exact);
+    runner.run("DC1 bounded deterministic mining smoke",
+               test_dc1_bounded_mining_smoke_is_deterministic);
+    runner.run("DC1 bounded deterministic action census",
+               test_dc1_bounded_action_census_is_deterministic);
+    runner.run("BSR exact source schedule",
+               test_bsr_source_schedule_is_exactly_balanced);
+    runner.run("BSR owner filter and binary action mapping",
+               test_bsr_owner_filter_retains_binary_and_maps_action);
+    runner.run("BSR reference invariances and seed split",
+               test_bsr_reference_is_order_hidden_and_seed_invariant);
+    runner.run("BSR stable root identity",
+               test_bsr_stable_root_key_binds_actual_and_model_not_hidden);
+    runner.run("BSR paired regret math",
+               test_bsr_paired_regret_math);
+    runner.run("BSR amended exact retention",
+               test_bsr_retention_amendment_is_exact_and_permutation_safe);
+    runner.run("BSR practical gate boundaries",
+               test_bsr_practical_gate_boundaries_are_exact);
+    runner.run("BSR bounded source accounting smoke",
+               test_bsr_bounded_source_accounting_smoke);
     return runner.finish();
 }

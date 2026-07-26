@@ -5032,3 +5032,808 @@ note the authoritative source still has the v2 cleanup implementation and its
 raw call sites; v3 becomes live only after the rules implementation, cache
 invalidation, and declared tests pass. This is a status disagreement, not a
 disagreement with the reviewer's recommendation to make the correction.
+
+### Environment v3 cleanup-discard correction (result: accepted)
+
+Recorded on 2026-07-26 after rereading the independent review timestamped
+00:45 PDT. The rules hypothesis passed. Cleanup now asks the active player for
+exactly `hand_size - 7` unique hand positions, validates the complete choice
+transactionally, moves those cards to the public graveyard, emits a public
+discard event, and only then clears mana, damage, and until-end-of-turn
+effects. Random, Monte Carlo, Deep Monte Carlo, Handcrafted, Learned Value,
+and Learned Actor all make legal deterministic cleanup choices. Learned ranks
+only its own/public successor states with its frozen model; it receives no
+card-specific rule, Handcrafted value, or opponent hidden card identity.
+
+The same authoritative choice is exposed by both human surfaces. Terminal
+interactive mode prompts for the exact excess cards. The web bridge publishes
+`cleanup_discard` with zero-based hand indices and accepts only an exact,
+unique integer array for the matching decision id; negative, quoted,
+fractional, duplicate, short, long, and junk-suffixed inputs fail before state
+mutation. Its resulting `cards_discarded` event is public. A separate opt-in
+Bluff mode may expose otherwise forced single-Pass priority choices without
+changing bot defaults or nontrivial-decision statistics.
+
+Because cleanup changes real trajectories, the engine schema and all learned
+artifact families advanced from v2 to v3. The G0/C2 golden model fingerprints
+were regenerated under the new schema, and the exact 300,000-game Random
+matrix at seed `303` was pinned to the following matchup rates:
+Green–Red `61.7%`, Green–Blue `56.4%`, Green–White `54.7%`,
+Green–RU `67.6%`, Red–Blue `48.9%`, Red–White `54.9%`, Red–RU
+`42.0%`, Blue–White `90.1%`, Blue–RU `48.8%`, and White–RU
+`38.6%`.
+
+Verification:
+
+- `make test` exited zero: 125/125 engine/bot tests, 16 learned-iteration
+  tests, 22 probe tests, 11 probe-metric tests, 24 probe-runner tests, 7 web
+  bridge tests, the complete CLI lifecycle, and 61/61 Node/browser-contract
+  tests passed.
+- The engine suite passed 125/125 under the exact sanitizer command
+  `c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror
+  -fsanitize=address,undefined -fno-omit-frame-pointer src/game.cpp
+  src/interactive.cpp src/learned_iteration.cpp tests/test_game.cpp -o
+  build/old-school-tests-sanitize`, followed by
+  `ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1
+  ./build/old-school-tests-sanitize`. There were no ASan/UBSan findings;
+  Apple's ASan runtime requires leak detection to remain disabled.
+- `git diff --check` was clean.
+- The README command
+  `./build/old-school-sim --games 100 --seed 42 --bots mixed --rollouts 2
+  --deep-rollouts 8 --learned-rollouts 2 --train-games 800 --train-seed
+  424242` completed 1,000 games with no draws or turn-limit finishes. The
+  five deck records were Green `179-221`, Red `147-253`, Blue `278-122`,
+  White `218-182`, and RU Aggro `178-222`. Learned G0 went `280-120`
+  overall, but its lift gate passed only White and failed Blue, RU, Red, and
+  Green. This is a small, unpaired user-facing smoke, not a bot-strength
+  conclusion.
+
+Decision: **accept Environment v3 as live**. All rules and verification gates
+passed. Do not reuse any v2 artifact, probe-cache fingerprint, lift table, or
+strength result as v3 evidence. The next required artifact step is a fresh,
+fingerprint-pinned v3 C16 retrain before any new policy experiment.
+
+Review reconciliation: the 00:35 corpus qualification report proposed 7 of 20
+legacy dev-v3 fixtures as outcome-relevant. A subsequent code audit found that
+the reviewer-branch qualifier always resumes `FirstMain`, resets the recorded
+pass count, uses the pre-v3 raw cleanup path, and discards paired per-world
+outcomes. Therefore the seven are preregistered hypotheses, not yet
+Environment-v3 ground truth; they must reproduce through the corrected v3
+qualification seam. The other thirteen, including every current White lore
+fixture and both Force Spike controls, remain descriptive only. A future probe
+corpus must qualify candidate branches by strong-pilot outcome separation
+before assigning an acceptance label. The X=0 no-op class is the first
+candidate post-v3 defect target, contingent on that corrected qualification.
+
+### Environment v3 C16 control artifact (declared)
+
+Declared on 2026-07-26 after the Environment v3 correctness gate passed and
+before starting a fresh post-reset training run.
+
+Hypothesis: the unchanged card-agnostic 16-generation Value Challenger recipe
+will train deterministically under Environment v3, publish a schema-bound
+artifact distinct from every v2 model, and reload with the exact same
+fingerprint and predictions. This experiment freezes the new research parent;
+its small gameplay tail is an artifact smoke and cannot establish strength.
+
+The exact generation command is:
+
+```sh
+./build/old-school-sim --benchmark --games 1 --seed 919190 \
+  --challenger learned-value-c16 --baseline learned-value-g0 \
+  --learned-rollouts 8 --train-games 800 --train-seed 424242 \
+  --refresh-value-challenger-cache
+```
+
+It must write only
+`build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`,
+report the complete fingerprint, and complete the balanced 60-paired-game
+smoke. A second invocation without `--refresh-value-challenger-cache` must
+load that artifact and report the identical fingerprint. Any schema mismatch,
+cross-load, nondeterministic fingerprint, incomplete run, or test regression
+rejects the artifact. The 60-game aggregate and five 12-game deck slices are
+reported for reproducibility but are explicitly below the measurement floor
+and will not select, reject, or promote a policy.
+
+### Environment v3 C16 control artifact (result: accepted)
+
+Recorded on 2026-07-26 after rereading the independent review timestamped
+00:58 PDT. The exact preregistered refresh command trained C16 in 298.15
+seconds and atomically published:
+
+- artifact:
+  `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`;
+- fingerprint:
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+- training seed `424242`, initial games `800`, generations `16`.
+
+The command then trained the Environment-v3 G0 comparator in 20.50 seconds
+with fingerprint
+`ab7a782478d9dbafe7bfd3242a2434b24f9b9fb6a0f3f83b8c406e3818566f78`
+and completed all 60 paired smoke games at evaluation seed `919190`. C16 went
+`30-30` (`50.0%`, approximate interval `37.7%--62.3%`), with challenger-deck
+records Green `3-9`, Red `6-6`, Blue `9-3`, White `5-7`, and RU Aggro `7-5`.
+The CLI exited one because the verdict was correctly inconclusive.
+
+The exact same command without the refresh flag loaded the artifact in 0.01
+seconds, reproduced the complete C16 and G0 fingerprints, and reproduced the
+aggregate, all five deck slices, and efficiency values exactly. This satisfies
+the declared deterministic generation/reload and schema-isolation gates.
+
+Decision: **accept this fingerprint as the immutable Environment-v3 C16
+research parent**. Accept no strength interpretation from the 60-game smoke.
+Future Environment-v3 challenges must bind this exact fingerprint or declare
+and freeze a different parent before collecting evidence.
+
+Review disagreement: the 00:58 entry calls the reviewer branch's
+`tools/certify.sh` a full certification panel. Read-only inspection shows that
+it currently has only one virgin evaluation seed, omits the required fixed
+`101,202,303,404,505,606,707,808` no-losing-seed panel, does not enforce
+per-deck direct wins or parse the pooled Wilson lower bound above 50%, uses
+one-seed lift rather than the seeded stability gate, omits sanitizers, and
+scores unqualified dev-v3 probes. Its final `CERTIFIED` label can therefore
+false-promote under `AGENTS.md`. Preserve the useful one-command concept, but
+do not run or import that script as authoritative until every required gate,
+qualification dependency, and collision-safe evidence log is implemented.
+More critically, its stage-three lift command omits
+`--learned-generations 16` and therefore evaluates legacy Value G0, while
+stage four explicitly scores G0; it can print `CERTIFIED` for the wrong model.
+It also accepts `gate-games < 34`, can silently train during evaluation, cannot
+prove a virgin evaluation seed, and returns shell status zero for
+`NOT CERTIFIED`. Stage two at 34 games does correctly combine the current
+CLI's Wilson-lower-bound and all-deck direct-win gates; that narrow piece is
+sound but does not repair the panel.
+
+### DC1 immediate resource-dominance mining audit (declared)
+
+Declared on 2026-07-26 after rereading the independent review timestamped
+01:20 PDT and freezing exact Environment-v3 C16 parent fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+
+Hypothesis: an evaluation-only, card-agnostic comparator can find a useful,
+deck-balanced supply of strictly dominated Priority actions in real frozen-C16
+self-play without assigning preferences to genuine resource tradeoffs. This
+is a mining sufficiency audit only. It trains no weights, filters no deployed
+action, changes no policy, and cannot promote a model.
+
+For a candidate root action, canonical settlement forces that action and then
+only passes priority until the current stack has resolved or the priority
+window ends. Rules-authoritative optional payments still occur. Settlement
+stops on the empty stack before any new phase, combat, cleanup, draw, or
+controller decision; natural terminal life/deck outcomes are retained. Every
+branch records an explicit cost ledger relative to the common root.
+
+Two settled branches may be ordered only when their non-cost effects are
+exactly equal after normalizing their branch-local costs. Exact comparison
+includes life, battlefield, stack, libraries, public zones, hand sizes, turn
+state, extra turns, and failed-draw state; irrelevant statistics and next-ID
+counters are normalized. Resource coordinates are factual and unweighted:
+own-hand card identities consumed, mana paid, preexisting mana sources newly
+tapped, land-play entitlement consumed, and opponent public/count resources
+consumed in the opposite direction. Action A dominates B only if A consumes
+no more actor resource on every coordinate, consumes no fewer opponent
+resource on every coordinate, and at least one coordinate is strict. No card
+name, power sum, permanent value, damage score, mana-to-card exchange rate, or
+Handcrafted value is permitted. Thus forcing a payable Force Spike tax is
+explicitly incomparable: it trades the actor's card/mana for opponent mana.
+
+Dominance must have one unanimous orientation across `K=8` common
+information-set worlds. Repartitioning/reordering opponent hidden zones must
+reproduce byte-identical sampled-world keys, action descriptors, effect
+fingerprints, ledgers, orientations, and example weights. Disagreement in one
+world makes the pair incomparable.
+
+The mining command is fixed:
+
+```sh
+./build/old-school-sim --audit-dc1-dominance \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+It loads, never refreshes, the pinned C16 parent. Training-mining seed is
+`577215`; held-out seed is `271828`. Each split contains two exact balanced
+40-game blocks, for 160 games and 320 seat-games overall. Training trajectories
+use the frozen parent with deterministic indexed 10% legal-action exploration;
+held-out trajectories use deployed C16 at `K=8`, epsilon zero. The collector
+retains at most 16 evenly spaced multi-action Priority roots per seat-game,
+including exact root state, all legal actions, phase, priority player,
+consecutive-pass count, sorcery permission, ordered decks, and stable decision
+ordinal. More than 64 legal actions fails closed. The full legal set is never
+truncated; at most eight unordered pairs per root are selected by stable hash.
+
+Accounting is bounded and printed compactly: at most 5,120 roots, 40,960 pair
+groups, 327,680 paired-world cells, and 2,621,440 total settlement operations.
+Examples are deduplicated by information-set fingerprint plus ordered action
+descriptors. Per deck, training must contain at least 32 strict positives and
+32 deterministically matched incomparable controls, each drawn from at least
+8 distinct seat-games. Held-out must contain at least 16 of each across at
+least 4 seat-games. Any deck miss rejects the audit; counts may not be repaired
+by oversampling a fixture, broadening the comparator, or changing thresholds
+after observation.
+
+Before mining, fixture gates must prove:
+
+1. Pass strictly dominates Disintegrate X=0 in the validation-v1 no-op state;
+2. payable Force Spike is incomparable;
+3. live Force Spike, lethal Disintegrate, useful Giant Growth, and productive
+   land, creature, and artifact development do not trigger dominance merely
+   because their outcomes/resources differ;
+4. malformed roots fail before mutation, settlements preserve card
+   conservation, hidden repartition is exact, and candidate order cannot
+   change descriptor-keyed results.
+
+The reported 7-of-20 reviewer outcome fixtures are not inputs or labels for
+DC1; their corrected Environment-v3 qualification is separate and remains
+mandatory before any later policy change. If the density audit passes, the
+next experiment must separately preregister either an exact dominance filter
+or a pairwise Priority residual fit. A critic-wide target is not licensed by
+this audit because calibration bleed could alter unrelated actions.
+
+Pre-run implementation reconciliation, recorded before executing the command:
+
+- The independent review's 02:10 working-tree lift table (4/5 decks, with
+  Blue shown at -10.0 points) is a useful smoke diagnostic only. It reports
+  80 games per cell (roughly +/-11 points), no complete reproducible command
+  in the entry, and is not the paired 2,000-game/panel gate. It is neither a
+  strength conclusion nor an input to DC1.
+- The reviewer's current fixture qualifier and certification harness have
+  unresolved source-binding, pairing, and false-pass defects. Consequently,
+  neither its 7-of-20 qualification nor its Blue-fixture claims are accepted
+  as DC1 labels or evidence. DC1 uses only its independently tested,
+  rules-exact resource comparator.
+- "Indexed exploration" in the declaration means that every mining game has
+  a seed derived from the fixed split/block/schedule index. Within a game,
+  the existing engine's deterministic RNG supplies the 10% exploration
+  decisions; there is no new per-decision RNG stream. This is reproducible
+  for the frozen binary, but intentionally does not claim invariance to
+  unrelated future RNG-consumption changes.
+- The earlier operation ceiling was arithmetically doubled. With 5,120 roots
+  across both splits, eight pairs/root, eight common worlds/pair, and four
+  raw settlements/world (two candidates plus their hidden clones), the exact
+  ceiling is 1,310,720 settlement operations, not 2,621,440. No sampling or
+  density threshold changed.
+- The CLI now fails closed unless the exact pinned C16 artifact already
+  exists. It cannot silently train, refresh, write, filter, or deploy a model.
+  Comparator proof coverage is 29/29, including exact X=0 and two-sided Force
+  Spike ledgers, priority-stop context, candidate-orientation reversal, and
+  exact Mox Sapphire/Sol Ring payment ledgers (including Sol Ring excess pool
+  clearing).
+
+### DC1 immediate resource-dominance mining audit (result: rejected before density)
+
+Run on 2026-07-26 after rereading the independent review through 04:05 PDT.
+The exact command was:
+
+```sh
+./build/old-school-sim --audit-dc1-dominance \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+The load-only route loaded the pinned Environment-v3 C16 artifact and
+reproduced exact model fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+Artifact loading self-reported 0.01 seconds; the complete failed invocation
+took approximately 48.0 seconds of observed tool wall time. It then exited
+with status 2 and:
+
+```text
+error: DC1 root exceeds legal-action bound
+```
+
+Result: **rejected before density**. The preregistered `>64` legal-action
+guard failed closed. No train/held-out split completed, so there are no
+aggregate or per-deck density counts to report, no positive/control examples
+were accepted, and no treatment is licensed. The model was not trained,
+refreshed, written, filtered, or deployed.
+
+The thrown context retained only the error text above; it did not retain the
+split, block, game, seat, deck, turn, phase, legal-action count, or descriptor
+set. Those facts cannot be reconstructed without new instrumentation and a
+rerun, neither of which is part of this rejected experiment.
+
+This is an implementation-bound failure, not evidence for or against the
+dominance hypothesis. The next experiment may not silently raise the bound.
+First add an evaluation-only diagnostic that reports the offending fixed
+split/block/schedule/seat/root, exact action count, and action-kind histogram,
+then predeclare a finite replacement bound from that evidence while preserving
+the complete legal action set and the original pair/root, world, density, and
+all-five-deck thresholds. Rerunning density requires a separately named
+declaration. The review's 03:55 Blue loss-state harvest is v2 and its current
+qualifier remains disputed; it is a follow-up hypothesis, not evidence that
+changes this rejection.
+
+### DC1-B0 legal-action census (declared)
+
+Declared on 2026-07-26 after rereading the independent review through
+04:50 PDT and receiving a read-only collector audit. This is diagnostic
+instrumentation, not a strength or density experiment. It fits, filters,
+writes, and deploys nothing.
+
+The collector audit found one pre-density correctness defect that must be
+fixed before any later DC1 density result: duplicate observations were
+deduplicated by `(information-set/action-pair key, observed label)`, so the
+same exact pair could count once as a positive and once as an incomparable
+control when finite-world labels conflicted. The corrected rule groups only
+by the information-set/action-pair key and drops the entire key on any label
+conflict. Conflict counts must be printed. Pair-world seeds must derive from
+the split seed plus that same descriptor-keyed identity, not trajectory
+provenance or retained-pair ordinal. Accounting must additionally enforce
+per-deck seat balance and all root/pair/cell/settlement sums and caps.
+
+The audit also found an undeclared implementation default:
+`max_game_turns=128`. DC1-B0 explicitly freezes that 128-turn mining horizon.
+It does not claim equivalence to the normal 500-turn game limit.
+
+Hypothesis: the exact frozen-C16, all-five-deck DC1 trajectories contain a
+finite, reproducible maximum legal Priority-action count above 64 but no more
+than 512. A complete census will identify every over-64 root and provide a
+non-post-hoc finite bound for a separately declared density rerun.
+
+The command is:
+
+```sh
+./build/old-school-sim --audit-dc1-action-census \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+It must load exact Environment-v3 C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+It replays the unchanged training-mining seed `577215` and held-out seed
+`271828`, two exact balanced 40-game blocks per split, K=8 frozen-C16
+self-play, 10% training-split exploration, zero held-out exploration, and
+`max_turns=128`. It traverses every captured Priority root and enumerates the
+complete legal action set, but performs no pair comparison, deduplication,
+density counting, training, or policy mutation.
+
+For every root with more than 64 actions, output must include split, block,
+schedule index, seat, both public deck IDs, turn, phase, consecutive-pass
+count, stack size, exact legal-action count, action-kind histogram, and a
+digest of sorted complete action descriptors. It must also report exact
+global and per-deck maxima and legal-count histograms, plus:
+
+- 80 games, 160 seat-games, and exactly 32 seat-games per deck in each split;
+- deck/root totals that cross-sum exactly;
+- distinct fixed split seeds;
+- a statement that no pair settlements or density examples were evaluated.
+
+Run the command twice. Acceptance requires byte-identical scientific output
+(timing, if printed separately, is excluded), exact accounting, the pinned
+fingerprint, at least one reproduced over-64 root, and a maximum no greater
+than the preregistered diagnostic ceiling of 512. If accepted, the next
+separately named density declaration will use the exact observed maximum as
+`max_legal_actions`; it may not round upward or change the original
+root/pair/K/density thresholds. If the maximum exceeds 512, or either replay
+differs, DC1-B0 is rejected and density remains unlicensed.
+
+Review reconciliation: the 04:50 entry endorses this bound census. Its
+proposed dual-pilot v3 Blue qualifier is a separate future experiment. The
+review's v2 Blue labels, and its current certification claims, remain outside
+DC1-B0.
+
+### DC1-B0 legal-action census (result: accepted diagnostic; exact bound 90)
+
+Run on 2026-07-26 after rereading the independent review through 06:20 PDT.
+The 06:20 dual-pilot Blue result is useful separate evidence, but it neither
+changes this rules-only census nor supplies DC1 labels. The exact command was
+run twice:
+
+```sh
+./build/old-school-sim --audit-dc1-action-census \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+Both invocations loaded, without refreshing, exact Environment-v3 C16
+fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+and exited 0. The complete outputs were byte-identical: each was 3,517 bytes
+over 32 lines with SHA-256
+`05094a4284c375027efefe7b01a7d5a9707e1193008b1f4d9305a77ed5ba7b43`.
+The scientific sections beginning at `DC1-B0 Legal-Action Census` were also
+byte-identical with SHA-256
+`c4cb2ddbb6d63599c9e56608d9502c7cbf0863f7a0dc78477b0d400232b74559`.
+Observed wall times were approximately 147 and 148 seconds.
+
+Exact split accounting:
+
+- training seed `577215`: 80 games, 160 seat-games, 18,543 Priority roots,
+  32 seat-games per deck, descriptor uniqueness PASS, accounting PASS;
+- held-out seed `271828`: 80 games, 160 seat-games, 18,046 Priority roots,
+  32 seat-games per deck, descriptor uniqueness PASS, accounting PASS;
+- pair comparisons `0`, density examples `0`, distinct split seeds PASS, and
+  cross-split accounting PASS.
+
+Per-deck root counts and exact maxima were:
+
+| Split | Green | Red | Blue | White | RU Aggro |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Training roots / max | 3,612 / 9 | 3,561 / 12 | 3,244 / 17 | 4,691 / 9 | 3,435 / 90 |
+| Held-out roots / max | 3,577 / 9 | 3,397 / 11 | 3,029 / 12 | 4,529 / 9 | 3,514 / 52 |
+
+The exact global training histogram was
+`{1:14838, 2:2108, 3:944, 4:238, 5:176, 6:76, 7:77, 8:32, 9:21, 10:9, 11:6, 12:1, 13:2, 14:1, 15:3, 17:2, 20:1, 22:1, 26:1, 32:1, 35:1, 37:1, 42:1, 80:1, 90:1}`.
+The exact held-out histogram was
+`{1:14480, 2:1942, 3:939, 4:250, 5:178, 6:77, 7:91, 8:34, 9:22, 10:9, 11:10, 12:1, 13:2, 14:1, 15:3, 17:1, 23:1, 27:1, 31:2, 33:1, 52:1}`.
+
+Exactly two roots exceeded 64 actions, both in training block 1, schedule 39,
+seat 0, RU Aggro versus White, turn 26 first main with zero prior passes and
+an empty stack:
+
+- trace root 301: 80 actions = Pass 1, Play Land 1, Cast Creature 1, and
+  Disintegrate 77; sorted-descriptor FNV-1a
+  `45e87156943666fe`;
+- trace root 302: 90 actions = Pass 1, Cast Creature 1, and Disintegrate 88;
+  sorted-descriptor FNV-1a `0f1f4432ae3f8a05`.
+
+Result: **accepted as a diagnostic**. It confirms the hypothesis
+`64 < maximum <= 512` and supplies the evidence-bound replacement
+`max_legal_actions=90`. It does not show density, improve a bot, or license a
+policy treatment. No model was trained, written, filtered, or deployed.
+
+### DC1-B1 exact-bound resource-dominance density rerun (declared)
+
+Declared on 2026-07-26 after accepting DC1-B0 and rereading the independent
+review through 06:20 PDT. This reruns the previously rejected DC1 density
+audit with exactly one evidence-required configuration change:
+`max_legal_actions` increases from 64 to the observed maximum 90. It is not
+rounded upward. The comparator, complete action sets, retained-root and pair
+limits, common-world count, split seeds, exploration, 128-turn horizon,
+density thresholds, hidden-information checks, and frozen parent remain
+unchanged.
+
+Hypothesis: with the exact bound 90, the fixed all-five-deck mining replay will
+complete its accounting and hidden-repartition gates and meet, for every
+deck, at least 32 strict positives plus 32 matched incomparable controls from
+at least 8 seat-games in training, and at least 16 of each from at least 4
+seat-games in held-out.
+
+The exact command is unchanged:
+
+```sh
+./build/old-school-sim --audit-dc1-dominance \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+It must load, never refresh, exact C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+The CLI report must print `max_legal_actions=90`, conflict-dropped key counts,
+exact global/per-deck root, pair, world-cell, and settlement cross-sums, and
+all density/seat-game counts. The prior exact ceilings remain: no more than
+5,120 retained roots, 40,960 pair groups, 327,680 paired-world cells, and
+1,310,720 raw settlement operations across both splits. Any bound excess,
+accounting mismatch, descriptor/world-seed invariance failure, fingerprint
+mismatch, or per-deck density miss rejects B1. No threshold may be repaired
+after observation.
+
+If B1 passes, it licenses only a separately preregistered narrow treatment:
+either an exact dominance filter or a pairwise Priority residual fit. It does
+not license critic-wide targets or a Learned-is-king claim. If it fails,
+record the exact all-five-deck density shortfall and move to the separately
+qualified v3 Blue stack-response corpus rather than weakening DC1.
+
+### DC1-B1 exact-bound resource-dominance density rerun (result: rejected)
+
+Run once on 2026-07-26 after rereading the independent review through
+00:21 PDT. That review independently reproduced DC1-B0 bit-for-bit and
+predicted that per-deck density, rather than the corrected bound, was B1's
+real risk. The only configured audit change was the declared exact bound
+`max_legal_actions=90`; all other seeds, limits, thresholds, and comparator
+semantics remained frozen. The exact command was:
+
+```sh
+./build/old-school-sim --audit-dc1-dominance \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+The route loaded, without training or refreshing, exact Environment-v3 C16
+fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+It printed `K=8`, `max_legal_actions=90`, `max_turns=128`, 16 retained
+roots/seat-game, and 8 pairs/root. The fixture, hidden-repartition, and exact
+accounting gates all passed. The process exited 1 with the intended scientific
+verdict `REJECT (density insufficient; no treatment)`. Audit time was
+159.657089958 seconds and observed wall time was 159.87 seconds. The complete
+capture SHA-256 was
+`1eca49d3f67285fe105e33af1ec07f294214b531bffd5904f793dba8e97bf8a2`.
+There was no retry or alternate configuration.
+
+Training split, seed `577215`:
+
+- aggregate: 80 games, 160 seat-games, 18,543 Priority roots, 3,705
+  multi-action roots, 2,448 retained roots, 6,346 pair groups, 50,768
+  paired-world cells, and 203,072 settlements; hidden/accounting PASS;
+- Green: 3,612 / 653 / 476 roots, 899 pairs, 6 positives, 893 unique
+  incomparable, 6 matched controls, 0 conflicts, positive/control seat
+  coverage 5/2 — FAIL;
+- Red: 3,561 / 660 / 486 roots, 1,571 pairs, 0 positives, 1,571
+  incomparable, 0 controls, 0 conflicts, coverage 0/0 — FAIL;
+- Blue: 3,244 / 753 / 505 roots, 884 pairs, 66 positives, 818
+  incomparable, 66 controls, 0 conflicts, coverage 25/4 — FAIL because
+  control coverage was below 8 seat-games;
+- White: 4,691 / 1,018 / 503 roots, 1,659 pairs, 2 positives, 1,655
+  incomparable, 2 controls, 0 conflicts, coverage 2/2 — FAIL;
+- RU Aggro: 3,435 / 621 / 478 roots, 1,333 pairs, 29 positives, 1,304
+  incomparable, 29 controls, 0 conflicts, coverage 11/2 — FAIL.
+
+Held-out split, seed `271828`:
+
+- aggregate: 80 games, 160 seat-games, 18,046 Priority roots, 3,566
+  multi-action roots, 2,473 retained roots, 6,883 pair groups, 55,064
+  paired-world cells, and 220,256 settlements; hidden/accounting PASS;
+- Green: 3,577 / 661 / 485 roots, 943 pairs, 8 positives, 935
+  incomparable, 8 controls, 0 conflicts, coverage 6/2 — FAIL;
+- Red: 3,397 / 605 / 482 roots, 1,648 pairs, 4 positives, 1,644
+  incomparable, 4 controls, 0 conflicts, coverage 4/2 — FAIL;
+- Blue: 3,029 / 669 / 505 roots, 1,010 pairs, 69 positives, 941
+  incomparable, 69 controls, 0 conflicts, coverage 25/4 — PASS;
+- White: 4,529 / 963 / 508 roots, 1,642 pairs, 4 positives, 1,638
+  incomparable, 4 controls, 0 conflicts, coverage 4/2 — FAIL;
+- RU Aggro: 3,514 / 668 / 493 roots, 1,640 pairs, 53 positives, 1,587
+  incomparable, 53 controls, 0 conflicts, coverage 14/2 — FAIL because
+  control coverage was below 4 seat-games.
+
+Both splits cross-summed exactly to 36,589 Priority roots, 7,271
+multi-action roots, 4,921 retained roots, 13,229 pairs, 105,832 world cells,
+and 423,328 settlements. Those remain below every preregistered ceiling.
+There were 241 positives, 12,986 unique incomparable pairs, 241 matched
+controls, and zero conflicting exact-pair keys. Raw per-deck root counts
+exactly reproduced DC1-B0.
+
+Result: **rejected on all-five-deck density**. Immediate resource dominance is
+real but too sparse and uneven for the declared general auxiliary target.
+The evidence especially rules out repairing DC1 by merely increasing sample
+count or weakening thresholds: Red had zero training positives, while most
+decks lacked diverse controls. No dominance filter, residual, critic target,
+model change, or deployment is licensed.
+
+Next experiment: follow the preregistered fallback, not a DC1 retry. Define a
+separate Environment-v3 diagnostic that harvests the frozen C16 Blue
+stack-response decisions it actually loses, then measures its chosen-action
+regret with a deeper hidden-information-safe Learned-mirror reference. The
+review's earlier eight states establish a method and three dual-pilot-agreed
+v2 candidates, but they are not silently promoted into Environment-v3
+training labels. The v3 command, corpus balance, reference budget, and
+acceptance threshold must be separately declared before implementation or
+execution.
+
+### Exact ordered-deck matrix instrumentation smoke (not a strength result)
+
+Run on 2026-07-26 after rereading the independent review through 00:21 PDT.
+This was a CLI/accounting smoke for the new certification evidence seam, not a
+bot candidate screen. The exact command was:
+
+```sh
+./build/old-school-sim --stability --stability-runs 1 --games 1 --seed 1 \
+  --train-games 1 --train-seed 424242 \
+  --rollouts 1 --deep-rollouts 2 \
+  --learned-generations 1 --learned-rollouts 1
+```
+
+It loaded the existing Environment-v3 C1 artifact with fingerprint
+`5f499b27515b6a379a227e929f961803edce8991f321d885cff66633b736357d`.
+Evaluation seed was `102`; each direct policy comparison contained 60 games.
+Aggregate Learned records were 36-24-0 versus Random, 31-29-0 versus Monte
+Carlo, 25-35-0 versus Deep Monte Carlo, and 9-51-0 versus Handcrafted.
+
+The pooled Handcrafted section emitted all 25 exact
+challenger-deck-by-baseline-deck cells from the challenger perspective.
+Every diagonal contained 4 games and every off-diagonal contained 2, for 60
+total. Reconstructing its row and reciprocal-column marginals gives the
+printed all-five deck result:
+
+| Learned deck | Learned wins | Handcrafted wins | Verdict |
+| --- | ---: | ---: | --- |
+| Green | 0 | 12 | FAIL |
+| Red | 6 | 12 | FAIL |
+| Blue | 1 | 10 | FAIL |
+| White | 0 | 9 | FAIL |
+| RU Aggro | 2 | 8 | FAIL |
+
+The one-seed mixed-field lift rows were Green +5.0 versus +35.0 Handcrafted,
+Red +50.0 versus +50.0 Handcrafted, Blue -15.0 versus +40.0 Handcrafted,
+White -20.0 versus +55.0 Handcrafted, and RU Aggro +55.0 versus +65.0
+Handcrafted. Only Red tied for best. At one repetition and a one-game-trained
+C1, none of these win rates is a strength claim.
+
+Instrumentation result: **accepted**. The exact 5x5 output has the intended
+shape and reconstructs the aggregate and both deck marginals, closing the
+false-pass class where impossible independent marginals could previously
+satisfy the certification parser. Next verification is adversarial parser
+coverage plus the full test suite; this smoke does not alter the frozen C16
+champion or the next Blue stack-response research experiment.
+
+### Blue harvest context correction (review reconciliation; no experiment)
+
+Recorded after rereading the independent review's 00:28 PDT correction. The
+earlier eight outcome-relevant states cannot be described as Blue mistakes:
+exact callback context shows `decision_player=1` for all eight, so they were
+opponent-held windows in games Blue eventually lost. Frozen C16 Blue did not
+choose any of those hypothetical branches. Their outcome relevance and the
+dual-pilot qualification method survive, but all three previously
+pilot-agreed action labels are invalid as evidence about Blue's policy.
+
+This corrects, without deleting, the B1 fallback wording above. There are
+currently **zero qualified Blue-held mistakes**. A valid v3 harvest must:
+
+- retain exact decision-player context and accept only Blue-held windows;
+- admit two-action stack decisions, because pass-versus-counter binaries were
+  structurally excluded by the prior three-action minimum;
+- keep opponent-held windows as relevance-only observations, never Blue
+  labels;
+- treat a zero-qualified result as evidence for value miscalibration rather
+  than inventing a discrete wrong-pick treatment.
+
+No model, fixture label, or policy changed. The next Blue diagnostic must be
+separately declared under these corrected constraints before it runs.
+
+### DC1 signal geography (review reconciliation; no experiment)
+
+Recorded after rereading the independent review through 00:40 PDT. The
+DC1-B1 rejection closes immediate resource dominance as an all-deck auxiliary
+target, but its distribution is a positive diagnostic result: Blue supplied
+66 training and 69 held-out strict positives, while Red supplied 0 and 4.
+The corresponding Blue control coverage was 25/4 seat-games. Thus
+dominance-comparable action structure is concentrated in Blue even though the
+declared balanced density gate failed. This does not license a DC1 treatment,
+but it strengthens the case for inspecting Blue's exact pass-versus-response
+decisions rather than treating B1 only as an undifferentiated failure.
+
+The review's independent `harvest-v2` has since reported ten correctly owned
+Blue windows, including one dual-pilot-qualified two-action decision with
+32.5 percentage points of regret and two relevance-only wrong picks. That
+result was observed before the declaration below, so it is treated as an
+external prediction to reproduce, not as a blind discovery by this worktree.
+
+### BSR0 Environment-v3 Blue-held stack-regret audit (declared)
+
+Declared on 2026-07-26 after rereading `AGENTS.md`, the B1 result, and the
+independent review through 00:40 PDT. BSR0 is a load-only diagnostic and an
+independent replication of the review's corrected `harvest-v2`; it does not
+train, refresh, write, or deploy a model and it cannot by itself license a
+Learned-is-king claim.
+
+Hypothesis: in an exactly balanced sample of 200 real games that frozen C16
+Blue loses, a correctly owner-filtered harvest will retain 20 Blue-held
+opponent-stack priority roots, including two-action windows, and a deeper
+hidden-information-safe Learned-mirror reference will find at least one
+stable chosen-action mistake with point regret at least `0.05` and a paired
+95% lower confidence bound above zero. This is the minimum independent
+replication criterion for the externally reported rare, high-cost binary
+mistake. A stronger density criterion is also predeclared: at least 4 of 20
+stable mistakes spanning at least two opponent-deck strata would license a
+separately declared regret-weighted treatment experiment. Missing the
+stronger criterion does not erase a replicated single mistake.
+
+The exact command will be:
+
+```sh
+./build/old-school-sim --audit-v3-blue-stack-regret \
+  --train-games 800 --train-seed 424242 \
+  --learned-generations 16
+```
+
+It must load, without training or refreshing, exact Environment-v3 C16
+fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+No alternate seed or retry is permitted after observing the result.
+
+Source-state protocol:
+
+- source seed `1618033`, 10 schedule blocks, all five opponent deck IDs;
+- Blue is the tracked deck in both policy seats and on both play/draw sides,
+  producing 20 games per block, 200 total, and 40 per opponent deck;
+- source games use a 128-turn cap and production C16 Learned search
+  (`K=8`, horizon 4) for the tracked Blue seat;
+- Handcrafted may act only as the other seat to source real losing states
+  from the measured matchup. Its score, action preference, features, hidden
+  information, and continuation are never copied, queried, labeled, or used
+  by Learned training or the reference. Snapshots are the only retained
+  product. This is evaluation-state sourcing, not training against
+  Handcrafted;
+- an eligible root must come from a tracked-seat loss, have valid decision
+  context with `decision_player` exactly equal to the tracked Blue seat, have
+  a nonempty stack whose top object is controlled by the opponent, expose a
+  complete Priority action set of size 2 through 512, and trace C16's actual
+  selected action to exactly one stable action descriptor;
+- retain at most one root per lost game: the lexicographically smallest
+  stable information/action-set key. Retain the four smallest provenance
+  keys per opponent deck, from four distinct games, for exactly 20 roots.
+  Opponent-held windows are counted only as rejected relevance observations
+  and can never become Blue labels.
+
+Reference protocol:
+
+- reference seed `1414213562`;
+- two disjoint descriptor-keyed common-world passes, a 64-world scout and an
+  independent 64-world confirmation, horizon 8, complete legal action set,
+  frozen C16 Learned-mirror continuations for both seats, no shallow-prior
+  blend, epsilon, or residual;
+- the scout selects its argmax set. A root is a stable chosen-action mistake
+  only if the independent confirmation has the same best-action set, C16's
+  traced actual action is outside both best sets, the paired point estimate
+  `Q(best)-Q(actual)` is at least `0.05`, and its paired 95% lower confidence
+  bound is above zero;
+- descriptor ordering cannot affect seeds or results, and a hidden clone that
+  preserves public state, own hand, opponent hand size, and card-count
+  multiset while repartitioning unknown cards must produce identical
+  eligibility, worlds, and scores.
+
+Bounds and required reporting:
+
+- exactly 200 source games and no more than 20 retained roots;
+- no more than 512 legal actions per root;
+- no more than 2,621,440 reference settlements in the worst case;
+- report exact source balance, losses, eligible/rejected ownership counts,
+  retained provenance and action counts, scout/confirmation best sets,
+  actual-action mapping, point regret, paired standard error/lower bound,
+  per-opponent and aggregate mistake counts, hidden-clone result, every
+  accounting cross-sum, elapsed time, process exit, model fingerprint, and
+  complete-capture SHA-256.
+
+Focused tests must cover exact owner retention, opponent-owner rejection,
+two-action stack-window retention, traced-action legality and descriptor
+mapping, five-opponent seat/play-draw balance, descriptor-order invariance,
+hidden-clone invariance, disjoint scout/confirmation seeds, regret/lower-bound
+math, exact accounting, and unchanged behavior when tracing is disabled.
+
+Interpretation is fixed in advance. One or more stable mistakes meeting the
+minimum criterion independently reproduces a discrete Blue decision defect.
+Four or more across two opponent strata licenses only a separately
+preregistered regret-weighted treatment. A zero result means no discrete
+wrong pick was witnessed under this protocol and redirects the next
+experiment to value calibration; thresholds will not be weakened. Any
+fingerprint, isolation, invariance, bound, or accounting failure rejects the
+audit as invalid rather than negative.
+
+#### BSR0 pre-execution rare-error amendment
+
+Amended before implementation completed and before any BSR0 execution, after
+incorporating the 00:40 review's full rare-error result and the implementer's
+independent design check. The broader `4 of 20 at 0.05` treatment criterion
+above was poorly matched to the now-observed error class. The following
+clauses supersede only BSR0's root-retention count and pass threshold; all
+seeds, ownership/isolation rules, reference settings, invariance checks, and
+reporting requirements remain unchanged.
+
+- retain up to two lexicographically smallest eligible roots per source loss;
+- require exactly eight retained roots per opponent-deck stratum, spanning at
+  least four distinct source losses, for 40 roots total;
+- BSR0's practical high-cost-error PASS requires at least one stable root
+  whose confirmation regret is at least `0.20` and whose paired 95% lower
+  confidence bound is above `0.10`;
+- stable regrets from `0.05` through `0.199999...`, or a positive lower bound
+  no greater than `0.10`, are still reported as diagnostic signal but make
+  BSR0 inconclusive and license no treatment;
+- the new worst-case bound is 5,242,880 rollout evaluations: 40 roots × 512
+  actions × 128 scout-plus-confirm worlds × two exact original/hidden-clone
+  passes.
+
+This amendment explicitly uses the external 32.5-point finding as a
+replication prior; it is not presented as blind preregistration. A PASS
+licenses only a separately declared stack-root deployment diagnostic such as
+bounded quiescence, not training, promotion, or a card-specific rule.
+
+#### BSR0 pre-execution capture/reporting amendment
+
+Added before any BSR0 execution. The one-shot invocation will use:
+
+```sh
+sh tools/run_bsr0_once.sh <absolute-new-output-prefix>
+```
+
+The wrapper executes the unchanged exact binary argv declared above and
+creates three new, immutable artifacts: `<prefix>.complete.txt` contains the
+combined simulator stdout/stderr plus POSIX elapsed/user/system timing,
+`<prefix>.exit.txt` contains the simulator's actual process exit, and
+`<prefix>.sha256.txt` contains the complete-capture SHA-256. It refuses to
+overwrite any of those paths, preventing an accidental retry at the same
+declared prefix. After the sole run, the notebook will record the capture's
+exact byte count, line count, SHA-256, and actual process exit along with its
+scientific output. This is reporting infrastructure only: no source/reference
+seed, model, schedule, search configuration, retention rule, bound, threshold,
+or interpretation changed.

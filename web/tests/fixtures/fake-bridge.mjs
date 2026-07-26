@@ -28,6 +28,7 @@ write({
       deepRollouts: valueAfter("--deep-rollouts"),
       learnedRollouts: valueAfter("--learned-rollouts"),
       debugReveal: args.includes("--debug-reveal"),
+      bluffMode: args.includes("--bluff-mode"),
     },
     players: [
       { hand: ["Flying Man"], life: 20 },

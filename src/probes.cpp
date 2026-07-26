@@ -1,12 +1,24 @@
 #include "old_school/probes.hpp"
+#include "old_school/learned_iteration.hpp"
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <iomanip>
+#include <iterator>
+#include <limits>
+#include <map>
 #include <numeric>
+#include <set>
+#include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 
@@ -2186,6 +2198,3392 @@ std::vector<std::string> validate_force_spike_policy_controls_v1(
         }
     }
     return errors;
+}
+
+namespace {
+
+std::uint64_t dc1_mix_seed(std::uint64_t seed,
+                           std::string_view stable_id,
+                           std::size_t world_index) {
+    constexpr std::uint64_t kFnvOffset = 1469598103934665603ULL;
+    constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
+    std::uint64_t hash = kFnvOffset;
+    const auto add = [&](std::uint8_t byte) {
+        hash ^= byte;
+        hash *= kFnvPrime;
+    };
+    for (const char character : stable_id) {
+        add(static_cast<std::uint8_t>(
+            static_cast<unsigned char>(character)));
+    }
+    for (std::size_t byte = 0; byte < sizeof(seed); ++byte) {
+        add(static_cast<std::uint8_t>(
+            seed >> (byte * 8U)));
+    }
+    const std::uint64_t index =
+        static_cast<std::uint64_t>(world_index);
+    for (std::size_t byte = 0; byte < sizeof(index); ++byte) {
+        add(static_cast<std::uint8_t>(
+            index >> (byte * 8U)));
+    }
+    return hash;
+}
+
+GameState dc1_hidden_repartition_clone(
+    const DecisionProbe& probe) {
+    if (probe.root_player >= kPlayerCount) {
+        throw std::invalid_argument(
+            "DC1 root player must be 0 or 1");
+    }
+    GameState clone = probe.state;
+    std::reverse(
+        clone.players[probe.root_player].library.begin(),
+        clone.players[probe.root_player].library.end());
+
+    const std::size_t opponent = 1 - probe.root_player;
+    PlayerState& opponent_clone = clone.players[opponent];
+    const std::size_t hand_size = opponent_clone.hand.size();
+    std::vector<CardId> hidden = opponent_clone.hand;
+    hidden.insert(hidden.end(), opponent_clone.library.begin(),
+                  opponent_clone.library.end());
+    if (hidden.size() > 1) {
+        std::rotate(hidden.begin(), hidden.begin() + 1,
+                    hidden.end());
+        std::reverse(hidden.begin(), hidden.end());
+    }
+    const auto hand_end =
+        hidden.begin() + static_cast<std::ptrdiff_t>(hand_size);
+    opponent_clone.hand.assign(hidden.begin(), hand_end);
+    opponent_clone.library.assign(hand_end, hidden.end());
+    return clone;
+}
+
+void add_mana(ManaCost& destination, const ManaCost& value) {
+    destination.generic += value.generic;
+    destination.green += value.green;
+    destination.red += value.red;
+    destination.blue += value.blue;
+    destination.white += value.white;
+}
+
+ManaCost dc1_available_mana(const PlayerState& player) {
+    ManaCost available = player.mana_pool;
+    for (const LandPermanent& land : player.lands) {
+        if (land.tapped) {
+            continue;
+        }
+        switch (land.card) {
+        case CardId::Forest:
+            ++available.green;
+            break;
+        case CardId::Mountain:
+            ++available.red;
+            break;
+        case CardId::Island:
+            ++available.blue;
+            break;
+        case CardId::Plains:
+            ++available.white;
+            break;
+        default:
+            break;
+        }
+    }
+    for (const ArtifactPermanent& artifact : player.artifacts) {
+        if (artifact.tapped) {
+            continue;
+        }
+        if (artifact.card == CardId::MoxSapphire) {
+            ++available.blue;
+        } else if (artifact.card == CardId::SolRing) {
+            available.generic += 2;
+        }
+    }
+    return available;
+}
+
+ManaCost positive_mana_difference(const ManaCost& before,
+                                  const ManaCost& after) {
+    return {
+        .generic = std::max(0, before.generic - after.generic),
+        .green = std::max(0, before.green - after.green),
+        .red = std::max(0, before.red - after.red),
+        .blue = std::max(0, before.blue - after.blue),
+        .white = std::max(0, before.white - after.white),
+    };
+}
+
+std::array<std::size_t, kCardCount> dc1_hand_counts(
+    const PlayerState& player) {
+    std::array<std::size_t, kCardCount> counts{};
+    for (const CardId card : player.hand) {
+        ++counts[card_index(card)];
+    }
+    return counts;
+}
+
+void add_newly_tapped_sources(
+    const GameState& root, const GameState& before,
+    const GameState& after, std::size_t player,
+    std::vector<Dc1ManaSource>& destination) {
+    const auto add_unique = [&](Dc1ManaSource source) {
+        if (std::find(destination.begin(), destination.end(),
+                      source) == destination.end()) {
+            destination.push_back(source);
+        }
+    };
+
+    const auto& root_player = root.players[player];
+    const auto& before_player = before.players[player];
+    const auto& after_player = after.players[player];
+    const std::size_t land_count =
+        std::min({root_player.lands.size(),
+                  before_player.lands.size(),
+                  after_player.lands.size()});
+    for (std::size_t index = 0; index < land_count; ++index) {
+        if (root_player.lands[index].card ==
+                before_player.lands[index].card &&
+            root_player.lands[index].card ==
+                after_player.lands[index].card &&
+            !root_player.lands[index].tapped &&
+            !before_player.lands[index].tapped &&
+            after_player.lands[index].tapped) {
+            add_unique({
+                .kind = Dc1ManaSourceKind::Land,
+                .key = static_cast<std::uint64_t>(index),
+                .card = root_player.lands[index].card,
+            });
+        }
+    }
+
+    for (const ArtifactPermanent& root_artifact :
+         root_player.artifacts) {
+        if (root_artifact.tapped) {
+            continue;
+        }
+        const auto before_artifact = std::find_if(
+            before_player.artifacts.begin(),
+            before_player.artifacts.end(),
+            [&](const ArtifactPermanent& candidate) {
+                return candidate.id == root_artifact.id &&
+                       candidate.card == root_artifact.card;
+            });
+        const auto after_artifact = std::find_if(
+            after_player.artifacts.begin(),
+            after_player.artifacts.end(),
+            [&](const ArtifactPermanent& candidate) {
+                return candidate.id == root_artifact.id &&
+                       candidate.card == root_artifact.card;
+            });
+        if (before_artifact != before_player.artifacts.end() &&
+            after_artifact != after_player.artifacts.end() &&
+            !before_artifact->tapped && after_artifact->tapped) {
+            add_unique({
+                .kind = Dc1ManaSourceKind::Artifact,
+                .key = root_artifact.id,
+                .card = root_artifact.card,
+            });
+        }
+    }
+}
+
+void accumulate_dc1_operation(
+    const GameState& root, const GameState& before,
+    const GameState& after,
+    std::array<Dc1PlayerResourceCost, 2>& resources,
+    bool include_hand_and_land_costs) {
+    for (std::size_t player = 0; player < kPlayerCount; ++player) {
+        const ManaCost before_mana =
+            dc1_available_mana(before.players[player]);
+        const ManaCost after_mana =
+            dc1_available_mana(after.players[player]);
+        add_mana(
+            resources[player].mana_depleted,
+            positive_mana_difference(before_mana, after_mana));
+        add_newly_tapped_sources(
+            root, before, after, player,
+            resources[player].preexisting_sources_newly_tapped);
+
+        if (!include_hand_and_land_costs) {
+            continue;
+        }
+        const auto before_hand =
+            dc1_hand_counts(before.players[player]);
+        const auto after_hand =
+            dc1_hand_counts(after.players[player]);
+        for (std::size_t card = 0; card < kCardCount; ++card) {
+            if (before_hand[card] > after_hand[card]) {
+                resources[player].hand_cards_consumed[card] +=
+                    before_hand[card] - after_hand[card];
+            }
+        }
+        if (!before.players[player].land_played_this_turn &&
+            after.players[player].land_played_this_turn) {
+            resources[player].land_play_entitlement_consumed = true;
+        }
+    }
+}
+
+bool dc1_terminal(const GameState& state) {
+    return state.players[0].life <= 0 ||
+           state.players[1].life <= 0 ||
+           state.failed_draw[0] || state.failed_draw[1];
+}
+
+void remove_normalized_graveyard_cost(
+    std::vector<CardId>& graveyard,
+    const std::vector<CardId>& root_graveyard, CardId card,
+    std::size_t maximum) {
+    const std::size_t root_count =
+        static_cast<std::size_t>(std::count(
+            root_graveyard.begin(), root_graveyard.end(), card));
+    std::size_t current_count =
+        static_cast<std::size_t>(std::count(
+            graveyard.begin(), graveyard.end(), card));
+    std::size_t removable =
+        std::min(maximum, current_count > root_count
+                              ? current_count - root_count
+                              : std::size_t{0});
+    while (removable > 0) {
+        const auto found =
+            std::find(graveyard.rbegin(), graveyard.rend(), card);
+        if (found == graveyard.rend()) {
+            break;
+        }
+        graveyard.erase(std::next(found).base());
+        --removable;
+        --current_count;
+    }
+}
+
+void restore_dc1_source(
+    PlayerState& player, const PlayerState& root,
+    const Dc1ManaSource& source) {
+    if (source.kind == Dc1ManaSourceKind::Land) {
+        const std::size_t index =
+            static_cast<std::size_t>(source.key);
+        if (index < player.lands.size() &&
+            index < root.lands.size() &&
+            player.lands[index].card == source.card &&
+            root.lands[index].card == source.card) {
+            player.lands[index].tapped = root.lands[index].tapped;
+        }
+        return;
+    }
+
+    const auto root_artifact = std::find_if(
+        root.artifacts.begin(), root.artifacts.end(),
+        [&](const ArtifactPermanent& candidate) {
+            return candidate.id == source.key &&
+                   candidate.card == source.card;
+        });
+    const auto artifact = std::find_if(
+        player.artifacts.begin(), player.artifacts.end(),
+        [&](const ArtifactPermanent& candidate) {
+            return candidate.id == source.key &&
+                   candidate.card == source.card;
+        });
+    if (root_artifact != root.artifacts.end() &&
+        artifact != player.artifacts.end()) {
+        artifact->tapped = root_artifact->tapped;
+    }
+}
+
+GameState normalized_dc1_effect(
+    const GameState& root,
+    const Dc1CanonicalSettlement& settlement) {
+    GameState normalized = settlement.settled_state;
+    for (std::size_t player = 0; player < kPlayerCount; ++player) {
+        auto& state = normalized.players[player];
+        const auto& root_state = root.players[player];
+        const auto& resources = settlement.resources[player];
+        for (std::size_t card = 0; card < kCardCount; ++card) {
+            const CardId card_id = static_cast<CardId>(card);
+            const std::size_t consumed =
+                resources.hand_cards_consumed[card];
+            state.hand.insert(state.hand.end(), consumed, card_id);
+            remove_normalized_graveyard_cost(
+                state.graveyard, root_state.graveyard, card_id,
+                consumed);
+        }
+        for (const Dc1ManaSource& source :
+             resources.preexisting_sources_newly_tapped) {
+            restore_dc1_source(state, root_state, source);
+        }
+        state.mana_pool = root_state.mana_pool;
+        state.land_played_this_turn =
+            root_state.land_played_this_turn;
+        std::sort(state.hand.begin(), state.hand.end());
+        std::sort(state.graveyard.begin(), state.graveyard.end());
+        std::sort(state.exile.begin(), state.exile.end());
+        std::sort(state.enchantments.begin(),
+                  state.enchantments.end());
+        std::sort(
+            state.lands.begin(), state.lands.end(),
+            [](const LandPermanent& left,
+               const LandPermanent& right) {
+                return std::tie(left.card, left.tapped) <
+                       std::tie(right.card, right.tapped);
+            });
+        std::sort(
+            state.creatures.begin(), state.creatures.end(),
+            [](const CreaturePermanent& left,
+               const CreaturePermanent& right) {
+                return left.id < right.id;
+            });
+        std::sort(
+            state.artifacts.begin(), state.artifacts.end(),
+            [](const ArtifactPermanent& left,
+               const ArtifactPermanent& right) {
+                return left.id < right.id;
+            });
+    }
+    normalized.stats = {};
+    normalized.next_permanent_id = 0;
+    normalized.next_stack_object_id = 0;
+    return normalized;
+}
+
+bool mana_cost_leq(const ManaCost& left, const ManaCost& right) {
+    return left.generic <= right.generic &&
+           left.green <= right.green &&
+           left.red <= right.red &&
+           left.blue <= right.blue &&
+           left.white <= right.white;
+}
+
+bool source_cost_leq(std::vector<Dc1ManaSource> left,
+                     std::vector<Dc1ManaSource> right) {
+    std::sort(left.begin(), left.end());
+    std::sort(right.begin(), right.end());
+    return std::includes(
+        right.begin(), right.end(), left.begin(), left.end());
+}
+
+bool player_cost_leq(const Dc1PlayerResourceCost& left,
+                     const Dc1PlayerResourceCost& right) {
+    for (std::size_t card = 0; card < kCardCount; ++card) {
+        if (left.hand_cards_consumed[card] >
+            right.hand_cards_consumed[card]) {
+            return false;
+        }
+    }
+    return mana_cost_leq(left.mana_depleted,
+                         right.mana_depleted) &&
+           source_cost_leq(
+               left.preexisting_sources_newly_tapped,
+               right.preexisting_sources_newly_tapped) &&
+           (!left.land_play_entitlement_consumed ||
+            right.land_play_entitlement_consumed);
+}
+
+Dc1Dominance compare_dc1_settlements(
+    const DecisionProbe& probe,
+    const Dc1CanonicalSettlement& first,
+    const Dc1CanonicalSettlement& second) {
+    if (!dc1_settlements_have_equal_normalized_effect(
+            probe, first, second)) {
+        return Dc1Dominance::Incomparable;
+    }
+
+    const std::size_t actor = probe.root_player;
+    const std::size_t opponent = 1 - actor;
+    const auto dominates =
+        [&](const Dc1CanonicalSettlement& better,
+            const Dc1CanonicalSettlement& worse) {
+            const bool actor_no_more =
+                player_cost_leq(better.resources[actor],
+                                worse.resources[actor]);
+            const bool opponent_no_fewer =
+                player_cost_leq(worse.resources[opponent],
+                                better.resources[opponent]);
+            const bool strict =
+                better.resources[actor] !=
+                    worse.resources[actor] ||
+                better.resources[opponent] !=
+                    worse.resources[opponent];
+            return actor_no_more && opponent_no_fewer && strict;
+        };
+    const bool first_dominates = dominates(first, second);
+    const bool second_dominates = dominates(second, first);
+    if (first_dominates == second_dominates) {
+        return Dc1Dominance::Incomparable;
+    }
+    return first_dominates
+               ? Dc1Dominance::FirstDominatesSecond
+               : Dc1Dominance::SecondDominatesFirst;
+}
+
+std::string dc1_pair_key(
+    const DecisionProbe& probe, std::size_t first,
+    std::size_t second);
+
+} // namespace
+
+Dc1CanonicalSettlement settle_dc1_priority_candidate(
+    const DecisionProbe& probe,
+    const GameState& information_set_world,
+    std::size_t candidate_index) {
+    if (probe.decision_kind != DecisionKind::Priority ||
+        probe.root_player >= kPlayerCount ||
+        probe.consecutive_passes < 0 ||
+        probe.consecutive_passes > 1 ||
+        candidate_index >= probe.candidates.size()) {
+        throw std::invalid_argument(
+            "invalid DC1 Priority settlement root");
+    }
+    const auto* action = std::get_if<PriorityAction>(
+        &probe.candidates[candidate_index].action);
+    if (action == nullptr) {
+        throw std::invalid_argument(
+            "DC1 candidate is not a Priority action");
+    }
+
+    Dc1CanonicalSettlement settlement;
+    settlement.settled_state = information_set_world;
+    settlement.phase = probe.phase;
+    PriorityState priority = {
+        .player = probe.root_player,
+        .consecutive_passes = probe.consecutive_passes,
+    };
+
+    const auto take_pass = [&]() {
+        const GameState before = settlement.settled_state;
+        const PriorityPassResult result =
+            pass_priority(settlement.settled_state, priority);
+        if (result == PriorityPassResult::StackObjectResolved) {
+            accumulate_dc1_operation(
+                information_set_world, before,
+                settlement.settled_state, settlement.resources,
+                false);
+            settlement.terminal =
+                dc1_terminal(settlement.settled_state);
+        } else if (result == PriorityPassResult::WindowEnded) {
+            settlement.window_ended = true;
+        }
+        return result;
+    };
+
+    if (action->kind == PriorityActionKind::Pass) {
+        static_cast<void>(take_pass());
+    } else {
+        const GameState before = settlement.settled_state;
+        if (!apply_priority_action(
+                settlement.settled_state, probe.root_player,
+                *action, sorcery_actions_for(probe.phase))) {
+            throw std::invalid_argument(
+                "DC1 candidate is illegal in sampled world");
+        }
+        accumulate_dc1_operation(
+            information_set_world, before,
+            settlement.settled_state, settlement.resources, true);
+        priority = {
+            .player = probe.root_player,
+            .consecutive_passes = 0,
+        };
+    }
+
+    constexpr std::size_t kMaximumPassSteps = 1024;
+    std::size_t steps = 0;
+    while (!settlement.terminal && !settlement.window_ended) {
+        if (++steps > kMaximumPassSteps) {
+            throw std::logic_error(
+                "DC1 canonical settlement exceeded pass bound");
+        }
+        static_cast<void>(take_pass());
+    }
+    for (auto& player : settlement.resources) {
+        std::sort(
+            player.preexisting_sources_newly_tapped.begin(),
+            player.preexisting_sources_newly_tapped.end());
+    }
+    settlement.final_priority_player = priority.player;
+    settlement.final_consecutive_passes =
+        priority.consecutive_passes;
+    return settlement;
+}
+
+bool dc1_settlements_have_equal_normalized_effect(
+    const DecisionProbe& probe,
+    const Dc1CanonicalSettlement& first,
+    const Dc1CanonicalSettlement& second) {
+    return first.phase == second.phase &&
+           first.final_priority_player ==
+               second.final_priority_player &&
+           first.final_consecutive_passes ==
+               second.final_consecutive_passes &&
+           first.terminal == second.terminal &&
+           first.window_ended == second.window_ended &&
+           normalized_dc1_effect(probe.state, first) ==
+               normalized_dc1_effect(probe.state, second);
+}
+
+Dc1PairComparison compare_dc1_priority_pair(
+    const DecisionProbe& probe,
+    std::size_t first_candidate_index,
+    std::size_t second_candidate_index, std::size_t worlds,
+    std::uint64_t seed) {
+    if (worlds == 0 ||
+        first_candidate_index == second_candidate_index ||
+        first_candidate_index >= probe.candidates.size() ||
+        second_candidate_index >= probe.candidates.size()) {
+        throw std::invalid_argument(
+            "invalid DC1 candidate pair");
+    }
+    const GameState hidden_clone =
+        dc1_hidden_repartition_clone(probe);
+    Dc1PairComparison comparison{
+        .first_descriptor =
+            probe.candidates[first_candidate_index].descriptor,
+        .second_descriptor =
+            probe.candidates[second_candidate_index].descriptor,
+        .world_seeds = {},
+        .world_orientations = {},
+        .unanimous_orientation = Dc1Dominance::Incomparable,
+        .hidden_repartition_bit_identical = true,
+    };
+    comparison.world_seeds.reserve(worlds);
+    comparison.world_orientations.reserve(worlds);
+    const std::string pair_key =
+        dc1_pair_key(
+            probe, first_candidate_index,
+            second_candidate_index);
+    std::optional<Dc1Dominance> unanimous;
+    for (std::size_t world_index = 0; world_index < worlds;
+         ++world_index) {
+        const std::uint64_t world_seed =
+            dc1_mix_seed(seed, pair_key, world_index);
+        comparison.world_seeds.push_back(world_seed);
+        const GameState world = sample_determinization(
+            probe.state, probe.original_decks, probe.root_player,
+            world_seed);
+        const GameState clone_world = sample_determinization(
+            hidden_clone, probe.original_decks, probe.root_player,
+            world_seed);
+        const Dc1CanonicalSettlement first =
+            settle_dc1_priority_candidate(
+                probe, world, first_candidate_index);
+        const Dc1CanonicalSettlement second =
+            settle_dc1_priority_candidate(
+                probe, world, second_candidate_index);
+        const Dc1CanonicalSettlement clone_first =
+            settle_dc1_priority_candidate(
+                probe, clone_world, first_candidate_index);
+        const Dc1CanonicalSettlement clone_second =
+            settle_dc1_priority_candidate(
+                probe, clone_world, second_candidate_index);
+        const Dc1Dominance orientation =
+            compare_dc1_settlements(probe, first, second);
+        const Dc1Dominance clone_orientation =
+            compare_dc1_settlements(
+                probe, clone_first, clone_second);
+        comparison.world_orientations.push_back(orientation);
+        comparison.hidden_repartition_bit_identical =
+            comparison.hidden_repartition_bit_identical &&
+            first == clone_first && second == clone_second &&
+            orientation == clone_orientation;
+        if (!unanimous.has_value()) {
+            unanimous = orientation;
+        } else if (*unanimous != orientation) {
+            unanimous = Dc1Dominance::Incomparable;
+        }
+    }
+    if (comparison.hidden_repartition_bit_identical &&
+        unanimous.has_value() &&
+        *unanimous != Dc1Dominance::Incomparable &&
+        std::all_of(
+            comparison.world_orientations.begin(),
+            comparison.world_orientations.end(),
+            [&](Dc1Dominance orientation) {
+                return orientation == *unanimous;
+            })) {
+        comparison.unanimous_orientation = *unanimous;
+    }
+    return comparison;
+}
+
+namespace {
+
+void dc1_append_u64(std::string& key, std::uint64_t value) {
+    for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+        key.push_back(static_cast<char>(
+            static_cast<std::uint8_t>(
+                value >> (byte * 8U))));
+    }
+}
+
+void dc1_append_bool(std::string& key, bool value) {
+    key.push_back(value ? '\1' : '\0');
+}
+
+void dc1_append_cards(std::string& key,
+                      std::vector<CardId> cards,
+                      bool order_matters) {
+    if (!order_matters) {
+        std::sort(cards.begin(), cards.end());
+    }
+    dc1_append_u64(key, cards.size());
+    for (const CardId card : cards) {
+        dc1_append_u64(
+            key, static_cast<std::uint64_t>(card));
+    }
+}
+
+void dc1_append_mana(std::string& key, const ManaCost& mana) {
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(mana.generic));
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(mana.green));
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(mana.red));
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(mana.blue));
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(mana.white));
+}
+
+void dc1_append_target(std::string& key,
+                       const std::optional<Target>& target) {
+    dc1_append_bool(key, target.has_value());
+    if (!target.has_value()) {
+        return;
+    }
+    dc1_append_u64(key, target->player);
+    dc1_append_bool(key, target->creature.has_value());
+    if (target->creature.has_value()) {
+        dc1_append_u64(key, *target->creature);
+    }
+}
+
+std::string dc1_information_set_key(
+    const DecisionProbe& probe) {
+    const PlayerObservation observation =
+        observe_game_state(probe.state, probe.root_player);
+    std::string key;
+    key.reserve(1024);
+    dc1_append_u64(key, probe.root_player);
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(probe.root_deck));
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(probe.opponent_deck));
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(probe.phase));
+    dc1_append_u64(
+        key, static_cast<std::uint64_t>(
+                 probe.consecutive_passes));
+    dc1_append_u64(key, observation.active_player);
+    dc1_append_u64(key, observation.starting_player);
+    dc1_append_u64(key, observation.turn_number);
+    for (const std::size_t turns :
+         observation.extra_turns_pending) {
+        dc1_append_u64(key, turns);
+    }
+    for (const PublicPlayerState& player :
+         observation.players) {
+        dc1_append_u64(
+            key, static_cast<std::uint64_t>(player.life));
+        dc1_append_u64(key, player.library_size);
+        dc1_append_u64(key, player.hand_size);
+        dc1_append_cards(key, player.graveyard, false);
+        dc1_append_cards(key, player.exile, false);
+
+        std::vector<LandPermanent> lands = player.lands;
+        std::sort(
+            lands.begin(), lands.end(),
+            [](const LandPermanent& left,
+               const LandPermanent& right) {
+                return std::tie(left.card, left.tapped) <
+                       std::tie(right.card, right.tapped);
+            });
+        dc1_append_u64(key, lands.size());
+        for (const LandPermanent& land : lands) {
+            dc1_append_u64(
+                key, static_cast<std::uint64_t>(land.card));
+            dc1_append_bool(key, land.tapped);
+        }
+
+        std::vector<CreaturePermanent> creatures =
+            player.creatures;
+        std::sort(
+            creatures.begin(), creatures.end(),
+            [](const CreaturePermanent& left,
+               const CreaturePermanent& right) {
+                return left.id < right.id;
+            });
+        dc1_append_u64(key, creatures.size());
+        for (const CreaturePermanent& creature : creatures) {
+            dc1_append_u64(key, creature.id);
+            dc1_append_u64(
+                key, static_cast<std::uint64_t>(creature.card));
+            dc1_append_bool(key, creature.tapped);
+            dc1_append_bool(key, creature.summoning_sick);
+            dc1_append_u64(
+                key, static_cast<std::uint64_t>(creature.damage));
+            dc1_append_u64(
+                key, static_cast<std::uint64_t>(
+                         creature.temporary_power_bonus));
+            dc1_append_u64(
+                key, static_cast<std::uint64_t>(
+                         creature.temporary_toughness_bonus));
+            dc1_append_bool(
+                key, creature.exile_on_death_this_turn);
+        }
+
+        std::vector<ArtifactPermanent> artifacts =
+            player.artifacts;
+        std::sort(
+            artifacts.begin(), artifacts.end(),
+            [](const ArtifactPermanent& left,
+               const ArtifactPermanent& right) {
+                return left.id < right.id;
+            });
+        dc1_append_u64(key, artifacts.size());
+        for (const ArtifactPermanent& artifact : artifacts) {
+            dc1_append_u64(key, artifact.id);
+            dc1_append_u64(
+                key, static_cast<std::uint64_t>(artifact.card));
+            dc1_append_bool(key, artifact.tapped);
+        }
+        dc1_append_cards(key, player.enchantments, false);
+        dc1_append_mana(key, player.mana_pool);
+        dc1_append_bool(key, player.land_played_this_turn);
+    }
+    dc1_append_cards(key, observation.hand, false);
+    dc1_append_u64(key, observation.stack.size());
+    for (const StackObject& object : observation.stack) {
+        dc1_append_u64(
+            key, static_cast<std::uint64_t>(object.kind));
+        dc1_append_u64(key, object.id);
+        dc1_append_u64(
+            key, static_cast<std::uint64_t>(object.card));
+        dc1_append_u64(key, object.controller);
+        dc1_append_target(key, object.target);
+        dc1_append_bool(key, object.spell_target.has_value());
+        if (object.spell_target.has_value()) {
+            dc1_append_u64(key, *object.spell_target);
+        }
+        dc1_append_u64(
+            key, static_cast<std::uint64_t>(object.x_value));
+    }
+    return key;
+}
+
+std::uint64_t dc1_stable_hash(std::string_view value) {
+    constexpr std::uint64_t kFnvOffset = 1469598103934665603ULL;
+    constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
+    std::uint64_t hash = kFnvOffset;
+    for (const char character : value) {
+        hash ^= static_cast<std::uint8_t>(
+            static_cast<unsigned char>(character));
+        hash *= kFnvPrime;
+    }
+    return hash;
+}
+
+Dc1LegalActionSetSummary dc1_summarize_action_set(
+    const std::vector<PriorityAction>& actions,
+    std::size_t diagnostic_ceiling) {
+    if (actions.empty() || diagnostic_ceiling == 0) {
+        throw std::invalid_argument(
+            "DC1 action summary requires a nonempty action set and "
+            "positive ceiling");
+    }
+    if (actions.size() > diagnostic_ceiling) {
+        throw std::logic_error(
+            "DC1 legal-action set exceeds diagnostic ceiling");
+    }
+
+    Dc1LegalActionSetSummary summary;
+    summary.legal_actions = actions.size();
+    std::vector<std::string> descriptors;
+    descriptors.reserve(actions.size());
+    for (const PriorityAction& action : actions) {
+        const std::size_t kind =
+            static_cast<std::size_t>(action.kind);
+        if (kind >= summary.action_kinds.size()) {
+            throw std::logic_error(
+                "DC1 action set contains an invalid action kind");
+        }
+        ++summary.action_kinds[kind];
+        descriptors.push_back(
+            harvested_priority_descriptor(action));
+    }
+    std::sort(descriptors.begin(), descriptors.end());
+    summary.descriptors_distinct =
+        std::adjacent_find(
+            descriptors.begin(), descriptors.end()) ==
+        descriptors.end();
+    std::string digest_input;
+    for (const std::string& descriptor : descriptors) {
+        dc1_append_u64(digest_input, descriptor.size());
+        digest_input += descriptor;
+    }
+    summary.sorted_descriptor_fnv1a64 =
+        dc1_stable_hash(digest_input);
+    return summary;
+}
+
+std::string dc1_pair_key(
+    const DecisionProbe& probe, std::size_t first,
+    std::size_t second) {
+    std::string first_descriptor =
+        probe.candidates[first].descriptor;
+    std::string second_descriptor =
+        probe.candidates[second].descriptor;
+    if (second_descriptor < first_descriptor) {
+        std::swap(first_descriptor, second_descriptor);
+    }
+    std::string key = dc1_information_set_key(probe);
+    dc1_append_u64(key, first_descriptor.size());
+    key += first_descriptor;
+    dc1_append_u64(key, second_descriptor.size());
+    key += second_descriptor;
+    return key;
+}
+
+using Dc1PairExample = Dc1PairLabelObservation;
+
+struct Dc1PairCandidate {
+    std::uint64_t hash = 0;
+    std::string first_descriptor;
+    std::string second_descriptor;
+    std::size_t first = 0;
+    std::size_t second = 0;
+};
+
+std::vector<Dc1PairCandidate> dc1_retained_pairs(
+    const DecisionProbe& probe, std::size_t maximum) {
+    std::vector<Dc1PairCandidate> pairs;
+    for (std::size_t first = 0;
+         first < probe.candidates.size(); ++first) {
+        for (std::size_t second = first + 1;
+             second < probe.candidates.size(); ++second) {
+            std::string first_descriptor =
+                probe.candidates[first].descriptor;
+            std::string second_descriptor =
+                probe.candidates[second].descriptor;
+            if (second_descriptor < first_descriptor) {
+                std::swap(first_descriptor, second_descriptor);
+            }
+            const std::string key =
+                dc1_pair_key(probe, first, second);
+            pairs.push_back({
+                .hash = dc1_stable_hash(key),
+                .first_descriptor =
+                    std::move(first_descriptor),
+                .second_descriptor =
+                    std::move(second_descriptor),
+                .first = first,
+                .second = second,
+            });
+        }
+    }
+    std::sort(
+        pairs.begin(), pairs.end(),
+        [](const Dc1PairCandidate& left,
+           const Dc1PairCandidate& right) {
+            return std::tie(
+                       left.hash, left.first_descriptor,
+                       left.second_descriptor) <
+                   std::tie(
+                       right.hash, right.first_descriptor,
+                       right.second_descriptor);
+        });
+    if (pairs.size() > maximum) {
+        pairs.resize(maximum);
+    }
+    return pairs;
+}
+
+const DecisionProbe& dc1_find_probe(
+    const std::vector<DecisionProbe>& probes, Category category) {
+    const auto found = std::find_if(
+        probes.begin(), probes.end(),
+        [category](const DecisionProbe& probe) {
+            return probe.category == category;
+        });
+    if (found == probes.end()) {
+        throw std::logic_error(
+            "DC1 fixture corpus is missing a category");
+    }
+    return *found;
+}
+
+std::size_t dc1_candidate_index(
+    const DecisionProbe& probe, std::string_view descriptor) {
+    const auto found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [descriptor](const Candidate& candidate) {
+            return candidate.descriptor == descriptor;
+        });
+    if (found == probe.candidates.end()) {
+        throw std::logic_error(
+            "DC1 fixture is missing a candidate");
+    }
+    return static_cast<std::size_t>(
+        std::distance(probe.candidates.begin(), found));
+}
+
+bool dc1_fixture_gate() {
+    const auto validation = make_probe_validation_v1();
+    const auto controls = make_force_spike_policy_controls_v1();
+    const auto dev = make_probe_dev_v3();
+    if (validation.size() != 1 || controls.size() != 2) {
+        return false;
+    }
+    const DecisionProbe& x_zero_probe = validation.front();
+    const std::size_t pass =
+        dc1_candidate_index(
+            x_zero_probe,
+            harvested_priority_descriptor(
+                PriorityAction::pass()));
+    const auto x_zero = std::find_if(
+        x_zero_probe.candidates.begin(),
+        x_zero_probe.candidates.end(),
+        [](const Candidate& candidate) {
+            const auto* action =
+                std::get_if<PriorityAction>(&candidate.action);
+            return action != nullptr &&
+                   action->kind ==
+                       PriorityActionKind::CastDisintegrate &&
+                   action->x_value == 0;
+        });
+    if (x_zero == x_zero_probe.candidates.end()) {
+        return false;
+    }
+    const std::size_t x_zero_index =
+        static_cast<std::size_t>(
+            std::distance(
+                x_zero_probe.candidates.begin(), x_zero));
+    const auto x_zero_comparison =
+        compare_dc1_priority_pair(
+            x_zero_probe, pass, x_zero_index, kDc1Worlds,
+            kDc1TrainingMiningSeed);
+    if (x_zero_comparison.unanimous_orientation !=
+            Dc1Dominance::FirstDominatesSecond ||
+        !x_zero_comparison.hidden_repartition_bit_identical) {
+        return false;
+    }
+
+    const auto expect_incomparable =
+        [](const DecisionProbe& probe,
+           std::string_view first_descriptor,
+           std::string_view second_descriptor) {
+            const auto comparison =
+                compare_dc1_priority_pair(
+                    probe,
+                    dc1_candidate_index(
+                        probe, first_descriptor),
+                    dc1_candidate_index(
+                        probe, second_descriptor),
+                    kDc1Worlds, kDc1TrainingMiningSeed);
+            return comparison.unanimous_orientation ==
+                       Dc1Dominance::Incomparable &&
+                   comparison.hidden_repartition_bit_identical;
+        };
+    return
+        expect_incomparable(
+            controls[0], "pass",
+            "force-spike-gray-ogre") &&
+        expect_incomparable(
+            controls[1], "pass",
+            "force-spike-gray-ogre") &&
+        expect_incomparable(
+            dc1_find_probe(dev, Category::GreenGrowthSaveBolt),
+            "pass", "growth-own-grizzly-bears") &&
+        expect_incomparable(
+            dc1_find_probe(dev, Category::GreenDevelop),
+            "pass", "cast-grizzly-bears") &&
+        expect_incomparable(
+            dc1_find_probe(dev, Category::RULandColor),
+            "pass", "play-mountain") &&
+        expect_incomparable(
+            dc1_find_probe(
+                dev, Category::WhiteEstablishMillstone),
+            "pass", "cast-millstone") &&
+        expect_incomparable(
+            dc1_find_probe(
+                dev, Category::RUDisintegrateLethal),
+            "pass", "disintegrate-x3-opponent-player");
+}
+
+void dc1_finalize_deck_examples(
+    std::vector<Dc1PairExample> examples,
+    std::size_t minimum_examples,
+    std::size_t minimum_seat_games,
+    Dc1DeckMiningSummary& summary) {
+    auto deduped =
+        dedupe_dc1_pair_labels(std::move(examples));
+    summary.conflicting_pair_keys =
+        deduped.conflicting_pair_keys;
+    std::vector<Dc1PairExample> positives;
+    std::vector<Dc1PairExample> controls;
+    for (Dc1PairExample& example : deduped.retained) {
+        (example.positive ? positives : controls)
+            .push_back(std::move(example));
+    }
+    summary.unique_positive_pairs = positives.size();
+    summary.unique_incomparable_pairs = controls.size();
+
+    const std::size_t matched =
+        std::min(positives.size(), controls.size());
+    controls.resize(matched);
+
+    std::set<std::string> positive_seat_games;
+    for (const auto& example : positives) {
+        positive_seat_games.insert(example.seat_game_key);
+    }
+    std::set<std::string> control_seat_games;
+    for (const auto& example : controls) {
+        control_seat_games.insert(example.seat_game_key);
+    }
+    summary.unique_matched_incomparable_controls =
+        controls.size();
+    summary.positive_seat_games = positive_seat_games.size();
+    summary.incomparable_control_seat_games =
+        control_seat_games.size();
+    summary.density_passed =
+        positives.size() >= minimum_examples &&
+        controls.size() >= minimum_examples &&
+        positive_seat_games.size() >= minimum_seat_games &&
+        control_seat_games.size() >= minimum_seat_games;
+}
+
+Dc1MiningSplitReport dc1_mine_split(
+    std::shared_ptr<const LearnedModel> model,
+    const Dc1MiningConfig& config, std::uint64_t split_seed,
+    bool training_split) {
+    Dc1MiningSplitReport report;
+    report.seed = split_seed;
+    report.hidden_repartition_passed = true;
+    std::array<std::vector<Dc1PairExample>, kDeckCount>
+        examples_by_deck;
+
+    for (std::size_t block = 0;
+         block < config.blocks_per_split; ++block) {
+        const auto schedule =
+            learned_iteration::balanced_schedule(
+                split_seed, 1, block);
+        for (const auto& scheduled : schedule) {
+            GameConfig game_config;
+            game_config.max_turns = config.max_game_turns;
+            game_config.starting_player =
+                scheduled.starting_player;
+            game_config.learned_model = model;
+            game_config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = config.worlds,
+                    .exploration_rate =
+                        training_split
+                            ? config.training_exploration_rate
+                            : 0.0,
+                    .learned_model = model,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = config.worlds,
+                    .exploration_rate =
+                        training_split
+                            ? config.training_exploration_rate
+                            : 0.0,
+                    .learned_model = model,
+                },
+            };
+            const std::array<std::vector<CardId>, 2> decks = {
+                deck_for(scheduled.seat_decks[0]),
+                deck_for(scheduled.seat_decks[1]),
+            };
+            Game game(
+                decks[0], decks[1], scheduled.seed,
+                game_config);
+            std::vector<LearnedDecisionTracePoint> trace;
+            static_cast<void>(
+                game.run_with_priority_root_trace(trace));
+            ++report.games;
+            report.seat_games += 2;
+            report.raw_priority_roots += trace.size();
+
+            for (std::size_t player = 0; player < kPlayerCount;
+                 ++player) {
+                const DeckId actor_deck =
+                    scheduled.seat_decks[player];
+                const std::size_t deck =
+                    static_cast<std::size_t>(actor_deck);
+                if (deck >= kDeckCount) {
+                    throw std::logic_error(
+                        "DC1 schedule contains invalid deck");
+                }
+                ++report.decks[deck].seat_games;
+                std::vector<DecisionProbe> roots;
+                for (std::size_t ordinal = 0;
+                     ordinal < trace.size(); ++ordinal) {
+                    const auto& point = trace[ordinal];
+                    if (!point.context.valid ||
+                        point.context.decision_player != player) {
+                        continue;
+                    }
+                    ++report.decks[deck].raw_priority_roots;
+                    const auto actions = legal_priority_actions(
+                        point.state, player,
+                        point.context.sorcery_actions);
+                    if (actions.size() <= 1) {
+                        continue;
+                    }
+                    ++report.raw_multi_action_roots;
+                    ++report.decks[deck]
+                          .raw_multi_action_roots;
+                    if (actions.size() >
+                        config.max_legal_actions) {
+                        throw std::logic_error(
+                            "DC1 root exceeds legal-action bound");
+                    }
+                    DecisionProbe probe;
+                    probe.stable_id =
+                        std::string(training_split
+                                        ? "dc1.train"
+                                        : "dc1.heldout") +
+                        ".b" + std::to_string(block) +
+                        ".g" +
+                        std::to_string(
+                            scheduled.schedule_index) +
+                        ".p" + std::to_string(player) +
+                        ".r" + std::to_string(ordinal);
+                    probe.category = Category::GreenDevelop;
+                    probe.decision_kind =
+                        DecisionKind::Priority;
+                    probe.root_deck = actor_deck;
+                    probe.opponent_deck =
+                        scheduled.seat_decks[1 - player];
+                    probe.root_player = player;
+                    probe.phase = point.context.phase;
+                    probe.consecutive_passes =
+                        point.context.consecutive_passes;
+                    probe.state = point.state;
+                    probe.original_decks = decks;
+                    probe.candidates.reserve(actions.size());
+                    for (const PriorityAction& action : actions) {
+                        probe.candidates.push_back(
+                            priority_candidate(
+                                harvested_priority_descriptor(
+                                    action),
+                                action));
+                    }
+                    roots.push_back(std::move(probe));
+                }
+
+                const auto retained =
+                    learned_iteration::
+                        evenly_spaced_retained_indices(
+                            roots.size(),
+                            config.max_roots_per_seat_game);
+                report.retained_roots += retained.size();
+                report.decks[deck].retained_roots +=
+                    retained.size();
+                const std::string seat_game_key =
+                    std::string(training_split
+                                    ? "train"
+                                    : "heldout") +
+                    ".b" + std::to_string(block) +
+                    ".g" +
+                    std::to_string(scheduled.schedule_index) +
+                    ".p" + std::to_string(player);
+                for (const std::size_t retained_index :
+                     retained) {
+                    const DecisionProbe& probe =
+                        roots.at(retained_index);
+                    const auto pairs = dc1_retained_pairs(
+                        probe, config.max_pairs_per_root);
+                    for (std::size_t pair_index = 0;
+                         pair_index < pairs.size();
+                         ++pair_index) {
+                        const Dc1PairCandidate& pair =
+                            pairs[pair_index];
+                        const auto comparison =
+                            compare_dc1_priority_pair(
+                                probe, pair.first, pair.second,
+                                config.worlds, split_seed);
+                        ++report.pair_groups;
+                        report.paired_world_cells +=
+                            config.worlds;
+                        report.settlement_operations +=
+                            config.worlds * 4;
+                        ++report.decks[deck].pair_groups;
+                        report.decks[deck]
+                            .paired_world_cells += config.worlds;
+                        report.decks[deck]
+                            .settlement_operations +=
+                            config.worlds * 4;
+                        report.hidden_repartition_passed =
+                            report.hidden_repartition_passed &&
+                            comparison
+                                .hidden_repartition_bit_identical;
+                        examples_by_deck[deck].push_back({
+                            .exact_pair_key =
+                                dc1_pair_key(
+                                    probe, pair.first,
+                                    pair.second),
+                            .seat_game_key = seat_game_key,
+                            .positive =
+                                comparison
+                                    .unanimous_orientation !=
+                                Dc1Dominance::Incomparable,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    report.density_passed = true;
+    const std::size_t minimum_examples =
+        training_split
+            ? config.training_minimum_examples_per_deck
+            : config.heldout_minimum_examples_per_deck;
+    const std::size_t minimum_seat_games =
+        training_split
+            ? config
+                  .training_minimum_seat_games_per_deck
+            : config
+                  .heldout_minimum_seat_games_per_deck;
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        dc1_finalize_deck_examples(
+            std::move(examples_by_deck[deck]),
+            minimum_examples, minimum_seat_games,
+            report.decks[deck]);
+        report.density_passed =
+            report.density_passed &&
+            report.decks[deck].density_passed;
+    }
+    report.density_passed =
+        report.density_passed &&
+        report.hidden_repartition_passed;
+
+    const std::size_t expected_games =
+        config.blocks_per_split *
+        learned_iteration::kBalancedScheduleGames;
+    const std::size_t expected_seat_games =
+        expected_games * kPlayerCount;
+    const std::size_t expected_seat_games_per_deck =
+        expected_seat_games / kDeckCount;
+    std::size_t deck_seat_games = 0;
+    std::size_t deck_raw_priority_roots = 0;
+    std::size_t deck_raw_multi_action_roots = 0;
+    std::size_t deck_retained_roots = 0;
+    std::size_t deck_pair_groups = 0;
+    std::size_t deck_paired_world_cells = 0;
+    std::size_t deck_settlement_operations = 0;
+    bool deck_caps_passed =
+        expected_seat_games % kDeckCount == 0;
+    for (const Dc1DeckMiningSummary& deck : report.decks) {
+        deck_seat_games += deck.seat_games;
+        deck_raw_priority_roots += deck.raw_priority_roots;
+        deck_raw_multi_action_roots +=
+            deck.raw_multi_action_roots;
+        deck_retained_roots += deck.retained_roots;
+        deck_pair_groups += deck.pair_groups;
+        deck_paired_world_cells +=
+            deck.paired_world_cells;
+        deck_settlement_operations +=
+            deck.settlement_operations;
+        deck_caps_passed =
+            deck_caps_passed &&
+            deck.seat_games ==
+                expected_seat_games_per_deck &&
+            deck.raw_multi_action_roots <=
+                deck.raw_priority_roots &&
+            deck.retained_roots <=
+                deck.raw_multi_action_roots &&
+            deck.retained_roots <=
+                deck.seat_games *
+                    config.max_roots_per_seat_game &&
+            deck.pair_groups <=
+                deck.retained_roots *
+                    config.max_pairs_per_root &&
+            deck.paired_world_cells ==
+                deck.pair_groups * config.worlds &&
+            deck.settlement_operations ==
+                deck.paired_world_cells * 4;
+    }
+    report.accounting_passed =
+        report.games == expected_games &&
+        report.seat_games == expected_seat_games &&
+        report.raw_multi_action_roots <=
+            report.raw_priority_roots &&
+        report.retained_roots <=
+            report.raw_multi_action_roots &&
+        report.retained_roots <=
+            report.seat_games *
+                config.max_roots_per_seat_game &&
+        report.pair_groups <=
+            report.retained_roots *
+                config.max_pairs_per_root &&
+        report.paired_world_cells ==
+            report.pair_groups * config.worlds &&
+        report.settlement_operations ==
+            report.paired_world_cells * 4 &&
+        deck_caps_passed &&
+        deck_seat_games == report.seat_games &&
+        deck_raw_priority_roots ==
+            report.raw_priority_roots &&
+        deck_raw_multi_action_roots ==
+            report.raw_multi_action_roots &&
+        deck_retained_roots == report.retained_roots &&
+        deck_pair_groups == report.pair_groups &&
+        deck_paired_world_cells ==
+            report.paired_world_cells &&
+        deck_settlement_operations ==
+            report.settlement_operations;
+    return report;
+}
+
+Dc1ActionCensusSplitReport dc1_census_split(
+    std::shared_ptr<const LearnedModel> model,
+    const Dc1ActionCensusConfig& config,
+    std::uint64_t split_seed, bool training_split) {
+    Dc1ActionCensusSplitReport report;
+    report.seed = split_seed;
+    report.descriptors_distinct = true;
+    report.legal_action_histogram.assign(
+        config.diagnostic_ceiling + 1, 0);
+    for (auto& deck : report.decks) {
+        deck.legal_action_histogram.assign(
+            config.diagnostic_ceiling + 1, 0);
+    }
+
+    for (std::size_t block = 0;
+         block < config.blocks_per_split; ++block) {
+        const auto schedule =
+            learned_iteration::balanced_schedule(
+                split_seed, 1, block);
+        for (const auto& scheduled : schedule) {
+            GameConfig game_config;
+            game_config.max_turns = config.max_game_turns;
+            game_config.starting_player =
+                scheduled.starting_player;
+            game_config.learned_model = model;
+            game_config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = config.worlds,
+                    .exploration_rate =
+                        training_split
+                            ? config.training_exploration_rate
+                            : 0.0,
+                    .learned_model = model,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action = config.worlds,
+                    .exploration_rate =
+                        training_split
+                            ? config.training_exploration_rate
+                            : 0.0,
+                    .learned_model = model,
+                },
+            };
+            const std::array<std::vector<CardId>, 2> decks = {
+                deck_for(scheduled.seat_decks[0]),
+                deck_for(scheduled.seat_decks[1]),
+            };
+            Game game(
+                decks[0], decks[1], scheduled.seed,
+                game_config);
+            std::vector<LearnedDecisionTracePoint> trace;
+            static_cast<void>(
+                game.run_with_priority_root_trace(trace));
+            ++report.games;
+            report.seat_games += kPlayerCount;
+
+            for (std::size_t player = 0;
+                 player < kPlayerCount; ++player) {
+                const DeckId root_deck =
+                    scheduled.seat_decks[player];
+                const DeckId opponent_deck =
+                    scheduled.seat_decks[1 - player];
+                const std::size_t deck_index =
+                    static_cast<std::size_t>(root_deck);
+                if (deck_index >= kDeckCount) {
+                    throw std::logic_error(
+                        "DC1 census schedule contains invalid deck");
+                }
+                auto& deck = report.decks[deck_index];
+                ++deck.seat_games;
+                for (std::size_t ordinal = 0;
+                     ordinal < trace.size(); ++ordinal) {
+                    const auto& point = trace[ordinal];
+                    if (!point.context.valid ||
+                        point.context.decision_player != player) {
+                        continue;
+                    }
+                    const auto actions = legal_priority_actions(
+                        point.state, player,
+                        point.context.sorcery_actions);
+                    const Dc1LegalActionSetSummary summary =
+                        dc1_summarize_action_set(
+                            actions,
+                            config.diagnostic_ceiling);
+                    ++report.priority_roots;
+                    ++deck.priority_roots;
+                    ++report.legal_action_histogram.at(
+                        summary.legal_actions);
+                    ++deck.legal_action_histogram.at(
+                        summary.legal_actions);
+                    report.maximum_legal_actions =
+                        std::max(
+                            report.maximum_legal_actions,
+                            summary.legal_actions);
+                    deck.maximum_legal_actions =
+                        std::max(
+                            deck.maximum_legal_actions,
+                            summary.legal_actions);
+                    report.descriptors_distinct =
+                        report.descriptors_distinct &&
+                        summary.descriptors_distinct;
+
+                    if (summary.legal_actions >
+                        config.threshold) {
+                        ++report.over_threshold_roots;
+                        ++deck.over_threshold_roots;
+                        report.over_threshold_contexts.push_back({
+                            .training_split = training_split,
+                            .block = block,
+                            .schedule_index =
+                                scheduled.schedule_index,
+                            .seat = player,
+                            .root_deck = root_deck,
+                            .opponent_deck = opponent_deck,
+                            .trace_ordinal = ordinal,
+                            .turn_number =
+                                point.state.turn_number,
+                            .phase = point.context.phase,
+                            .consecutive_passes =
+                                point.context.consecutive_passes,
+                            .stack_size =
+                                point.state.stack.size(),
+                            .actions = summary,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    std::sort(
+        report.over_threshold_contexts.begin(),
+        report.over_threshold_contexts.end(),
+        [](const Dc1ActionCensusContext& left,
+           const Dc1ActionCensusContext& right) {
+            return std::tie(
+                       left.block, left.schedule_index,
+                       left.seat, left.trace_ordinal) <
+                   std::tie(
+                       right.block, right.schedule_index,
+                       right.seat, right.trace_ordinal);
+        });
+
+    const std::size_t expected_games =
+        config.blocks_per_split *
+        learned_iteration::kBalancedScheduleGames;
+    const std::size_t expected_seat_games =
+        expected_games * kPlayerCount;
+    const std::size_t expected_seat_games_per_deck =
+        expected_seat_games / kDeckCount;
+    const auto histogram_total =
+        [](const std::vector<std::size_t>& histogram) {
+            return std::accumulate(
+                histogram.begin(), histogram.end(),
+                std::size_t{0});
+        };
+    const auto histogram_over_threshold =
+        [&](const std::vector<std::size_t>& histogram) {
+            if (config.threshold + 1 >= histogram.size()) {
+                return std::size_t{0};
+            }
+            return std::accumulate(
+                histogram.begin() +
+                    static_cast<std::ptrdiff_t>(
+                        config.threshold + 1),
+                histogram.end(), std::size_t{0});
+        };
+    std::vector<std::size_t> deck_histogram_sum(
+        config.diagnostic_ceiling + 1, 0);
+    std::size_t deck_seat_games = 0;
+    std::size_t deck_priority_roots = 0;
+    std::size_t deck_over_threshold_roots = 0;
+    bool deck_accounting =
+        expected_seat_games % kDeckCount == 0;
+    for (const auto& deck : report.decks) {
+        deck_seat_games += deck.seat_games;
+        deck_priority_roots += deck.priority_roots;
+        deck_over_threshold_roots +=
+            deck.over_threshold_roots;
+        if (deck.legal_action_histogram.size() !=
+            deck_histogram_sum.size()) {
+            deck_accounting = false;
+            continue;
+        }
+        for (std::size_t actions = 0;
+             actions < deck_histogram_sum.size(); ++actions) {
+            deck_histogram_sum[actions] +=
+                deck.legal_action_histogram[actions];
+        }
+        const auto maximum = std::find_if(
+            deck.legal_action_histogram.rbegin(),
+            deck.legal_action_histogram.rend(),
+            [](std::size_t count) { return count != 0; });
+        const std::size_t histogram_maximum =
+            maximum == deck.legal_action_histogram.rend()
+                ? 0
+                : deck.legal_action_histogram.size() - 1 -
+                      static_cast<std::size_t>(
+                          std::distance(
+                              deck.legal_action_histogram.rbegin(),
+                              maximum));
+        deck_accounting =
+            deck_accounting &&
+            deck.seat_games ==
+                expected_seat_games_per_deck &&
+            histogram_total(
+                deck.legal_action_histogram) ==
+                deck.priority_roots &&
+            histogram_over_threshold(
+                deck.legal_action_histogram) ==
+                deck.over_threshold_roots &&
+            histogram_maximum ==
+                deck.maximum_legal_actions;
+    }
+    const auto global_max = std::find_if(
+        report.legal_action_histogram.rbegin(),
+        report.legal_action_histogram.rend(),
+        [](std::size_t count) { return count != 0; });
+    const std::size_t global_histogram_maximum =
+        global_max == report.legal_action_histogram.rend()
+            ? 0
+            : report.legal_action_histogram.size() - 1 -
+                  static_cast<std::size_t>(
+                      std::distance(
+                          report.legal_action_histogram.rbegin(),
+                          global_max));
+    const bool contexts_exact =
+        report.over_threshold_contexts.size() ==
+            report.over_threshold_roots &&
+        std::all_of(
+            report.over_threshold_contexts.begin(),
+            report.over_threshold_contexts.end(),
+            [&](const Dc1ActionCensusContext& context) {
+                return context.training_split ==
+                           training_split &&
+                       context.actions.legal_actions >
+                           config.threshold &&
+                       context.actions.legal_actions <=
+                           config.diagnostic_ceiling &&
+                       context.actions.descriptors_distinct;
+            });
+    report.accounting_passed =
+        report.games == expected_games &&
+        report.seat_games == expected_seat_games &&
+        report.legal_action_histogram.size() ==
+            config.diagnostic_ceiling + 1 &&
+        histogram_total(report.legal_action_histogram) ==
+            report.priority_roots &&
+        histogram_over_threshold(
+            report.legal_action_histogram) ==
+            report.over_threshold_roots &&
+        global_histogram_maximum ==
+            report.maximum_legal_actions &&
+        deck_accounting &&
+        deck_seat_games == report.seat_games &&
+        deck_priority_roots == report.priority_roots &&
+        deck_over_threshold_roots ==
+            report.over_threshold_roots &&
+        deck_histogram_sum ==
+            report.legal_action_histogram &&
+        contexts_exact && report.descriptors_distinct;
+    return report;
+}
+
+} // namespace
+
+Dc1PairLabelDedupeResult dedupe_dc1_pair_labels(
+    std::vector<Dc1PairLabelObservation> observations) {
+    std::sort(
+        observations.begin(), observations.end(),
+        [](const Dc1PairLabelObservation& left,
+           const Dc1PairLabelObservation& right) {
+            return std::tie(
+                       left.exact_pair_key,
+                       left.seat_game_key, left.positive) <
+                   std::tie(
+                       right.exact_pair_key,
+                       right.seat_game_key, right.positive);
+        });
+
+    Dc1PairLabelDedupeResult result;
+    result.retained.reserve(observations.size());
+    for (std::size_t begin = 0;
+         begin < observations.size();) {
+        std::size_t end = begin + 1;
+        bool saw_positive = observations[begin].positive;
+        bool saw_incomparable = !observations[begin].positive;
+        while (end < observations.size() &&
+               observations[end].exact_pair_key ==
+                   observations[begin].exact_pair_key) {
+            saw_positive =
+                saw_positive || observations[end].positive;
+            saw_incomparable =
+                saw_incomparable ||
+                !observations[end].positive;
+            ++end;
+        }
+        if (saw_positive && saw_incomparable) {
+            ++result.conflicting_pair_keys;
+        } else {
+            Dc1PairLabelObservation representative =
+                observations[begin];
+            representative.positive = saw_positive;
+            result.retained.push_back(
+                std::move(representative));
+        }
+        begin = end;
+    }
+    return result;
+}
+
+Dc1LegalActionSetSummary summarize_dc1_legal_actions(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, std::size_t diagnostic_ceiling) {
+    if (player >= kPlayerCount) {
+        throw std::invalid_argument(
+            "DC1 action summary player must be 0 or 1");
+    }
+    return dc1_summarize_action_set(
+        legal_priority_actions(
+            state, player, sorcery_actions),
+        diagnostic_ceiling);
+}
+
+Dc1DominanceAuditReport audit_dc1_dominance_mining(
+    std::shared_ptr<const LearnedModel> frozen_parent,
+    Dc1MiningConfig config) {
+    if (!frozen_parent ||
+        config.required_model_fingerprint.empty() ||
+        config.training_seed == config.heldout_seed ||
+        config.blocks_per_split == 0 || config.worlds == 0 ||
+        config.max_roots_per_seat_game == 0 ||
+        config.max_pairs_per_root == 0 ||
+        config.max_legal_actions < 2 ||
+        config.max_game_turns == 0 ||
+        !std::isfinite(config.training_exploration_rate) ||
+        config.training_exploration_rate < 0.0 ||
+        config.training_exploration_rate > 1.0) {
+        throw std::invalid_argument(
+            "invalid DC1 mining configuration");
+    }
+    const std::string fingerprint =
+        learned_model_fingerprint(frozen_parent);
+    if (fingerprint != config.required_model_fingerprint) {
+        throw std::invalid_argument(
+            "DC1 frozen-parent fingerprint mismatch");
+    }
+
+    Dc1DominanceAuditReport report;
+    report.model_fingerprint = fingerprint;
+    report.config = config;
+    report.fixture_gate_passed = dc1_fixture_gate();
+    if (!report.fixture_gate_passed) {
+        return report;
+    }
+    report.training = dc1_mine_split(
+        frozen_parent, config, config.training_seed, true);
+    report.heldout = dc1_mine_split(
+        frozen_parent, config, config.heldout_seed, false);
+
+    report.accounting_passed =
+        report.training.accounting_passed &&
+        report.heldout.accounting_passed;
+    report.gate_passed =
+        report.fixture_gate_passed &&
+        report.accounting_passed &&
+        report.training.density_passed &&
+        report.heldout.density_passed;
+    return report;
+}
+
+Dc1ActionCensusReport audit_dc1_action_census(
+    std::shared_ptr<const LearnedModel> frozen_parent,
+    Dc1ActionCensusConfig config) {
+    if (!frozen_parent ||
+        config.required_model_fingerprint.empty() ||
+        config.training_seed == config.heldout_seed ||
+        config.blocks_per_split == 0 ||
+        config.worlds == 0 ||
+        config.max_game_turns == 0 ||
+        !std::isfinite(config.training_exploration_rate) ||
+        config.training_exploration_rate < 0.0 ||
+        config.training_exploration_rate > 1.0 ||
+        config.threshold == 0 ||
+        config.diagnostic_ceiling <= config.threshold) {
+        throw std::invalid_argument(
+            "invalid DC1 action-census configuration");
+    }
+    const std::string fingerprint =
+        learned_model_fingerprint(frozen_parent);
+    if (fingerprint != config.required_model_fingerprint) {
+        throw std::invalid_argument(
+            "DC1 action-census frozen-parent fingerprint mismatch");
+    }
+
+    Dc1ActionCensusReport report;
+    report.model_fingerprint = fingerprint;
+    report.config = config;
+    report.training = dc1_census_split(
+        frozen_parent, config, config.training_seed, true);
+    report.heldout = dc1_census_split(
+        frozen_parent, config, config.heldout_seed, false);
+    report.accounting_passed =
+        report.training.accounting_passed &&
+        report.heldout.accounting_passed &&
+        report.pair_comparisons == 0 &&
+        report.density_examples == 0;
+    report.reproduced_over_threshold_root =
+        report.training.over_threshold_roots +
+            report.heldout.over_threshold_roots >
+        0;
+    report.ceiling_passed =
+        report.training.maximum_legal_actions <=
+            config.diagnostic_ceiling &&
+        report.heldout.maximum_legal_actions <=
+            config.diagnostic_ceiling;
+    report.gate_passed =
+        report.accounting_passed &&
+        report.reproduced_over_threshold_root &&
+        report.ceiling_passed;
+    return report;
+}
+
+std::vector<BsrSourceGame> bsr_source_schedule(
+    std::uint64_t seed, std::size_t blocks) {
+    if (blocks == 0) {
+        throw std::invalid_argument(
+            "BSR source schedule requires a positive block count");
+    }
+    std::vector<BsrSourceGame> schedule;
+    schedule.reserve(blocks * kBsrSourceGamesPerBlock);
+    for (std::size_t block = 0; block < blocks; ++block) {
+        std::size_t schedule_index = 0;
+        for (std::size_t opponent = 0;
+             opponent < kDeckCount; ++opponent) {
+            for (std::size_t tracked_seat = 0;
+                 tracked_seat < kPlayerCount; ++tracked_seat) {
+                for (std::size_t play_draw = 0;
+                     play_draw < 2; ++play_draw) {
+                    const bool tracked_starts =
+                        play_draw == 1;
+                    schedule.push_back({
+                        .block = block,
+                        .schedule_index = schedule_index,
+                        .opponent_deck =
+                            static_cast<DeckId>(opponent),
+                        .tracked_seat = tracked_seat,
+                        .tracked_starts = tracked_starts,
+                        .starting_player =
+                            tracked_starts
+                                ? tracked_seat
+                                : 1 - tracked_seat,
+                        .seed = learned_iteration::derive_seed(
+                            seed,
+                            learned_iteration::SeedDomain::
+                                SelfPlayGame,
+                            0, block, schedule_index),
+                    });
+                    ++schedule_index;
+                }
+            }
+        }
+        if (schedule_index != kBsrSourceGamesPerBlock) {
+            throw std::logic_error(
+                "BSR source block has the wrong size");
+        }
+    }
+    return schedule;
+}
+
+BsrRootClassification classify_bsr_trace_root(
+    const LearnedDecisionTracePoint& point,
+    std::size_t tracked_player,
+    std::size_t maximum_legal_actions) {
+    if (tracked_player >= kPlayerCount ||
+        maximum_legal_actions < 2) {
+        throw std::invalid_argument(
+            "invalid BSR root-classification configuration");
+    }
+
+    BsrRootClassification result;
+    if (!point.context.valid ||
+        point.context.decision_player >= kPlayerCount) {
+        result.eligibility =
+            BsrRootEligibility::InvalidContext;
+        return result;
+    }
+    if (point.context.decision_player != tracked_player) {
+        result.eligibility =
+            BsrRootEligibility::WrongDecisionOwner;
+        return result;
+    }
+    if (point.state.stack.empty()) {
+        result.eligibility = BsrRootEligibility::EmptyStack;
+        return result;
+    }
+    const std::size_t stack_controller =
+        point.state.stack.back().controller;
+    if (stack_controller >= kPlayerCount) {
+        result.eligibility =
+            BsrRootEligibility::InvalidContext;
+        return result;
+    }
+    if (stack_controller == tracked_player) {
+        result.eligibility =
+            BsrRootEligibility::TrackedSpellOnTop;
+        return result;
+    }
+
+    result.legal_actions = legal_priority_actions(
+        point.state, tracked_player,
+        point.context.sorcery_actions);
+    result.descriptors.reserve(result.legal_actions.size());
+    for (const PriorityAction& action : result.legal_actions) {
+        result.descriptors.push_back(
+            harvested_priority_descriptor(action));
+    }
+    if (result.legal_actions.size() < 2 ||
+        result.legal_actions.size() > maximum_legal_actions) {
+        result.eligibility =
+            BsrRootEligibility::ActionCountOutsideBounds;
+        return result;
+    }
+    if (!point.selected_priority_action.has_value()) {
+        result.eligibility =
+            BsrRootEligibility::MissingSelectedAction;
+        return result;
+    }
+
+    for (std::size_t index = 0;
+         index < result.legal_actions.size(); ++index) {
+        if (result.legal_actions[index] ==
+            *point.selected_priority_action) {
+            ++result.selected_action_matches;
+            result.selected_action_index = index;
+        }
+    }
+    if (result.selected_action_matches == 0) {
+        result.eligibility =
+            BsrRootEligibility::SelectedActionNotLegal;
+        result.selected_action_index.reset();
+        return result;
+    }
+    if (result.selected_action_matches != 1) {
+        result.eligibility =
+            BsrRootEligibility::SelectedActionAmbiguous;
+        result.selected_action_index.reset();
+        return result;
+    }
+    std::vector<std::string> sorted_descriptors =
+        result.descriptors;
+    std::sort(
+        sorted_descriptors.begin(), sorted_descriptors.end());
+    if (std::adjacent_find(
+            sorted_descriptors.begin(),
+            sorted_descriptors.end()) !=
+        sorted_descriptors.end()) {
+        result.eligibility =
+            BsrRootEligibility::DuplicateActionDescriptor;
+        return result;
+    }
+    result.eligibility = BsrRootEligibility::Eligible;
+    return result;
+}
+
+std::vector<std::size_t> select_bsr_retained_candidate_indices(
+    const std::vector<BsrRetentionCandidate>& candidates,
+    std::size_t roots_per_loss,
+    std::size_t roots_per_opponent) {
+    if (roots_per_loss == 0 || roots_per_opponent == 0 ||
+        roots_per_opponent >
+            std::numeric_limits<std::size_t>::max() /
+                kDeckCount) {
+        throw std::invalid_argument(
+            "invalid BSR retention configuration");
+    }
+
+    std::array<
+        std::map<std::string, std::vector<std::size_t>>,
+        kDeckCount>
+        candidates_by_loss;
+    for (std::size_t index = 0;
+         index < candidates.size(); ++index) {
+        const BsrRetentionCandidate& candidate =
+            candidates[index];
+        const std::size_t opponent =
+            static_cast<std::size_t>(
+                candidate.opponent_deck);
+        if (opponent >= kDeckCount ||
+            candidate.source_loss_key.empty() ||
+            candidate.provenance_key.empty() ||
+            candidate.stable_selection_key.empty()) {
+            throw std::invalid_argument(
+                "invalid BSR retention candidate");
+        }
+        candidates_by_loss[opponent]
+            [candidate.source_loss_key]
+                .push_back(index);
+    }
+
+    std::vector<std::size_t> selected;
+    selected.reserve(
+        std::min(
+            candidates.size(),
+            roots_per_opponent * kDeckCount));
+    for (std::size_t opponent = 0;
+         opponent < kDeckCount; ++opponent) {
+        std::vector<std::size_t> stratum;
+        for (auto& [loss_key, loss_indices] :
+             candidates_by_loss[opponent]) {
+            static_cast<void>(loss_key);
+            std::sort(
+                loss_indices.begin(), loss_indices.end(),
+                [&](std::size_t left, std::size_t right) {
+                    return std::tie(
+                               candidates[left]
+                                   .stable_selection_key,
+                               candidates[left]
+                                   .provenance_key,
+                               left) <
+                           std::tie(
+                               candidates[right]
+                                   .stable_selection_key,
+                               candidates[right]
+                                   .provenance_key,
+                               right);
+                });
+            if (loss_indices.size() > roots_per_loss) {
+                loss_indices.resize(roots_per_loss);
+            }
+            stratum.insert(
+                stratum.end(), loss_indices.begin(),
+                loss_indices.end());
+        }
+        std::sort(
+            stratum.begin(), stratum.end(),
+            [&](std::size_t left, std::size_t right) {
+                return std::tie(
+                           candidates[left].provenance_key,
+                           candidates[left]
+                               .stable_selection_key,
+                           candidates[left].source_loss_key,
+                           left) <
+                       std::tie(
+                           candidates[right].provenance_key,
+                           candidates[right]
+                               .stable_selection_key,
+                           candidates[right].source_loss_key,
+                           right);
+            });
+        if (stratum.size() > roots_per_opponent) {
+            stratum.resize(roots_per_opponent);
+        }
+        selected.insert(
+            selected.end(), stratum.begin(), stratum.end());
+    }
+    return selected;
+}
+
+bool bsr_retention_requirements_met(
+    const std::vector<BsrRetentionCandidate>& retained,
+    std::size_t roots_per_loss,
+    std::size_t roots_per_opponent,
+    std::size_t minimum_losses_per_opponent) {
+    if (roots_per_loss == 0 || roots_per_opponent == 0 ||
+        minimum_losses_per_opponent == 0 ||
+        minimum_losses_per_opponent > roots_per_opponent) {
+        throw std::invalid_argument(
+            "invalid BSR retention requirement");
+    }
+    std::array<std::size_t, kDeckCount> roots_by_opponent{};
+    std::array<std::map<std::string, std::size_t>, kDeckCount>
+        roots_by_loss;
+    for (const BsrRetentionCandidate& candidate : retained) {
+        const std::size_t opponent =
+            static_cast<std::size_t>(
+                candidate.opponent_deck);
+        if (opponent >= kDeckCount ||
+            candidate.source_loss_key.empty() ||
+            candidate.provenance_key.empty() ||
+            candidate.stable_selection_key.empty()) {
+            throw std::invalid_argument(
+                "invalid retained BSR candidate");
+        }
+        ++roots_by_opponent[opponent];
+        const std::size_t roots_in_loss =
+            ++roots_by_loss[opponent]
+                [candidate.source_loss_key];
+        if (roots_in_loss > roots_per_loss) {
+            return false;
+        }
+    }
+    for (std::size_t opponent = 0;
+         opponent < kDeckCount; ++opponent) {
+        if (roots_by_opponent[opponent] !=
+                roots_per_opponent ||
+            roots_by_loss[opponent].size() <
+                minimum_losses_per_opponent) {
+            return false;
+        }
+    }
+    return true;
+}
+
+namespace {
+
+constexpr double kBsrNormal95 = 1.96;
+
+std::string bsr_hex64(std::uint64_t value) {
+    std::ostringstream output;
+    output << std::hex << std::setfill('0')
+           << std::setw(16) << value;
+    return output.str();
+}
+
+std::string bsr_information_action_key(
+    const DecisionProbe& probe) {
+    std::string key = dc1_information_set_key(probe);
+    std::vector<std::string> descriptors;
+    descriptors.reserve(probe.candidates.size());
+    for (const Candidate& candidate : probe.candidates) {
+        descriptors.push_back(candidate.descriptor);
+    }
+    std::sort(descriptors.begin(), descriptors.end());
+    dc1_append_u64(key, descriptors.size());
+    for (const std::string& descriptor : descriptors) {
+        dc1_append_u64(key, descriptor.size());
+        key += descriptor;
+    }
+    return key;
+}
+
+void bsr_append_text(std::string& key,
+                     std::string_view value) {
+    dc1_append_u64(key, value.size());
+    key.append(value);
+}
+
+std::string bsr_stable_root_key(
+    const DecisionProbe& probe,
+    std::string_view actual_action_descriptor,
+    std::string_view model_fingerprint,
+    const BsrRootKeyContext& provenance) {
+    if (model_fingerprint.empty() ||
+        provenance.tracked_seat >= kPlayerCount ||
+        probe.root_player != provenance.tracked_seat) {
+        throw std::invalid_argument(
+            "invalid BSR stable-root identity input");
+    }
+    const std::size_t actual_matches =
+        static_cast<std::size_t>(std::count_if(
+            probe.candidates.begin(),
+            probe.candidates.end(),
+            [&](const Candidate& candidate) {
+                return candidate.descriptor ==
+                       actual_action_descriptor;
+            }));
+    if (actual_matches != 1) {
+        throw std::invalid_argument(
+            "BSR stable-root identity requires one actual "
+            "descriptor");
+    }
+
+    std::string key;
+    key.reserve(1536);
+    bsr_append_text(key, kBsrEnvironmentRevision);
+    bsr_append_text(key, model_fingerprint);
+    const std::string information_action_key =
+        bsr_information_action_key(probe);
+    bsr_append_text(key, information_action_key);
+    bsr_append_text(key, actual_action_descriptor);
+    dc1_append_u64(key, provenance.game_seed);
+    dc1_append_u64(key, provenance.block);
+    dc1_append_u64(key, provenance.schedule_index);
+    dc1_append_u64(key, provenance.tracked_seat);
+    dc1_append_bool(key, provenance.tracked_starts);
+    dc1_append_u64(key, provenance.trace_ordinal);
+    return key;
+}
+
+std::vector<PriorityAction> bsr_priority_actions(
+    const DecisionProbe& probe) {
+    std::vector<PriorityAction> actions;
+    actions.reserve(probe.candidates.size());
+    for (const Candidate& candidate : probe.candidates) {
+        const auto* action =
+            std::get_if<PriorityAction>(&candidate.action);
+        if (action == nullptr) {
+            throw std::invalid_argument(
+                "BSR Priority probe contains an attack candidate");
+        }
+        actions.push_back(*action);
+    }
+    return actions;
+}
+
+bool bsr_sorcery_actions(TurnPhase phase) {
+    return phase == TurnPhase::FirstMain ||
+           phase == TurnPhase::SecondMain;
+}
+
+bool bsr_complete_action_set(
+    const DecisionProbe& probe,
+    const std::vector<PriorityAction>& candidates) {
+    const auto legal = legal_priority_actions(
+        probe.state, probe.root_player,
+        bsr_sorcery_actions(probe.phase));
+    if (legal.size() != candidates.size()) {
+        return false;
+    }
+    std::vector<bool> matched(candidates.size(), false);
+    for (const PriorityAction& action : legal) {
+        std::size_t matches = 0;
+        std::size_t matched_index = 0;
+        for (std::size_t index = 0;
+             index < candidates.size(); ++index) {
+            if (candidates[index] == action) {
+                ++matches;
+                matched_index = index;
+            }
+        }
+        if (matches != 1 || matched[matched_index]) {
+            return false;
+        }
+        matched[matched_index] = true;
+    }
+    return std::all_of(
+        matched.begin(), matched.end(),
+        [](bool value) { return value; });
+}
+
+bool bsr_samples_bit_identical(
+    const LearnedActionSamples& first,
+    const LearnedActionSamples& second) {
+    if (first.sampled_worlds != second.sampled_worlds ||
+        first.rollout_evaluations !=
+            second.rollout_evaluations ||
+        first.terminal_evaluations !=
+            second.terminal_evaluations ||
+        first.bootstrapped_evaluations !=
+            second.bootstrapped_evaluations ||
+        first.q_samples.size() != second.q_samples.size()) {
+        return false;
+    }
+    for (std::size_t action = 0;
+         action < first.q_samples.size(); ++action) {
+        if (first.q_samples[action].size() !=
+            second.q_samples[action].size()) {
+            return false;
+        }
+        for (std::size_t sample = 0;
+             sample < first.q_samples[action].size(); ++sample) {
+            if (std::bit_cast<std::uint64_t>(
+                    first.q_samples[action][sample]) !=
+                std::bit_cast<std::uint64_t>(
+                    second.q_samples[action][sample])) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+double bsr_mean(const std::vector<double>& values) {
+    if (values.empty()) {
+        throw std::invalid_argument(
+            "BSR mean requires at least one sample");
+    }
+    for (const double value : values) {
+        if (!std::isfinite(value)) {
+            throw std::invalid_argument(
+                "BSR samples must be finite");
+        }
+    }
+    return std::accumulate(
+               values.begin(), values.end(), 0.0) /
+           static_cast<double>(values.size());
+}
+
+struct BsrBestSet {
+    double mean = 0.0;
+    std::vector<std::size_t> indices;
+    std::vector<std::string> descriptors;
+};
+
+BsrBestSet bsr_best_set(
+    const std::vector<std::string>& descriptors,
+    const LearnedActionSamples& samples) {
+    if (samples.q_samples.size() != descriptors.size() ||
+        descriptors.empty()) {
+        throw std::invalid_argument(
+            "BSR samples do not match descriptors");
+    }
+    std::vector<double> means;
+    means.reserve(samples.q_samples.size());
+    for (const auto& row : samples.q_samples) {
+        means.push_back(bsr_mean(row));
+    }
+    const double best =
+        *std::max_element(means.begin(), means.end());
+    BsrBestSet result;
+    result.mean = best;
+    for (std::size_t index = 0;
+         index < means.size(); ++index) {
+        if (means[index] == best) {
+            result.indices.push_back(index);
+            result.descriptors.push_back(
+                descriptors[index]);
+        }
+    }
+    return result;
+}
+
+std::pair<double, double> bsr_paired_regret_and_se(
+    const std::vector<double>& best,
+    const std::vector<double>& actual) {
+    if (best.size() != actual.size() || best.empty()) {
+        throw std::invalid_argument(
+            "BSR paired rows must have equal nonzero size");
+    }
+    std::vector<double> differences;
+    differences.reserve(best.size());
+    for (std::size_t sample = 0;
+         sample < best.size(); ++sample) {
+        differences.push_back(best[sample] - actual[sample]);
+    }
+    const double mean = bsr_mean(differences);
+    if (differences.size() == 1) {
+        return {mean, 0.0};
+    }
+    double squared_deviations = 0.0;
+    for (const double difference : differences) {
+        const double centered = difference - mean;
+        squared_deviations += centered * centered;
+    }
+    const double sample_variance =
+        squared_deviations /
+        static_cast<double>(differences.size() - 1);
+    return {
+        mean,
+        std::sqrt(
+            sample_variance /
+            static_cast<double>(differences.size())),
+    };
+}
+
+std::size_t bsr_expected_evaluations(
+    std::size_t actions, std::size_t worlds,
+    std::size_t rollouts_per_world) {
+    if (actions == 0 || worlds == 0 ||
+        rollouts_per_world == 0 ||
+        actions >
+            std::numeric_limits<std::size_t>::max() / worlds ||
+        actions * worlds >
+            std::numeric_limits<std::size_t>::max() /
+                rollouts_per_world) {
+        throw std::overflow_error(
+            "BSR reference evaluation count overflow");
+    }
+    return actions * worlds * rollouts_per_world;
+}
+
+bool bsr_sample_accounting(
+    const LearnedActionSamples& samples,
+    std::size_t actions, std::size_t worlds,
+    std::size_t rollouts_per_world) {
+    const std::size_t samples_per_action =
+        bsr_expected_evaluations(
+            1, worlds, rollouts_per_world);
+    return
+        samples.sampled_worlds == worlds &&
+        samples.rollout_evaluations ==
+            bsr_expected_evaluations(
+                actions, worlds, rollouts_per_world) &&
+        samples.terminal_evaluations <=
+            samples.rollout_evaluations &&
+        samples.bootstrapped_evaluations ==
+            samples.rollout_evaluations -
+                samples.terminal_evaluations &&
+        samples.q_samples.size() == actions &&
+        std::all_of(
+            samples.q_samples.begin(),
+            samples.q_samples.end(),
+            [&](const std::vector<double>& row) {
+                return row.size() == samples_per_action;
+            });
+}
+
+LearnedActionSamples bsr_score_pass(
+    const DecisionProbe& probe,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedModel> model,
+    const BsrReferenceConfig& config,
+    std::uint64_t seed, std::size_t worlds) {
+    return learned_priority_action_samples(
+        probe.state, probe.original_decks, probe.root_player,
+        bsr_sorcery_actions(probe.phase), probe.phase,
+        probe.consecutive_passes,
+        candidates, std::move(model),
+        {
+            .seed = seed,
+            .worlds = worlds,
+            .rollouts_per_world =
+                config.rollouts_per_world,
+            .horizon_turns = config.horizon_turns,
+            .continuation_variant =
+                LearnedVariant::ValueSearchChampion,
+            .value_continuation_epsilon = 0.0,
+            .blend_shallow_prior = false,
+            .value_priority_residual_weight = 0.0,
+            .evaluation_threads =
+                config.evaluation_threads,
+        });
+}
+
+struct BsrHarvestedRoot {
+    DecisionProbe probe;
+    std::string information_action_key;
+    std::string information_action_fingerprint;
+    std::string stable_root_key;
+    std::string stable_root_fingerprint;
+    std::string actual_action_descriptor;
+    std::string provenance_key;
+    std::string source_game_key;
+    std::size_t source_cell = 0;
+    std::size_t block = 0;
+    std::size_t schedule_index = 0;
+    std::size_t tracked_seat = 0;
+    bool tracked_starts = false;
+    std::uint64_t game_seed = 0;
+    std::size_t trace_ordinal = 0;
+};
+
+std::string bsr_fixed_width(std::uint64_t value,
+                            std::size_t width) {
+    std::ostringstream output;
+    output << std::setfill('0') << std::setw(
+                  static_cast<int>(width))
+           << value;
+    return output.str();
+}
+
+std::string bsr_source_game_key(
+    const BsrSourceGame& scheduled) {
+    return "b" + bsr_fixed_width(scheduled.block, 4) +
+           ".g" +
+           bsr_fixed_width(scheduled.schedule_index, 3) +
+           ".p" + std::to_string(scheduled.tracked_seat) +
+           ".d" + (scheduled.tracked_starts ? "p" : "d") +
+           ".s" + bsr_fixed_width(scheduled.seed, 20);
+}
+
+std::string bsr_provenance_key(
+    const BsrSourceGame& scheduled,
+    std::size_t trace_ordinal) {
+    return bsr_source_game_key(scheduled) +
+           ".r" + bsr_fixed_width(trace_ordinal, 6);
+}
+
+void bsr_add_cell_to_deck(
+    const BsrSourceCellSummary& cell,
+    BsrDeckSummary& deck) {
+    deck.games += cell.games;
+    deck.tracked_losses += cell.tracked_losses;
+    deck.draws += cell.draws;
+    deck.turn_limit_draws += cell.turn_limit_draws;
+    deck.trace_roots += cell.trace_roots;
+    deck.tracked_held_opponent_stack_roots +=
+        cell.tracked_held_opponent_stack_roots;
+    deck.opponent_held_opponent_stack_roots +=
+        cell.opponent_held_opponent_stack_roots;
+    deck.eligible_loss_roots += cell.eligible_loss_roots;
+    deck.loss_games_with_eligible_roots +=
+        cell.loss_games_with_eligible_roots;
+    deck.retained_roots += cell.retained_roots;
+}
+
+} // namespace
+
+std::string bsr_stable_root_fingerprint(
+    const DecisionProbe& probe,
+    std::string_view actual_action_descriptor,
+    std::string_view model_fingerprint,
+    const BsrRootKeyContext& provenance) {
+    return bsr_hex64(dc1_stable_hash(
+        bsr_stable_root_key(
+            probe, actual_action_descriptor,
+            model_fingerprint, provenance)));
+}
+
+BsrPairedRegretEstimate bsr_paired_regret_estimate(
+    const std::vector<double>& best_samples,
+    const std::vector<double>& actual_samples) {
+    const auto [regret, standard_error] =
+        bsr_paired_regret_and_se(
+            best_samples, actual_samples);
+    return {
+        .regret = regret,
+        .standard_error = standard_error,
+        .lower_95 =
+            regret - kBsrNormal95 * standard_error,
+    };
+}
+
+bool bsr_diagnostic_stable_mistake(
+    bool scout_confirmation_best_set_stable,
+    bool actual_outside_best_sets,
+    const BsrPairedRegretEstimate& estimate) {
+    return scout_confirmation_best_set_stable &&
+           actual_outside_best_sets &&
+           estimate.regret >=
+               kBsrDiagnosticRegretThreshold &&
+           estimate.lower_95 > 0.0;
+}
+
+bool bsr_practical_high_cost_mistake(
+    bool scout_confirmation_best_set_stable,
+    bool actual_outside_best_sets,
+    const BsrPairedRegretEstimate& estimate) {
+    return scout_confirmation_best_set_stable &&
+           actual_outside_best_sets &&
+           estimate.regret >=
+               kBsrPracticalRegretThreshold &&
+           estimate.lower_95 >
+               kBsrPracticalLower95Threshold;
+}
+
+bool bsr_practical_audit_gate(
+    bool audit_valid,
+    std::size_t practical_high_cost_mistakes) {
+    return audit_valid && practical_high_cost_mistakes != 0;
+}
+
+BsrRootScore score_bsr_priority_probe(
+    const DecisionProbe& probe,
+    std::string_view actual_action_descriptor,
+    std::shared_ptr<const LearnedModel> frozen_model,
+    BsrReferenceConfig config) {
+    if (!frozen_model ||
+        probe.decision_kind != DecisionKind::Priority ||
+        probe.root_player >= kPlayerCount ||
+        probe.state.stack.empty() ||
+        probe.candidates.size() < 2 ||
+        probe.candidates.size() >
+            kBsrMaximumLegalActions ||
+        config.seed == 0 ||
+        config.scout_worlds == 0 ||
+        config.confirmation_worlds == 0 ||
+        config.rollouts_per_world == 0 ||
+        config.evaluation_threads == 0) {
+        throw std::invalid_argument(
+            "invalid BSR reference-scoring input");
+    }
+
+    DecisionProbe canonical = probe;
+    std::sort(
+        canonical.candidates.begin(),
+        canonical.candidates.end(),
+        [](const Candidate& left, const Candidate& right) {
+            return left.descriptor < right.descriptor;
+        });
+    if (std::adjacent_find(
+            canonical.candidates.begin(),
+            canonical.candidates.end(),
+            [](const Candidate& left, const Candidate& right) {
+                return left.descriptor == right.descriptor;
+            }) != canonical.candidates.end()) {
+        throw std::invalid_argument(
+            "BSR candidate descriptors must be distinct");
+    }
+
+    const std::vector<PriorityAction> candidates =
+        bsr_priority_actions(canonical);
+    if (!bsr_complete_action_set(canonical, candidates)) {
+        throw std::invalid_argument(
+            "BSR candidate list is not the complete legal "
+            "Priority action set");
+    }
+    const auto actual = std::find_if(
+        canonical.candidates.begin(),
+        canonical.candidates.end(),
+        [actual_action_descriptor](const Candidate& candidate) {
+            return candidate.descriptor ==
+                   actual_action_descriptor;
+        });
+    if (actual == canonical.candidates.end()) {
+        throw std::invalid_argument(
+            "BSR actual-action descriptor is absent");
+    }
+    const std::size_t actual_index =
+        static_cast<std::size_t>(
+            std::distance(
+                canonical.candidates.begin(), actual));
+    std::vector<std::string> descriptors;
+    descriptors.reserve(canonical.candidates.size());
+    for (const Candidate& candidate : canonical.candidates) {
+        descriptors.push_back(candidate.descriptor);
+    }
+
+    const std::string information_action_key =
+        bsr_information_action_key(canonical);
+    const std::uint64_t scout_seed = dc1_mix_seed(
+        config.seed, information_action_key, 0);
+    const std::uint64_t confirmation_seed = dc1_mix_seed(
+        config.seed, information_action_key, 1);
+    if (scout_seed == confirmation_seed) {
+        throw std::logic_error(
+            "BSR scout and confirmation seeds collided");
+    }
+
+    const LearnedActionSamples scout = bsr_score_pass(
+        canonical, candidates, frozen_model, config,
+        scout_seed, config.scout_worlds);
+    const LearnedActionSamples confirmation = bsr_score_pass(
+        canonical, candidates, frozen_model, config,
+        confirmation_seed, config.confirmation_worlds);
+
+    DecisionProbe hidden = canonical;
+    hidden.state = dc1_hidden_repartition_clone(canonical);
+    LearnedDecisionTracePoint hidden_point{
+        .state = hidden.state,
+        .context = {
+            .valid = true,
+            .phase = hidden.phase,
+            .decision_player = hidden.root_player,
+            .consecutive_passes =
+                hidden.consecutive_passes,
+            .sorcery_actions =
+                bsr_sorcery_actions(hidden.phase),
+        },
+        .selected_priority_action =
+            candidates[actual_index],
+    };
+    const BsrRootClassification hidden_classification =
+        classify_bsr_trace_root(
+            hidden_point, hidden.root_player,
+            kBsrMaximumLegalActions);
+    const LearnedActionSamples hidden_scout = bsr_score_pass(
+        hidden, candidates, frozen_model, config,
+        scout_seed, config.scout_worlds);
+    const LearnedActionSamples hidden_confirmation =
+        bsr_score_pass(
+            hidden, candidates, frozen_model, config,
+            confirmation_seed,
+            config.confirmation_worlds);
+
+    const BsrBestSet scout_best =
+        bsr_best_set(descriptors, scout);
+    const BsrBestSet confirmation_best =
+        bsr_best_set(descriptors, confirmation);
+    const BsrPairedRegretEstimate paired =
+        bsr_paired_regret_estimate(
+            confirmation.q_samples[
+                confirmation_best.indices.front()],
+            confirmation.q_samples[actual_index]);
+    const bool stable_best =
+        scout_best.descriptors ==
+        confirmation_best.descriptors;
+    const auto outside =
+        [&](const std::vector<std::string>& best) {
+            return std::find(
+                       best.begin(), best.end(),
+                       actual_action_descriptor) ==
+                   best.end();
+        };
+    const bool actual_outside =
+        outside(scout_best.descriptors) &&
+        outside(confirmation_best.descriptors);
+
+    const bool scout_accounting = bsr_sample_accounting(
+        scout, candidates.size(), config.scout_worlds,
+        config.rollouts_per_world);
+    const bool confirmation_accounting =
+        bsr_sample_accounting(
+            confirmation, candidates.size(),
+            config.confirmation_worlds,
+            config.rollouts_per_world);
+    const bool hidden_scout_accounting =
+        bsr_sample_accounting(
+            hidden_scout, candidates.size(),
+            config.scout_worlds,
+            config.rollouts_per_world);
+    const bool hidden_confirmation_accounting =
+        bsr_sample_accounting(
+            hidden_confirmation, candidates.size(),
+            config.confirmation_worlds,
+            config.rollouts_per_world);
+
+    BsrRootScore result;
+    result.stable_id = canonical.stable_id;
+    result.information_action_fingerprint =
+        bsr_hex64(
+            dc1_stable_hash(information_action_key));
+    result.action_count = candidates.size();
+    result.actual_action_index = actual_index;
+    result.actual_action_descriptor =
+        std::string(actual_action_descriptor);
+    result.scout_seed = scout_seed;
+    result.confirmation_seed = confirmation_seed;
+    result.scout_best_actions = scout_best.descriptors;
+    result.confirmation_best_actions =
+        confirmation_best.descriptors;
+    result.scout_actual_mean =
+        bsr_mean(scout.q_samples[actual_index]);
+    result.scout_best_mean = scout_best.mean;
+    result.confirmation_actual_mean =
+        bsr_mean(confirmation.q_samples[actual_index]);
+    result.confirmation_best_mean =
+        confirmation_best.mean;
+    result.confirmation_regret = paired.regret;
+    result.paired_standard_error =
+        paired.standard_error;
+    result.paired_lower_95 = paired.lower_95;
+    result.sampled_worlds =
+        scout.sampled_worlds +
+        confirmation.sampled_worlds +
+        hidden_scout.sampled_worlds +
+        hidden_confirmation.sampled_worlds;
+    result.rollout_evaluations =
+        scout.rollout_evaluations +
+        confirmation.rollout_evaluations +
+        hidden_scout.rollout_evaluations +
+        hidden_confirmation.rollout_evaluations;
+    result.terminal_evaluations =
+        scout.terminal_evaluations +
+        confirmation.terminal_evaluations +
+        hidden_scout.terminal_evaluations +
+        hidden_confirmation.terminal_evaluations;
+    result.bootstrapped_evaluations =
+        scout.bootstrapped_evaluations +
+        confirmation.bootstrapped_evaluations +
+        hidden_scout.bootstrapped_evaluations +
+        hidden_confirmation.bootstrapped_evaluations;
+    result.scout_confirmation_best_set_stable =
+        stable_best;
+    result.actual_outside_best_sets = actual_outside;
+    result.diagnostic_stable_mistake =
+        bsr_diagnostic_stable_mistake(
+            stable_best, actual_outside, paired);
+    result.practical_high_cost_mistake =
+        bsr_practical_high_cost_mistake(
+            stable_best, actual_outside, paired);
+    result.descriptor_order_invariant =
+        std::is_sorted(
+            canonical.candidates.begin(),
+            canonical.candidates.end(),
+            [](const Candidate& left,
+               const Candidate& right) {
+                return left.descriptor <
+                       right.descriptor;
+            });
+    result.hidden_repartition_eligible =
+        hidden_classification.eligible() &&
+        hidden_classification.legal_actions.size() ==
+            candidates.size() &&
+        std::all_of(
+            candidates.begin(), candidates.end(),
+            [&](const PriorityAction& action) {
+                return static_cast<std::size_t>(
+                           std::count(
+                               hidden_classification
+                                   .legal_actions.begin(),
+                               hidden_classification
+                                   .legal_actions.end(),
+                               action)) == 1;
+            });
+    result.hidden_repartition_bit_identical =
+        bsr_samples_bit_identical(
+            scout, hidden_scout) &&
+        bsr_samples_bit_identical(
+            confirmation, hidden_confirmation);
+    result.accounting_passed =
+        scout_accounting && confirmation_accounting &&
+        hidden_scout_accounting &&
+        hidden_confirmation_accounting &&
+        result.terminal_evaluations <=
+            result.rollout_evaluations &&
+        result.bootstrapped_evaluations ==
+            result.rollout_evaluations -
+                result.terminal_evaluations;
+    return result;
+}
+
+BsrAuditReport audit_bsr_blue_stack_regret(
+    std::shared_ptr<const LearnedModel> frozen_model,
+    BsrAuditConfig config) {
+    if (!frozen_model ||
+        config.required_model_fingerprint.empty() ||
+        config.source_seed == 0 ||
+        config.reference_seed == 0 ||
+        config.source_seed == config.reference_seed ||
+        config.source_blocks == 0 ||
+        config.source_max_turns == 0 ||
+        config.production_worlds == 0 ||
+        config.roots_per_loss == 0 ||
+        config.roots_per_opponent == 0 ||
+        config.minimum_losses_per_opponent == 0 ||
+        config.maximum_legal_actions < 2 ||
+        config.reference.seed != config.reference_seed ||
+        config.reference.scout_worlds == 0 ||
+        config.reference.confirmation_worlds == 0 ||
+        config.reference.rollouts_per_world == 0 ||
+        config.reference.evaluation_threads == 0 ||
+        config.roots_per_opponent >
+            config.source_blocks * 4 *
+                config.roots_per_loss ||
+        config.minimum_losses_per_opponent >
+            config.roots_per_opponent) {
+        throw std::invalid_argument(
+            "invalid BSR audit configuration");
+    }
+    const std::string fingerprint =
+        learned_model_fingerprint(frozen_model);
+    if (fingerprint != config.required_model_fingerprint) {
+        throw std::invalid_argument(
+            "BSR frozen-model fingerprint mismatch");
+    }
+
+    BsrAuditReport report;
+    report.model_fingerprint = fingerprint;
+    report.config = config;
+    report.schedule = bsr_source_schedule(
+        config.source_seed, config.source_blocks);
+    report.descriptor_order_invariant = true;
+    report.hidden_repartition_passed = true;
+    report.scout_confirmation_seeds_disjoint = true;
+    bool traced_actions_valid = true;
+    bool observed_action_bound_passed = true;
+    std::vector<BsrHarvestedRoot> harvested;
+
+    for (std::size_t cell_index = 0;
+         cell_index < report.source_cells.size();
+         ++cell_index) {
+        const std::size_t opponent = cell_index / 4;
+        const std::size_t within_opponent = cell_index % 4;
+        report.source_cells[cell_index].opponent_deck =
+            static_cast<DeckId>(opponent);
+        report.source_cells[cell_index].tracked_seat =
+            within_opponent / 2;
+        report.source_cells[cell_index].tracked_starts =
+            within_opponent % 2 == 1;
+    }
+
+    for (const BsrSourceGame& scheduled :
+         report.schedule) {
+        if (scheduled.schedule_index >=
+                report.source_cells.size() ||
+            scheduled.tracked_seat >= kPlayerCount) {
+            throw std::logic_error(
+                "BSR source schedule contains an invalid cell");
+        }
+        BsrSourceCellSummary& cell =
+            report.source_cells[scheduled.schedule_index];
+        if (cell.opponent_deck !=
+                scheduled.opponent_deck ||
+            cell.tracked_seat != scheduled.tracked_seat ||
+            cell.tracked_starts !=
+                scheduled.tracked_starts) {
+            throw std::logic_error(
+                "BSR source schedule cell metadata changed");
+        }
+
+        const std::size_t tracked = scheduled.tracked_seat;
+        const std::size_t opponent = 1 - tracked;
+        const std::array<std::vector<CardId>, 2> decks = {
+            tracked == 0
+                ? deck_for(DeckId::Blue)
+                : deck_for(scheduled.opponent_deck),
+            tracked == 1
+                ? deck_for(DeckId::Blue)
+                : deck_for(scheduled.opponent_deck),
+        };
+        GameConfig game_config;
+        game_config.max_turns = config.source_max_turns;
+        game_config.starting_player =
+            scheduled.starting_player;
+        game_config.learned_model = frozen_model;
+        game_config.learned_search_depth = 1;
+        game_config.bots[tracked] = {
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action =
+                config.production_worlds,
+            .exploration_rate = 0.0,
+            .value_continuation_epsilon = 0.0,
+            .value_priority_residual_weight = 0.0,
+            .learned_model = frozen_model,
+        };
+        game_config.bots[opponent] = {
+            .kind = BotKind::Handcrafted,
+        };
+
+        Game game(
+            decks[0], decks[1], scheduled.seed,
+            game_config);
+        std::vector<LearnedDecisionTracePoint> trace;
+        const GameResult result =
+            game.run_with_priority_root_trace(trace);
+        ++cell.games;
+        cell.trace_roots += trace.size();
+        const bool tracked_lost =
+            result.winner == static_cast<int>(opponent);
+        if (tracked_lost) {
+            ++cell.tracked_losses;
+        } else if (result.winner < 0) {
+            ++cell.draws;
+            if (result.reason == EndReason::TurnLimit) {
+                ++cell.turn_limit_draws;
+            }
+        }
+
+        std::vector<BsrHarvestedRoot> game_roots;
+        for (std::size_t ordinal = 0;
+             ordinal < trace.size(); ++ordinal) {
+            const LearnedDecisionTracePoint& point =
+                trace[ordinal];
+            if (!point.context.valid ||
+                point.context.decision_player >=
+                    kPlayerCount) {
+                traced_actions_valid = false;
+                continue;
+            }
+            const auto trace_actions = legal_priority_actions(
+                point.state,
+                point.context.decision_player,
+                point.context.sorcery_actions);
+            const std::size_t trace_action_matches =
+                point.selected_priority_action.has_value()
+                    ? static_cast<std::size_t>(
+                          std::count(
+                              trace_actions.begin(),
+                              trace_actions.end(),
+                              *point.selected_priority_action))
+                    : 0;
+            traced_actions_valid =
+                traced_actions_valid &&
+                trace_action_matches == 1;
+
+            if (!point.state.stack.empty() &&
+                point.state.stack.back().controller <
+                    kPlayerCount) {
+                const std::size_t controller =
+                    point.state.stack.back().controller;
+                if (point.context.decision_player == tracked &&
+                    controller == opponent) {
+                    ++cell
+                          .tracked_held_opponent_stack_roots;
+                } else if (
+                    point.context.decision_player == opponent &&
+                    controller == opponent) {
+                    ++cell
+                          .opponent_held_opponent_stack_roots;
+                }
+            }
+
+            const BsrRootClassification classification =
+                classify_bsr_trace_root(
+                    point, tracked,
+                    config.maximum_legal_actions);
+            if (classification.eligibility ==
+                    BsrRootEligibility::
+                        ActionCountOutsideBounds &&
+                classification.legal_actions.size() >
+                    config.maximum_legal_actions) {
+                observed_action_bound_passed = false;
+            }
+            if (!tracked_lost ||
+                !classification.eligible()) {
+                continue;
+            }
+            ++cell.eligible_loss_roots;
+
+            DecisionProbe probe;
+            probe.category = Category::BlueCounterWar;
+            probe.decision_kind = DecisionKind::Priority;
+            probe.root_deck = DeckId::Blue;
+            probe.opponent_deck =
+                scheduled.opponent_deck;
+            probe.root_player = tracked;
+            probe.phase = point.context.phase;
+            probe.consecutive_passes =
+                point.context.consecutive_passes;
+            probe.state = point.state;
+            probe.original_decks = decks;
+            probe.candidates.reserve(
+                classification.legal_actions.size());
+            for (std::size_t action = 0;
+                 action <
+                 classification.legal_actions.size();
+                 ++action) {
+                probe.candidates.push_back(
+                    priority_candidate(
+                        classification.descriptors[action],
+                        classification
+                            .legal_actions[action]));
+            }
+
+            const std::string information_action_key =
+                bsr_information_action_key(probe);
+            const std::string provenance_key =
+                bsr_provenance_key(
+                    scheduled, ordinal);
+            const std::string actual_action_descriptor =
+                classification.descriptors.at(
+                    *classification.selected_action_index);
+            const BsrRootKeyContext root_key_context{
+                .game_seed = scheduled.seed,
+                .block = scheduled.block,
+                .schedule_index =
+                    scheduled.schedule_index,
+                .tracked_seat =
+                    scheduled.tracked_seat,
+                .tracked_starts =
+                    scheduled.tracked_starts,
+                .trace_ordinal = ordinal,
+            };
+            const std::string stable_root_key =
+                bsr_stable_root_key(
+                    probe, actual_action_descriptor,
+                    fingerprint, root_key_context);
+            const std::string stable_root_fingerprint =
+                bsr_hex64(
+                    dc1_stable_hash(stable_root_key));
+            probe.stable_id =
+                "bsr0." +
+                std::string(
+                    deck_name(
+                        scheduled.opponent_deck)) +
+                "." + provenance_key + ".k" +
+                stable_root_fingerprint;
+            probe.harvest = HarvestProvenance{
+                .collector =
+                    "Game::run_with_priority_root_trace",
+                .trajectory_script =
+                    "bsr0-blue-vs-handcrafted-source-v1",
+                .game_seed = scheduled.seed,
+                .starting_player =
+                    scheduled.starting_player,
+                .priority_decision_ordinal = ordinal,
+                .turn_number =
+                    point.state.turn_number,
+                .phase = point.context.phase,
+            };
+            game_roots.push_back({
+                .probe = std::move(probe),
+                .information_action_key =
+                    information_action_key,
+                .information_action_fingerprint =
+                    bsr_hex64(
+                        dc1_stable_hash(
+                            information_action_key)),
+                .stable_root_key =
+                    stable_root_key,
+                .stable_root_fingerprint =
+                    stable_root_fingerprint,
+                .actual_action_descriptor =
+                    actual_action_descriptor,
+                .provenance_key = provenance_key,
+                .source_game_key =
+                    bsr_source_game_key(scheduled),
+                .source_cell =
+                    scheduled.schedule_index,
+                .block = scheduled.block,
+                .schedule_index =
+                    scheduled.schedule_index,
+                .tracked_seat =
+                    scheduled.tracked_seat,
+                .tracked_starts =
+                    scheduled.tracked_starts,
+                .game_seed = scheduled.seed,
+                .trace_ordinal = ordinal,
+            });
+        }
+
+        if (tracked_lost && !game_roots.empty()) {
+            ++cell.loss_games_with_eligible_roots;
+        }
+        harvested.insert(
+            harvested.end(),
+            std::make_move_iterator(game_roots.begin()),
+            std::make_move_iterator(game_roots.end()));
+    }
+
+    std::array<std::set<std::string>, kDeckCount>
+        retained_loss_keys;
+    std::vector<BsrRetentionCandidate> retention_candidates;
+    retention_candidates.reserve(harvested.size());
+    for (const BsrHarvestedRoot& root : harvested) {
+        retention_candidates.push_back({
+            .opponent_deck = root.probe.opponent_deck,
+            .source_loss_key = root.source_game_key,
+            .provenance_key = root.provenance_key,
+            .stable_selection_key =
+                root.information_action_key,
+        });
+    }
+    const std::vector<std::size_t> retained_indices =
+        select_bsr_retained_candidate_indices(
+            retention_candidates, config.roots_per_loss,
+            config.roots_per_opponent);
+    std::vector<BsrHarvestedRoot> retained;
+    std::vector<BsrRetentionCandidate>
+        retained_contract_candidates;
+    retained.reserve(retained_indices.size());
+    retained_contract_candidates.reserve(
+        retained_indices.size());
+    for (const std::size_t index : retained_indices) {
+        BsrHarvestedRoot& root = harvested.at(index);
+        const std::size_t opponent =
+            static_cast<std::size_t>(
+                root.probe.opponent_deck);
+        ++report.source_cells.at(root.source_cell)
+              .retained_roots;
+        retained_loss_keys.at(opponent).insert(
+            root.source_game_key);
+        retained_contract_candidates.push_back(
+            retention_candidates.at(index));
+        retained.push_back(std::move(root));
+    }
+    std::sort(
+        retained.begin(), retained.end(),
+        [](const BsrHarvestedRoot& left,
+           const BsrHarvestedRoot& right) {
+            return std::tie(
+                       left.probe.opponent_deck,
+                       left.provenance_key,
+                       left.stable_root_key) <
+                   std::tie(
+                       right.probe.opponent_deck,
+                       right.provenance_key,
+                       right.stable_root_key);
+        });
+
+    for (std::size_t deck_index = 0;
+         deck_index < kDeckCount; ++deck_index) {
+        report.decks[deck_index].opponent_deck =
+            static_cast<DeckId>(deck_index);
+    }
+    for (const BsrSourceCellSummary& cell :
+         report.source_cells) {
+        const std::size_t deck_index =
+            static_cast<std::size_t>(
+                cell.opponent_deck);
+        bsr_add_cell_to_deck(
+            cell, report.decks.at(deck_index));
+    }
+    for (std::size_t deck_index = 0;
+         deck_index < kDeckCount; ++deck_index) {
+        report.decks[deck_index]
+            .retained_distinct_losses =
+            retained_loss_keys[deck_index].size();
+    }
+
+    report.roots.reserve(retained.size());
+    for (BsrHarvestedRoot& root : retained) {
+        BsrRootScore score = score_bsr_priority_probe(
+            root.probe, root.actual_action_descriptor,
+            frozen_model, config.reference);
+        if (score.information_action_fingerprint !=
+            root.information_action_fingerprint) {
+            throw std::logic_error(
+                "BSR reference changed the information/action key");
+        }
+        const std::size_t deck_index =
+            static_cast<std::size_t>(
+                root.probe.opponent_deck);
+        BsrDeckSummary& deck =
+            report.decks.at(deck_index);
+        if (score.diagnostic_stable_mistake) {
+            ++deck.diagnostic_stable_mistakes;
+        }
+        if (score.practical_high_cost_mistake) {
+            ++deck.practical_high_cost_mistakes;
+        }
+        deck.reference_rollout_evaluations +=
+            score.rollout_evaluations;
+        deck.reference_terminal_evaluations +=
+            score.terminal_evaluations;
+        deck.reference_bootstrapped_evaluations +=
+            score.bootstrapped_evaluations;
+        report.descriptor_order_invariant =
+            report.descriptor_order_invariant &&
+            score.descriptor_order_invariant;
+        report.hidden_repartition_passed =
+            report.hidden_repartition_passed &&
+            score.hidden_repartition_eligible &&
+            score.hidden_repartition_bit_identical;
+        report.scout_confirmation_seeds_disjoint =
+            report.scout_confirmation_seeds_disjoint &&
+            score.scout_seed != score.confirmation_seed;
+        report.reference_rollout_evaluations +=
+            score.rollout_evaluations;
+        report.reference_terminal_evaluations +=
+            score.terminal_evaluations;
+        report.reference_bootstrapped_evaluations +=
+            score.bootstrapped_evaluations;
+        report.roots.push_back({
+            .stable_id = root.probe.stable_id,
+            .stable_root_fingerprint =
+                root.stable_root_fingerprint,
+            .information_action_fingerprint =
+                root.information_action_fingerprint,
+            .opponent_deck =
+                root.probe.opponent_deck,
+            .block = root.block,
+            .schedule_index = root.schedule_index,
+            .tracked_seat = root.tracked_seat,
+            .tracked_starts = root.tracked_starts,
+            .game_seed = root.game_seed,
+            .trace_ordinal = root.trace_ordinal,
+            .turn_number =
+                root.probe.state.turn_number,
+            .phase = root.probe.phase,
+            .action_count =
+                root.probe.candidates.size(),
+            .actual_action_descriptor =
+                root.actual_action_descriptor,
+            .score = std::move(score),
+        });
+    }
+
+    for (const BsrSourceCellSummary& cell :
+         report.source_cells) {
+        report.source_games += cell.games;
+        report.tracked_losses += cell.tracked_losses;
+        report.draws += cell.draws;
+        report.turn_limit_draws +=
+            cell.turn_limit_draws;
+        report.trace_roots += cell.trace_roots;
+        report.tracked_held_opponent_stack_roots +=
+            cell.tracked_held_opponent_stack_roots;
+        report.opponent_held_opponent_stack_roots +=
+            cell.opponent_held_opponent_stack_roots;
+        report.eligible_loss_roots +=
+            cell.eligible_loss_roots;
+        report.loss_games_with_eligible_roots +=
+            cell.loss_games_with_eligible_roots;
+    }
+    for (const BsrDeckSummary& deck : report.decks) {
+        report.retained_distinct_losses +=
+            deck.retained_distinct_losses;
+        report.diagnostic_stable_mistakes +=
+            deck.diagnostic_stable_mistakes;
+        report.practical_high_cost_mistakes +=
+            deck.practical_high_cost_mistakes;
+        if (deck.practical_high_cost_mistakes != 0) {
+            ++report.mistake_opponent_strata;
+        }
+    }
+
+    const std::size_t expected_source_games =
+        config.source_blocks *
+        kBsrSourceGamesPerBlock;
+    report.source_balance_passed =
+        report.schedule.size() == expected_source_games &&
+        report.source_games == expected_source_games &&
+        std::all_of(
+            report.source_cells.begin(),
+            report.source_cells.end(),
+            [&](const BsrSourceCellSummary& cell) {
+                return cell.games ==
+                    config.source_blocks;
+            }) &&
+        std::all_of(
+            report.decks.begin(), report.decks.end(),
+            [&](const BsrDeckSummary& deck) {
+                return deck.games ==
+                    config.source_blocks * 4;
+            });
+
+    const std::size_t expected_retained =
+        config.roots_per_opponent * kDeckCount;
+    report.retention_passed =
+        retained.size() == expected_retained &&
+        report.roots.size() == expected_retained &&
+        bsr_retention_requirements_met(
+            retained_contract_candidates,
+            config.roots_per_loss,
+            config.roots_per_opponent,
+            config.minimum_losses_per_opponent) &&
+        std::all_of(
+            report.decks.begin(), report.decks.end(),
+            [&](const BsrDeckSummary& deck) {
+                return
+                    deck.retained_roots ==
+                        config.roots_per_opponent &&
+                    deck.retained_distinct_losses >=
+                        config
+                            .minimum_losses_per_opponent;
+            });
+
+    std::size_t deck_games = 0;
+    std::size_t deck_losses = 0;
+    std::size_t deck_draws = 0;
+    std::size_t deck_turn_limit_draws = 0;
+    std::size_t deck_trace_roots = 0;
+    std::size_t deck_tracked_held = 0;
+    std::size_t deck_opponent_held = 0;
+    std::size_t deck_eligible = 0;
+    std::size_t deck_eligible_games = 0;
+    std::size_t deck_retained = 0;
+    std::size_t deck_diagnostic = 0;
+    std::size_t deck_practical = 0;
+    std::size_t deck_reference_rollouts = 0;
+    std::size_t deck_reference_terminal = 0;
+    std::size_t deck_reference_bootstrapped = 0;
+    for (const BsrDeckSummary& deck : report.decks) {
+        deck_games += deck.games;
+        deck_losses += deck.tracked_losses;
+        deck_draws += deck.draws;
+        deck_turn_limit_draws +=
+            deck.turn_limit_draws;
+        deck_trace_roots += deck.trace_roots;
+        deck_tracked_held +=
+            deck.tracked_held_opponent_stack_roots;
+        deck_opponent_held +=
+            deck.opponent_held_opponent_stack_roots;
+        deck_eligible += deck.eligible_loss_roots;
+        deck_eligible_games +=
+            deck.loss_games_with_eligible_roots;
+        deck_retained += deck.retained_roots;
+        deck_diagnostic +=
+            deck.diagnostic_stable_mistakes;
+        deck_practical +=
+            deck.practical_high_cost_mistakes;
+        deck_reference_rollouts +=
+            deck.reference_rollout_evaluations;
+        deck_reference_terminal +=
+            deck.reference_terminal_evaluations;
+        deck_reference_bootstrapped +=
+            deck.reference_bootstrapped_evaluations;
+    }
+    std::size_t root_rollouts = 0;
+    std::size_t root_terminal = 0;
+    std::size_t root_bootstrapped = 0;
+    bool root_accounting = true;
+    for (const BsrRetainedRoot& root : report.roots) {
+        root_rollouts += root.score.rollout_evaluations;
+        root_terminal += root.score.terminal_evaluations;
+        root_bootstrapped +=
+            root.score.bootstrapped_evaluations;
+        root_accounting =
+            root_accounting &&
+            root.score.accounting_passed &&
+            root.action_count ==
+                root.score.action_count &&
+            root.actual_action_descriptor ==
+                root.score.actual_action_descriptor;
+    }
+    report.traced_actions_valid = traced_actions_valid;
+    report.accounting_passed =
+        deck_games == report.source_games &&
+        deck_losses == report.tracked_losses &&
+        deck_draws == report.draws &&
+        deck_turn_limit_draws ==
+            report.turn_limit_draws &&
+        deck_trace_roots == report.trace_roots &&
+        deck_tracked_held ==
+            report.tracked_held_opponent_stack_roots &&
+        deck_opponent_held ==
+            report.opponent_held_opponent_stack_roots &&
+        deck_eligible == report.eligible_loss_roots &&
+        deck_eligible_games ==
+            report.loss_games_with_eligible_roots &&
+        deck_retained == report.roots.size() &&
+        deck_diagnostic ==
+            report.diagnostic_stable_mistakes &&
+        deck_practical ==
+            report.practical_high_cost_mistakes &&
+        deck_reference_rollouts ==
+            report.reference_rollout_evaluations &&
+        deck_reference_terminal ==
+            report.reference_terminal_evaluations &&
+        deck_reference_bootstrapped ==
+            report.reference_bootstrapped_evaluations &&
+        root_rollouts ==
+            report.reference_rollout_evaluations &&
+        root_terminal ==
+            report.reference_terminal_evaluations &&
+        root_bootstrapped ==
+            report.reference_bootstrapped_evaluations &&
+        report.reference_terminal_evaluations <=
+            report.reference_rollout_evaluations &&
+        report.reference_bootstrapped_evaluations ==
+            report.reference_rollout_evaluations -
+                report.reference_terminal_evaluations &&
+        root_accounting;
+
+    const std::size_t reference_worlds =
+        config.reference.scout_worlds +
+        config.reference.confirmation_worlds;
+    const std::size_t maximum_per_original_pass =
+        bsr_expected_evaluations(
+            config.maximum_legal_actions,
+            reference_worlds,
+            config.reference.rollouts_per_world);
+    if (maximum_per_original_pass >
+        std::numeric_limits<std::size_t>::max() / 2) {
+        throw std::overflow_error(
+            "BSR hidden-clone evaluation bound overflow");
+    }
+    const std::size_t maximum_reference_evaluations =
+        expected_retained >
+                std::numeric_limits<std::size_t>::max() /
+                    (maximum_per_original_pass * 2)
+            ? std::numeric_limits<std::size_t>::max()
+            : expected_retained *
+                  maximum_per_original_pass * 2;
+    report.bounds_passed =
+        observed_action_bound_passed &&
+        report.roots.size() <= expected_retained &&
+        std::all_of(
+            report.roots.begin(), report.roots.end(),
+            [&](const BsrRetainedRoot& root) {
+                return root.action_count >= 2 &&
+                       root.action_count <=
+                           config.maximum_legal_actions;
+            }) &&
+        report.reference_rollout_evaluations <=
+            maximum_reference_evaluations;
+    report.audit_valid =
+        report.source_balance_passed &&
+        report.retention_passed &&
+        report.traced_actions_valid &&
+        report.descriptor_order_invariant &&
+        report.hidden_repartition_passed &&
+        report.scout_confirmation_seeds_disjoint &&
+        report.accounting_passed &&
+        report.bounds_passed;
+    report.diagnostic_replication_found =
+        report.audit_valid &&
+        report.diagnostic_stable_mistakes != 0;
+    report.gate_passed = bsr_practical_audit_gate(
+        report.audit_valid,
+        report.practical_high_cost_mistakes);
+    return report;
 }
 
 } // namespace old_school::probes

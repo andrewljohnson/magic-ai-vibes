@@ -56,6 +56,17 @@ export interface Card {
   flying?: boolean;
 }
 
+export function hasPublicCombatStats(
+  cardType: string | undefined,
+  power: number | undefined,
+  toughness: number | undefined,
+): boolean {
+  if (cardType !== undefined) {
+    return cardType.toLowerCase().includes("creature");
+  }
+  return power !== undefined || toughness !== undefined;
+}
+
 export interface Permanent {
   permanentId: string | number;
   card: Card;
@@ -284,6 +295,18 @@ export interface DamageOrderDecision {
   blockers: Array<string | number>;
 }
 
+export interface CleanupDiscardOption {
+  index: number;
+  card: Card;
+}
+
+export interface CleanupDiscardDecision {
+  kind: "cleanup_discard";
+  decisionId: string | number;
+  count: number;
+  options: CleanupDiscardOption[];
+}
+
 export function restoreOpaqueIds(
   selectedKeys: Iterable<string>,
   legalIds: readonly (string | number)[],
@@ -321,7 +344,8 @@ export type Decision =
   | PriorityDecision
   | AttackersDecision
   | BlockersDecision
-  | DamageOrderDecision;
+  | DamageOrderDecision
+  | CleanupDiscardDecision;
 
 export interface GameResult {
   winner?: number | null;
@@ -381,6 +405,43 @@ export interface LogEntry {
   phase?: string;
 }
 
+export interface PublicLogEntry {
+  message: string;
+  turn?: number;
+  player?: number;
+  kind?: string;
+}
+
+function explicitPublicLogMessage(
+  entry: string | LogEntry,
+): string | undefined {
+  if (typeof entry === "string") return entry;
+  for (const value of [entry.message, entry.text, entry.label]) {
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
+export function formatPublicLogEntry(
+  entry: string | LogEntry,
+): PublicLogEntry {
+  if (typeof entry === "string") return { message: entry };
+  return {
+    message: explicitPublicLogMessage(entry) ?? "Game event",
+    turn: Number.isSafeInteger(entry.turn) ? entry.turn : undefined,
+    player: Number.isSafeInteger(entry.player) ? entry.player : undefined,
+    kind: typeof entry.kind === "string" ? entry.kind : undefined,
+  };
+}
+
+export function latestPublicEventMessage(
+  entries: readonly (string | LogEntry)[],
+): string | undefined {
+  const latest = entries.at(-1);
+  if (latest === undefined) return undefined;
+  return explicitPublicLogMessage(latest);
+}
+
 export type DeckCard =
   | string
   | {
@@ -412,11 +473,60 @@ export interface SeatConfig {
 }
 
 export interface GameConfig {
-  seed: number;
+  seed: number | string;
   trainGames: number;
-  trainSeed: number;
+  trainSeed: number | string;
   debugReveal: boolean;
+  bluffMode: boolean;
+  rollouts: number;
+  deepRollouts: number;
+  learnedRollouts: number;
   players: [SeatConfig, SeatConfig];
+}
+
+export interface ReproductionPublicContext {
+  turnNumber?: number;
+  phase?: string;
+  priorityHolder: "You" | "None" | "Unknown";
+  latestEvent?: string;
+}
+
+export function reproductionPriorityHolder(
+  decisionKind: string | undefined,
+  hasPublicState: boolean,
+): ReproductionPublicContext["priorityHolder"] {
+  if (decisionKind === "priority") return "You";
+  return hasPublicState ? "None" : "Unknown";
+}
+
+export function formatReproductionSummary(
+  config: GameConfig,
+  context: ReproductionPublicContext,
+): string {
+  const turnNumber = Number.isSafeInteger(context.turnNumber)
+    ? String(context.turnNumber)
+    : "unknown";
+  const phase = context.phase?.length ? context.phase : "unknown";
+  const latestEvent =
+    context.latestEvent === undefined
+      ? "none"
+      : JSON.stringify(context.latestEvent);
+  return [
+    `you=${config.players[0].deckId}/${config.players[0].policyId}`,
+    `opponent=${config.players[1].deckId}/${config.players[1].policyId}`,
+    `game-seed=${String(config.seed)}`,
+    `train-games=${config.trainGames}`,
+    `train-seed=${String(config.trainSeed)}`,
+    `rollouts=${config.rollouts}`,
+    `deep-rollouts=${config.deepRollouts}`,
+    `learned-rollouts=${config.learnedRollouts}`,
+    `bluff=${config.bluffMode ? "on" : "off"}`,
+    `reveal=${config.debugReveal ? "on" : "off"}`,
+    `turn=${turnNumber}`,
+    `phase=${phase}`,
+    `priority-holder=${context.priorityHolder}`,
+    `latest-event=${latestEvent}`,
+  ].join(" | ");
 }
 
 export type ActionRequest =
@@ -425,4 +535,5 @@ export type ActionRequest =
   | {
       decisionId: string | number;
       pairs: Array<[string | number, string | number]>;
-    };
+    }
+  | { decisionId: string | number; indices: number[] };

@@ -32,7 +32,9 @@ test("production structured targets have stable readable labels", async () => {
     describeTopOfStack,
     formatStackEntryLabel,
     formatTargetLabel,
+    priorityDestinationKey,
     priorityOptionsForCard,
+    priorityOptionsForSourcePermanent,
     stackPermanentTargetIds,
   } = await loadTargetFormatter();
 
@@ -152,9 +154,31 @@ test("production structured targets have stable readable labels", async () => {
       },
       {
         index: 5,
-        label: "Cast Lightning Bolt → Grizzly Bears #110",
+        label: "Play Forest",
+        kind: "play_land",
+        card: { id: "card-1", name: "Forest" },
+      },
+      {
+        index: 6,
+        label: "Cast Lightning Bolt → Opponent",
         kind: "cast",
         card: { id: "card-5", name: "Lightning Bolt" },
+        target: { player: 1, label: "Opponent" },
+      },
+      {
+        index: 7,
+        label: "Cast Counterspell → stack #302",
+        kind: "cast",
+        card: { id: "card-13", name: "Counterspell" },
+        spellTarget: 302,
+      },
+      {
+        index: 8,
+        label: "Activate Millstone → Opponent",
+        kind: "activate",
+        card: { id: "card-20", name: "Millstone" },
+        sourcePermanent: 900,
+        target: { player: 1, label: "Opponent" },
       },
     ],
   };
@@ -164,6 +188,34 @@ test("production structured targets have stable readable labels", async () => {
     ),
     [3, 4],
     "one dragged card definition must expose every exact target-specific option",
+  );
+  assert.equal(
+    priorityDestinationKey(giantGrowthDecision.options[1]),
+    "permanent:110",
+  );
+  assert.equal(
+    priorityDestinationKey(giantGrowthDecision.options[2]),
+    "permanent:210",
+  );
+  assert.equal(priorityDestinationKey(giantGrowthDecision.options[3]), "play");
+  assert.equal(
+    priorityDestinationKey(giantGrowthDecision.options[4]),
+    "player:1",
+  );
+  assert.equal(
+    priorityDestinationKey(giantGrowthDecision.options[5]),
+    "stack:302",
+  );
+  assert.deepEqual(
+    priorityOptionsForCard(giantGrowthDecision, "card-20"),
+    [],
+    "a permanent activation must never masquerade as a hand-card action",
+  );
+  assert.deepEqual(
+    priorityOptionsForSourcePermanent(giantGrowthDecision, 900).map(
+      (option) => option.index,
+    ),
+    [8],
   );
   assert.deepEqual(priorityOptionsForCard(undefined, "card-3"), []);
 });
@@ -175,21 +227,15 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   ]);
 
   assert.match(app, /formatStackTargets\(entry\)/);
-  assert.match(
-    app,
-    /key=\{entry\.stackId \?\? entry\.id \?\?/,
-  );
+  assert.match(app, /const stackId = entry\.stackId \?\? entry\.id/);
+  assert.match(app, /key=\{stackId \?\?/);
   assert.match(app, /formatTargetLabel\(option\.target\)/);
   assert.match(app, /option\.spellTarget/);
   assert.match(app, /describeTopOfStack\(state\.stack \?\? \[\]\)/);
   assert.match(app, /"Respond to the stack"/);
-  assert.match(
-    app,
-    /continue toward resolving \$\{stackInteraction\.label\}/,
-  );
+  assert.match(app, /\? "Pass toward resolution" : "Pass priority"/);
   assert.match(app, /concisePriorityOptionLabel\(option\)/);
   assert.match(app, /target\s*\?\s*`Target → \$\{target\}`/);
-  assert.match(css, /\.action-card\.no-card\s*\{/);
   assert.match(app, /stackPermanentTargetIds\(stack\)/);
   assert.equal(
     app.match(/targetedPermanentIds=\{targetedPermanentIds\}/g)?.length,
@@ -201,26 +247,32 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   assert.match(css, /\.card-face\.is-targeted\s*\{[^}]*outline:/s);
   assert.match(css, /\.status-targeted\s*\{/);
   assert.match(css, /\.stack-choice-context\s*\{/);
+  assert.match(
+    app,
+    /priorityStackTargetIds\?\.has\(String\(stackId\)\)/,
+  );
+  assert.match(
+    app,
+    /choosePriorityDestination\(`stack:\$\{id\}`\)/,
+  );
+  assert.match(css, /\.stack-entry\.is-priority-destination\s*\{/);
+  assert.match(css, /\.stack-surface-action\s*\{/);
   assert.doesNotMatch(app, /\{entry\.target\}/);
   assert.doesNotMatch(app, /entry\.targets\?\.join/);
 });
 
-test("playable hand cards inspect safely and drag onto exact engine options", async () => {
+test("priority origins route to exact Arena surfaces without a legal-action wall", async () => {
   const [app, css] = await Promise.all([
     source("src/App.tsx"),
     source("src/styles.css"),
   ]);
-  const inspector = app.slice(
-    app.indexOf("function CardInspector"),
-    app.indexOf("function PriorityControls"),
-  );
-  const priorityControls = app.slice(
-    app.indexOf("function PriorityControls"),
-    app.indexOf("function AttackersControls"),
-  );
   const dragHandler = app.slice(
     app.indexOf("const startHandCardDrag"),
-    app.indexOf("const inspectedCardOptions"),
+    app.indexOf("const selectPriorityPermanentOrigin"),
+  );
+  const routing = app.slice(
+    app.indexOf("const playableHandCardIds"),
+    app.indexOf("const toggleAttacker"),
   );
 
   assert.match(app, /draggable=\{playable && Boolean\(onCardDragStart\)\}/);
@@ -233,37 +285,82 @@ test("playable hand cards inspect safely and drag onto exact engine options", as
     /card\.name/,
     "drag legality must come from engine options, not card-name knowledge",
   );
-
-  assert.match(inspector, /role="dialog"/);
-  assert.match(inspector, /aria-modal="true"/);
-  assert.match(inspector, /Inspecting never plays a card/);
-  assert.match(inspector, /onFocusOption\(option\)/);
+  assert.match(routing, /priorityOptionsForCard\(priorityDecision, card\.id\)/);
+  assert.match(
+    routing,
+    /priorityOptionsForSourcePermanent\(\s*priorityDecision,\s*permanentId/,
+  );
+  assert.match(routing, /priorityDestinationKey\(option\)/);
+  assert.match(
+    routing,
+    /new Map<\s*PriorityDestinationKey,\s*PriorityOption\[\]/,
+  );
+  assert.match(
+    routing,
+    /priorityDestinationGroups\.get\(destination\) \?\? \[\]/,
+  );
+  assert.match(
+    routing,
+    /playOptions\.length === 1[\s\S]+?submitPriorityOption\(playOptions\[0\]\)/,
+    "double-click may immediately submit only one exact targetless option",
+  );
+  assert.match(app, /data-priority-play-target=\{priorityPlayTarget \|\| undefined\}/);
+  assert.match(app, /onCardDoubleClick=\{doubleClickHandCard\}/);
+  assert.match(app, /choiceTarget=\{priorityDestination\}/);
+  assert.match(app, /priorityTarget=\{priorityPlayerTargets\?\.has\(seat\)\}/);
+  assert.match(
+    app,
+    /priorityStackTargetIds\?\.has\(String\(stackId\)\)/,
+  );
+  assert.match(app, /className="priority-parameter-chooser"/);
+  assert.match(app, /index: option\.index/);
+  assert.match(
+    app,
+    /const draggedPriorityOriginRef = useRef<PriorityOriginSelection \| null>/,
+  );
+  assert.match(
+    routing,
+    /draggedPriorityOriginRef\.current = origin;[\s\S]+?setDraggedPriorityOrigin\(origin\)/,
+    "native drag legality must become synchronous before React renders highlights",
+  );
+  assert.match(
+    app,
+    /onDragOver=\{\(event\) => onPriorityDragOver\?\.\("play", event\)\}/,
+  );
+  assert.match(
+    app,
+    /onPriorityDragOver\?\.\(`permanent:\$\{id\}`, event\)/,
+  );
+  assert.match(
+    routing,
+    /matchingPriorityDropOptions\(origin, destination\)[\s\S]+?event\.preventDefault\(\)/,
+  );
   assert.doesNotMatch(
-    inspector,
-    /onSubmit/,
-    "inspection links focus actions and never submit them",
-  );
-  assert.match(app, /event\.key === "Escape" && inspectedHandCard/);
-  const inspectorShortcutGuard = app.indexOf("!inspectedHandCard");
-  const numericShortcut = app.indexOf('/^[1-9]$/.test', inspectorShortcutGuard);
-  assert.ok(
-    inspectorShortcutGuard >= 0 && numericShortcut > inspectorShortcutGuard,
-    "the open inspector must suppress numeric action shortcuts",
-  );
-
-  assert.match(
-    priorityControls,
-    /String\(option\.card\.id\) === draggedCardId/,
+    app,
+    /target\.closest\("\\.permanent-zone"\)/,
+    "the empty near battlefield and its non-button children must all accept play clicks",
   );
   assert.match(
-    priorityControls,
-    /onDrop=[\s\S]+?index: option\.index/,
-    "dropping must submit the exact engine option, including its target",
+    app,
+    /decision\.kind !== "priority" && \([\s\S]+?className="decision-heading"/,
   );
-  assert.match(priorityControls, />DROP TO PLAY<\/span>/);
-  assert.match(css, /\.action-card\.is-drop-target\s*\{/);
-  assert.match(css, /\.drop-cue\s*\{/);
-  assert.match(css, /\.card-inspect-face \.card-face\s*\{[^}]*width:\s*220px;[^}]*height:\s*306px;/s);
+  assert.match(css, /\.decision-dock\.is-priority\s*\{/);
+  assert.match(
+    css,
+    /\.game-shell\.has-decision\.has-priority-decision\s*\{[^}]*--player-decision-height:\s*78px;/s,
+  );
+  assert.match(css, /\.player-side\.is-play-destination\s*\{/);
+  assert.match(css, /\.card-face\.is-choice-target\s*\{/);
+  assert.match(css, /\.surface-action\s*\{/);
+  assert.doesNotMatch(app, /function CardInspector/);
+  assert.doesNotMatch(app, /className="action-card/);
+  assert.doesNotMatch(app, /play-cast-zone/);
+  assert.doesNotMatch(app, />SELECTED</);
+  assert.doesNotMatch(
+    routing,
+    /card\.name|card\.type/,
+    "Arena routing must use structured engine fields, never card identity heuristics",
+  );
 });
 
 test("browser selections preserve opaque numeric IDs in every combat request", async () => {
@@ -288,6 +385,20 @@ test("browser selections preserve opaque numeric IDs in every combat request", a
       [{ blocker: "bear-a", legalAttackers: ["orc-b"] }],
     ),
     [["orc-b", "bear-a"]],
+  );
+  assert.deepEqual(
+    blockerPairsFromKeys(
+      { 31: "21", 32: "21" },
+      [
+        { blocker: 31, legalAttackers: [21] },
+        { blocker: 32, legalAttackers: [21] },
+      ],
+    ),
+    [
+      [21, 31],
+      [21, 32],
+    ],
+    "multiple blockers may converge on one attacker without stringifying IDs",
   );
 
   assert.match(

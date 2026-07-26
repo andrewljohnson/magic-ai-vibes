@@ -667,9 +667,10 @@ bool unique_values(const std::vector<Value>& values) {
 class JsonController {
   public:
     JsonController(std::istream& input, std::ostream& output,
-                   bool reveal_opponent_hand)
+                   bool reveal_opponent_hand, bool bluff_mode)
         : input_(input), output_(output),
-          reveal_opponent_hand_(reveal_opponent_hand) {}
+          reveal_opponent_hand_(reveal_opponent_hand),
+          bluff_mode_(bluff_mode) {}
 
     HumanController controller() {
         return {
@@ -713,6 +714,7 @@ class JsonController {
                     observe(observation, event);
                 },
             .reveal_opponent_hand = reveal_opponent_hand_,
+            .bluff_mode = bluff_mode_,
         };
     }
 
@@ -1076,6 +1078,7 @@ class JsonController {
     std::istream& input_;
     std::ostream& output_;
     bool reveal_opponent_hand_ = false;
+    bool bluff_mode_ = false;
     std::uint64_t decision_id_ = 0;
     TurnPhase phase_ = TurnPhase::FirstMain;
 };
@@ -1183,7 +1186,8 @@ int run_bridge_session(std::istream& input, std::ostream& output,
     game_config.learned_model = learned_model;
 
     JsonController controller(
-        input, output, config.reveal_opponent_hand);
+        input, output, config.reveal_opponent_hand,
+        config.bluff_mode);
     game_config.human_controllers[0] =
         controller.controller();
 

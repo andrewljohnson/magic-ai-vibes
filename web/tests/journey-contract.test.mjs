@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -12,13 +13,13 @@ const JOURNEY_BRIDGE = path.join(
   "journey-bridge.mjs",
 );
 
-function makeHarness(t) {
+function makeHarness(t, options = {}) {
   let nextId = 0;
   const harness = createGameContractHarness({
     bridgePath: process.execPath,
-    bridgeArgsPrefix: [JOURNEY_BRIDGE],
+    bridgeArgsPrefix: [JOURNEY_BRIDGE, ...(options.bridgeArgs ?? [])],
     initialTimeoutMs: 5_000,
-    actionTimeoutMs: 5_000,
+    actionTimeoutMs: options.actionTimeoutMs ?? 5_000,
     idFactory: () => `journey-${++nextId}`,
   });
   t.after(() => harness.shutdown());
@@ -77,6 +78,76 @@ function assertVisibleHumanHand(game, expectedSize) {
   );
 }
 
+test("journey Pass priority settles and unsupported branches fail promptly", async (t) => {
+  const harness = makeHarness(t, { actionTimeoutMs: 500 });
+  const { game: opening } = await harness.create({
+    players: [
+      { deckId: "green", policyId: "human" },
+      { deckId: "green", policyId: "learned-value" },
+    ],
+    seed: 42,
+    trainGames: 800,
+    trainSeed: 424242,
+    debugReveal: false,
+  });
+
+  const { game: passed } = await harness.action(opening.id, {
+    decisionId: 1,
+    index: 0,
+  });
+  assert.equal(passed.status, "awaiting_action");
+  assert.equal(passed.decision.id, 7);
+  assert.equal(passed.decision.kind, "attackers");
+  assert.deepEqual(passed.decision.eligible, [102]);
+  assert.equal(passed.snapshot.phase, "declare_attackers");
+  assert.equal(passed.snapshot.players[0].handSize, 7);
+  assert.equal(passed.events.at(-1).kind, "priority_action");
+  assert.equal(passed.events.at(-1).message, "You: Pass priority");
+
+  const { game: failed } = await harness.action(passed.id, {
+    decisionId: 7,
+    ids: [],
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.decision, null);
+  assert.equal(failed.error.code, "bridge_failed");
+  assert.match(failed.error.message, /exited unexpectedly \(code 3\)/);
+});
+
+test("delayed journey mode has a real bounded in-flight interval", async (t) => {
+  const delayMs = 250;
+  const harness = makeHarness(t, {
+    actionTimeoutMs: 2_000,
+    bridgeArgs: ["--fixture-delay-ms", String(delayMs)],
+  });
+  const { game: opening } = await harness.create({
+    players: [
+      { deckId: "green", policyId: "human" },
+      { deckId: "green", policyId: "learned-value" },
+    ],
+    seed: 42,
+    trainGames: 800,
+    trainSeed: 424242,
+    debugReveal: false,
+  });
+
+  const startedAt = performance.now();
+  const { game: passed } = await harness.action(opening.id, {
+    decisionId: 1,
+    index: 0,
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.ok(
+    elapsedMs >= delayMs - 25,
+    `delayed fixture settled too early after ${elapsedMs.toFixed(1)} ms`,
+  );
+  assert.equal(passed.status, "awaiting_action");
+  assert.equal(passed.snapshot.phase, "declare_attackers");
+  assert.equal(passed.decision.kind, "attackers");
+  assert.deepEqual(passed.decision.eligible, [102]);
+});
+
 async function runFullJourney(harness, config) {
   let { game } = await harness.create(config);
   assert.equal(game.status, "awaiting_action");
@@ -90,6 +161,7 @@ async function runFullJourney(harness, config) {
     trainGames: 800,
     trainSeed: "424242",
     debugReveal: false,
+    bluffMode: false,
     rollouts: 2,
     deepRollouts: 8,
     learnedRollouts: 2,
@@ -110,24 +182,25 @@ async function runFullJourney(harness, config) {
     decisionId: 2,
     index: 1,
   }));
-  assert.equal(game.decision.id, 3);
-  assert.equal(game.decision.kind, "priority");
-  assert.equal(game.snapshot.stack.length, 1);
-  assert.equal(game.snapshot.stack[0].stackId, 1);
-  assert.equal(game.snapshot.stack[0].kind, "spell");
-  assert.equal(game.snapshot.stack[0].card.name, "Grizzly Bears");
-  assertVisibleHumanHand(game, 5);
-  assert.equal(game.events.at(-1).kind, "priority_action");
-  assert.match(game.events.at(-1).message, /Cast Grizzly Bears/);
-
-  ({ game } = await harness.action(game.id, {
-    decisionId: 3,
-    index: 0,
-  }));
+  assert.equal(game.decision.id, 4);
+  assert.equal(game.decision.kind, "attackers");
   assert.equal(game.snapshot.stack.length, 0);
   assert.equal(game.snapshot.players[0].creatures.length, 2);
-  assert.equal(game.decision.kind, "attackers");
   assert.deepEqual(game.decision.eligible, [101, 102]);
+  assertVisibleHumanHand(game, 5);
+  assert.ok(
+    game.events.some(
+      ({ kind, message }) =>
+        kind === "priority_action" && /Cast Grizzly Bears/.test(message),
+    ),
+  );
+  assert.ok(
+    game.events.some(
+      ({ kind, message }) =>
+        kind === "priority_action" && /Pass priority/.test(message),
+    ),
+    "the forced pass remains observable as an event without becoming a decision",
+  );
   assert.ok(game.events.some(({ kind }) => kind === "stack_resolved"));
   assert.equal(game.events.at(-1).kind, "turn_started");
 
@@ -138,6 +211,11 @@ async function runFullJourney(harness, config) {
   assert.equal(game.decision.kind, "damage_order");
   assert.equal(game.decision.attacker, 101);
   assert.deepEqual(game.decision.blockers, [201, 202]);
+  assert.deepEqual(
+    game.snapshot.players[1].creatures.map(({ permanentId }) => permanentId),
+    [201, 202],
+    "every damage-order ID must map to a visible public permanent",
+  );
   assert.equal(game.events.at(-2).kind, "attackers_declared");
   assert.equal(game.events.at(-1).kind, "blockers_declared");
 
@@ -146,19 +224,26 @@ async function runFullJourney(harness, config) {
     ids: [202, 201],
   }));
   assert.equal(game.decision.kind, "blockers");
-  assert.deepEqual(game.decision.attackers, [202]);
+  assert.deepEqual(game.decision.attackers, [201]);
   assert.deepEqual(game.decision.choices, [
-    { blocker: 102, legalAttackers: [202] },
+    { blocker: 102, legalAttackers: [201] },
   ]);
+  assert.deepEqual(
+    game.snapshot.players[1].creatures.map(({ permanentId }) => permanentId),
+    [201],
+    "damage removes the first ordered blocker and keeps the other one",
+  );
   assert.ok(game.events.some(({ kind }) => kind === "damage_order"));
   assert.ok(game.events.some(({ kind }) => kind === "combat_resolved"));
 
   ({ game } = await harness.action(game.id, {
     decisionId: 6,
-    pairs: [[202, 102]],
+    pairs: [[201, 102]],
   }));
   assert.equal(game.status, "finished");
   assert.equal(game.decision, null);
+  assert.deepEqual(game.snapshot.players[0].creatures, []);
+  assert.deepEqual(game.snapshot.players[1].creatures, []);
   assert.equal(game.events.at(-2).kind, "blockers_declared");
   assert.equal(game.events.at(-1).kind, "combat_resolved");
   assert.deepEqual(game.result, {
@@ -256,4 +341,38 @@ test("debug reveal is explicit and leaves the human hand visible", async (t) => 
   } finally {
     harness.delete(game.id);
   }
+});
+
+test("journey fixtures have stable make commands", async () => {
+  const webDirectory = path.dirname(TEST_DIRECTORY);
+  const [packageJson, fixtureServer, makefile] = await Promise.all([
+    readFile(path.join(webDirectory, "package.json"), "utf8").then(JSON.parse),
+    readFile(path.join(webDirectory, "fixture-server.mjs"), "utf8"),
+    readFile(path.join(webDirectory, "..", "Makefile"), "utf8"),
+  ]);
+
+  assert.equal(
+    packageJson.scripts["fixture:journey"],
+    "node fixture-server.mjs journey",
+  );
+  assert.equal(
+    packageJson.scripts["fixture:delayed-journey"],
+    "node fixture-server.mjs delayed-journey",
+  );
+  assert.match(
+    fixtureServer,
+    /"journey",\s*path\.join\(directory, "tests", "fixtures", "journey-bridge\.mjs"\)/,
+  );
+  assert.match(
+    fixtureServer,
+    /fixtureName === "delayed-journey"[\s\S]+?"--fixture-delay-ms", "650"/,
+  );
+  assert.match(
+    makefile,
+    /web-journey:[^\n]*\n\tnpm --prefix web run build\n\tnpm --prefix web run fixture:journey/,
+  );
+  assert.match(
+    makefile,
+    /web-delayed-journey:[^\n]*\n\tnpm --prefix web run build\n\tnpm --prefix web run fixture:delayed-journey/,
+  );
 });
