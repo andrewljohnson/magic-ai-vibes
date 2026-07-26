@@ -110,20 +110,18 @@ test("hand hover keeps card headings inside 1440x900 and 1280x720 layouts", asyn
 test("match typography keeps a readable floor without enlarging fixed regions", async () => {
   const css = await source("styles.css");
   const rootRule = cssRule(css, ":root");
-  assert.match(rootRule, /--type-floor:\s*10px/);
-  assert.match(rootRule, /--card-type-floor:\s*9px/);
+  assert.match(rootRule, /--type-floor:\s*11px/);
+  assert.match(rootRule, /--type-label:\s*12px/);
+  assert.match(rootRule, /--card-type-floor:\s*11px/);
+  assert.match(rootRule, /--card-name-size:\s*12px/);
 
   const uiFloorSelectors = [
     ".event-index",
     ".event-turn",
-    ".turn-marker span",
-    ".phase-steps li",
     ".priority-marker span",
     ".zone-badge",
     ".row-label",
-    ".hand-label",
     ".stack-entry > span:not(.stack-order)",
-    ".decision-heading p",
     ".stack-choice-context > small",
     ".action-copy span",
   ];
@@ -131,12 +129,25 @@ test("match typography keeps a readable floor without enlarging fixed regions", 
     assert.match(
       cssRule(css, selector),
       /font-size:\s*var\(--type-floor\)/,
-      `${selector} must use the 10px interface floor`,
+      `${selector} must use the 11px interface floor`,
+    );
+  }
+
+  for (const selector of [
+    ".turn-marker span",
+    ".phase-steps li",
+    ".hand-label",
+    ".decision-heading p",
+    ".deck-manifest li",
+  ]) {
+    assert.match(
+      cssRule(css, selector),
+      /font-size:\s*var\(--type-label\)/,
+      `${selector} must use a 12px primary-label size`,
     );
   }
 
   const cardFloorSelectors = [
-    ".card-name",
     ".mana-cost",
     ".card-type",
     ".combat-stats",
@@ -146,17 +157,32 @@ test("match typography keeps a readable floor without enlarging fixed regions", 
     assert.match(
       cssRule(css, selector),
       /font-size:\s*var\(--card-type-floor\)/,
-      `${selector} must use the 9px embedded-card floor`,
+      `${selector} must use the 11px embedded-card floor`,
     );
   }
+  assert.match(
+    cssRule(css, ".card-name"),
+    /font-size:\s*var\(--card-name-size\)/,
+  );
+  assert.match(cssRule(css, ".hand-card-wrap .card-name"), /font-size:\s*13px/);
 
   const undersizedLiterals = [...css.matchAll(/font-size:\s*(\d+)px/g)]
     .map(([, value]) => Number(value))
-    .filter((value) => value > 0 && value < 9);
+    .filter((value) => value > 0 && value < 11);
   assert.deepEqual(
     undersizedLiterals,
     [],
-    "content text must not bypass the 9px absolute floor",
+    "content text must not bypass the 11px absolute floor",
+  );
+  assert.equal(css.match(/font-size:\s*0\s*;/g)?.length, 1);
+  assert.match(
+    css,
+    /Intentional exception: the adjacent 17px icon replaces this text label\.\s*\*\/\s*font-size:\s*0/,
+  );
+  assert.doesNotMatch(
+    css,
+    /scale\(0\./,
+    "responsive transforms must not shrink readable type below its declared size",
   );
 
   const shellRule = cssRule(css, ".game-shell");

@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 21:03 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 21:12 PDT — refreshed at the top of every review cycle.*
 
 - **P1R rejected: the outcome signal overcorrects.** With the
   optimizer fixed (all mechanism gates passed), the learned residual
@@ -91,6 +91,15 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 21:12 PDT
+
+FT128's CLI (`--diagnose-terminal-credit`, K=1024/H=128, fail-closed
+terminality) landed in the committed binary; no result recorded yet.
+The reviewer has launched the preregistered command verbatim — the
+independent first run, per the pattern that served the seed-909
+champion screen. Result in the next entry. Lift table
+deterministic-identical (3 of 5).
 
 ## 2026-07-25 21:03 PDT
 
