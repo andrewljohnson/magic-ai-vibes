@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 10:17 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 11:11 PDT — refreshed every review cycle.*
 
 - **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
   current read (pooled 240 games/cell over seeds 4242+7801): **1 of
@@ -36,12 +36,12 @@ binary, never from extrapolation.
   Blue -15pp / Green +18pp in self-play). First recipe fork
   C17-DB8 (bootstrap 4->8) is TRAINING in the challenger tree,
   seed 8629 reserved.**
-- **AUTHORIZATION ACCEPTED (user-delegated): calendar-8 reopens as
-  a COMPOSITE COMPONENT ONLY — the joint multi-family declaration
-  is now unblocked pending PD0's diagnostic and the repaired RB0.
-  PD0 (exact Pass-dominance filter via the DC1 comparator)
-  supersedes OSC-2's hardcoded class prune; OSC-2's in-flight gate
-  (seed 6871) provides the class-level prior.**
+- **ONE EVENT FROM THE COMPOSITE: PD0 is COMPLETE (all gates
+  passed; verified bit-exact; accepted as component) and the fresh
+  RB0-0 sealed census is declared. On its verdict the joint
+  declaration follows — calendar-8 + continuation prune + PD0
+  filter, plus density iff RB0 passes. All replication machinery
+  frozen and ready.**
 - **OSC-1 (continuation prune): rejected standalone at 47.8% BUT
   the registered instrument hit the night's best Blue mirror
   (55.9% vs ~49%). SIX single-change forms, six instrument
@@ -51,11 +51,13 @@ binary, never from extrapolation.
   verdict + one joint declaration. Pay component struck as moot
   (engine already PayIfAble); near-tie defects go to component (d)
   pass-preference tie-break.**
-- **RB0-0 SEALED RUN: INFRASTRUCTURE FAILURE (exit 2 at a guard
-  that did not name its failing invariant; seed quarantined, no
-  inference — correctly handled). Recommendations delivered:
-  per-invariant failure lines + a no-seed dry-run mode. Density is
-  now the composite's critical path.**
+- **RB0 DIAGNOSED: floating-point mass drift (uncompensated
+  129,280-row summation vs 64-epsilon on arm64), found via
+  named-invariant engineering preflight — both 08:32 process
+  recommendations now standard practice. Fix scoped to diagnostic
+  summaries only; clean post-fix capture licenses a fresh RB0-0
+  seed. Composite timeline: preflight -> RB0-0 -> PD0 -> joint
+  declaration.**
 - **RB0-0 (Codex) was the one live mechanism: FEAT-0b
   came back unsupported with ZERO VARIANCE at the early stratum —
   early-Green optimism predates the board entirely, killing the
@@ -147,6 +149,89 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 11:11 PDT (review cycle)
+
+**No-change cycle at the record level: the RB0-0 sealed rerun is
+executing (declaration frozen at HEAD, capture pending).** Lift
+table: bit-identical, sixty-fourth cycle. The program holds at one
+in-flight sealed event from the composite's component
+finalization.
+
+## 2026-07-26 11:03 PDT (review cycle — PD0 complete; one event remains)
+
+**PD0 has passed its COMPLETE gate set — mechanism (verified
+bit-exact by me), hidden-information, default-off,
+large-regression (51.2% filtered aggregate, floor 40%), and
+runtime (+7.35% vs 25% cap) — and is accepted as a composite
+candidate component. The fresh RB0-0 sealed rerun is declared on
+searched seed 202607261047. The joint composite declaration is now
+ONE SEALED EVENT away.** The descriptive smoke slices (48-game,
+correctly not evidence) lean the right way: Blue 75.0% filtered vs
+66.7% unfiltered, RU 54.2 vs 47.9.
+
+Lift table: bit-identical, sixty-third cycle. My replication arm,
+instrument panel, and frozen baseline stand ready; on RB0-0's
+verdict (either way), the composite's component set finalizes and
+the joint declaration should follow immediately — with density if
+it passes, without if it fails.
+
+## 2026-07-26 10:54 PDT (research thread — PD0 verified)
+
+**PD0's mechanism pass is VERIFIED: my deterministic reproduction
+returns exit 0 with both published selection hashes bit-exact (G0
+control 0x74c3bb33..., C16 treatment 0xa40ef88a...). All eleven
+comparator controls — including the user's redundant-counter
+fixture (dominated) and payable Force Spike (retained) — behave
+exactly as declared.** The dominated-line filter is proven at the
+mechanism level. Remaining before the joint composite: your frozen
+PD0 large-regression smoke and the fresh RB0-0 sealed census, both
+licensed. My replication arm and instrument panel (baseline
+profile frozen at 1/6/11 waste) stand ready.
+
+## 2026-07-26 10:47 PDT (review cycle)
+
+**PD0's benchmark admission repair is frozen (09b7e74) — final
+pre-run preparation continuing after the RB0 preflight pass.**
+Both sealed runs (PD0 diagnostic, fresh RB0-0) remain licensed and
+queued. Lift table: bit-identical, sixty-second cycle. All
+positions hold.
+
+## 2026-07-26 10:40 PDT (review cycle — RB0 repaired)
+
+**The repaired RB0 preflight PASSED (exit 0, all named invariants,
+scientific hashes unchanged, capture 4432f4a2) — the compensated
+accumulation fixed the arm64 mass drift with the fix's scope
+verified by hash identity on every scientific artifact. A fresh
+RB0-0 sealed seed declaration is now licensed with the original
+hypothesis untouched.** Clean recovery: failure -> named-invariant
+diagnosis -> scoped fix -> adversarial regression -> engineering
+preflight -> license, without one scientific surface moving. Lift
+table: bit-identical, sixty-first cycle.
+
+Composite timeline now reads: fresh RB0-0 sealed run + PD0 sealed
+diagnostic (both licensed and queued) -> joint declaration. My
+baseline instrument profile completes its last probe track in
+parallel.
+
+## 2026-07-26 10:32 PDT (review cycle — RB0 diagnosed)
+
+**Verdict: the RB0 mechanical diagnosis (9ade1a6) is exactly right
+and exactly scoped — the sealed failure was floating-point mass
+drift (uncompensated summation over 129,280 rows tripping the
+64-epsilon tolerance on arm64), found via a named-invariant
+engineering preflight on a permitted non-scientific seed. The fix
+touches ONLY diagnostic mass summaries (compensated accumulation),
+adds the >=129,280-row adversarial regression first, and licenses
+nothing but a fresh RB0-0 seed declaration after a clean post-fix
+capture with unchanged scientific hashes.** Both process
+recommendations from my 08:32 entry are now operating practice:
+named invariants and the dry-run preflight.
+
+Composite path timeline is now concrete: post-fix preflight ->
+fresh RB0-0 sealed run -> (with PD0's sealed diagnostic) -> joint
+declaration. Lift table: bit-identical, sixtieth cycle. My
+baseline instrument profile is one probe track from frozen.
 
 ## 2026-07-26 10:17 PDT (review cycle)
 

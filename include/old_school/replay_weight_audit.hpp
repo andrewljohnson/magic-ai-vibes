@@ -16,7 +16,9 @@
 
 namespace old_school::replay_weight_audit {
 
-inline constexpr std::uint64_t kAuditSeed = 202607260731ULL;
+inline constexpr std::uint64_t kAuditSeed = 202607261047ULL;
+inline constexpr std::uint64_t kQuarantinedAuditSeed =
+    202607260731ULL;
 inline constexpr std::size_t kAuditGeneration = 20;
 inline constexpr std::size_t kAuditBalancedBlocks = 60;
 inline constexpr std::size_t kAuditPhysicalGames =

@@ -108,13 +108,13 @@ void test_quarantined_seed_is_rejected() {
     bool rejected = false;
     try {
         mechanical::require_engineering_seed(
-            rb0::kAuditSeed);
+            rb0::kQuarantinedAuditSeed);
     } catch (const std::invalid_argument& error) {
         rejected =
             std::string_view(error.what()).find(
                 "quarantined") != std::string_view::npos &&
             std::string_view(error.what()).find(
-                std::to_string(rb0::kAuditSeed)) !=
+                std::to_string(rb0::kQuarantinedAuditSeed)) !=
                 std::string_view::npos;
     }
     expect(
@@ -122,6 +122,24 @@ void test_quarantined_seed_is_rejected() {
         "quarantined RB0-0 seed must fail with a named fence");
     mechanical::require_engineering_seed(
         mechanical::kEngineeringSeed);
+}
+
+void test_reserved_seed_is_rejected() {
+    bool rejected = false;
+    try {
+        mechanical::require_engineering_seed(
+            rb0::kAuditSeed);
+    } catch (const std::invalid_argument& error) {
+        rejected =
+            std::string_view(error.what()).find(
+                "reserved") != std::string_view::npos &&
+            std::string_view(error.what()).find(
+                std::to_string(rb0::kAuditSeed)) !=
+                std::string_view::npos;
+    }
+    expect(
+        rejected,
+        "reserved RB0-0 seed must fail with a named fence");
 }
 
 void test_alternate_engineering_seed_is_rejected() {
@@ -249,6 +267,9 @@ int main() {
     runner.run(
         "quarantined seed is rejected",
         test_quarantined_seed_is_rejected);
+    runner.run(
+        "reserved seed is rejected",
+        test_reserved_seed_is_rejected);
     runner.run(
         "alternate seed is rejected",
         test_alternate_engineering_seed_is_rejected);

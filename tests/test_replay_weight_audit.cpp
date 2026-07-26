@@ -70,6 +70,18 @@ void expect_near(
     }
 }
 
+void test_seed_provenance_is_explicit() {
+    expect(
+        rb0::kAuditSeed == 202607261047ULL,
+        "fresh RB0 audit seed");
+    expect(
+        rb0::kQuarantinedAuditSeed == 202607260731ULL,
+        "quarantined RB0 audit seed");
+    expect(
+        rb0::kAuditSeed != rb0::kQuarantinedAuditSeed,
+        "fresh and quarantined RB0 seeds differ");
+}
+
 template <typename Exception, typename Function>
 void expect_throws(
     Function&& function, std::string_view message) {
@@ -726,6 +738,9 @@ void test_reports_are_stable_and_explicit_about_post_run_effect() {
 
 int main() {
     TestRunner runner;
+    runner.run(
+        "seed provenance is explicit",
+        test_seed_provenance_is_explicit);
     runner.run(
         "balanced schedule", test_balanced_schedule);
     runner.run(

@@ -288,7 +288,7 @@ case $help_output in
     *"--audit-replay-weights"*\
 "Exclusive load-only RB0-0 audit"*\
 "unit versus actor-game/exact-calendar-turn replay weights"*\
-"fixed seed 202607260731 and frozen C16"*\
+"fixed seed 202607261047 and frozen C16"*\
 "accepts no other options"*\
 "exits 0/1/2 for pass/reject/infrastructure"*) ;;
     *)
@@ -461,9 +461,13 @@ expect_error "--audit-replay-weights is exclusive and accepts no other options" 
     --audit-replay-weights --benchmark
 expect_error "--audit-replay-weights is exclusive and accepts no other options" \
     --audit-replay-weights --help
-expect_error "reserved RB0-0 audit seed 202607260731 may be used only by --audit-replay-weights" \
+expect_error "reserved RB0-0 audit seed 202607261047 may be used only by --audit-replay-weights" \
+    --games 1 --seed 202607261047 --bots random
+expect_error "reserved RB0-0 audit seed 202607261047 may be used only by --audit-replay-weights" \
+    --games 1 --seed 1 --bots random --train-seed 202607261047
+expect_error "quarantined RB0-0 audit seed 202607260731 may not be reused" \
     --games 1 --seed 202607260731 --bots random
-expect_error "reserved RB0-0 audit seed 202607260731 may be used only by --audit-replay-weights" \
+expect_error "quarantined RB0-0 audit seed 202607260731 may not be reused" \
     --games 1 --seed 1 --bots random --train-seed 202607260731
 ta4_files_before=$(find . -type f -print | sort)
 expect_error "TA4-0 infrastructure/incomplete-evidence failure" \

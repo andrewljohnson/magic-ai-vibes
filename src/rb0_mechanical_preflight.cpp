@@ -220,9 +220,14 @@ void write_capture(
 } // namespace
 
 void require_engineering_seed(std::uint64_t seed) {
-    if (seed == rb0::kAuditSeed) {
+    if (seed == rb0::kQuarantinedAuditSeed) {
         throw std::invalid_argument(
             "RB0-E1 rejects quarantined RB0-0 seed " +
+            std::to_string(rb0::kQuarantinedAuditSeed));
+    }
+    if (seed == rb0::kAuditSeed) {
+        throw std::invalid_argument(
+            "RB0-E1 rejects reserved RB0-0 seed " +
             std::to_string(rb0::kAuditSeed));
     }
     if (seed != kEngineeringSeed) {
@@ -384,6 +389,7 @@ Report run(std::ostream& progress) {
     report.exact_engineering_seed =
         report.seed == kEngineeringSeed;
     report.quarantined_seed_excluded =
+        report.seed != rb0::kQuarantinedAuditSeed &&
         report.seed != rb0::kAuditSeed;
     report.exact_generation =
         report.generation == kGeneration;

@@ -378,7 +378,7 @@ void print_help(std::string_view executable) {
            "pass/reject/infrastructure\n"
         << "  --audit-replay-weights  Exclusive load-only RB0-0 audit "
            "of unit versus actor-game/exact-calendar-turn replay "
-           "weights; fixed seed 202607260731 and frozen C16, accepts no "
+           "weights; fixed seed 202607261047 and frozen C16, accepts no "
            "other options, and exits 0/1/2 for "
            "pass/reject/infrastructure\n"
         << "  --variance-study  Run fixed 3x3 training/evaluation seed "
@@ -5815,8 +5815,20 @@ int main(int argc, char** argv) {
               training_seed ==
                   old_school::replay_weight_audit::kAuditSeed))) {
             throw std::invalid_argument(
-                "reserved RB0-0 audit seed 202607260731 may be used "
+                "reserved RB0-0 audit seed 202607261047 may be used "
                 "only by --audit-replay-weights");
+        }
+        if ((seed_option_used &&
+             seed ==
+                 old_school::replay_weight_audit::
+                     kQuarantinedAuditSeed) ||
+            (training_seed_option_used &&
+             training_seed ==
+                 old_school::replay_weight_audit::
+                     kQuarantinedAuditSeed)) {
+            throw std::invalid_argument(
+                "quarantined RB0-0 audit seed 202607260731 may not "
+                "be reused");
         }
         if (audit_dc1_dominance &&
             dc1_unsupported_option_used) {
