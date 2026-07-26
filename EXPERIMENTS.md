@@ -8558,3 +8558,276 @@ weighted critic fit. This closes the replay-weight family and excludes density
 weighting from the next composite. The joint composite will be declared
 separately with calendar-8 targets, the card-agnostic continuation/pass
 controller, and PD0 exact pass dominance, but without RB0 weighting.
+
+### C17-J1: calendar-8 + continuation controller + PD0 joint composite
+
+Declared 2026-07-26 before implementing the controller, fitting either paired
+arm, generating the new deep-reference cache, or opening any of the five fresh
+seeds below. Repository, build-capture, and all-history searches found no prior
+use of seeds `202607261145` through `202607261149`.
+
+`REVIEW.md` was reread through its newest 11:17 PDT cycle before this
+declaration. That cycle predates the completed RB0 result and therefore still
+describes RB0 as unopened. Its earlier recommendation to compose calendar-8,
+the continuation prune, and PD0 agrees with this declaration; its conditional
+density component is now excluded because the repaired RB0 audit was a valid
+scientific rejection. The review branch's seven-fixture DRC artifact is useful
+corroboration but is neither present on main nor five-deck balanced, so it is
+not silently treated as the required promotion corpus.
+
+#### Falsifiable hypothesis
+
+The honest C16 learner has two independently measured errors that reinforce
+one another: its critic bootstraps after four trace records rather than eight
+physical turns, and its depth-zero Value-mirror continuation wastes public
+resources on own-stack counters or exact-Q-tied non-Pass actions. On one
+shared five-deck C17 shard, replacing only the shard's RO4 labels with CT8
+labels, then deploying the resulting critic with the already qualified PD0
+filter and one card-agnostic continuation controller, will:
+
+1. improve held-out pooled critic Brier and soft log loss versus an otherwise
+   identical RO4 C17 control without creating an unsafe deck slice;
+2. preserve or improve held-out deep-reference action ranking on Green, Red,
+   Blue, White, and RU Aggro;
+3. beat the matched RO4/legacy/off control, frozen C16, and HandcodedPolicy
+   above 50% with a Wilson 95% lower bound above 50% in successive 2,040-game
+   paired panels; and
+4. ultimately pass every unchanged five-deck Learned-is-king gate.
+
+Failure at a declared stage suppresses every later gameplay stage. There is no
+seed retry, best-deck salvage, threshold revision, component ablation against
+the held-out result, or Handcoded-guided tuning.
+
+#### Exact paired fit
+
+- Parent/source policy is exact immutable Environment-v3 C16, T800, training
+  seed `424242`, fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+- Raw shard seed is `202607261145`, generation coordinate 17, and five exact
+  40-game balanced blocks: 200 physical games, 400 actor perspectives, and 80
+  perspectives for each of Green, Red, Blue, White, and RU Aggro.
+- Collection is a frozen C16 Learned mirror in both seats, K=1/H=4,
+  exploration `0.05`, maximum 500 turns, legacy continuation behavior, and
+  PD0 off. Thus neither deployment component can change the shared data.
+- Both arms reconstruct the same C16 parent once and reuse its identical
+  random anchor plus G15/G16 historical replay. Both use identical unit record
+  weights, features, example order, optimizer, shuffle/member seed, three
+  epochs, and learning rate `0.006`.
+- Control shard target is canonical RO4:
+  `0.50*z + 0.50*V_parent(i+4 trace records)`, with terminal `z` when fewer
+  than four future records remain.
+- Treatment shard target is CT8:
+  `0.50*z + 0.50*V_parent(j)`, where `j` is the earliest trace record whose
+  physical `turn_number` is exactly `root.turn_number + 8`; if no such record
+  exists the target is terminal `z`.
+- Historical replay targets are byte-identical between arms. The raw shard,
+  features, outcomes, and fit order must be byte-identical. Only the shared
+  shard's target bits may differ.
+- RB0 hierarchical density weighting is excluded. Terminal annealing,
+  record-offset eight, deeper collection, new features, policy-head fitting,
+  combat scoring, block lookahead, Handcoded data, and card-specific weights
+  or switches are excluded.
+
+The new paired bundle is one distinct checksummed atomic artifact at
+`build/model-cache/old-school-value-joint-c17-v1-t800-p424242-r202607261145.bin`.
+It must bind parent and shard coordinates, the exact schedule and collection
+recipe, both target formulas and future-index/tail counts, all replay/raw/
+feature/outcome/index/target/order hashes, optimizer and unit-weight recipe,
+per-deck accounting, model component fingerprints, and the deployment policy
+metadata below. It must reject cross-family loading, corruption, trailing
+bytes, metadata mismatch, and overwrite. Both models must differ from the
+parent and from each other only in the critic component.
+
+#### Exact deployment controller
+
+The treatment policy is C17 CT8 at K=8/H=4 with PD0 on and typed controller
+`PublicStackPassV1`. The control is C17 RO4 at K=8/H=4 with PD0 off and
+controller `Legacy`. These settings are part of the policy token and artifact
+identity; the treatment cannot load with either component disabled and the
+control cannot load with either component enabled.
+
+`PublicStackPassV1` is one versioned, default-off, continuation-only rules
+controller:
+
+- An explicit internal role distinguishes a real root from a depth-zero Value
+  continuation. The controller propagates symmetrically to both Learned-mirror
+  continuation seats and never changes real-root legal actions.
+- At a continuation Priority decision, apply PD0 first. Then remove an action
+  only when its public `spell_target` identifies a public stack object
+  controlled by the chooser. Missing or stale targets fail closed by retaining
+  the action. Pass is always retained. The rule inspects no CardId, name,
+  learned value, handcrafted score, or hidden identity.
+- On the retained continuation list, epsilon exploration, when nonzero,
+  samples only retained actions. On the greedy path, compute the unchanged
+  Value scores; if Pass belongs to the exact bit-equal argmax set, choose Pass
+  without consuming tie-break RNG. Otherwise retain the legacy tie behavior.
+- The deployed root remains unchanged except for PD0's already qualified exact
+  dominance proof. Countering an opponent-controlled Counterspell in a
+  counter-war remains legal and selectable. Live and payable Force Spike
+  remain legal and selectable; the existing rules engine continues to use
+  `PayIfAble`. No Force-Spike exception or near-tie threshold is added.
+
+Focused gates must cover both seats, hidden repartition, own useful spell,
+counter-war, redundant same-target counter composition, distinct stack
+targets, live/payable Force Spike resolution, exact Pass ties, unique non-Pass
+maxima, epsilon support, default-off RNG identity, unchanged legal actions,
+and rejection on every non-Learned-Value policy. The user's Flying Men versus
+Air Elemental blocking report remains a separate open mechanism: this
+composite deliberately does not score combat or claim to fix it.
+
+#### Frozen five-deck deep-reference regression corpus
+
+No candidate may be fit until a new Environment-v3 cache is generated from the
+already frozen 20-position probe-dev-v3 corpus, which has exactly four roots
+per deck. The cache is Actor-mirror common-world K=64/H=8, one rollout per
+world, T800/S424242, fixed reference seed `0x50524f4245524546`, and path
+`data/old-school-probe-dev-v3-k64-h8-c17-j1.labels.tsv`. The exact generation
+command is:
+
+```sh
+./build/old-school-sim --score-probes \
+  --probe-corpus dev-v3 \
+  --probe-worlds 64 --probe-horizon 8 \
+  --learned-rollouts 8 --learned-generations 16 \
+  --train-games 800 --train-seed 424242 \
+  --probe-cache data/old-school-probe-dev-v3-k64-h8-c17-j1.labels.tsv \
+  --refresh-probe-cache
+```
+
+Generation must pass exact corpus/card/legality/hidden-repartition validation,
+produce finite 64-sample rows for every candidate, bind the current Actor and
+environment fingerprints, and be frozen by byte size and SHA-256 before
+C17-J1 training. The 20 hand-authored positions remain reject-only and cannot
+alone promote a model, but they restore the required deck-balanced
+deep-reference action-ranking report. Treatment and control will be scored at
+their exact deployed K8 configurations against the same frozen rows. Require:
+
+- pooled mean action regret no worse for treatment than control;
+- pooled top-one agreement no lower for treatment than control;
+- no deck's mean regret more than control plus `0.01`;
+- no deck loses more than one stable best-set agreement, where stability is
+  defined prospectively by the existing paired reference uncertainty code;
+- the reference-best set remains selected on all stable Blue stack fixtures
+  and the live Force Spike fixture; and
+- exact hidden-repartition invariance for retained actions, scores,
+  selections, and policy hashes.
+
+Report top-one agreement, mean regret, Brier, soft log loss, calibration bias,
+and ECE pooled and separately for all five decks. Critic metrics use the same
+state labels for both paired models; action metrics use no Handcoded label.
+
+#### Stage 1: held-out critic gate
+
+Holdout seed `202607261146`, generation coordinate 18, and five new balanced
+40-game C16-mirror blocks produce 200 physical games and 400 perspectives not
+used by the fit. Pilots are frozen parent C16 K1/H4, exploration `0.05`,
+legacy/off, maximum 500 turns. Candidate models never choose a holdout action.
+Score discounted terminal calibration with unit record weighting and
+physical-game-clustered paired CR1 intervals.
+
+Treatment must have both pooled Brier and pooled soft-log-loss
+treatment-minus-control upper 95% bounds below zero. For every deck, neither
+loss point delta may exceed `+0.005`; treatment may create no material signed
+bias (`abs(bias) >= 0.05` with its clustered interval excluding zero) unless
+control already has same-sign material bias; and RU absolute bias must be no
+greater than `max(abs(control bias), 0.010)`. Green and Blue treatment absolute
+bias must each be strictly smaller than control. Every schedule, target,
+feature, hidden-information, deterministic-reduction, and artifact snapshot
+check is conjunctive. Failure is scientific rejection and suppresses probes
+and gameplay.
+
+#### Stages 2-5: paired gameplay and final gates
+
+Every gameplay panel balances challenger deck, policy seat, and play/draw.
+`--games 34` means 34 repetitions of the exact 60-game five-deck paired
+schedule: 2,040 games total, 408 per challenger deck, and 102 in every
+deck-by-seat-by-play/draw quadrant. Near 50%, the nominal one-sample
+independent-binomial two-sided 80%-power MDE is about 3.1 percentage points
+pooled and 6.9 points per deck; physical-game/quartet-clustered intervals must
+also be reported, and the nominal values are not claimed as achieved paired
+power.
+
+1. Seed `202607261147`: treatment versus its matched RO4/legacy/off C17
+   control. Require aggregate wins above 50%, Wilson 95% lower bound above
+   50%, and strictly more treatment wins than losses for every challenger
+   deck.
+2. Only after stage 1 and the deep-reference gate pass, and stage 2 passes,
+   seed `202607261148`: treatment versus exact frozen C16 K8. Apply the same
+   aggregate and all-five direct-win gates.
+3. Only after stage 3 passes, seed `202607261149`: treatment versus
+   HandcodedPolicy. Require aggregate wins above 50%, Wilson 95% lower bound
+   above 50%, and strictly more treatment wins than Handcoded for Green, Red,
+   Blue, White, and RU Aggro.
+4. Only after the fresh Handcoded milestone passes, run the unchanged fixed
+   evaluation-seed panel `101, 202, 303, 404, 505, 606, 707, 808`, five
+   repetitions per seed = 2,400 direct games. No seed may be losing in
+   aggregate. Pool the 2,040-game primary and 2,400-game panel: aggregate
+   win rate and Wilson lower bound must exceed 50%, and every deck must have
+   strictly more pooled wins than losses.
+5. Run the deck-balanced mixed-field stability report with the frozen
+   treatment. Learned must provide the largest win-rate lift over Random on
+   all five decks. Full unit/integration/CLI/certification tests, deterministic
+   artifact reload and representative simulation, and ASan/UBSan must pass.
+
+Stages 2 and 3 are causal/champion screens, not Learned-is-king verdicts.
+Only the complete Handcoded primary, fixed seed panel, mixed-field lift table,
+probe report, integrity gates, and verification suite can promote C17-J1.
+Any rejection leaves exact C16 as champion and records the failed composite
+without rewriting its component choices.
+
+#### Prospective user-field regression amendment
+
+Added immediately after the C17-J1 declaration and before any implementation,
+cache generation, fit, or reserved-seed use. A user reported three additional
+manual Learned lines; no game seed or complete hidden state was retained, so
+these are qualitative failure reports rather than benchmark evidence:
+
+1. at 20 life, RU chump-blocked an opposing Air Elemental with Flying Men;
+2. Learned cast Grizzly Bears, cast Giant Growth on its newly cast
+   summoning-sick Bear, then passed; and
+3. Learned cast Giant Growth on the opponent's Air Elemental and then declined
+   to attack.
+
+The first report independently repeats the earlier Blue Flying Men versus Air
+Elemental chump pattern in another deck. Current Value blocks are ranked by
+one post-combat critic prediction, and Value attacks average one post-combat
+critic prediction over sampled blocks. Therefore a horizon/critic
+misvaluation is plausible, but not yet established: candidate sampling,
+temporary-effect representation, or continuation behavior could produce the
+same symptoms. CT8 changes the critic those selectors use and may repair the
+ranking, but the joint declaration still adds no combat score, material
+heuristic, or card-specific rule.
+
+The Growth reports sharpen a hold-versus-waste/target-relation failure. The
+existing PD0 proof settles only the current Priority window. A resolved Giant
+Growth leaves temporary public power/toughness until cleanup, so current PD0
+should conservatively treat it as observably different from Pass even when the
+buff will expire unused. Extending exact settlement through cleanup may prove
+some Second Main cases dominated, but First Main Growth can still interact
+with later priority or combat and must not be removed by assumption. No PD0
+semantics are changed by this note.
+
+Before C17-J1 training, add deterministic information-safe diagnostics for
+all three reports:
+
+- enumerate no-block and each legal block for Flying Men versus Air Elemental
+  at nonlethal life, record parent/control/treatment post-combat critic scores,
+  and label the alternatives with bounded common-world Learned-mirror
+  continuations rather than a combat heuristic;
+- expose Pass plus every legal own/opponent Giant Growth target for a newly
+  cast summoning-sick Bear state and for an attack-capable board containing an
+  opposing Air Elemental; record PD0/controller retention, K8 deployed scores,
+  selected action, and K64/H8 deep-reference scores; and
+- verify only rules consequences in fixtures: summoning sickness prevents the
+  new Bear from attacking, Growth expires at cleanup, opponent-target Growth
+  increases that public creature's power/toughness, Air Elemental kills Flying
+  Men in the reported block, nonblocking is nonlethal at 20, and every
+  candidate remains legal.
+
+Hidden hand/library repartition must preserve candidate descriptors, all
+public consequences, scores, and selections. These small field fixtures are
+reject-only diagnostics. They may reject C17-J1 if treatment newly worsens a
+stable deep-reference ranking, but they cannot promote it or authorize
+hardcoded target/combat knowledge. If they expose a distinct mechanism that
+CT8 plus the already declared controller does not address, record and
+preregister that mechanism separately rather than silently expanding C17-J1.
