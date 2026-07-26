@@ -482,7 +482,6 @@ inline constexpr std::size_t kFieldDeploymentWorlds = 8;
 inline constexpr std::size_t kFieldDeploymentHorizonTurns = 4;
 
 enum class FieldRegressionScoreKind : std::uint8_t {
-    DeepReferenceMean,
     DeployedPrioritySearch,
     ImmediateCombat,
 };
@@ -511,7 +510,7 @@ struct FieldRegressionPolicyDecision {
     std::string name;
     std::string fingerprint;
     FieldRegressionScoreKind score_kind =
-        FieldRegressionScoreKind::DeepReferenceMean;
+        FieldRegressionScoreKind::DeployedPrioritySearch;
     std::size_t deployment_worlds = kFieldDeploymentWorlds;
     std::size_t deployment_horizon_turns =
         kFieldDeploymentHorizonTurns;
@@ -556,11 +555,18 @@ struct FieldRegressionDecisionReport {
 
 struct FieldRegressionReport {
     std::string corpus_id;
+    std::string reference_model_fingerprint;
     std::size_t reference_worlds = kFieldReferenceWorlds;
     std::size_t reference_horizon_turns =
         kFieldReferenceHorizonTurns;
     std::size_t reference_rollouts_per_world = 1;
     bool reference_blend_shallow_prior = false;
+    double reference_value_continuation_epsilon = 0.0;
+    double reference_value_priority_residual_weight = 0.0;
+    bool reference_value_pass_dominance = false;
+    LearnedContinuationController
+        reference_value_continuation_controller =
+            LearnedContinuationController::Legacy;
     HiddenRepartitionSummary hidden_repartition;
     bool rules_contract_passed = false;
     std::vector<FieldRegressionDecisionReport> decisions;

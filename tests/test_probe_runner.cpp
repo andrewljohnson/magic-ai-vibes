@@ -1412,6 +1412,514 @@ void test_probe_scoring_rejects_block_decisions_explicitly() {
         "Value deployment Block rejection was not explicit");
 }
 
+void test_field_candidate_mapping_supports_canonical_block_rows() {
+    const auto fields =
+        old_school::probes::make_field_regressions_v1();
+    DecisionProbe block =
+        first_probe_of_kind(fields, DecisionKind::Block);
+    std::reverse(
+        block.candidates.begin(), block.candidates.end());
+    const LearnedActionSamples canonical{
+        .q_samples = {
+            {0.125, 0.25},
+            {0.75, 0.875},
+        },
+        .sampled_worlds = 2,
+        .rollout_evaluations = 4,
+        .terminal_evaluations = 1,
+        .bootstrapped_evaluations = 3,
+    };
+    const auto mapped =
+        old_school::probe_runner::
+            map_field_candidate_samples(block, canonical);
+    expect(
+        mapped.size() == 2 &&
+            mapped[0].key ==
+                "block-air-elemental-with-flying-men" &&
+            mapped[0].q_samples ==
+                canonical.q_samples[1] &&
+            mapped[1].key == "no-blocks" &&
+            mapped[1].q_samples ==
+                canonical.q_samples[0],
+        "field Block mapper did not preserve descriptor order "
+        "while mapping canonical No Block/Block rows");
+
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        map_candidate_samples(
+                            block, canonical));
+            },
+            "generic mapper accepted a field Block")
+                .find("does not support Block") !=
+            std::string::npos,
+        "field Block support leaked into the sealed generic "
+        "mapper");
+
+    DecisionProbe duplicate = block;
+    std::get<old_school::probes::BinaryBlockDecision>(
+        duplicate.candidates[1].action)
+        .include = true;
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        map_field_candidate_samples(
+                            duplicate, canonical));
+            },
+            "field mapper accepted a duplicate Block branch")
+                .find("duplicates") !=
+            std::string::npos,
+        "duplicate Block mapping failure was not actionable");
+
+    DecisionProbe mismatched = block;
+    std::get<old_school::probes::BinaryBlockDecision>(
+        mismatched.candidates[1].action)
+        .blocker = 999'999;
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        map_field_candidate_samples(
+                            mismatched, canonical));
+            },
+            "field mapper accepted multiple blockers")
+                .find("multiple blockers") !=
+            std::string::npos,
+        "mismatched Block mapping failure was not actionable");
+
+    LearnedActionSamples one_row = canonical;
+    one_row.q_samples.pop_back();
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        map_field_candidate_samples(
+                            block, one_row));
+            },
+            "field mapper accepted one binary row")
+                .find("two canonical rows") !=
+            std::string::npos,
+        "missing canonical Block row failure was not actionable");
+}
+
+void test_field_report_is_cache_free_hidden_safe_and_deployment_exact() {
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x4649454C445231ULL);
+    const old_school::probe_runner::NamedValueScoringModel parent{
+        .name = "frozen parent",
+        .model = model,
+    };
+    const old_school::probe_runner::NamedValueScoringModel control{
+        .name = "paired control",
+        .model = model,
+    };
+    const old_school::probe_runner::NamedValueScoringModel treatment{
+        .name = "paired treatment",
+        .model = model,
+        .value_pass_dominance = true,
+        .value_continuation_controller =
+            old_school::LearnedContinuationController::
+                PublicStackPassV1,
+    };
+
+    TemporaryDirectory temporary;
+    const std::filesystem::path cache_sentinel =
+        temporary.path() /
+        old_school::probe_runner::default_probe_cache_path(
+            ProbeCorpusKind::DevV3);
+    expect(!std::filesystem::exists(cache_sentinel),
+           "field scorer cache sentinel unexpectedly exists");
+    const auto report = [&] {
+        const ScopedCurrentPath scoped(temporary.path());
+        return old_school::probe_runner::
+            score_field_regressions_v1(
+                parent, control, treatment);
+    }();
+    expect(
+        !std::filesystem::exists(cache_sentinel),
+        "field scorer read or wrote the DevV3 cache path");
+
+    const auto corpus =
+        old_school::probes::make_field_regressions_v1();
+    expect(
+        report.corpus_id ==
+                old_school::probes::kFieldRegressionsV1 &&
+            report.reference_model_fingerprint ==
+                old_school::learned_model_fingerprint(model) &&
+            report.reference_worlds ==
+                old_school::probe_runner::
+                    kFieldReferenceWorlds &&
+            report.reference_horizon_turns ==
+                old_school::probe_runner::
+                    kFieldReferenceHorizonTurns &&
+            report.reference_rollouts_per_world == 1 &&
+            !report.reference_blend_shallow_prior &&
+            report.reference_value_continuation_epsilon ==
+                0.0 &&
+            report.reference_value_priority_residual_weight ==
+                0.0 &&
+            !report.reference_value_pass_dominance &&
+            report.reference_value_continuation_controller ==
+                old_school::
+                    LearnedContinuationController::Legacy &&
+            report.rules_contract_passed &&
+            report.hidden_repartition.passed &&
+            report.hidden_repartition.policy_count == 4 &&
+            report.hidden_repartition.probe_count ==
+                corpus.size() &&
+            report.decisions.size() == corpus.size(),
+        "field report lost its frozen reference, rules, or "
+        "hidden-clone contract");
+
+    const auto report_for =
+        [&report](std::string_view stable_id)
+            -> const old_school::probe_runner::
+                FieldRegressionDecisionReport& {
+            const auto found = std::find_if(
+                report.decisions.begin(),
+                report.decisions.end(),
+                [stable_id](const auto& decision) {
+                    return decision.stable_id ==
+                           stable_id;
+                });
+            if (found == report.decisions.end()) {
+                throw std::runtime_error(
+                    "field report decision is missing");
+            }
+            return *found;
+        };
+
+    const std::string fingerprint =
+        old_school::learned_model_fingerprint(model);
+    for (const DecisionProbe& probe : corpus) {
+        const auto& decision =
+            report_for(probe.stable_id);
+        std::vector<std::string> descriptors;
+        descriptors.reserve(probe.candidates.size());
+        for (const auto& candidate : probe.candidates) {
+            descriptors.push_back(candidate.descriptor);
+        }
+        expect(
+            decision.root_deck == probe.root_deck &&
+                decision.decision_kind ==
+                    probe.decision_kind &&
+                decision.candidate_descriptors ==
+                    descriptors &&
+                decision.reference_samples.size() ==
+                    descriptors.size() &&
+                decision.reference_accounting
+                        .sampled_worlds ==
+                    old_school::probe_runner::
+                        kFieldReferenceWorlds &&
+                decision.reference_accounting
+                        .rollout_evaluations ==
+                    descriptors.size() *
+                        old_school::probe_runner::
+                            kFieldReferenceWorlds &&
+                decision.reference_accounting
+                        .terminal_evaluations +
+                        decision.reference_accounting
+                            .bootstrapped_evaluations ==
+                    decision.reference_accounting
+                        .rollout_evaluations &&
+                decision.forced_consequences.size() ==
+                    descriptors.size(),
+            "field decision omitted descriptor-ordered deep "
+            "samples, accounting, or forced consequences");
+        for (std::size_t candidate = 0;
+             candidate < descriptors.size(); ++candidate) {
+            expect(
+                decision.reference_samples[candidate].key ==
+                        descriptors[candidate] &&
+                    decision.reference_samples[candidate]
+                            .q_samples.size() ==
+                        old_school::probe_runner::
+                            kFieldReferenceWorlds &&
+                    decision.forced_consequences[candidate]
+                            .descriptor ==
+                        descriptors[candidate] &&
+                    decision.forced_consequences[candidate]
+                            .public_state_fingerprint.size() ==
+                        16,
+                "field rows or forced public consequence "
+                "fingerprints lost descriptor order");
+        }
+
+        const std::array<
+            const old_school::probe_runner::
+                FieldRegressionPolicyDecision*,
+            3>
+            policies = {
+                &decision.parent,
+                &decision.control,
+                &decision.treatment,
+            };
+        for (const auto* policy : policies) {
+            expect(
+                policy->fingerprint == fingerprint &&
+                    policy->deployment_worlds ==
+                        old_school::probe_runner::
+                            kFieldDeploymentWorlds &&
+                    policy->deployment_horizon_turns ==
+                        old_school::probe_runner::
+                            kFieldDeploymentHorizonTurns &&
+                    policy->blend_shallow_prior &&
+                    policy->scores.size() ==
+                        descriptors.size() &&
+                    !policy->selected_keys.empty(),
+                "field deployed policy omitted its exact "
+                "configuration, scores, or selection");
+            for (std::size_t candidate = 0;
+                 candidate < descriptors.size();
+                 ++candidate) {
+                expect(
+                    policy->scores[candidate].key ==
+                            descriptors[candidate] &&
+                        std::isfinite(
+                            policy->scores[candidate].score),
+                    "field deployed score lost descriptor "
+                    "identity or finiteness");
+            }
+            if (probe.decision_kind ==
+                DecisionKind::Priority) {
+                expect(
+                    policy->score_kind ==
+                            old_school::probe_runner::
+                                FieldRegressionScoreKind::
+                                    DeployedPrioritySearch &&
+                        !policy->deterministic_selection &&
+                        policy->samples.size() ==
+                            descriptors.size() &&
+                        policy->accounting.sampled_worlds ==
+                            old_school::probe_runner::
+                                kFieldDeploymentWorlds &&
+                        policy->accounting
+                                .rollout_evaluations ==
+                            descriptors.size() *
+                                old_school::probe_runner::
+                                    kFieldDeploymentWorlds &&
+                        policy->accounting
+                                .terminal_evaluations +
+                                policy->accounting
+                                    .bootstrapped_evaluations ==
+                            policy->accounting
+                                .rollout_evaluations,
+                    "field Priority policy did not use exact "
+                    "K8/H4 deployed search accounting");
+                for (const auto& samples :
+                     policy->samples) {
+                    expect(
+                        samples.q_samples.size() ==
+                            old_school::probe_runner::
+                                kFieldDeploymentWorlds,
+                        "field Priority deployed sample row "
+                        "has the wrong width");
+                }
+            } else {
+                expect(
+                    policy->score_kind ==
+                            old_school::probe_runner::
+                                FieldRegressionScoreKind::
+                                    ImmediateCombat &&
+                        policy->deterministic_selection &&
+                        policy->samples.empty() &&
+                        policy->accounting ==
+                            old_school::probe_runner::
+                                FieldRegressionEvaluationAccounting{},
+                    "field combat policy did not use the exact "
+                    "immediate deployed selector");
+            }
+        }
+        expect(
+            decision.parent.name == parent.name &&
+                decision.control.name == control.name &&
+                decision.treatment.name ==
+                    treatment.name &&
+                !decision.parent.value_pass_dominance &&
+                !decision.control.value_pass_dominance &&
+                decision.treatment.value_pass_dominance &&
+                decision.parent
+                        .value_continuation_controller ==
+                    old_school::
+                        LearnedContinuationController::Legacy &&
+                decision.control
+                        .value_continuation_controller ==
+                    old_school::
+                        LearnedContinuationController::Legacy &&
+                decision.treatment
+                        .value_continuation_controller ==
+                    old_school::LearnedContinuationController::
+                        PublicStackPassV1,
+            "field report changed parent/control/treatment "
+            "deployment metadata");
+    }
+
+    const DecisionProbe& priority =
+        first_probe_of_kind(corpus, DecisionKind::Priority);
+    const auto& priority_report =
+        report_for(priority.stable_id);
+    const auto parent_diagnostic =
+        old_school::probe_runner::
+            diagnose_value_probe_deployment(
+                priority, parent,
+                old_school::probes::
+                    kFieldRegressionsV1,
+                old_school::probe_runner::
+                    kFieldDeploymentWorlds, 0.0);
+    const auto treatment_diagnostic =
+        old_school::probe_runner::
+            diagnose_value_probe_deployment(
+                priority, treatment,
+                old_school::probes::
+                    kFieldRegressionsV1,
+                old_school::probe_runner::
+                    kFieldDeploymentWorlds, 0.0);
+    expect(
+        policy_scores_are_bit_identical(
+            priority_report.parent.scores,
+            parent_diagnostic.deployed_policy_scores) &&
+            priority_report.parent.selected_keys ==
+                parent_diagnostic.selected_keys &&
+            policy_scores_are_bit_identical(
+                priority_report.treatment.scores,
+                treatment_diagnostic.deployed_policy_scores) &&
+            priority_report.treatment.selected_keys ==
+                treatment_diagnostic.selected_keys &&
+            priority_report.treatment
+                    .policy_scores_adjusted_for_deployment ==
+                treatment_diagnostic
+                    .policy_scores_adjusted_for_deployment,
+        "field Priority view does not match standalone exact "
+        "deployment scoring");
+
+    const DecisionProbe& attack =
+        first_probe_of_kind(corpus, DecisionKind::Attack);
+    const auto& attack_report =
+        report_for(attack.stable_id);
+    const auto& attack_decision =
+        std::get<
+            old_school::probes::BinaryAttackDecision>(
+            attack.candidates.front().action);
+    const auto attack_expected =
+        old_school::learned_value_attack_set_scores(
+            attack.state, attack.root_player,
+            {{}, {attack_decision.attacker}}, model,
+            old_school::probe_runner::
+                reference_seed_for_probe(
+                    old_school::probes::
+                        kFieldRegressionsV1,
+                    attack.stable_id,
+                    old_school::probe_runner::
+                        kProbeProductionPolicySeed));
+    expect(
+        attack_expected.scores.size() == 2 &&
+            policy_score_for(
+                attack_report.parent.scores,
+                "skip-ironroot-treefolk")
+                    .score ==
+                attack_expected.scores[0] &&
+            policy_score_for(
+                attack_report.parent.scores,
+                "include-ironroot-treefolk")
+                    .score ==
+                attack_expected.scores[1] &&
+            attack_report.parent.selected_keys ==
+                std::vector<std::string>{
+                    attack.candidates[
+                        attack_expected
+                            .selected_candidate]
+                        .descriptor},
+        "field Attack view does not match the immediate deployed "
+        "selector");
+
+    const DecisionProbe& block =
+        first_probe_of_kind(corpus, DecisionKind::Block);
+    const auto& block_report =
+        report_for(block.stable_id);
+    const auto& block_decision =
+        std::get<
+            old_school::probes::BinaryBlockDecision>(
+            block.candidates.front().action);
+    const auto block_expected =
+        old_school::learned_value_binary_block_scores(
+            block.state, block.root_player,
+            block_decision.attacker,
+            block_decision.blocker, model);
+    expect(
+        policy_score_for(
+            block_report.parent.scores, "no-blocks")
+                .score ==
+                block_expected.scores[0] &&
+            policy_score_for(
+                block_report.parent.scores,
+                "block-air-elemental-with-flying-men")
+                    .score ==
+                block_expected.scores[1] &&
+            block_report.parent.selected_keys ==
+                std::vector<std::string>{
+                    block.candidates[
+                        block_expected
+                            .selected_candidate]
+                        .descriptor},
+        "field Block view does not match the immediate deployed "
+        "selector");
+
+    auto bad_parent = parent;
+    bad_parent.value_pass_dominance = true;
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        score_field_regressions_v1(
+                            bad_parent, control,
+                            treatment));
+            },
+            "field scorer accepted PD0 on parent")
+                .find("frozen field deployment") !=
+            std::string::npos,
+        "field parent configuration failure was not actionable");
+    auto bad_treatment = treatment;
+    bad_treatment.value_continuation_controller =
+        old_school::LearnedContinuationController::Legacy;
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        score_field_regressions_v1(
+                            parent, control,
+                            bad_treatment));
+            },
+            "field scorer accepted Legacy treatment")
+                .find("frozen field deployment") !=
+            std::string::npos,
+        "field treatment configuration failure was not "
+        "actionable");
+    auto duplicate_name = treatment;
+    duplicate_name.name = control.name;
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        score_field_regressions_v1(
+                            parent, control,
+                            duplicate_name));
+            },
+            "field scorer accepted duplicate model names")
+                .find("unique") !=
+            std::string::npos,
+        "field duplicate-name failure was not actionable");
+}
+
 void test_priority_evaluation_threads_are_bit_identical() {
     const auto controls =
         old_school::probes::make_force_spike_policy_controls_v1();
@@ -3584,6 +4092,10 @@ int main() {
                test_value_deployment_metadata_pd0_and_controller);
     runner.run("unsupported Block probe scoring",
                test_probe_scoring_rejects_block_decisions_explicitly);
+    runner.run("field canonical Block mapping",
+               test_field_candidate_mapping_supports_canonical_block_rows);
+    runner.run("field scorer exact deployment report",
+               test_field_report_is_cache_free_hidden_safe_and_deployment_exact);
     runner.run("Priority evaluation thread identity",
                test_priority_evaluation_threads_are_bit_identical);
     runner.run("deployed Value attack seed independence",

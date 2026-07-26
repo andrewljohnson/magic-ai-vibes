@@ -22,6 +22,7 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -3955,11 +3956,18 @@ FieldRegressionReport score_field_regressions_v1(
     FieldRegressionReport report{
         .corpus_id =
             std::string(probes::kFieldRegressionsV1),
+        .reference_model_fingerprint =
+            learned_model_fingerprint(parent.model),
         .reference_worlds = kFieldReferenceWorlds,
         .reference_horizon_turns =
             kFieldReferenceHorizonTurns,
         .reference_rollouts_per_world = 1,
         .reference_blend_shallow_prior = false,
+        .reference_value_continuation_epsilon = 0.0,
+        .reference_value_priority_residual_weight = 0.0,
+        .reference_value_pass_dominance = false,
+        .reference_value_continuation_controller =
+            LearnedContinuationController::Legacy,
         .hidden_repartition = {
             .passed = true,
             // One deep reference plus three deployed views.
@@ -3980,7 +3988,10 @@ FieldRegressionReport score_field_regressions_v1(
             throw std::runtime_error(
                 probe.stable_id +
                 ": hidden field fixture is invalid: " +
-                clone_validation.errors.front());
+                (clone_validation.errors.empty()
+                     ? std::string("unspecified validation "
+                                   "failure")
+                     : clone_validation.errors.front()));
         }
         if (probe.stable_id != clone.stable_id ||
             probe.root_deck != clone.root_deck ||
