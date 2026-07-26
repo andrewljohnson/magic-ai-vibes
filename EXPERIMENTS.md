@@ -9158,3 +9158,93 @@ stable reference-best action and treatment does not; a treatment gain cannot
 cancel a loss. Rules validation, exact evaluation accounting, and hidden-zone
 repartition invariance are conjunctive. These six positions can reject but
 never promote the composite.
+
+#### C17-J1 sealed labels-only scorer freeze
+
+Frozen and pushed as commit `8943a89`. `REVIEW.md` had been reread through the
+13:02 PDT cycle; no experimental seed or result changed.
+
+The sealed scorer accepts the already-loaded, metadata-validated dev-v3 labels
+plus exactly one immutable control and treatment Value model. It constructs and
+validates the 20-position corpus internally, requires exact unique stable-ID,
+deck, and candidate-key coverage, orders every decision by stable ID, and
+scores the exact deployed selectors and information-equivalent hidden-zone
+clones. Residual, PD0, and continuation-controller metadata propagate to the
+same K-search used by deployment. It has no cache path, refresh mode, Actor,
+reference-Value model, or trainer input, so it cannot regenerate labels or
+silently fit a model during sealed evaluation.
+
+Verification:
+
+```sh
+make -j4 test-probes
+git diff --check
+```
+
+Results were 44/44 probe tests, 11/11 probe-metric tests, and 29/29
+probe-runner tests. Missing, duplicate, foreign, or mismatched labels fail
+closed; an isolated working directory remains free of the default cache; and
+control/treatment selections match the standalone deployment diagnostic.
+Decision: accept this as load-only evaluator plumbing, not playing-strength
+evidence. No C17-J1 seed was opened.
+
+#### C17-J1 linked field-sequence completion
+
+Declared after rereading `REVIEW.md` through its 13:17 PDT cycle and before
+opening any reserved seed. That cycle inferred that a live simulator process
+might be the paired fit; it was only the nonreserved engine verification for
+the Block evaluator. The production bundle still does not exist and all five
+C17-J1 seeds remain unopened.
+
+The six frozen field positions and their order remain unchanged, but the
+rules-only construction contract will be strengthened before fitting:
+
+- casting Grizzly Bears from the exact predecessor hand and mana state must
+  resolve byte-for-byte to the existing Second Main summoning-sick-Bear root;
+- in the linked Begin Combat position, Growth on the attack-capable Treefolk
+  followed by its legal unblocked attack must be lethal, while the existing
+  Growth-on-opposing-Air successor and untapped-Air control remain exact; and
+- reference and deployed field scoring must reproduce candidate descriptors,
+  sample rows, immediate scores, and selected keys under the frozen hidden-zone
+  repartition.
+
+These assertions encode the reported action sequence and public rules
+consequences, not a strategic label. They neither add a card-specific policy
+rule nor make the six field positions promotion evidence.
+
+#### C17-J1 acceptance-scheduler repair
+
+Declared before any C17-J1 fit or reserved-seed use after an adversarial review
+of the newly added pure gameplay gates. The review found a real mismatch
+between the preregistered panel and `run_bot_benchmark`: for each repetition,
+the fixed `first_deck <= second_deck` orientation gives Green physical-seat
+quadrants `5/5/1/1`, Red `4/4/2/2`, Blue `3/3/3/3`, White `2/2/4/4`, and RU
+Aggro `1/1/5/5`. Thus the current runner does not satisfy the declared
+`3/3/3/3` deck-by-policy-seat-by-play/draw balance, even though its aggregate,
+deck, and matrix totals look correct. No C17 gameplay panel may use it.
+
+Before the fit is licensed:
+
+- orient the ten off-diagonal K5 deck edges as a regular cyclic tournament,
+  retaining both policy assignments and both starters, so every deck occupies
+  each physical policy seat against exactly two other decks;
+- retain and validate explicit challenger and baseline
+  deck/seat/play-draw quadrant evidence (`102` per quadrant at 34 repetitions
+  and `15` at five);
+- bind every benchmark result to its evaluation seed, exact policies, frozen
+  model fingerprints, and quartet-clustered interval;
+- add an exact frozen-Learned tournament override so mixed-field evaluation
+  actually deploys treatment K8/epsilon-zero/residual-zero/PD0-on/
+  `PublicStackPassV1`, rather than silently reverting to Legacy/PD0-off;
+- make the fixed panel bind the ordered seeds
+  `101,202,303,404,505,606,707,808`, require the 4,440-game pooled direct gate
+  before mixed field, and validate each of the eight 1,000-game mixed
+  tournament schedules rather than accepting only pooled marginals; and
+- use checked addition in the held-out gate's per-deck record/perspective
+  totals.
+
+The repair preserves every preregistered sample size and strength threshold.
+It corrects the implementation to the declaration; it is not a result-driven
+threshold or component change. The falsifiable mechanical expectation is that
+all exact schedule/evidence tests pass, old malformed synthetic summaries fail
+closed, and no production artifact or reserved seed exists afterward.

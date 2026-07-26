@@ -476,6 +476,116 @@ struct NamedValueScoringModel {
         LearnedContinuationController::Legacy;
 };
 
+inline constexpr std::size_t kFieldReferenceWorlds = 64;
+inline constexpr std::size_t kFieldReferenceHorizonTurns = 8;
+inline constexpr std::size_t kFieldDeploymentWorlds = 8;
+inline constexpr std::size_t kFieldDeploymentHorizonTurns = 4;
+
+enum class FieldRegressionScoreKind : std::uint8_t {
+    DeepReferenceMean,
+    DeployedPrioritySearch,
+    ImmediateCombat,
+};
+
+struct FieldRegressionEvaluationAccounting {
+    std::size_t sampled_worlds = 0;
+    std::size_t rollout_evaluations = 0;
+    std::size_t terminal_evaluations = 0;
+    std::size_t bootstrapped_evaluations = 0;
+
+    bool operator==(
+        const FieldRegressionEvaluationAccounting&) const = default;
+};
+
+struct FieldRegressionForcedConsequence {
+    std::string descriptor;
+    // FNV-1a over the observer's post-branch information set: every public
+    // zone and counter, the observer's hand, and hidden-zone sizes.
+    std::string public_state_fingerprint;
+
+    bool operator==(
+        const FieldRegressionForcedConsequence&) const = default;
+};
+
+struct FieldRegressionPolicyDecision {
+    std::string name;
+    std::string fingerprint;
+    FieldRegressionScoreKind score_kind =
+        FieldRegressionScoreKind::DeepReferenceMean;
+    std::size_t deployment_worlds = kFieldDeploymentWorlds;
+    std::size_t deployment_horizon_turns =
+        kFieldDeploymentHorizonTurns;
+    bool blend_shallow_prior = true;
+    double value_priority_residual_weight = 0.0;
+    bool value_pass_dominance = false;
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy;
+    // Present for Priority search and empty for the immediate combat
+    // selector. Rows remain descriptor-keyed in frozen fixture order.
+    std::vector<probe_eval::CandidateSamples> samples;
+    FieldRegressionEvaluationAccounting accounting;
+    std::vector<probe_eval::PolicyScore> scores;
+    std::vector<std::string> selected_keys;
+    // Attack and Block use the deployed selector's exact first-on-tie
+    // candidate. Priority exposes its complete exact-score argmax set.
+    bool deterministic_selection = false;
+    bool policy_scores_adjusted_for_deployment = false;
+
+};
+
+struct FieldRegressionDecisionReport {
+    std::string stable_id;
+    DeckId root_deck = DeckId::Green;
+    probes::DecisionKind decision_kind =
+        probes::DecisionKind::Priority;
+    std::vector<std::string> candidate_descriptors;
+    // The only reference label source: frozen parent Value mirror,
+    // K64/H8, one rollout/world, unblended, Legacy, and PD0 off.
+    std::vector<probe_eval::CandidateSamples> reference_samples;
+    FieldRegressionEvaluationAccounting reference_accounting;
+    std::vector<FieldRegressionForcedConsequence>
+        forced_consequences;
+    // All three views reproduce deployment: Priority is K8/H4 with its
+    // serialized metadata, while Attack and Block use the immediate
+    // production selector.
+    FieldRegressionPolicyDecision parent;
+    FieldRegressionPolicyDecision control;
+    FieldRegressionPolicyDecision treatment;
+
+};
+
+struct FieldRegressionReport {
+    std::string corpus_id;
+    std::size_t reference_worlds = kFieldReferenceWorlds;
+    std::size_t reference_horizon_turns =
+        kFieldReferenceHorizonTurns;
+    std::size_t reference_rollouts_per_world = 1;
+    bool reference_blend_shallow_prior = false;
+    HiddenRepartitionSummary hidden_repartition;
+    bool rules_contract_passed = false;
+    std::vector<FieldRegressionDecisionReport> decisions;
+
+};
+
+// Separate field-only mapper. Generic DevV3 mapping deliberately remains
+// Block-closed. Priority rows are caller order; Attack rows are Skip/Include;
+// Block rows are No Block/Block. Every binary action mapping is validated
+// before any row is associated with a descriptor.
+std::vector<probe_eval::CandidateSamples>
+map_field_candidate_samples(
+    const probes::DecisionProbe& probe,
+    const LearnedActionSamples& action_samples);
+
+// Cache-, artifact-, trainer-, and label-free scoring of the exact six
+// field-regressions-v1 fixtures. Model policy metadata is fail-closed:
+// parent/control are residual-zero, Legacy, PD0-off; treatment is
+// residual-zero, PublicStackPassV1, PD0-on. The reference is always the
+// parent and is never replaced by either paired arm.
+FieldRegressionReport score_field_regressions_v1(
+    const NamedValueScoringModel& parent,
+    const NamedValueScoringModel& control,
+    const NamedValueScoringModel& treatment);
+
 // Candidate-only, cache-free comparison against an already-loaded frozen
 // label set. The control is the transition parent for the treatment. This
 // path constructs the named frozen corpus internally and has no Actor,

@@ -2567,6 +2567,66 @@ std::vector<std::string> validate_field_regressions_v1(
         }
     }
 
+    if (probes.size() >= 3) {
+        const DecisionProbe& sick_bear = probes[2];
+        GameState predecessor = sick_bear.state;
+        PlayerState& root =
+            predecessor.players[sick_bear.root_player];
+        const auto bear = std::find_if(
+            root.creatures.begin(), root.creatures.end(),
+            [](const CreaturePermanent& creature) {
+                return creature.card == CardId::GrizzlyBears;
+            });
+        if (bear == root.creatures.end() ||
+            root.lands.size() < 2) {
+            errors.push_back(
+                "sick-Bear Growth probe has no exact cast "
+                "predecessor");
+        } else {
+            const PermanentId bear_id = bear->id;
+            root.hand.push_back(CardId::GrizzlyBears);
+            root.creatures.erase(bear);
+            root.lands[0].tapped = false;
+            root.lands[1].tapped = false;
+            predecessor.next_permanent_id = bear_id;
+
+            const std::size_t frozen_spells_cast =
+                sick_bear.state.stats[sick_bear.root_player]
+                    .spells_cast;
+            const StackObjectId frozen_next_stack_object_id =
+                sick_bear.state.next_stack_object_id;
+            if (!apply_priority_action(
+                    predecessor, sick_bear.root_player,
+                    PriorityAction::cast_creature(
+                        CardId::GrizzlyBears),
+                    true) ||
+                !resolve_top_of_stack(predecessor)) {
+                errors.push_back(
+                    "sick-Bear Growth probe could not replay its "
+                    "Bear cast predecessor");
+            } else {
+                const bool history_counters_exact =
+                    predecessor
+                            .stats[sick_bear.root_player]
+                            .spells_cast ==
+                        frozen_spells_cast + 1 &&
+                    predecessor.next_stack_object_id ==
+                        frozen_next_stack_object_id + 1;
+                predecessor
+                    .stats[sick_bear.root_player]
+                    .spells_cast = frozen_spells_cast;
+                predecessor.next_stack_object_id =
+                    frozen_next_stack_object_id;
+                if (!history_counters_exact ||
+                    predecessor != sick_bear.state) {
+                    errors.push_back(
+                        "sick-Bear Growth probe is not the exact "
+                        "rules successor of casting Grizzly Bears");
+                }
+            }
+        }
+    }
+
     if (probes.size() >= 5) {
         GameState expected = probes[3].state;
         const PriorityAction growth =

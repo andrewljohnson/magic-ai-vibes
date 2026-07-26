@@ -319,13 +319,21 @@ void hash_probe(Fnv1a& hash,
                 std::get_if<PriorityAction>(&candidate.action)) {
             hash.byte(0U);
             hash_priority_action(hash, *priority);
-        } else {
-            const auto& attack =
-                std::get<probes::BinaryAttackDecision>(
-                    candidate.action);
+        } else if (const auto* attack =
+                       std::get_if<
+                           probes::BinaryAttackDecision>(
+                           &candidate.action)) {
             hash.byte(1U);
-            hash.unsigned_integer(attack.attacker);
-            hash.boolean(attack.include);
+            hash.unsigned_integer(attack->attacker);
+            hash.boolean(attack->include);
+        } else {
+            const auto& block =
+                std::get<probes::BinaryBlockDecision>(
+                    candidate.action);
+            hash.byte(2U);
+            hash.unsigned_integer(block.attacker);
+            hash.unsigned_integer(block.blocker);
+            hash.boolean(block.include);
         }
     }
 }
@@ -980,6 +988,56 @@ PermanentId binary_attack_subject(
     return *subject;
 }
 
+struct BinaryBlockSubject {
+    PermanentId attacker = 0;
+    PermanentId blocker = 0;
+};
+
+BinaryBlockSubject binary_block_subject(
+    const probes::DecisionProbe& probe) {
+    std::optional<PermanentId> attacker;
+    std::optional<PermanentId> blocker;
+    std::array<bool, 2> choices{};
+    for (const probes::Candidate& candidate : probe.candidates) {
+        const auto* block =
+            std::get_if<probes::BinaryBlockDecision>(
+                &candidate.action);
+        if (block == nullptr) {
+            throw std::invalid_argument(
+                "block probe contains a non-block candidate");
+        }
+        if (attacker.has_value() &&
+            *attacker != block->attacker) {
+            throw std::invalid_argument(
+                "binary block probe has multiple attackers");
+        }
+        if (blocker.has_value() &&
+            *blocker != block->blocker) {
+            throw std::invalid_argument(
+                "binary block probe has multiple blockers");
+        }
+        const std::size_t branch =
+            block->include ? 1U : 0U;
+        if (choices[branch]) {
+            throw std::invalid_argument(
+                "binary block probe duplicates a branch");
+        }
+        attacker = block->attacker;
+        blocker = block->blocker;
+        choices[branch] = true;
+    }
+    if (!attacker.has_value() || !blocker.has_value() ||
+        !choices[0] || !choices[1] ||
+        probe.candidates.size() != 2) {
+        throw std::invalid_argument(
+            "binary block probe must contain No Block and Block");
+    }
+    return {
+        .attacker = *attacker,
+        .blocker = *blocker,
+    };
+}
+
 LearnedActionSamples score_probe_actions(
     const probes::DecisionProbe& probe, const GameState& state,
     std::shared_ptr<const LearnedModel> model,
@@ -1235,22 +1293,19 @@ struct ValuePriorityDeploymentScores {
     bool adjusted = false;
 };
 
-ValuePriorityDeploymentScores value_priority_deployment_scores(
+ValuePriorityDeploymentScores
+rank_value_priority_deployment_scores(
     const probes::DecisionProbe& probe,
-    std::shared_ptr<const LearnedModel> value_model,
-    std::string_view corpus_id, std::size_t worlds,
-    double value_continuation_epsilon,
-    double value_priority_residual_weight,
-    bool value_pass_dominance,
-    LearnedContinuationController value_continuation_controller) {
+    std::vector<double> raw_candidate_q,
+    bool value_pass_dominance) {
     ValuePriorityDeploymentScores result;
-    result.raw_candidate_q = learned_search_scores(
-        probe, std::move(value_model), corpus_id,
-        LearnedVariant::ValueSearchChampion, worlds, 1,
-        kProductionValueHorizon, true,
-        value_continuation_epsilon,
-        value_priority_residual_weight, value_pass_dominance,
-        value_continuation_controller);
+    result.raw_candidate_q = std::move(raw_candidate_q);
+    if (result.raw_candidate_q.size() !=
+        probe.candidates.size()) {
+        throw std::invalid_argument(
+            "deployed Value Priority scorer returned the wrong "
+            "candidate count");
+    }
     result.deployed_policy_scores = result.raw_candidate_q;
     for (const double score : result.raw_candidate_q) {
         if (!std::isfinite(score)) {
@@ -1317,6 +1372,27 @@ ValuePriorityDeploymentScores value_priority_deployment_scores(
               result.pass_dominated_keys.end());
     result.adjusted = true;
     return result;
+}
+
+ValuePriorityDeploymentScores value_priority_deployment_scores(
+    const probes::DecisionProbe& probe,
+    std::shared_ptr<const LearnedModel> value_model,
+    std::string_view corpus_id, std::size_t worlds,
+    double value_continuation_epsilon,
+    double value_priority_residual_weight,
+    bool value_pass_dominance,
+    LearnedContinuationController value_continuation_controller) {
+    return rank_value_priority_deployment_scores(
+        probe,
+        learned_search_scores(
+            probe, std::move(value_model), corpus_id,
+            LearnedVariant::ValueSearchChampion, worlds, 1,
+            kProductionValueHorizon, true,
+            value_continuation_epsilon,
+            value_priority_residual_weight,
+            value_pass_dominance,
+            value_continuation_controller),
+        value_pass_dominance);
 }
 
 std::vector<probe_eval::ProbePrediction> score_value_deployed(
@@ -2377,6 +2453,625 @@ TeacherOptionComparison score_teacher_option_comparison(
     };
 }
 
+FieldRegressionEvaluationAccounting field_accounting(
+    const LearnedActionSamples& samples) {
+    return {
+        .sampled_worlds = samples.sampled_worlds,
+        .rollout_evaluations =
+            samples.rollout_evaluations,
+        .terminal_evaluations =
+            samples.terminal_evaluations,
+        .bootstrapped_evaluations =
+            samples.bootstrapped_evaluations,
+    };
+}
+
+void require_field_accounting(
+    const LearnedActionSamples& samples,
+    std::size_t candidate_count, std::size_t worlds,
+    std::size_t rollouts_per_world,
+    std::string_view context) {
+    if (candidate_count == 0 || worlds == 0 ||
+        rollouts_per_world == 0 ||
+        worlds >
+            std::numeric_limits<std::size_t>::max() /
+                rollouts_per_world) {
+        throw std::logic_error(
+            std::string(context) +
+            ": invalid expected evaluation dimensions");
+    }
+    const std::size_t samples_per_candidate =
+        worlds * rollouts_per_world;
+    if (candidate_count >
+        std::numeric_limits<std::size_t>::max() /
+            samples_per_candidate) {
+        throw std::overflow_error(
+            std::string(context) +
+            ": expected evaluation count overflows size_t");
+    }
+    const std::size_t expected =
+        candidate_count * samples_per_candidate;
+    if (samples.sampled_worlds != worlds ||
+        samples.q_samples.size() != candidate_count ||
+        samples.rollout_evaluations != expected ||
+        samples.terminal_evaluations >
+            samples.rollout_evaluations ||
+        samples.bootstrapped_evaluations !=
+            samples.rollout_evaluations -
+                samples.terminal_evaluations) {
+        throw std::runtime_error(
+            std::string(context) +
+            ": evaluation accounting is not exact");
+    }
+    for (const auto& row : samples.q_samples) {
+        if (row.size() != samples_per_candidate ||
+            !std::all_of(
+                row.begin(), row.end(),
+                [](double value) {
+                    return std::isfinite(value) &&
+                           value >= 0.0 && value <= 1.0;
+                })) {
+            throw std::runtime_error(
+                std::string(context) +
+                ": sample rows have the wrong shape or range");
+        }
+    }
+}
+
+void require_field_candidate_samples_bit_identical(
+    const std::vector<probe_eval::CandidateSamples>& original,
+    const std::vector<probe_eval::CandidateSamples>& hidden,
+    std::string_view context) {
+    if (original.size() != hidden.size()) {
+        throw std::runtime_error(
+            std::string(context) +
+            ": hidden repartition changed mapped sample count");
+    }
+    for (std::size_t candidate = 0;
+         candidate < original.size(); ++candidate) {
+        if (original[candidate].key != hidden[candidate].key ||
+            original[candidate].q_samples.size() !=
+                hidden[candidate].q_samples.size()) {
+            throw std::runtime_error(
+                std::string(context) +
+                ": hidden repartition changed sample descriptors");
+        }
+        for (std::size_t sample = 0;
+             sample <
+             original[candidate].q_samples.size();
+             ++sample) {
+            if (!bit_identical(
+                    original[candidate].q_samples[sample],
+                    hidden[candidate].q_samples[sample])) {
+                throw std::runtime_error(
+                    std::string(context) +
+                    ": hidden repartition changed mapped Q "
+                    "samples");
+            }
+        }
+    }
+}
+
+std::vector<double> field_candidate_means(
+    const std::vector<probe_eval::CandidateSamples>& samples) {
+    std::vector<double> means;
+    means.reserve(samples.size());
+    for (const auto& candidate : samples) {
+        if (candidate.q_samples.empty()) {
+            throw std::invalid_argument(
+                "field candidate has no score samples");
+        }
+        double sum = 0.0;
+        for (const double value : candidate.q_samples) {
+            if (!std::isfinite(value)) {
+                throw std::invalid_argument(
+                    "field candidate has a non-finite score "
+                    "sample");
+            }
+            sum += value;
+        }
+        means.push_back(
+            sum /
+            static_cast<double>(
+                candidate.q_samples.size()));
+    }
+    return means;
+}
+
+std::vector<probe_eval::PolicyScore> field_policy_scores(
+    const probes::DecisionProbe& probe,
+    const std::vector<double>& scores) {
+    if (scores.size() != probe.candidates.size()) {
+        throw std::invalid_argument(
+            "field policy score count does not match candidates");
+    }
+    std::vector<probe_eval::PolicyScore> result;
+    result.reserve(scores.size());
+    for (std::size_t candidate = 0;
+         candidate < scores.size(); ++candidate) {
+        if (!std::isfinite(scores[candidate])) {
+            throw std::invalid_argument(
+                "field policy score is non-finite");
+        }
+        result.push_back({
+            .key = probe.candidates[candidate].descriptor,
+            .score = scores[candidate],
+        });
+    }
+    return result;
+}
+
+std::vector<std::string> field_exact_max_keys(
+    const std::vector<probe_eval::PolicyScore>& scores) {
+    if (scores.empty()) {
+        throw std::invalid_argument(
+            "field policy has no candidate scores");
+    }
+    const double highest = std::max_element(
+        scores.begin(), scores.end(),
+        [](const probe_eval::PolicyScore& left,
+           const probe_eval::PolicyScore& right) {
+            return left.score < right.score;
+        })->score;
+    std::vector<std::string> selected;
+    for (const auto& score : scores) {
+        if (score.score == highest) {
+            selected.push_back(score.key);
+        }
+    }
+    std::sort(selected.begin(), selected.end());
+    return selected;
+}
+
+LearnedActionSamples score_field_probe_actions(
+    const probes::DecisionProbe& probe,
+    const GameState& state,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig search) {
+    if (probe.decision_kind ==
+        probes::DecisionKind::Priority) {
+        return learned_priority_action_samples(
+            state, probe.original_decks, probe.root_player,
+            sorcery_actions_for(probe.phase), probe.phase,
+            probe.consecutive_passes,
+            priority_candidates(probe), std::move(model),
+            search);
+    }
+    if (probe.decision_kind ==
+        probes::DecisionKind::Attack) {
+        const PermanentId subject =
+            binary_attack_subject(probe);
+        return learned_binary_attack_samples(
+            state, probe.original_decks, probe.root_player,
+            {}, subject, {}, std::move(model), search);
+    }
+    if (probe.decision_kind ==
+        probes::DecisionKind::Block) {
+        const BinaryBlockSubject subject =
+            binary_block_subject(probe);
+        return learned_binary_block_samples(
+            state, probe.original_decks, probe.root_player,
+            subject.attacker, subject.blocker,
+            std::move(model), search);
+    }
+    throw std::invalid_argument(
+        "field scorer received an unknown decision kind");
+}
+
+GameState field_public_information_state(
+    const GameState& state, std::size_t observer) {
+    if (observer >= state.players.size()) {
+        throw std::out_of_range(
+            "field public-state observer must be 0 or 1");
+    }
+    GameState visible = state;
+    for (std::size_t player = 0;
+         player < visible.players.size(); ++player) {
+        auto& player_state = visible.players[player];
+        player_state.library.assign(
+            player_state.library.size(),
+            static_cast<CardId>(0));
+        if (player != observer) {
+            player_state.hand.assign(
+                player_state.hand.size(),
+                static_cast<CardId>(0));
+        }
+    }
+    return visible;
+}
+
+std::string field_public_state_fingerprint(
+    const probes::DecisionProbe& probe,
+    const GameState& state) {
+    probes::DecisionProbe visible = probe;
+    visible.state =
+        field_public_information_state(
+            state, probe.root_player);
+    Fnv1a hash;
+    hash_probe(hash, visible);
+    return hex_u64(hash.value());
+}
+
+GameState force_field_candidate(
+    const probes::DecisionProbe& probe,
+    const GameState& source,
+    const probes::Candidate& candidate) {
+    GameState state = source;
+    if (probe.decision_kind ==
+        probes::DecisionKind::Priority) {
+        const auto* action =
+            std::get_if<PriorityAction>(&candidate.action);
+        if (action == nullptr ||
+            !apply_priority_action(
+                state, probe.root_player, *action,
+                sorcery_actions_for(probe.phase))) {
+            throw std::runtime_error(
+                probe.stable_id + "/" +
+                candidate.descriptor +
+                ": forced Priority branch is illegal");
+        }
+        if (action->kind !=
+                PriorityActionKind::Pass &&
+            !resolve_top_of_stack(state)) {
+            throw std::runtime_error(
+                probe.stable_id + "/" +
+                candidate.descriptor +
+                ": forced Priority spell did not resolve");
+        }
+        return state;
+    }
+    if (probe.decision_kind ==
+        probes::DecisionKind::Attack) {
+        const auto* attack =
+            std::get_if<probes::BinaryAttackDecision>(
+                &candidate.action);
+        if (attack == nullptr ||
+            !resolve_combat(
+                state, state.active_player,
+                attack->include
+                    ? std::vector<PermanentId>{
+                          attack->attacker}
+                    : std::vector<PermanentId>{},
+                {})) {
+            throw std::runtime_error(
+                probe.stable_id + "/" +
+                candidate.descriptor +
+                ": forced Attack branch is illegal");
+        }
+        return state;
+    }
+    if (probe.decision_kind ==
+        probes::DecisionKind::Block) {
+        const auto* block =
+            std::get_if<probes::BinaryBlockDecision>(
+                &candidate.action);
+        if (block == nullptr ||
+            !probes::settle_binary_block_decision(
+                state, state.active_player, *block)) {
+            throw std::runtime_error(
+                probe.stable_id + "/" +
+                candidate.descriptor +
+                ": forced Block branch is illegal");
+        }
+        return state;
+    }
+    throw std::invalid_argument(
+        "field consequence received an unknown decision kind");
+}
+
+std::vector<FieldRegressionForcedConsequence>
+field_forced_consequences(
+    const probes::DecisionProbe& probe,
+    const probes::DecisionProbe& hidden) {
+    if (probe.candidates != hidden.candidates) {
+        throw std::runtime_error(
+            probe.stable_id +
+            ": hidden repartition changed candidate descriptors "
+            "or actions");
+    }
+    std::vector<FieldRegressionForcedConsequence> result;
+    result.reserve(probe.candidates.size());
+    for (std::size_t candidate = 0;
+         candidate < probe.candidates.size(); ++candidate) {
+        const GameState original_state =
+            force_field_candidate(
+                probe, probe.state,
+                probe.candidates[candidate]);
+        const GameState hidden_state =
+            force_field_candidate(
+                hidden, hidden.state,
+                hidden.candidates[candidate]);
+        const GameState original_public =
+            field_public_information_state(
+                original_state, probe.root_player);
+        const GameState hidden_public =
+            field_public_information_state(
+                hidden_state, hidden.root_player);
+        if (original_public != hidden_public) {
+            throw std::runtime_error(
+                probe.stable_id + "/" +
+                probe.candidates[candidate].descriptor +
+                ": hidden repartition changed forced public "
+                "consequences");
+        }
+        const std::string original_fingerprint =
+            field_public_state_fingerprint(
+                probe, original_state);
+        const std::string hidden_fingerprint =
+            field_public_state_fingerprint(
+                hidden, hidden_state);
+        if (original_fingerprint != hidden_fingerprint) {
+            throw std::logic_error(
+                probe.stable_id + "/" +
+                probe.candidates[candidate].descriptor +
+                ": equal public consequences hashed "
+                "differently");
+        }
+        result.push_back({
+            .descriptor =
+                probe.candidates[candidate].descriptor,
+            .public_state_fingerprint =
+                original_fingerprint,
+        });
+    }
+    return result;
+}
+
+void validate_field_named_model(
+    const NamedValueScoringModel& scoring,
+    std::string_view role, bool treatment) {
+    validate_named_value_scoring_model(scoring, role);
+    const bool exact =
+        scoring.value_priority_residual_weight == 0.0 &&
+        scoring.value_pass_dominance == treatment &&
+        scoring.value_continuation_controller ==
+            (treatment
+                 ? LearnedContinuationController::
+                       PublicStackPassV1
+                 : LearnedContinuationController::Legacy);
+    if (!exact) {
+        throw std::invalid_argument(
+            std::string(role) +
+            " does not match the frozen field deployment "
+            "configuration");
+    }
+}
+
+struct FieldImmediateScores {
+    std::vector<double> scores;
+    std::size_t selected_candidate = 0;
+};
+
+FieldImmediateScores field_immediate_scores(
+    const probes::DecisionProbe& probe,
+    const GameState& state,
+    std::shared_ptr<const LearnedModel> model) {
+    if (probe.decision_kind ==
+        probes::DecisionKind::Attack) {
+        const PermanentId subject =
+            binary_attack_subject(probe);
+        const auto canonical =
+            learned_value_attack_set_scores(
+                state, probe.root_player,
+                {{}, {subject}}, std::move(model),
+                reference_seed_for_probe(
+                    probes::kFieldRegressionsV1,
+                    probe.stable_id,
+                    kProbeProductionPolicySeed));
+        if (canonical.scores.size() != 2 ||
+            canonical.selected_candidate >= 2) {
+            throw std::runtime_error(
+                probe.stable_id +
+                ": immediate Attack selector returned an "
+                "invalid schema");
+        }
+        FieldImmediateScores result;
+        result.scores.resize(probe.candidates.size());
+        bool found_selected = false;
+        for (std::size_t candidate = 0;
+             candidate < probe.candidates.size(); ++candidate) {
+            const auto& attack =
+                std::get<probes::BinaryAttackDecision>(
+                    probe.candidates[candidate].action);
+            const std::size_t branch =
+                attack.include ? 1U : 0U;
+            result.scores[candidate] =
+                canonical.scores[branch];
+            if (branch ==
+                canonical.selected_candidate) {
+                result.selected_candidate = candidate;
+                found_selected = true;
+            }
+        }
+        if (!found_selected) {
+            throw std::logic_error(
+                probe.stable_id +
+                ": immediate Attack selection did not map to "
+                "a fixture candidate");
+        }
+        return result;
+    }
+    if (probe.decision_kind ==
+        probes::DecisionKind::Block) {
+        const BinaryBlockSubject subject =
+            binary_block_subject(probe);
+        const auto canonical =
+            learned_value_binary_block_scores(
+                state, probe.root_player,
+                subject.attacker, subject.blocker,
+                std::move(model));
+        if (canonical.selected_candidate >= 2) {
+            throw std::runtime_error(
+                probe.stable_id +
+                ": immediate Block selector returned an "
+                "invalid selection");
+        }
+        FieldImmediateScores result;
+        result.scores.resize(probe.candidates.size());
+        bool found_selected = false;
+        for (std::size_t candidate = 0;
+             candidate < probe.candidates.size(); ++candidate) {
+            const auto& block =
+                std::get<probes::BinaryBlockDecision>(
+                    probe.candidates[candidate].action);
+            const std::size_t branch =
+                block.include ? 1U : 0U;
+            result.scores[candidate] =
+                canonical.scores[branch];
+            if (branch ==
+                canonical.selected_candidate) {
+                result.selected_candidate = candidate;
+                found_selected = true;
+            }
+        }
+        if (!found_selected) {
+            throw std::logic_error(
+                probe.stable_id +
+                ": immediate Block selection did not map to "
+                "a fixture candidate");
+        }
+        return result;
+    }
+    throw std::invalid_argument(
+        "field immediate scorer requires Attack or Block");
+}
+
+FieldRegressionPolicyDecision score_field_deployment(
+    const probes::DecisionProbe& probe,
+    const GameState& state,
+    const NamedValueScoringModel& scoring) {
+    FieldRegressionPolicyDecision detail{
+        .name = scoring.name,
+        .fingerprint =
+            learned_model_fingerprint(scoring.model),
+        .score_kind =
+            probe.decision_kind ==
+                    probes::DecisionKind::Priority
+                ? FieldRegressionScoreKind::
+                      DeployedPrioritySearch
+                : FieldRegressionScoreKind::
+                      ImmediateCombat,
+        .deployment_worlds = kFieldDeploymentWorlds,
+        .deployment_horizon_turns =
+            kFieldDeploymentHorizonTurns,
+        .blend_shallow_prior = true,
+        .value_priority_residual_weight =
+            scoring.value_priority_residual_weight,
+        .value_pass_dominance =
+            scoring.value_pass_dominance,
+        .value_continuation_controller =
+            scoring.value_continuation_controller,
+    };
+
+    if (probe.decision_kind !=
+        probes::DecisionKind::Priority) {
+        const FieldImmediateScores immediate =
+            field_immediate_scores(
+                probe, state, scoring.model);
+        detail.scores =
+            field_policy_scores(probe, immediate.scores);
+        detail.selected_keys = {
+            probe.candidates[
+                immediate.selected_candidate]
+                .descriptor,
+        };
+        detail.deterministic_selection = true;
+        return detail;
+    }
+
+    const LearnedSearchConfig search{
+        .seed = reference_seed_for_probe(
+            probes::kFieldRegressionsV1,
+            probe.stable_id),
+        .worlds = kFieldDeploymentWorlds,
+        .rollouts_per_world = 1,
+        .horizon_turns =
+            kFieldDeploymentHorizonTurns,
+        .continuation_variant =
+            LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon = 0.0,
+        .blend_shallow_prior = true,
+        .value_priority_residual_weight =
+            scoring.value_priority_residual_weight,
+        .value_pass_dominance =
+            scoring.value_pass_dominance,
+        .value_continuation_controller =
+            scoring.value_continuation_controller,
+    };
+    const LearnedActionSamples action_samples =
+        score_field_probe_actions(
+            probe, state, scoring.model, search);
+    require_field_accounting(
+        action_samples, probe.candidates.size(),
+        kFieldDeploymentWorlds, 1,
+        probe.stable_id + " " + scoring.name +
+            " deployment");
+    detail.samples =
+        map_field_candidate_samples(
+            probe, action_samples);
+    detail.accounting =
+        field_accounting(action_samples);
+    const auto ranked =
+        rank_value_priority_deployment_scores(
+            probe, field_candidate_means(detail.samples),
+            scoring.value_pass_dominance);
+    detail.scores = field_policy_scores(
+        probe, ranked.deployed_policy_scores);
+    detail.selected_keys =
+        field_exact_max_keys(detail.scores);
+    detail.policy_scores_adjusted_for_deployment =
+        ranked.adjusted;
+    return detail;
+}
+
+void require_field_policy_bit_identical(
+    const FieldRegressionPolicyDecision& original,
+    const FieldRegressionPolicyDecision& hidden,
+    std::string_view context) {
+    if (original.name != hidden.name ||
+        original.fingerprint != hidden.fingerprint ||
+        original.score_kind != hidden.score_kind ||
+        original.deployment_worlds !=
+            hidden.deployment_worlds ||
+        original.deployment_horizon_turns !=
+            hidden.deployment_horizon_turns ||
+        original.blend_shallow_prior !=
+            hidden.blend_shallow_prior ||
+        !bit_identical(
+            original.value_priority_residual_weight,
+            hidden.value_priority_residual_weight) ||
+        original.value_pass_dominance !=
+            hidden.value_pass_dominance ||
+        original.value_continuation_controller !=
+            hidden.value_continuation_controller ||
+        original.accounting != hidden.accounting ||
+        original.selected_keys != hidden.selected_keys ||
+        original.deterministic_selection !=
+            hidden.deterministic_selection ||
+        original.policy_scores_adjusted_for_deployment !=
+            hidden.policy_scores_adjusted_for_deployment ||
+        original.scores.size() != hidden.scores.size()) {
+        throw std::runtime_error(
+            std::string(context) +
+            ": hidden repartition changed deployment detail");
+    }
+    require_field_candidate_samples_bit_identical(
+        original.samples, hidden.samples, context);
+    for (std::size_t candidate = 0;
+         candidate < original.scores.size(); ++candidate) {
+        if (original.scores[candidate].key !=
+                hidden.scores[candidate].key ||
+            !bit_identical(
+                original.scores[candidate].score,
+                hidden.scores[candidate].score)) {
+            throw std::runtime_error(
+                std::string(context) +
+                ": hidden repartition changed deployment "
+                "scores");
+        }
+    }
+}
+
 } // namespace
 
 std::size_t
@@ -3158,6 +3853,258 @@ map_candidate_samples(
         });
     }
     return mapped;
+}
+
+std::vector<probe_eval::CandidateSamples>
+map_field_candidate_samples(
+    const probes::DecisionProbe& probe,
+    const LearnedActionSamples& action_samples) {
+    std::unordered_set<std::string> descriptors;
+    for (const probes::Candidate& candidate :
+         probe.candidates) {
+        if (candidate.descriptor.empty() ||
+            !descriptors.insert(candidate.descriptor).second) {
+            throw std::invalid_argument(
+                "field candidate descriptors must be nonempty "
+                "and unique");
+        }
+    }
+
+    if (probe.decision_kind ==
+        probes::DecisionKind::Priority) {
+        return map_candidate_samples(probe, action_samples);
+    }
+    if (action_samples.q_samples.size() != 2) {
+        throw std::invalid_argument(
+            "field binary scorer must return two canonical rows");
+    }
+
+    std::vector<probe_eval::CandidateSamples> mapped;
+    mapped.reserve(probe.candidates.size());
+    if (probe.decision_kind ==
+        probes::DecisionKind::Attack) {
+        (void)binary_attack_subject(probe);
+        for (const probes::Candidate& candidate :
+             probe.candidates) {
+            const auto& attack =
+                std::get<probes::BinaryAttackDecision>(
+                    candidate.action);
+            mapped.push_back({
+                candidate.descriptor,
+                action_samples.q_samples[
+                    attack.include ? 1U : 0U],
+            });
+        }
+        return mapped;
+    }
+    if (probe.decision_kind ==
+        probes::DecisionKind::Block) {
+        (void)binary_block_subject(probe);
+        for (const probes::Candidate& candidate :
+             probe.candidates) {
+            const auto& block =
+                std::get<probes::BinaryBlockDecision>(
+                    candidate.action);
+            mapped.push_back({
+                candidate.descriptor,
+                action_samples.q_samples[
+                    block.include ? 1U : 0U],
+            });
+        }
+        return mapped;
+    }
+    throw std::invalid_argument(
+        "field candidate mapper received an unknown decision "
+        "kind");
+}
+
+FieldRegressionReport score_field_regressions_v1(
+    const NamedValueScoringModel& parent,
+    const NamedValueScoringModel& control,
+    const NamedValueScoringModel& treatment) {
+    validate_field_named_model(
+        parent, "field parent", false);
+    validate_field_named_model(
+        control, "field control", false);
+    validate_field_named_model(
+        treatment, "field treatment", true);
+    if (parent.name == control.name ||
+        parent.name == treatment.name ||
+        control.name == treatment.name) {
+        throw std::invalid_argument(
+            "field parent/control/treatment names must be "
+            "unique");
+    }
+
+    const std::vector<probes::DecisionProbe> corpus =
+        probes::make_field_regressions_v1();
+    const std::vector<std::string> validation_errors =
+        probes::validate_field_regressions_v1(corpus);
+    if (!validation_errors.empty()) {
+        throw std::runtime_error(
+            "frozen field-regressions-v1 corpus is invalid: " +
+            validation_errors.front());
+    }
+    const std::vector<probes::DecisionProbe> hidden =
+        hidden_clone_corpus(corpus);
+    if (hidden.size() != corpus.size()) {
+        throw std::logic_error(
+            "field hidden-clone count changed");
+    }
+
+    FieldRegressionReport report{
+        .corpus_id =
+            std::string(probes::kFieldRegressionsV1),
+        .reference_worlds = kFieldReferenceWorlds,
+        .reference_horizon_turns =
+            kFieldReferenceHorizonTurns,
+        .reference_rollouts_per_world = 1,
+        .reference_blend_shallow_prior = false,
+        .hidden_repartition = {
+            .passed = true,
+            // One deep reference plus three deployed views.
+            .policy_count = 4,
+            .probe_count = corpus.size(),
+        },
+        .rules_contract_passed = true,
+    };
+    report.decisions.reserve(corpus.size());
+
+    for (std::size_t index = 0;
+         index < corpus.size(); ++index) {
+        const probes::DecisionProbe& probe = corpus[index];
+        const probes::DecisionProbe& clone = hidden[index];
+        const probes::Validation clone_validation =
+            probes::validate_probe(clone);
+        if (!clone_validation.ok()) {
+            throw std::runtime_error(
+                probe.stable_id +
+                ": hidden field fixture is invalid: " +
+                clone_validation.errors.front());
+        }
+        if (probe.stable_id != clone.stable_id ||
+            probe.root_deck != clone.root_deck ||
+            probe.decision_kind != clone.decision_kind ||
+            probe.root_player != clone.root_player ||
+            probe.candidates != clone.candidates ||
+            field_public_information_state(
+                probe.state, probe.root_player) !=
+                field_public_information_state(
+                    clone.state, clone.root_player)) {
+            throw std::runtime_error(
+                probe.stable_id +
+                ": hidden clone changed field descriptors or "
+                "the root information set");
+        }
+
+        const LearnedSearchConfig reference_search{
+            .seed = reference_seed_for_probe(
+                probes::kFieldRegressionsV1,
+                probe.stable_id),
+            .worlds = kFieldReferenceWorlds,
+            .rollouts_per_world = 1,
+            .horizon_turns =
+                kFieldReferenceHorizonTurns,
+            .continuation_variant =
+                LearnedVariant::ValueSearchChampion,
+            .value_continuation_epsilon = 0.0,
+            .blend_shallow_prior = false,
+            .value_priority_residual_weight = 0.0,
+            .value_pass_dominance = false,
+            .value_continuation_controller =
+                LearnedContinuationController::Legacy,
+        };
+        const LearnedActionSamples reference =
+            score_field_probe_actions(
+                probe, probe.state, parent.model,
+                reference_search);
+        const LearnedActionSamples clone_reference =
+            score_field_probe_actions(
+                clone, clone.state, parent.model,
+                reference_search);
+        require_field_accounting(
+            reference, probe.candidates.size(),
+            kFieldReferenceWorlds, 1,
+            probe.stable_id + " deep reference");
+        require_field_accounting(
+            clone_reference, clone.candidates.size(),
+            kFieldReferenceWorlds, 1,
+            clone.stable_id + " hidden deep reference");
+        if (!action_samples_bit_identical(
+                reference, clone_reference)) {
+            throw std::runtime_error(
+                probe.stable_id +
+                ": hidden repartition changed exact deep "
+                "reference samples or accounting");
+        }
+        const auto mapped_reference =
+            map_field_candidate_samples(probe, reference);
+        const auto mapped_clone_reference =
+            map_field_candidate_samples(
+                clone, clone_reference);
+        require_field_candidate_samples_bit_identical(
+            mapped_reference, mapped_clone_reference,
+            probe.stable_id + " deep reference");
+
+        FieldRegressionPolicyDecision parent_detail =
+            score_field_deployment(
+                probe, probe.state, parent);
+        const FieldRegressionPolicyDecision
+            parent_clone_detail =
+                score_field_deployment(
+                    clone, clone.state, parent);
+        require_field_policy_bit_identical(
+            parent_detail, parent_clone_detail,
+            probe.stable_id + " parent");
+
+        FieldRegressionPolicyDecision control_detail =
+            score_field_deployment(
+                probe, probe.state, control);
+        const FieldRegressionPolicyDecision
+            control_clone_detail =
+                score_field_deployment(
+                    clone, clone.state, control);
+        require_field_policy_bit_identical(
+            control_detail, control_clone_detail,
+            probe.stable_id + " control");
+
+        FieldRegressionPolicyDecision treatment_detail =
+            score_field_deployment(
+                probe, probe.state, treatment);
+        const FieldRegressionPolicyDecision
+            treatment_clone_detail =
+                score_field_deployment(
+                    clone, clone.state, treatment);
+        require_field_policy_bit_identical(
+            treatment_detail, treatment_clone_detail,
+            probe.stable_id + " treatment");
+
+        FieldRegressionDecisionReport decision{
+            .stable_id = probe.stable_id,
+            .root_deck = probe.root_deck,
+            .decision_kind = probe.decision_kind,
+            .reference_samples = mapped_reference,
+            .reference_accounting =
+                field_accounting(reference),
+            .forced_consequences =
+                field_forced_consequences(
+                    probe, clone),
+            .parent = std::move(parent_detail),
+            .control = std::move(control_detail),
+            .treatment =
+                std::move(treatment_detail),
+        };
+        decision.candidate_descriptors.reserve(
+            probe.candidates.size());
+        for (const probes::Candidate& candidate :
+             probe.candidates) {
+            decision.candidate_descriptors.push_back(
+                candidate.descriptor);
+        }
+        report.decisions.push_back(
+            std::move(decision));
+    }
+    return report;
 }
 
 ProbeCacheMetadata make_probe_cache_metadata(

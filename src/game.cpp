@@ -8412,6 +8412,27 @@ double predict_learned_critic_with_context(
             context, perspective));
 }
 
+double learned_value_post_combat_score(
+    const std::shared_ptr<const LearnedModel>& model,
+    const GameState& successor, std::size_t perspective) {
+    const std::size_t opponent = opponent_of(perspective);
+    if (successor.players[perspective].life <= 0) {
+        return 0.0;
+    }
+    if (successor.players[opponent].life <= 0) {
+        return 1.0;
+    }
+    return predict_learned_critic_with_context(
+        model, successor, perspective,
+        {
+            .valid = true,
+            .phase = TurnPhase::EndCombat,
+            .decision_player = successor.active_player,
+            .consecutive_passes = 0,
+            .sorcery_actions = false,
+        });
+}
+
 LearnedValueAttackSetScores score_learned_value_attack_sets(
     const GameState& state, std::size_t attacking_player,
     const std::vector<std::vector<PermanentId>>& candidates,
@@ -13679,26 +13700,9 @@ std::optional<GameResult> Game::play_combat_with_attackers(
                 throw std::logic_error(
                     "Learned Value sampled illegal blocks");
             }
-            double score = 0.5;
-            if (successor.players[defending_player].life <= 0) {
-                score = 0.0;
-            } else if (
-                successor.players[state_.active_player].life <=
-                0) {
-                score = 1.0;
-            } else {
-                score =
-                    predict_learned_critic_with_context(
-                        model, successor, defending_player,
-                        {
-                            .valid = true,
-                            .phase = TurnPhase::EndCombat,
-                            .decision_player =
-                                successor.active_player,
-                            .consecutive_passes = 0,
-                            .sorcery_actions = false,
-                        });
-            }
+            const double score =
+                learned_value_post_combat_score(
+                    model, successor, defending_player);
             if (score > best_score) {
                 best_score = score;
                 best_blocks = candidate;
@@ -15309,6 +15313,78 @@ std::vector<PermanentId> validate_binary_attack_context(
     return legal;
 }
 
+std::size_t validate_binary_block_context(
+    const GameState& state, std::size_t defending_player,
+    PermanentId attacker, PermanentId blocker) {
+    if (defending_player >= state.players.size()) {
+        throw std::out_of_range(
+            "defending player must be 0 or 1");
+    }
+    const std::size_t attacking_player =
+        opponent_of(defending_player);
+    if (state.active_player != attacking_player) {
+        throw std::invalid_argument(
+            "binary block evaluation requires the active "
+            "opponent");
+    }
+    if (!state.stack.empty()) {
+        throw std::invalid_argument(
+            "binary block evaluation requires an empty stack");
+    }
+
+    const CreaturePermanent* attacking_creature =
+        find_creature(
+            state.players[attacking_player], attacker);
+    if (attacking_creature == nullptr ||
+        !attacking_creature->tapped) {
+        throw std::invalid_argument(
+            "binary block attacker must be an existing tapped "
+            "creature");
+    }
+    const CreaturePermanent* blocking_creature =
+        find_creature(
+            state.players[defending_player], blocker);
+    if (blocking_creature == nullptr ||
+        blocking_creature->tapped) {
+        throw std::invalid_argument(
+            "binary block blocker must be an existing untapped "
+            "creature");
+    }
+
+    for (std::size_t root_choice = 0; root_choice < 2;
+         ++root_choice) {
+        GameState branch = state;
+        CreaturePermanent* copied_attacker =
+            find_creature(
+                branch.players[attacking_player], attacker);
+        if (copied_attacker == nullptr) {
+            throw std::logic_error(
+                "binary block attacker disappeared from its "
+                "validation copy");
+        }
+        copied_attacker->tapped = false;
+        const std::vector<
+            std::pair<PermanentId, PermanentId>>
+            blocks =
+                root_choice == 0
+                    ? std::vector<std::pair<
+                          PermanentId, PermanentId>>{}
+                    : std::vector<std::pair<
+                          PermanentId, PermanentId>>{
+                          {attacker, blocker},
+                      };
+        if (!resolve_combat(
+                branch, attacking_player, {attacker},
+                blocks)) {
+            throw std::invalid_argument(
+                root_choice == 0
+                    ? "binary block no-block branch is illegal"
+                    : "binary block branch is illegal");
+        }
+    }
+    return attacking_player;
+}
+
 } // namespace
 
 LearnedValuePriorityResidualDiagnostic
@@ -15459,6 +15535,62 @@ LearnedValueAttackSetScores learned_value_attack_set_scores(
     std::mt19937_64 random(seed);
     return score_learned_value_attack_sets(
         state, attacking_player, candidates, model, random);
+}
+
+LearnedValueBinaryBlockScores
+learned_value_binary_block_scores(
+    const GameState& state, std::size_t defending_player,
+    PermanentId attacker, PermanentId blocker,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    const std::size_t attacking_player =
+        validate_binary_block_context(
+            state, defending_player, attacker, blocker);
+
+    LearnedValueBinaryBlockScores result;
+    double best_score =
+        -std::numeric_limits<double>::infinity();
+    for (std::size_t root_choice = 0; root_choice < 2;
+         ++root_choice) {
+        GameState successor = state;
+        CreaturePermanent* copied_attacker =
+            find_creature(
+                successor.players[attacking_player],
+                attacker);
+        if (copied_attacker == nullptr) {
+            throw std::logic_error(
+                "validated immediate block attacker "
+                "disappeared");
+        }
+        copied_attacker->tapped = false;
+        const std::vector<
+            std::pair<PermanentId, PermanentId>>
+            blocks =
+                root_choice == 0
+                    ? std::vector<std::pair<
+                          PermanentId, PermanentId>>{}
+                    : std::vector<std::pair<
+                          PermanentId, PermanentId>>{
+                          {attacker, blocker},
+                      };
+        if (!resolve_combat(
+                successor, attacking_player, {attacker},
+                blocks)) {
+            throw std::logic_error(
+                "validated immediate block branch became "
+                "illegal");
+        }
+        const double score =
+            learned_value_post_combat_score(
+                model, successor, defending_player);
+        result.scores[root_choice] = score;
+        if (score > best_score) {
+            best_score = score;
+            result.selected_candidate = root_choice;
+        }
+    }
+    return result;
 }
 
 std::vector<double> handcrafted_priority_scores(
@@ -20589,6 +20721,165 @@ LearnedActionSamples learned_binary_attack_samples(
                 result.terminal_evaluations) {
         throw std::logic_error(
             "Learned attack evaluation accounting mismatch");
+    }
+    return result;
+}
+
+LearnedActionSamples learned_binary_block_samples(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t defending_player, PermanentId attacker,
+    PermanentId blocker,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig config) {
+    validate_search_config(config, model);
+    const std::size_t attacking_player =
+        validate_binary_block_context(
+            state, defending_player, attacker, blocker);
+    const auto worlds = sample_evaluation_worlds(
+        state, original_decks, defending_player, config);
+
+    Game evaluator(
+        original_decks[0], original_decks[1],
+        indexed_search_seed(
+            config.seed, 0x424C4F434B455641ULL, 0),
+        learned_evaluation_game_config(
+            model, config.continuation_variant,
+            config.value_continuation_epsilon,
+            config.value_priority_residual_weight,
+            config.value_pass_dominance,
+            config.value_continuation_controller));
+    evaluator.state_ = state;
+
+    LearnedActionSamples result;
+    result.sampled_worlds = worlds.size();
+    const std::size_t expected_evaluations =
+        checked_rollout_evaluations(2, config);
+    result.q_samples.resize(2);
+    const std::size_t samples_per_action =
+        config.worlds * config.rollouts_per_world;
+    for (auto& samples : result.q_samples) {
+        samples.reserve(samples_per_action);
+    }
+
+    // Canonical row order is No Block, then Block. Each paired cell starts
+    // from the same defender-visible world and continuation seed.
+    for (std::size_t root_choice = 0; root_choice < 2;
+         ++root_choice) {
+        for (const LearnedEvaluationWorld& world : worlds) {
+            for (const std::uint64_t continuation_seed :
+                 world.continuation_seeds) {
+                Game simulation = evaluator;
+                simulation.state_ = world.state;
+                simulation.random_.seed(continuation_seed);
+                simulation.trace_ = nullptr;
+                simulation.learned_decision_trace_ = nullptr;
+                simulation.config_.learned_policy_recorder.reset();
+                simulation.config_.learned_search_depth = 0;
+                if (config.continuation_variant ==
+                    LearnedVariant::ValueSearchChampion) {
+                    simulation.learned_decision_role_ =
+                        Game::LearnedDecisionRole::
+                            ValueContinuation;
+                }
+
+                CreaturePermanent* copied_attacker =
+                    find_creature(
+                        simulation.state_
+                            .players[attacking_player],
+                        attacker);
+                if (copied_attacker == nullptr) {
+                    throw std::logic_error(
+                        "validated binary block attacker "
+                        "disappeared from its sampled world");
+                }
+                // The fixture is captured after attackers were declared.
+                // resolve_combat validates an attack declaration, so only
+                // the copied subject is readied immediately before the
+                // rules-engine call.
+                copied_attacker->tapped = false;
+                const std::vector<
+                    std::pair<PermanentId, PermanentId>>
+                    blocks =
+                        root_choice == 0
+                            ? std::vector<std::pair<
+                                  PermanentId,
+                                  PermanentId>>{}
+                            : std::vector<std::pair<
+                                  PermanentId,
+                                  PermanentId>>{
+                                  {attacker, blocker},
+                              };
+                if (!resolve_combat(
+                        simulation.state_, attacking_player,
+                        {attacker}, blocks)) {
+                    throw std::logic_error(
+                        "validated binary block branch became "
+                        "illegal");
+                }
+
+                // Match the deployed selector's shallow score exactly:
+                // resolve combat, then score the End Combat decision state
+                // before either player receives priority.
+                const double shallow_prior =
+                    learned_value_post_combat_score(
+                        model, simulation.state_,
+                        defending_player);
+                std::optional<GameResult> terminal =
+                    simulation.life_total_result();
+                if (!terminal.has_value()) {
+                    terminal =
+                        simulation.play_priority_window(
+                            false, TurnPhase::EndCombat);
+                }
+                if (!terminal.has_value()) {
+                    terminal =
+                        simulation.play_priority_window(
+                            true, TurnPhase::SecondMain);
+                }
+                if (!terminal.has_value()) {
+                    simulation.perform_cleanup();
+                }
+
+                double continuation = 0.0;
+                bool terminal_evaluation =
+                    terminal.has_value();
+                if (terminal_evaluation) {
+                    continuation = learned_result_value(
+                        *terminal, defending_player);
+                } else {
+                    const auto horizon_evaluation =
+                        simulation
+                            .finish_learned_evaluation_horizon(
+                                defending_player,
+                                config.horizon_turns);
+                    continuation = horizon_evaluation.score;
+                    terminal_evaluation =
+                        horizon_evaluation.terminal;
+                }
+                result.q_samples[root_choice].push_back(
+                    blend_evaluation_score(
+                        continuation, shallow_prior,
+                        config.blend_shallow_prior,
+                        samples_per_action));
+                ++result.rollout_evaluations;
+                if (terminal_evaluation) {
+                    ++result.terminal_evaluations;
+                } else {
+                    ++result.bootstrapped_evaluations;
+                }
+            }
+        }
+    }
+    if (result.rollout_evaluations !=
+            expected_evaluations ||
+        result.terminal_evaluations >
+            result.rollout_evaluations ||
+        result.bootstrapped_evaluations !=
+            result.rollout_evaluations -
+                result.terminal_evaluations) {
+        throw std::logic_error(
+            "Learned block evaluation accounting mismatch");
     }
     return result;
 }

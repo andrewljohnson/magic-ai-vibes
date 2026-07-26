@@ -1220,6 +1220,68 @@ void test_field_ru_chump_block_rules_consequences() {
     }
 }
 
+void test_field_sick_bear_root_has_exact_cast_predecessor() {
+    const std::vector<DecisionProbe> fields =
+        old_school::probes::make_field_regressions_v1();
+    const DecisionProbe& probe = find_probe(
+        fields, Category::FieldGreenSecondMainSickBearGrowth);
+    expect(
+        fields.size() == 6 && probe.candidates.size() == 2 &&
+            probe.candidates[0].descriptor == "pass" &&
+            probe.candidates[1].descriptor ==
+                "growth-own-summoning-sick-grizzly-bears",
+        "sick-Bear predecessor check changed the frozen field "
+        "corpus or its actions");
+
+    GameState predecessor = probe.state;
+    old_school::PlayerState& root =
+        predecessor.players[probe.root_player];
+    const auto bear = std::find_if(
+        root.creatures.begin(), root.creatures.end(),
+        [](const old_school::CreaturePermanent& creature) {
+            return creature.card == CardId::GrizzlyBears;
+        });
+    expect(
+        bear != root.creatures.end() &&
+            root.lands.size() >= 2,
+        "sick-Bear field root cannot derive a cast predecessor");
+    const PermanentId bear_id = bear->id;
+    root.hand.push_back(CardId::GrizzlyBears);
+    root.creatures.erase(bear);
+    root.lands[0].tapped = false;
+    root.lands[1].tapped = false;
+    predecessor.next_permanent_id = bear_id;
+
+    const std::size_t frozen_spells_cast =
+        probe.state.stats[probe.root_player].spells_cast;
+    const old_school::StackObjectId
+        frozen_next_stack_object_id =
+            probe.state.next_stack_object_id;
+    expect(
+        old_school::apply_priority_action(
+            predecessor, probe.root_player,
+            PriorityAction::cast_creature(CardId::GrizzlyBears),
+            true),
+        "exact predecessor could not cast Grizzly Bears");
+    resolve_cast_spell(predecessor);
+    expect(
+        predecessor.stats[probe.root_player].spells_cast ==
+                frozen_spells_cast + 1 &&
+            predecessor.next_stack_object_id ==
+                frozen_next_stack_object_id + 1,
+        "Bear predecessor changed unexpected action-history "
+        "counters");
+
+    predecessor.stats[probe.root_player].spells_cast =
+        frozen_spells_cast;
+    predecessor.next_stack_object_id =
+        frozen_next_stack_object_id;
+    expect(
+        game_states_equal(predecessor, probe.state),
+        "casting and resolving Bear did not reproduce the exact "
+        "sick-Bear field root");
+}
+
 void test_field_second_main_sick_bear_growth_consequences() {
     const std::vector<DecisionProbe> fields =
         old_school::probes::make_field_regressions_v1();
@@ -1295,6 +1357,29 @@ void test_field_growth_on_air_has_linked_attack_consequences() {
     const DecisionProbe& untapped_control = find_probe(
         fields,
         Category::FieldGreenAttackAfterGrowthUntappedAirControl);
+
+    GameState own_growth = growth_probe.state;
+    const PermanentId own_treefolk =
+        creature_id(own_growth, 0, CardId::IronrootTreefolk);
+    expect(old_school::apply_priority_action(
+               own_growth, growth_probe.root_player,
+               priority_candidate(
+                   growth_probe,
+                   "growth-own-ironroot-treefolk"),
+               false),
+           "field own-Treefolk Growth control failed to cast");
+    resolve_cast_spell(own_growth);
+    const auto& grown_treefolk =
+        own_growth.players[0].creatures.front();
+    expect(
+        grown_treefolk.id == own_treefolk &&
+            grown_treefolk.temporary_power_bonus == 3 &&
+            grown_treefolk.temporary_toughness_bonus == 3 &&
+            old_school::resolve_combat(
+                own_growth, 0, {own_treefolk}, {}) &&
+            own_growth.players[1].life == 0,
+        "own-Treefolk Growth control did not produce its factual "
+        "lethal attack");
 
     GameState resolved = growth_probe.state;
     expect(old_school::apply_priority_action(
@@ -2896,6 +2981,8 @@ int main() {
                test_field_regressions_are_separate_and_rules_valid);
     runner.run("field RU chump-block consequences",
                test_field_ru_chump_block_rules_consequences);
+    runner.run("field sick-Bear exact cast predecessor",
+               test_field_sick_bear_root_has_exact_cast_predecessor);
     runner.run("field sick-Bear Growth consequences",
                test_field_second_main_sick_bear_growth_consequences);
     runner.run("field Growth and linked attack consequences",

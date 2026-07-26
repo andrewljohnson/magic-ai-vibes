@@ -769,6 +769,13 @@ struct LearnedValueAttackSetScores {
     std::size_t selected_candidate = 0;
 };
 
+struct LearnedValueBinaryBlockScores {
+    // Canonical order: No Block, Block.
+    std::array<double, 2> scores = {0.0, 0.0};
+    // The deployed selector retains row zero on an exact tie.
+    std::size_t selected_candidate = 0;
+};
+
 // Evaluation-only view of the deployed Value attack-set selector. `seed`
 // initializes the RNG exactly at the block-candidate enumeration boundary;
 // candidates are scored in caller order with the unchanged deployed
@@ -777,6 +784,14 @@ LearnedValueAttackSetScores learned_value_attack_set_scores(
     const GameState& state, std::size_t attacking_player,
     const std::vector<std::vector<PermanentId>>& candidates,
     std::shared_ptr<const LearnedModel> model, std::uint64_t seed);
+
+// Evaluation-only exact immediate view of the deployed Value block selector
+// for one attacker and blocker. It scores the two post-combat states without
+// any continuation, card heuristic, or combat heuristic.
+LearnedValueBinaryBlockScores learned_value_binary_block_scores(
+    const GameState& state, std::size_t defending_player,
+    PermanentId attacker, PermanentId blocker,
+    std::shared_ptr<const LearnedModel> model);
 
 LearnedActionSamples learned_priority_action_samples(
     const GameState& state,
@@ -798,6 +813,18 @@ LearnedActionSamples learned_binary_attack_samples(
     const std::vector<PermanentId>& selected_attackers,
     PermanentId subject,
     const std::vector<PermanentId>& remaining_attackers,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig config);
+
+// Evaluates one already-declared attacker against one available blocker from
+// the defender's information set. The two rows are No Block and Block,
+// respectively. Combat legality and consequences are delegated to the rules
+// engine.
+LearnedActionSamples learned_binary_block_samples(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t defending_player, PermanentId attacker,
+    PermanentId blocker,
     std::shared_ptr<const LearnedModel> model,
     LearnedSearchConfig config);
 
@@ -997,6 +1024,13 @@ class Game {
         const std::vector<PermanentId>& selected_attackers,
         PermanentId subject,
         const std::vector<PermanentId>& remaining_attackers,
+        std::shared_ptr<const LearnedModel> model,
+        LearnedSearchConfig config);
+    friend LearnedActionSamples learned_binary_block_samples(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t defending_player, PermanentId attacker,
+        PermanentId blocker,
         std::shared_ptr<const LearnedModel> model,
         LearnedSearchConfig config);
     friend std::vector<double> handcrafted_priority_scores(
@@ -1215,6 +1249,10 @@ struct TournamentConfig {
     std::size_t learned_rollouts = 2;
     double value_continuation_epsilon = 0.0;
     std::size_t learned_training_games = 800;
+    // Optional exact, already-trained Learned policy. When present this is
+    // the complete Learned seat configuration for Learned and Mixed fields;
+    // no tournament training is performed.
+    std::optional<BotConfig> frozen_learned_bot;
 };
 
 struct MatchupSummary {
@@ -1226,8 +1264,13 @@ struct MatchupSummary {
 struct TournamentSummary {
     std::size_t games_per_matchup = 0;
     std::size_t total_games = 0;
+    std::uint64_t evaluation_seed = 0;
     std::uint64_t learned_training_seed =
         kDefaultLearnedTrainingSeed;
+    // Exact Learned policy actually scheduled, including its frozen model.
+    // Empty when the field contains no Learned bot.
+    std::optional<BotConfig> effective_learned_bot;
+    std::string effective_learned_model_fingerprint;
     std::array<DeckSimulationStats, kDeckCount> decks;
     std::array<std::array<DeckSimulationStats, kBotKindCount>,
                kDeckCount>
@@ -1272,17 +1315,50 @@ TournamentSummary run_tournament(std::size_t games_per_matchup,
                                  GameConfig game_config = {},
                                  TournamentConfig tournament_config = {});
 
+struct BotBenchmarkOutcomeCounts {
+    std::size_t games = 0;
+    std::size_t wins = 0;
+    std::size_t losses = 0;
+    std::size_t draws = 0;
+
+    bool operator==(const BotBenchmarkOutcomeCounts&) const = default;
+};
+
+// [deck][physical policy seat][play/draw], where play/draw index zero is
+// on-play and index one is on-draw.
+using BotBenchmarkOutcomeQuadrants =
+    std::array<std::array<std::array<BotBenchmarkOutcomeCounts, 2>, 2>,
+               kDeckCount>;
+
+struct BotBenchmarkClusteredScoreEstimate {
+    std::size_t clusters = 0;
+    std::size_t records = 0;
+    double mean = 0.0;
+    double standard_error = 0.0;
+    double confidence_low_95 = 0.0;
+    double confidence_high_95 = 0.0;
+
+    bool operator==(
+        const BotBenchmarkClusteredScoreEstimate&) const = default;
+};
+
 struct BotBenchmarkSummary {
     BotConfig challenger;
     BotConfig baseline;
+    std::uint64_t evaluation_seed = 0;
     std::uint64_t learned_training_seed =
         kDefaultLearnedTrainingSeed;
+    std::string challenger_model_fingerprint;
+    std::string baseline_model_fingerprint;
     std::size_t repetitions_per_deck_pairing = 0;
     std::size_t total_games = 0;
     BotSimulationStats challenger_stats;
     BotSimulationStats baseline_stats;
     std::array<DeckSimulationStats, kDeckCount> challenger_decks;
     std::array<DeckSimulationStats, kDeckCount> baseline_decks;
+    BotBenchmarkOutcomeQuadrants challenger_outcome_quadrants;
+    BotBenchmarkOutcomeQuadrants baseline_outcome_quadrants;
+    BotBenchmarkClusteredScoreEstimate challenger_quartet_cr1;
     // Challenger-perspective outcomes for each exact ordered deck matchup.
     // Rows are challenger decks and columns are baseline decks.
     std::array<std::array<DeckSimulationStats, kDeckCount>, kDeckCount>

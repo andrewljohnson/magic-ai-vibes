@@ -521,6 +521,53 @@ DeterminizationFixture attack_evaluation_fixture(
     return fixture;
 }
 
+DeterminizationFixture block_evaluation_fixture() {
+    DeterminizationFixture fixture{
+        .state = {},
+        .decks = {
+            old_school::blue_deck(),
+            old_school::blue_deck(),
+        },
+    };
+    auto& state = fixture.state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 11;
+    state.players[0].land_played_this_turn = true;
+    state.players[0].lands.assign(
+        5, old_school::LandPermanent{
+               .card = old_school::CardId::Island,
+               .tapped = false,
+           });
+    state.players[0].creatures = {
+        creature(1, old_school::CardId::AirElemental),
+    };
+    state.players[0].creatures[0].tapped = true;
+    state.players[1].lands.assign(
+        5, old_school::LandPermanent{
+               .card = old_school::CardId::Island,
+               .tapped = false,
+           });
+    state.players[1].creatures = {
+        creature(2, old_school::CardId::FlyingMen),
+    };
+
+    for (std::size_t player = 0; player < fixture.decks.size();
+         ++player) {
+        std::vector<old_school::CardId> hidden =
+            fixture.decks[player];
+        for (const auto& land : state.players[player].lands) {
+            remove_fixture_card(hidden, land.card);
+        }
+        for (const auto& permanent :
+             state.players[player].creatures) {
+            remove_fixture_card(hidden, permanent.card);
+        }
+        state.players[player].library = std::move(hidden);
+    }
+    return fixture;
+}
+
 TEST(old_school_card_definitions_are_complete) {
     const auto& forest = old_school::card_definition(old_school::CardId::Forest);
     CHECK(forest.name == "Forest");
@@ -5878,6 +5925,264 @@ TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
         rejected_moat = true;
     }
     CHECK(rejected_moat);
+}
+
+TEST(generic_binary_block_samples_are_paired_legal_and_hidden_safe) {
+    const DeterminizationFixture fixture =
+        block_evaluation_fixture();
+    const old_school::GameState original_state =
+        fixture.state;
+    const old_school::LearnedSearchConfig config = {
+        .seed = 0xB10C5A6DULL,
+        .worlds = 3,
+        .rollouts_per_world = 2,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::
+                ValueSearchChampion,
+        .blend_shallow_prior = false,
+    };
+    const auto baseline =
+        old_school::learned_binary_block_samples(
+            fixture.state, fixture.decks, 1, 1, 2,
+            small_value_model(), config);
+    CHECK(fixture.state == original_state);
+    CHECK(baseline.sampled_worlds == 3);
+    CHECK(baseline.q_samples.size() == 2);
+    CHECK(baseline.rollout_evaluations == 12);
+    CHECK(baseline.terminal_evaluations +
+              baseline.bootstrapped_evaluations ==
+          baseline.rollout_evaluations);
+    for (const auto& row : baseline.q_samples) {
+        CHECK(row.size() == 6);
+        CHECK(std::all_of(
+            row.begin(), row.end(),
+            [](double score) {
+                return std::isfinite(score) &&
+                       score >= 0.0 && score <= 1.0;
+            }));
+    }
+
+    const auto repeated =
+        old_school::learned_binary_block_samples(
+            fixture.state, fixture.decks, 1, 1, 2,
+            small_value_model(), config);
+    CHECK(repeated.q_samples == baseline.q_samples);
+    CHECK(repeated.sampled_worlds ==
+          baseline.sampled_worlds);
+    CHECK(repeated.rollout_evaluations ==
+          baseline.rollout_evaluations);
+    CHECK(repeated.terminal_evaluations ==
+          baseline.terminal_evaluations);
+    CHECK(repeated.bootstrapped_evaluations ==
+          baseline.bootstrapped_evaluations);
+
+    const auto hidden =
+        hidden_repartition(fixture.state, 1);
+    const auto hidden_samples =
+        old_school::learned_binary_block_samples(
+            hidden, fixture.decks, 1, 1, 2,
+            small_value_model(), config);
+    CHECK(hidden_samples.q_samples == baseline.q_samples);
+    CHECK(hidden_samples.rollout_evaluations ==
+          baseline.rollout_evaluations);
+    CHECK(hidden_samples.terminal_evaluations ==
+          baseline.terminal_evaluations);
+    CHECK(hidden_samples.bootstrapped_evaluations ==
+          baseline.bootstrapped_evaluations);
+
+    auto no_block = fixture.state;
+    no_block.players[0].creatures[0].tapped = false;
+    CHECK(old_school::resolve_combat(
+        no_block, 0, {1}, {}));
+    CHECK(no_block.players[1].life == 16);
+    CHECK(no_block.players[0].creatures.size() == 1);
+    CHECK(no_block.players[1].creatures.size() == 1);
+    CHECK(no_block.players[0].creatures[0].tapped);
+
+    auto block = fixture.state;
+    block.players[0].creatures[0].tapped = false;
+    CHECK(old_school::resolve_combat(
+        block, 0, {1}, {{1, 2}}));
+    CHECK(block.players[1].life == 20);
+    CHECK(block.players[0].creatures.size() == 1);
+    CHECK(block.players[0].creatures[0].tapped);
+    CHECK(block.players[0].creatures[0].damage == 1);
+    CHECK(block.players[1].creatures.empty());
+    CHECK(block.players[1].graveyard.back() ==
+          old_school::CardId::FlyingMen);
+
+    const auto immediate =
+        old_school::learned_value_binary_block_scores(
+            fixture.state, 1, 1, 2,
+            small_value_model());
+    std::array<double, 2> expected_immediate{};
+    for (std::size_t choice = 0; choice < 2; ++choice) {
+        auto successor = fixture.state;
+        successor.players[0].creatures[0].tapped = false;
+        const std::vector<std::pair<
+            old_school::PermanentId,
+            old_school::PermanentId>>
+            blocks =
+                choice == 0
+                    ? std::vector<std::pair<
+                          old_school::PermanentId,
+                          old_school::PermanentId>>{}
+                    : std::vector<std::pair<
+                          old_school::PermanentId,
+                          old_school::PermanentId>>{
+                          {1, 2},
+                      };
+        CHECK(old_school::resolve_combat(
+            successor, 0, {1}, blocks));
+        expected_immediate[choice] =
+            old_school::learned_contextual_critic_value(
+                successor, 1,
+                {
+                    .valid = true,
+                    .phase =
+                        old_school::TurnPhase::EndCombat,
+                    .decision_player =
+                        successor.active_player,
+                    .consecutive_passes = 0,
+                    .sorcery_actions = false,
+                },
+                small_value_model());
+    }
+    CHECK(immediate.scores == expected_immediate);
+    CHECK(immediate.selected_candidate ==
+          (immediate.scores[1] >
+                   immediate.scores[0]
+               ? 1U
+               : 0U));
+    CHECK(old_school::learned_value_binary_block_scores(
+              hidden, 1, 1, 2, small_value_model())
+              .scores == immediate.scores);
+
+    old_school::LearnedSearchConfig blended_config =
+        config;
+    blended_config.blend_shallow_prior = true;
+    const auto blended =
+        old_school::learned_binary_block_samples(
+            fixture.state, fixture.decks, 1, 1, 2,
+            small_value_model(), blended_config);
+    const double sample_count = 6.0;
+    for (std::size_t row = 0; row < 2; ++row) {
+        for (std::size_t sample = 0; sample < 6;
+             ++sample) {
+            CHECK(blended.q_samples[row][sample] ==
+                  (immediate.scores[row] +
+                   sample_count *
+                       baseline.q_samples[row][sample]) /
+                      (sample_count + 1.0));
+        }
+    }
+
+    auto lethal = fixture.state;
+    lethal.players[1].life = 4;
+    old_school::LearnedSearchConfig one_sample =
+        config;
+    one_sample.worlds = 1;
+    one_sample.rollouts_per_world = 1;
+    const auto lethal_samples =
+        old_school::learned_binary_block_samples(
+            lethal, fixture.decks, 1, 1, 2,
+            small_value_model(), one_sample);
+    CHECK(lethal_samples.q_samples[0][0] == 0.0);
+    CHECK(lethal_samples.q_samples[1][0] > 0.0);
+    CHECK(lethal_samples.q_samples[1][0] < 1.0);
+    CHECK(lethal_samples.terminal_evaluations == 1);
+    CHECK(lethal_samples.bootstrapped_evaluations == 1);
+
+    const auto rejects =
+        [&](const old_school::GameState& state,
+            std::size_t defender,
+            old_school::PermanentId attacker,
+            old_school::PermanentId blocker,
+            std::string_view text) {
+            CHECK(throws_with_text(
+                [&] {
+                    static_cast<void>(
+                        old_school::
+                            learned_binary_block_samples(
+                                state, fixture.decks,
+                                defender, attacker,
+                                blocker,
+                                small_value_model(),
+                                config));
+                },
+                text));
+        };
+    rejects(fixture.state, 2, 1, 2, "defending player");
+    rejects(fixture.state, 0, 1, 2, "active opponent");
+    rejects(fixture.state, 1, 2, 1, "attacker");
+    rejects(fixture.state, 1, 999, 2, "attacker");
+    rejects(fixture.state, 1, 1, 999, "blocker");
+
+    auto untapped_attacker = fixture.state;
+    untapped_attacker.players[0].creatures[0].tapped =
+        false;
+    rejects(
+        untapped_attacker, 1, 1, 2,
+        "existing tapped creature");
+    auto tapped_blocker = fixture.state;
+    tapped_blocker.players[1].creatures[0].tapped =
+        true;
+    rejects(
+        tapped_blocker, 1, 1, 2,
+        "existing untapped creature");
+    auto occupied_stack = fixture.state;
+    occupied_stack.stack.push_back({
+        .kind = old_school::StackObjectKind::Spell,
+        .id = 1,
+        .card = old_school::CardId::Counterspell,
+        .controller = 0,
+    });
+    rejects(
+        occupied_stack, 1, 1, 2, "empty stack");
+    auto ground_blocker = fixture.state;
+    ground_blocker.players[1].creatures[0].card =
+        old_school::CardId::GrizzlyBears;
+    rejects(
+        ground_blocker, 1, 1, 2,
+        "block branch is illegal");
+
+    const auto rejects_config =
+        [&](old_school::LearnedSearchConfig bad,
+            std::string_view text) {
+            CHECK(throws_with_text(
+                [&] {
+                    static_cast<void>(
+                        old_school::
+                            learned_binary_block_samples(
+                                fixture.state,
+                                fixture.decks, 1, 1, 2,
+                                small_value_model(), bad));
+                },
+                text));
+        };
+    auto bad = config;
+    bad.worlds = 0;
+    rejects_config(bad, "worlds");
+    bad = config;
+    bad.rollouts_per_world = 0;
+    rejects_config(bad, "rollouts per world");
+    bad = config;
+    bad.horizon_turns = 129;
+    rejects_config(bad, "horizon");
+    bad = config;
+    bad.evaluation_threads = 0;
+    rejects_config(bad, "threads");
+    rejects_config(
+        {
+            .seed = config.seed,
+            .worlds = 1,
+            .rollouts_per_world = 1,
+            .horizon_turns = 0,
+            .continuation_variant =
+                old_school::LearnedVariant::UnifiedActor,
+        },
+        "does not match");
 }
 
 TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
