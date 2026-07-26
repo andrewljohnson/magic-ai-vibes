@@ -5928,3 +5928,59 @@ will establish the current deficit shape before a separately preregistered
 general training-strength challenger. Any future stack-regret audit must
 predeclare a loss-conditioned or feasibility-aware retention rule rather
 than requiring losses from every matchup.
+
+### Environment-v3 C16 first certification panel (declared)
+
+Declared on 2026-07-26 after committing the BSR0 invalid result and rereading
+the independent review through 01:41 PDT. This is the first certification run
+of the committed Environment-v3 C16 control. It is evaluation only: it must
+load the existing artifact, may not refresh or retrain it, and binds exact
+fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+
+Hypothesis: frozen C16 will pass the 2,040-game primary direct benchmark
+against Handcrafted at fresh seed `11235813`: aggregate win rate above 50%,
+two-sided Wilson 95% lower bound above 50%, and more direct wins for C16 on
+each of Green, Red, Blue, White, and RU Aggro. Conditional on that primary
+gate, the full fixed-seed panel is expected to **reject** certification on
+the all-five mixed-field lift criterion, because the independent two-seed
+preview currently shows only Green ahead and small deficits on the other
+four decks. This makes the run falsifiable in both directions: clearing the
+full panel would overturn the preview, while primary or panel rejection fixes
+the exact current baseline before changing training.
+
+Exact command:
+
+```sh
+sh tools/certify.sh 11235813 \
+  68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+```
+
+Seed `11235813` was selected and searched in the repository before execution;
+it is distinct from training seed `424242`, artifact-smoke seed `919190`,
+fixed validation seeds `101,202,303,404,505,606,707,808`, and every existing
+certification claim. There was no `certification-runs` directory before this
+declaration. No alternate primary seed or retry is allowed after observing
+scientific output.
+
+The committed harness fixes:
+
+- 34 balanced repetitions / 2,040 primary paired games, 408 games per
+  challenger deck, with a predeclared three-percentage-point effect and exact
+  binomial/Wilson power contract;
+- if primary passes, five repetitions at each of the eight fixed evaluation
+  seeds, 2,400 pooled direct games, 480 per challenger deck, plus 640
+  mixed-field games per deck-policy cell;
+- exact all-five direct and mixed-lift gates, pooled Wilson lower bound, and
+  no losing validation seed;
+- a clean committed source archive, collision-safe seed claim and evidence
+  directory, exact artifact fingerprint/byte checks before and after
+  evaluation, full tests, and ASan/UBSan;
+- shell exit `0` only for full certification, `1` for a valid scientific
+  rejection, and `2+` for incomplete infrastructure or evidence.
+
+If the primary gate rejects, the harness intentionally stops and the fixed
+panel remains unobserved; that is a valid result, not permission to choose a
+different seed. If the run reaches and rejects the fixed panel, its pooled
+all-five tables become the control for the next separately declared
+general-training-strength challenger.
