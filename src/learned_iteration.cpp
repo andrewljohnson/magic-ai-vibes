@@ -1141,9 +1141,13 @@ evaluate_centered_tanh_rootwise_oracle(
     return metrics;
 }
 
-std::vector<double> four_state_bootstrap_targets(
+std::vector<double> n_state_bootstrap_targets(
     std::span<const double> chronological_parent_values,
-    double terminal_z) {
+    double terminal_z, std::size_t distance) {
+    if (distance == 0) {
+        throw std::invalid_argument(
+            "bootstrap distance must be nonzero");
+    }
     if (!valid_probability(terminal_z)) {
         throw std::invalid_argument(
             "terminal value must be a probability");
@@ -1155,19 +1159,29 @@ std::vector<double> four_state_bootstrap_targets(
         }
     }
 
-    constexpr std::size_t kBootstrapStepStates = 4;
     std::vector<double> targets(
         chronological_parent_values.size(), terminal_z);
+    if (distance >= chronological_parent_values.size()) {
+        return targets;
+    }
+    const std::size_t bootstrapped_count =
+        chronological_parent_values.size() - distance;
     for (std::size_t index = 0;
-         index + kBootstrapStepStates <
-         chronological_parent_values.size();
+         index < bootstrapped_count;
          ++index) {
         targets[index] =
             0.5 * terminal_z +
             0.5 * chronological_parent_values[
-                      index + kBootstrapStepStates];
+                      index + distance];
     }
     return targets;
+}
+
+std::vector<double> four_state_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    double terminal_z) {
+    return n_state_bootstrap_targets(
+        chronological_parent_values, terminal_z, 4);
 }
 
 } // namespace old_school::learned_iteration

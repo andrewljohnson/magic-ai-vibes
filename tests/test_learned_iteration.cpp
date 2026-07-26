@@ -1406,6 +1406,9 @@ void test_four_state_bootstrap_is_exact_and_terminal_at_tail() {
     const auto targets =
         iteration::four_state_bootstrap_targets(
             parent_values, 0.25);
+    const auto generic_targets =
+        iteration::n_state_bootstrap_targets(
+            parent_values, 0.25, 4);
     const std::vector<double> expected = {
         0.375, 0.425, 0.475, 0.525, 0.575,
         0.25, 0.25, 0.25, 0.25,
@@ -1418,6 +1421,9 @@ void test_four_state_bootstrap_is_exact_and_terminal_at_tail() {
             targets[index], expected[index], 1.0e-12,
             "four-state bootstrap target");
     }
+    expect(
+        generic_targets == targets,
+        "generic distance four must preserve the canonical targets");
 
     const std::vector<double> four_values = {
         0.1, 0.2, 0.3, 0.4,
@@ -1435,11 +1441,46 @@ void test_four_state_bootstrap_is_exact_and_terminal_at_tail() {
         iteration::four_state_bootstrap_targets(
             empty, 0.5).empty(),
         "empty bootstrap trajectory must stay empty");
+}
 
+void test_eight_state_bootstrap_indexing_and_tail_are_exact() {
+    const std::vector<double> parent_values = {
+        0.01, 0.02, 0.03, 0.04, 0.05,
+        0.06, 0.07, 0.08, 0.09, 0.10,
+        0.11, 0.12,
+    };
+    const auto targets =
+        iteration::n_state_bootstrap_targets(
+            parent_values, 0.40, 8);
+    const std::vector<double> expected = {
+        0.245, 0.250, 0.255, 0.260,
+        0.400, 0.400, 0.400, 0.400,
+        0.400, 0.400, 0.400, 0.400,
+    };
+    expect(targets.size() == expected.size(),
+           "eight-state target count must match state count");
+    for (std::size_t index = 0; index < targets.size();
+         ++index) {
+        expect_near(
+            targets[index], expected[index], 1.0e-12,
+            "eight-state bootstrap target");
+    }
+}
+
+void test_n_state_bootstrap_validates_inputs() {
+    const std::vector<double> parent_values = {
+        0.10, 0.20, 0.30,
+    };
     expect_invalid(
         [&] {
-            iteration::four_state_bootstrap_targets(
-                parent_values, 1.01);
+            iteration::n_state_bootstrap_targets(
+                parent_values, 0.5, 0);
+        },
+        "zero bootstrap distance must be rejected");
+    expect_invalid(
+        [&] {
+            iteration::n_state_bootstrap_targets(
+                parent_values, 1.01, 4);
         },
         "invalid bootstrap terminal value must be rejected");
     expect_invalid(
@@ -1448,10 +1489,24 @@ void test_four_state_bootstrap_is_exact_and_terminal_at_tail() {
                 0.2,
                 std::numeric_limits<double>::infinity(),
             };
-            iteration::four_state_bootstrap_targets(
-                invalid, 0.5);
+            iteration::n_state_bootstrap_targets(
+                invalid, 0.5, 4);
         },
         "invalid parent bootstrap value must be rejected");
+}
+
+void test_n_state_bootstrap_large_distance_cannot_overflow() {
+    const std::vector<double> parent_values = {
+        0.10, 0.20, 0.30,
+    };
+    const auto targets =
+        iteration::n_state_bootstrap_targets(
+            parent_values, 0.75,
+            std::numeric_limits<std::size_t>::max());
+    expect(
+        targets ==
+            std::vector<double>({0.75, 0.75, 0.75}),
+        "a distance larger than the trace must leave terminal targets");
 }
 
 void test_value_g8_mix50_assignment_is_exact_and_rng_free() {
@@ -1621,6 +1676,15 @@ int main() {
     runner.run(
         "exact four-state Value bootstrap",
         test_four_state_bootstrap_is_exact_and_terminal_at_tail);
+    runner.run(
+        "exact eight-state Value bootstrap",
+        test_eight_state_bootstrap_indexing_and_tail_are_exact);
+    runner.run(
+        "n-state Value bootstrap input validation",
+        test_n_state_bootstrap_validates_inputs);
+    runner.run(
+        "n-state Value bootstrap overflow safety",
+        test_n_state_bootstrap_large_distance_cannot_overflow);
     runner.run(
         "exact Value G8 Late-Mix50 assignment",
         test_value_g8_mix50_assignment_is_exact_and_rng_free);

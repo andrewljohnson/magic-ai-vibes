@@ -262,9 +262,17 @@ evaluate_centered_tanh_rootwise_oracle(
     std::span<const CenteredTanhOracleObservation> observations,
     CenteredTanhOracleConfig config = {});
 
-// Value G8's exact four-recorded-state bootstrap. For state i, when state
-// i+4 exists, the target is the equal blend of terminal_z and V_parent(i+4).
-// The final four states retain the terminal target alone.
+// Exact n-recorded-state bootstrap. For state i, when state i+distance
+// exists, the target is the equal blend of terminal_z and
+// V_parent(i+distance). The final `distance` states (or the entire trace when
+// it is shorter) retain the terminal target alone. Distance must be nonzero.
+std::vector<double> n_state_bootstrap_targets(
+    std::span<const double> chronological_parent_values,
+    double terminal_z, std::size_t distance);
+
+// Value G8's exact four-recorded-state bootstrap. Kept as the canonical
+// training API and as a compatibility wrapper around
+// n_state_bootstrap_targets(..., 4).
 std::vector<double> four_state_bootstrap_targets(
     std::span<const double> chronological_parent_values,
     double terminal_z);
