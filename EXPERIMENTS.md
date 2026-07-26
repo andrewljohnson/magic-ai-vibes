@@ -7917,6 +7917,22 @@ Focused acceptance fixtures:
 6. Default-off G0/K2 and frozen C16/K8 action scores/selections remain
    bit-identical. Treatment-on reports their before/after option sets and
    cannot select an action the comparator proved dominated.
+7. From a priority root immediately after the learner has put one
+   Counterspell above an opposing Air Elemental, a second Counterspell
+   targeting that same Air Elemental is Pass-dominated: both forced-pass
+   branches remove the Air Elemental, while the second-counter branch spends
+   one additional card and two additional blue mana and leaves that redundant
+   Counterspell to fizzle. A response targeting a different stack object whose
+   survival changes the settled public state remains incomparable.
+
+This seventh fixture is a prospective field-report amendment made before
+either reserved PD0 seed was consumed. The user observed the exact redundant
+double-counter stack in the C16 web client after this experiment was first
+declared; the independent `REVIEW.md` 09:02 cycle then measured roughly six
+deployed redundant counters per 20-game K=8 mixed run. The observation does
+not change the treatment, comparator, thresholds, commands, or interpretation:
+it is a new validation case for the already frozen card-agnostic settlement
+proof, not a Counterspell-specific rule.
 
 The diagnostic uses seed `202607260947` only for paired information-set worlds
 and reports G0/K2 plus exact frozen C16/K8. This is a mechanism/proof gate, not
