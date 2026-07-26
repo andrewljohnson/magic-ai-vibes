@@ -131,6 +131,17 @@ constexpr std::string_view kValueChallengerRecipeId =
     "old-school.learned-value-challenger."
     "terminal-anchor-bootstrap4w50-replay3-k1h4.v1";
 constexpr std::array<std::uint8_t, 8>
+    kTerminalWeightC17ArtifactMagic = {
+        'O', 'S', 'M', 'V', 'T', 'W', '1', '1',
+    };
+constexpr std::uint32_t
+    kTerminalWeightC17ArtifactSchema = 1;
+constexpr std::string_view kTerminalWeightC17RecipeId =
+    "old-school.learned-value-terminal-weight-c17."
+    "same-shard-bootstrap4-w50-w75-replay3-k1h4.v1";
+void validate_terminal_weight_report(
+    const LearnedTerminalWeightC17Report& report);
+constexpr std::array<std::uint8_t, 8>
     kValueContextChallengerArtifactMagic = {
         'O', 'S', 'M', 'V', 'C', 'T', 'X', '1',
     };
@@ -1789,6 +1800,16 @@ class LearnedModel {
         std::uint64_t expected_seed,
         std::size_t expected_self_play_generations);
     friend void
+    write_learned_terminal_weight_c17_artifact_atomic(
+        const std::string& path,
+        const LearnedTerminalWeightC17Artifact& artifact);
+    friend LearnedTerminalWeightC17Artifact
+    load_learned_terminal_weight_c17_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_parent_training_seed,
+        std::uint64_t expected_shard_seed);
+    friend void
     write_learned_value_context_challenger_artifact_atomic(
         const std::string& path,
         const LearnedValueContextChallengerArtifact& artifact);
@@ -2610,6 +2631,22 @@ std::string learned_value_challenger_cache_path(
            std::to_string(seed) + ".bin";
 }
 
+std::string learned_terminal_weight_c17_cache_path(
+    std::size_t training_games,
+    std::uint64_t parent_training_seed,
+    std::uint64_t shard_seed) {
+    if (training_games == 0) {
+        throw std::invalid_argument(
+            "terminal-weight C17 cache training_games must be "
+            "positive");
+    }
+    return "build/model-cache/"
+           "old-school-value-terminal-weight-c17-v1-t" +
+           std::to_string(training_games) + "-p" +
+           std::to_string(parent_training_seed) + "-r" +
+           std::to_string(shard_seed) + ".bin";
+}
+
 std::string learned_value_context_challenger_cache_path(
     std::size_t training_games, std::uint64_t seed,
     std::size_t self_play_generations) {
@@ -3036,6 +3073,509 @@ load_learned_value_challenger_artifact(
     return LearnedValueChallengerArtifact(
         std::move(model), training_games, seed,
         self_play_generations);
+}
+
+void write_learned_terminal_weight_c17_artifact_atomic(
+    const std::string& path,
+    const LearnedTerminalWeightC17Artifact& artifact) {
+    const auto& control = artifact.control_model_;
+    const auto& treatment = artifact.treatment_model_;
+    const auto& report = artifact.report_;
+    if (!control || !treatment) {
+        throw std::invalid_argument(
+            "terminal-weight C17 artifact models must not be "
+            "null");
+    }
+    if (control->variant_ !=
+            LearnedVariant::ValueSearchChampion ||
+        treatment->variant_ !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "terminal-weight C17 artifact requires Value models");
+    }
+    validate_terminal_weight_report(report);
+    if (learned_model_fingerprint(control) !=
+            report.control_fingerprint ||
+        learned_model_fingerprint(treatment) !=
+            report.treatment_fingerprint ||
+        learned_model_component_fingerprints(control) !=
+            report.control_components ||
+        learned_model_component_fingerprints(treatment) !=
+            report.treatment_components) {
+        throw std::invalid_argument(
+            "terminal-weight C17 artifact model provenance "
+            "mismatch");
+    }
+
+    ValueG8BinaryWriter payload;
+    payload.text(kValueChallengerEngineSchemaId);
+    payload.text(kTerminalWeightC17RecipeId);
+    payload.size(kLearnedCardCount);
+    payload.size(LearnedModel::kScalarFeatureCount);
+    payload.size(LearnedModel::kCardPlanes);
+    payload.size(LearnedModel::kFeatureCount);
+    payload.size(LearnedModel::kHiddenCount);
+    payload.size(LearnedModel::kPolicyDecisionCount);
+    payload.size(LearnedModel::kPolicyPhaseCount);
+    payload.size(LearnedModel::kPolicyVerbCount);
+    payload.size(LearnedModel::kPolicyCardPlanes);
+    payload.size(LearnedModel::kPolicyScalarCount);
+    payload.size(LearnedModel::kPolicyFeatureCount);
+    payload.size(LearnedModel::kPolicyHiddenCount);
+
+    payload.size(report.training_games);
+    payload.unsigned64(report.parent_training_seed);
+    payload.size(report.parent_generations);
+    payload.unsigned64(report.shard_seed);
+    payload.size(report.balanced_blocks);
+    payload.size(report.scheduled_games);
+    payload.size(report.bootstrap_distance);
+    payload.size(report.collection_search_worlds);
+    payload.size(report.collection_horizon_turns);
+    payload.size(report.collection_max_game_turns);
+    payload.real(report.collection_exploration_rate);
+    payload.real(report.control_terminal_weight);
+    payload.real(report.treatment_terminal_weight);
+    payload.size(report.fit_epochs);
+    payload.real(report.fit_learning_rate);
+    payload.size(report.anchor_examples);
+    payload.size(report.penultimate_generation_examples);
+    payload.size(report.last_generation_examples);
+    payload.size(report.historical_replay_examples);
+    payload.size(report.fit_examples);
+    payload.size(report.shard_examples);
+    payload.size(report.bootstrapped_examples);
+    payload.size(report.terminal_tail_examples);
+    payload.real(report.maximum_target_delta_error);
+    payload.text(report.parent_fingerprint);
+    payload.text(report.control_fingerprint);
+    payload.text(report.treatment_fingerprint);
+    const auto write_components =
+        [&payload](
+            const LearnedModelComponentFingerprints& components) {
+            payload.text(components.critic);
+            payload.text(components.priority);
+            payload.text(components.attack);
+            payload.text(components.block);
+            payload.text(components.damage_order);
+    };
+    write_components(report.parent_components);
+    payload.text(report.anchor_hash);
+    payload.text(report.penultimate_generation_hash);
+    payload.text(report.last_generation_hash);
+    payload.text(report.historical_replay_hash);
+    payload.text(report.fit_feature_order_hash);
+    payload.text(report.raw_shard_hash);
+    payload.text(report.schedule_hash);
+    payload.text(report.feature_hash);
+    payload.text(report.outcome_hash);
+    payload.text(report.control_target_hash);
+    payload.text(report.treatment_target_hash);
+    for (const auto& deck : report.decks) {
+        payload.size(deck.games);
+        payload.size(deck.examples);
+        payload.size(deck.bootstrapped_examples);
+        payload.size(deck.terminal_tail_examples);
+    }
+    std::size_t node_count = 0;
+    std::function<void(
+        const std::shared_ptr<const LearnedModel>&,
+        std::size_t)>
+        write_model;
+    write_model =
+        [&](const std::shared_ptr<const LearnedModel>& node,
+            std::size_t depth) {
+            if (!node) {
+                throw std::runtime_error(
+                    "terminal-weight C17 artifact contains a "
+                    "null model node");
+            }
+            if (depth > kMaximumValueG8ArtifactDepth ||
+                ++node_count > kMaximumValueG8ArtifactNodes) {
+                throw std::runtime_error(
+                    "terminal-weight C17 artifact model graph "
+                    "exceeds its bound");
+            }
+            if (node->variant_ !=
+                    LearnedVariant::ValueSearchChampion ||
+                node->critic_schema_ !=
+                    LearnedCriticSchema::LegacyStateOnly) {
+                throw std::runtime_error(
+                    "terminal-weight C17 artifact contains an "
+                    "incompatible model");
+            }
+            if (node->ensemble_.size() >
+                kMaximumValueG8EnsembleMembers) {
+                throw std::runtime_error(
+                    "terminal-weight C17 artifact ensemble "
+                    "exceeds its bound");
+            }
+            payload.unsigned32(0x4D4F444C);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(node->variant_));
+            write_value_g8_fixed(
+                payload, node->input_weights_);
+            write_value_g8_fixed(
+                payload, node->hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->output_weights_);
+            write_value_g8_fixed(
+                payload, node->direct_output_weights_);
+            payload.real(node->output_bias_);
+            write_value_g8_fixed(
+                payload, node->policy_input_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_hidden_biases_);
+            write_value_g8_fixed(
+                payload, node->policy_output_weights_);
+            write_value_g8_fixed(
+                payload,
+                node->policy_direct_output_weights_);
+            write_value_g8_fixed(
+                payload, node->policy_output_bias_);
+            payload.unsigned32(
+                static_cast<std::uint32_t>(
+                    node->ensemble_.size()));
+            for (const auto& member : node->ensemble_) {
+                write_model(member, depth + 1);
+            }
+        };
+    write_model(control, 0);
+    write_model(treatment, 0);
+
+    ValueG8BinaryWriter file;
+    file.bytes(kTerminalWeightC17ArtifactMagic);
+    file.unsigned32(kTerminalWeightC17ArtifactSchema);
+    file.size(payload.data().size());
+    file.unsigned64(
+        value_g8_payload_checksum(payload.data()));
+    file.bytes(payload.data());
+    write_value_g8_file_atomic(path, file.data());
+}
+
+LearnedTerminalWeightC17Artifact
+load_learned_terminal_weight_c17_artifact(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_parent_training_seed,
+    std::uint64_t expected_shard_seed) {
+    if (expected_training_games == 0) {
+        throw std::invalid_argument(
+            "expected terminal-weight C17 training_games must "
+            "be positive");
+    }
+    const std::vector<std::uint8_t> file_bytes =
+        read_bounded_value_g8_file(path);
+    ValueG8BinaryReader file(file_bytes);
+    for (const std::uint8_t expected :
+         kTerminalWeightC17ArtifactMagic) {
+        if (file.byte("file magic") != expected) {
+            throw std::runtime_error(
+                "terminal-weight C17 artifact '" + path +
+                "' has the wrong magic");
+        }
+    }
+    const std::uint32_t schema = file.unsigned32("schema");
+    if (schema != kTerminalWeightC17ArtifactSchema) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' uses unsupported schema " +
+            std::to_string(schema));
+    }
+    const std::size_t payload_size =
+        file.size("payload length");
+    if (file.remaining() < 8 ||
+        payload_size > kMaximumValueG8ArtifactBytes ||
+        payload_size != file.remaining() - 8) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' has an invalid payload length");
+    }
+    const std::uint64_t stored_checksum =
+        file.unsigned64("payload checksum");
+    const auto payload_bytes =
+        file.take(payload_size, "payload");
+    if (!file.at_end()) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' has trailing bytes");
+    }
+    if (value_g8_payload_checksum(payload_bytes) !=
+        stored_checksum) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' failed its payload checksum");
+    }
+
+    ValueG8BinaryReader payload(payload_bytes);
+    const std::string engine_schema =
+        payload.text("engine schema ID");
+    if (engine_schema != kValueChallengerEngineSchemaId) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' engine schema mismatch");
+    }
+    const std::string recipe = payload.text("recipe ID");
+    if (recipe != kTerminalWeightC17RecipeId) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' recipe mismatch");
+    }
+    const auto require_dimension =
+        [&](std::string_view name, std::size_t expected) {
+            const std::size_t actual = payload.size(name);
+            if (actual != expected) {
+                throw std::runtime_error(
+                    "terminal-weight C17 artifact '" + path +
+                    "' dimension '" + std::string(name) +
+                    "' mismatch");
+            }
+        };
+    require_dimension("card count", kLearnedCardCount);
+    require_dimension(
+        "scalar feature count",
+        LearnedModel::kScalarFeatureCount);
+    require_dimension(
+        "card planes", LearnedModel::kCardPlanes);
+    require_dimension(
+        "feature count", LearnedModel::kFeatureCount);
+    require_dimension(
+        "hidden count", LearnedModel::kHiddenCount);
+    require_dimension(
+        "policy decision count",
+        LearnedModel::kPolicyDecisionCount);
+    require_dimension(
+        "policy phase count",
+        LearnedModel::kPolicyPhaseCount);
+    require_dimension(
+        "policy verb count",
+        LearnedModel::kPolicyVerbCount);
+    require_dimension(
+        "policy card planes",
+        LearnedModel::kPolicyCardPlanes);
+    require_dimension(
+        "policy scalar count",
+        LearnedModel::kPolicyScalarCount);
+    require_dimension(
+        "policy feature count",
+        LearnedModel::kPolicyFeatureCount);
+    require_dimension(
+        "policy hidden count",
+        LearnedModel::kPolicyHiddenCount);
+
+    LearnedTerminalWeightC17Report report;
+    report.training_games =
+        payload.size("metadata training_games");
+    report.parent_training_seed =
+        payload.unsigned64("metadata parent training seed");
+    report.parent_generations =
+        payload.size("metadata parent generations");
+    report.shard_seed =
+        payload.unsigned64("metadata shard seed");
+    report.balanced_blocks =
+        payload.size("metadata balanced blocks");
+    report.scheduled_games =
+        payload.size("metadata scheduled games");
+    report.bootstrap_distance =
+        payload.size("metadata bootstrap distance");
+    report.collection_search_worlds =
+        payload.size("metadata collection worlds");
+    report.collection_horizon_turns =
+        payload.size("metadata collection horizon");
+    report.collection_max_game_turns =
+        payload.size("metadata max game turns");
+    report.collection_exploration_rate =
+        payload.real("metadata exploration rate");
+    report.control_terminal_weight =
+        payload.real("metadata control terminal weight");
+    report.treatment_terminal_weight =
+        payload.real("metadata treatment terminal weight");
+    report.fit_epochs =
+        payload.size("metadata fit epochs");
+    report.fit_learning_rate =
+        payload.real("metadata fit learning rate");
+    report.anchor_examples =
+        payload.size("metadata anchor examples");
+    report.penultimate_generation_examples =
+        payload.size("metadata penultimate examples");
+    report.last_generation_examples =
+        payload.size("metadata last examples");
+    report.historical_replay_examples =
+        payload.size("metadata historical replay examples");
+    report.fit_examples =
+        payload.size("metadata fit examples");
+    report.shard_examples =
+        payload.size("metadata shard examples");
+    report.bootstrapped_examples =
+        payload.size("metadata bootstrapped examples");
+    report.terminal_tail_examples =
+        payload.size("metadata terminal-tail examples");
+    report.maximum_target_delta_error =
+        payload.real("metadata target delta error");
+    if (report.training_games != expected_training_games) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' training_games mismatch");
+    }
+    if (report.parent_training_seed !=
+        expected_parent_training_seed) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' parent training seed mismatch");
+    }
+    if (report.shard_seed != expected_shard_seed) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' shard seed mismatch");
+    }
+    report.parent_fingerprint =
+        payload.text("parent fingerprint");
+    report.control_fingerprint =
+        payload.text("control fingerprint");
+    report.treatment_fingerprint =
+        payload.text("treatment fingerprint");
+    const auto read_components =
+        [&payload]() {
+            return LearnedModelComponentFingerprints{
+                .critic =
+                    payload.text("component critic fingerprint"),
+                .priority =
+                    payload.text("component priority fingerprint"),
+                .attack =
+                    payload.text("component attack fingerprint"),
+                .block =
+                    payload.text("component block fingerprint"),
+                .damage_order =
+                    payload.text(
+                        "component damage-order fingerprint"),
+            };
+    };
+    report.parent_components = read_components();
+    report.anchor_hash = payload.text("anchor hash");
+    report.penultimate_generation_hash =
+        payload.text("penultimate-generation hash");
+    report.last_generation_hash =
+        payload.text("last-generation hash");
+    report.historical_replay_hash =
+        payload.text("historical-replay hash");
+    report.fit_feature_order_hash =
+        payload.text("fit-feature-order hash");
+    report.raw_shard_hash =
+        payload.text("raw-shard hash");
+    report.schedule_hash = payload.text("schedule hash");
+    report.feature_hash = payload.text("feature hash");
+    report.outcome_hash = payload.text("outcome hash");
+    report.control_target_hash =
+        payload.text("control-target hash");
+    report.treatment_target_hash =
+        payload.text("treatment-target hash");
+    for (auto& deck : report.decks) {
+        deck.games = payload.size("deck games");
+        deck.examples = payload.size("deck examples");
+        deck.bootstrapped_examples =
+            payload.size("deck bootstrapped examples");
+        deck.terminal_tail_examples =
+            payload.size("deck terminal-tail examples");
+    }
+    std::size_t node_count = 0;
+    std::function<std::shared_ptr<const LearnedModel>(
+        std::size_t)>
+        read_model;
+    read_model = [&](std::size_t depth)
+        -> std::shared_ptr<const LearnedModel> {
+        if (depth > kMaximumValueG8ArtifactDepth ||
+            ++node_count > kMaximumValueG8ArtifactNodes) {
+            throw std::runtime_error(
+                "terminal-weight C17 artifact '" + path +
+                "' model graph exceeds its bound");
+        }
+        if (payload.unsigned32("model marker") !=
+            0x4D4F444C) {
+            throw std::runtime_error(
+                "terminal-weight C17 artifact '" + path +
+                "' has an invalid model marker");
+        }
+        const std::uint32_t raw_variant =
+            payload.unsigned32("model variant");
+        if (raw_variant !=
+            static_cast<std::uint32_t>(
+                LearnedVariant::ValueSearchChampion)) {
+            throw std::runtime_error(
+                "terminal-weight C17 artifact '" + path +
+                "' contains a non-Value model");
+        }
+        auto node = std::shared_ptr<LearnedModel>(
+            new LearnedModel(
+                0, LearnedVariant::ValueSearchChampion));
+        read_value_g8_fixed(
+            payload, node->input_weights_,
+            "critic input weight");
+        read_value_g8_fixed(
+            payload, node->hidden_biases_,
+            "critic hidden bias");
+        read_value_g8_fixed(
+            payload, node->output_weights_,
+            "critic output weight");
+        read_value_g8_fixed(
+            payload, node->direct_output_weights_,
+            "critic direct weight");
+        node->output_bias_ =
+            payload.real("critic output bias");
+        read_value_g8_fixed(
+            payload, node->policy_input_weights_,
+            "policy input weight");
+        read_value_g8_fixed(
+            payload, node->policy_hidden_biases_,
+            "policy hidden bias");
+        read_value_g8_fixed(
+            payload, node->policy_output_weights_,
+            "policy output weight");
+        read_value_g8_fixed(
+            payload,
+            node->policy_direct_output_weights_,
+            "policy direct weight");
+        read_value_g8_fixed(
+            payload, node->policy_output_bias_,
+            "policy output bias");
+        const std::uint32_t member_count =
+            payload.unsigned32("ensemble member count");
+        if (member_count >
+            kMaximumValueG8EnsembleMembers) {
+            throw std::runtime_error(
+                "terminal-weight C17 artifact '" + path +
+                "' ensemble exceeds its bound");
+        }
+        node->ensemble_.reserve(member_count);
+        for (std::uint32_t member = 0;
+             member < member_count; ++member) {
+            node->ensemble_.push_back(
+                read_model(depth + 1));
+        }
+        return node;
+    };
+    auto control = read_model(0);
+    auto treatment = read_model(0);
+    if (!payload.at_end()) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' has trailing payload bytes");
+    }
+    report.control_components =
+        learned_model_component_fingerprints(control);
+    report.treatment_components =
+        learned_model_component_fingerprints(treatment);
+    if (learned_model_fingerprint(control) !=
+            report.control_fingerprint ||
+        learned_model_fingerprint(treatment) !=
+            report.treatment_fingerprint) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact '" + path +
+            "' model fingerprint mismatch");
+    }
+    validate_terminal_weight_report(report);
+    return LearnedTerminalWeightC17Artifact(
+        std::move(control), std::move(treatment),
+        std::move(report));
 }
 
 void write_learned_value_context_challenger_artifact_atomic(
@@ -10474,11 +11014,10 @@ double Game::learned_value_search_action_score(
         return result_score(*result);
     }
 
-    constexpr std::size_t kSearchHorizonTurns = 4;
     simulation.config_.max_turns =
         std::min(simulation.config_.max_turns,
                  simulation.state_.turn_number +
-                     kSearchHorizonTurns);
+                     kLearnedValueSearchHorizonTurns);
     const GameResult result =
         simulation.run_from_turn(
             simulation.state_.turn_number + 1);
@@ -14741,10 +15280,19 @@ train_learned_value_champion(std::size_t training_games,
     return model;
 }
 
+namespace {
+
+struct LearnedValueChallengerCapture {
+    std::vector<LearnedModel::TrainingExample> anchor;
+    std::vector<LearnedModel::TrainingExample> penultimate_generation;
+    std::vector<LearnedModel::TrainingExample> last_generation;
+};
+
 std::shared_ptr<const LearnedModel>
-train_learned_value_challenger(
+train_learned_value_challenger_internal(
     std::size_t training_games, std::uint64_t seed,
-    std::size_t self_play_generations) {
+    std::size_t self_play_generations,
+    LearnedValueChallengerCapture* capture) {
     if (training_games == 0) {
         throw std::invalid_argument(
             "Learned Value challenger training games must be positive");
@@ -14988,7 +15536,784 @@ train_learned_value_challenger(
                 0x100ULL * generation);
         model = make_ensemble();
     }
+    if (capture != nullptr) {
+        if (generation_blocks.size() < 2) {
+            throw std::logic_error(
+                "terminal-weight capture requires at least two "
+                "parent generations");
+        }
+        examples.resize(random_example_count);
+        capture->anchor = std::move(examples);
+        capture->penultimate_generation =
+            std::move(generation_blocks[
+                generation_blocks.size() - 2]);
+        capture->last_generation =
+            std::move(generation_blocks.back());
+    }
     return model;
+}
+
+} // namespace
+
+std::shared_ptr<const LearnedModel>
+train_learned_value_challenger(
+    std::size_t training_games, std::uint64_t seed,
+    std::size_t self_play_generations) {
+    return train_learned_value_challenger_internal(
+        training_games, seed, self_play_generations, nullptr);
+}
+
+namespace {
+
+struct TerminalWeightTargetRecord {
+    std::size_t fit_example_index = 0;
+    double treatment_target = 0.5;
+};
+
+std::string hash_terminal_weight_examples(
+    std::span<const LearnedModel::TrainingExample> examples,
+    std::uint64_t domain) {
+    ModelFingerprintHash hash;
+    hash.add(domain);
+    hash.add(static_cast<std::uint64_t>(examples.size()));
+    for (const auto& [features, target] : examples) {
+        add_model_fingerprint_value(hash, features);
+        add_model_fingerprint_value(hash, target);
+    }
+    return hash.finish();
+}
+
+std::string hash_terminal_weight_feature_order(
+    std::span<const LearnedModel::TrainingExample> examples) {
+    ModelFingerprintHash hash;
+    hash.add(0x54574649544F5244ULL);
+    hash.add(static_cast<std::uint64_t>(examples.size()));
+    for (const auto& [features, target] : examples) {
+        static_cast<void>(target);
+        add_model_fingerprint_value(hash, features);
+    }
+    return hash.finish();
+}
+
+std::string terminal_weight_schedule_hash(
+    std::uint64_t shard_seed,
+    std::size_t parent_generations,
+    std::size_t balanced_blocks) {
+    ModelFingerprintHash hash;
+    hash.add(0x5457534348454455ULL);
+    for (std::size_t block = 0;
+         block < balanced_blocks; ++block) {
+        const auto schedule =
+            learned_iteration::balanced_schedule(
+                shard_seed, parent_generations + 1, block);
+        for (const auto& game : schedule) {
+            hash.add(block);
+            hash.add(game.schedule_index);
+            hash.add(game.pairing_index);
+            hash.add(static_cast<std::uint64_t>(
+                game.seat_decks[0]));
+            hash.add(static_cast<std::uint64_t>(
+                game.seat_decks[1]));
+            hash.add(game.starting_player);
+            hash.add(game.seed);
+        }
+    }
+    return hash.finish();
+}
+
+void require_terminal_weight_policy_unchanged(
+    const LearnedModelComponentFingerprints& parent,
+    const LearnedModelComponentFingerprints& candidate,
+    std::string_view arm) {
+    if (candidate.critic == parent.critic ||
+        candidate.priority != parent.priority ||
+        candidate.attack != parent.attack ||
+        candidate.block != parent.block ||
+        candidate.damage_order != parent.damage_order) {
+        throw std::logic_error(
+            std::string("terminal-weight ") + std::string(arm) +
+            " must change only the critic component");
+    }
+}
+
+double terminal_weight_discounted_target(
+    const GameResult& result, std::size_t perspective) {
+    if (perspective >= 2) {
+        throw std::invalid_argument(
+            "terminal-weight perspective must be 0 or 1");
+    }
+    if (result.winner < 0) {
+        return 0.5;
+    }
+    const double discounted_outcome =
+        0.5 * std::pow(
+                  0.985, static_cast<double>(result.turns));
+    return result.winner == static_cast<int>(perspective)
+               ? 0.5 + discounted_outcome
+               : 0.5 - discounted_outcome;
+}
+
+void validate_terminal_weight_config(
+    const LearnedTerminalWeightC17Config& config) {
+    if (config.training_games == 0 ||
+        config.parent_generations < 2 ||
+        config.balanced_blocks == 0 ||
+        config.balanced_blocks > 64 ||
+        config.max_game_turns == 0) {
+        throw std::invalid_argument(
+            "invalid terminal-weight C17 training configuration");
+    }
+    if (!config.required_parent_fingerprint.empty() &&
+        !is_lower_hex_fingerprint(
+            config.required_parent_fingerprint)) {
+        throw std::invalid_argument(
+            "terminal-weight required parent fingerprint is "
+            "malformed");
+    }
+    const bool canonical_identity =
+        config.training_games == 800 &&
+        config.parent_training_seed ==
+            kDefaultLearnedTrainingSeed &&
+        config.parent_generations == 16 &&
+        config.shard_seed == kTerminalWeightC17ShardSeed &&
+        config.balanced_blocks == 5 &&
+        config.max_game_turns == 500;
+    if (canonical_identity &&
+        config.required_parent_fingerprint !=
+            kTerminalWeightC17ParentFingerprint) {
+        throw std::invalid_argument(
+            "canonical terminal-weight C17 training requires "
+            "the exact frozen C16 fingerprint");
+    }
+}
+
+void validate_terminal_weight_report(
+    const LearnedTerminalWeightC17Report& report) {
+    constexpr std::size_t kBootstrapDistance = 4;
+    constexpr std::size_t kSearchWorlds = 1;
+    constexpr std::size_t kSearchHorizon =
+        kLearnedValueSearchHorizonTurns;
+    constexpr double kExploration = 0.05;
+    constexpr double kControlWeight = 0.50;
+    constexpr double kTreatmentWeight = 0.75;
+    constexpr std::size_t kFitEpochs = 3;
+    constexpr double kFitRate = 0.006;
+    if (report.training_games == 0 ||
+        report.parent_generations < 2 ||
+        report.balanced_blocks == 0 ||
+        report.balanced_blocks > 64 ||
+        report.bootstrap_distance != kBootstrapDistance ||
+        report.collection_search_worlds != kSearchWorlds ||
+        report.collection_horizon_turns != kSearchHorizon ||
+        report.collection_max_game_turns == 0 ||
+        std::bit_cast<std::uint64_t>(
+            report.collection_exploration_rate) !=
+            std::bit_cast<std::uint64_t>(kExploration) ||
+        std::bit_cast<std::uint64_t>(
+            report.control_terminal_weight) !=
+            std::bit_cast<std::uint64_t>(kControlWeight) ||
+        std::bit_cast<std::uint64_t>(
+            report.treatment_terminal_weight) !=
+            std::bit_cast<std::uint64_t>(kTreatmentWeight) ||
+        report.fit_epochs != kFitEpochs ||
+        std::bit_cast<std::uint64_t>(
+            report.fit_learning_rate) !=
+            std::bit_cast<std::uint64_t>(kFitRate) ||
+        report.anchor_examples == 0 ||
+        report.penultimate_generation_examples == 0 ||
+        report.last_generation_examples == 0 ||
+        report.historical_replay_examples !=
+            report.anchor_examples +
+                report.penultimate_generation_examples +
+                report.last_generation_examples ||
+        report.fit_examples !=
+            report.historical_replay_examples +
+                report.shard_examples ||
+        report.shard_examples == 0 ||
+        report.bootstrapped_examples +
+                report.terminal_tail_examples !=
+            report.shard_examples ||
+        !std::isfinite(report.maximum_target_delta_error) ||
+        report.maximum_target_delta_error < 0.0 ||
+        report.scheduled_games !=
+            report.balanced_blocks *
+                learned_iteration::kBalancedScheduleGames) {
+        throw std::runtime_error(
+            "terminal-weight C17 report has invalid recipe "
+            "accounting");
+    }
+
+    const auto require_hash =
+        [](std::string_view value, std::string_view field) {
+            if (!is_lower_hex_fingerprint(value)) {
+                throw std::runtime_error(
+                    "terminal-weight C17 report has malformed " +
+                    std::string(field));
+            }
+        };
+    require_hash(report.parent_fingerprint, "parent fingerprint");
+    require_hash(report.control_fingerprint, "control fingerprint");
+    require_hash(
+        report.treatment_fingerprint, "treatment fingerprint");
+    require_hash(report.anchor_hash, "anchor hash");
+    require_hash(
+        report.penultimate_generation_hash,
+        "penultimate-generation hash");
+    require_hash(
+        report.last_generation_hash,
+        "last-generation hash");
+    require_hash(
+        report.historical_replay_hash,
+        "historical-replay hash");
+    require_hash(
+        report.fit_feature_order_hash,
+        "fit-feature-order hash");
+    require_hash(report.raw_shard_hash, "raw-shard hash");
+    require_hash(report.schedule_hash, "schedule hash");
+    require_hash(report.feature_hash, "feature hash");
+    require_hash(report.outcome_hash, "outcome hash");
+    require_hash(
+        report.control_target_hash, "control-target hash");
+    require_hash(
+        report.treatment_target_hash, "treatment-target hash");
+    if (report.parent_fingerprint ==
+            report.control_fingerprint ||
+        report.parent_fingerprint ==
+            report.treatment_fingerprint ||
+        report.control_fingerprint ==
+            report.treatment_fingerprint ||
+        report.control_target_hash ==
+            report.treatment_target_hash) {
+        throw std::runtime_error(
+            "terminal-weight C17 treatment/control identities "
+            "must differ");
+    }
+    require_terminal_weight_policy_unchanged(
+        report.parent_components, report.control_components,
+        "TW50");
+    require_terminal_weight_policy_unchanged(
+        report.parent_components, report.treatment_components,
+        "TW75");
+
+    if (report.schedule_hash !=
+        terminal_weight_schedule_hash(
+            report.shard_seed, report.parent_generations,
+            report.balanced_blocks)) {
+        throw std::runtime_error(
+            "terminal-weight C17 report schedule hash mismatch");
+    }
+
+    std::size_t deck_examples = 0;
+    std::size_t deck_bootstrapped = 0;
+    std::size_t deck_tail = 0;
+    for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
+        const auto& counts = report.decks[deck];
+        if (counts.games != 16 * report.balanced_blocks ||
+            counts.examples == 0 ||
+            counts.bootstrapped_examples +
+                    counts.terminal_tail_examples !=
+                counts.examples) {
+            throw std::runtime_error(
+                "terminal-weight C17 report has invalid "
+                "per-deck accounting");
+        }
+        deck_examples += counts.examples;
+        deck_bootstrapped += counts.bootstrapped_examples;
+        deck_tail += counts.terminal_tail_examples;
+    }
+    if (deck_examples != report.shard_examples ||
+        deck_bootstrapped != report.bootstrapped_examples ||
+        deck_tail != report.terminal_tail_examples) {
+        throw std::runtime_error(
+            "terminal-weight C17 report deck totals mismatch");
+    }
+}
+
+} // namespace
+
+double learned_discounted_terminal_target(
+    const GameResult& result, std::size_t perspective) {
+    return terminal_weight_discounted_target(
+        result, perspective);
+}
+
+LearnedTerminalWeightC17Artifact::
+    LearnedTerminalWeightC17Artifact(
+        std::shared_ptr<const LearnedModel> control_model,
+        std::shared_ptr<const LearnedModel> treatment_model,
+        LearnedTerminalWeightC17Report report)
+    : control_model_(std::move(control_model)),
+      treatment_model_(std::move(treatment_model)),
+      report_(std::move(report)) {}
+
+std::shared_ptr<const LearnedModel>
+LearnedTerminalWeightC17Artifact::control_model() const {
+    return control_model_;
+}
+
+std::shared_ptr<const LearnedModel>
+LearnedTerminalWeightC17Artifact::treatment_model() const {
+    return treatment_model_;
+}
+
+const LearnedTerminalWeightC17Report&
+LearnedTerminalWeightC17Artifact::report() const {
+    return report_;
+}
+
+LearnedTerminalWeightC17Artifact
+train_learned_terminal_weight_c17_family(
+    LearnedTerminalWeightC17Config config) {
+    validate_terminal_weight_config(config);
+
+    constexpr std::size_t kBootstrapDistance = 4;
+    constexpr std::size_t kCollectionWorlds = 1;
+    constexpr std::size_t kCollectionHorizon =
+        kLearnedValueSearchHorizonTurns;
+    constexpr double kExplorationRate = 0.05;
+    constexpr double kControlWeight = 0.50;
+    constexpr double kTreatmentWeight = 0.75;
+    constexpr std::size_t kFitEpochs = 3;
+    constexpr double kFitLearningRate = 0.006;
+
+    LearnedValueChallengerCapture capture;
+    const auto parent =
+        train_learned_value_challenger_internal(
+            config.training_games,
+            config.parent_training_seed,
+            config.parent_generations, &capture);
+    const std::string parent_fingerprint =
+        learned_model_fingerprint(parent);
+    if (!config.required_parent_fingerprint.empty() &&
+        parent_fingerprint !=
+            config.required_parent_fingerprint) {
+        throw std::runtime_error(
+            "terminal-weight C17 parent fingerprint mismatch: "
+            "expected " +
+            config.required_parent_fingerprint + ", got " +
+            parent_fingerprint);
+    }
+    if (capture.anchor.empty() ||
+        capture.penultimate_generation.empty() ||
+        capture.last_generation.empty()) {
+        throw std::logic_error(
+            "terminal-weight C17 canonical replay capture is "
+            "incomplete");
+    }
+
+    LearnedTerminalWeightC17Report report;
+    report.training_games = config.training_games;
+    report.parent_training_seed =
+        config.parent_training_seed;
+    report.parent_generations = config.parent_generations;
+    report.shard_seed = config.shard_seed;
+    report.balanced_blocks = config.balanced_blocks;
+    report.schedule_hash =
+        terminal_weight_schedule_hash(
+            config.shard_seed, config.parent_generations,
+            config.balanced_blocks);
+    report.bootstrap_distance = kBootstrapDistance;
+    report.collection_search_worlds = kCollectionWorlds;
+    report.collection_horizon_turns = kCollectionHorizon;
+    report.collection_max_game_turns =
+        config.max_game_turns;
+    report.collection_exploration_rate =
+        kExplorationRate;
+    report.control_terminal_weight = kControlWeight;
+    report.treatment_terminal_weight =
+        kTreatmentWeight;
+    report.fit_epochs = kFitEpochs;
+    report.fit_learning_rate = kFitLearningRate;
+    report.anchor_examples = capture.anchor.size();
+    report.penultimate_generation_examples =
+        capture.penultimate_generation.size();
+    report.last_generation_examples =
+        capture.last_generation.size();
+    report.parent_fingerprint = parent_fingerprint;
+    report.parent_components =
+        learned_model_component_fingerprints(parent);
+    report.anchor_hash = hash_terminal_weight_examples(
+        capture.anchor, 0x5457414E43484F52ULL);
+    report.penultimate_generation_hash =
+        hash_terminal_weight_examples(
+            capture.penultimate_generation,
+            0x545750454E554C54ULL);
+    report.last_generation_hash =
+        hash_terminal_weight_examples(
+            capture.last_generation,
+            0x54574C4153544745ULL);
+
+    std::vector<LearnedModel::TrainingExample> fit_examples;
+    const std::size_t historical_examples =
+        capture.anchor.size() +
+        capture.penultimate_generation.size() +
+        capture.last_generation.size();
+    fit_examples.reserve(
+        historical_examples +
+        config.balanced_blocks *
+            learned_iteration::kBalancedScheduleGames * 120);
+    const auto move_examples =
+        [&fit_examples](
+            std::vector<LearnedModel::TrainingExample>& source) {
+            for (auto& example : source) {
+                fit_examples.push_back(std::move(example));
+            }
+            source.clear();
+        };
+    move_examples(capture.anchor);
+    move_examples(capture.penultimate_generation);
+    move_examples(capture.last_generation);
+    if (fit_examples.size() != historical_examples) {
+        throw std::logic_error(
+            "terminal-weight C17 historical replay accounting "
+            "mismatch");
+    }
+    report.historical_replay_examples =
+        fit_examples.size();
+    report.historical_replay_hash =
+        hash_terminal_weight_examples(
+        fit_examples, 0x54575245504C4159ULL);
+
+    std::vector<TerminalWeightTargetRecord> target_records;
+    ModelFingerprintHash raw_hash;
+    ModelFingerprintHash feature_hash;
+    ModelFingerprintHash outcome_hash;
+    ModelFingerprintHash control_target_hash;
+    ModelFingerprintHash treatment_target_hash;
+    raw_hash.add(0x5457524157534844ULL);
+    feature_hash.add(0x5457464541545552ULL);
+    outcome_hash.add(0x54574F5554434F4DULL);
+    control_target_hash.add(0x5457544152473530ULL);
+    treatment_target_hash.add(0x5457544152473735ULL);
+
+    for (std::size_t block = 0;
+         block < config.balanced_blocks; ++block) {
+        const auto schedule =
+            learned_iteration::balanced_schedule(
+                config.shard_seed,
+                config.parent_generations + 1, block);
+        for (const auto& scheduled : schedule) {
+            GameConfig game_config;
+            game_config.max_turns =
+                config.max_game_turns;
+            game_config.starting_player =
+                scheduled.starting_player;
+            game_config.learned_model = parent;
+            game_config.learned_search_depth = 1;
+            game_config.bots = {
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action =
+                        kCollectionWorlds,
+                    .exploration_rate =
+                        kExplorationRate,
+                    .learned_model = parent,
+                },
+                BotConfig{
+                    .kind = BotKind::Learned,
+                    .learned_variant =
+                        LearnedVariant::ValueSearchChampion,
+                    .rollouts_per_action =
+                        kCollectionWorlds,
+                    .exploration_rate =
+                        kExplorationRate,
+                    .learned_model = parent,
+                },
+            };
+            Game game(
+                deck_cards(scheduled.seat_decks[0]),
+                deck_cards(scheduled.seat_decks[1]),
+                scheduled.seed, game_config);
+            std::vector<GameState> trace;
+            const GameResult result =
+                game.run_with_trace(trace);
+            if (trace.empty()) {
+                throw std::logic_error(
+                    "terminal-weight C17 collection produced "
+                    "an empty trace");
+            }
+            if (result.starting_player !=
+                scheduled.starting_player) {
+                throw std::logic_error(
+                    "terminal-weight C17 starting-player "
+                    "schedule mismatch");
+            }
+
+            ++report.scheduled_games;
+            raw_hash.add(block);
+            raw_hash.add(scheduled.schedule_index);
+            raw_hash.add(scheduled.pairing_index);
+            raw_hash.add(static_cast<std::uint64_t>(
+                scheduled.seat_decks[0]));
+            raw_hash.add(static_cast<std::uint64_t>(
+                scheduled.seat_decks[1]));
+            raw_hash.add(scheduled.starting_player);
+            raw_hash.add(scheduled.seed);
+            raw_hash.add(static_cast<std::uint64_t>(
+                result.winner + 1));
+            raw_hash.add(result.turns);
+            raw_hash.add(trace.size());
+            outcome_hash.add(static_cast<std::uint64_t>(
+                result.winner + 1));
+            outcome_hash.add(result.turns);
+            outcome_hash.add(result.starting_player);
+            for (const DeckId deck : scheduled.seat_decks) {
+                ++report.decks[
+                    static_cast<std::size_t>(deck)]
+                      .games;
+            }
+
+            std::array<double, 2> terminal_targets;
+            std::array<std::vector<double>, 2>
+                parent_values;
+            std::array<std::vector<double>, 2>
+                control_targets;
+            std::array<std::vector<double>, 2>
+                treatment_targets;
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                terminal_targets[perspective] =
+                    learned_discounted_terminal_target(
+                        result, perspective);
+                outcome_hash.add(
+                    std::bit_cast<std::uint64_t>(
+                        terminal_targets[perspective]));
+                parent_values[perspective].assign(
+                    trace.size(),
+                    terminal_targets[perspective]);
+            }
+            for (std::size_t future_index =
+                     kBootstrapDistance;
+                 future_index < trace.size();
+                 ++future_index) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    parent_values[perspective]
+                                 [future_index] =
+                        parent->predict(
+                            learned_features(
+                                trace[future_index],
+                                perspective));
+                }
+            }
+            for (std::size_t perspective = 0;
+                 perspective < 2; ++perspective) {
+                control_targets[perspective] =
+                    learned_iteration::
+                        weighted_n_state_bootstrap_targets(
+                            parent_values[perspective],
+                            terminal_targets[perspective],
+                            kBootstrapDistance,
+                            kControlWeight);
+                treatment_targets[perspective] =
+                    learned_iteration::
+                        weighted_n_state_bootstrap_targets(
+                            parent_values[perspective],
+                            terminal_targets[perspective],
+                            kBootstrapDistance,
+                            kTreatmentWeight);
+            }
+
+            for (std::size_t index = 0;
+                 index < trace.size(); ++index) {
+                for (std::size_t perspective = 0;
+                     perspective < 2; ++perspective) {
+                    const auto features =
+                        learned_features(
+                            trace[index], perspective);
+                    const bool terminal_tail =
+                        kBootstrapDistance >=
+                        trace.size() - index;
+                    const double terminal_target =
+                        terminal_targets[perspective];
+                    const double parent_future_value =
+                        terminal_tail
+                            ? terminal_target
+                            : parent_values[perspective]
+                                           [index +
+                                            kBootstrapDistance];
+                    const double control_target =
+                        control_targets[perspective][index];
+                    const double treatment_target =
+                        treatment_targets[perspective][index];
+                    const double direct_control =
+                        0.50 * terminal_target +
+                        0.50 * parent_future_value;
+                    const double direct_treatment =
+                        terminal_tail
+                            ? terminal_target
+                            : 0.75 * terminal_target +
+                                  0.25 *
+                                      parent_future_value;
+                    if (std::bit_cast<std::uint64_t>(
+                            control_target) !=
+                            std::bit_cast<std::uint64_t>(
+                                direct_control) ||
+                        std::bit_cast<std::uint64_t>(
+                            treatment_target) !=
+                            std::bit_cast<std::uint64_t>(
+                                direct_treatment)) {
+                        throw std::logic_error(
+                            "terminal-weight C17 target helper "
+                            "does not match the declared formula");
+                    }
+                    const double expected_delta =
+                        terminal_tail
+                            ? 0.0
+                            : 0.25 *
+                                  (terminal_target -
+                                   parent_future_value);
+                    const double actual_delta =
+                        treatment_target -
+                        control_target;
+                    const double delta_error =
+                        std::abs(
+                            actual_delta -
+                            expected_delta);
+                    const double delta_tolerance =
+                        8.0 *
+                        std::numeric_limits<double>::epsilon() *
+                        std::max(
+                            {1.0,
+                             std::abs(actual_delta),
+                             std::abs(expected_delta)});
+                    if (delta_error > delta_tolerance) {
+                        throw std::logic_error(
+                            "terminal-weight C17 target delta "
+                            "violates .25*(z-v4)");
+                    }
+                    report.maximum_target_delta_error =
+                        std::max(
+                            report
+                                .maximum_target_delta_error,
+                            delta_error);
+
+                    const std::size_t fit_index =
+                        fit_examples.size();
+                    fit_examples.emplace_back(
+                        features, control_target);
+                    const DeckId deck =
+                        scheduled
+                            .seat_decks[perspective];
+                    target_records.push_back({
+                        .fit_example_index = fit_index,
+                        .treatment_target =
+                            treatment_target,
+                    });
+                    auto& deck_report =
+                        report.decks[
+                            static_cast<std::size_t>(
+                                deck)];
+                    ++deck_report.examples;
+                    if (terminal_tail) {
+                        ++report
+                              .terminal_tail_examples;
+                        ++deck_report
+                              .terminal_tail_examples;
+                    } else {
+                        ++report
+                              .bootstrapped_examples;
+                        ++deck_report
+                              .bootstrapped_examples;
+                    }
+
+                    raw_hash.add(block);
+                    raw_hash.add(
+                        scheduled.schedule_index);
+                    raw_hash.add(index);
+                    raw_hash.add(perspective);
+                    raw_hash.add(
+                        static_cast<std::uint64_t>(
+                            deck));
+                    raw_hash.add(
+                        terminal_tail ? 1ULL : 0ULL);
+                    add_model_fingerprint_value(
+                        raw_hash, features);
+                    add_model_fingerprint_value(
+                        raw_hash, terminal_target);
+                    add_model_fingerprint_value(
+                        raw_hash,
+                        parent_future_value);
+                    add_model_fingerprint_value(
+                        feature_hash, features);
+                    add_model_fingerprint_value(
+                        control_target_hash,
+                        control_target);
+                    add_model_fingerprint_value(
+                        treatment_target_hash,
+                        treatment_target);
+                }
+            }
+        }
+    }
+
+    report.shard_examples = target_records.size();
+    report.fit_examples = fit_examples.size();
+    report.fit_feature_order_hash =
+        hash_terminal_weight_feature_order(fit_examples);
+    raw_hash.add(report.shard_examples);
+    feature_hash.add(report.shard_examples);
+    outcome_hash.add(report.scheduled_games);
+    control_target_hash.add(report.shard_examples);
+    treatment_target_hash.add(report.shard_examples);
+    report.raw_shard_hash = raw_hash.finish();
+    report.feature_hash = feature_hash.finish();
+    report.outcome_hash = outcome_hash.finish();
+    report.control_target_hash =
+        control_target_hash.finish();
+    report.treatment_target_hash =
+        treatment_target_hash.finish();
+
+    const LearnedValueUpdateConfig fit_config = {
+        .epochs = kFitEpochs,
+        .learning_rate = kFitLearningRate,
+        .root_seed = config.parent_training_seed,
+        .member_training_tag =
+            0x53454C4600000000ULL +
+            0x100ULL * config.parent_generations,
+    };
+    const auto control =
+        update_learned_value_model_encoded(
+            parent, fit_examples, fit_config);
+    if (learned_model_fingerprint(parent) !=
+        parent_fingerprint) {
+        throw std::logic_error(
+            "terminal-weight C17 TW50 fit mutated its "
+            "frozen parent");
+    }
+    for (const auto& record : target_records) {
+        if (record.fit_example_index >=
+            fit_examples.size()) {
+            throw std::logic_error(
+                "terminal-weight C17 target index is out "
+                "of range");
+        }
+        fit_examples[record.fit_example_index].second =
+            record.treatment_target;
+    }
+    const auto treatment =
+        update_learned_value_model_encoded(
+            parent, fit_examples, fit_config);
+    if (learned_model_fingerprint(parent) !=
+        parent_fingerprint) {
+        throw std::logic_error(
+            "terminal-weight C17 TW75 fit mutated its "
+            "frozen parent");
+    }
+
+    report.control_fingerprint =
+        learned_model_fingerprint(control);
+    report.treatment_fingerprint =
+        learned_model_fingerprint(treatment);
+    report.control_components =
+        learned_model_component_fingerprints(control);
+    report.treatment_components =
+        learned_model_component_fingerprints(treatment);
+    validate_terminal_weight_report(report);
+    return LearnedTerminalWeightC17Artifact(
+        control, treatment, std::move(report));
 }
 
 namespace {

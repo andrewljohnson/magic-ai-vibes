@@ -208,6 +208,9 @@ void print_help(std::string_view executable) {
         << " --diagnose-terminal-credit --train-games 800"
            " --train-seed 424242\n"
         << "       " << executable
+        << " --train-terminal-weight-c17 --train-games 800"
+           " --train-seed 424242\n"
+        << "       " << executable
         << " --audit-dc1-dominance --train-games 800"
            " --train-seed 424242 --learned-generations 16\n"
         << "       " << executable
@@ -287,6 +290,7 @@ void print_help(std::string_view executable) {
            "learned-value-context-cN, "
            "learned-value-dense-masked-cN, "
            "learned-value-dense-context-cN, "
+           "learned-value-tw50-c17, learned-value-tw75-c17, "
            "learned-value-mix50-g8, "
            "learned-actor-g0/g1); under --score-probes, "
            "the context-ablation tokens add their ordered cells "
@@ -324,6 +328,10 @@ void print_help(std::string_view executable) {
            "Priority residual, shallow-prior blend off, and required "
            "terminal results; accepts only --train-games and "
            "--train-seed\n"
+        << "  --train-terminal-weight-c17  Train the fixed same-shard "
+           "TW50/TW75 C17 family from exact C16 using raw seed "
+           "202607260311; accepts only --train-games 800 and "
+           "--train-seed 424242 and writes a distinct atomic bundle\n"
         << "  --audit-dc1-dominance  Evaluation-only Environment-v3 "
            "resource-dominance mining audit of exact C16; fixed "
            "all-five 2x40-game train/heldout blocks and K=8; trains "
@@ -388,6 +396,8 @@ struct BotSelection {
         ContextChallenger,
         DenseMaskedChallenger,
         DenseContextChallenger,
+        TerminalWeight50,
+        TerminalWeight75,
         Canonical,
         Mix50,
     };
@@ -444,6 +454,21 @@ BotSelection parse_bot(std::string_view value) {
             .learned_variant =
                 old_school::LearnedVariant::ValueSearchChampion,
             .value_generation = 0,
+        };
+    }
+    if (value == "learned-value-tw50-c17" ||
+        value == "learned-value-tw75-c17") {
+        return {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::ValueSearchChampion,
+            .value_family =
+                value == "learned-value-tw50-c17"
+                    ? BotSelection::ValueFamily::
+                          TerminalWeight50
+                    : BotSelection::ValueFamily::
+                          TerminalWeight75,
+            .value_generation = 17,
         };
     }
     std::size_t challenger_generation = 0;
@@ -1020,6 +1045,160 @@ load_value_challenger_with_progress(
         << " fingerprint: "
         << old_school::learned_model_fingerprint(model) << '\n';
     return model;
+}
+
+void require_canonical_terminal_weight_bundle(
+    const old_school::LearnedTerminalWeightC17Report& report) {
+    if (report.training_games != 800 ||
+        report.parent_training_seed != 424242 ||
+        report.parent_generations != 16 ||
+        report.shard_seed !=
+            old_school::kTerminalWeightC17ShardSeed ||
+        report.balanced_blocks != 5 ||
+        report.scheduled_games != 200 ||
+        report.bootstrap_distance != 4 ||
+        report.collection_search_worlds != 1 ||
+        report.collection_horizon_turns !=
+            old_school::kLearnedValueSearchHorizonTurns ||
+        report.collection_max_game_turns != 500 ||
+        report.collection_exploration_rate != 0.05 ||
+        report.control_terminal_weight != 0.50 ||
+        report.treatment_terminal_weight != 0.75 ||
+        report.fit_epochs != 3 ||
+        report.fit_learning_rate != 0.006 ||
+        report.parent_fingerprint !=
+            old_school::kTerminalWeightC17ParentFingerprint) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact is not the canonical "
+            "preregistered family");
+    }
+}
+
+old_school::LearnedTerminalWeightC17Artifact
+load_terminal_weight_c17_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed) {
+    const std::string path =
+        old_school::learned_terminal_weight_c17_cache_path(
+            training_games, training_seed);
+    std::error_code exists_error;
+    const bool exists =
+        std::filesystem::exists(path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect terminal-weight C17 artifact '" +
+            path + "': " + exists_error.message());
+    }
+    if (!exists) {
+        throw std::runtime_error(
+            "evaluation-only route requires the existing "
+            "terminal-weight C17 artifact '" + path +
+            "'; create it with --train-terminal-weight-c17");
+    }
+    std::cout
+        << "Loading pinned terminal-weight C17 artifact from "
+        << path << "..." << std::flush;
+    const auto started = std::chrono::steady_clock::now();
+    auto artifact =
+        old_school::load_learned_terminal_weight_c17_artifact(
+            path, training_games, training_seed);
+    require_canonical_terminal_weight_bundle(
+        artifact.report());
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    std::cout
+        << " done (" << std::fixed << std::setprecision(2)
+        << elapsed.count() << "s)\n"
+        << "  TW50 fingerprint: "
+        << artifact.report().control_fingerprint << '\n'
+        << "  TW75 fingerprint: "
+        << artifact.report().treatment_fingerprint << '\n';
+    return artifact;
+}
+
+void train_terminal_weight_c17_with_progress(
+    std::size_t training_games,
+    std::uint64_t training_seed) {
+    const std::string path =
+        old_school::learned_terminal_weight_c17_cache_path(
+            training_games, training_seed);
+    std::error_code exists_error;
+    const bool exists =
+        std::filesystem::exists(path, exists_error);
+    if (exists_error) {
+        throw std::runtime_error(
+            "cannot inspect terminal-weight C17 artifact '" +
+            path + "': " + exists_error.message());
+    }
+    if (exists) {
+        throw std::runtime_error(
+            "terminal-weight C17 artifact already exists at '" +
+            path + "'; refusing to retrain or overwrite the "
+                   "one-shot family");
+    }
+    std::cout
+        << "Training canonical same-shard TW50/TW75 C17 "
+           "family (parent seed "
+        << training_seed << ", raw shard seed "
+        << old_school::kTerminalWeightC17ShardSeed
+        << ")..." << std::flush;
+    const auto started = std::chrono::steady_clock::now();
+    old_school::LearnedTerminalWeightC17Config config;
+    config.training_games = training_games;
+    config.parent_training_seed = training_seed;
+    auto artifact =
+        old_school::train_learned_terminal_weight_c17_family(
+            std::move(config));
+    require_canonical_terminal_weight_bundle(
+        artifact.report());
+    old_school::
+        write_learned_terminal_weight_c17_artifact_atomic(
+            path, artifact);
+    const auto reloaded =
+        old_school::load_learned_terminal_weight_c17_artifact(
+            path, training_games, training_seed);
+    if (reloaded.report() != artifact.report()) {
+        throw std::runtime_error(
+            "terminal-weight C17 atomic roundtrip changed "
+            "provenance");
+    }
+    const std::chrono::duration<double> elapsed =
+        std::chrono::steady_clock::now() - started;
+    const auto& report = reloaded.report();
+    std::cout
+        << " done (" << std::fixed << std::setprecision(2)
+        << elapsed.count() << "s)\n"
+        << "  Parent/TW50/TW75: "
+        << report.parent_fingerprint << " / "
+        << report.control_fingerprint << " / "
+        << report.treatment_fingerprint << '\n'
+        << "  Shared schedule/raw/features/outcomes: "
+        << report.schedule_hash << " / "
+        << report.raw_shard_hash << " / "
+        << report.fit_feature_order_hash << " / "
+        << report.outcome_hash << '\n'
+        << "  Control/treatment targets: "
+        << report.control_target_hash << " / "
+        << report.treatment_target_hash << '\n'
+        << "  Examples historical/shard/bootstrap/tail: "
+        << report.historical_replay_examples << '/'
+        << report.shard_examples << '/'
+        << report.bootstrapped_examples << '/'
+        << report.terminal_tail_examples << '\n'
+        << "  Per deck games/examples/bootstrap/tail:\n";
+    for (std::size_t deck = 0;
+         deck < old_school::kDeckCount; ++deck) {
+        const auto& counts = report.decks[deck];
+        std::cout
+            << "    "
+            << old_school::deck_name(
+                   static_cast<old_school::DeckId>(deck))
+            << ": " << counts.games << '/'
+            << counts.examples << '/'
+            << counts.bootstrapped_examples << '/'
+            << counts.terminal_tail_examples << '\n';
+    }
+    std::cout << "  Artifact: " << path << '\n';
 }
 
 void print_value_root_coverage(
@@ -4269,6 +4448,8 @@ int main(int argc, char** argv) {
         bool p1r_probe_unsupported_option_used = false;
         bool diagnose_terminal_credit = false;
         bool terminal_credit_unsupported_option_used = false;
+        bool train_terminal_weight_c17 = false;
+        bool terminal_weight_unsupported_option_used = false;
         bool audit_dc1_dominance = false;
         bool dc1_unsupported_option_used = false;
         bool audit_dc1_action_census = false;
@@ -4344,6 +4525,11 @@ int main(int argc, char** argv) {
                 option != "--train-seed") {
                 terminal_credit_unsupported_option_used = true;
             }
+            if (option != "--train-terminal-weight-c17" &&
+                option != "--train-games" &&
+                option != "--train-seed") {
+                terminal_weight_unsupported_option_used = true;
+            }
             if (option != "--audit-dc1-dominance" &&
                 option != "--train-games" &&
                 option != "--train-seed" &&
@@ -4406,6 +4592,10 @@ int main(int argc, char** argv) {
             }
             if (option == "--diagnose-terminal-credit") {
                 diagnose_terminal_credit = true;
+                continue;
+            }
+            if (option == "--train-terminal-weight-c17") {
+                train_terminal_weight_c17 = true;
                 continue;
             }
             if (option == "--audit-dc1-dominance") {
@@ -4694,6 +4884,7 @@ int main(int argc, char** argv) {
                 static_cast<int>(diagnose_p1_fit) +
                 static_cast<int>(score_p1r_probes) +
                 static_cast<int>(diagnose_terminal_credit) +
+                static_cast<int>(train_terminal_weight_c17) +
                 static_cast<int>(audit_dc1_dominance) +
                 static_cast<int>(audit_dc1_action_census) +
                 static_cast<int>(audit_v3_blue_stack_regret) +
@@ -4707,6 +4898,7 @@ int main(int argc, char** argv) {
                 "--diagnose-force-spike-teacher, --train-p-family, "
                 "--diagnose-p1-fit, --score-p1r-probes, "
                 "--diagnose-terminal-credit, "
+                "--train-terminal-weight-c17, "
                 "--audit-dc1-dominance, "
                 "--audit-dc1-action-census, "
                 "--audit-v3-blue-stack-regret, "
@@ -4761,6 +4953,19 @@ int main(int argc, char** argv) {
              training_seed != 424242)) {
             throw std::invalid_argument(
                 "--diagnose-terminal-credit requires exact "
+                "--train-games 800 --train-seed 424242");
+        }
+        if (train_terminal_weight_c17 &&
+            terminal_weight_unsupported_option_used) {
+            throw std::invalid_argument(
+                "--train-terminal-weight-c17 accepts only "
+                "--train-games and --train-seed");
+        }
+        if (train_terminal_weight_c17 &&
+            (training_games != 800 ||
+             training_seed != 424242)) {
+            throw std::invalid_argument(
+                "--train-terminal-weight-c17 requires exact "
                 "--train-games 800 --train-seed 424242");
         }
         if (audit_dc1_dominance &&
@@ -4879,6 +5084,39 @@ int main(int argc, char** argv) {
                                DenseContextChallenger &&
                        selection.value_generation > 0;
             };
+        const auto selects_terminal_weight_c17 =
+            [](const BotSelection& selection) {
+                return selection.kind ==
+                           old_school::BotKind::Learned &&
+                       selection.learned_variant ==
+                           old_school::LearnedVariant::
+                               ValueSearchChampion &&
+                       (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                TerminalWeight50 ||
+                        selection.value_family ==
+                            BotSelection::ValueFamily::
+                                TerminalWeight75);
+            };
+        if (benchmark &&
+            (selects_terminal_weight_c17(challenger) ||
+             selects_terminal_weight_c17(baseline)) &&
+            (training_games != 800 ||
+             training_seed != 424242)) {
+            throw std::invalid_argument(
+                "terminal-weight C17 benchmark tokens require "
+                "exact --train-games 800 --train-seed 424242");
+        }
+        if (benchmark &&
+            (selects_terminal_weight_c17(challenger) ||
+             selects_terminal_weight_c17(baseline)) &&
+            (seed == old_school::kTerminalWeightC17ShardSeed ||
+             seed == old_school::kTerminalWeightC17HoldoutSeed ||
+             seed == old_school::kTerminalWeightC17GameplaySeed)) {
+            throw std::invalid_argument(
+                "reserved terminal-weight C17 seeds may be used "
+                "only by the sealed evaluator");
+        }
         if (evolve &&
             evolve_pilot.kind == old_school::BotKind::Learned &&
             !selects_value_context_challenger(evolve_pilot)) {
@@ -4954,6 +5192,7 @@ int main(int argc, char** argv) {
             !diagnose_p1_fit &&
             !score_p1r_probes &&
             !diagnose_terminal_credit &&
+            !train_terminal_weight_c17 &&
             !audit_dc1_dominance &&
             !audit_dc1_action_census &&
             !audit_v3_blue_stack_regret &&
@@ -5339,6 +5578,11 @@ int main(int argc, char** argv) {
                        dev_report, validation_report)
                        ? 0
                        : 1;
+        }
+        if (train_terminal_weight_c17) {
+            train_terminal_weight_c17_with_progress(
+                training_games, training_seed);
+            return 0;
         }
         if (diagnose_terminal_credit) {
             constexpr std::size_t kTerminalTrainingGames = 800;
@@ -5873,6 +6117,9 @@ int main(int argc, char** argv) {
             old_school::LearnedValueG8Result frozen_value_bundle;
             old_school::LearnedValueG8Result
                 frozen_value_mix50_bundle;
+            std::optional<
+                old_school::LearnedTerminalWeightC17Artifact>
+                frozen_terminal_weight_bundle;
             std::shared_ptr<const old_school::LearnedModel>
                 frozen_actor_g0;
             std::shared_ptr<const old_school::LearnedModel>
@@ -5883,6 +6130,26 @@ int main(int argc, char** argv) {
                 if (selection.learned_variant ==
                     old_school::LearnedVariant::
                         ValueSearchChampion) {
+                    if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                TerminalWeight50 ||
+                        selection.value_family ==
+                            BotSelection::ValueFamily::
+                                TerminalWeight75) {
+                        if (!frozen_terminal_weight_bundle) {
+                            frozen_terminal_weight_bundle =
+                                load_terminal_weight_c17_with_progress(
+                                    training_games,
+                                    training_seed);
+                        }
+                        return selection.value_family ==
+                                       BotSelection::ValueFamily::
+                                           TerminalWeight50
+                                   ? frozen_terminal_weight_bundle
+                                         ->control_model()
+                                   : frozen_terminal_weight_bundle
+                                         ->treatment_model();
+                    }
                     if (selection.value_family ==
                         BotSelection::ValueFamily::Challenger) {
                         const auto found =
@@ -6066,6 +6333,10 @@ int main(int argc, char** argv) {
                     switch (left.value_family) {
                     case BotSelection::ValueFamily::LegacyG0:
                     case BotSelection::ValueFamily::Mix50:
+                    case BotSelection::ValueFamily::
+                        TerminalWeight50:
+                    case BotSelection::ValueFamily::
+                        TerminalWeight75:
                         return true;
                     case BotSelection::ValueFamily::Challenger:
                     case BotSelection::ValueFamily::
@@ -6158,6 +6429,24 @@ int main(int argc, char** argv) {
                                        "Learned Value Dense Context C") +
                                    std::to_string(
                                        selection.value_generation) +
+                                   value_continuation_epsilon_suffix(
+                                       config
+                                           .value_continuation_epsilon);
+                        }
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                TerminalWeight50) {
+                            return std::string(
+                                       "Learned Value TW50 C17") +
+                                   value_continuation_epsilon_suffix(
+                                       config
+                                           .value_continuation_epsilon);
+                        }
+                        if (selection.value_family ==
+                            BotSelection::ValueFamily::
+                                TerminalWeight75) {
+                            return std::string(
+                                       "Learned Value TW75 C17") +
                                    value_continuation_epsilon_suffix(
                                        config
                                            .value_continuation_epsilon);

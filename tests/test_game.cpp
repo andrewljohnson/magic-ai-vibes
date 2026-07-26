@@ -322,6 +322,25 @@ small_value_challenger_c2() {
     return small_value_challenger_c2_artifact().model();
 }
 
+const old_school::LearnedTerminalWeightC17Artifact&
+small_terminal_weight_family() {
+    static const auto artifact = [] {
+        old_school::LearnedTerminalWeightC17Config config;
+        config.training_games = 1;
+        config.parent_training_seed = 424242;
+        config.parent_generations = 2;
+        config.shard_seed = 0x7A17C17ULL;
+        config.balanced_blocks = 1;
+        config.max_game_turns = 8;
+        config.required_parent_fingerprint =
+            "8b9696870ca43087cddb3987a3d80759ac0528b552f1ead5447091d526cf2e06";
+        return old_school::
+            train_learned_terminal_weight_c17_family(
+                std::move(config));
+    }();
+    return artifact;
+}
+
 const old_school::LearnedValueContextChallengerArtifact&
 small_value_context_challenger_c1_artifact() {
     static const auto artifact =
@@ -2128,6 +2147,227 @@ TEST(value_challenger_artifact_is_versioned_bit_exact_and_fail_closed) {
     std::filesystem::remove(corrupt);
     std::filesystem::remove(canonical_path);
     std::filesystem::remove(mix50_path);
+}
+
+TEST(terminal_weight_c17_uses_one_balanced_shard_and_changes_only_critic) {
+    old_school::GameResult decisive;
+    decisive.winner = 0;
+    decisive.turns = 10;
+    const double discount =
+        0.5 * std::pow(0.985, 10.0);
+    CHECK(old_school::learned_discounted_terminal_target(
+              decisive, 0) ==
+          0.5 + discount);
+    CHECK(old_school::learned_discounted_terminal_target(
+              decisive, 1) ==
+          0.5 - discount);
+    decisive.winner = -1;
+    CHECK(old_school::learned_discounted_terminal_target(
+              decisive, 0) == 0.5);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_discounted_terminal_target(
+                    decisive, 2));
+        },
+        "perspective"));
+
+    const auto& artifact = small_terminal_weight_family();
+    const auto& report = artifact.report();
+    CHECK(report.training_games == 1);
+    CHECK(report.parent_training_seed == 424242);
+    CHECK(report.parent_generations == 2);
+    CHECK(report.shard_seed == 0x7A17C17ULL);
+    CHECK(report.balanced_blocks == 1);
+    CHECK(report.scheduled_games == 40);
+    CHECK(report.bootstrap_distance == 4);
+    CHECK(report.collection_search_worlds == 1);
+    CHECK(report.collection_horizon_turns ==
+          old_school::kLearnedValueSearchHorizonTurns);
+    CHECK(report.collection_max_game_turns == 8);
+    CHECK(report.collection_exploration_rate == 0.05);
+    CHECK(report.control_terminal_weight == 0.50);
+    CHECK(report.treatment_terminal_weight == 0.75);
+    CHECK(report.fit_epochs == 3);
+    CHECK(report.fit_learning_rate == 0.006);
+    CHECK(report.parent_fingerprint ==
+          "8b9696870ca43087cddb3987a3d80759ac0528b552f1ead5447091d526cf2e06");
+    CHECK(report.control_fingerprint ==
+          old_school::learned_model_fingerprint(
+              artifact.control_model()));
+    CHECK(report.treatment_fingerprint ==
+          old_school::learned_model_fingerprint(
+              artifact.treatment_model()));
+    CHECK(report.control_fingerprint !=
+          report.treatment_fingerprint);
+    CHECK(report.control_target_hash !=
+          report.treatment_target_hash);
+    CHECK(report.historical_replay_examples ==
+          report.anchor_examples +
+              report.penultimate_generation_examples +
+              report.last_generation_examples);
+    CHECK(report.fit_examples ==
+          report.historical_replay_examples +
+              report.shard_examples);
+    CHECK(report.bootstrapped_examples +
+              report.terminal_tail_examples ==
+          report.shard_examples);
+    CHECK(report.maximum_target_delta_error <=
+          8.0 * std::numeric_limits<double>::epsilon());
+    CHECK(report.schedule_hash.size() == 64);
+    CHECK(report.raw_shard_hash.size() == 64);
+    CHECK(report.fit_feature_order_hash.size() == 64);
+    CHECK(report.outcome_hash.size() == 64);
+
+    std::size_t deck_examples = 0;
+    std::size_t deck_bootstrapped = 0;
+    std::size_t deck_tail = 0;
+    for (const auto& deck : report.decks) {
+        CHECK(deck.games == 16);
+        CHECK(deck.examples > 0);
+        CHECK(deck.bootstrapped_examples +
+                  deck.terminal_tail_examples ==
+              deck.examples);
+        deck_examples += deck.examples;
+        deck_bootstrapped += deck.bootstrapped_examples;
+        deck_tail += deck.terminal_tail_examples;
+    }
+    CHECK(deck_examples == report.shard_examples);
+    CHECK(deck_bootstrapped ==
+          report.bootstrapped_examples);
+    CHECK(deck_tail == report.terminal_tail_examples);
+
+    const auto& parent_components = report.parent_components;
+    for (const auto& candidate :
+         {report.control_components,
+          report.treatment_components}) {
+        CHECK(candidate.critic != parent_components.critic);
+        CHECK(candidate.priority == parent_components.priority);
+        CHECK(candidate.attack == parent_components.attack);
+        CHECK(candidate.block == parent_components.block);
+        CHECK(candidate.damage_order ==
+              parent_components.damage_order);
+    }
+}
+
+TEST(terminal_weight_c17_artifact_is_distinct_atomic_and_fail_closed) {
+    const auto& original = small_terminal_weight_family();
+    const std::filesystem::path directory =
+        "build/test-model-cache";
+    const std::filesystem::path good =
+        directory / "terminal-weight-family-good.bin";
+    const std::filesystem::path corrupt =
+        directory / "terminal-weight-family-corrupt.bin";
+    const std::filesystem::path challenger =
+        directory / "terminal-weight-cross-family.bin";
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(challenger);
+
+    old_school::
+        write_learned_terminal_weight_c17_artifact_atomic(
+            good.string(), original);
+    const auto loaded =
+        old_school::load_learned_terminal_weight_c17_artifact(
+            good.string(), 1, 424242, 0x7A17C17ULL);
+    CHECK(loaded.report() == original.report());
+    CHECK(old_school::learned_model_fingerprint(
+              loaded.control_model()) ==
+          original.report().control_fingerprint);
+    CHECK(old_school::learned_model_fingerprint(
+              loaded.treatment_model()) ==
+          original.report().treatment_fingerprint);
+    CHECK(old_school::learned_terminal_weight_c17_cache_path(
+              800, 424242) ==
+          "build/model-cache/"
+          "old-school-value-terminal-weight-c17-v1-t800-p424242-"
+          "r202607260311.bin");
+
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_terminal_weight_c17_artifact(
+                        good.string(), 2, 424242,
+                        0x7A17C17ULL));
+        },
+        "training_games mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_terminal_weight_c17_artifact(
+                        good.string(), 1, 424243,
+                        0x7A17C17ULL));
+        },
+        "parent training seed mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_terminal_weight_c17_artifact(
+                        good.string(), 1, 424242,
+                        0x7A17C18ULL));
+        },
+        "shard seed mismatch"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_value_challenger_artifact(
+                        good.string(), 1, 424242, 2));
+        },
+        "wrong magic"));
+
+    old_school::write_learned_value_challenger_artifact_atomic(
+        challenger.string(),
+        small_value_challenger_c2_artifact());
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_terminal_weight_c17_artifact(
+                        challenger.string(), 1, 424242,
+                        0x7A17C17ULL));
+        },
+        "wrong magic"));
+
+    auto changed = read_binary_file(good);
+    CHECK(changed.size() > 64);
+    changed.back() ^= 0x01U;
+    write_binary_file(corrupt, changed);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    load_learned_terminal_weight_c17_artifact(
+                        corrupt.string(), 1, 424242,
+                        0x7A17C17ULL));
+        },
+        "checksum"));
+
+    old_school::LearnedTerminalWeightC17Config canonical;
+    canonical.required_parent_fingerprint.clear();
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    train_learned_terminal_weight_c17_family(
+                        canonical));
+        },
+        "exact frozen C16 fingerprint"));
+    CHECK(throws_with_text(
+        [] {
+            static_cast<void>(
+                old_school::
+                    learned_terminal_weight_c17_cache_path(
+                        0, 424242));
+        },
+        "positive"));
+
+    std::filesystem::remove(good);
+    std::filesystem::remove(corrupt);
+    std::filesystem::remove(challenger);
 }
 
 TEST(value_context_challenger_s1_is_deterministic_and_reports_roots) {

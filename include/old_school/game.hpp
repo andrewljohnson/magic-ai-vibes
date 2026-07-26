@@ -506,6 +506,8 @@ enum class LearnedVariant : std::uint8_t {
 inline constexpr std::size_t kBotKindCount = 5;
 inline constexpr std::size_t kBotMatchupCount =
     kBotKindCount * (kBotKindCount - 1) / 2;
+inline constexpr std::size_t
+    kLearnedValueSearchHorizonTurns = 4;
 
 class LearnedModel;
 class LearnedPolicyRecorder;
@@ -550,6 +552,11 @@ struct GameResult {
 
     bool operator==(const GameResult&) const = default;
 };
+
+// Canonical soft terminal label used by the Value challenger recipes:
+// draws are 0.5 and decisive results are discounted by game length.
+double learned_discounted_terminal_target(
+    const GameResult& result, std::size_t perspective);
 
 struct GameConfig {
     std::size_t max_turns = 500;
@@ -1776,6 +1783,139 @@ struct LearnedModelComponentFingerprints {
 LearnedModelComponentFingerprints
 learned_model_component_fingerprints(
     std::shared_ptr<const LearnedModel> model);
+
+inline constexpr std::uint64_t
+    kTerminalWeightC17ShardSeed = 202607260311ULL;
+inline constexpr std::uint64_t
+    kTerminalWeightC17HoldoutSeed = 202607260312ULL;
+inline constexpr std::uint64_t
+    kTerminalWeightC17GameplaySeed = 202607260313ULL;
+inline constexpr std::string_view
+    kTerminalWeightC17ParentFingerprint =
+        "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
+
+struct LearnedTerminalWeightC17DeckReport {
+    std::size_t games = 0;
+    std::size_t examples = 0;
+    std::size_t bootstrapped_examples = 0;
+    std::size_t terminal_tail_examples = 0;
+
+    bool operator==(
+        const LearnedTerminalWeightC17DeckReport&) const = default;
+};
+
+struct LearnedTerminalWeightC17Report {
+    std::size_t training_games = 0;
+    std::uint64_t parent_training_seed = 0;
+    std::size_t parent_generations = 0;
+    std::uint64_t shard_seed = 0;
+    std::size_t balanced_blocks = 0;
+    std::size_t scheduled_games = 0;
+    std::size_t bootstrap_distance = 0;
+    std::size_t collection_search_worlds = 0;
+    std::size_t collection_horizon_turns = 0;
+    std::size_t collection_max_game_turns = 0;
+    double collection_exploration_rate = 0.0;
+    double control_terminal_weight = 0.0;
+    double treatment_terminal_weight = 0.0;
+    std::size_t fit_epochs = 0;
+    double fit_learning_rate = 0.0;
+    std::size_t anchor_examples = 0;
+    std::size_t penultimate_generation_examples = 0;
+    std::size_t last_generation_examples = 0;
+    std::size_t historical_replay_examples = 0;
+    std::size_t fit_examples = 0;
+    std::size_t shard_examples = 0;
+    std::size_t bootstrapped_examples = 0;
+    std::size_t terminal_tail_examples = 0;
+    double maximum_target_delta_error = 0.0;
+    std::array<LearnedTerminalWeightC17DeckReport, kDeckCount>
+        decks{};
+    std::string parent_fingerprint;
+    std::string control_fingerprint;
+    std::string treatment_fingerprint;
+    LearnedModelComponentFingerprints parent_components;
+    LearnedModelComponentFingerprints control_components;
+    LearnedModelComponentFingerprints treatment_components;
+    std::string anchor_hash;
+    std::string penultimate_generation_hash;
+    std::string last_generation_hash;
+    std::string historical_replay_hash;
+    std::string fit_feature_order_hash;
+    std::string raw_shard_hash;
+    std::string schedule_hash;
+    std::string feature_hash;
+    std::string outcome_hash;
+    std::string control_target_hash;
+    std::string treatment_target_hash;
+
+    bool operator==(
+        const LearnedTerminalWeightC17Report&) const = default;
+};
+
+// Test-scale configurations may reduce the parent generation count, block
+// count, and turn bound. The published CLI route fixes the canonical values
+// below and requires the exact frozen C16 fingerprint.
+struct LearnedTerminalWeightC17Config {
+    std::size_t training_games = 800;
+    std::uint64_t parent_training_seed =
+        kDefaultLearnedTrainingSeed;
+    std::size_t parent_generations = 16;
+    std::uint64_t shard_seed = kTerminalWeightC17ShardSeed;
+    std::size_t balanced_blocks = 5;
+    std::size_t max_game_turns = 500;
+    std::string required_parent_fingerprint =
+        std::string(kTerminalWeightC17ParentFingerprint);
+};
+
+class LearnedTerminalWeightC17Artifact {
+  public:
+    std::shared_ptr<const LearnedModel> control_model() const;
+    std::shared_ptr<const LearnedModel> treatment_model() const;
+    const LearnedTerminalWeightC17Report& report() const;
+
+  private:
+    LearnedTerminalWeightC17Artifact(
+        std::shared_ptr<const LearnedModel> control_model,
+        std::shared_ptr<const LearnedModel> treatment_model,
+        LearnedTerminalWeightC17Report report);
+
+    std::shared_ptr<const LearnedModel> control_model_;
+    std::shared_ptr<const LearnedModel> treatment_model_;
+    LearnedTerminalWeightC17Report report_;
+
+    friend LearnedTerminalWeightC17Artifact
+    train_learned_terminal_weight_c17_family(
+        LearnedTerminalWeightC17Config config);
+    friend void
+    write_learned_terminal_weight_c17_artifact_atomic(
+        const std::string& path,
+        const LearnedTerminalWeightC17Artifact& artifact);
+    friend LearnedTerminalWeightC17Artifact
+    load_learned_terminal_weight_c17_artifact(
+        const std::string& path,
+        std::size_t expected_training_games,
+        std::uint64_t expected_parent_training_seed,
+        std::uint64_t expected_shard_seed);
+};
+
+LearnedTerminalWeightC17Artifact
+train_learned_terminal_weight_c17_family(
+    LearnedTerminalWeightC17Config config = {});
+std::string learned_terminal_weight_c17_cache_path(
+    std::size_t training_games,
+    std::uint64_t parent_training_seed,
+    std::uint64_t shard_seed = kTerminalWeightC17ShardSeed);
+void write_learned_terminal_weight_c17_artifact_atomic(
+    const std::string& path,
+    const LearnedTerminalWeightC17Artifact& artifact);
+LearnedTerminalWeightC17Artifact
+load_learned_terminal_weight_c17_artifact(
+    const std::string& path,
+    std::size_t expected_training_games,
+    std::uint64_t expected_parent_training_seed,
+    std::uint64_t expected_shard_seed =
+        kTerminalWeightC17ShardSeed);
 
 struct LearnedValuePolicyFamilyConfig {
     std::size_t generations = 1;

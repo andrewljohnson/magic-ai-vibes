@@ -23,6 +23,7 @@ challenger_c2_cache=build/model-cache/old-school-value-challenger-v3-c2-t1-s4242
 context_challenger_c1_cache=build/model-cache/old-school-value-context-s1-v3-c1-t1-s424242.bin
 dense_masked_c1_cache=build/model-cache/old-school-value-context-d0-v3-c1-t1-s424242.bin
 dense_context_c1_cache=build/model-cache/old-school-value-context-d1-v3-c1-t1-s424242.bin
+terminal_weight_cache=build/model-cache/old-school-value-terminal-weight-c17-v1-t800-p424242-r202607260311.bin
 probe_cache=
 mix50_probe_cache=
 validation_probe_cache=
@@ -32,7 +33,8 @@ cleanup() {
     rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
         "$challenger_c1_cache" "$challenger_c2_cache" \
         "$context_challenger_c1_cache" \
-        "$dense_masked_c1_cache" "$dense_context_c1_cache"
+        "$dense_masked_c1_cache" "$dense_context_c1_cache" \
+        "$terminal_weight_cache"
     if [ -n "$probe_cache" ]; then
         rm -f "$probe_cache"
     fi
@@ -52,7 +54,8 @@ trap cleanup EXIT HUP INT TERM
 rm -f "$g8_cache" "$g8_t8_cache" "$mix50_cache" \
     "$challenger_c1_cache" "$challenger_c2_cache" \
     "$context_challenger_c1_cache" \
-    "$dense_masked_c1_cache" "$dense_context_c1_cache"
+    "$dense_masked_c1_cache" "$dense_context_c1_cache" \
+    "$terminal_weight_cache"
 
 run_cli() {
     set +e
@@ -101,7 +104,9 @@ case $help_output in
 "learned-value-context-cN"*\
 "learned-value-dense-masked-cN"*\
 "learned-value-dense-context-cN"*\
+"learned-value-tw50-c17"*"learned-value-tw75-c17"*\
 "learned-value-mix50-g8"*\
+"--train-terminal-weight-c17"*\
 "--value-generation N"*"--value-recipe NAME"*\
 "--actor-policy-epochs N"*"--actor-policy-rate X"*\
 "--refresh-value-challenger-cache"*\
@@ -329,6 +334,44 @@ expect_error "--diagnose-terminal-credit requires exact --train-games 800 --trai
 expect_error "--diagnose-terminal-credit requires exact --train-games 800 --train-seed 424242" \
     --diagnose-terminal-credit \
     --train-games 800 --train-seed 1
+expect_error "--train-terminal-weight-c17 accepts only --train-games and --train-seed" \
+    --train-terminal-weight-c17 --games 1
+expect_error "cannot be combined" \
+    --train-terminal-weight-c17 --benchmark
+expect_error "--train-terminal-weight-c17 requires exact --train-games 800 --train-seed 424242" \
+    --train-terminal-weight-c17 \
+    --train-games 1 --train-seed 424242
+expect_error "--train-terminal-weight-c17 requires exact --train-games 800 --train-seed 424242" \
+    --train-terminal-weight-c17 \
+    --train-games 800 --train-seed 1
+expect_error "terminal-weight C17 benchmark tokens require exact --train-games 800 --train-seed 424242" \
+    --benchmark --games 1 --seed 1 \
+    --challenger learned-value-tw75-c17 \
+    --baseline learned-value-tw50-c17 \
+    --train-games 1 --train-seed 424242
+expect_error "reserved terminal-weight C17 seeds may be used only by the sealed evaluator" \
+    --benchmark --games 1 --seed 202607260313 \
+    --challenger learned-value-tw75-c17 \
+    --baseline learned-value-tw50-c17 \
+    --train-games 800 --train-seed 424242
+expect_error "evaluation-only route requires the existing terminal-weight C17 artifact" \
+    --benchmark --games 1 --seed 1 \
+    --challenger learned-value-tw75-c17 \
+    --baseline learned-value-tw50-c17 \
+    --train-games 800 --train-seed 424242
+case $cli_output in
+    *"Training canonical same-shard"*)
+        printf 'terminal-weight evaluation route tried to train\n%s\n' \
+            "$cli_output" >&2
+        exit 1
+        ;;
+esac
+mkdir -p "$(dirname "$terminal_weight_cache")"
+: >"$terminal_weight_cache"
+expect_error "refusing to retrain or overwrite the one-shot family" \
+    --train-terminal-weight-c17 \
+    --train-games 800 --train-seed 424242
+rm -f "$terminal_weight_cache"
 expect_error "--audit-dc1-dominance accepts only --train-games, --train-seed, and --learned-generations" \
     --audit-dc1-dominance --learned-generations 16 --seed 1
 expect_error "cannot be combined" \
