@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -67,6 +68,15 @@ void expect_near(
             std::to_string(expected) + ", got " +
             std::to_string(actual));
     }
+}
+
+void expect_bit_identical(
+    double actual, double expected,
+    std::string_view message) {
+    expect(
+        std::bit_cast<std::uint64_t>(actual) ==
+            std::bit_cast<std::uint64_t>(expected),
+        message);
 }
 
 template <typename Exception, typename Function>
@@ -345,6 +355,131 @@ void test_calendar_alignment_counts_extra_turns_and_priority_roots() {
         "remain exact");
 }
 
+void test_eight_horizon_targets_use_exact_futures_and_tails() {
+    const std::vector<std::size_t> turns = {
+        1, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 9, 10};
+    const auto indices =
+        old_school::learned_iteration::
+            turn_aligned_bootstrap_indices(
+                turns, ta4::kCalendarTurn8Advances);
+    expect(
+        indices[0] == std::optional<std::size_t>(10) &&
+            indices[1] == std::optional<std::size_t>(10),
+        "CT8 same-turn priority roots share the earliest "
+        "eight-turn future");
+    expect(
+        indices[2] == std::optional<std::size_t>(12) &&
+            indices[3] == std::optional<std::size_t>(12),
+        "CT8 ordinary roots land exactly eight turns ahead");
+    for (std::size_t root = 4; root < indices.size();
+         ++root) {
+        expect(
+            !indices[root].has_value(),
+            "CT8 roots without eight future turns are tails");
+    }
+
+    std::vector<double> parent_values;
+    parent_values.reserve(turns.size());
+    for (std::size_t index = 0; index < turns.size();
+         ++index) {
+        parent_values.push_back(
+            0.02 * static_cast<double>(index + 1));
+    }
+    constexpr double terminal = 0.8;
+    const auto calendar_targets =
+        old_school::learned_iteration::
+            weighted_turn_aligned_bootstrap_targets(
+                parent_values, turns, terminal,
+                ta4::kCalendarTurn8Advances,
+                ta4::kTerminalWeight);
+    expect_near(
+        calendar_targets[0],
+        0.5 * terminal + 0.5 * parent_values[10],
+        1.0e-15, "CT8 aligned target uses its exact future");
+    for (std::size_t root = 4;
+         root < calendar_targets.size(); ++root) {
+        expect_bit_identical(
+            calendar_targets[root], terminal,
+            "CT8 aligned terminal tails retain z exactly");
+    }
+
+    const auto record_targets =
+        old_school::learned_iteration::
+            n_state_bootstrap_targets(
+                parent_values, terminal,
+                ta4::kRecordOffset8Distance);
+    expect_near(
+        record_targets[0],
+        0.5 * terminal + 0.5 * parent_values[8],
+        1.0e-15,
+        "RO8 target uses exactly eight trace records");
+    for (std::size_t root = parent_values.size() -
+             ta4::kRecordOffset8Distance;
+         root < record_targets.size(); ++root) {
+        expect_bit_identical(
+            record_targets[root], terminal,
+            "RO8 terminal tails retain z exactly");
+    }
+}
+
+void test_eight_turn_alignment_counts_time_walk_turns() {
+    old_school::GameState state;
+    state.turn_number = 7;
+    state.active_player = 0;
+    state.players[0].hand = {
+        old_school::CardId::TimeWalk,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+    };
+    expect(
+        old_school::apply_priority_action(
+            state, 0,
+            old_school::PriorityAction::cast_sorcery(
+                old_school::CardId::TimeWalk),
+            true),
+        "CT8 Time Walk fixture cast");
+    expect(
+        old_school::resolve_top_of_stack(state),
+        "CT8 Time Walk fixture resolution");
+
+    std::vector<std::size_t> turns = {
+        state.turn_number,
+        state.turn_number,
+    };
+    std::vector<std::size_t> active_players = {
+        state.active_player,
+        state.active_player,
+    };
+    for (std::size_t advance = 0; advance < 8; ++advance) {
+        ++state.turn_number;
+        active_players.push_back(
+            old_school::advance_turn_player(state));
+        turns.push_back(state.turn_number);
+    }
+    expect(
+        active_players ==
+            std::vector<std::size_t>(
+                {0, 0, 0, 1, 0, 1, 0, 1, 0, 1}),
+        "CT8 Time Walk repeats the active player while calendar "
+        "turn numbers advance");
+    const auto indices =
+        old_school::learned_iteration::
+            turn_aligned_bootstrap_indices(
+                turns, ta4::kCalendarTurn8Advances);
+    expect(
+        indices[0] == std::optional<std::size_t>(9) &&
+            indices[1] == std::optional<std::size_t>(9),
+        "CT8 Time Walk priority roots land at turn plus eight");
+    for (std::size_t root = 2; root < indices.size();
+         ++root) {
+        expect(
+            !indices[root].has_value(),
+            "CT8 Time Walk late roots remain terminal tails");
+    }
+}
+
 void test_scoring_tracks_paired_targets_and_tail_accounting() {
     const auto records = metric_fixture();
     const auto report = ta4::score_records(records);
@@ -587,14 +722,23 @@ void test_small_noncanonical_collection_is_reproducible() {
             serial.tail_identity_passed &&
             serial.treatment_distance_passed &&
             serial.treatment_earliest_passed &&
-            serial.hidden_repartition_passed,
-        "TA4 small collection invariants");
+            serial.hidden_repartition_passed &&
+            serial.record_offset8_identity_passed &&
+            serial.calendar_turn8_distance_passed &&
+            serial.calendar_turn8_earliest_passed &&
+            serial.eight_tail_identity_passed,
+        "TA4/CT8 small collection invariants");
     expect(
         !serial.schedule_hash.empty() &&
             !serial.trace_hash.empty() &&
             !serial.control_target_hash.empty() &&
-            !serial.treatment_target_hash.empty(),
-        "TA4 small collection hashes");
+            !serial.treatment_target_hash.empty() &&
+            !serial.record_offset8_target_hash.empty() &&
+            !serial.calendar_turn8_target_hash.empty(),
+        "TA4/CT8 small collection hashes");
+    expect(
+        serial.hidden_repartition_states > 0,
+        "CT8 collection exercised a changed hidden clone");
     for (const auto& record : serial.records) {
         if (record.treatment_future_index.has_value()) {
             expect(
@@ -605,6 +749,82 @@ void test_small_noncanonical_collection_is_reproducible() {
                     std::optional<std::size_t>(
                         ta4::kTurnBootstrapAdvances),
                 "TA4 aligned future is exactly four turns");
+        }
+        expect(
+            record.record_offset8_future_index.has_value() ==
+                record.record_offset8_turn_distance.has_value(),
+            "RO8 future and turn-distance presence match");
+        expect(
+            record.calendar_turn8_future_index.has_value() ==
+                record.calendar_turn8_turn_distance.has_value(),
+            "CT8 future and turn-distance presence match");
+        if (record.record_offset8_future_index.has_value()) {
+            expect(
+                *record.record_offset8_future_index ==
+                    record.root_index +
+                        ta4::kRecordOffset8Distance,
+                "RO8 future is exactly eight records ahead");
+            expect(
+                *record.record_offset8_turn_distance <=
+                    ta4::kRecordOffset8Distance,
+                "RO8 future advances at most eight turns");
+        } else {
+            expect_bit_identical(
+                record.record_offset8_target,
+                record.terminal_target,
+                "RO8 collected tail is bit-identical to z");
+        }
+        if (record.calendar_turn8_future_index.has_value()) {
+            expect(
+                record.record_offset8_future_index.has_value() &&
+                    record.treatment_future_index.has_value(),
+                "CT8 common row has all shorter futures");
+            expect(
+                record.calendar_turn8_turn_distance ==
+                    std::optional<std::size_t>(
+                        ta4::kCalendarTurn8Advances),
+                "CT8 aligned future is exactly eight turns");
+            const auto future = std::find_if(
+                serial.records.begin(), serial.records.end(),
+                [&](const ta4::AuditRecord& candidate) {
+                    return candidate.physical_game ==
+                               record.physical_game &&
+                           candidate.perspective ==
+                               record.perspective &&
+                           candidate.root_index ==
+                               *record
+                                    .calendar_turn8_future_index;
+                });
+            expect(
+                future != serial.records.end() &&
+                    future->root_turn ==
+                        record.root_turn +
+                            ta4::kCalendarTurn8Advances,
+                "CT8 collected future lands on exact turn");
+            const bool has_earlier_landing = std::any_of(
+                serial.records.begin(), serial.records.end(),
+                [&](const ta4::AuditRecord& candidate) {
+                    return candidate.physical_game ==
+                               record.physical_game &&
+                           candidate.perspective ==
+                               record.perspective &&
+                           candidate.root_index >
+                               record.root_index &&
+                           candidate.root_index <
+                               *record
+                                    .calendar_turn8_future_index &&
+                           candidate.root_turn >=
+                               future->root_turn;
+                });
+            expect(
+                !has_earlier_landing,
+                "CT8 collected future is the earliest exact "
+                "turn landing");
+        } else {
+            expect_bit_identical(
+                record.calendar_turn8_target,
+                record.terminal_target,
+                "CT8 collected tail is bit-identical to z");
         }
     }
 }
@@ -619,6 +839,12 @@ int main() {
     runner.run(
         "calendar alignment counts extra turns and priority roots",
         test_calendar_alignment_counts_extra_turns_and_priority_roots);
+    runner.run(
+        "eight-horizon targets use exact futures and tails",
+        test_eight_horizon_targets_use_exact_futures_and_tails);
+    runner.run(
+        "eight-turn alignment counts Time Walk turns",
+        test_eight_turn_alignment_counts_time_walk_turns);
     runner.run(
         "scoring tracks paired targets and tail accounting",
         test_scoring_tracks_paired_targets_and_tail_accounting);

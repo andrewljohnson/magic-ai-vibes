@@ -7247,3 +7247,80 @@ recipe (constant terminal weight `0.50`, canonical H4 collection). That model
 must then pass a fresh all-five held-out fitted-critic gate, the correctly
 implemented frozen DRC regression check, and a paired frozen CT8-versus-C16
 benchmark before any Handcrafted or certification seed is opened.
+
+#### CT8-0 implementation freeze (seed still unopened)
+
+Frozen at 2026-07-26 06:55 PDT after rereading `REVIEW.md` through its
+06:47 cycle. The reserved seed `202607260621` and the exclusive
+`--audit-calendar-eight-targets` route have not been run.
+
+The implementation extends the established TA4 trace collector without
+changing any legacy TA4 hash input or output field. On each identical
+C16-mirror trace it now captures RO8 and CT8 targets, future indices,
+physical-turn distances, exact-formula and tail identities, independent
+target hashes, and hidden-repartition checks alongside the existing RO4 and
+CT4 arrays. The new load-only evaluator:
+
+- scores all rows, four-arm-common rows, every pair-specific common set, and
+  four-arm-common `<=3`, `4-7`, and `>=8` root-turn strata;
+- forms every target contrast and the factorial interaction row by row before
+  physical-game CR1 clustering;
+- separately reports record weighting and within-actor-game averaging,
+  followed by clustering of both perspectives on the physical game;
+- implements the declared coverage, early-Green qualification, MDE,
+  constituent, interaction, pooled-loss, all-five safety, Blue/RU direction,
+  and mechanical gates without threshold changes;
+- loads and fingerprints only the exact immutable C16 artifact, constructs the
+  entire corpus twice from fresh `Game` instances, and contains no trainer or
+  artifact writer;
+- emits human and stable TSV reports including all target distributions,
+  effective sample counts, terminal-tail accounting, and the RO4/RO8
+  physical-turn-distance histograms needed to audit the unit/reach mechanism;
+  and
+- returns `0` for a complete scientific pass, `1` for a complete scientific
+  rejection, and `2` for missing/incomplete infrastructure or evidence.
+
+An independent read-only code review found no blocking scientific correctness
+issue. It confirmed direct paired interaction construction, equal-actor
+aggregation, common-set semantics, exact gates, load-only behavior, hidden
+information isolation, deterministic reduction, and TA4 compatibility. Its
+two reporting findings were fixed before this freeze: equal-actor target
+distributions now report actor-game rather than raw-record sample counts, and
+the previously computed RO4/RO8 physical-turn-distance histograms are emitted
+in both report formats.
+
+Verification on the frozen implementation:
+
+```sh
+make test
+./build/old-school-sim --games 5 --seed 42 --bots random
+c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/probe_eval.cpp src/probe_runner.cpp src/terminal_weight_eval.cpp \
+  src/turn_alignment_audit.cpp src/target_factorial_audit.cpp \
+  tests/test_target_factorial_audit.cpp \
+  -o /private/tmp/old-school-target-factorial-audit-tests-asan-final
+/private/tmp/old-school-target-factorial-audit-tests-asan-final
+```
+
+The full suite passed: 128 engine tests, 27 learned-iteration tests, 40 probe
+tests, 11 probe-metric tests, 25 probe-runner tests, 10 terminal-weight tests,
+10 TA4 tests, 7 CT8 tests, 9 web-bridge tests, the CLI and capture-once suites,
+82 web tests, and 48 certification tests. The dedicated CT8 suite also passed
+7/7 under ASan/UBSan. The representative 50-game, five-deck Random tournament
+completed with no draws or turn-limit failures and printed all five deck
+statistics.
+
+One review notation disagreement is made explicit rather than silently
+adopted. `REVIEW.md` 06:32 calls the predicted interaction “positive,” but
+also predicts that CT8 will cut positive early-Green bias more than either
+constituent. Under the frozen definition
+`(CT8-CT4) - (RO8-RO4)`, that super-additive downward correction is
+**negative**. The implementation therefore retains the preregistered
+`mean < 0` and `upper95 < 0` gate. The review's 06:47 suggestion to move
+directly to castability representation if early Green fails is useful as a
+later axis, but it does not replace the already frozen failure branch:
+actor-game/calendar-turn-balanced replay weighting will be tested first
+because record-density imbalance is independently measured. Representation
+work remains next if that weighting axis is falsified.

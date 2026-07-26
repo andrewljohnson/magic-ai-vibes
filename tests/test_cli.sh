@@ -257,6 +257,19 @@ case $help_output in
         exit 1
         ;;
 esac
+case $help_output in
+    *"--audit-calendar-eight-targets"*\
+"Exclusive load-only CT8-0 four-arm audit"*\
+"record/calendar units at four/eight-turn bootstrap horizons"*\
+"fixed seed 202607260621 and frozen C16"*\
+"accepts no other options"*\
+"exits 0/1/2 for pass/reject/infrastructure"*) ;;
+    *)
+        printf 'CT8-0 target-factorial audit contract missing from --help\n' \
+            >&2
+        exit 1
+        ;;
+esac
 
 run_cli --diagnose-value-context
 if [ "$cli_status" -ne 0 ]; then
@@ -382,6 +395,16 @@ expect_error "reserved TA4-0 audit seed 202607260501 may be used only by --audit
     --games 1 --seed 202607260501 --bots random
 expect_error "reserved TA4-0 audit seed 202607260501 may be used only by --audit-calendar-turn-targets" \
     --games 1 --seed 1 --bots random --train-seed 202607260501
+expect_error "--audit-calendar-eight-targets is exclusive and accepts no other options" \
+    --audit-calendar-eight-targets --seed 1
+expect_error "--audit-calendar-eight-targets is exclusive and accepts no other options" \
+    --audit-calendar-eight-targets --benchmark
+expect_error "--audit-calendar-eight-targets is exclusive and accepts no other options" \
+    --audit-calendar-eight-targets --help
+expect_error "reserved CT8-0 audit seed 202607260621 may be used only by --audit-calendar-eight-targets" \
+    --games 1 --seed 202607260621 --bots random
+expect_error "reserved CT8-0 audit seed 202607260621 may be used only by --audit-calendar-eight-targets" \
+    --games 1 --seed 1 --bots random --train-seed 202607260621
 ta4_files_before=$(find . -type f -print | sort)
 expect_error "TA4-0 infrastructure/incomplete-evidence failure" \
     --audit-calendar-turn-targets

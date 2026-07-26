@@ -148,6 +148,8 @@ void hash_observation(
 }
 
 void hash_record(ContentHash& hash, const AuditRecord& record) {
+    // Frozen TA4 serializer. Later audit arms use independent hashes below;
+    // do not add their appended AuditRecord fields here.
     hash.add_size(record.physical_game);
     hash.add_size(record.block);
     hash.add_size(record.schedule_index);
@@ -905,6 +907,12 @@ struct TaskCapture {
     std::string control_target_hash;
     std::string treatment_target_hash;
     std::string scoring_hash;
+    bool record_offset8_identity_passed = true;
+    bool calendar_turn8_distance_passed = true;
+    bool calendar_turn8_earliest_passed = true;
+    bool eight_tail_identity_passed = true;
+    std::string record_offset8_target_hash;
+    std::string calendar_turn8_target_hash;
 };
 
 void validate_task(const AuditTask& task) {
@@ -1036,6 +1044,13 @@ TaskCapture run_task(
         throw std::logic_error(
             "TA4 turn-index helper returned the wrong size");
     }
+    const auto calendar_turn8_indices =
+        learned_iteration::turn_aligned_bootstrap_indices(
+            turns, kCalendarTurn8Advances);
+    if (calendar_turn8_indices.size() != trace.size()) {
+        throw std::logic_error(
+            "CT8 turn-index helper returned the wrong size");
+    }
 
     std::array<double, 2> terminal_targets{};
     std::array<std::vector<double>, 2> parent_values;
@@ -1043,9 +1058,17 @@ TaskCapture run_task(
     std::array<std::vector<double>, 2> control_targets;
     std::array<std::vector<double>, 2> treatment_targets;
     std::array<std::vector<double>, 2>
+        record_offset8_targets;
+    std::array<std::vector<double>, 2>
+        calendar_turn8_targets;
+    std::array<std::vector<double>, 2>
         clone_control_targets;
     std::array<std::vector<double>, 2>
         clone_treatment_targets;
+    std::array<std::vector<double>, 2>
+        clone_record_offset8_targets;
+    std::array<std::vector<double>, 2>
+        clone_calendar_turn8_targets;
     std::size_t hidden_repartition_states = 0;
     for (std::size_t perspective = 0;
          perspective < 2; ++perspective) {
@@ -1088,6 +1111,17 @@ TaskCapture run_task(
                     parent_values[perspective], turns,
                     terminal_targets[perspective],
                     kTurnBootstrapAdvances, kTerminalWeight);
+        record_offset8_targets[perspective] =
+            learned_iteration::n_state_bootstrap_targets(
+                parent_values[perspective],
+                terminal_targets[perspective],
+                kRecordOffset8Distance);
+        calendar_turn8_targets[perspective] =
+            learned_iteration::
+                weighted_turn_aligned_bootstrap_targets(
+                    parent_values[perspective], turns,
+                    terminal_targets[perspective],
+                    kCalendarTurn8Advances, kTerminalWeight);
     }
 
     TaskCapture output;
@@ -1108,19 +1142,41 @@ TaskCapture run_task(
                         terminal_targets[perspective],
                         kTurnBootstrapAdvances,
                         kTerminalWeight);
+            clone_record_offset8_targets[perspective] =
+                learned_iteration::n_state_bootstrap_targets(
+                    clone_values[perspective],
+                    terminal_targets[perspective],
+                    kRecordOffset8Distance);
+            clone_calendar_turn8_targets[perspective] =
+                learned_iteration::
+                    weighted_turn_aligned_bootstrap_targets(
+                        clone_values[perspective], turns,
+                        terminal_targets[perspective],
+                        kCalendarTurn8Advances,
+                        kTerminalWeight);
             if (!bit_identical(
                     control_targets[perspective],
                     clone_control_targets[perspective]) ||
                 !bit_identical(
                     treatment_targets[perspective],
-                    clone_treatment_targets[perspective])) {
+                    clone_treatment_targets[perspective]) ||
+                !bit_identical(
+                    record_offset8_targets[perspective],
+                    clone_record_offset8_targets[perspective]) ||
+                !bit_identical(
+                    calendar_turn8_targets[perspective],
+                    clone_calendar_turn8_targets[perspective])) {
                 throw std::runtime_error(
-                    "TA4 hidden repartition changed target arrays");
+                    "CT8 hidden repartition changed target arrays");
             }
         }
     } else {
         clone_control_targets = control_targets;
         clone_treatment_targets = treatment_targets;
+        clone_record_offset8_targets =
+            record_offset8_targets;
+        clone_calendar_turn8_targets =
+            calendar_turn8_targets;
     }
 
     ContentHash trace_hash;
@@ -1162,10 +1218,20 @@ TaskCapture run_task(
     ContentHash treatment_hash;
     ContentHash scoring_hash;
     ContentHash hidden_scoring_hash;
+    ContentHash record_offset8_hash;
+    ContentHash calendar_turn8_hash;
+    ContentHash hidden_record_offset8_hash;
+    ContentHash hidden_calendar_turn8_hash;
     control_hash.add_text("ta4-control-v1");
     treatment_hash.add_text("ta4-treatment-v1");
     scoring_hash.add_text("ta4-scoring-v1");
     hidden_scoring_hash.add_text("ta4-scoring-v1");
+    record_offset8_hash.add_text("ct8-record-offset8-v1");
+    calendar_turn8_hash.add_text("ct8-calendar-turn8-v1");
+    hidden_record_offset8_hash.add_text(
+        "ct8-record-offset8-v1");
+    hidden_calendar_turn8_hash.add_text(
+        "ct8-calendar-turn8-v1");
     output.records.reserve(2 * trace.size());
     for (std::size_t root = 0; root < trace.size();
          ++root) {
@@ -1216,6 +1282,59 @@ TaskCapture run_task(
                 }
             }
         }
+        std::optional<std::size_t>
+            record_offset8_future;
+        std::optional<std::size_t>
+            record_offset8_distance;
+        if (root + kRecordOffset8Distance <
+            trace.size()) {
+            record_offset8_future =
+                root + kRecordOffset8Distance;
+            if (turns[*record_offset8_future] <
+                turns[root]) {
+                throw std::runtime_error(
+                    "CT8 record-offset-eight future regressed");
+            }
+            record_offset8_distance =
+                turns[*record_offset8_future] - turns[root];
+            if (*record_offset8_distance >
+                kRecordOffset8Distance) {
+                throw std::runtime_error(
+                    "CT8 record-offset-eight future advanced "
+                    "too many turns");
+            }
+        }
+        const auto calendar_turn8_future =
+            calendar_turn8_indices[root];
+        std::optional<std::size_t>
+            calendar_turn8_distance;
+        if (calendar_turn8_future.has_value()) {
+            if (!record_offset8_future.has_value() ||
+                *calendar_turn8_future <= root ||
+                turns[*calendar_turn8_future] <
+                    turns[root]) {
+                throw std::runtime_error(
+                    "CT8 calendar-turn-eight future is "
+                    "structurally invalid");
+            }
+            calendar_turn8_distance =
+                turns[*calendar_turn8_future] - turns[root];
+            if (*calendar_turn8_distance !=
+                kCalendarTurn8Advances) {
+                throw std::runtime_error(
+                    "CT8 calendar future is not eight turns "
+                    "ahead");
+            }
+            for (std::size_t between = root + 1;
+                 between < *calendar_turn8_future; ++between) {
+                if (turns[between] >=
+                    turns[*calendar_turn8_future]) {
+                    throw std::runtime_error(
+                        "CT8 calendar future is not the earliest "
+                        "aligned record");
+                }
+            }
+        }
 
         for (std::size_t perspective = 0;
              perspective < 2; ++perspective) {
@@ -1225,6 +1344,10 @@ TaskCapture run_task(
                 control_targets[perspective][root];
             const double treatment =
                 treatment_targets[perspective][root];
+            const double record_offset8 =
+                record_offset8_targets[perspective][root];
+            const double calendar_turn8 =
+                calendar_turn8_targets[perspective][root];
             const double direct_control =
                 control_future.has_value()
                     ? kTerminalWeight * terminal +
@@ -1239,6 +1362,20 @@ TaskCapture run_task(
                               parent_values[perspective]
                                            [*treatment_future]
                     : terminal;
+            const double direct_record_offset8 =
+                record_offset8_future.has_value()
+                    ? kTerminalWeight * terminal +
+                          (1.0 - kTerminalWeight) *
+                              parent_values[perspective]
+                                           [*record_offset8_future]
+                    : terminal;
+            const double direct_calendar_turn8 =
+                calendar_turn8_future.has_value()
+                    ? kTerminalWeight * terminal +
+                          (1.0 - kTerminalWeight) *
+                              parent_values[perspective]
+                                           [*calendar_turn8_future]
+                    : terminal;
             if (!bit_identical(control, direct_control)) {
                 throw std::runtime_error(
                     "TA4 control target differs from canonical "
@@ -1249,12 +1386,35 @@ TaskCapture run_task(
                     "TA4 treatment target differs from declared "
                     "calendar-turn formula");
             }
+            if (!bit_identical(
+                    record_offset8,
+                    direct_record_offset8)) {
+                throw std::runtime_error(
+                    "CT8 record-offset-eight target differs "
+                    "from the canonical helper");
+            }
+            if (!bit_identical(
+                    calendar_turn8,
+                    direct_calendar_turn8)) {
+                throw std::runtime_error(
+                    "CT8 calendar-turn-eight target differs "
+                    "from the declared formula");
+            }
             if ((!control_future.has_value() &&
                  !bit_identical(control, terminal)) ||
                 (!treatment_future.has_value() &&
                  !bit_identical(treatment, terminal))) {
                 throw std::runtime_error(
                     "TA4 terminal tail differs from z");
+            }
+            if ((!record_offset8_future.has_value() &&
+                 !bit_identical(
+                     record_offset8, terminal)) ||
+                (!calendar_turn8_future.has_value() &&
+                 !bit_identical(
+                     calendar_turn8, terminal))) {
+                throw std::runtime_error(
+                    "CT8 terminal tail differs from z");
             }
 
             AuditRecord record{
@@ -1275,6 +1435,16 @@ TaskCapture run_task(
                 .control_turn_distance = control_distance,
                 .treatment_turn_distance =
                     treatment_distance,
+                .record_offset8_target = record_offset8,
+                .calendar_turn8_target = calendar_turn8,
+                .record_offset8_future_index =
+                    record_offset8_future,
+                .calendar_turn8_future_index =
+                    calendar_turn8_future,
+                .record_offset8_turn_distance =
+                    record_offset8_distance,
+                .calendar_turn8_turn_distance =
+                    calendar_turn8_distance,
             };
             require_probability(
                 record.control_target,
@@ -1282,6 +1452,12 @@ TaskCapture run_task(
             require_probability(
                 record.treatment_target,
                 "TA4 treatment target");
+            require_probability(
+                record.record_offset8_target,
+                "CT8 record-offset-eight target");
+            require_probability(
+                record.calendar_turn8_target,
+                "CT8 calendar-turn-eight target");
 
             hash_task(control_hash, task);
             control_hash.add_size(perspective);
@@ -1295,13 +1471,47 @@ TaskCapture run_task(
             hash_optional_index(
                 treatment_hash, treatment_future);
             treatment_hash.add_double(treatment);
+            hash_task(record_offset8_hash, task);
+            record_offset8_hash.add_size(perspective);
+            record_offset8_hash.add_size(root);
+            hash_optional_index(
+                record_offset8_hash,
+                record_offset8_future);
+            record_offset8_hash.add_double(record_offset8);
+            hash_task(calendar_turn8_hash, task);
+            calendar_turn8_hash.add_size(perspective);
+            calendar_turn8_hash.add_size(root);
+            hash_optional_index(
+                calendar_turn8_hash,
+                calendar_turn8_future);
+            calendar_turn8_hash.add_double(calendar_turn8);
             hash_record(scoring_hash, record);
             AuditRecord hidden_record = record;
             hidden_record.control_target =
                 clone_control_targets[perspective][root];
             hidden_record.treatment_target =
                 clone_treatment_targets[perspective][root];
+            hidden_record.record_offset8_target =
+                clone_record_offset8_targets[perspective][root];
+            hidden_record.calendar_turn8_target =
+                clone_calendar_turn8_targets[perspective][root];
             hash_record(hidden_scoring_hash, hidden_record);
+            hash_task(hidden_record_offset8_hash, task);
+            hidden_record_offset8_hash.add_size(perspective);
+            hidden_record_offset8_hash.add_size(root);
+            hash_optional_index(
+                hidden_record_offset8_hash,
+                record_offset8_future);
+            hidden_record_offset8_hash.add_double(
+                hidden_record.record_offset8_target);
+            hash_task(hidden_calendar_turn8_hash, task);
+            hidden_calendar_turn8_hash.add_size(perspective);
+            hidden_calendar_turn8_hash.add_size(root);
+            hash_optional_index(
+                hidden_calendar_turn8_hash,
+                calendar_turn8_future);
+            hidden_calendar_turn8_hash.add_double(
+                hidden_record.calendar_turn8_target);
             output.records.push_back(std::move(record));
         }
     }
@@ -1309,10 +1519,22 @@ TaskCapture run_task(
     output.treatment_target_hash =
         treatment_hash.finish();
     output.scoring_hash = scoring_hash.finish();
+    output.record_offset8_target_hash =
+        record_offset8_hash.finish();
+    output.calendar_turn8_target_hash =
+        calendar_turn8_hash.finish();
     if (capture_config.verify_hidden_repartition &&
         output.scoring_hash != hidden_scoring_hash.finish()) {
         throw std::runtime_error(
             "TA4 hidden repartition changed the scoring hash");
+    }
+    if (capture_config.verify_hidden_repartition &&
+        (output.record_offset8_target_hash !=
+             hidden_record_offset8_hash.finish() ||
+         output.calendar_turn8_target_hash !=
+             hidden_calendar_turn8_hash.finish())) {
+        throw std::runtime_error(
+            "CT8 hidden repartition changed target hashes");
     }
     return output;
 }
@@ -1414,18 +1636,28 @@ Capture collect(
     output.treatment_distance_passed = true;
     output.treatment_earliest_passed = true;
     output.hidden_repartition_passed = true;
+    output.record_offset8_identity_passed = true;
+    output.calendar_turn8_distance_passed = true;
+    output.calendar_turn8_earliest_passed = true;
+    output.eight_tail_identity_passed = true;
     ContentHash schedule_hash;
     ContentHash trace_hash;
     ContentHash outcome_hash;
     ContentHash control_hash;
     ContentHash treatment_hash;
     ContentHash scoring_hash;
+    ContentHash record_offset8_hash;
+    ContentHash calendar_turn8_hash;
     schedule_hash.add_text("ta4-schedule-v1");
     trace_hash.add_text("ta4-traces-v1");
     outcome_hash.add_text("ta4-outcomes-v1");
     control_hash.add_text("ta4-controls-v1");
     treatment_hash.add_text("ta4-treatments-v1");
     scoring_hash.add_text("ta4-scores-v1");
+    record_offset8_hash.add_text(
+        "ct8-record-offset8-targets-v1");
+    calendar_turn8_hash.add_text(
+        "ct8-calendar-turn8-targets-v1");
 
     std::size_t total_records = 0;
     for (const TaskCapture& slot : slots) {
@@ -1443,6 +1675,10 @@ Capture collect(
         treatment_hash.add_text(
             slot.treatment_target_hash);
         scoring_hash.add_text(slot.scoring_hash);
+        record_offset8_hash.add_text(
+            slot.record_offset8_target_hash);
+        calendar_turn8_hash.add_text(
+            slot.calendar_turn8_target_hash);
         output.trace_invariants_passed =
             output.trace_invariants_passed &&
             slot.trace_invariants_passed;
@@ -1461,6 +1697,18 @@ Capture collect(
         output.hidden_repartition_passed =
             output.hidden_repartition_passed &&
             slot.hidden_repartition_passed;
+        output.record_offset8_identity_passed =
+            output.record_offset8_identity_passed &&
+            slot.record_offset8_identity_passed;
+        output.calendar_turn8_distance_passed =
+            output.calendar_turn8_distance_passed &&
+            slot.calendar_turn8_distance_passed;
+        output.calendar_turn8_earliest_passed =
+            output.calendar_turn8_earliest_passed &&
+            slot.calendar_turn8_earliest_passed;
+        output.eight_tail_identity_passed =
+            output.eight_tail_identity_passed &&
+            slot.eight_tail_identity_passed;
         output.hidden_repartition_states +=
             slot.hidden_repartition_states;
         for (std::size_t perspective = 0;
@@ -1488,6 +1736,10 @@ Capture collect(
     output.treatment_target_hash =
         treatment_hash.finish();
     output.scoring_hash = scoring_hash.finish();
+    output.record_offset8_target_hash =
+        record_offset8_hash.finish();
+    output.calendar_turn8_target_hash =
+        calendar_turn8_hash.finish();
     return output;
 }
 

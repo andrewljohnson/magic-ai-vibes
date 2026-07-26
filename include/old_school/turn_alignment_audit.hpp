@@ -28,6 +28,8 @@ inline constexpr std::size_t kAuditPerspectives =
 inline constexpr std::size_t kAuditPerspectivesPerDeck = 800;
 inline constexpr std::size_t kRecordBootstrapDistance = 4;
 inline constexpr std::size_t kTurnBootstrapAdvances = 4;
+inline constexpr std::size_t kRecordOffset8Distance = 8;
+inline constexpr std::size_t kCalendarTurn8Advances = 8;
 inline constexpr double kTerminalWeight = 0.50;
 static_assert(
     kLearnedValueSearchHorizonTurns ==
@@ -65,6 +67,12 @@ struct AuditRecord {
     std::optional<std::size_t> treatment_future_index;
     std::optional<std::size_t> control_turn_distance;
     std::optional<std::size_t> treatment_turn_distance;
+    double record_offset8_target = 0.5;
+    double calendar_turn8_target = 0.5;
+    std::optional<std::size_t> record_offset8_future_index;
+    std::optional<std::size_t> calendar_turn8_future_index;
+    std::optional<std::size_t> record_offset8_turn_distance;
+    std::optional<std::size_t> calendar_turn8_turn_distance;
 
     bool operator==(const AuditRecord&) const = default;
 };
@@ -174,6 +182,12 @@ struct Capture {
     std::string control_target_hash;
     std::string treatment_target_hash;
     std::string scoring_hash;
+    bool record_offset8_identity_passed = false;
+    bool calendar_turn8_distance_passed = false;
+    bool calendar_turn8_earliest_passed = false;
+    bool eight_tail_identity_passed = false;
+    std::string record_offset8_target_hash;
+    std::string calendar_turn8_target_hash;
 
     bool operator==(const Capture&) const = default;
 };
