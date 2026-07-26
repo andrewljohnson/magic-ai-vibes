@@ -83,7 +83,7 @@ test("journey Pass priority settles and unsupported branches fail promptly", asy
   const { game: opening } = await harness.create({
     players: [
       { deckId: "green", policyId: "human" },
-      { deckId: "green", policyId: "learned-value" },
+      { deckId: "green", policyId: "learned-value-g0" },
     ],
     seed: 42,
     trainGames: 800,
@@ -123,7 +123,7 @@ test("delayed journey mode has a real bounded in-flight interval", async (t) => 
   const { game: opening } = await harness.create({
     players: [
       { deckId: "green", policyId: "human" },
-      { deckId: "green", policyId: "learned-value" },
+      { deckId: "green", policyId: "learned-value-g0" },
     ],
     seed: 42,
     trainGames: 800,
@@ -164,7 +164,9 @@ async function runFullJourney(harness, config) {
     bluffMode: false,
     rollouts: 2,
     deepRollouts: 8,
-    learnedRollouts: 2,
+    learnedRollouts: 8,
+    learnedGenerations:
+      config.players[1].policyId === "learned-value-c16" ? 16 : 0,
   });
   assert.equal(game.events.at(-1).kind, "turn_started");
 
@@ -270,7 +272,8 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
       "monte-carlo",
       "deep-monte-carlo",
       "handcrafted",
-      "learned-value",
+      "learned-value-c16",
+      "learned-value-g0",
       "learned-actor",
     ],
   );
@@ -323,7 +326,7 @@ test("debug reveal is explicit and leaves the human hand visible", async (t) => 
   const { game } = await harness.create({
     players: [
       { deckId: "blue", policyId: "human" },
-      { deckId: "white", policyId: "learned-value" },
+      { deckId: "white", policyId: "learned-value-g0" },
     ],
     seed: 707,
     trainGames: 800,

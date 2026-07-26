@@ -12,6 +12,9 @@ const SERVER_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const UINT64_MAX = 18_446_744_073_709_551_615n;
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_LOG_ENTRIES = 2_000;
+const FROZEN_C16_GENERATIONS = 16;
+const FROZEN_C16_TRAIN_GAMES = 800;
+const FROZEN_C16_TRAIN_SEED = "424242";
 
 export const DECKS = Object.freeze([
   {
@@ -123,10 +126,16 @@ export const POLICIES = Object.freeze([
     description: "The compact rules-aware benchmark policy.",
   },
   {
-    id: "learned-value",
-    label: "Learned Value",
-    name: "Learned Value",
-    description: "Hidden-information-safe learned value search.",
+    id: "learned-value-c16",
+    label: "Learned Value C16",
+    name: "Learned Value C16",
+    description: "Frozen research baseline · C16 · K8/H4.",
+  },
+  {
+    id: "learned-value-g0",
+    label: "Learned Value G0",
+    name: "Learned Value G0",
+    description: "Trainable legacy model for quick test matches.",
   },
   {
     id: "learned-actor",
@@ -142,15 +151,16 @@ const POLICY_IDS = new Set(POLICIES.map(({ id }) => id));
 const DEFAULT_CONFIG = Object.freeze({
   players: [
     { deckId: "ru-aggro", policyId: "human" },
-    { deckId: "ru-aggro", policyId: "learned-value" },
+    { deckId: "ru-aggro", policyId: "learned-value-c16" },
   ],
-  trainGames: 800,
-  trainSeed: "424242",
+  trainGames: FROZEN_C16_TRAIN_GAMES,
+  trainSeed: FROZEN_C16_TRAIN_SEED,
   debugReveal: false,
   bluffMode: false,
   rollouts: 2,
   deepRollouts: 8,
-  learnedRollouts: 2,
+  learnedRollouts: 8,
+  learnedGenerations: FROZEN_C16_GENERATIONS,
 });
 
 const LIMITS = Object.freeze({
@@ -158,6 +168,7 @@ const LIMITS = Object.freeze({
   rollouts: { min: 1, max: 4_096 },
   deepRollouts: { min: 1, max: 4_096 },
   learnedRollouts: { min: 1, max: 4_096 },
+  learnedGenerations: { min: 0, max: FROZEN_C16_GENERATIONS },
 });
 
 const MIME_TYPES = new Map([
@@ -191,6 +202,32 @@ class ApiError extends Error {
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizedPublicModelIdentity(value) {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.family !== "string" ||
+    !Number.isSafeInteger(value.generation) ||
+    value.generation < 0 ||
+    !Number.isSafeInteger(value.searchWorlds) ||
+    value.searchWorlds < 1 ||
+    !Number.isSafeInteger(value.horizonTurns) ||
+    value.horizonTurns < 0 ||
+    typeof value.source !== "string" ||
+    typeof value.fingerprint !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.fingerprint)
+  ) {
+    return null;
+  }
+  return {
+    family: value.family,
+    generation: value.generation,
+    searchWorlds: value.searchWorlds,
+    horizonTurns: value.horizonTurns,
+    source: value.source,
+    fingerprint: value.fingerprint,
+  };
 }
 
 function normalizedUint64(value, fieldName, fallback) {
@@ -236,6 +273,22 @@ function normalizedUint64(value, fieldName, fallback) {
 }
 
 function positiveBoundedInteger(value, fieldName, limits, fallback) {
+  const candidate = value === undefined ? fallback : value;
+  if (
+    !Number.isSafeInteger(candidate) ||
+    candidate < limits.min ||
+    candidate > limits.max
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_config",
+      `${fieldName} must be an integer from ${limits.min} to ${limits.max}`,
+    );
+  }
+  return candidate;
+}
+
+function boundedInteger(value, fieldName, limits, fallback) {
   const candidate = value === undefined ? fallback : value;
   if (
     !Number.isSafeInteger(candidate) ||
@@ -338,6 +391,51 @@ export function normalizeGameConfig(body) {
     );
   }
 
+  const normalizedOpponentPolicy = validatedPolicy(
+    opponentPolicy,
+    "players[1].policyId",
+    DEFAULT_CONFIG.players[1].policyId,
+  );
+  const trainGames = positiveBoundedInteger(
+    body.trainGames,
+    "trainGames",
+    LIMITS.trainGames,
+    DEFAULT_CONFIG.trainGames,
+  );
+  const trainSeed = normalizedUint64(
+    body.trainSeed,
+    "trainSeed",
+    DEFAULT_CONFIG.trainSeed,
+  );
+  const expectedLearnedGenerations =
+    normalizedOpponentPolicy === "learned-value-c16"
+      ? FROZEN_C16_GENERATIONS
+      : 0;
+  const learnedGenerations = boundedInteger(
+    body.learnedGenerations,
+    "learnedGenerations",
+    LIMITS.learnedGenerations,
+    expectedLearnedGenerations,
+  );
+  if (learnedGenerations !== expectedLearnedGenerations) {
+    throw new ApiError(
+      400,
+      "invalid_config",
+      `${normalizedOpponentPolicy} requires learnedGenerations=${expectedLearnedGenerations}`,
+    );
+  }
+  if (
+    normalizedOpponentPolicy === "learned-value-c16" &&
+    (trainGames !== FROZEN_C16_TRAIN_GAMES ||
+      trainSeed !== FROZEN_C16_TRAIN_SEED)
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_config",
+      "Learned Value C16 requires trainGames=800 and trainSeed=424242; select Learned Value G0 for custom match training",
+    );
+  }
+
   return {
     players: [
       {
@@ -354,25 +452,12 @@ export function normalizeGameConfig(body) {
           "players[1].deckId",
           DEFAULT_CONFIG.players[1].deckId,
         ),
-        policyId: validatedPolicy(
-          opponentPolicy,
-          "players[1].policyId",
-          DEFAULT_CONFIG.players[1].policyId,
-        ),
+        policyId: normalizedOpponentPolicy,
       },
     ],
     seed: normalizedUint64(body.seed, "seed", freshSeed()),
-    trainGames: positiveBoundedInteger(
-      body.trainGames,
-      "trainGames",
-      LIMITS.trainGames,
-      DEFAULT_CONFIG.trainGames,
-    ),
-    trainSeed: normalizedUint64(
-      body.trainSeed,
-      "trainSeed",
-      DEFAULT_CONFIG.trainSeed,
-    ),
+    trainGames,
+    trainSeed,
     debugReveal,
     bluffMode,
     rollouts: positiveBoundedInteger(
@@ -393,6 +478,7 @@ export function normalizeGameConfig(body) {
       LIMITS.learnedRollouts,
       DEFAULT_CONFIG.learnedRollouts,
     ),
+    learnedGenerations,
   };
 }
 
@@ -416,6 +502,8 @@ function bridgeArguments(config) {
     String(config.deepRollouts),
     "--learned-rollouts",
     String(config.learnedRollouts),
+    "--learned-generations",
+    String(config.learnedGenerations),
   ];
   if (config.debugReveal) {
     args.push("--debug-reveal");
@@ -622,6 +710,7 @@ class GameSession {
     this.snapshot = null;
     this.decision = null;
     this.result = null;
+    this.model = null;
     this.error = null;
     this.message = "Starting game";
     this.events = [];
@@ -661,7 +750,12 @@ class GameSession {
       if (this.status !== "finished" && this.status !== "failed") {
         const suffix =
           signal === null ? `code ${code ?? "unknown"}` : `signal ${signal}`;
-        this.#fail(`The game engine exited unexpectedly (${suffix})`);
+        const detail = this.stderr.trim();
+        this.#fail(
+          `The game engine exited unexpectedly (${suffix})${
+            detail ? `: ${detail}` : ""
+          }`,
+        );
       }
     });
   }
@@ -695,6 +789,15 @@ class GameSession {
     if (envelope.type === "status") {
       if (typeof envelope.message === "string") {
         this.message = envelope.message;
+      }
+      if (envelope.model !== undefined) {
+        const model = normalizedPublicModelIdentity(envelope.model);
+        if (model === null) {
+          this.#fail("The game engine produced invalid model identity");
+          this.stop();
+          return;
+        }
+        this.model = model;
       }
       this.#pushBounded(this.log, envelope);
       return;
@@ -805,6 +908,7 @@ class GameSession {
       events: this.events,
       log: this.log,
       result: this.result,
+      model: this.model,
       error: this.error,
     };
   }

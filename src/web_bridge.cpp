@@ -183,6 +183,26 @@ void write_json_string(std::ostream& output,
     output << '"';
 }
 
+void write_model_status(
+    std::ostream& output, std::string_view message,
+    std::string_view family, std::size_t generation,
+    std::size_t learned_rollouts, std::string_view source,
+    std::string_view fingerprint) {
+    output << "{\"type\":\"status\",\"message\":";
+    write_json_string(output, message);
+    output << ",\"model\":{\"family\":";
+    write_json_string(output, family);
+    output << ",\"generation\":" << generation
+           << ",\"searchWorlds\":" << learned_rollouts
+           << ",\"horizonTurns\":"
+           << kLearnedValueSearchHorizonTurns
+           << ",\"source\":";
+    write_json_string(output, source);
+    output << ",\"fingerprint\":";
+    write_json_string(output, fingerprint);
+    output << "}}\n" << std::flush;
+}
+
 void write_mana(std::ostream& output, const ManaCost& mana) {
     output << "{\"generic\":" << mana.generic
            << ",\"green\":" << mana.green
@@ -1105,9 +1125,44 @@ DeckId parse_deck_id(std::string_view value) {
         "unknown deck: " + std::string(value));
 }
 
+std::shared_ptr<const LearnedModel>
+load_frozen_learned_value_c16(const std::string& path) {
+    std::shared_ptr<const LearnedModel> model;
+    try {
+        model = load_learned_value_challenger_artifact(
+                    path, kFrozenWebC16TrainingGames,
+                    kFrozenWebC16TrainingSeed,
+                    kFrozenWebC16Generations)
+                    .model();
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            "frozen Learned Value C16 artifact '" + path +
+            "' is missing, stale, or invalid: " + error.what() +
+            "; generate it in a separate CLI run with "
+            "./build/old-school-sim --benchmark --games 1 "
+            "--challenger learned-value-c16 --baseline random "
+            "--learned-generations 16 --learned-rollouts 8 "
+            "--train-games 800 --train-seed 424242 "
+            "--refresh-value-challenger-cache");
+    }
+    const std::string fingerprint =
+        learned_model_fingerprint(model);
+    if (fingerprint != kFrozenWebC16Fingerprint) {
+        throw std::runtime_error(
+            "frozen Learned Value C16 artifact '" + path +
+            "' has fingerprint " + fingerprint +
+            ", expected " +
+            std::string(kFrozenWebC16Fingerprint) +
+            "; the web bridge will not train, refresh, or "
+            "substitute a model");
+    }
+    return model;
+}
+
 BotKind parse_opponent_bot(
     std::string_view value,
-    LearnedVariant& learned_variant) {
+    LearnedVariant& learned_variant,
+    std::size_t& learned_generations) {
     if (value == "random") {
         return BotKind::Random;
     }
@@ -1121,12 +1176,20 @@ BotKind parse_opponent_bot(
         value == "handcoded-policy") {
         return BotKind::Handcrafted;
     }
-    if (value == "learned-value" || value == "learned") {
+    if (value == "learned-value-c16" ||
+        value == "learned-value" || value == "learned") {
         learned_variant = LearnedVariant::ValueSearchChampion;
+        learned_generations = kFrozenWebC16Generations;
+        return BotKind::Learned;
+    }
+    if (value == "learned-value-g0") {
+        learned_variant = LearnedVariant::ValueSearchChampion;
+        learned_generations = 0;
         return BotKind::Learned;
     }
     if (value == "learned-actor" || value == "actor") {
         learned_variant = LearnedVariant::UnifiedActor;
+        learned_generations = 0;
         return BotKind::Learned;
     }
     throw std::invalid_argument(
@@ -1142,12 +1205,47 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         throw std::invalid_argument(
             "training games and rollout budgets must be positive");
     }
+    if (config.opponent_bot == BotKind::Learned &&
+        config.learned_variant ==
+            LearnedVariant::UnifiedActor &&
+        config.learned_generations != 0) {
+        throw std::invalid_argument(
+            "Learned Actor requires --learned-generations 0");
+    }
+    if (config.opponent_bot == BotKind::Learned &&
+        config.learned_variant ==
+            LearnedVariant::ValueSearchChampion &&
+        config.learned_generations != 0 &&
+        config.learned_generations !=
+            kFrozenWebC16Generations) {
+        throw std::invalid_argument(
+            "the web bridge supports Learned Value generations "
+            "0 and 16 only");
+    }
+    if (config.opponent_bot == BotKind::Learned &&
+        config.learned_variant ==
+            LearnedVariant::ValueSearchChampion &&
+        config.learned_generations ==
+            kFrozenWebC16Generations &&
+        (config.training_games !=
+             kFrozenWebC16TrainingGames ||
+         config.training_seed !=
+             kFrozenWebC16TrainingSeed)) {
+        throw std::invalid_argument(
+            "Learned Value C16 requires exact --train-games 800 "
+            "--train-seed 424242; select Learned Value G0 for "
+            "custom match training");
+    }
 
     output << "{\"type\":\"status\",\"message\":";
     write_json_string(
         output,
         config.opponent_bot == BotKind::Learned
-            ? "Preparing the frozen learned model"
+            ? config.learned_variant ==
+                      LearnedVariant::UnifiedActor ||
+                      config.learned_generations == 0
+                  ? "Training the selected learned model"
+                  : "Loading frozen Learned Value C16"
             : "Preparing the battlefield");
     output << "}\n" << std::flush;
 
@@ -1157,9 +1255,35 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             LearnedVariant::UnifiedActor) {
             learned_model = train_learned_actor_model(
                 config.training_games, config.training_seed);
-        } else {
+            write_model_status(
+                output, "Learned Actor G0 ready",
+                "learned-actor", 0,
+                config.learned_rollouts, "trained-for-match",
+                learned_model_fingerprint(learned_model));
+        } else if (config.learned_generations == 0) {
             learned_model = train_learned_value_champion(
                 config.training_games, config.training_seed);
+            write_model_status(
+                output, "Learned Value G0 ready",
+                "learned-value", 0,
+                config.learned_rollouts, "trained-for-match",
+                learned_model_fingerprint(learned_model));
+        } else {
+            const std::string artifact_path =
+                config.frozen_c16_artifact_path.empty()
+                    ? learned_value_challenger_cache_path(
+                          kFrozenWebC16TrainingGames,
+                          kFrozenWebC16TrainingSeed,
+                          kFrozenWebC16Generations)
+                    : config.frozen_c16_artifact_path;
+            learned_model =
+                load_frozen_learned_value_c16(artifact_path);
+            write_model_status(
+                output, "Frozen Learned Value C16 loaded",
+                "learned-value",
+                kFrozenWebC16Generations,
+                config.learned_rollouts, "frozen-artifact",
+                learned_model_fingerprint(learned_model));
         }
     }
 

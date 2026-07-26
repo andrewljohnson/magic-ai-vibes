@@ -127,9 +127,12 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     body.decks.find(({ id }) => id === "blue").deckList,
     /Force Spike/,
   );
-  assert.ok(body.policies.some(({ id }) => id === "learned-value"));
+  assert.ok(body.policies.some(({ id }) => id === "learned-value-c16"));
+  assert.ok(body.policies.some(({ id }) => id === "learned-value-g0"));
   assert.ok(body.policies.some(({ id }) => id === "learned-actor"));
   assert.equal(body.defaults.bluffMode, false);
+  assert.equal(body.defaults.learnedGenerations, 16);
+  assert.equal(body.defaults.learnedRollouts, 8);
   assert.deepEqual(body.decisionKinds, [
     "priority",
     "attackers",
@@ -210,7 +213,7 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
       body: JSON.stringify({
         players: [
           { deckId: "blue", policyId: "human" },
-          { deckId: "white", policyId: "learned-value" },
+          { deckId: "white", policyId: "learned-value-g0" },
         ],
         seed: "18446744073709551615",
         trainGames: 321,
@@ -220,6 +223,7 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
         rollouts: 3,
         deepRollouts: 9,
         learnedRollouts: 5,
+        learnedGenerations: 0,
       }),
     }),
   );
@@ -232,13 +236,14 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
   assert.deepEqual(body.game.snapshot.received, {
     humanDeck: "blue",
     opponentDeck: "white",
-    opponentPolicy: "learned-value",
+    opponentPolicy: "learned-value-g0",
     seed: "18446744073709551615",
     trainGames: "321",
     trainSeed: "424242",
     rollouts: "3",
     deepRollouts: "9",
     learnedRollouts: "5",
+    learnedGenerations: "0",
     debugReveal: true,
     bluffMode: true,
   });
@@ -246,12 +251,56 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
     handSize: 7,
     life: 20,
   });
+  assert.deepEqual(body.game.model, {
+    family: "learned-value",
+    generation: 0,
+    searchWorlds: 5,
+    horizonTurns: 4,
+    source: "trained-for-match",
+    fingerprint:
+      "0000000000000000000000000000000000000000000000000000000000000000",
+  });
 
   const fetched = await json(
     await request("/api/games/test-game"),
   );
   assert.equal(fetched.response.status, 200);
   assert.equal(fetched.body.game.decision.id, "priority-1");
+});
+
+test("C16 is explicit, canonical, and fingerprinted in match metadata", async (t) => {
+  const { request } = await startTestServer(t);
+  const { response, body } = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        players: [
+          { deckId: "blue", policyId: "human" },
+          { deckId: "blue", policyId: "learned-value-c16" },
+        ],
+        seed: 42,
+        trainGames: 800,
+        trainSeed: 424242,
+        learnedRollouts: 8,
+        learnedGenerations: 16,
+      }),
+    }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(body.game.config.players[1].policyId, "learned-value-c16");
+  assert.equal(body.game.snapshot.received.opponentPolicy, "learned-value-c16");
+  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
+  assert.deepEqual(body.game.model, {
+    family: "learned-value",
+    generation: 16,
+    searchWorlds: 8,
+    horizonTurns: 4,
+    source: "frozen-artifact",
+    fingerprint:
+      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
+  });
 });
 
 test("rejects stale and illegal choices before progressing a valid game", async (t) => {
@@ -447,6 +496,27 @@ test("rejects malformed config without spawning a game", async (t) => {
     { seed: "18446744073709551616" },
     { trainGames: 0 },
     { learnedRollouts: 4_097 },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        { deckId: "blue", policyId: "learned-value-c16" },
+      ],
+      trainGames: 799,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        { deckId: "blue", policyId: "learned-value-c16" },
+      ],
+      learnedGenerations: 0,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        { deckId: "blue", policyId: "learned-value-g0" },
+      ],
+      learnedGenerations: 16,
+    },
     { debugReveal: "yes" },
     { bluffMode: "yes" },
   ];

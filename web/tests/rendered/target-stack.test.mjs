@@ -127,7 +127,7 @@ async function configureFixedMatch(page, { bluffMode = false } = {}) {
   const farSeat = setup.locator(".seat-1");
   await nearSeat.locator("select").nth(0).selectOption("green");
   await farSeat.locator("select").nth(0).selectOption("red");
-  await farSeat.locator("select").nth(1).selectOption("learned-value");
+  await farSeat.locator("select").nth(1).selectOption("learned-value-g0");
 
   const numberInputs = setup.locator('input[type="number"]');
   await numberInputs.nth(0).fill("42");
@@ -188,6 +188,47 @@ async function configureRealEngineMatch(page, { bluffMode }) {
 
   await setup.getByRole("button", { name: "Start match" }).click();
   await setup.waitFor({ state: "hidden" });
+}
+
+async function configureFrozenC16Match(page) {
+  const setup = page.getByRole("dialog", { name: "Set the table" });
+  await setup.waitFor();
+  const nearSeat = setup.locator(".seat-0");
+  const farSeat = setup.locator(".seat-1");
+  await nearSeat.locator("select").nth(0).selectOption("blue");
+  await farSeat.locator("select").nth(0).selectOption("blue");
+
+  const policy = farSeat.locator("select").nth(1);
+  assert.deepEqual(
+    await policy.locator("option").evaluateAll((options) =>
+      options
+        .map((option) => option.value)
+        .filter((value) => value.startsWith("learned-value")),
+    ),
+    ["learned-value-c16", "learned-value-g0"],
+  );
+  await policy.selectOption("learned-value-c16");
+
+  const numberInputs = setup.locator('input[type="number"]');
+  await numberInputs.nth(0).fill("42");
+  assert.equal(await numberInputs.nth(1).inputValue(), "800");
+  assert.equal(await numberInputs.nth(2).inputValue(), "424242");
+  assert.equal(await numberInputs.nth(1).isEditable(), false);
+  assert.equal(await numberInputs.nth(2).isEditable(), false);
+
+  const responsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.request().method() === "POST" &&
+      url.pathname === "/api/games"
+    );
+  });
+  await setup.getByRole("button", { name: "Start match" }).click();
+  const response = await responsePromise;
+  assert.equal(response.ok(), true);
+  const body = await response.json();
+  await setup.waitFor({ state: "hidden" });
+  return body.game;
 }
 
 function isActionRequest(request) {
@@ -421,6 +462,98 @@ function assertStackControllerCues(cues, expected) {
         `${cue.controllerOrderOverlap}px²`,
     );
   });
+}
+
+for (const viewport of VIEWPORTS) {
+  test(
+    `frozen C16 identity is loaded and conspicuous at ${viewport.width}x${viewport.height}`,
+    { timeout: 60_000 },
+    async (t) => {
+      const { server, url } = await startRealEngine();
+      t.after(() => closeServer(server));
+      const browser = await launchBrowser();
+      t.after(() => browser.close());
+      const context = await browser.newContext({ viewport });
+      t.after(() => context.close());
+      const page = await context.newPage();
+
+      await page.goto(url, { waitUntil: "networkidle" });
+      const game = await configureFrozenC16Match(page);
+      assert.equal(game.config.players[1].policyId, "learned-value-c16");
+      assert.equal(game.config.learnedGenerations, 16);
+      assert.equal(game.config.learnedRollouts, 8);
+      assert.deepEqual(game.model, {
+        family: "learned-value",
+        generation: 16,
+        searchWorlds: 8,
+        horizonTurns: 4,
+        source: "frozen-artifact",
+        fingerprint:
+          "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
+      });
+
+      const visiblePolicy = page
+        .locator(".opponent-side .player-hud")
+        .getByText("Learned Value C16", { exact: true });
+      assert.equal(await visiblePolicy.count(), 1);
+      assert.equal(await visiblePolicy.isVisible(), true);
+      await page
+        .locator('summary[aria-label="Open exact reproduction settings"]')
+        .click();
+      const panel = page.getByLabel("Exact reproduction settings");
+      await panel.waitFor();
+      const panelText = await panel.innerText();
+      assert.match(panelText, /Learned model/);
+      assert.match(panelText, /learned-value C16 · K8\/H4/);
+      assert.match(
+        panelText,
+        /68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f/,
+      );
+      const exact = await panel
+        .getByLabel("Selectable exact reproduction summary")
+        .inputValue();
+      assert.match(exact, /opponent=blue\/learned-value-c16/);
+      assert.match(exact, /learned-generations=16/);
+      assert.match(exact, /model=learned-value\/C16/);
+      assert.match(exact, /learned-search=K8\/H4/);
+      assert.match(
+        exact,
+        /model-fingerprint=68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f/,
+      );
+      assert.equal(await page.getByRole("alert").count(), 0);
+
+      const geometry = await page.evaluate(() => {
+        const panel = document.querySelector(".repro-panel");
+        const bounds = panel?.getBoundingClientRect();
+        return {
+          documentWidth: document.documentElement.scrollWidth,
+          bodyWidth: document.body.scrollWidth,
+          panel: bounds
+            ? {
+                left: bounds.left,
+                top: bounds.top,
+                right: bounds.right,
+                bottom: bounds.bottom,
+                width: bounds.width,
+                height: bounds.height,
+              }
+            : null,
+        };
+      });
+      assert.equal(geometry.documentWidth, viewport.width);
+      assert.equal(geometry.bodyWidth, viewport.width);
+      assertVisibleRectangle(
+        geometry.panel,
+        viewport,
+        "C16 reproduction panel",
+      );
+
+      t.diagnostic(
+        `${viewport.width}x${viewport.height}: real bridge loaded exact ` +
+          "C16 fingerprint and rendered C16 · K8/H4 in REPRO",
+      );
+    },
+  );
 }
 
 test(

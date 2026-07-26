@@ -109,14 +109,26 @@ void test_names_parse_strictly() {
            "RU Aggro deck did not parse");
     LearnedVariant variant =
         LearnedVariant::UnifiedActor;
-    expect(parse_opponent_bot("learned-value", variant) ==
+    std::size_t generations = 0;
+    expect(parse_opponent_bot(
+               "learned-value-c16", variant, generations) ==
                BotKind::Learned &&
                variant ==
-                   LearnedVariant::ValueSearchChampion,
-           "Learned Value did not parse");
-    expect(parse_opponent_bot("learned-actor", variant) ==
+                   LearnedVariant::ValueSearchChampion &&
+               generations == 16,
+           "Learned Value C16 did not parse");
+    expect(parse_opponent_bot(
+               "learned-value-g0", variant, generations) ==
                BotKind::Learned &&
-               variant == LearnedVariant::UnifiedActor,
+               variant ==
+                   LearnedVariant::ValueSearchChampion &&
+               generations == 0,
+           "Learned Value G0 did not parse");
+    expect(parse_opponent_bot(
+               "learned-actor", variant, generations) ==
+               BotKind::Learned &&
+               variant == LearnedVariant::UnifiedActor &&
+               generations == 0,
            "Learned Actor did not parse");
 
     bool bad_deck = false;
@@ -126,6 +138,80 @@ void test_names_parse_strictly() {
         bad_deck = true;
     }
     expect(bad_deck, "unknown deck must be rejected");
+}
+
+void test_frozen_c16_load_boundary_fails_actionably() {
+    bool rejected = false;
+    std::string message;
+    try {
+        static_cast<void>(
+            old_school::web::load_frozen_learned_value_c16(
+                "build/model-cache/"
+                "deliberately-missing-web-c16-artifact.bin"));
+    } catch (const std::runtime_error& error) {
+        rejected = true;
+        message = error.what();
+    }
+    expect(rejected,
+           "missing frozen C16 artifact must fail closed");
+    expect(message.find("missing, stale, or invalid") !=
+               std::string::npos,
+           "missing C16 error omitted the failure class");
+    expect(message.find(
+               "--refresh-value-challenger-cache") !=
+               std::string::npos,
+           "missing C16 error omitted the separate CLI action");
+}
+
+void test_c16_rejects_noncanonical_training_identity() {
+    auto config = fast_config();
+    config.opponent_bot = old_school::BotKind::Learned;
+    config.learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    config.learned_generations = 16;
+    config.training_games = 1;
+
+    std::istringstream input(passive_responses(1));
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        static_cast<void>(old_school::web::run_bridge_session(
+            input, output, config));
+    } catch (const std::invalid_argument& error) {
+        rejected =
+            std::string_view(error.what()).find(
+                "exact --train-games 800 --train-seed 424242") !=
+            std::string_view::npos;
+    }
+    expect(rejected,
+           "C16 accepted a noncanonical training identity");
+    expect(output.str().empty(),
+           "C16 emitted session output before identity validation");
+}
+
+void test_g0_status_exposes_actual_model_identity() {
+    auto config = fast_config();
+    config.opponent_bot = old_school::BotKind::Learned;
+    config.learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    config.learned_generations = 0;
+    config.training_games = 1;
+    config.learned_rollouts = 1;
+
+    std::istringstream input(passive_responses(5000));
+    std::ostringstream output;
+    expect(old_school::web::run_bridge_session(
+               input, output, config) == 0,
+           "G0 identity session did not complete");
+    const std::string transcript = output.str();
+    expect(transcript.find(
+               "\"family\":\"learned-value\","
+               "\"generation\":0,\"searchWorlds\":1,"
+               "\"horizonTurns\":4,"
+               "\"source\":\"trained-for-match\","
+               "\"fingerprint\":\"") !=
+               std::string::npos,
+           "G0 status omitted structured model identity");
 }
 
 void test_passive_client_reaches_a_terminal_result() {
@@ -355,6 +441,12 @@ int main() {
     TestRunner runner;
     runner.run("strict deck and policy names",
                test_names_parse_strictly);
+    runner.run("frozen C16 failure is actionable",
+               test_frozen_c16_load_boundary_fails_actionably);
+    runner.run("C16 training identity is canonical",
+               test_c16_rejects_noncanonical_training_identity);
+    runner.run("G0 status exposes model identity",
+               test_g0_status_exposes_actual_model_identity);
     runner.run("passive client reaches terminal result",
                test_passive_client_reaches_a_terminal_result);
     runner.run("illegal option rejected",

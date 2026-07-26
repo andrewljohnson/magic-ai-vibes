@@ -37,6 +37,7 @@ test("the production session manager drives the real engine bridge without HTTP"
     rollouts: 1,
     deepRollouts: 1,
     learnedRollouts: 1,
+    learnedGenerations: 0,
   };
 
   const { game: created } = await harness.create(requestedConfig);

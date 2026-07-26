@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 07:47 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 08:32 PDT — refreshed every review cycle.*
 
 - **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
   current read (pooled 240 games/cell over seeds 4242+7801): **1 of
@@ -36,7 +36,21 @@ binary, never from extrapolation.
   Blue -15pp / Green +18pp in self-play). First recipe fork
   C17-DB8 (bootstrap 4->8) is TRAINING in the challenger tree,
   seed 8629 reserved.**
-- **RB0-0 (Codex, implementing) is the ONE LIVE MECHANISM: FEAT-0b
+- **OSC-1 (continuation prune): rejected standalone at 47.8% BUT
+  the registered instrument hit the night's best Blue mirror
+  (55.9% vs ~49%). SIX single-change forms, six instrument
+  confirmations, zero gate passes — the MULTI-FAMILY COMPOSITE
+  (calendar-8 + continuation prune + RB0-0's component) is the
+  evidence-mandated next form. Needs: user's CT8-R GO + RB0-0
+  verdict + one joint declaration. Pay component struck as moot
+  (engine already PayIfAble); near-tie defects go to component (d)
+  pass-preference tie-break.**
+- **RB0-0 SEALED RUN: INFRASTRUCTURE FAILURE (exit 2 at a guard
+  that did not name its failing invariant; seed quarantined, no
+  inference — correctly handled). Recommendations delivered:
+  per-invariant failure lines + a no-seed dry-run mode. Density is
+  now the composite's critical path.**
+- **RB0-0 (Codex) was the one live mechanism: FEAT-0b
   came back unsupported with ZERO VARIANCE at the early stratum —
   early-Green optimism predates the board entirely, killing the
   whole board-feature class by construction. Representational
@@ -127,6 +141,113 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 08:32 PDT (review cycle — RB0-0 infrastructure failure)
+
+**Verdict: the RB0-0 classification is correct and honestly handled
+— exit 2 at the aggregate guard, no scientific value exposed, seed
+202607260731 quarantined, no inference drawn. The reviewable lesson
+is in the guard design: a fail-closed check that does not retain
+WHICH invariant tripped costs a quarantined seed per mystery.
+Twelve minutes of clean collection (all four captures, 129,280 rows
+each, accounting printed) died in a guard that ate its own
+diagnosis.**
+
+Two recommendations for the redeclaration:
+1. Per-invariant failure reporting: every nonthrowing boolean in
+   the repeat/reverse/worker, schedule, weight, hidden-zone, and
+   mechanical guards should carry its own named failure line — the
+   fail-closed exit stays, but the transcript names the culprit.
+2. A NO-SEED DRY-RUN mode: exercise the complete pipeline
+   (collection + every guard) on an explicitly throwaway schedule
+   before any declared seed opens — the analog of my artifact-hash
+   and DRC pre-gates, which caught two wiring faults tonight before
+   they could consume seeds. Guards are code; code needs its own
+   smoke test.
+
+Lift table: bit-identical, forty-ninth cycle. Program state
+otherwise per 08:29: three confirmed live components across three
+families; the composite awaits your fixed census, the user's CT8-R
+ruling, and one joint declaration. The density family is now the
+schedule's critical path.
+
+## 2026-07-26 08:29 PDT (research thread — OSC-1 verdict; the composite case is now overwhelming)
+
+**OSC-1 (deployment-only continuation prune from the user's field
+report): REJECTED standalone at 47.8% (CI 45.7-50.0) — with the
+registered instrument delivering the night's largest Blue-mirror
+value: 76-60 = 55.9% vs ~49% control.** Removing own-spell counters
+from rollouts materially improves Blue evaluation, exactly as the
+mechanism predicted; aggregate movement (+1.0pp) is the familiar
+single-change size.
+
+Meta-pattern, now SIX-for-six: every single-change form across
+three mechanism families moves its registered instrument as
+predicted and adds +1-2pp, and none clears 2,040-game gates alone.
+Each family has a confirmed live component: calendar-8 targets
+(sealed, user authorization pending), the continuation prune
+(confirmed today), and density (your census pending). The
+multi-family composite — one knob from each family, jointly
+declared, judged by certification v4 — is now supported by
+eighteen hours of convergent evidence. It needs: the user's CT8-R
+GO, your RB0-0 verdict, and one joint declaration.
+
+My side proceeds meanwhile with the family's cheap component (d):
+pass-preference tie-break on epsilon-Q-ties (fixes the two
+near-tie field defects — Spike-into-mana and random blocks — at
+the Arena-visible layer). Note also the 08:27 correction: the
+engine already models Force Spike payment correctly everywhere;
+the pay component was struck as moot.
+
+## 2026-07-26 08:17 PDT (review cycle)
+
+**RB0-0 implementation is FROZEN (9e2d48b) with no audit data
+opened — the sealed census run is next.** Lift table:
+bit-identical, forty-eighth cycle. Research side: the
+continuation-policy family (from the user's field reports + my
+OSC-0 census, 08:15 entry) is being taken up as my declared axis —
+it is disjoint from your density census and from the closed target
+space, and its first component (pruning own-stack-object counter
+targets from continuation action sets) will be preregistered with
+full gates before anything runs. Your census result may interact
+(continuation misplay distorts label density); read-across noted
+in both notebooks.
+
+## 2026-07-26 08:15 PDT (research thread — USER FIELD REPORTS + OSC-0: a new mechanism family)
+
+**The user played Learned manually and reported three defects; the
+OSC-0 census turned them into the sharpest mechanism finding since
+the mispricing map: THE CONTINUATION POLICY IS THE SYSTEMIC WEAK
+LAYER.** Census (instrumented, then reverted): deployed K=8 play
+counters its own spell just once in a full mixed run (in a decided
+position) — but the K=0 one-world continuation choosers inside
+rollouts do it 1,619 times, at healthy life, as a genuine
+preference (ties=1). Every value the deployed search consumes is
+computed through continuations that waste Blue's counters — a
+direct mechanism for Blue's -9pp pessimism.
+
+The other two reports fit the same layer: Force Spike into 5 open
+mana is FT128's payability blindness live (and if the simulated
+opponent in rollouts fails to pay 1, the Spike looks strong to the
+search — same continuation defect); the random-seeming chump block
+is the one-ply block scorer hitting near-ties on coarse material
+aggregates.
+
+Candidate treatments logged for joint declaration (card-agnostic,
+gated, and DISTINCT from both the closed target space and RB0-0's
+density story): (a) prune own-stack-object counter targets from
+continuation action sets; (b) rules-derived dominant-branch
+resolution for the continuation opponent (pay when paying strictly
+dominates); (c) 2-ply or paired-world block scoring. Recommend we
+fold this into the post-RB0-0 agenda — it may interact with your
+census (continuation misplay also distorts the density of
+optimistic labels).
+
+## 2026-07-26 07:53 PDT (review cycle)
+
+**No-change cycle: RB0-0 implementing.** Lift table bit-identical,
+forty-seventh cycle. User is awake; program summary delivered in
+session.
 
 ## 2026-07-26 07:47 PDT (review cycle)
 

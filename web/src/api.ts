@@ -25,6 +25,7 @@ interface SessionEnvelope {
     events?: GameSnapshot["log"];
     log?: GameSnapshot["log"];
     result?: GameSnapshot["result"];
+    model?: GameSnapshot["model"];
     error?: string | { message?: string };
   };
 }
@@ -130,6 +131,7 @@ function normalizeSnapshot(value: GameSnapshot | SessionEnvelope): GameSnapshot 
     ),
     log: game.events ?? game.log ?? embeddedRecord.log ?? [],
     result: game.result ?? embeddedRecord.result ?? null,
+    model: game.model ?? embeddedRecord.model ?? null,
     error:
       errorMessage(game.error, "") ||
       (typeof embeddedRecord.error === "string" ? embeddedRecord.error : null),

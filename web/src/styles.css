@@ -281,6 +281,21 @@ textarea:focus-visible,
   text-align: right;
 }
 
+.repro-settings > .repro-model-identity {
+  grid-column: 1 / -1;
+  align-items: flex-start;
+}
+
+.repro-model-identity dd {
+  max-width: 440px;
+}
+
+.repro-model-identity dd span {
+  overflow-wrap: anywhere;
+  color: #c7ded7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .repro-copy-field {
   display: grid;
   gap: 5px;

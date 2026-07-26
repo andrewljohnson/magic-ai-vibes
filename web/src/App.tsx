@@ -80,9 +80,14 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
     description: "A compact rules-aware benchmark.",
   },
   {
-    id: "learned-value",
-    name: "Learned Value",
-    description: "Hidden-information-safe learned search.",
+    id: "learned-value-c16",
+    name: "Learned Value C16",
+    description: "Frozen research baseline · C16 · K8/H4.",
+  },
+  {
+    id: "learned-value-g0",
+    name: "Learned Value G0",
+    description: "Trainable legacy model for quick tests.",
   },
   {
     id: "learned-actor",
@@ -2005,6 +2010,25 @@ function SetupDrawer({
     if (!config) return;
     const players = [...config.players] as GameConfig["players"];
     players[seat] = { ...players[seat], [field]: value };
+    if (seat === 1 && field === "policyId") {
+      if (value === "learned-value-c16") {
+        setConfig({
+          ...config,
+          players,
+          trainGames: 800,
+          trainSeed: 424242,
+          learnedRollouts: 8,
+          learnedGenerations: 16,
+        });
+        return;
+      }
+      setConfig({
+        ...config,
+        players,
+        learnedGenerations: 0,
+      });
+      return;
+    }
     setConfig({ ...config, players });
   };
   const submit = (event: FormEvent) => {
@@ -2183,6 +2207,14 @@ function SetupDrawer({
                   min="1"
                   max="100000"
                   value={config.trainGames}
+                  readOnly={
+                    config.players[1].policyId === "learned-value-c16"
+                  }
+                  title={
+                    config.players[1].policyId === "learned-value-c16"
+                      ? "Frozen C16 is pinned to 800 initial training games"
+                      : undefined
+                  }
                   onChange={(event) =>
                     setConfig({
                       ...config,
@@ -2198,6 +2230,14 @@ function SetupDrawer({
                   min="1"
                   max="4294967295"
                   value={config.trainSeed}
+                  readOnly={
+                    config.players[1].policyId === "learned-value-c16"
+                  }
+                  title={
+                    config.players[1].policyId === "learned-value-c16"
+                      ? "Frozen C16 is pinned to training seed 424242"
+                      : undefined
+                  }
                   onChange={(event) =>
                     setConfig({
                       ...config,
@@ -2310,7 +2350,7 @@ function WelcomeTable({
         <p>
           Pilot {deckCount} classic archetypes against {policyCount} bot
           policies: Random, Monte Carlo, Deep Monte Carlo, HandcodedPolicy,
-          Learned Value, and Learned Actor.
+          explicit Learned Value generations, and Learned Actor.
         </p>
         {error ? (
           <div className="welcome-error">
@@ -2532,9 +2572,9 @@ export default function App() {
     const firstDeck = meta.decks[0].id;
     const secondDeck = meta.decks[1]?.id ?? firstDeck;
     const defaultOpponentPolicy =
-      meta.policies.find((policy) => policy.id === "learned-value")?.id ??
+      meta.policies.find((policy) => policy.id === "learned-value-c16")?.id ??
       meta.policies[0]?.id ??
-      "learned-value";
+      "learned-value-c16";
     const defaultPlayers = readDefault<
       Array<{ deckId?: string; policyId?: string }>
     >(defaults, ["players"], []);
@@ -2551,7 +2591,10 @@ export default function App() {
       rollouts: Number(readDefault(defaults, ["rollouts"], 2)),
       deepRollouts: Number(readDefault(defaults, ["deepRollouts"], 8)),
       learnedRollouts: Number(
-        readDefault(defaults, ["learnedRollouts"], 2),
+        readDefault(defaults, ["learnedRollouts"], 8),
+      ),
+      learnedGenerations: Number(
+        readDefault(defaults, ["learnedGenerations"], 16),
       ),
       players: [
         {
@@ -3456,6 +3499,7 @@ function ReproductionSummary({
       Boolean(snapshot.state),
     ),
     latestEvent: latestPublicEventMessage(snapshot.log ?? []),
+    model: snapshot.model,
   });
   return (
     <details className="repro-summary">
@@ -3487,7 +3531,8 @@ function ReproductionSummary({
           <div>
             <dt>Training</dt>
             <dd>
-              {config.trainGames} games · seed {String(config.trainSeed)}
+              C{config.learnedGenerations} · {config.trainGames} games · seed{" "}
+              {String(config.trainSeed)}
             </dd>
           </div>
           <div>
@@ -3495,6 +3540,21 @@ function ReproductionSummary({
             <dd>
               {config.rollouts} normal · {config.deepRollouts} deep ·{" "}
               {config.learnedRollouts} learned
+            </dd>
+          </div>
+          <div className="repro-model-identity">
+            <dt>Learned model</dt>
+            <dd>
+              {snapshot.model ? (
+                <>
+                  {snapshot.model.family} C{snapshot.model.generation} · K
+                  {snapshot.model.searchWorlds}/H
+                  {snapshot.model.horizonTurns} ·{" "}
+                  <span>{snapshot.model.fingerprint}</span>
+                </>
+              ) : (
+                <>None loaded</>
+              )}
             </dd>
           </div>
           <div>

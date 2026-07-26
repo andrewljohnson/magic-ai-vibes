@@ -404,6 +404,7 @@ export interface GameSnapshot {
   decision?: Decision | null;
   log?: Array<string | LogEntry>;
   result?: GameResult | null;
+  model?: LearnedModelIdentity | null;
   error?: string | null;
 }
 
@@ -494,7 +495,17 @@ export interface GameConfig {
   rollouts: number;
   deepRollouts: number;
   learnedRollouts: number;
+  learnedGenerations: number;
   players: [SeatConfig, SeatConfig];
+}
+
+export interface LearnedModelIdentity {
+  family: string;
+  generation: number;
+  searchWorlds: number;
+  horizonTurns: number;
+  source: string;
+  fingerprint: string;
 }
 
 export interface ReproductionPublicContext {
@@ -502,6 +513,7 @@ export interface ReproductionPublicContext {
   phase?: string;
   priorityHolder: "You" | "None" | "Unknown";
   latestEvent?: string;
+  model?: LearnedModelIdentity | null;
 }
 
 export function reproductionPriorityHolder(
@@ -533,6 +545,16 @@ export function formatReproductionSummary(
     `rollouts=${config.rollouts}`,
     `deep-rollouts=${config.deepRollouts}`,
     `learned-rollouts=${config.learnedRollouts}`,
+    `learned-generations=${config.learnedGenerations}`,
+    context.model
+      ? `model=${context.model.family}/C${context.model.generation}`
+      : "model=none",
+    context.model
+      ? `model-fingerprint=${context.model.fingerprint}`
+      : "model-fingerprint=none",
+    context.model
+      ? `learned-search=K${context.model.searchWorlds}/H${context.model.horizonTurns}`
+      : "learned-search=none",
     `bluff=${config.bluffMode ? "on" : "off"}`,
     `reveal=${config.debugReveal ? "on" : "off"}`,
     `turn=${turnNumber}`,

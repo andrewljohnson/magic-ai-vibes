@@ -67,7 +67,7 @@ test("reproduction summaries keep setup stable while public context advances", a
   const config = {
     players: [
       { deckId: "ru-aggro", policyId: "human" },
-      { deckId: "blue", policyId: "learned-value" },
+      { deckId: "blue", policyId: "learned-value-g0" },
     ],
     seed: "18446744073709551615",
     trainGames: 800,
@@ -75,6 +75,7 @@ test("reproduction summaries keep setup stable while public context advances", a
     rollouts: 2,
     deepRollouts: 8,
     learnedRollouts: 3,
+    learnedGenerations: 0,
     bluffMode: true,
     debugReveal: false,
   };
@@ -83,6 +84,15 @@ test("reproduction summaries keep setup stable while public context advances", a
     phase: "first_main",
     priorityHolder: "You",
     latestEvent: "You started turn 1",
+    model: {
+      family: "learned-value",
+      generation: 0,
+      searchWorlds: 3,
+      horizonTurns: 4,
+      source: "trained-for-match",
+      fingerprint:
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    },
     opponentHand: ["Counterspell"],
   });
   const advanced = formatReproductionSummary(config, {
@@ -90,16 +100,25 @@ test("reproduction summaries keep setup stable while public context advances", a
     phase: "declare_attackers",
     priorityHolder: "None",
     latestEvent: "You declared 2 attacker(s)",
+    model: {
+      family: "learned-value",
+      generation: 0,
+      searchWorlds: 3,
+      horizonTurns: 4,
+      source: "trained-for-match",
+      fingerprint:
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    },
     opponentHand: ["Lightning Bolt"],
   });
 
   assert.equal(
     first,
-    'you=ru-aggro/human | opponent=blue/learned-value | game-seed=18446744073709551615 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=3 | bluff=on | reveal=off | turn=1 | phase=first_main | priority-holder=You | latest-event="You started turn 1"',
+    'you=ru-aggro/human | opponent=blue/learned-value-g0 | game-seed=18446744073709551615 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=3 | learned-generations=0 | model=learned-value/C0 | model-fingerprint=0000000000000000000000000000000000000000000000000000000000000000 | learned-search=K3/H4 | bluff=on | reveal=off | turn=1 | phase=first_main | priority-holder=You | latest-event="You started turn 1"',
   );
   assert.equal(
     advanced,
-    'you=ru-aggro/human | opponent=blue/learned-value | game-seed=18446744073709551615 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=3 | bluff=on | reveal=off | turn=3 | phase=declare_attackers | priority-holder=None | latest-event="You declared 2 attacker(s)"',
+    'you=ru-aggro/human | opponent=blue/learned-value-g0 | game-seed=18446744073709551615 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=3 | learned-generations=0 | model=learned-value/C0 | model-fingerprint=0000000000000000000000000000000000000000000000000000000000000000 | learned-search=K3/H4 | bluff=on | reveal=off | turn=3 | phase=declare_attackers | priority-holder=None | latest-event="You declared 2 attacker(s)"',
   );
   assert.equal(
     first.slice(0, first.indexOf(" | turn=")),

@@ -47,7 +47,8 @@ horizontal fit are also green**
 
 Acceptance criteria:
 
-- Setup exposes all five decks and all six opponent policies.
+- Setup exposes all five decks and all seven opponent policies, including
+  explicit Learned Value C16 and G0 identities.
 - The current player, phase, priority holder, and required choice are obvious.
 - Land play, spell cast, priority pass, stack resolution, attackers, blockers,
   damage order, game over, and rematch can each be completed without guessing.
@@ -294,6 +295,37 @@ Acceptance criteria:
   match.
 - A bug report can copy a compact reproduction containing matchup, seeds,
   settings, turn, phase, and latest event.
+
+#### Preregistered explicit Learned-model identity slice
+
+Hypothesis: replacing the web's ambiguous, freshly trained `learned-value`
+selection with explicit G0 and immutable C16 choices will make manual bot
+feedback reproducible and will prevent a weak test model from being mistaken
+for the frozen research baseline.
+
+- Setup advertises `Learned Value C16` and `Learned Value G0` as distinct
+  policies. The normal/default Learned opponent is C16 with K=8; G0 remains an
+  explicit trainable option for fast fixtures and smoke tests.
+- The normalized match config carries the selected generation and Learned
+  rollout count to the bridge. C16 accepts only its canonical T800/S424242/C16
+  identity, loads only
+  `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`
+  through the canonical artifact loader, verifies fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+  and never trains, refreshes, or substitutes a model. A missing, stale, or
+  mismatched artifact fails closed with a separate-generation command.
+- G0 continues to train from the exact public training games/seed. Both model
+  paths emit structured public identity containing family, generation, K,
+  fixed H=4, and the actual model fingerprint; the server preserves it as
+  match metadata.
+- The live REPRO surface displays the actual generation and fingerprint and
+  includes them in its selectable exact text. This metadata is model-public
+  and contains no state, hand, or hidden card identity.
+- Acceptance requires C++ parser/load-only/fingerprint regressions, Node
+  normalization/bridge-contract regressions, `make test-web`, `make
+  test-web-ui`, and rendered setup/REPRO checks at 1280 × 720 and
+  1440 × 900. The rendered checks must identify C16 and its exact fingerprint;
+  fixture-only G0 coverage cannot establish the C16 loading claim.
 
 #### Preregistered compact reproduction slice
 
@@ -667,7 +699,7 @@ The gate runs the full journey for every combination of:
 - Opponent: Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned
   Value, Learned Actor
 
-The 30-case matrix proves that every advertised deck/policy selection survives
+The 35-case matrix proves that every advertised deck/policy selection survives
 normalization and session setup. It does **not** claim that the fixture ran the
 real deck or policy; real engine coverage is a separate gate below. Each matrix
 case must prove:
@@ -712,7 +744,7 @@ seen without manually testing all 30 pairs:
 
 | Human deck | Opponent deck | Opponent policy |
 | --- | --- | --- |
-| RU Aggro | RU Aggro | Learned Value |
+| RU Aggro | RU Aggro | Learned Value C16 |
 | Blue | White | Handcoded Policy |
 | White | Red | Deep Monte Carlo |
 | Green | Blue | Monte Carlo |

@@ -626,6 +626,8 @@ test("landing metadata includes and advertises every bot policy", async () => {
   ]) {
     assert.match(app, new RegExp(policy));
   }
+  assert.match(app, /id:\s*"learned-value-c16"/);
+  assert.match(app, /id:\s*"learned-value-g0"/);
   assert.match(app, /id:\s*"learned-actor"/);
   assert.match(app, /policyCount=\{meta\?\.policies\.length \|\| FALLBACK_POLICIES\.length\}/);
   assert.match(app, /<strong>\{policyCount\}<\/strong> bot policies/);
@@ -648,6 +650,7 @@ test("live header exposes a compact selectable reproduction summary", async () =
     "config.rollouts",
     "config.deepRollouts",
     "config.learnedRollouts",
+    "config.learnedGenerations",
     "config.bluffMode",
     "config.debugReveal",
   ]) {
@@ -667,6 +670,8 @@ test("live header exposes a compact selectable reproduction summary", async () =
     /reproductionPriorityHolder\(\s*snapshot\.decision\?\.kind,\s*Boolean\(snapshot\.state\)/,
   );
   assert.match(exactSummary, /latestPublicEventMessage\(snapshot\.log \?\? \[\]\)/);
+  assert.match(exactSummary, /model:\s*snapshot\.model/);
+  assert.match(reproduction, /snapshot\.model\.fingerprint/);
   assert.doesNotMatch(
     exactSummary,
     /state\?\.players|\.hand|revealedHand|graveyard|library|stack/,

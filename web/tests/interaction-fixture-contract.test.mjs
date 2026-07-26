@@ -43,7 +43,7 @@ test("interaction fixture exposes one exact forced empty blocker declaration", a
   const { game: initial } = await harness.create({
     players: [
       { deckId: "white", policyId: "human" },
-      { deckId: "red", policyId: "learned-value" },
+      { deckId: "red", policyId: "learned-value-g0" },
     ],
     seed: 42,
     trainGames: 800,
@@ -80,7 +80,7 @@ test("interaction fixture advances duplicate cleanup into numeric board blocks",
   const { game: initial } = await harness.create({
     players: [
       { deckId: "white", policyId: "human" },
-      { deckId: "red", policyId: "learned-value" },
+      { deckId: "red", policyId: "learned-value-g0" },
     ],
     seed: 42,
     trainGames: 800,
