@@ -8090,6 +8090,45 @@ fixture, smoke command, threshold, or interpretation. Re-run the nonreserved
 analogue and the complete strict/CLI suites before consuming either reserved
 seed.
 
+#### Diagnostic result: mechanism passed
+
+Run 2026-07-26 from committed source `c599c18`, after the admission repair
+passed 134/134 engine tests, the CLI suite, two independent reviews, and
+nonreserved off/off and on/off analogues. `REVIEW.md` was reread through its
+10:47 cycle immediately after the run. The exact command was:
+
+```sh
+./build/old-school-sim --diagnose-value-pass-dominance \
+  --seed 202607260947
+```
+
+The route exited `0`. All eleven exact comparator controls passed: both
+Braingeyser X=0 targets and Disintegrate X=0 were dominated; productive X=1/X
+actions were retained; live and payable Force Spike were retained; own
+useful-spell Counterspell was retained; redundant same-target Counterspell was
+dominated; and materially distinct targets plus an intervening counter-war
+response were retained. The paired hidden repartition was exact.
+
+In-memory G0 T800/S424242/K2 trained in 16.93 seconds with fingerprint
+`ab7a782478d9dbafe7bfd3242a2434b24f9b9fb6a0f3f83b8c406e3818566f78`.
+Load-only C16 T800/S424242/K8 matched its exact required fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+the artifact remained 3,111,437 bytes with unchanged modification time.
+
+For both G0 and C16, the exact before set was Pass, both X=0 player targets,
+and both X=1 player targets. Treatment removed only the two X=0 actions.
+Control and treatment both selected productive Braingeyser X=1 targeting the
+learner. G0 control/treatment hashes were
+`0x74c3bb33816c5675` / `0x2a3128d2a0c33629`; C16 hashes were
+`0x57bc30f3915cec0` / `0xa40ef88adbc2aa96`. Both models passed default-off
+identity, unchanged legal actions, exact filtering, selected-action retention,
+and hidden-repartition invariance.
+
+Decision: the mechanism/proof gate passes. This consumes diagnostic seed
+`202607260947` permanently and licenses only the already-frozen paired
+large-regression/runtime smoke; it does not establish gameplay strength or
+promote a bot.
+
 The smoke seed `202607260948` is reserved for exactly two 240-game paired
 all-five configurations, run in this fixed order. First, the unfiltered
 C16/K8 control:
