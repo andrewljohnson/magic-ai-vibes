@@ -23,7 +23,7 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-learned-iteration test-probes test-web test-web-ui web web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-learned-iteration test-probes test-web test-web-ui web web-target-stack web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -88,6 +88,10 @@ web-build: $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 
 web: web-build
 	npm --prefix web start
+
+web-target-stack: $(WEB_DEPENDENCIES)
+	npm --prefix web run build
+	npm --prefix web run fixture:target-stack
 
 benchmark: $(SIMULATOR)
 	./$(SIMULATOR) --benchmark --games 20 --seed 424242 --challenger handcrafted --baseline monte-carlo --rollouts 2

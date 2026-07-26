@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-25 20:52 PDT — refreshed at the top of every review cycle.*
+*Updated 2026-07-25 21:03 PDT — refreshed at the top of every review cycle.*
 
 - **P1R rejected: the outcome signal overcorrects.** With the
   optimizer fixed (all mechanism gates passed), the learned residual
@@ -91,6 +91,16 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-25 21:03 PDT
+
+No-result cycle: FT128 implementation committed (`31ecce6`) with its
+fail-closed terminality accounting (every continuation must end in a
+natural game result — a single bootstrapped sample invalidates the
+run), but the audit itself has not been recorded. Lift table
+deterministic-identical (3 of 5). W-family disposition (gate fail at
+zero-head, held pending a trained priority head) is on the dashboard;
+the FT128 verdict remains the program's single pending decisive event.
 
 ## 2026-07-25 20:52 PDT
 

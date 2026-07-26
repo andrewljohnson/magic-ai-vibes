@@ -2046,6 +2046,7 @@ TeacherOptionComparison score_teacher_option_comparison(
         .horizon_turns = config.horizon_turns,
         .continuation_variant = config.continuation_variant,
         .blend_shallow_prior = config.blend_shallow_prior,
+        .evaluation_threads = config.evaluation_threads,
     };
     const LearnedActionSamples original =
         score_probe_actions(probe, probe.state, model, search);
@@ -2535,8 +2536,13 @@ std::string format_teacher_sufficiency_audit_report(
                    report.config.continuation_variant)
             << " mirror, shallow-prior blend "
             << (report.config.blend_shallow_prior ? "on" : "off")
-            << ", one rollout/world\n"
-            << "  all hidden repartitions: "
+            << ", one rollout/world";
+        if (report.config.evaluation_threads != 1) {
+            output << ", evaluation threads "
+                   << report.config.evaluation_threads;
+        }
+        output
+            << "\n  all hidden repartitions: "
             << (report.hidden_repartition_bit_identical
                     ? "bit-identical"
                     : "CHANGED")
@@ -2583,8 +2589,12 @@ std::string format_terminal_credit_audit_report(
            << ", one rollout/world, terminal results "
            << (report.config.require_terminal_results
                    ? "required"
-                   : "NOT REQUIRED")
-           << '\n';
+                   : "NOT REQUIRED");
+    if (report.config.evaluation_threads != 1) {
+        output << ", evaluation threads "
+               << report.config.evaluation_threads;
+    }
+    output << '\n';
 
     const auto append_keys =
         [&output](const std::vector<std::string>& keys) {

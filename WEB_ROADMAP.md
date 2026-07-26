@@ -233,7 +233,25 @@ For each web issue:
   once and render no prompt; when attackers are available, `No attacks`
   remains explicit and the primary control stays disabled as `Select
   attackers` until the player selects at least one creature. The fixed
-  decision-ID guard covers React Strict Mode replays. `npm --prefix web run
-  build` passed and `make test-web-ui` passed all 39 build, combat-control,
-  layout, target/stack, and 30-case journey checks. The rendered P1 check
-  remains open.
+  decision-ID guard covers React Strict Mode replays; if the automatic request
+  fails, that decision becomes visible with one recoverable `Continue — no
+  attackers` action rather than retrying in a loop or stranding the match.
+  `npm --prefix web run build` passed and `make test-web-ui` passed all 39
+  build, combat-control, layout, target/stack, and 30-case journey checks. The
+  rendered P1 check remains open.
+- 2026-07-25 — Real-browser combat smoke at seed 42 confirmed the zero-attacker
+  path emits `You declared no attackers` without displaying either redundant
+  control, advances through the opponent's empty combat, and returns control
+  on turn three. P1 remains open for the full creature-selection, blocking,
+  damage-order, stack, game-over, and rematch journey.
+- 2026-07-25 — Added a fixed seed-42 RU Aggro-versus-Blue targeted-stack
+  regression and made stack priority legible without inventing client-side
+  rules. While the stack is non-empty, the decision dock now says `Respond to
+  the stack`, names the next object and its public target, and explains that
+  passing continues toward resolution. Publicly targeted permanents on either
+  battlefield receive both a dashed outline and a `TARGET` label, and the
+  stack rail repeats the target beside the resolving object. `make
+  test-web-ui` passed the production build and all 39 focused/matrix tests.
+  No controllable browser was available in this environment, so this is
+  structural evidence only; the 1440 × 900 and 1280 × 720 rendered stack
+  interaction remains open and P1 is not closed.

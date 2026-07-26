@@ -15387,6 +15387,7 @@ namespace {
 constexpr std::size_t kMaximumEvaluationWorlds = 4096;
 constexpr std::size_t kMaximumEvaluationRolloutsPerWorld = 256;
 constexpr std::size_t kMaximumEvaluationHorizonTurns = 128;
+constexpr std::size_t kMaximumEvaluationThreads = 64;
 
 std::uint64_t mix_search_seed(std::uint64_t value) {
     value += 0x9E3779B97F4A7C15ULL;
@@ -15441,6 +15442,12 @@ void validate_search_config(
         kMaximumEvaluationHorizonTurns) {
         throw std::invalid_argument(
             "Learned search horizon must be at most 128 turns");
+    }
+    if (config.evaluation_threads == 0 ||
+        config.evaluation_threads >
+            kMaximumEvaluationThreads) {
+        throw std::invalid_argument(
+            "Learned search evaluation threads must be in [1, 64]");
     }
 }
 
@@ -15595,101 +15602,174 @@ LearnedActionSamples learned_priority_action_samples(
     result.q_samples.resize(candidates.size());
     const std::size_t samples_per_action =
         config.worlds * config.rollouts_per_world;
-    for (auto& samples : result.q_samples) {
-        samples.reserve(samples_per_action);
-    }
-
-    for (std::size_t action_index = 0;
-         action_index < candidates.size(); ++action_index) {
+    const auto evaluate =
+        [&](std::size_t action_index, std::size_t world_index,
+            std::size_t rollout_index)
+        -> std::pair<double, bool> {
         const PriorityAction& action = candidates[action_index];
-        for (const LearnedEvaluationWorld& world : worlds) {
-            for (const std::uint64_t continuation_seed :
-                 world.continuation_seeds) {
-                Game simulation = evaluator;
-                simulation.state_ = world.state;
-                simulation.random_.seed(continuation_seed);
-                simulation.trace_ = nullptr;
-                simulation.learned_decision_trace_ = nullptr;
-                simulation.config_.learned_policy_recorder.reset();
-                simulation.config_.learned_search_depth = 0;
+        const LearnedEvaluationWorld& world = worlds[world_index];
+        const std::uint64_t continuation_seed =
+            world.continuation_seeds[rollout_index];
+        Game simulation = evaluator;
+        simulation.state_ = world.state;
+        simulation.random_.seed(continuation_seed);
+        simulation.trace_ = nullptr;
+        simulation.learned_decision_trace_ = nullptr;
+        simulation.config_.learned_policy_recorder.reset();
+        simulation.config_.learned_search_depth = 0;
 
-                const double shallow_prior =
-                    config.blend_shallow_prior
-                        ? simulation
-                              .learned_value_shallow_action_score(
-                                  action, player, sorcery_actions,
-                                  phase, consecutive_passes,
-                                  world.state)
-                        : 0.0;
-                PriorityState priority{
-                    .player = player,
-                    .consecutive_passes = consecutive_passes,
-                };
-                bool window_ended = false;
-                std::optional<GameResult> terminal;
-                if (action.kind == PriorityActionKind::Pass) {
-                    const PriorityPassResult pass =
-                        pass_priority(simulation.state_, priority);
-                    window_ended =
-                        pass == PriorityPassResult::WindowEnded;
-                    if (pass ==
-                        PriorityPassResult::StackObjectResolved) {
-                        terminal = simulation.life_total_result();
+        const double shallow_prior =
+            config.blend_shallow_prior
+                ? simulation.learned_value_shallow_action_score(
+                      action, player, sorcery_actions, phase,
+                      consecutive_passes, world.state)
+                : 0.0;
+        PriorityState priority{
+            .player = player,
+            .consecutive_passes = consecutive_passes,
+        };
+        bool window_ended = false;
+        std::optional<GameResult> terminal;
+        if (action.kind == PriorityActionKind::Pass) {
+            const PriorityPassResult pass =
+                pass_priority(simulation.state_, priority);
+            window_ended =
+                pass == PriorityPassResult::WindowEnded;
+            if (pass == PriorityPassResult::StackObjectResolved) {
+                terminal = simulation.life_total_result();
+            }
+        } else {
+            if (!apply_priority_action(
+                    simulation.state_, player, action,
+                    sorcery_actions)) {
+                throw std::logic_error(
+                    "validated priority action became illegal");
+            }
+            priority = {
+                .player = player,
+                .consecutive_passes = 0,
+            };
+        }
+
+        if (!terminal.has_value() && !window_ended) {
+            terminal = simulation.continue_priority_window(
+                sorcery_actions, phase, priority);
+        }
+        if (!terminal.has_value()) {
+            terminal =
+                simulation.finish_turn_after_priority_phase(phase);
+        }
+
+        double continuation = 0.0;
+        bool terminal_evaluation = terminal.has_value();
+        if (terminal_evaluation) {
+            continuation = learned_result_value(*terminal, player);
+        } else {
+            const auto horizon_evaluation =
+                simulation.finish_learned_evaluation_horizon(
+                    player, config.horizon_turns);
+            continuation = horizon_evaluation.score;
+            terminal_evaluation = horizon_evaluation.terminal;
+        }
+        double score = blend_evaluation_score(
+            continuation, shallow_prior,
+            config.blend_shallow_prior, samples_per_action);
+        if (config.value_priority_residual_weight != 0.0) {
+            score += priority_residuals[action_index];
+        }
+        return {score, terminal_evaluation};
+    };
+
+    if (config.evaluation_threads == 1) {
+        for (auto& samples : result.q_samples) {
+            samples.reserve(samples_per_action);
+        }
+        for (std::size_t action_index = 0;
+             action_index < candidates.size(); ++action_index) {
+            for (std::size_t world_index = 0;
+                 world_index < worlds.size(); ++world_index) {
+                for (std::size_t rollout_index = 0;
+                     rollout_index <
+                     config.rollouts_per_world;
+                     ++rollout_index) {
+                    const auto [score, terminal_evaluation] =
+                        evaluate(
+                            action_index, world_index,
+                            rollout_index);
+                    result.q_samples[action_index].push_back(
+                        score);
+                    ++result.rollout_evaluations;
+                    if (terminal_evaluation) {
+                        ++result.terminal_evaluations;
+                    } else {
+                        ++result.bootstrapped_evaluations;
                     }
-                } else {
-                    if (!apply_priority_action(
-                            simulation.state_, player, action,
-                            sorcery_actions)) {
-                        throw std::logic_error(
-                            "validated priority action became illegal");
-                    }
-                    priority = {
-                        .player = player,
-                        .consecutive_passes = 0,
-                    };
-                }
-
-                if (!terminal.has_value() && !window_ended) {
-                    terminal =
-                        simulation.continue_priority_window(
-                            sorcery_actions, phase, priority);
-                }
-                if (!terminal.has_value()) {
-                    terminal =
-                        simulation.finish_turn_after_priority_phase(
-                            phase);
-                }
-
-                double continuation = 0.0;
-                bool terminal_evaluation = terminal.has_value();
-                if (terminal_evaluation) {
-                    continuation =
-                        learned_result_value(*terminal, player);
-                } else {
-                    const auto horizon_evaluation =
-                        simulation
-                            .finish_learned_evaluation_horizon(
-                                player, config.horizon_turns);
-                    continuation = horizon_evaluation.score;
-                    terminal_evaluation =
-                        horizon_evaluation.terminal;
-                }
-                double score = blend_evaluation_score(
-                    continuation, shallow_prior,
-                    config.blend_shallow_prior,
-                    samples_per_action);
-                if (config.value_priority_residual_weight != 0.0) {
-                    score += priority_residuals[action_index];
-                }
-                result.q_samples[action_index].push_back(score);
-                ++result.rollout_evaluations;
-                if (terminal_evaluation) {
-                    ++result.terminal_evaluations;
-                } else {
-                    ++result.bootstrapped_evaluations;
                 }
             }
         }
+    } else {
+        for (auto& samples : result.q_samples) {
+            samples.resize(samples_per_action);
+        }
+        std::vector<unsigned char> terminal_flags(
+            expected_evaluations, 0);
+        std::vector<std::exception_ptr> failures(
+            expected_evaluations);
+        const std::size_t worker_count =
+            std::min(
+                config.evaluation_threads,
+                expected_evaluations);
+        std::vector<std::jthread> workers;
+        workers.reserve(worker_count);
+        for (std::size_t worker = 0; worker < worker_count;
+             ++worker) {
+            workers.emplace_back([&, worker] {
+                for (std::size_t evaluation = worker;
+                     evaluation < expected_evaluations;
+                     evaluation += worker_count) {
+                    try {
+                        const std::size_t action_index =
+                            evaluation / samples_per_action;
+                        const std::size_t sample_index =
+                            evaluation % samples_per_action;
+                        const std::size_t world_index =
+                            sample_index /
+                            config.rollouts_per_world;
+                        const std::size_t rollout_index =
+                            sample_index %
+                            config.rollouts_per_world;
+                        const auto [score,
+                                    terminal_evaluation] =
+                            evaluate(
+                                action_index, world_index,
+                                rollout_index);
+                        result.q_samples[action_index]
+                                        [sample_index] = score;
+                        terminal_flags[evaluation] =
+                            terminal_evaluation ? 1U : 0U;
+                    } catch (...) {
+                        failures[evaluation] =
+                            std::current_exception();
+                    }
+                }
+            });
+        }
+        for (auto& worker : workers) {
+            worker.join();
+        }
+        for (const std::exception_ptr& failure : failures) {
+            if (failure) {
+                std::rethrow_exception(failure);
+            }
+        }
+        result.rollout_evaluations = expected_evaluations;
+        result.terminal_evaluations =
+            static_cast<std::size_t>(std::count(
+                terminal_flags.begin(), terminal_flags.end(),
+                static_cast<unsigned char>(1)));
+        result.bootstrapped_evaluations =
+            expected_evaluations -
+            result.terminal_evaluations;
     }
     if (result.rollout_evaluations != expected_evaluations ||
         result.terminal_evaluations >

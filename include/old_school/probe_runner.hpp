@@ -297,6 +297,9 @@ struct TeacherSufficiencyAuditConfig {
     // Requires a horizon that conservatively reaches a terminal result for
     // every fixture and enables fail-closed terminal-result accounting.
     bool require_terminal_results = false;
+    // Passed only to the evaluation sampler. One is the canonical serial
+    // path; higher values preserve the exact preindexed sample matrix.
+    std::size_t evaluation_threads = 1;
 
     bool operator==(const TeacherSufficiencyAuditConfig&) const =
         default;

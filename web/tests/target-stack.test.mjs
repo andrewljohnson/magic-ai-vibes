@@ -27,8 +27,16 @@ async function loadTargetFormatter() {
 }
 
 test("production structured targets have stable readable labels", async () => {
-  const { formatTargetLabel } = await loadTargetFormatter();
+  const {
+    describeTopOfStack,
+    formatStackEntryLabel,
+    formatTargetLabel,
+    stackPermanentTargetIds,
+  } = await loadTargetFormatter();
 
+  // Fixed reproduction: game seed 42, RU Aggro (human) into Blue. The
+  // production bridge orders the bottom of the stack first and the next
+  // object to resolve last.
   const targetedStack = [
     {
       stackId: 41,
@@ -55,6 +63,7 @@ test("production structured targets have stable readable labels", async () => {
       stackId: 44,
       kind: "spell",
       card: { id: "card-19", name: "Braingeyser" },
+      label: "Braingeyser → You",
       xValue: 3,
       target: { player: 0, label: "You" },
     },
@@ -78,20 +87,53 @@ test("production structured targets have stable readable labels", async () => {
   assert.equal(formatTargetLabel({ unexpected: true }), "Unknown target");
   assert.equal(formatTargetLabel("   "), null);
   assert.equal(formatTargetLabel(null), null);
+
+  assert.deepEqual(describeTopOfStack(targetedStack), {
+    label: "Braingeyser",
+    targets: ["You"],
+    summary: "Braingeyser targeting You is next to resolve.",
+  });
+  assert.deepEqual(stackPermanentTargetIds(targetedStack), ["73", "18"]);
+  assert.equal(
+    formatStackEntryLabel({
+      kind: "activated_ability",
+      card: { id: "card-20", name: "Millstone" },
+      label: "Millstone → Opponent",
+    }),
+    "Millstone ability",
+  );
 });
 
-test("stack and priority rendering consume bridge-shaped targets and IDs", async () => {
-  const app = await source("src/App.tsx");
+test("stack, priority, and battlefield rendering share bridge-shaped targets", async () => {
+  const [app, css] = await Promise.all([
+    source("src/App.tsx"),
+    source("src/styles.css"),
+  ]);
 
-  assert.match(app, /formatTargetLabel\(entry\.target\)/);
-  assert.match(app, /\.map\(formatTargetLabel\)/);
-  assert.match(app, /entry\.spellTarget/);
+  assert.match(app, /formatStackTargets\(entry\)/);
   assert.match(
     app,
     /key=\{entry\.stackId \?\? entry\.id \?\?/,
   );
   assert.match(app, /formatTargetLabel\(option\.target\)/);
   assert.match(app, /option\.spellTarget/);
+  assert.match(app, /describeTopOfStack\(state\.stack \?\? \[\]\)/);
+  assert.match(app, /"Respond to the stack"/);
+  assert.match(
+    app,
+    /continue toward resolving \$\{stackInteraction\.label\}/,
+  );
+  assert.match(app, /stackPermanentTargetIds\(stack\)/);
+  assert.equal(
+    app.match(/targetedPermanentIds=\{targetedPermanentIds\}/g)?.length,
+    2,
+    "both battlefields must receive the public stack target set",
+  );
+  assert.match(app, /targeted \? "is-targeted" : ""/);
+  assert.match(app, />TARGET<\/span>/);
+  assert.match(css, /\.card-face\.is-targeted\s*\{[^}]*outline:/s);
+  assert.match(css, /\.status-targeted\s*\{/);
+  assert.match(css, /\.stack-choice-context\s*\{/);
   assert.doesNotMatch(app, /\{entry\.target\}/);
   assert.doesNotMatch(app, /entry\.targets\?\.join/);
 });

@@ -95,6 +95,67 @@ export interface StackEntry {
   xValue?: number;
 }
 
+export interface StackInteraction {
+  label: string;
+  targets: string[];
+  summary: string;
+}
+
+export function formatStackEntryLabel(entry: StackEntry): string {
+  if (entry.card) {
+    return entry.kind === "activated_ability"
+      ? `${entry.card.name} ability`
+      : entry.card.name;
+  }
+  return entry.label ?? "Ability";
+}
+
+export function formatStackTargets(entry: StackEntry): string[] {
+  const targets = [
+    formatTargetLabel(entry.target),
+    ...(entry.targets?.map(formatTargetLabel) ?? []),
+    entry.spellTarget !== undefined ? `Stack #${entry.spellTarget}` : null,
+  ].filter((value): value is string => value !== null);
+  return Array.from(new Set(targets));
+}
+
+export function describeTopOfStack(
+  stack: readonly StackEntry[],
+): StackInteraction | null {
+  const top = stack.at(-1);
+  if (!top) return null;
+  const label = formatStackEntryLabel(top);
+  const targets = formatStackTargets(top);
+  return {
+    label,
+    targets,
+    summary: `${label}${
+      targets.length > 0 ? ` targeting ${targets.join(", ")}` : ""
+    } is next to resolve.`,
+  };
+}
+
+export function stackPermanentTargetIds(
+  stack: readonly StackEntry[],
+): string[] {
+  const ids = new Set<string>();
+  for (const entry of stack) {
+    for (const target of [entry.target, ...(entry.targets ?? [])]) {
+      if (!target || typeof target !== "object" || Array.isArray(target)) {
+        continue;
+      }
+      if (
+        typeof target.creature === "string" ||
+        (typeof target.creature === "number" &&
+          Number.isFinite(target.creature))
+      ) {
+        ids.add(String(target.creature));
+      }
+    }
+  }
+  return [...ids];
+}
+
 export interface GameState {
   turnNumber: number;
   activePlayer: number;

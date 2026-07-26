@@ -15,7 +15,11 @@ import {
   submitAction,
 } from "./api";
 import {
+  describeTopOfStack,
+  formatStackEntryLabel,
+  formatStackTargets,
   formatTargetLabel,
+  stackPermanentTargetIds,
   type ActionRequest,
   type AttackersDecision,
   type BlockersDecision,
@@ -32,6 +36,7 @@ import {
   type PlayerState,
   type PolicyMeta,
   type PriorityDecision,
+  type StackInteraction,
   type StackEntry,
 } from "./types";
 
@@ -254,6 +259,7 @@ interface CardFaceProps {
   compact?: boolean;
   selected?: boolean;
   actionable?: boolean;
+  targeted?: boolean;
   onClick?: () => void;
 }
 
@@ -264,6 +270,7 @@ function CardFace({
   compact = false,
   selected = false,
   actionable = false,
+  targeted = false,
   onClick,
 }: CardFaceProps) {
   const power = permanent?.power ?? card.power;
@@ -278,6 +285,7 @@ function CardFace({
     permanent?.tapped ? "Tapped" : undefined,
     permanent?.summoningSick ? "Summoning sick" : undefined,
     permanent?.damage ? `${permanent.damage} damage marked` : undefined,
+    targeted ? "Targeted by an object on the stack" : undefined,
   ]
     .filter(Boolean)
     .join(" • ");
@@ -288,13 +296,15 @@ function CardFace({
         compact ? "card-compact" : ""
       } ${selected ? "is-selected" : ""} ${
         actionable ? "is-actionable" : ""
-      } ${className}`}
+      } ${targeted ? "is-targeted" : ""} ${className}`}
       type="button"
       title={title}
       onClick={onClick}
       disabled={!onClick}
       aria-pressed={actionable ? selected : undefined}
-      aria-label={`${card.name}${permanent?.tapped ? ", tapped" : ""}`}
+      aria-label={`${card.name}${permanent?.tapped ? ", tapped" : ""}${
+        targeted ? ", targeted by the stack" : ""
+      }`}
     >
       <span className="card-edge" />
       <span className="card-heading">
@@ -324,6 +334,7 @@ function CardFace({
       {!!permanent?.damage && (
         <span className="status-token status-damage">−{permanent.damage}</span>
       )}
+      {targeted && <span className="status-token status-targeted">TARGET</span>}
     </button>
   );
 }
@@ -517,12 +528,14 @@ function PermanentRow({
   permanents,
   eligibleIds,
   selectedIds,
+  targetedIds,
   onToggle,
 }: {
   title: string;
   permanents: Permanent[];
   eligibleIds?: Set<string>;
   selectedIds?: Set<string>;
+  targetedIds?: ReadonlySet<string>;
   onToggle?: (id: string) => void;
 }) {
   if (permanents.length === 0) return null;
@@ -545,6 +558,7 @@ function PermanentRow({
                 permanent={permanent}
                 selected={selectedIds?.has(id)}
                 actionable={eligible}
+                targeted={targetedIds?.has(id)}
                 onClick={eligible && onToggle ? () => onToggle(id) : undefined}
               />
             </div>
@@ -564,6 +578,7 @@ function BattlefieldSide({
   opponent,
   attackerDecision,
   selectedAttackers,
+  targetedPermanentIds,
   onToggleAttacker,
 }: {
   player: PlayerState;
@@ -574,6 +589,7 @@ function BattlefieldSide({
   opponent?: boolean;
   attackerDecision?: AttackersDecision;
   selectedAttackers?: Set<string>;
+  targetedPermanentIds?: ReadonlySet<string>;
   onToggleAttacker?: (id: string) => void;
 }) {
   const eligibleIds = useMemo(
@@ -623,9 +639,14 @@ function BattlefieldSide({
           permanents={nonlands}
           eligibleIds={eligibleIds}
           selectedIds={selectedAttackers}
+          targetedIds={targetedPermanentIds}
           onToggle={onToggleAttacker}
         />
-        <PermanentRow title="Lands" permanents={player.lands ?? []} />
+        <PermanentRow
+          title="Lands"
+          permanents={player.lands ?? []}
+          targetedIds={targetedPermanentIds}
+        />
         {nonlands.length === 0 && (player.lands ?? []).length === 0 && (
           <span className="open-ground">Open battlefield</span>
         )}
@@ -729,7 +750,7 @@ function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
 function StackRail({ stack }: { stack: StackEntry[] }) {
   if (stack.length === 0) return null;
   return (
-    <aside className="stack-rail" aria-label="The stack">
+    <aside className="stack-rail" aria-label="The stack" aria-live="polite">
       <div className="panel-heading">
         <span className="eyebrow">RESOLVING</span>
         <h2>The Stack</h2>
@@ -737,15 +758,8 @@ function StackRail({ stack }: { stack: StackEntry[] }) {
       </div>
       <div className="stack-list">
         {[...stack].reverse().map((entry, index) => {
-          const label = entry.label ?? entry.card?.name ?? "Ability";
-          const target = formatTargetLabel(entry.target);
-          const targets =
-            entry.targets
-              ?.map(formatTargetLabel)
-              .filter((value): value is string => value !== null) ?? [];
-          if (entry.spellTarget !== undefined) {
-            targets.push(`Stack #${entry.spellTarget}`);
-          }
+          const label = formatStackEntryLabel(entry);
+          const targets = formatStackTargets(entry);
           return (
             <div
               className="stack-entry"
@@ -763,9 +777,11 @@ function StackRail({ stack }: { stack: StackEntry[] }) {
                 </div>
               )}
               {entry.card && <strong>{label}</strong>}
-              {target && <span>Target: {target}</span>}
               {targets.length ? (
-                <span>Targets: {targets.join(", ")}</span>
+                <span className="stack-target">
+                  {targets.length === 1 ? "Target" : "Targets"} →{" "}
+                  <strong>{targets.join(", ")}</strong>
+                </span>
               ) : null}
             </div>
           );
@@ -777,48 +793,74 @@ function StackRail({ stack }: { stack: StackEntry[] }) {
 
 function PriorityControls({
   decision,
+  stackInteraction,
   onSubmit,
   busy,
 }: {
   decision: PriorityDecision;
+  stackInteraction: StackInteraction | null;
   onSubmit: (action: ActionRequest) => void;
   busy: boolean;
 }) {
   return (
-    <div className="priority-options">
-      {decision.options.map((option, index) => {
-        const target =
-          formatTargetLabel(option.target) ??
-          (option.spellTarget !== undefined
-            ? `Stack #${option.spellTarget}`
-            : null);
-        return (
-          <button
-            id={priorityOptionElementId(decision.decisionId, option.index)}
-            className={`action-card action-${option.kind.toLowerCase()}`}
-            type="button"
-            key={`${option.index}-${option.label}`}
-            onClick={() =>
-              onSubmit({ decisionId: decision.decisionId, index: option.index })
-            }
-            disabled={busy}
-          >
-            <span className="hotkey">{index < 9 ? index + 1 : "•"}</span>
-            {option.card && (
-              <span className={`action-swatch card-${cardColor(option.card)}`}>
-                {formatCost(option.card.cost, option.card.costLabel) || "◇"}
+    <div
+      className={`priority-control ${
+        stackInteraction ? "has-stack-context" : ""
+      }`}
+    >
+      {stackInteraction && (
+        <div className="stack-choice-context">
+          <span>NEXT ON STACK</span>
+          <strong>{stackInteraction.label}</strong>
+          {stackInteraction.targets.length > 0 && (
+            <small>
+              Target → {stackInteraction.targets.join(", ")}
+            </small>
+          )}
+        </div>
+      )}
+      <div className="priority-options">
+        {decision.options.map((option, index) => {
+          const target =
+            formatTargetLabel(option.target) ??
+            (option.spellTarget !== undefined
+              ? `Stack #${option.spellTarget}`
+              : null);
+          const detail =
+            option.kind === "pass" && stackInteraction
+              ? `continue toward resolving ${stackInteraction.label}`
+              : option.kind.replaceAll("_", " ");
+          return (
+            <button
+              id={priorityOptionElementId(decision.decisionId, option.index)}
+              className={`action-card action-${option.kind.toLowerCase()}`}
+              type="button"
+              key={`${option.index}-${option.label}`}
+              onClick={() =>
+                onSubmit({
+                  decisionId: decision.decisionId,
+                  index: option.index,
+                })
+              }
+              disabled={busy}
+            >
+              <span className="hotkey">{index < 9 ? index + 1 : "•"}</span>
+              {option.card && (
+                <span className={`action-swatch card-${cardColor(option.card)}`}>
+                  {formatCost(option.card.cost, option.card.costLabel) || "◇"}
+                </span>
+              )}
+              <span className="action-copy">
+                <strong>{option.label}</strong>
+                <span>
+                  {detail}
+                  {target ? ` · ${target}` : ""}
+                </span>
               </span>
-            )}
-            <span className="action-copy">
-              <strong>{option.label}</strong>
-              <span>
-                {option.kind.replaceAll("_", " ")}
-                {target ? ` · ${target}` : ""}
-              </span>
-            </span>
-          </button>
-        );
-      })}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -838,7 +880,22 @@ function AttackersControls({
   onSubmit: (action: ActionRequest) => void;
   busy: boolean;
 }) {
-  if (decision.eligible.length === 0) return null;
+  if (decision.eligible.length === 0) {
+    return (
+      <div className="decision-actions">
+        <button
+          type="button"
+          className="button-primary"
+          onClick={() =>
+            onSubmit({ decisionId: decision.decisionId, ids: [] })
+          }
+          disabled={busy}
+        >
+          Continue — no attackers
+        </button>
+      </div>
+    );
+  }
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -1061,26 +1118,33 @@ function DecisionDock({
     );
   }, [decision.decisionId, decision.kind, setSelectedAttackers]);
 
-  if (decision.kind === "attackers" && decision.eligible.length === 0)
-    return null;
-
   const humanSeat: PlayerIndex = 0;
   const player = state.players[humanSeat];
   const opponent = state.players[(humanSeat === 0 ? 1 : 0) as PlayerIndex];
+  const stackInteraction =
+    decision.kind === "priority" ? describeTopOfStack(state.stack ?? []) : null;
 
   const heading =
     decision.kind === "priority"
-      ? "Choose your play"
+      ? stackInteraction
+        ? "Respond to the stack"
+        : "Choose your play"
       : decision.kind === "attackers"
-        ? "Declare attackers"
+        ? decision.eligible.length === 0
+          ? "Continue combat"
+          : "Declare attackers"
         : decision.kind === "blockers"
           ? "Declare blockers"
           : "Order combat damage";
   const helper =
     decision.kind === "priority"
-      ? "The game is waiting for your priority decision."
+      ? stackInteraction
+        ? `${stackInteraction.summary} Cast a response, or pass priority to continue.`
+        : "The game is waiting for your priority decision."
       : decision.kind === "attackers"
-        ? "Select any creatures you want to send into combat."
+        ? decision.eligible.length === 0
+          ? "Automatic advance was interrupted. Continue without attackers."
+          : "Select any creatures you want to send into combat."
         : decision.kind === "blockers"
           ? "Each blocker can intercept one legal attacker."
           : "Damage is assigned from left to right.";
@@ -1099,6 +1163,7 @@ function DecisionDock({
         {decision.kind === "priority" && (
           <PriorityControls
             decision={decision}
+            stackInteraction={stackInteraction}
             onSubmit={onSubmit}
             busy={busy}
           />
@@ -1569,6 +1634,9 @@ export default function App() {
   const [selectedAttackers, setSelectedAttackers] = useState<Set<string>>(
     new Set(),
   );
+  const [autoAdvanceFailedDecision, setAutoAdvanceFailedDecision] = useState<
+    string | null
+  >(null);
   const autoSubmittedAttackerDecision = useRef<string | null>(null);
 
   const loadMeta = useCallback(() => {
@@ -1689,7 +1757,7 @@ export default function App() {
   }, [snapshot?.id]);
 
   const act = useCallback(
-    (action: ActionRequest) => {
+    (action: ActionRequest, onError?: () => void) => {
       if (!snapshot || acting) return;
       setActing(true);
       setGameError(null);
@@ -1699,6 +1767,7 @@ export default function App() {
           setActing(false);
         })
         .catch((error: unknown) => {
+          onError?.();
           setGameError(error instanceof Error ? error.message : String(error));
           setActing(false);
         });
@@ -1717,10 +1786,14 @@ export default function App() {
       return;
 
     const decisionKey = `${snapshot.id}:${String(decision.decisionId)}`;
+    if (autoAdvanceFailedDecision === decisionKey) return;
     if (autoSubmittedAttackerDecision.current === decisionKey) return;
     autoSubmittedAttackerDecision.current = decisionKey;
-    act({ decisionId: decision.decisionId, ids: [] });
-  }, [act, acting, snapshot]);
+    act(
+      { decisionId: decision.decisionId, ids: [] },
+      () => setAutoAdvanceFailedDecision(decisionKey),
+    );
+  }, [act, acting, autoAdvanceFailedDecision, snapshot]);
 
   useEffect(() => {
     if (
@@ -1811,6 +1884,7 @@ export default function App() {
 
   const state = snapshot.state;
   const stack = state?.stack ?? [];
+  const targetedPermanentIds = new Set(stackPermanentTargetIds(stack));
   const humanSeat =
     (currentConfig?.players.findIndex((seat) => seat.policyId === "human") ??
       0) as PlayerIndex;
@@ -1821,9 +1895,13 @@ export default function App() {
     snapshot.decision?.kind === "attackers"
       ? snapshot.decision
       : undefined;
-  const hasVisibleDecision = !(
-    attackerDecision && attackerDecision.eligible.length === 0
-  );
+  const emptyAttackDecisionKey =
+    attackerDecision?.eligible.length === 0
+      ? `${snapshot.id}:${String(attackerDecision.decisionId)}`
+      : null;
+  const hasVisibleDecision =
+    emptyAttackDecisionKey === null ||
+    autoAdvanceFailedDecision === emptyAttackDecisionKey;
   const priorityDecision =
     snapshot.decision?.kind === "priority"
       ? snapshot.decision
@@ -1891,6 +1969,7 @@ export default function App() {
                   meta={meta}
                   active={state.activePlayer === farSeat}
                   opponent
+                  targetedPermanentIds={targetedPermanentIds}
                 />
                 <div className="midline">
                   <span />
@@ -1907,6 +1986,7 @@ export default function App() {
                     state.activePlayer === nearSeat ? attackerDecision : undefined
                   }
                   selectedAttackers={selectedAttackers}
+                  targetedPermanentIds={targetedPermanentIds}
                   onToggleAttacker={toggleAttacker}
                 />
               </div>

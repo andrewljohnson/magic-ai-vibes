@@ -9,10 +9,11 @@
     "dev": "npm run build && node server.mjs",
     "build": "tsc --noEmit && vite build --config vite.game.config.ts",
     "start": "node server.mjs",
+    "fixture:target-stack": "node fixture-server.mjs target-stack",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:contract": "node --test tests/journey-contract.test.mjs",
     "test:real-bridge": "node --test tests/real-bridge-session.test.mjs",
-    "test:ui": "npm run build && node --test tests/hand-layout.test.mjs tests/target-stack.test.mjs tests/journey-contract.test.mjs"
+    "test:ui": "npm run build && node --test tests/hand-layout.test.mjs tests/target-stack.test.mjs tests/target-stack-contract.test.mjs tests/journey-contract.test.mjs"
   },
   "dependencies": {
     "react": "19.2.6",

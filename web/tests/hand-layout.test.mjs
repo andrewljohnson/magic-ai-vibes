@@ -131,10 +131,19 @@ test("combat skips empty attacker decisions without duplicate controls", async (
     app.indexOf("function AttackersControls"),
     app.indexOf("function BlockersControls"),
   );
+  const emptyAttackers = attackersControls.slice(
+    attackersControls.indexOf("if (decision.eligible.length === 0)"),
+    attackersControls.indexOf("const toggle"),
+  );
 
   assert.match(
-    attackersControls,
-    /if \(decision\.eligible\.length === 0\) return null;/,
+    emptyAttackers,
+    /Continue — no attackers/,
+  );
+  assert.equal(
+    emptyAttackers.match(/<button/g)?.length,
+    1,
+    "a failed automatic advance must reveal exactly one recovery action",
   );
   assert.match(attackersControls, />\s*No attacks\s*<\/button>/);
   assert.match(attackersControls, /disabled=\{busy \|\| selected\.size === 0\}/);
@@ -154,11 +163,11 @@ test("combat skips empty attacker decisions without duplicate controls", async (
   );
   assert.match(
     app,
-    /if \(autoSubmittedAttackerDecision\.current === decisionKey\) return;[\s\S]+?act\(\{ decisionId: decision\.decisionId, ids: \[\] \}\);/,
+    /if \(autoSubmittedAttackerDecision\.current === decisionKey\) return;[\s\S]+?act\([\s\S]+?decisionId: decision\.decisionId, ids: \[\][\s\S]+?setAutoAdvanceFailedDecision\(decisionKey\)/,
   );
   assert.match(
     app,
-    /const hasVisibleDecision = !\([\s\S]+?attackerDecision\.eligible\.length === 0[\s\S]+?\);/,
+    /const emptyAttackDecisionKey =[\s\S]+?attackerDecision\?\.eligible\.length === 0[\s\S]+?const hasVisibleDecision =[\s\S]+?autoAdvanceFailedDecision === emptyAttackDecisionKey;/,
   );
   assert.match(
     app,

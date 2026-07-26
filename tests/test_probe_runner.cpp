@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -93,6 +94,38 @@ void expect(bool condition, std::string_view message) {
     if (!condition) {
         throw std::runtime_error(std::string(message));
     }
+}
+
+bool action_samples_are_bit_identical(
+    const LearnedActionSamples& first,
+    const LearnedActionSamples& second) {
+    if (first.sampled_worlds != second.sampled_worlds ||
+        first.rollout_evaluations !=
+            second.rollout_evaluations ||
+        first.terminal_evaluations !=
+            second.terminal_evaluations ||
+        first.bootstrapped_evaluations !=
+            second.bootstrapped_evaluations ||
+        first.q_samples.size() != second.q_samples.size()) {
+        return false;
+    }
+    for (std::size_t candidate = 0;
+         candidate < first.q_samples.size(); ++candidate) {
+        if (first.q_samples[candidate].size() !=
+            second.q_samples[candidate].size()) {
+            return false;
+        }
+        for (std::size_t sample = 0;
+             sample < first.q_samples[candidate].size(); ++sample) {
+            if (std::bit_cast<std::uint64_t>(
+                    first.q_samples[candidate][sample]) !=
+                std::bit_cast<std::uint64_t>(
+                    second.q_samples[candidate][sample])) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 template <typename Function>
@@ -715,6 +748,91 @@ void test_tiny_reference_is_hidden_clone_invariant() {
     }
 }
 
+void test_priority_evaluation_threads_are_bit_identical() {
+    const auto controls =
+        old_school::probes::make_force_spike_policy_controls_v1();
+    const DecisionProbe& live = controls.front();
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x54485245414453ULL);
+
+    std::vector<old_school::PriorityAction> actions;
+    actions.reserve(live.candidates.size());
+    for (const auto& candidate : live.candidates) {
+        const auto* action =
+            std::get_if<old_school::PriorityAction>(
+                &candidate.action);
+        expect(action != nullptr,
+               "Force Spike control contains a non-Priority action");
+        actions.push_back(*action);
+    }
+
+    old_school::LearnedSearchConfig serial{
+        .seed =
+            old_school::probe_runner::reference_seed_for_probe(
+                old_school::probes::
+                    kForceSpikePolicyControlsV1,
+                live.stable_id),
+        .worlds = 8,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = false,
+        .evaluation_threads = 1,
+    };
+    auto parallel = serial;
+    parallel.evaluation_threads = 4;
+
+    const auto score =
+        [&](const old_school::GameState& state,
+            const old_school::LearnedSearchConfig& config) {
+            return old_school::learned_priority_action_samples(
+                state, live.original_decks, live.root_player,
+                true, live.phase, live.consecutive_passes,
+                actions, model, config);
+        };
+    const old_school::GameState hidden =
+        old_school::probe_runner::hidden_repartition_clone(live);
+    const LearnedActionSamples serial_original =
+        score(live.state, serial);
+    const LearnedActionSamples parallel_original =
+        score(live.state, parallel);
+    const LearnedActionSamples serial_hidden =
+        score(hidden, serial);
+    const LearnedActionSamples parallel_hidden =
+        score(hidden, parallel);
+
+    expect(
+        action_samples_are_bit_identical(
+            serial_original, parallel_original) &&
+            action_samples_are_bit_identical(
+                serial_hidden, parallel_hidden) &&
+            action_samples_are_bit_identical(
+                serial_original, serial_hidden) &&
+            action_samples_are_bit_identical(
+                parallel_original, parallel_hidden),
+        "preindexed four-thread Priority scoring changed raw "
+        "samples, counters, order, or hidden-repartition identity");
+
+    auto invalid = serial;
+    invalid.evaluation_threads = 0;
+    const std::string zero_threads = expect_invalid(
+        [&] {
+            static_cast<void>(score(live.state, invalid));
+        },
+        "Priority scorer accepted zero evaluation threads");
+    expect(
+        zero_threads.find("[1, 64]") != std::string::npos,
+        "evaluation-thread validation was not actionable");
+    invalid.evaluation_threads = 65;
+    static_cast<void>(expect_invalid(
+        [&] {
+            static_cast<void>(score(live.state, invalid));
+        },
+        "Priority scorer accepted too many evaluation threads"));
+}
+
 void test_value_attack_probe_scores_are_seed_independent() {
     const auto probes = old_school::probes::make_probe_dev_v3();
     const auto value_model =
@@ -1103,6 +1221,17 @@ void test_teacher_sufficiency_audit_is_generic_and_hidden_safe() {
             value, "Synthetic Value K8/H0", value_config);
     expect(first == repeated,
            "teacher-sufficiency audit is not deterministic");
+    auto parallel_config = value_config;
+    parallel_config.evaluation_threads = 4;
+    const auto parallel =
+        old_school::probe_runner::score_teacher_sufficiency_audit(
+            value, "Synthetic Value K8/H0", parallel_config);
+    auto serial_with_parallel_identity = first;
+    serial_with_parallel_identity.config = parallel_config;
+    expect(
+        parallel == serial_with_parallel_identity,
+        "teacher audit changed a report field when only execution "
+        "parallelism changed");
     expect(
         first.model_fingerprint ==
                 old_school::learned_model_fingerprint(value) &&
@@ -2706,6 +2835,8 @@ int main() {
                test_hidden_clone_preserves_information_set);
     runner.run("tiny hidden-safe reference",
                test_tiny_reference_is_hidden_clone_invariant);
+    runner.run("Priority evaluation thread identity",
+               test_priority_evaluation_threads_are_bit_identical);
     runner.run("deployed Value attack seed independence",
                test_value_attack_probe_scores_are_seed_independent);
     runner.run("Force Spike control gate and report",
