@@ -474,6 +474,50 @@ void validate_text_field(std::string_view value,
     }
 }
 
+void validate_continuation_controller(
+    LearnedContinuationController controller,
+    std::string_view field) {
+    switch (controller) {
+    case LearnedContinuationController::Legacy:
+    case LearnedContinuationController::PublicStackPassV1:
+        return;
+    }
+    throw std::invalid_argument(
+        std::string(field) + " is unknown");
+}
+
+std::string_view continuation_controller_token(
+    LearnedContinuationController controller) {
+    validate_continuation_controller(
+        controller, "Value continuation controller");
+    switch (controller) {
+    case LearnedContinuationController::Legacy:
+        return "legacy";
+    case LearnedContinuationController::PublicStackPassV1:
+        return "public-stack-pass-v1";
+    }
+    throw std::logic_error(
+        "validated Value continuation controller disappeared");
+}
+
+void validate_named_value_scoring_model(
+    const NamedValueScoringModel& scoring,
+    std::string_view context) {
+    if (!scoring.model || scoring.name.empty() ||
+        !std::isfinite(
+            scoring.value_priority_residual_weight) ||
+        scoring.value_priority_residual_weight < 0.0 ||
+        scoring.value_priority_residual_weight > 1.0) {
+        throw std::invalid_argument(
+            std::string(context) + " model is invalid");
+    }
+    validate_text_field(scoring.name,
+                        std::string(context) + " model name");
+    validate_continuation_controller(
+        scoring.value_continuation_controller,
+        std::string(context) + " continuation controller");
+}
+
 std::string deck_token(DeckId deck) {
     return std::string(deck_name(deck));
 }
@@ -872,6 +916,10 @@ LearnedActionSamples score_probe_actions(
             probe.consecutive_passes, priority_candidates(probe),
             std::move(model), search);
     }
+    if (probe.decision_kind != probes::DecisionKind::Attack) {
+        throw std::invalid_argument(
+            "probe search scorer does not support Block decisions");
+    }
     const PermanentId subject = binary_attack_subject(probe);
     return learned_binary_attack_samples(
         state, probe.original_decks, probe.root_player, {}, subject,
@@ -887,6 +935,10 @@ std::vector<double> actor_raw_scores(
             sorcery_actions_for(probe.phase), probe.phase,
             probe.consecutive_passes, priority_candidates(probe),
             std::move(model));
+    }
+    if (probe.decision_kind != probes::DecisionKind::Attack) {
+        throw std::invalid_argument(
+            "raw Actor scorer does not support Block decisions");
     }
     const PermanentId subject = binary_attack_subject(probe);
     const std::array<double, 2> logits =
@@ -910,6 +962,11 @@ std::vector<double> handcrafted_scores(
         return handcrafted_priority_scores(
             probe.state, probe.root_player,
             priority_candidates(probe), probe.phase);
+    }
+    if (probe.decision_kind != probes::DecisionKind::Attack) {
+        throw std::invalid_argument(
+            "Handcrafted probe scorer does not support Block "
+            "decisions");
     }
     const PermanentId subject = binary_attack_subject(probe);
     const std::array<double, 2> scores =
@@ -994,7 +1051,10 @@ std::vector<double> learned_search_scores(
     std::size_t rollouts_per_world, std::size_t horizon_turns,
     bool blend_shallow_prior,
     double value_continuation_epsilon = 0.0,
-    double value_priority_residual_weight = 0.0) {
+    double value_priority_residual_weight = 0.0,
+    bool value_pass_dominance = false,
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy) {
     const LearnedSearchConfig config{
         .seed = reference_seed_for_probe(
             corpus_id, probe.stable_id),
@@ -1007,6 +1067,9 @@ std::vector<double> learned_search_scores(
         .blend_shallow_prior = blend_shallow_prior,
         .value_priority_residual_weight =
             value_priority_residual_weight,
+        .value_pass_dominance = value_pass_dominance,
+        .value_continuation_controller =
+            value_continuation_controller,
     };
     const LearnedActionSamples samples =
         score_probe_actions(probe, probe.state, model, config);
@@ -1090,12 +1153,110 @@ LearnedValueAttackSetScores value_deployed_attack_scores(
         std::move(value_model), policy_seed);
 }
 
+struct ValuePriorityDeploymentScores {
+    std::vector<double> raw_candidate_q;
+    std::vector<double> deployed_policy_scores;
+    std::vector<std::string> pass_dominated_keys;
+    bool adjusted = false;
+};
+
+ValuePriorityDeploymentScores value_priority_deployment_scores(
+    const probes::DecisionProbe& probe,
+    std::shared_ptr<const LearnedModel> value_model,
+    std::string_view corpus_id, std::size_t worlds,
+    double value_continuation_epsilon,
+    double value_priority_residual_weight,
+    bool value_pass_dominance,
+    LearnedContinuationController value_continuation_controller) {
+    ValuePriorityDeploymentScores result;
+    result.raw_candidate_q = learned_search_scores(
+        probe, std::move(value_model), corpus_id,
+        LearnedVariant::ValueSearchChampion, worlds, 1,
+        kProductionValueHorizon, true,
+        value_continuation_epsilon,
+        value_priority_residual_weight, value_pass_dominance,
+        value_continuation_controller);
+    result.deployed_policy_scores = result.raw_candidate_q;
+    for (const double score : result.raw_candidate_q) {
+        if (!std::isfinite(score)) {
+            throw std::runtime_error(
+                "deployed Value Priority scorer produced a "
+                "non-finite raw candidate Q");
+        }
+    }
+    if (!value_pass_dominance) {
+        return result;
+    }
+
+    const auto dominance = diagnose_value_pass_dominance(
+        probe.state, probe.root_player,
+        sorcery_actions_for(probe.phase), probe.phase,
+        probe.consecutive_passes);
+    const std::vector<PriorityAction> candidates =
+        priority_candidates(probe);
+    std::vector<bool> retained(probe.candidates.size(), true);
+    for (const auto& action : dominance.actions) {
+        if (!action.strictly_dominated_by_pass) {
+            continue;
+        }
+        const auto found = std::find(
+            candidates.begin(), candidates.end(), action.action);
+        if (found == candidates.end()) {
+            continue;
+        }
+        const std::size_t index = static_cast<std::size_t>(
+            std::distance(candidates.begin(), found));
+        retained[index] = false;
+        result.pass_dominated_keys.push_back(
+            probe.candidates[index].descriptor);
+    }
+    if (result.pass_dominated_keys.empty()) {
+        return result;
+    }
+
+    const double lowest_raw = *std::min_element(
+        result.raw_candidate_q.begin(),
+        result.raw_candidate_q.end());
+    if (!std::isfinite(lowest_raw) ||
+        std::none_of(
+            retained.begin(), retained.end(),
+            [](bool candidate_retained) {
+                return candidate_retained;
+            })) {
+        throw std::logic_error(
+            "PD0 removed every explicit probe candidate");
+    }
+    const double filtered_rank = std::nextafter(
+        lowest_raw,
+        -std::numeric_limits<double>::infinity());
+    if (!std::isfinite(filtered_rank)) {
+        throw std::runtime_error(
+            "PD0 could not construct a finite deployment rank");
+    }
+    for (std::size_t index = 0; index < retained.size(); ++index) {
+        if (!retained[index]) {
+            result.deployed_policy_scores[index] = filtered_rank;
+        }
+    }
+    std::sort(result.pass_dominated_keys.begin(),
+              result.pass_dominated_keys.end());
+    result.adjusted = true;
+    return result;
+}
+
 std::vector<probe_eval::ProbePrediction> score_value_deployed(
     const std::vector<probes::DecisionProbe>& corpus,
     std::shared_ptr<const LearnedModel> value_model,
     std::string_view corpus_id, std::size_t worlds,
     double value_continuation_epsilon,
-    double value_priority_residual_weight) {
+    double value_priority_residual_weight,
+    bool value_pass_dominance = false,
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy,
+    bool* policy_scores_adjusted_for_deployment = nullptr) {
+    if (policy_scores_adjusted_for_deployment != nullptr) {
+        *policy_scores_adjusted_for_deployment = false;
+    }
     std::vector<probe_eval::ProbePrediction> predictions;
     predictions.reserve(corpus.size());
     for (const probes::DecisionProbe& probe : corpus) {
@@ -1103,19 +1264,30 @@ std::vector<probe_eval::ProbePrediction> score_value_deployed(
         std::optional<std::size_t> selected_candidate;
         if (probe.decision_kind ==
             probes::DecisionKind::Priority) {
-            scores = learned_search_scores(
+            const auto priority = value_priority_deployment_scores(
                 probe, value_model, corpus_id,
-                LearnedVariant::ValueSearchChampion,
-                worlds, 1,
-                kProductionValueHorizon, true,
+                worlds,
                 value_continuation_epsilon,
-                value_priority_residual_weight);
-        } else {
+                value_priority_residual_weight,
+                value_pass_dominance,
+                value_continuation_controller);
+            scores = priority.deployed_policy_scores;
+            if (priority.adjusted &&
+                policy_scores_adjusted_for_deployment != nullptr) {
+                *policy_scores_adjusted_for_deployment = true;
+            }
+        } else if (
+            probe.decision_kind ==
+            probes::DecisionKind::Attack) {
             const auto attack =
                 value_deployed_attack_scores(
                     probe, value_model, corpus_id);
             scores = attack.scores;
             selected_candidate = attack.selected_candidate;
+        } else {
+            throw std::invalid_argument(
+                "deployed Value scorer does not support Block "
+                "decisions");
         }
         predictions.push_back(make_prediction(
             probe, scores,
@@ -1391,7 +1563,8 @@ PolicyProbeReport evaluate_hidden_invariant_policy(
     const std::vector<probe_eval::ProbeLabel>& labels,
     const std::vector<probe_eval::ProbePrediction>& predictions,
     const std::vector<probe_eval::ProbePrediction>& clone_predictions,
-    bool has_critic_metrics, bool has_candidate_q_fit = false) {
+    bool has_critic_metrics, bool has_candidate_q_fit = false,
+    bool policy_scores_adjusted_for_deployment = false) {
     require_predictions_bit_identical(
         predictions, clone_predictions, name);
     const auto metrics =
@@ -1402,6 +1575,12 @@ PolicyProbeReport evaluate_hidden_invariant_policy(
             labels, clone_predictions);
     require_metrics_bit_identical(metrics, clone_metrics, name);
     std::optional<probe_eval::CandidateQFitSummary> candidate_q_fit;
+    if (has_candidate_q_fit &&
+        policy_scores_adjusted_for_deployment) {
+        throw std::logic_error(
+            "deployment-adjusted rankings cannot be reported as "
+            "candidate-Q fit");
+    }
     if (has_candidate_q_fit) {
         candidate_q_fit =
             probe_eval::evaluate_candidate_q_fit(
@@ -1418,6 +1597,8 @@ PolicyProbeReport evaluate_hidden_invariant_policy(
         .metrics = metrics,
         .has_critic_metrics = has_critic_metrics,
         .candidate_q_fit = std::move(candidate_q_fit),
+        .policy_scores_adjusted_for_deployment =
+            policy_scores_adjusted_for_deployment,
     };
 }
 
@@ -1648,6 +1829,9 @@ ValueProbeDecisionDetail build_value_probe_decision_detail(
 ValueCheckpointProbeReport make_value_checkpoint_report(
     std::string name, std::string fingerprint,
     double value_priority_residual_weight,
+    bool value_pass_dominance,
+    LearnedContinuationController value_continuation_controller,
+    bool policy_scores_adjusted_for_deployment,
     const std::vector<probe_eval::ProbeLabel>& labels,
     const std::vector<probe_eval::ProbePrediction>& predictions,
     const std::vector<probe_eval::ProbePrediction>& clone_predictions,
@@ -1656,7 +1840,8 @@ ValueCheckpointProbeReport make_value_checkpoint_report(
     const PolicyProbeReport evaluated =
         evaluate_hidden_invariant_policy(
             name, "deployed Value checkpoint", labels,
-            predictions, clone_predictions, true);
+            predictions, clone_predictions, true, false,
+            policy_scores_adjusted_for_deployment);
     ValueCheckpointProbeReport checkpoint{
         .name = std::move(name),
         .fingerprint = std::move(fingerprint),
@@ -1664,6 +1849,11 @@ ValueCheckpointProbeReport make_value_checkpoint_report(
             previous == nullptr ? std::string{} : previous->name,
         .value_priority_residual_weight =
             value_priority_residual_weight,
+        .value_pass_dominance = value_pass_dominance,
+        .value_continuation_controller =
+            value_continuation_controller,
+        .policy_scores_adjusted_for_deployment =
+            policy_scores_adjusted_for_deployment,
         .metrics = evaluated.metrics,
     };
     checkpoint.decisions.reserve(labels.size());
@@ -1888,7 +2078,9 @@ std::vector<CandidatePairEstimate> score_value_candidate_pair(
     const std::vector<probes::DecisionProbe>& corpus,
     std::shared_ptr<const LearnedModel> model, std::string name,
     std::string_view corpus_id, const ProbeScoreConfig& config,
-    double value_priority_residual_weight) {
+    double value_priority_residual_weight,
+    bool value_pass_dominance,
+    LearnedContinuationController value_continuation_controller) {
     const auto focused =
         focused_candidate_pair(corpus_kind, corpus);
     if (!focused.has_value()) {
@@ -1907,6 +2099,9 @@ std::vector<CandidatePairEstimate> score_value_candidate_pair(
         .blend_shallow_prior = true,
         .value_priority_residual_weight =
             value_priority_residual_weight,
+        .value_pass_dominance = value_pass_dominance,
+        .value_continuation_controller =
+            value_continuation_controller,
     };
     const LearnedActionSamples original =
         score_probe_actions(
@@ -2242,7 +2437,9 @@ score_value_force_spike_policy_controls(
     std::shared_ptr<const LearnedModel> model,
     std::string policy_name, std::size_t worlds,
     double value_continuation_epsilon,
-    double value_priority_residual_weight) {
+    double value_priority_residual_weight,
+    bool value_pass_dominance,
+    LearnedContinuationController value_continuation_controller) {
     if (!model) {
         throw std::invalid_argument(
             "Force Spike control scoring requires a frozen Value "
@@ -2269,6 +2466,9 @@ score_value_force_spike_policy_controls(
             "Force Spike control Value Priority residual weight "
             "must be finite and in [0, 1]");
     }
+    validate_continuation_controller(
+        value_continuation_controller,
+        "Force Spike control Value continuation controller");
 
     const std::vector<probes::DecisionProbe> controls =
         probes::make_force_spike_policy_controls_v1();
@@ -2283,17 +2483,29 @@ score_value_force_spike_policy_controls(
         throw std::runtime_error(message.str());
     }
 
+    bool policy_scores_adjusted = false;
+    bool clone_policy_scores_adjusted = false;
     const auto predictions = score_value_deployed(
         controls, model, probes::kForceSpikePolicyControlsV1,
         worlds, value_continuation_epsilon,
-        value_priority_residual_weight);
+        value_priority_residual_weight, value_pass_dominance,
+        value_continuation_controller,
+        &policy_scores_adjusted);
     const std::vector<probes::DecisionProbe> hidden_clones =
         hidden_clone_corpus(controls);
     const auto clone_predictions = score_value_deployed(
         hidden_clones, model,
         probes::kForceSpikePolicyControlsV1, worlds,
         value_continuation_epsilon,
-        value_priority_residual_weight);
+        value_priority_residual_weight, value_pass_dominance,
+        value_continuation_controller,
+        &clone_policy_scores_adjusted);
+    if (policy_scores_adjusted !=
+        clone_policy_scores_adjusted) {
+        throw std::runtime_error(
+            "Force Spike hidden repartition changed PD0 root "
+            "eligibility");
+    }
     require_predictions_bit_identical(
         predictions, clone_predictions, policy_name);
 
@@ -2313,6 +2525,11 @@ score_value_force_spike_policy_controls(
         .hidden_repartition_passed = true,
         .value_priority_residual_weight =
             value_priority_residual_weight,
+        .value_pass_dominance = value_pass_dominance,
+        .value_continuation_controller =
+            value_continuation_controller,
+        .policy_scores_adjusted_for_deployment =
+            policy_scores_adjusted,
     };
 }
 
@@ -2846,6 +3063,11 @@ map_candidate_samples(
         return mapped;
     }
 
+    if (probe.decision_kind != probes::DecisionKind::Attack) {
+        throw std::invalid_argument(
+            "candidate sample mapper does not support Block "
+            "decisions");
+    }
     (void)binary_attack_subject(probe);
     if (action_samples.q_samples.size() != 2) {
         throw std::invalid_argument(
@@ -3310,16 +3532,8 @@ HiddenRepartitionSummary verify_value_hidden_repartition(
     }
     for (std::size_t index = 0; index < models.size(); ++index) {
         const auto& model = models[index];
-        if (!model.model || model.name.empty() ||
-            !std::isfinite(
-                model.value_priority_residual_weight) ||
-            model.value_priority_residual_weight < 0.0 ||
-            model.value_priority_residual_weight > 1.0) {
-            throw std::invalid_argument(
-                "hidden-repartition audit model is invalid");
-        }
-        validate_text_field(
-            model.name, "hidden-repartition model name");
+        validate_named_value_scoring_model(
+            model, "hidden-repartition audit");
         for (std::size_t prior = 0; prior < index; ++prior) {
             if (models[prior].name == model.name) {
                 throw std::invalid_argument(
@@ -3339,15 +3553,29 @@ HiddenRepartitionSummary verify_value_hidden_repartition(
             "hidden clone changed corpus information-set fingerprint");
     }
     for (const auto& candidate : models) {
+        bool adjusted = false;
+        bool clone_adjusted = false;
         const auto original = score_value_deployed(
             corpus, candidate.model, definition.corpus_id,
             scoring_value_worlds, value_continuation_epsilon,
-            candidate.value_priority_residual_weight);
+            candidate.value_priority_residual_weight,
+            candidate.value_pass_dominance,
+            candidate.value_continuation_controller,
+            &adjusted);
         const auto clone = score_value_deployed(
             hidden_clones, candidate.model,
             definition.corpus_id, scoring_value_worlds,
             value_continuation_epsilon,
-            candidate.value_priority_residual_weight);
+            candidate.value_priority_residual_weight,
+            candidate.value_pass_dominance,
+            candidate.value_continuation_controller,
+            &clone_adjusted);
+        if (adjusted != clone_adjusted) {
+            throw std::runtime_error(
+                candidate.name +
+                ": hidden repartition changed PD0 root "
+                "eligibility");
+        }
         require_predictions_bit_identical(
             original, clone, candidate.name);
     }
@@ -3356,6 +3584,76 @@ HiddenRepartitionSummary verify_value_hidden_repartition(
         .policy_count = models.size(),
         .probe_count = corpus.size(),
     };
+}
+
+ValueProbeDeploymentDiagnostic diagnose_value_probe_deployment(
+    const probes::DecisionProbe& probe,
+    const NamedValueScoringModel& scoring,
+    std::string_view corpus_id, std::size_t worlds,
+    double value_continuation_epsilon) {
+    validate_named_value_scoring_model(
+        scoring, "Value probe deployment diagnostic");
+    validate_text_field(
+        corpus_id, "Value probe deployment corpus ID");
+    if (probe.decision_kind != probes::DecisionKind::Priority) {
+        throw std::invalid_argument(
+            "Value probe deployment diagnostic requires a "
+            "Priority probe");
+    }
+    const probes::Validation validation =
+        probes::validate_probe(probe);
+    if (!validation.ok()) {
+        throw std::invalid_argument(
+            "Value probe deployment diagnostic requires a valid "
+            "probe");
+    }
+    if (worlds == 0 || worlds > kMaximumReferenceWorlds ||
+        !std::isfinite(value_continuation_epsilon) ||
+        value_continuation_epsilon < 0.0 ||
+        value_continuation_epsilon > 1.0) {
+        throw std::invalid_argument(
+            "Value probe deployment diagnostic search "
+            "configuration is invalid");
+    }
+
+    const auto scores = value_priority_deployment_scores(
+        probe, scoring.model, corpus_id, worlds,
+        value_continuation_epsilon,
+        scoring.value_priority_residual_weight,
+        scoring.value_pass_dominance,
+        scoring.value_continuation_controller);
+    const auto prediction = make_prediction(
+        probe, scores.deployed_policy_scores,
+        probe_critic_value(probe, scoring.model));
+
+    ValueProbeDeploymentDiagnostic diagnostic{
+        .stable_id = probe.stable_id,
+        .pass_dominated_keys = scores.pass_dominated_keys,
+        .selected_keys = deployed_selected_keys(prediction),
+        .policy_scores_adjusted_for_deployment =
+            scores.adjusted,
+        .candidate_q_fit_eligible = !scores.adjusted,
+        .value_pass_dominance =
+            scoring.value_pass_dominance,
+        .value_continuation_controller =
+            scoring.value_continuation_controller,
+    };
+    diagnostic.raw_candidate_q.reserve(
+        probe.candidates.size());
+    diagnostic.deployed_policy_scores.reserve(
+        probe.candidates.size());
+    for (std::size_t index = 0;
+         index < probe.candidates.size(); ++index) {
+        diagnostic.raw_candidate_q.push_back({
+            probe.candidates[index].descriptor,
+            scores.raw_candidate_q[index],
+        });
+        diagnostic.deployed_policy_scores.push_back({
+            probe.candidates[index].descriptor,
+            scores.deployed_policy_scores[index],
+        });
+    }
+    return diagnostic;
 }
 
 ProbeScoreReport score_probe_corpus_with_candidates(
@@ -3393,25 +3691,12 @@ ProbeScoreReport score_probe_corpus_with_candidates(
          ++candidate) {
         const NamedValueScoringModel& scoring =
             models.scoring_value_models[candidate];
-        if (!scoring.model) {
-            throw std::invalid_argument(
-                "probe scoring requires every Value checkpoint "
-                "model to be frozen and non-null");
-        }
-        validate_text_field(scoring.name,
-                            "probe scoring Value name");
+        validate_named_value_scoring_model(
+            scoring, "probe scoring Value");
         if (!scoring.transition_family.empty()) {
             validate_text_field(
                 scoring.transition_family,
                 "probe scoring Value transition family");
-        }
-        if (!std::isfinite(
-                scoring.value_priority_residual_weight) ||
-            scoring.value_priority_residual_weight < 0.0 ||
-            scoring.value_priority_residual_weight > 1.0) {
-            throw std::invalid_argument(
-                "probe scoring Value Priority residual weight must "
-                "be finite and in [0, 1]");
         }
         for (std::size_t prior = 0; prior < candidate; ++prior) {
             if (models.scoring_value_models[prior].name ==
@@ -3533,7 +3818,12 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         (scoring_value_fingerprints.front() !=
              reference_value_fingerprint ||
          models.scoring_value_models.front()
-                 .value_priority_residual_weight != 0.0);
+                 .value_priority_residual_weight != 0.0 ||
+         models.scoring_value_models.front()
+             .value_pass_dominance ||
+         models.scoring_value_models.front()
+                 .value_continuation_controller !=
+             LearnedContinuationController::Legacy);
     const std::size_t policy_count =
         5 + (multi_checkpoint_attribution
                  ? models.scoring_value_models.size()
@@ -3579,25 +3869,44 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         scoring_value_deployed;
     std::vector<std::vector<probe_eval::ProbePrediction>>
         scoring_value_deployed_clones;
+    std::vector<bool> scoring_value_policy_scores_adjusted;
     scoring_value_deployed.reserve(
         models.scoring_value_models.size());
     scoring_value_deployed_clones.reserve(
         models.scoring_value_models.size());
+    scoring_value_policy_scores_adjusted.reserve(
+        models.scoring_value_models.size());
     for (const NamedValueScoringModel& candidate :
          models.scoring_value_models) {
+        bool adjusted = false;
+        bool clone_adjusted = false;
         scoring_value_deployed.push_back(
             score_value_deployed(
                 corpus, candidate.model, definition.corpus_id,
                 config.scoring_value_worlds,
                 config.scoring_value_continuation_epsilon,
-                candidate.value_priority_residual_weight));
+                candidate.value_priority_residual_weight,
+                candidate.value_pass_dominance,
+                candidate.value_continuation_controller,
+                &adjusted));
         scoring_value_deployed_clones.push_back(
             score_value_deployed(
                 hidden_clones, candidate.model,
                 definition.corpus_id,
                 config.scoring_value_worlds,
                 config.scoring_value_continuation_epsilon,
-                candidate.value_priority_residual_weight));
+                candidate.value_priority_residual_weight,
+                candidate.value_pass_dominance,
+                candidate.value_continuation_controller,
+                &clone_adjusted));
+        if (adjusted != clone_adjusted) {
+            throw std::runtime_error(
+                candidate.name +
+                ": hidden repartition changed PD0 root "
+                "eligibility");
+        }
+        scoring_value_policy_scores_adjusted.push_back(
+            adjusted);
     }
     const auto handcrafted = score_handcrafted(corpus);
     const auto handcrafted_clone =
@@ -3643,7 +3952,8 @@ ProbeScoreReport score_probe_corpus_with_candidates(
             corpus_kind, corpus, models.reference_value_model,
             models.reference_value_name +
                 " Q(Pass) - Q(X=0)",
-            definition.corpus_id, config, 0.0);
+            definition.corpus_id, config, 0.0, false,
+            LearnedContinuationController::Legacy);
         for (CandidatePairEstimate& pair : value_pairs) {
             report.value_candidate_pairs.push_back(
                 std::move(pair));
@@ -3655,7 +3965,9 @@ ProbeScoreReport score_probe_corpus_with_candidates(
             corpus_kind, corpus, candidate.model,
             candidate.name + " Q(Pass) - Q(X=0)",
             definition.corpus_id, config,
-            candidate.value_priority_residual_weight);
+            candidate.value_priority_residual_weight,
+            candidate.value_pass_dominance,
+            candidate.value_continuation_controller);
         for (CandidatePairEstimate& pair : value_pairs) {
             report.value_candidate_pairs.push_back(
                 std::move(pair));
@@ -3679,7 +3991,9 @@ ProbeScoreReport score_probe_corpus_with_candidates(
                     candidate.model, candidate.name,
                     config.scoring_value_worlds,
                     config.scoring_value_continuation_epsilon,
-                    candidate.value_priority_residual_weight));
+                    candidate.value_priority_residual_weight,
+                    candidate.value_pass_dominance,
+                    candidate.value_continuation_controller));
         }
         progress << " done\n";
     }
@@ -3695,7 +4009,11 @@ ProbeScoreReport score_probe_corpus_with_candidates(
     const std::string reference_value_deployed_name =
         models.reference_value_name + " deployed policy";
     const auto value_deployed_configuration =
-        [&config](double value_priority_residual_weight) {
+        [&config](
+            double value_priority_residual_weight,
+            bool value_pass_dominance,
+            LearnedContinuationController
+                value_continuation_controller) {
             std::ostringstream value_configuration;
             value_configuration.imbue(std::locale::classic());
             value_configuration
@@ -3712,6 +4030,17 @@ ProbeScoreReport score_probe_corpus_with_candidates(
                 value_configuration
                     << ", Value Priority residual weight="
                     << value_priority_residual_weight;
+            }
+            if (value_pass_dominance) {
+                value_configuration
+                    << ", PD0 root/continuation Pass-dominance";
+            }
+            if (value_continuation_controller !=
+                LearnedContinuationController::Legacy) {
+                value_configuration
+                    << ", continuation controller="
+                    << continuation_controller_token(
+                           value_continuation_controller);
             }
             value_configuration
                 << "; Attack: deployed public-board attack-set "
@@ -3730,7 +4059,9 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         labels, actor_deployed, actor_deployed_clone, true));
     report.policies.push_back(evaluate_hidden_invariant_policy(
         reference_value_deployed_name,
-        value_deployed_configuration(0.0),
+        value_deployed_configuration(
+            0.0, false,
+            LearnedContinuationController::Legacy),
         labels, reference_value_deployed,
         reference_value_deployed_clone, true));
     if (has_distinct_single_value_candidate) {
@@ -3739,9 +4070,14 @@ ProbeScoreReport score_probe_corpus_with_candidates(
                 " deployed policy",
             value_deployed_configuration(
                 models.scoring_value_models.front()
-                    .value_priority_residual_weight),
+                    .value_priority_residual_weight,
+                models.scoring_value_models.front()
+                    .value_pass_dominance,
+                models.scoring_value_models.front()
+                    .value_continuation_controller),
             labels, scoring_value_deployed.front(),
-            scoring_value_deployed_clones.front(), true));
+            scoring_value_deployed_clones.front(), true, false,
+            scoring_value_policy_scores_adjusted.front()));
     }
     report.policies.push_back(evaluate_hidden_invariant_policy(
         "Handcrafted agreement",
@@ -3763,7 +4099,9 @@ ProbeScoreReport score_probe_corpus_with_candidates(
         report.value_checkpoints.push_back(
             make_value_checkpoint_report(
                 models.reference_value_name,
-                reference_value_fingerprint, 0.0, labels,
+                reference_value_fingerprint, 0.0, false,
+                LearnedContinuationController::Legacy, false,
+                labels,
                 reference_value_deployed,
                 reference_value_deployed_clone, nullptr, nullptr));
         std::unordered_map<std::string, std::size_t>
@@ -3789,7 +4127,11 @@ ProbeScoreReport score_probe_corpus_with_candidates(
                 make_value_checkpoint_report(
                     scoring.name,
                     scoring_value_fingerprints[candidate],
-                    scoring.value_priority_residual_weight, labels,
+                    scoring.value_priority_residual_weight,
+                    scoring.value_pass_dominance,
+                    scoring.value_continuation_controller,
+                    scoring_value_policy_scores_adjusted[candidate],
+                    labels,
                     scoring_value_deployed[candidate],
                     scoring_value_deployed_clones[candidate],
                     reference, previous));
@@ -4070,6 +4412,19 @@ std::string format_probe_score_report(
                 output << ", Value Priority residual weight="
                        << control.value_priority_residual_weight;
             }
+            if (control.value_pass_dominance) {
+                output << ", PD0 root/continuation Pass-dominance";
+            }
+            if (control.value_continuation_controller !=
+                LearnedContinuationController::Legacy) {
+                output << ", continuation controller="
+                       << continuation_controller_token(
+                              control.value_continuation_controller);
+            }
+            if (control.policy_scores_adjusted_for_deployment) {
+                output << ", deployment-adjusted ranking "
+                          "(not candidate-Q fit)";
+            }
             output << ", hidden repartition "
                    << (control.hidden_repartition_passed
                            ? "PASS"
@@ -4131,6 +4486,21 @@ std::string format_probe_score_report(
                 output << ", Value Priority residual weight="
                        << checkpoint
                               .value_priority_residual_weight;
+            }
+            if (checkpoint.value_pass_dominance) {
+                output << ", PD0 root/continuation Pass-dominance";
+            }
+            if (checkpoint.value_continuation_controller !=
+                LearnedContinuationController::Legacy) {
+                output << ", continuation controller="
+                       << continuation_controller_token(
+                              checkpoint
+                                  .value_continuation_controller);
+            }
+            if (checkpoint
+                    .policy_scores_adjusted_for_deployment) {
+                output << ", deployment-adjusted ranking "
+                          "(not candidate-Q fit)";
             }
             output << ", pooled top1 "
                    << 100.0 *
@@ -4225,6 +4595,12 @@ std::string format_probe_score_report(
     for (const PolicyProbeReport& policy : report.policies) {
         output << policy.name << "\n  Config: "
                << policy.configuration << '\n';
+        if (policy.policy_scores_adjusted_for_deployment) {
+            output
+                << "  Policy scores: deployment-adjusted finite "
+                   "ranking; raw candidate Q is diagnostic-only "
+                   "(not candidate-Q fit)\n";
+        }
         append_metric_line(
             output, "  ", "Pooled",
             pooled_deck_metrics(policy.metrics),

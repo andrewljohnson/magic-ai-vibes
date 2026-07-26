@@ -8983,3 +8983,93 @@ as a status overstatement because the raw shard seed remains unopened.
   publication, reject any existing file, directory, or symlink at the
   destination, and leave existing bytes unchanged. A CLI precheck alone is
   insufficient.
+
+#### C17-J1 controller and user-field fixture implementation freeze
+
+Frozen and pushed as commit `240d138`, with every reserved C17-J1 seed still
+unopened. `REVIEW.md` was reread through its 12:17 PDT cycle before recording
+this result; the reviewer independently reproduced the frozen promotion cache
+byte-for-byte and confirmed that the paired fit remained the next sealed
+event.
+
+The typed `PublicStackPassV1` implementation is continuation-only. It first
+applies the already accepted PD0 filter, then removes only actions whose valid
+public `spell_target` names a stack object controlled by the chooser. It
+retains Pass, stale/missing targets, opponent-controlled stack targets, and
+both live and payable Force Spike. Exact Pass argmax ties avoid the legacy
+tie-break path; exploration samples only retained actions. Both Value-mirror
+continuation seats receive the same settings. Defaults remain Legacy/PD0-off,
+real-root selection is unchanged, and every non-Learned-Value use is rejected.
+No card name, combat score, Handcoded value, or hidden opponent identity enters
+the controller.
+
+The separate reject-only `old-school-field-regressions-v1` corpus contains six
+fixtures:
+
+1. Flying Men block/no-block against Air Elemental at life 20;
+2. the same public state at life 4 as a terminal control;
+3. Second Main Growth on a summoning-sick Grizzly Bears;
+4. Begin Combat Pass/own-target/opponent-target Growth with a tapped opposing
+   Air Elemental;
+5. the exact resolved opponent-Growth successor with skip/attack choices; and
+6. an otherwise identical successor with the Air Elemental untapped.
+
+The fixtures encode no preferred strategic label. Tests prove only exact rules
+consequences and information safety: the sick Bear cannot attack, Growth
+expires at cleanup, the opponent-target buff is real, a tapped Air cannot
+block the linked Treefolk attack, an untapped grown Air can eat it, Flying Men
+dies when chump-blocking Air, and hidden repartition preserves each fixture.
+Neither the frozen `dev-v3` corpus nor its cache changed.
+
+Verification:
+
+```sh
+./build/old-school-tests
+make -j4 test-probes
+git diff --check
+```
+
+Results were 142/142 engine tests, 44/44 probe tests, 11/11 probe-metric tests,
+and 25/25 probe-runner tests, with every target compiling under the repository's
+`-Werror` flags. Decision: accept this as the declared pre-fit mechanical
+implementation, not as evidence of playing-strength improvement. Next is the
+paired artifact/evaluator implementation and another source freeze before raw
+shard seed `202607261145` is opened.
+
+#### C17-J1 deployment-faithful probe scoring freeze
+
+`REVIEW.md` was reread through the 12:41 PDT cycle before recording this
+implementation result. The reviewer still reports the lift table as
+bit-identical and the paired fit as the next sealed event.
+
+The probe runner now accepts typed, default-off PD0 and continuation-controller
+metadata for named frozen Value models. Priority scoring preserves a finite raw
+Q estimate for every explicit candidate, then creates a separate finite
+deployment ranking only when root PD0 actually removes an action. Filtered
+actions rank strictly below every retained raw Q, cannot enter the deployed
+selected set, and make that row ineligible for candidate-Q calibration. The
+report-level adjustment bit means “an action was actually filtered,” not merely
+“PD0 was enabled.” The K-search itself receives both PD0 and
+`PublicStackPassV1`, matching deployment continuation semantics.
+
+Hidden-repartition checks now include raw Q, deployed ranks, filtered keys,
+selection, adjustment state, and controller metadata. The Force Spike
+live/payable controls prove that enabling PD0 does not falsely mark a row
+adjusted when no explicit root action is dominated. Unsupported Block fixtures
+fail explicitly instead of being silently interpreted as Attack or Priority;
+their bounded common-world continuation scorer remains evaluator integration
+work. The summoning-sick-Bear Growth fixture is correctly retained as a
+reject-only strategic regression, not mislabeled as a mechanical PD0 case.
+
+Verification:
+
+```sh
+make -j4 test-probes
+git diff --check -- include/old_school/probe_runner.hpp \
+  src/probe_runner.cpp tests/test_probe_runner.cpp
+```
+
+Results were 44/44 probe tests, 11/11 probe-metric tests, and 27/27 probe-runner
+tests under `-Werror`. Decision: accept the scoring seam as mechanical
+instrumentation only. It opens no C17-J1 seed and makes no playing-strength
+claim. Next remains the paired artifact/evaluator source freeze.

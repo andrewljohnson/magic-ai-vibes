@@ -153,6 +153,37 @@ const DecisionProbe& first_probe_of_kind(
     return *found;
 }
 
+bool policy_scores_are_bit_identical(
+    const std::vector<old_school::probe_eval::PolicyScore>& first,
+    const std::vector<old_school::probe_eval::PolicyScore>& second) {
+    if (first.size() != second.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < first.size(); ++index) {
+        if (first[index].key != second[index].key ||
+            std::bit_cast<std::uint64_t>(first[index].score) !=
+                std::bit_cast<std::uint64_t>(
+                    second[index].score)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+const old_school::probe_eval::PolicyScore& policy_score_for(
+    const std::vector<old_school::probe_eval::PolicyScore>& scores,
+    std::string_view key) {
+    const auto found = std::find_if(
+        scores.begin(), scores.end(),
+        [key](const old_school::probe_eval::PolicyScore& score) {
+            return score.key == key;
+        });
+    if (found == scores.end()) {
+        throw std::runtime_error("required policy score is missing");
+    }
+    return *found;
+}
+
 std::vector<ProbeReferenceSamples> synthetic_samples(
     const std::vector<DecisionProbe>& probes,
     std::size_t samples_per_candidate) {
@@ -813,6 +844,313 @@ void test_cache_free_value_hidden_repartition_audit() {
         "hidden-repartition validation error was not actionable");
 }
 
+void test_value_deployment_metadata_pd0_and_controller() {
+    const auto validation =
+        old_school::probes::make_probe_validation_v1();
+    const DecisionProbe& probe = validation.front();
+    std::string pass_key;
+    std::string x_zero_key;
+    for (const auto& candidate : probe.candidates) {
+        const auto* action =
+            std::get_if<old_school::PriorityAction>(
+                &candidate.action);
+        if (action == nullptr) {
+            continue;
+        }
+        if (action->kind ==
+            old_school::PriorityActionKind::Pass) {
+            pass_key = candidate.descriptor;
+        }
+        if (action->kind ==
+                old_school::PriorityActionKind::CastDisintegrate &&
+            action->x_value == 0 &&
+            action->target.has_value() &&
+            !action->target->creature.has_value() &&
+            action->target->player == 1 - probe.root_player) {
+            x_zero_key = candidate.descriptor;
+        }
+    }
+    expect(
+        !pass_key.empty() && !x_zero_key.empty(),
+        "PD0 deployment test lost its Pass/X=0 controls");
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x504430434F4E5452ULL);
+
+    const old_school::probe_runner::NamedValueScoringModel
+        default_scoring{
+            .name = "default",
+            .model = model,
+        };
+    const old_school::probe_runner::NamedValueScoringModel
+        explicit_default{
+            .name = "explicit default",
+            .model = model,
+            .value_pass_dominance = false,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::Legacy,
+        };
+    const auto default_diagnostic =
+        old_school::probe_runner::
+            diagnose_value_probe_deployment(
+                probe, default_scoring,
+                old_school::probes::kProbeValidationV1, 1);
+    const auto explicit_default_diagnostic =
+        old_school::probe_runner::
+            diagnose_value_probe_deployment(
+                probe, explicit_default,
+                old_school::probes::kProbeValidationV1, 1);
+    expect(
+        policy_scores_are_bit_identical(
+            default_diagnostic.raw_candidate_q,
+            explicit_default_diagnostic.raw_candidate_q) &&
+            policy_scores_are_bit_identical(
+                default_diagnostic.deployed_policy_scores,
+                explicit_default_diagnostic
+                    .deployed_policy_scores) &&
+            default_diagnostic.selected_keys ==
+                explicit_default_diagnostic.selected_keys &&
+            default_diagnostic.pass_dominated_keys.empty() &&
+            !default_diagnostic
+                 .policy_scores_adjusted_for_deployment &&
+            default_diagnostic.candidate_q_fit_eligible &&
+            !default_diagnostic.value_pass_dominance &&
+            default_diagnostic.value_continuation_controller ==
+                old_school::LearnedContinuationController::Legacy,
+        "explicit default deployment metadata changed legacy "
+        "probe scores or selection bits");
+
+    const old_school::probe_runner::NamedValueScoringModel
+        controller_only{
+            .name = "controller only",
+            .model = model,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+        };
+    const auto controller_diagnostic =
+        old_school::probe_runner::
+            diagnose_value_probe_deployment(
+                probe, controller_only,
+                old_school::probes::kProbeValidationV1, 1);
+    expect(
+        controller_diagnostic.value_continuation_controller ==
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1 &&
+            !controller_diagnostic.value_pass_dominance &&
+            !controller_diagnostic
+                 .policy_scores_adjusted_for_deployment &&
+            controller_diagnostic.candidate_q_fit_eligible &&
+            policy_scores_are_bit_identical(
+                controller_diagnostic.raw_candidate_q,
+                controller_diagnostic.deployed_policy_scores),
+        "continuation-only controller incorrectly filtered the "
+        "explicit probe root");
+
+    const old_school::probe_runner::NamedValueScoringModel
+        pd0_controller{
+            .name = "PD0 + public-stack controller",
+            .model = model,
+            .value_pass_dominance = true,
+            .value_continuation_controller =
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1,
+        };
+    const auto diagnostic =
+        old_school::probe_runner::
+            diagnose_value_probe_deployment(
+                probe, pd0_controller,
+                old_school::probes::kProbeValidationV1, 1);
+    const bool x_zero_is_dominated =
+        std::find(
+            diagnostic.pass_dominated_keys.begin(),
+            diagnostic.pass_dominated_keys.end(),
+            x_zero_key) != diagnostic.pass_dominated_keys.end();
+    const bool selected_a_dominated_candidate =
+        std::any_of(
+            diagnostic.selected_keys.begin(),
+            diagnostic.selected_keys.end(),
+            [&diagnostic](const std::string& selected) {
+                return std::find(
+                           diagnostic.pass_dominated_keys.begin(),
+                           diagnostic.pass_dominated_keys.end(),
+                           selected) !=
+                       diagnostic.pass_dominated_keys.end();
+            });
+    expect(
+        diagnostic.value_pass_dominance &&
+            diagnostic.value_continuation_controller ==
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1 &&
+            diagnostic.policy_scores_adjusted_for_deployment &&
+            !diagnostic.candidate_q_fit_eligible &&
+            x_zero_is_dominated &&
+            !diagnostic.selected_keys.empty() &&
+            !selected_a_dominated_candidate,
+        "PD0 deployment metadata did not exclude the reported "
+        "X=0 action from exact-max selection");
+    expect(
+        diagnostic.raw_candidate_q.size() ==
+                probe.candidates.size() &&
+            diagnostic.deployed_policy_scores.size() ==
+                probe.candidates.size() &&
+            std::all_of(
+                diagnostic.raw_candidate_q.begin(),
+                diagnostic.raw_candidate_q.end(),
+                [](const auto& score) {
+                    return std::isfinite(score.score);
+                }) &&
+            std::all_of(
+                diagnostic.deployed_policy_scores.begin(),
+                diagnostic.deployed_policy_scores.end(),
+                [](const auto& score) {
+                    return std::isfinite(score.score);
+                }) &&
+            policy_score_for(
+                diagnostic.deployed_policy_scores, pass_key)
+                    .score >
+                policy_score_for(
+                    diagnostic.deployed_policy_scores,
+                    x_zero_key)
+                    .score,
+        "PD0 did not retain finite raw Q and a finite "
+        "deployment-only ranking for every candidate");
+    expect(
+        std::bit_cast<std::uint64_t>(
+            policy_score_for(
+                diagnostic.raw_candidate_q, pass_key)
+                .score) ==
+                std::bit_cast<std::uint64_t>(
+                    policy_score_for(
+                        diagnostic.deployed_policy_scores,
+                        pass_key)
+                        .score) &&
+            std::bit_cast<std::uint64_t>(
+                policy_score_for(
+                    diagnostic.raw_candidate_q, x_zero_key)
+                    .score) !=
+                std::bit_cast<std::uint64_t>(
+                    policy_score_for(
+                        diagnostic.deployed_policy_scores,
+                        x_zero_key)
+                        .score),
+        "PD0 overwrote raw candidate Q or failed to create a "
+        "distinct deployment-only rank for the filtered action");
+
+    std::vector<old_school::PriorityAction> actions;
+    actions.reserve(probe.candidates.size());
+    for (const auto& candidate : probe.candidates) {
+        const auto* action =
+            std::get_if<old_school::PriorityAction>(
+                &candidate.action);
+        expect(action != nullptr,
+               "field PD0 fixture contains a non-Priority action");
+        actions.push_back(*action);
+    }
+    const old_school::LearnedSearchConfig expected_search{
+        .seed =
+            old_school::probe_runner::reference_seed_for_probe(
+                old_school::probes::kProbeValidationV1,
+                probe.stable_id),
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns =
+            old_school::kLearnedValueSearchHorizonTurns,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = true,
+        .value_pass_dominance = true,
+        .value_continuation_controller =
+            old_school::LearnedContinuationController::
+                PublicStackPassV1,
+    };
+    const LearnedActionSamples expected_samples =
+        old_school::learned_priority_action_samples(
+            probe.state, probe.original_decks, probe.root_player,
+            true, probe.phase, probe.consecutive_passes, actions,
+            model, expected_search);
+    expect(
+        expected_samples.q_samples.size() ==
+            diagnostic.raw_candidate_q.size(),
+        "manual K-search propagation check lost a candidate");
+    for (std::size_t index = 0;
+         index < expected_samples.q_samples.size(); ++index) {
+        expect(expected_samples.q_samples[index].size() == 1 &&
+                   std::bit_cast<std::uint64_t>(
+                       expected_samples.q_samples[index].front()) ==
+                       std::bit_cast<std::uint64_t>(
+                           diagnostic.raw_candidate_q[index].score),
+               "Named Value PD0/controller metadata did not reach "
+               "the exact K-search continuation config");
+    }
+
+    DecisionProbe hidden = probe;
+    hidden.state =
+        old_school::probe_runner::hidden_repartition_clone(probe);
+    const auto hidden_diagnostic =
+        old_school::probe_runner::
+            diagnose_value_probe_deployment(
+                hidden, pd0_controller,
+                old_school::probes::kProbeValidationV1, 1);
+    expect(
+        policy_scores_are_bit_identical(
+            diagnostic.raw_candidate_q,
+            hidden_diagnostic.raw_candidate_q) &&
+            policy_scores_are_bit_identical(
+                diagnostic.deployed_policy_scores,
+                hidden_diagnostic.deployed_policy_scores) &&
+            diagnostic.pass_dominated_keys ==
+                hidden_diagnostic.pass_dominated_keys &&
+            diagnostic.selected_keys ==
+                hidden_diagnostic.selected_keys,
+        "PD0/controller deployment diagnostic changed under hidden "
+        "repartition");
+}
+
+void test_probe_scoring_rejects_block_decisions_explicitly() {
+    const auto fields =
+        old_school::probes::make_field_regressions_v1();
+    const DecisionProbe& block =
+        first_probe_of_kind(fields, DecisionKind::Block);
+    const LearnedActionSamples pretend_attack{
+        {{0.25, 0.25}, {0.75, 0.75}}};
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        map_candidate_samples(
+                            block, pretend_attack));
+            },
+            "Block fixture silently entered attack mapping")
+                .find("does not support Block") !=
+            std::string::npos,
+        "Block fixture rejection was not explicit");
+
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0x424C4F434B50524FULL);
+    expect(
+        expect_invalid(
+            [&] {
+                static_cast<void>(
+                    old_school::probe_runner::
+                        diagnose_value_probe_deployment(
+                            block,
+                            {
+                                .name = "unsupported Block",
+                                .model = model,
+                            },
+                            old_school::probes::
+                                kFieldRegressionsV1,
+                            1));
+            },
+            "Block fixture silently entered Priority scoring")
+                .find("requires a Priority probe") !=
+            std::string::npos,
+        "Value deployment Block rejection was not explicit");
+}
+
 void test_priority_evaluation_threads_are_bit_identical() {
     const auto controls =
         old_school::probes::make_force_spike_policy_controls_v1();
@@ -1014,6 +1352,28 @@ void test_force_spike_control_gate_and_report_semantics() {
                 std::string::npos,
         "Force Spike control report lost exact scores, selections, "
         "gate status, or legacy-zero formatting");
+
+    ProbeScoreReport adjusted_report;
+    adjusted_report.metadata.corpus_id =
+        std::string(old_school::probes::kProbeDevV3);
+    adjusted_report.policies.push_back({
+        .name = "PD0-adjusted Value",
+        .configuration = "synthetic deployment diagnostic",
+        .policy_scores_adjusted_for_deployment = true,
+    });
+    const std::string adjusted_output =
+        old_school::probe_runner::format_probe_score_report(
+            adjusted_report);
+    expect(
+        adjusted_output.find(
+            "Policy scores: deployment-adjusted finite ranking; "
+            "raw candidate Q is diagnostic-only "
+            "(not candidate-Q fit)") != std::string::npos &&
+            adjusted_output.find(
+                "  Candidate-Q fit (candidate-weighted)\n") ==
+                std::string::npos,
+        "adjusted policy diagnostics were misreported as "
+        "candidate-Q fit");
 }
 
 void test_force_spike_control_scorer_uses_deployed_value_path() {
@@ -1031,9 +1391,15 @@ void test_force_spike_control_scorer_uses_deployed_value_path() {
         old_school::probe_runner::
             score_value_force_spike_policy_controls(
                 model, "Synthetic Value", 2, 0.0, 0.0);
+    const auto explicit_deployment_default =
+        old_school::probe_runner::
+            score_value_force_spike_policy_controls(
+                model, "Synthetic Value", 2, 0.0, 0.0, false,
+                old_school::LearnedContinuationController::Legacy);
 
     expect(
-        first == repeated && first == explicit_zero,
+        first == repeated && first == explicit_zero &&
+            first == explicit_deployment_default,
         "explicit zero changed legacy deployed Force Spike scores");
     expect(
         first.model_fingerprint ==
@@ -1068,6 +1434,41 @@ void test_force_spike_control_scorer_uses_deployed_value_path() {
             old_school::probe_runner::format_probe_score_report(
                 explicit_zero_report),
         "explicit zero changed legacy Force Spike report output");
+
+    const auto pd0_public_stack =
+        old_school::probe_runner::
+            score_value_force_spike_policy_controls(
+                model, "Synthetic Value PD0", 2, 0.0, 0.0, true,
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1);
+    expect(
+        pd0_public_stack.value_pass_dominance &&
+            pd0_public_stack.value_continuation_controller ==
+                old_school::LearnedContinuationController::
+                    PublicStackPassV1 &&
+            !pd0_public_stack
+                 .policy_scores_adjusted_for_deployment &&
+            pd0_public_stack.hidden_repartition_passed,
+        "PD0-on Force Spike controls were marked adjusted despite "
+        "retaining every explicit root candidate");
+    ProbeScoreReport pd0_report;
+    pd0_report.metadata.corpus_id =
+        std::string(old_school::probes::kProbeDevV3);
+    pd0_report.force_spike_controls = {pd0_public_stack};
+    const std::string pd0_output =
+        old_school::probe_runner::format_probe_score_report(
+            pd0_report);
+    expect(
+        pd0_output.find(
+            "PD0 root/continuation Pass-dominance") !=
+                std::string::npos &&
+            pd0_output.find(
+                "continuation controller=public-stack-pass-v1") !=
+                std::string::npos &&
+            pd0_output.find("deployment-adjusted ranking") ==
+                std::string::npos,
+        "Force Spike report confused enabled deployment metadata "
+        "with an actually adjusted root ranking");
 
     const std::string world_error = expect_invalid(
         [&] {
@@ -2914,6 +3315,10 @@ int main() {
                test_tiny_reference_is_hidden_clone_invariant);
     runner.run("cache-free Value hidden-repartition audit",
                test_cache_free_value_hidden_repartition_audit);
+    runner.run("Value deployment metadata and PD0 ranking",
+               test_value_deployment_metadata_pd0_and_controller);
+    runner.run("unsupported Block probe scoring",
+               test_probe_scoring_rejects_block_decisions_explicitly);
     runner.run("Priority evaluation thread identity",
                test_priority_evaluation_threads_are_bit_identical);
     runner.run("deployed Value attack seed independence",

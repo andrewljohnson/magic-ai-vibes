@@ -99,6 +99,10 @@ struct PolicyProbeReport {
     // Present only when every policy score in the row is an estimated Q
     // probability for the corresponding candidate.
     std::optional<probe_eval::CandidateQFitSummary> candidate_q_fit;
+    // True when deployment eligibility changed the ranking scores while raw
+    // finite candidate Q estimates were retained in the deployment
+    // diagnostic. Such a row must never be described as candidate-Q fit.
+    bool policy_scores_adjusted_for_deployment = false;
 };
 
 struct ReferenceSensitivityFlag {
@@ -184,6 +188,10 @@ struct ValueCheckpointProbeReport {
     // Zero is the legacy deployed Value selector. Nonzero candidates add the
     // bounded, learned Priority-head residual after the unchanged Value score.
     double value_priority_residual_weight = 0.0;
+    bool value_pass_dominance = false;
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy;
+    bool policy_scores_adjusted_for_deployment = false;
     probe_eval::ProbeMetricSummary metrics;
     // Stable-ID order, independent of fixture or cache row order.
     std::vector<ValueProbeDecisionDetail> decisions;
@@ -231,6 +239,10 @@ struct ForceSpikePolicyControlReport {
     ForceSpikeControlDecision payable;
     bool hidden_repartition_passed = false;
     double value_priority_residual_weight = 0.0;
+    bool value_pass_dominance = false;
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy;
+    bool policy_scores_adjusted_for_deployment = false;
 
     bool live_selects_force_spike() const;
     bool payable_selects_pass() const;
@@ -456,6 +468,25 @@ struct NamedValueScoringModel {
     std::string transition_family;
     // Zero preserves legacy deployed Value scoring bit-for-bit.
     double value_priority_residual_weight = 0.0;
+    // Default-off deployment metadata. PD0 applies at the probe root and in
+    // Value-mirror continuations. The controller applies only inside K-search
+    // continuations, matching Learned Value deployment.
+    bool value_pass_dominance = false;
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy;
+};
+
+struct ValueProbeDeploymentDiagnostic {
+    std::string stable_id;
+    std::vector<probe_eval::PolicyScore> raw_candidate_q;
+    std::vector<probe_eval::PolicyScore> deployed_policy_scores;
+    std::vector<std::string> pass_dominated_keys;
+    std::vector<std::string> selected_keys;
+    bool policy_scores_adjusted_for_deployment = false;
+    bool candidate_q_fit_eligible = true;
+    bool value_pass_dominance = false;
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy;
 };
 
 struct ProbeScoringModels {
@@ -476,6 +507,15 @@ HiddenRepartitionSummary verify_value_hidden_repartition(
     ProbeCorpusKind corpus_kind,
     const std::vector<NamedValueScoringModel>& models,
     std::size_t scoring_value_worlds = 8,
+    double value_continuation_epsilon = 0.0);
+
+// Cache-free single-position view of exact Value deployment semantics. Raw Q
+// remains finite for every explicit candidate; when PD0 filters root actions,
+// deployed_policy_scores is a finite ranking view that excludes them.
+ValueProbeDeploymentDiagnostic diagnose_value_probe_deployment(
+    const probes::DecisionProbe& probe,
+    const NamedValueScoringModel& scoring,
+    std::string_view corpus_id, std::size_t worlds = 8,
     double value_continuation_epsilon = 0.0);
 
 // Scores explicit immutable Actor and ordered Value candidates. Actor cache
@@ -504,7 +544,10 @@ score_value_force_spike_policy_controls(
     std::shared_ptr<const LearnedModel> model,
     std::string policy_name, std::size_t worlds = 8,
     double value_continuation_epsilon = 0.0,
-    double value_priority_residual_weight = 0.0);
+    double value_priority_residual_weight = 0.0,
+    bool value_pass_dominance = false,
+    LearnedContinuationController value_continuation_controller =
+        LearnedContinuationController::Legacy);
 
 // Eval-only P16 prerequisite. Scores the existing Force Spike live/payable
 // controls and validation-v1 Pass/X=0 decision with a caller-supplied frozen
