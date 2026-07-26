@@ -3,6 +3,8 @@ CXXFLAGS ?= -std=c++20 -O3 -Wall -Wextra -Wpedantic -Werror
 CPPFLAGS ?= -Iinclude
 
 BUILD_DIR := build
+OBJ_DIR := $(BUILD_DIR)/obj
+HEADERS := $(wildcard include/old_school/*.hpp)
 ENGINE_SOURCE := src/game.cpp
 INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
@@ -36,6 +38,26 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
+# Every translation unit compiles exactly once into $(OBJ_DIR); binaries are
+# links over the shared objects. All objects depend on every public header so
+# a header edit rebuilds everything a monolithic compile would have rebuilt.
+ENGINE_OBJECT := $(OBJ_DIR)/game.o
+INTERACTIVE_OBJECT := $(OBJ_DIR)/interactive.o
+LEARNED_ITERATION_OBJECT := $(OBJ_DIR)/learned_iteration.o
+PROBE_OBJECT := $(OBJ_DIR)/probes.o
+PROBE_EVAL_OBJECT := $(OBJ_DIR)/probe_eval.o
+PROBE_RUNNER_OBJECT := $(OBJ_DIR)/probe_runner.o
+AUDIT_COMMON_OBJECT := $(OBJ_DIR)/audit_common.o
+TERMINAL_WEIGHT_EVAL_OBJECT := $(OBJ_DIR)/terminal_weight_eval.o
+TURN_ALIGNMENT_AUDIT_OBJECT := $(OBJ_DIR)/turn_alignment_audit.o
+TARGET_FACTORIAL_AUDIT_OBJECT := $(OBJ_DIR)/target_factorial_audit.o
+REPLAY_WEIGHT_AUDIT_OBJECT := $(OBJ_DIR)/replay_weight_audit.o
+RB0_MECHANICAL_PREFLIGHT_OBJECT := $(OBJ_DIR)/rb0_mechanical_preflight.o
+RB0_MECHANICAL_PREFLIGHT_MAIN_OBJECT := $(OBJ_DIR)/rb0_mechanical_preflight_main.o
+WEB_BRIDGE_OBJECT := $(OBJ_DIR)/web_bridge.o
+WEB_BRIDGE_MAIN_OBJECT := $(OBJ_DIR)/web_bridge_main.o
+MAIN_OBJECT := $(OBJ_DIR)/main.o
+
 .PHONY: all test test-capture test-certify test-learned-iteration test-probes test-audit-common test-terminal-weight-eval test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
@@ -43,50 +65,92 @@ all: $(SIMULATOR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(SIMULATOR): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/turn_alignment_audit.hpp include/old_school/target_factorial_audit.hpp include/old_school/replay_weight_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp -o $@
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
 
-$(TEST_RUNNER): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp -o $@
+$(OBJ_DIR)/tests:
+	mkdir -p $(OBJ_DIR)/tests
 
-$(LEARNED_ITERATION_TEST_RUNNER): $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp -o $@
+$(OBJ_DIR)/%.o: src/%.cpp $(HEADERS) | $(OBJ_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-$(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp -o $@
+$(OBJ_DIR)/tests/%.o: tests/%.cpp $(HEADERS) | $(OBJ_DIR)/tests
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-$(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp include/old_school/game.hpp include/old_school/probe_eval.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp -o $@
+SIMULATOR_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(AUDIT_COMMON_OBJECT) $(TERMINAL_WEIGHT_EVAL_OBJECT) $(TURN_ALIGNMENT_AUDIT_OBJECT) $(TARGET_FACTORIAL_AUDIT_OBJECT) $(REPLAY_WEIGHT_AUDIT_OBJECT) $(MAIN_OBJECT)
 
-$(PROBE_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp -o $@
+$(SIMULATOR): $(SIMULATOR_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(SIMULATOR_OBJECTS) -o $@
 
-$(AUDIT_COMMON_TEST_RUNNER): $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp include/old_school/audit_common.hpp include/old_school/learned_iteration.hpp include/old_school/game.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp -o $@
+TEST_RUNNER_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(OBJ_DIR)/tests/test_game.o
 
-$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) tests/test_terminal_weight_eval.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) tests/test_terminal_weight_eval.cpp -o $@
+$(TEST_RUNNER): $(TEST_RUNNER_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(TEST_RUNNER_OBJECTS) -o $@
 
-$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) tests/test_turn_alignment_audit.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/turn_alignment_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) tests/test_turn_alignment_audit.cpp -o $@
+LEARNED_ITERATION_TEST_OBJECTS := $(LEARNED_ITERATION_OBJECT) $(OBJ_DIR)/tests/test_learned_iteration.o
 
-$(TARGET_FACTORIAL_AUDIT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) tests/test_target_factorial_audit.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/turn_alignment_audit.hpp include/old_school/target_factorial_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) tests/test_target_factorial_audit.cpp -o $@
+$(LEARNED_ITERATION_TEST_RUNNER): $(LEARNED_ITERATION_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(LEARNED_ITERATION_TEST_OBJECTS) -o $@
 
-$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) tests/test_replay_weight_audit.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/replay_weight_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) tests/test_replay_weight_audit.cpp -o $@
+PROBE_TEST_OBJECTS := $(ENGINE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(OBJ_DIR)/tests/test_probes.o
 
-$(RB0_MECHANICAL_PREFLIGHT): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) src/rb0_mechanical_preflight_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/replay_weight_audit.hpp include/old_school/rb0_mechanical_preflight.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) src/rb0_mechanical_preflight_main.cpp -o $@
+$(PROBE_TEST_RUNNER): $(PROBE_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(PROBE_TEST_OBJECTS) -o $@
 
-$(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) tests/test_rb0_mechanical_preflight.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/replay_weight_audit.hpp include/old_school/rb0_mechanical_preflight.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) tests/test_rb0_mechanical_preflight.cpp -o $@
+PROBE_EVAL_TEST_OBJECTS := $(PROBE_EVAL_OBJECT) $(OBJ_DIR)/tests/test_probe_eval.o
 
-$(WEB_BRIDGE): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/web_bridge.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp -o $@
+$(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(PROBE_EVAL_TEST_OBJECTS) -o $@
 
-$(WEB_BRIDGE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/web_bridge.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp -o $@
+PROBE_RUNNER_TEST_OBJECTS := $(ENGINE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(OBJ_DIR)/tests/test_probe_runner.o
+
+$(PROBE_RUNNER_TEST_RUNNER): $(PROBE_RUNNER_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(PROBE_RUNNER_TEST_OBJECTS) -o $@
+
+AUDIT_COMMON_TEST_OBJECTS := $(AUDIT_COMMON_OBJECT) $(OBJ_DIR)/tests/test_audit_common.o
+
+$(AUDIT_COMMON_TEST_RUNNER): $(AUDIT_COMMON_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(AUDIT_COMMON_TEST_OBJECTS) -o $@
+
+TERMINAL_WEIGHT_EVAL_TEST_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(AUDIT_COMMON_OBJECT) $(TERMINAL_WEIGHT_EVAL_OBJECT) $(OBJ_DIR)/tests/test_terminal_weight_eval.o
+
+$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER): $(TERMINAL_WEIGHT_EVAL_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(TERMINAL_WEIGHT_EVAL_TEST_OBJECTS) -o $@
+
+TURN_ALIGNMENT_AUDIT_TEST_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(AUDIT_COMMON_OBJECT) $(TERMINAL_WEIGHT_EVAL_OBJECT) $(TURN_ALIGNMENT_AUDIT_OBJECT) $(OBJ_DIR)/tests/test_turn_alignment_audit.o
+
+$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER): $(TURN_ALIGNMENT_AUDIT_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(TURN_ALIGNMENT_AUDIT_TEST_OBJECTS) -o $@
+
+TARGET_FACTORIAL_AUDIT_TEST_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(AUDIT_COMMON_OBJECT) $(TERMINAL_WEIGHT_EVAL_OBJECT) $(TURN_ALIGNMENT_AUDIT_OBJECT) $(TARGET_FACTORIAL_AUDIT_OBJECT) $(OBJ_DIR)/tests/test_target_factorial_audit.o
+
+$(TARGET_FACTORIAL_AUDIT_TEST_RUNNER): $(TARGET_FACTORIAL_AUDIT_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(TARGET_FACTORIAL_AUDIT_TEST_OBJECTS) -o $@
+
+REPLAY_WEIGHT_AUDIT_TEST_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(AUDIT_COMMON_OBJECT) $(TERMINAL_WEIGHT_EVAL_OBJECT) $(REPLAY_WEIGHT_AUDIT_OBJECT) $(OBJ_DIR)/tests/test_replay_weight_audit.o
+
+$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER): $(REPLAY_WEIGHT_AUDIT_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(REPLAY_WEIGHT_AUDIT_TEST_OBJECTS) -o $@
+
+RB0_MECHANICAL_PREFLIGHT_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(AUDIT_COMMON_OBJECT) $(TERMINAL_WEIGHT_EVAL_OBJECT) $(REPLAY_WEIGHT_AUDIT_OBJECT) $(RB0_MECHANICAL_PREFLIGHT_OBJECT) $(RB0_MECHANICAL_PREFLIGHT_MAIN_OBJECT)
+
+$(RB0_MECHANICAL_PREFLIGHT): $(RB0_MECHANICAL_PREFLIGHT_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(RB0_MECHANICAL_PREFLIGHT_OBJECTS) -o $@
+
+RB0_MECHANICAL_PREFLIGHT_TEST_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(PROBE_OBJECT) $(PROBE_EVAL_OBJECT) $(PROBE_RUNNER_OBJECT) $(AUDIT_COMMON_OBJECT) $(TERMINAL_WEIGHT_EVAL_OBJECT) $(REPLAY_WEIGHT_AUDIT_OBJECT) $(RB0_MECHANICAL_PREFLIGHT_OBJECT) $(OBJ_DIR)/tests/test_rb0_mechanical_preflight.o
+
+$(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER): $(RB0_MECHANICAL_PREFLIGHT_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(RB0_MECHANICAL_PREFLIGHT_TEST_OBJECTS) -o $@
+
+WEB_BRIDGE_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(WEB_BRIDGE_OBJECT) $(WEB_BRIDGE_MAIN_OBJECT)
+
+$(WEB_BRIDGE): $(WEB_BRIDGE_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(WEB_BRIDGE_OBJECTS) -o $@
+
+WEB_BRIDGE_TEST_OBJECTS := $(ENGINE_OBJECT) $(INTERACTIVE_OBJECT) $(LEARNED_ITERATION_OBJECT) $(WEB_BRIDGE_OBJECT) $(OBJ_DIR)/tests/test_web_bridge.o
+
+$(WEB_BRIDGE_TEST_RUNNER): $(WEB_BRIDGE_TEST_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(WEB_BRIDGE_TEST_OBJECTS) -o $@
 
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts

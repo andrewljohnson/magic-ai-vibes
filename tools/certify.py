@@ -2370,7 +2370,13 @@ class CertificationRunner:
             # the test gate without being rebuilt from the clean source tree.
             self.run_source_stage(
                 "make-test",
-                [str(make_path), "-B", "test"],
+                [
+                    str(make_path),
+                    "-B",
+                    "-j",
+                    str(max(1, os.cpu_count() or 1)),
+                    "test",
+                ],
                 environment=make_test_environment,
             )
             simulator = self.runtime_dir / "old-school-sim"
