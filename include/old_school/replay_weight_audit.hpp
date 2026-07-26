@@ -120,6 +120,11 @@ struct WeightDiagnostics {
     bool operator==(const WeightDiagnostics&) const = default;
 };
 
+// Recomputes the hierarchy mass diagnostics for already weighted records.
+// This is the same path used by collection and consumes no RNG.
+WeightDiagnostics diagnose_hierarchical_weights(
+    std::span<const AuditRecord> records);
+
 struct CaptureConfig {
     std::size_t max_game_turns = 500;
     std::size_t worker_count = 1;

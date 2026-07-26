@@ -149,6 +149,27 @@ DistributionSummary summarize_values(
     return result;
 }
 
+class CompensatedDiagnosticSum {
+  public:
+    void add(double value) noexcept {
+        const double next = sum_ + value;
+        if (std::abs(sum_) >= std::abs(value)) {
+            correction_ += (sum_ - next) + value;
+        } else {
+            correction_ += (value - next) + sum_;
+        }
+        sum_ = next;
+    }
+
+    [[nodiscard]] double value() const noexcept {
+        return sum_ + correction_;
+    }
+
+  private:
+    double sum_ = 0.0;
+    double correction_ = 0.0;
+};
+
 WeightDiagnostics describe_weights(
     std::span<const AuditRecord* const> records,
     bool verify_hierarchy) {
@@ -160,11 +181,13 @@ WeightDiagnostics describe_weights(
     std::map<ActorKey, std::size_t> actor_counts;
     std::map<ActorKey, std::set<std::size_t>> actor_turns;
     std::map<ActorTurnKey, std::size_t> turn_counts;
-    std::map<ActorKey, long double> actor_masses;
-    std::map<ActorTurnKey, long double> turn_masses;
+    std::map<ActorKey, CompensatedDiagnosticSum> actor_masses;
+    std::map<ActorTurnKey, CompensatedDiagnosticSum>
+        turn_masses;
     std::vector<double> weights;
     weights.reserve(records.size());
-    long double total = 0.0L;
+    CompensatedDiagnosticSum diagnostic_total;
+    long double kish_total = 0.0L;
     long double squared = 0.0L;
     bool finite_positive = true;
     for (const AuditRecord* record : records) {
@@ -176,14 +199,15 @@ WeightDiagnostics describe_weights(
         ++actor_counts[actor];
         actor_turns[actor].insert(record->root_turn);
         ++turn_counts[actor_turn];
-        actor_masses[actor] += record->treatment_weight;
-        turn_masses[actor_turn] += record->treatment_weight;
+        actor_masses[actor].add(record->treatment_weight);
+        turn_masses[actor_turn].add(record->treatment_weight);
         weights.push_back(record->treatment_weight);
         finite_positive =
             finite_positive &&
             std::isfinite(record->treatment_weight) &&
             record->treatment_weight > 0.0;
-        total += record->treatment_weight;
+        diagnostic_total.add(record->treatment_weight);
+        kish_total += record->treatment_weight;
         squared +=
             static_cast<long double>(record->treatment_weight) *
             record->treatment_weight;
@@ -214,11 +238,12 @@ WeightDiagnostics describe_weights(
     result.records = records.size();
     result.actor_games = actor_counts.size();
     result.actor_turns = turn_counts.size();
-    result.total_weight = static_cast<double>(total);
+    result.total_weight = diagnostic_total.value();
     result.kish_effective_sample_size =
         squared == 0.0L
             ? 0.0
-            : static_cast<double>(total * total / squared);
+            : static_cast<double>(
+                  kish_total * kish_total / squared);
     result.weights = summarize_values(std::move(weights));
     result.actor_record_counts =
         summarize_values(std::move(actor_record_counts));
@@ -247,7 +272,7 @@ WeightDiagnostics describe_weights(
     result.turn_mass_identity = true;
     for (const auto& [actor, mass] : actor_masses) {
         const double error = std::abs(
-            static_cast<double>(mass) - expected_actor);
+            mass.value() - expected_actor);
         result.maximum_actor_mass_error =
             std::max(result.maximum_actor_mass_error, error);
         result.actor_mass_identity =
@@ -260,9 +285,10 @@ WeightDiagnostics describe_weights(
             static_cast<double>(turn_count);
         for (const std::size_t turn : actor_turns.at(actor)) {
             const double turn_error = std::abs(
-                static_cast<double>(
-                    turn_masses.at({
-                        actor.first, actor.second, turn})) -
+                turn_masses
+                        .at({
+                            actor.first, actor.second, turn})
+                        .value() -
                 expected_turn);
             result.maximum_turn_mass_error =
                 std::max(
@@ -936,6 +962,16 @@ void require_hash(std::string_view hash, std::string_view field) {
 
 } // namespace
 
+WeightDiagnostics diagnose_hierarchical_weights(
+    std::span<const AuditRecord> records) {
+    std::vector<const AuditRecord*> record_pointers;
+    record_pointers.reserve(records.size());
+    for (const AuditRecord& record : records) {
+        record_pointers.push_back(&record);
+    }
+    return describe_weights(record_pointers, true);
+}
+
 std::vector<AuditTask> audit_schedule(
     std::uint64_t seed, std::size_t generation,
     std::size_t balanced_blocks) {
@@ -1232,13 +1268,8 @@ Capture collect(
         hidden_records[index].treatment_weight =
             hidden_weights[index];
     }
-    std::vector<const AuditRecord*> record_pointers;
-    record_pointers.reserve(output.records.size());
-    for (const AuditRecord& record : output.records) {
-        record_pointers.push_back(&record);
-    }
     output.weights =
-        describe_weights(record_pointers, true);
+        diagnose_hierarchical_weights(output.records);
     output.weight_identity_passed =
         output.weights.finite_positive &&
         output.weights.global_mass_identity &&

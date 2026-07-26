@@ -1,4 +1,5 @@
 #include "old_school/replay_weight_audit.hpp"
+#include "old_school/audit_common.hpp"
 
 #include <algorithm>
 #include <array>
@@ -285,6 +286,110 @@ void test_uneven_hierarchy_equalizes_actor_and_turn_mass() {
     expect_near(
         weights[0] + weights[1],
         weights[2], 0.0, "equal within-actor turn mass");
+}
+
+void test_full_scale_hierarchy_uses_compensated_mass() {
+    constexpr std::size_t kRows = 129280;
+    constexpr std::size_t kRepeatedRows = kRows - 1;
+
+    std::vector<rb0::ReplayCoordinate> coordinates;
+    coordinates.reserve(kRows);
+    for (std::size_t row = 0; row < kRepeatedRows; ++row) {
+        static_cast<void>(row);
+        coordinates.push_back({
+            .physical_game = 0,
+            .perspective = 0,
+            .calendar_turn = 1,
+        });
+    }
+    coordinates.push_back({
+        .physical_game = 1,
+        .perspective = 0,
+        .calendar_turn = 1,
+    });
+    expect(
+        coordinates.size() == kRows,
+        "full-scale fixture row count");
+
+    const std::vector<double> weights =
+        rb0::hierarchical_weights(coordinates);
+    const double expected_mass = static_cast<double>(kRows);
+    const double tolerance =
+        old_school::audit_common::mass_tolerance(expected_mass);
+    long double legacy_total = 0.0L;
+    long double legacy_repeated_actor_mass = 0.0L;
+    for (const double weight : weights) {
+        legacy_total += weight;
+    }
+    for (std::size_t index = 0;
+         index < kRepeatedRows; ++index) {
+        legacy_repeated_actor_mass += weights[index];
+    }
+    const double legacy_error = std::abs(
+        static_cast<double>(legacy_total) - expected_mass);
+    const double expected_actor_mass = expected_mass / 2.0;
+    const double actor_tolerance =
+        old_school::audit_common::mass_tolerance(
+            expected_actor_mass);
+    const double legacy_actor_error = std::abs(
+        static_cast<double>(legacy_repeated_actor_mass) -
+        expected_actor_mass);
+    if constexpr (
+        std::numeric_limits<long double>::digits ==
+        std::numeric_limits<double>::digits) {
+        expect(
+            legacy_error > tolerance,
+            "full-scale fixture must expose legacy arm64 "
+            "accumulation failure");
+        expect(
+            legacy_actor_error > actor_tolerance,
+            "full-scale fixture must expose legacy actor/turn "
+            "accumulation failure");
+    }
+
+    std::vector<rb0::AuditRecord> records;
+    records.reserve(kRows);
+    for (std::size_t index = 0; index < kRows; ++index) {
+        records.push_back({
+            .physical_game =
+                coordinates[index].physical_game,
+            .perspective =
+                coordinates[index].perspective,
+            .root_turn =
+                coordinates[index].calendar_turn,
+            .treatment_weight = weights[index],
+        });
+    }
+    const rb0::WeightDiagnostics diagnostics =
+        rb0::diagnose_hierarchical_weights(records);
+    expect(diagnostics.records == kRows, "full-scale records");
+    expect(
+        diagnostics.actor_games == 2,
+        "full-scale actor count");
+    expect(
+        diagnostics.actor_turns == 2,
+        "full-scale actor-turn count");
+    expect(
+        diagnostics.finite_positive,
+        "full-scale weights finite-positive");
+    expect(
+        diagnostics.global_mass_identity,
+        "compensated full-scale global mass");
+    expect(
+        diagnostics.actor_mass_identity,
+        "full-scale actor mass remains valid");
+    expect(
+        diagnostics.turn_mass_identity,
+        "full-scale turn mass remains valid");
+    expect(
+        diagnostics.maximum_global_mass_error <= tolerance,
+        "full-scale global error within frozen tolerance");
+    expect(
+        diagnostics.maximum_actor_mass_error <= actor_tolerance,
+        "full-scale actor error within frozen tolerance");
+    expect(
+        diagnostics.maximum_turn_mass_error <= actor_tolerance,
+        "full-scale turn error within frozen tolerance");
 }
 
 void test_hierarchy_rejects_malformed_coordinates() {
@@ -629,6 +734,9 @@ int main() {
     runner.run(
         "uneven hierarchy equalizes actor and turn mass",
         test_uneven_hierarchy_equalizes_actor_and_turn_mass);
+    runner.run(
+        "full-scale hierarchy uses compensated mass",
+        test_full_scale_hierarchy_uses_compensated_mass);
     runner.run(
         "hierarchy rejects malformed coordinates",
         test_hierarchy_rejects_malformed_coordinates);

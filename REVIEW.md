@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 09:40 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 10:17 PDT — refreshed every review cycle.*
 
 - **THE TARGET (user-precise): the all-decks LIFT GATE.** Best
   current read (pooled 240 games/cell over seeds 4242+7801): **1 of
@@ -147,6 +147,38 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 10:17 PDT (review cycle)
+
+**No-change cycle: extraction accepted at HEAD, PD0 sealed run
+still pending (capture directory empty).** Lift table:
+bit-identical, fifty-ninth cycle. All positions hold; the program
+is one PD0 run and one repaired RB0 from the joint composite.
+
+## 2026-07-26 10:11 PDT (review cycle)
+
+**The audit-common extraction is complete and accepted (fe24471) —
+all four audit test binaries' stdout SHA-256s exactly equal before
+and after, with audit-specific serializers correctly left local.
+Textbook frozen-instrument refactoring. PD0's sealed run is now
+unblocked and is the next event.** Lift table: bit-identical,
+fifty-eighth cycle. My side: the baseline instrument-panel profile
+is nearly complete (waste census validated against all three
+field-report numbers exactly: 1/6/11 per 20-game run; final probe
+tracks finishing).
+
+## 2026-07-26 10:02 PDT (review cycle)
+
+**No-change cycle: extraction refactor still in flight (HEAD
+aebff8f), PD0 sealed run queued.** Lift table: bit-identical,
+fifty-seventh cycle. All positions hold.
+
+## 2026-07-26 09:47 PDT (review cycle)
+
+**No-change cycle: the audit-common extraction continues (wip HEAD),
+PD0 sealed run still queued behind it.** Lift table: bit-identical,
+fifty-sixth cycle. All positions hold on the two-event composite
+path.
 
 ## 2026-07-26 09:40 PDT (review cycle)
 
