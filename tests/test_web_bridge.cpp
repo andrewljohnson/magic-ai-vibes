@@ -161,6 +161,18 @@ void test_frozen_c16_load_boundary_fails_actionably() {
                "--refresh-value-challenger-cache") !=
                std::string::npos,
            "missing C16 error omitted the separate CLI action");
+    expect(message.find(
+               "--challenger learned-value-c16 --baseline random "
+               "--learned-rollouts 8 --train-games 800 "
+               "--train-seed 424242 "
+               "--refresh-value-challenger-cache") !=
+               std::string::npos,
+           "missing C16 error did not provide an executable "
+           "benchmark recovery command");
+    expect(message.find("--learned-generations") ==
+               std::string::npos,
+           "missing C16 recovery command included a benchmark-"
+           "incompatible generations flag");
 }
 
 void test_c16_rejects_noncanonical_training_identity() {

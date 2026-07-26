@@ -84,10 +84,14 @@ make web
 ```
 
 Open <http://127.0.0.1:4173>. The setup drawer offers all five decks and
-Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned Value, and
-Learned Actor opponents, plus deterministic game/training seeds. Learned
-opponents are prepared while a new game opens; lower `train games` in
-the drawer for a faster behavior-inspection match.
+Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned Value C16,
+Learned Value G0, and Learned Actor opponents, plus deterministic
+game/training seeds. C16 is the default Learned opponent: it loads the exact
+frozen T800/S424242/C16 artifact at K=8/H=4 and fails closed if that artifact
+is missing, stale, or has the wrong fingerprint. G0 remains an explicit
+trainable choice; select it before lowering `train games` for a faster smoke
+match. The in-game `REPRO` panel shows the actual generation, K/H, and complete
+model fingerprint so manual behavior reports identify the model that played.
 
 The Node server starts one structured C++ engine session per match. Game state
 and clickable choices come directly from the engine's legal-action callbacks;

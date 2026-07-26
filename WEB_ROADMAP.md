@@ -282,8 +282,9 @@ rules.
 
 ### P3 — Model inspection and reproducibility
 
-Status: **acceptance criteria and public-log privacy boundary complete;
-broader model inspection remains a future enhancement**
+Status: **explicit Learned-model identity, acceptance criteria, and public-log
+privacy boundary complete; broader model inspection remains a future
+enhancement**
 
 Acceptance criteria:
 
@@ -697,7 +698,7 @@ The gate runs the full journey for every combination of:
 
 - Deck: Green, Red, Blue, White, RU Aggro
 - Opponent: Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned
-  Value, Learned Actor
+  Value C16, Learned Value G0, Learned Actor
 
 The 35-case matrix proves that every advertised deck/policy selection survives
 normalization and session setup. It does **not** claim that the fixture ran the
@@ -1375,3 +1376,26 @@ For each web issue:
   binding, so the required render evidence comes from the repository's real
   Chromium/Playwright gate on ephemeral localhost ports; port `4173` was
   untouched.
+- 2026-07-26 — Completed the preregistered explicit Learned-model identity
+  slice. Setup now advertises seven policies with separate `Learned Value C16`
+  and `Learned Value G0` choices; C16 is the normal default at K=8/H=4, while
+  G0 remains an explicit per-match training path. The web bridge accepts and
+  reports generation separately from rollout width. Its C16 branch requires
+  exact T800/S424242/C16 metadata, resolves the artifact relative to the bridge
+  executable rather than the Node process's `web/` working directory, loads
+  only through the canonical artifact reader, and verifies exact fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+  it contains no train/refresh/substitution fallback. Missing, stale,
+  noncanonical, and wrong-fingerprint paths fail closed with an actionable
+  separate CLI generation command. Structured, whitelisted model identity
+  survives the server boundary and the REPRO panel shows actual family,
+  generation, K/H, source, and the full fingerprint without receiving any
+  state or hidden-card payload. `make test-web` passed 12/12 C++ bridge tests
+  and 90/90 Node tests; `make test-web-ui` passed 82/82 including the 35-case
+  five-deck × seven-policy matrix. The first rendered invocation was
+  infrastructure-only `listen EPERM`; the permitted identical full rerun
+  passed 7/7 Playwright journeys. At both 1280 × 720 and 1440 × 900, a real
+  bridge launched from the web workflow loaded the exact C16 artifact, the
+  opponent HUD visibly named `Learned Value C16`, and the open REPRO panel
+  visibly contained `learned-value C16 · K8/H4` plus the complete fingerprint,
+  with the panel wholly inside the viewport and no page overflow.

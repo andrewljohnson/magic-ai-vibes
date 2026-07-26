@@ -1141,8 +1141,8 @@ load_frozen_learned_value_c16(const std::string& path) {
             "; generate it in a separate CLI run with "
             "./build/old-school-sim --benchmark --games 1 "
             "--challenger learned-value-c16 --baseline random "
-            "--learned-generations 16 --learned-rollouts 8 "
-            "--train-games 800 --train-seed 424242 "
+            "--learned-rollouts 8 --train-games 800 "
+            "--train-seed 424242 "
             "--refresh-value-challenger-cache");
     }
     const std::string fingerprint =

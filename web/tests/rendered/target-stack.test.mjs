@@ -492,15 +492,16 @@ for (const viewport of VIEWPORTS) {
           "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
       });
 
-      const visiblePolicy = page
-        .locator(".opponent-side .player-hud")
-        .getByText("Learned Value C16", { exact: true });
+      const visiblePolicy = page.locator(
+        ".opponent-side .player-hud .player-copy > span",
+      );
       assert.equal(await visiblePolicy.count(), 1);
       assert.equal(await visiblePolicy.isVisible(), true);
+      assert.match(await visiblePolicy.innerText(), /Learned Value C16/);
       await page
         .locator('summary[aria-label="Open exact reproduction settings"]')
         .click();
-      const panel = page.getByLabel("Exact reproduction settings");
+      const panel = page.locator(".repro-panel");
       await panel.waitFor();
       const panelText = await panel.innerText();
       assert.match(panelText, /Learned model/);
