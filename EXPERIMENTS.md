@@ -7849,3 +7849,92 @@ shard, artifact identity, offline all-five gates, direct C16 comparison,
 Handcoded milestone, sample size, MDE, and fixed eight-seed certification
 panel must be declared together. Green, Red, Blue, White, and RU Aggro retain
 equal status; the final Learned-is-king thresholds are unchanged.
+
+### PD0: exact Pass-dominance Learned filter (declared)
+
+Declared 2026-07-26 after the user observed old-web G0/K2 cast Braingeyser
+targeting itself for X=0. `REVIEW.md` was reread through its 08:32 cycle before
+this declaration. Diagnostic seed `202607260947` and large-regression smoke
+seed `202607260948` were searched in the working tree and all Git history and
+were unused.
+
+Braingeyser X=0 is legal Old School Magic and remains in the engine's legal
+action set. The report has two separable causes: choosing any X=0 branch over
+Pass is a hold-versus-waste value error; choosing self rather than opponent is
+an exact tie because X=0 has the same resolved effect on either player and the
+state-only Value critic does not encode a noncreature spell's player target.
+The older Disintegrate X=0 field report showed the same no-effect spend class.
+The existing eval-only DC1 canonical-settlement comparator already proves
+Pass strictly dominates Disintegrate X=0 while payable Force Spike is
+incomparable, with exact ledgers and hidden-repartition checks.
+
+#### Falsifiable hypothesis
+
+A card-agnostic exact-settlement filter can remove actions strictly dominated
+by Pass at both deployed Learned Value roots and its K=0 Value continuations.
+It will eliminate Braingeyser/Disintegrate X=0 resource burns without changing
+legal Magic actions, filtering payable Force Spike, filtering productive X
+spells, peeking at hidden information, using card names/values, or causing a
+large all-five gameplay regression.
+
+#### Frozen treatment and controls
+
+- Add an explicit research flag, default off. Off must remain bit-identical and
+  consume no RNG. The filter applies only to Learned Value priority selection,
+  at the deployed root and its depth-zero Value-mirror continuations. It does
+  not change `legal_priority_actions`, resolution, Human, Random, Monte Carlo,
+  Deep Monte Carlo, HandcodedPolicy, or Learned Actor.
+- When Pass is legal, settle Pass once and each non-Pass candidate through the
+  same bounded forced-pass stack/window procedure to an identical comparison
+  context. Compare only information available to the acting learner: its own
+  hand identities and sizes plus public zones/state. Opponent hidden hand and
+  library identities may not enter the comparator.
+- A candidate is filtered only if every non-cost observable effect and stop
+  context is identical to Pass, its rules-derived resource ledger is
+  componentwise no better, and at least one resource component is strictly
+  worse. Opponent resource or public-state changes make branches incomparable.
+  Pass and every incomparable action are always retained. No card ID/name,
+  handcrafted value, target-specific weight, learned prediction, or stochastic
+  threshold may enter this proof.
+- Reuse or production-neutrally extract the already tested DC1 settlement and
+  ledger semantics; production engine code must not depend on probe code.
+  Bound work explicitly and reject malformed/nonsettling comparisons rather
+  than filtering them.
+
+Focused acceptance fixtures:
+
+1. A Blue second-main state exposes Pass, Braingeyser X=0 targeting each
+   player, and productive X=1 targeting self. Both X=0 actions must be proved
+   strictly dominated and filtered; X=1 must remain incomparable and legal.
+2. Existing nonlethal Disintegrate X=0 is dominated, while lethal/productive X
+   remains.
+3. Live and payable Force Spike remain incomparable and selectable.
+4. Counterspell targeting the learner's own useful creature spell remains
+   incomparable; own-counter cleanup is the separately confirmed OSC
+   controller-relation component, not a reason to weaken this exact proof.
+5. Opponent hand/library repartition preserves comparator result, filtered
+   option keys, selected action, and deterministic hashes.
+6. Default-off G0/K2 and frozen C16/K8 action scores/selections remain
+   bit-identical. Treatment-on reports their before/after option sets and
+   cannot select an action the comparator proved dominated.
+
+The diagnostic uses seed `202607260947` only for paired information-set worlds
+and reports G0/K2 plus exact frozen C16/K8. This is a mechanism/proof gate, not
+a claim that C16 already handles Braingeyser correctly. The treatment then
+runs a 240-game paired all-five large-regression smoke:
+
+```sh
+./build/old-school-sim --benchmark --games 4 \
+  --seed 202607260948 --train-seed 424242 --train-games 800 \
+  --challenger learned-value-c16 --baseline learned-value-c16 \
+  --learned-rollouts 8 --value-pass-dominance
+```
+
+The paired smoke is sensitive only to a large effect. Reject the treatment if
+its aggregate win rate is below 40%; do not accept or reject a few-point change
+or a 48-game deck slice. Also compare fixed-work wall time to identical C16/K8
+control and reject an overhead above 25%. Passing every exact fixture,
+hidden-information/default-off safeguard, and the large-regression/runtime
+screen accepts PD0 only as a candidate component for the jointly declared
+composite. It does not promote a bot or relax any five-deck Learned-is-king
+gate.
