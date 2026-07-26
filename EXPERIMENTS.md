@@ -7594,5 +7594,9 @@ exposure or trajectory; FEAT-0 forbids reviving castability without new
 evidence. Any complete mechanically valid corpus that misses qualification is
 an unqualified scientific rejection: it retires the seed and closes this
 declared replay-weight family rather than permitting a larger rerun. Exit `2`
-still consumes and quarantines the seed but supports no mechanism claim; only
-a corrected implementation or declaration may use a new seed.
+still consumes and quarantines the seed but supports no mechanism claim. A
+new-seed RB0-0 rerun may correct only the mechanical failure causally
+responsible for exit `2`; its hypothesis, estimands, weights, scopes,
+thresholds, qualifications, sample size, and analysis remain frozen. Any
+substantive scientific change retires RB0-0 and requires a genuinely new
+family and hypothesis rather than a rerun.
