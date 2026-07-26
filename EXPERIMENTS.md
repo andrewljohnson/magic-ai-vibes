@@ -8028,3 +8028,62 @@ CT8, and RB0 have frozen commands naming `old-school-sim`; moving those routes
 while PD0 and the repaired RB0 are live would widen this cleanup into a CLI and
 evidence-contract migration. Reconsider the split only after the current
 preflight and PD0 captures, under its own command-compatibility declaration.
+
+#### Result: accepted
+
+Completed 2026-07-26 after rereading `REVIEW.md` through its 10:02 cycle.
+The extraction moved deterministic real formatting, TSV sanitization,
+probability validation, bit-identity comparisons, content hashing,
+scheduled-task/optional-index/observation hashing, lower-hex validation,
+soft log loss, strict-sign comparison, 64-epsilon mass tolerance, and the
+shared TSV estimate-row formatter into `audit_common`. The last byte-identical
+TA4/RB0 `hash_task` adapters and Terminal/TA4/CT8 estimate-writer lambdas were
+also replaced by tested common adapters. Audit-specific record serializers,
+domain tags, schedules, collectors, reducers, gates, thresholds, and report
+skeletons remain local and unchanged. RB0's prose `write_estimate` is not the
+same serializer and deliberately remains local.
+
+The four pre-edit and post-edit stdout SHA-256 values are exactly equal:
+
+- terminal-weight evaluator:
+  `ed3ea3b065dba195a9498683b363f02b05636b4d37e021c5f90ee9bd41031be0`;
+- TA4:
+  `da50ff56bc7d3aa74cf51ab6e5c63e0954825125a1099c5482a7b3e10cb97d4d`;
+- CT8:
+  `1f40f81cad6f33326b2282b8c8c915146ba24a2f0b4e1a2aff2393861841ecf0`;
+- RB0:
+  `68d0cd78cc5311afef63478dae7a34c1ce007b5b6651ed82b1a64f4e9641e380`.
+
+The focused strict suites passed 8/8 common-helper tests, 10/10 terminal,
+10/10 TA4, 7/7 CT8, 13/13 RB0, and 6/6 mechanical-preflight tests. The
+simulator and preflight executables built C++20 `-Werror` clean. All six
+focused suites independently rebuilt at `-O1 -g` with
+`-fsanitize=address,undefined -fno-omit-frame-pointer` and passed with
+`ASAN_OPTIONS=detect_leaks=0:halt_on_error=1` and
+`UBSAN_OPTIONS=halt_on_error=1`, with no sanitizer diagnostic.
+
+`make test` then passed the full current matrix: 131 engine/bot, 27
+learned-iteration, 40 probe-corpus, 11 probe-metric, 25 probe-runner, 8
+common-helper, 10 terminal, 10 TA4, 7 CT8, 13 RB0, 6 preflight, 12 web-bridge,
+90 web-client, and 48 certification tests, plus CLI and capture-once suites.
+The representative command
+`./build/old-school-sim --games 5 --seed 42 --bots random` completed all ten
+five-deck matchups without a draw or turn-limit failure. No audit route,
+preflight capture, reserved diagnostic, or scientific seed was run.
+
+The four large audit implementations fell from 8,807 to 8,285 lines; the
+common production module/header add 286 lines, for a net 236-line production
+reduction before counting the new characterization tests. A read-only split
+assessment also confirmed that the five audit translation units contribute
+about 352,720 bytes, or 17.36%, of the simulator's current text segment, so a
+separate `old-school-audits` binary remains worthwhile. It is still deferred:
+the repaired RB0 declaration canonically names
+`./build/old-school-sim --audit-replay-weights`. After that route is consumed
+or retired, migrate the four audit flags together, preserve reserved-seed
+fencing in the simulator, split the CLI contract tests, and make the simulator
+emit a direct moved-command error. Do not add a process-exec compatibility
+shim or rewrite historical commands.
+
+Decision: accept this only as a source cleanup. Exact frozen evidence output
+and all scientific semantics are unchanged. The next research events remain
+the cleared RB0-E1 mechanical capture and the frozen PD0 diagnostic/smoke.

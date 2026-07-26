@@ -30,6 +30,7 @@ using ActorKey = std::pair<std::size_t, std::size_t>;
 using audit_common::bit_identical;
 using audit_common::format_real;
 using audit_common::is_lower_hex_digest;
+using audit_common::make_tsv_estimate_writer;
 using audit_common::require_probability;
 using audit_common::same_strict_sign;
 using audit_common::sanitize_tsv;
@@ -1576,23 +1577,7 @@ void write_tsv_report(
                 << sanitize_tsv(detail) << '\n';
         };
     const auto write_estimate =
-        [&row](
-            std::string_view scope,
-            std::string_view subject,
-            std::string_view metric,
-            const ClusteredEstimate& estimate_value) {
-            row(
-                "metric", scope, subject, metric,
-                format_real(estimate_value.mean),
-                format_real(estimate_value.standard_error),
-                format_real(
-                    estimate_value.confidence_lower_95),
-                format_real(
-                    estimate_value.confidence_upper_95),
-                std::to_string(estimate_value.records),
-                std::to_string(estimate_value.clusters),
-                "", "");
-        };
+        make_tsv_estimate_writer(row);
     const auto write_weighting =
         [&row, &write_estimate](
             std::string_view scope,

@@ -36,17 +36,13 @@ using audit_common::ContentHash;
 using audit_common::format_real;
 using audit_common::hash_observation;
 using audit_common::hash_optional_index;
+using audit_common::hash_task;
 using audit_common::is_lower_hex_digest;
+using audit_common::make_tsv_estimate_writer;
 using audit_common::require_probability;
 using audit_common::same_strict_sign;
 using audit_common::sanitize_tsv;
 using audit_common::soft_log_loss;
-
-void hash_task(ContentHash& hash, const AuditTask& task) {
-    audit_common::hash_scheduled_task(
-        hash, task.physical_game, task.block,
-        task.scheduled);
-}
 
 void hash_record(ContentHash& hash, const AuditRecord& record) {
     // Frozen TA4 serializer. Later audit arms use independent hashes below;
@@ -2059,23 +2055,7 @@ void write_tsv_report(
             ";K=1;H=4;epsilon=0.05;terminal_weight=0.5");
 
     const auto write_estimate =
-        [&row](
-            std::string_view scope,
-            std::string_view subject,
-            std::string_view metric,
-            const ClusteredEstimate& estimate) {
-            row(
-                "metric", scope, subject, metric,
-                format_real(estimate.mean),
-                format_real(estimate.standard_error),
-                format_real(
-                    estimate.confidence_lower_95),
-                format_real(
-                    estimate.confidence_upper_95),
-                std::to_string(estimate.records),
-                std::to_string(estimate.clusters),
-                "", "");
-        };
+        make_tsv_estimate_writer(row);
     const auto write_weighting =
         [&row, &write_estimate](
             std::string_view scope,

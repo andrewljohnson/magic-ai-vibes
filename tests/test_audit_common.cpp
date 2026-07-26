@@ -48,6 +48,17 @@ void expect(bool condition, std::string_view message) {
     }
 }
 
+void expect_equal(
+    std::string_view actual, std::string_view expected,
+    std::string_view message) {
+    if (actual != expected) {
+        throw std::runtime_error(
+            std::string(message) + ": expected '" +
+            std::string(expected) + "', got '" +
+            std::string(actual) + "'");
+    }
+}
+
 template <typename Exception, typename Function>
 void expect_throws(
     Function function, std::string_view expected_message) {
@@ -78,6 +89,66 @@ void test_formatting_and_tsv_sanitization() {
         common::sanitize_tsv("plain \xC2\xB5 text") ==
             "plain \xC2\xB5 text",
         "TSV sanitizer changed non-control bytes");
+}
+
+void test_tsv_estimate_writer() {
+    struct Estimate {
+        std::size_t records;
+        std::size_t clusters;
+        double mean;
+        double standard_error;
+        double confidence_lower_95;
+        double confidence_upper_95;
+    };
+    std::array<std::string, 12> fields;
+    const auto row =
+        [&fields](
+            std::string_view type,
+            std::string_view scope,
+            std::string_view subject,
+            std::string_view metric,
+            std::string_view estimate,
+            std::string_view standard_error,
+            std::string_view confidence_lower,
+            std::string_view confidence_upper,
+            std::string_view records,
+            std::string_view clusters,
+            std::string_view status,
+            std::string_view detail) {
+            fields = {
+                std::string(type),
+                std::string(scope),
+                std::string(subject),
+                std::string(metric),
+                std::string(estimate),
+                std::string(standard_error),
+                std::string(confidence_lower),
+                std::string(confidence_upper),
+                std::string(records),
+                std::string(clusters),
+                std::string(status),
+                std::string(detail),
+            };
+        };
+    const auto write_estimate =
+        common::make_tsv_estimate_writer(row);
+    write_estimate(
+        "pooled", "control", "brier",
+        Estimate{
+            .records = 12,
+            .clusters = 3,
+            .mean = 0.5,
+            .standard_error = 0.25,
+            .confidence_lower_95 = -1.0,
+            .confidence_upper_95 = 1.0,
+        });
+    const std::array<std::string, 12> expected = {
+        "metric", "pooled", "control", "brier",
+        "0.5", "0.25", "-1", "1", "12", "3", "", "",
+    };
+    expect(
+        fields == expected,
+        "TSV estimate writer fields changed");
 }
 
 void test_probability_validation() {
@@ -195,9 +266,10 @@ void test_soft_log_loss_and_sign() {
 
 void test_content_hash_golden() {
     common::ContentHash empty;
-    expect(
-        empty.finish() ==
-            "TODO_EMPTY_DIGEST",
+    expect_equal(
+        empty.finish(),
+        "080e808ca2ccf327fffae4e925940221"
+        "6eee6ce700f6ec1a3860f02997b3cb94",
         "empty content-hash golden changed");
 
     common::ContentHash hash;
@@ -223,10 +295,42 @@ void test_content_hash_golden() {
     };
     common::hash_scheduled_task(
         hash, 41, 7, scheduled);
-    expect(
-        hash.finish() ==
-            "TODO_COMPOSED_DIGEST",
+    expect_equal(
+        hash.finish(),
+        "0b191821b7a8d4043d513cf8f4ea10dc"
+        "5e91bae025a55886cb3637d47216bcaf",
         "composed content-hash golden changed");
+}
+
+void test_task_hash_adapter() {
+    struct Task {
+        std::size_t physical_game;
+        std::size_t block;
+        old_school::learned_iteration::ScheduledGame scheduled;
+    };
+    const Task task = {
+        .physical_game = 41,
+        .block = 7,
+        .scheduled = {
+            .schedule_index = 23,
+            .pairing_index = 5,
+            .seat_decks = {
+                old_school::DeckId::Blue,
+                old_school::DeckId::RUAggro,
+            },
+            .starting_player = 1,
+            .seed = 0x0123456789abcdefULL,
+        },
+    };
+    common::ContentHash direct;
+    common::ContentHash adapted;
+    common::hash_scheduled_task(
+        direct, task.physical_game, task.block,
+        task.scheduled);
+    common::hash_task(adapted, task);
+    expect_equal(
+        adapted.finish(), direct.finish(),
+        "task hash adapter changed serialization");
 }
 
 } // namespace
@@ -236,6 +340,9 @@ int main() {
     runner.run(
         "formatting and TSV sanitization",
         test_formatting_and_tsv_sanitization);
+    runner.run(
+        "TSV estimate writer",
+        test_tsv_estimate_writer);
     runner.run(
         "probability validation",
         test_probability_validation);
@@ -249,5 +356,8 @@ int main() {
     runner.run(
         "content hash golden",
         test_content_hash_golden);
+    runner.run(
+        "task hash adapter",
+        test_task_hash_adapter);
     return runner.finish();
 }

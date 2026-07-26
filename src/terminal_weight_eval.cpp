@@ -38,6 +38,7 @@ constexpr double kMaterialBias = 0.05;
 
 using audit_common::ContentHash;
 using audit_common::format_real;
+using audit_common::make_tsv_estimate_writer;
 using audit_common::require_probability;
 using audit_common::same_strict_sign;
 using audit_common::sanitize_tsv;
@@ -1555,22 +1556,7 @@ void write_tsv_report(
         "TW75-C17", report.treatment_fingerprint);
 
     const auto write_estimate =
-        [&row](
-            std::string_view scope,
-            std::string_view subject,
-            std::string_view metric,
-            const ClusteredEstimate& estimate) {
-            row(
-                "metric", scope, subject, metric,
-                format_real(estimate.mean),
-                format_real(estimate.standard_error),
-                format_real(
-                    estimate.confidence_lower_95),
-                format_real(
-                    estimate.confidence_upper_95),
-                std::to_string(estimate.records),
-                std::to_string(estimate.clusters), "", "");
-        };
+        make_tsv_estimate_writer(row);
     const auto write_scope =
         [&row, &write_estimate](
             std::string_view name,

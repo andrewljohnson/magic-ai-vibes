@@ -43,6 +43,7 @@ using audit_common::bit_identical;
 using audit_common::ContentHash;
 using audit_common::hash_observation;
 using audit_common::hash_optional_index;
+using audit_common::hash_task;
 using audit_common::is_lower_hex_digest;
 using audit_common::mass_tolerance;
 using audit_common::require_probability;
@@ -88,12 +89,6 @@ std::vector<CardId> cards_for_deck(DeckId deck) {
         return ru_aggro_deck();
     }
     throw std::invalid_argument("RB0 deck is out of range");
-}
-
-void hash_task(ContentHash& hash, const AuditTask& task) {
-    audit_common::hash_scheduled_task(
-        hash, task.physical_game, task.block,
-        task.scheduled);
 }
 
 std::string schedule_digest(
@@ -1644,7 +1639,7 @@ GateReport evaluate_gate(const ScientificReport& report) {
                 has_material_bias(bias.treatment);
             const bool inherited =
                 has_material_bias(bias.control) &&
-                same_sign(
+                same_strict_sign(
                     bias.treatment.mean,
                     bias.control.mean);
             if (treatment_material && !inherited) {

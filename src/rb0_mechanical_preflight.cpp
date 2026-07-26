@@ -1,4 +1,5 @@
 #include "old_school/rb0_mechanical_preflight.hpp"
+#include "old_school/audit_common.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,22 +26,8 @@ constexpr std::size_t kTrainingGames = 800;
 constexpr std::size_t kSelfPlayGenerations = 16;
 constexpr std::size_t kMaximumGameTurns = 500;
 
-double mass_tolerance(double expected_mass) {
-    return 64.0 * std::numeric_limits<double>::epsilon() *
-           std::max(1.0, std::abs(expected_mass));
-}
-
-bool well_formed_hash(std::string_view hash) {
-    return hash.size() == 64 &&
-           std::all_of(
-               hash.begin(), hash.end(),
-               [](char character) {
-                   return (character >= '0' &&
-                           character <= '9') ||
-                          (character >= 'a' &&
-                           character <= 'f');
-               });
-}
+using audit_common::is_lower_hex_digest;
+using audit_common::mass_tolerance;
 
 bool capture_schedule_balanced(
     const rb0::Capture& capture,
@@ -286,14 +273,14 @@ CaptureEvidence inspect_capture(
                     seed, generation,
                     balanced_blocks));
     result.hashes_well_formed =
-        well_formed_hash(capture.schedule_hash) &&
-        well_formed_hash(capture.trace_hash) &&
-        well_formed_hash(capture.outcome_hash) &&
-        well_formed_hash(capture.feature_hash) &&
-        well_formed_hash(capture.grouping_hash) &&
-        well_formed_hash(capture.ro4_target_hash) &&
-        well_formed_hash(capture.weight_hash) &&
-        well_formed_hash(capture.scoring_hash);
+        is_lower_hex_digest(capture.schedule_hash) &&
+        is_lower_hex_digest(capture.trace_hash) &&
+        is_lower_hex_digest(capture.outcome_hash) &&
+        is_lower_hex_digest(capture.feature_hash) &&
+        is_lower_hex_digest(capture.grouping_hash) &&
+        is_lower_hex_digest(capture.ro4_target_hash) &&
+        is_lower_hex_digest(capture.weight_hash) &&
+        is_lower_hex_digest(capture.scoring_hash);
     result.trace_invariants_passed =
         capture.trace_invariants_passed;
     result.ro4_identity_passed =
@@ -407,7 +394,7 @@ Report run(std::ostream& progress) {
     report.artifact_snapshot_bound =
         report.artifact_before.path == artifact_path &&
         report.artifact_before.size > 0 &&
-        well_formed_hash(
+        is_lower_hex_digest(
             report.artifact_before.content_hash);
 
     progress << "Loading exact frozen Environment-v3 C16..."

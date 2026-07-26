@@ -39,6 +39,24 @@ std::string format_real(double value);
 std::string sanitize_tsv(std::string_view value);
 void require_probability(double value, std::string_view field);
 
+template <typename Row>
+auto make_tsv_estimate_writer(Row& row) {
+    return [row](
+               std::string_view scope,
+               std::string_view subject,
+               std::string_view metric,
+               const auto& estimate) {
+        row(
+            "metric", scope, subject, metric,
+            format_real(estimate.mean),
+            format_real(estimate.standard_error),
+            format_real(estimate.confidence_lower_95),
+            format_real(estimate.confidence_upper_95),
+            std::to_string(estimate.records),
+            std::to_string(estimate.clusters), "", "");
+    };
+}
+
 bool bit_identical(double left, double right);
 bool bit_identical(
     std::span<const double> left,
@@ -53,6 +71,13 @@ void hash_scheduled_task(
     ContentHash& hash, std::size_t physical_game,
     std::size_t block,
     const learned_iteration::ScheduledGame& scheduled);
+template <typename Task>
+void hash_task(ContentHash& hash, const Task& task) {
+    // Audit task adapters must expose this shared frozen shape.
+    hash_scheduled_task(
+        hash, task.physical_game, task.block,
+        task.scheduled);
+}
 void hash_optional_index(
     ContentHash& hash,
     const std::optional<std::size_t>& value);
