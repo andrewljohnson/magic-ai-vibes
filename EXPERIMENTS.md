@@ -12029,6 +12029,29 @@ sqrt(sd1^2/8 + sd2^2/8) > 0`. Opposing unique exact-max supports within one
 legal set also constitute a target conflict even when the interval touches
 zero.
 
+Pre-implementation feature-row clarification (2026-07-27, before opening any
+FQ0 seed): the scalar target for one successor action is the symmetric
+two-bank estimate `0.5 * (qA(action) + qB(action))`; the cross-fitted `V0`
+above remains the value used only for the successor maximum and root backup.
+Every successor information-set/action row encountered in the full K64
+construction receives one full target and eight independently reconstructed
+block targets. If that information set has zero empirical root-particle mass
+in a particular K8 block, its feature-only action row is still evaluated on
+that block's separately derived A/B streams and serialized as raw evidence;
+it is never sliced from K64, copied from another block, or omitted. These
+zero-mass feature-only evaluations do not enter that block's root `Tq0`.
+Exact repeated semantic successor coordinates reached through different root
+actions intentionally reuse candidate-independent seeds and must reconstruct
+bit-identical rows; conflicting reuse is infrastructure failure.
+
+The X=0 support guard is typed, not label-parsed. It covers both
+Braingeyser X=0 targets and all four Disintegrate X=0 targets across
+`ru.disintegrate-player-x.v3` and
+`validation.ru.disintegrate-hold-x0.v1` (six actions total). Pass and X=0
+rows are identified from `PriorityAction` kind/`x_value`, then bound to the
+exact descriptor stored by the frozen manifest; no human-readable spelling
+such as `pass` or `x0` is assumed.
+
 #### Scientific gates
 
 The primary is
