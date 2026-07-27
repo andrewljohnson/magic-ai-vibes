@@ -6,7 +6,25 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
+
+namespace old_school::probes {
+struct DecisionProbe;
+}
+
+namespace old_school::fq0_dominance {
+class Settlement;
+struct CanonicalSettlement;
+}
+
+namespace old_school::fq0_dominance_transition {
+fq0_dominance::Settlement advance_to_next_first_main(
+    const probes::DecisionProbe& probe,
+    const GameState& information_set_world,
+    std::size_t candidate_index,
+    std::string root_information_fingerprint);
+}
 
 namespace old_school::fq0_dominance {
 
@@ -37,23 +55,114 @@ struct PlayerResourceCost {
     bool operator==(const PlayerResourceCost&) const = default;
 };
 
+// Exact public-rules state transition used to verify the resource ledger.
+// `include_hand_and_land_costs` is true for the forced root action and false
+// for later priority passes/resolutions, matching the frozen PD0 accumulation
+// semantics.
+struct ResourceOperation {
+    GameState before;
+    GameState after;
+    bool include_hand_and_land_costs = false;
+
+    bool operator==(const ResourceOperation&) const = default;
+};
+
 // Pure input to the dominance comparator. The engine-owned neutral transition
 // driver is responsible for producing this record and its resource ledger.
 // `root_information_fingerprint` binds comparisons to one owner information
 // set without exposing the hidden state itself.
-struct Settlement {
-    std::string root_information_fingerprint;
-    GameState root_state;
-    GameState boundary_state;
-    LearnedDecisionContext boundary_context;
-    std::array<PlayerResourceCost, 2> costs;
-    bool terminal = false;
+class Settlement {
+  public:
+    Settlement(const Settlement&) = default;
+    Settlement(Settlement&&) noexcept = default;
+
+    const std::string& root_information_fingerprint() const {
+        return root_information_fingerprint_;
+    }
+    const GameState& root_state() const {
+        return root_state_;
+    }
+    const GameState& resource_boundary_state() const {
+        return resource_boundary_state_;
+    }
+    const std::vector<ResourceOperation>& resource_operations() const {
+        return resource_operations_;
+    }
+    const GameState& boundary_state() const {
+        return boundary_state_;
+    }
+    const LearnedDecisionContext& boundary_context() const {
+        return boundary_context_;
+    }
+    const std::array<PlayerResourceCost, 2>& costs() const {
+        return costs_;
+    }
+    bool terminal() const {
+        return terminal_;
+    }
     // -2 for a nonterminal boundary, -1 for a terminal draw, or 0/1.
-    int terminal_winner = -2;
-    bool complete = false;
-    bool unresolved_transient_choice_effect = false;
+    int terminal_winner() const {
+        return terminal_winner_;
+    }
+    bool complete() const {
+        return complete_;
+    }
+    bool unresolved_transient_choice_effect() const {
+        return unresolved_transient_choice_effect_;
+    }
 
     bool operator==(const Settlement&) const = default;
+
+  private:
+    Settlement(
+        std::string root_information_fingerprint,
+        GameState root_state,
+        GameState resource_boundary_state,
+        std::vector<ResourceOperation> resource_operations,
+        GameState boundary_state,
+        LearnedDecisionContext boundary_context,
+        std::array<PlayerResourceCost, 2> costs,
+        bool terminal, int terminal_winner, bool complete,
+        bool unresolved_transient_choice_effect)
+        : root_information_fingerprint_(
+              std::move(root_information_fingerprint)),
+          root_state_(std::move(root_state)),
+          resource_boundary_state_(
+              std::move(resource_boundary_state)),
+          resource_operations_(
+              std::move(resource_operations)),
+          boundary_state_(std::move(boundary_state)),
+          boundary_context_(boundary_context),
+          costs_(std::move(costs)),
+          terminal_(terminal),
+          terminal_winner_(terminal_winner),
+          complete_(complete),
+          unresolved_transient_choice_effect_(
+              unresolved_transient_choice_effect) {}
+
+    std::string root_information_fingerprint_;
+    GameState root_state_;
+    // State immediately after the forced root Priority window settles. The
+    // operation chain must begin at root_state and end here.
+    GameState resource_boundary_state_;
+    std::vector<ResourceOperation> resource_operations_;
+    GameState boundary_state_;
+    LearnedDecisionContext boundary_context_;
+    std::array<PlayerResourceCost, 2> costs_;
+    bool terminal_ = false;
+    int terminal_winner_ = -2;
+    bool complete_ = false;
+    bool unresolved_transient_choice_effect_ = false;
+
+    friend Settlement
+    fq0_dominance_transition::advance_to_next_first_main(
+        const probes::DecisionProbe& probe,
+        const GameState& information_set_world,
+        std::size_t candidate_index,
+        std::string root_information_fingerprint);
+
+    friend CanonicalSettlement canonicalize_settlement(
+        const Settlement& settlement, std::size_t observer);
 };
 
 // Source identities are deliberately absent here. The canonical cost still

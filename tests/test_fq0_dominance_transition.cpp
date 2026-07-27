@@ -68,9 +68,9 @@ void test_sick_bear_pass_strictly_dominates_growth() {
     const auto spent = transition::advance_to_next_first_main(
         probe, probe.state, growth, "sick-bear-root");
     expect(
-        held.complete && spent.complete &&
-            !held.unresolved_transient_choice_effect &&
-            !spent.unresolved_transient_choice_effect,
+        held.complete() && spent.complete() &&
+            !held.unresolved_transient_choice_effect() &&
+            !spent.unresolved_transient_choice_effect(),
         "second-main sick-Bear transition did not complete cleanly");
     expect(
         dominance::compare(held, spent, probe.root_player)
@@ -94,8 +94,8 @@ void test_begin_combat_growth_fails_closed() {
     const auto pumped = transition::advance_to_next_first_main(
         probe, probe.state, growth, "combat-root");
     expect(
-        !held.unresolved_transient_choice_effect &&
-            pumped.unresolved_transient_choice_effect,
+        !held.unresolved_transient_choice_effect() &&
+            pumped.unresolved_transient_choice_effect(),
         "begin-combat temporary effect was not detected before no attacks");
     expect(
         dominance::compare(held, pumped, probe.root_player)
@@ -147,21 +147,21 @@ void test_cleanup_order_and_next_turn_draw_are_exact() {
     const auto result = transition::advance_to_next_first_main(
         probe, probe.state, 0, "cleanup-root");
     expect(
-        result.complete && !result.terminal &&
-            result.boundary_context.valid &&
-            result.boundary_context.phase ==
+        result.complete() && !result.terminal() &&
+            result.boundary_context().valid &&
+            result.boundary_context().phase ==
                 old_school::TurnPhase::FirstMain &&
-            result.boundary_state.active_player == 1 &&
-            result.boundary_state.turn_number == 6 &&
-            result.boundary_state.players[0].hand.size() == 7 &&
-            result.boundary_state.players[0].graveyard ==
+            result.boundary_state().active_player == 1 &&
+            result.boundary_state().turn_number == 6 &&
+            result.boundary_state().players[0].hand.size() == 7 &&
+            result.boundary_state().players[0].graveyard ==
                 std::vector<old_school::CardId>({
                     old_school::CardId::Forest,
                     old_school::CardId::Forest}) &&
-            result.boundary_state.players[1].hand ==
+            result.boundary_state().players[1].hand ==
                 std::vector<old_school::CardId>{
                     old_school::CardId::Mountain} &&
-            result.boundary_state.stats[1].cards_drawn == 1,
+            result.boundary_state().stats[1].cards_drawn == 1,
         "canonical cleanup or next-turn preparation drifted");
 }
 
