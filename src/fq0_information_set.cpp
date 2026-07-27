@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -18,7 +21,9 @@ namespace {
 inline constexpr std::string_view kInformationSetSchema =
     "old-school-fq0-owner-information-set-v1";
 inline constexpr std::string_view kLeafConsequenceSchema =
-    "old-school-fq0-redacted-leaf-consequence-v1";
+    "old-school-fq0-redacted-leaf-consequence-v2";
+inline constexpr std::string_view kPriorityConsequenceSchema =
+    "old-school-fq0-canonical-priority-consequence-v1";
 inline constexpr std::string_view kIndexedSeedSchema =
     "old-school-fq0-indexed-seed-v1";
 
@@ -190,6 +195,267 @@ void append_observation(
         observation.turn_number);
 }
 
+void canonicalize_leaf_observation(
+    PlayerObservation& observation) {
+    const std::size_t observer = observation.observer;
+    if (observer >= observation.players.size()) {
+        throw std::invalid_argument(
+            "FQ0 leaf consequence has an invalid observer");
+    }
+    const auto relative_player =
+        [observer](std::size_t player) {
+            if (player >= 2) {
+                throw std::invalid_argument(
+                    "FQ0 leaf consequence has an invalid player");
+            }
+            return player == observer ? std::size_t{0}
+                                      : std::size_t{1};
+        };
+    if (observer == 1) {
+        std::swap(
+            observation.players[0],
+            observation.players[1]);
+        std::swap(
+            observation.extra_turns_pending[0],
+            observation.extra_turns_pending[1]);
+    }
+    for (StackObject& object : observation.stack) {
+        object.controller =
+            relative_player(object.controller);
+        if (object.target.has_value()) {
+            object.target->player =
+                relative_player(object.target->player);
+        }
+    }
+    observation.active_player =
+        relative_player(observation.active_player);
+    observation.starting_player =
+        relative_player(observation.starting_player);
+    observation.observer = 0;
+
+    std::set<PermanentId> permanent_ids;
+    std::array<std::map<PermanentId, std::size_t>, 2>
+        creature_indices;
+    std::array<std::vector<std::vector<std::size_t>>, 2>
+        incoming_creature_targets;
+    std::map<StackObjectId, StackObjectId> stack_ids;
+
+    for (std::size_t player = 0;
+         player < observation.players.size(); ++player) {
+        PublicPlayerState& public_player =
+            observation.players[player];
+        std::sort(
+            public_player.exile.begin(),
+            public_player.exile.end());
+        incoming_creature_targets[player].resize(
+            public_player.creatures.size());
+        for (std::size_t index = 0;
+             index < public_player.creatures.size(); ++index) {
+            const PermanentId id =
+                public_player.creatures[index].id;
+            if (!permanent_ids.insert(id).second ||
+                !creature_indices[player]
+                     .emplace(id, index)
+                     .second) {
+                throw std::invalid_argument(
+                    "FQ0 leaf consequence has a duplicate "
+                    "permanent ID");
+            }
+        }
+
+        for (const ArtifactPermanent& artifact :
+             public_player.artifacts) {
+            if (!permanent_ids
+                     .insert(artifact.id)
+                     .second) {
+                throw std::invalid_argument(
+                    "FQ0 leaf consequence has a duplicate "
+                    "permanent ID");
+            }
+        }
+    }
+
+    for (std::size_t position = 0;
+         position < observation.stack.size(); ++position) {
+        const StackObject& object =
+            observation.stack[position];
+        if (!stack_ids
+                 .emplace(
+                     object.id,
+                     static_cast<StackObjectId>(
+                         position + 1))
+                 .second) {
+            throw std::invalid_argument(
+                "FQ0 leaf consequence has a duplicate stack ID");
+        }
+        if (!object.target.has_value() ||
+            !object.target->creature.has_value()) {
+            continue;
+        }
+        if (object.target->player >=
+            observation.players.size()) {
+            throw std::invalid_argument(
+                "FQ0 leaf consequence has an invalid target "
+                "player");
+        }
+        const auto target =
+            creature_indices[object.target->player].find(
+                *object.target->creature);
+        // A spell may legally retain a target whose object has already left
+        // the battlefield. Every such target is the same rules-level
+        // "missing object" consequence and therefore has no live incidence.
+        if (target !=
+            creature_indices[object.target->player].end()) {
+            incoming_creature_targets[object.target->player]
+                                     [target->second]
+                                         .push_back(position);
+        }
+    }
+
+    std::array<std::map<PermanentId, PermanentId>, 2>
+        creature_ids;
+    PermanentId next_permanent_id = 1;
+    for (std::size_t player = 0;
+         player < observation.players.size(); ++player) {
+        PublicPlayerState& public_player =
+            observation.players[player];
+        std::sort(
+            public_player.lands.begin(),
+            public_player.lands.end(),
+            [](const LandPermanent& left,
+               const LandPermanent& right) {
+                return std::tie(left.card, left.tapped) <
+                       std::tie(right.card, right.tapped);
+            });
+        std::vector<std::size_t> creature_order(
+            public_player.creatures.size());
+        for (std::size_t index = 0;
+             index < creature_order.size(); ++index) {
+            creature_order[index] = index;
+        }
+        std::sort(
+            creature_order.begin(), creature_order.end(),
+            [&](std::size_t first, std::size_t second) {
+                const CreaturePermanent& left =
+                    public_player.creatures[first];
+                const CreaturePermanent& right =
+                    public_player.creatures[second];
+                const auto left_fields = std::tie(
+                    left.card, left.tapped,
+                    left.summoning_sick, left.damage,
+                    left.temporary_power_bonus,
+                    left.temporary_toughness_bonus,
+                    left.exile_on_death_this_turn);
+                const auto right_fields = std::tie(
+                    right.card, right.tapped,
+                    right.summoning_sick, right.damage,
+                    right.temporary_power_bonus,
+                    right.temporary_toughness_bonus,
+                    right.exile_on_death_this_turn);
+                if (left_fields != right_fields) {
+                    return left_fields < right_fields;
+                }
+                return incoming_creature_targets[player][first] <
+                       incoming_creature_targets[player][second];
+            });
+        std::vector<CreaturePermanent> creatures;
+        creatures.reserve(creature_order.size());
+        for (const std::size_t index : creature_order) {
+            CreaturePermanent creature =
+                public_player.creatures[index];
+            const PermanentId physical_id = creature.id;
+            creature.id = next_permanent_id++;
+            creature_ids[player].emplace(
+                physical_id, creature.id);
+            creatures.push_back(creature);
+        }
+        public_player.creatures = std::move(creatures);
+
+        std::sort(
+            public_player.artifacts.begin(),
+            public_player.artifacts.end(),
+            [](const ArtifactPermanent& left,
+               const ArtifactPermanent& right) {
+                return std::tie(left.card, left.tapped) <
+                       std::tie(right.card, right.tapped);
+            });
+        for (ArtifactPermanent& artifact :
+             public_player.artifacts) {
+            artifact.id = next_permanent_id++;
+        }
+        std::sort(
+            public_player.enchantments.begin(),
+            public_player.enchantments.end());
+    }
+
+    for (StackObject& object : observation.stack) {
+        object.id = stack_ids.at(object.id);
+        if (object.target.has_value()) {
+            Target& target = *object.target;
+            if (target.player >= creature_ids.size()) {
+                throw std::invalid_argument(
+                    "FQ0 leaf consequence has an invalid target "
+                    "player");
+            }
+            if (target.creature.has_value()) {
+                const auto found =
+                    creature_ids[target.player].find(
+                        *target.creature);
+                // Zero is a canonical missing-object sentinel. Live
+                // canonical permanent IDs begin at one. Once the object is
+                // missing, its former controller is no longer a
+                // rules-relevant part of the target, so normalize both
+                // coordinates.
+                if (found == creature_ids[target.player].end()) {
+                    target.player = 0;
+                    target.creature = 0;
+                } else {
+                    target.creature = found->second;
+                }
+            }
+        }
+        if (object.spell_target.has_value()) {
+            const auto found =
+                stack_ids.find(*object.spell_target);
+            // Zero is likewise the canonical missing-stack-object
+            // sentinel.
+            object.spell_target =
+                found == stack_ids.end() ? 0 : found->second;
+        }
+    }
+}
+
+void append_canonical_leaf_observation(
+    ByteWriter& writer,
+    PlayerObservation observation) {
+    canonicalize_leaf_observation(observation);
+    append_observation(writer, observation);
+}
+
+void append_context(
+    ByteWriter& writer,
+    const LearnedDecisionContext& context);
+
+std::size_t observer_relative_player(
+    std::size_t player, std::size_t observer) {
+    if (player >= 2 || observer >= 2) {
+        throw std::invalid_argument(
+            "FQ0 consequence has an invalid player coordinate");
+    }
+    return player == observer ? 0 : 1;
+}
+
+void append_canonical_leaf_context(
+    ByteWriter& writer, LearnedDecisionContext context,
+    std::size_t observer) {
+    if (context.valid) {
+        context.decision_player =
+            observer_relative_player(
+                context.decision_player, observer);
+    }
+    append_context(writer, context);
+}
+
 void append_context(
     ByteWriter& writer,
     const LearnedDecisionContext& context) {
@@ -343,6 +609,48 @@ void validate_seed_bank(SeedBank bank) {
         "FQ0 indexed seed has an invalid bank");
 }
 
+struct TerminalDisposition {
+    int winner = -1;
+    EndReason reason = EndReason::LifeTotal;
+};
+
+std::optional<TerminalDisposition> terminal_disposition(
+    const GameState& state) {
+    if (state.failed_draw[0] || state.failed_draw[1]) {
+        int winner = -1;
+        if (state.failed_draw[0] != state.failed_draw[1]) {
+            winner = state.failed_draw[0] ? 1 : 0;
+        }
+        return TerminalDisposition{
+            .winner = winner,
+            .reason = EndReason::EmptyLibrary,
+        };
+    }
+    const bool player_zero_lost =
+        state.players[0].life <= 0;
+    const bool player_one_lost =
+        state.players[1].life <= 0;
+    if (!player_zero_lost && !player_one_lost) {
+        return std::nullopt;
+    }
+    int winner = -1;
+    if (player_zero_lost != player_one_lost) {
+        winner = player_zero_lost ? 1 : 0;
+    }
+    return TerminalDisposition{
+        .winner = winner,
+        .reason = EndReason::LifeTotal,
+    };
+}
+
+enum class PriorityConsequenceDisposition : std::uint8_t {
+    ActionApplied,
+    Passed,
+    StackObjectResolved,
+    WindowEnded,
+    Terminal,
+};
+
 std::uint8_t hex_nibble(char digit) {
     if (digit >= '0' && digit <= '9') {
         return static_cast<std::uint8_t>(digit - '0');
@@ -478,26 +786,168 @@ std::string redacted_leaf_consequence_sha256(
 
     ByteWriter writer;
     writer.text(kLeafConsequenceSchema);
-    append_observation(writer, observation);
-    append_context(writer, context);
+    append_canonical_leaf_observation(
+        writer, observation);
+    append_canonical_leaf_context(
+        writer, context, observer);
     writer.boolean(terminal_result.has_value());
     if (terminal_result.has_value()) {
-        writer.integer(terminal_result->winner);
+        const int winner =
+            terminal_result->winner < 0
+                ? -1
+                : static_cast<int>(
+                      observer_relative_player(
+                          static_cast<std::size_t>(
+                              terminal_result->winner),
+                          observer));
+        writer.integer(winner);
         writer.integer<std::uint64_t>(
             static_cast<std::uint64_t>(
                 terminal_result->reason));
         writer.integer<std::uint64_t>(
             terminal_result->turns);
         writer.integer<std::uint64_t>(
-            terminal_result->starting_player);
-        for (const int life :
-             terminal_result->ending_life) {
-            writer.integer(life);
+            observer_relative_player(
+                terminal_result->starting_player,
+                observer));
+        writer.integer(
+            terminal_result
+                ->ending_life[observer]);
+        writer.integer(
+            terminal_result
+                ->ending_life[1 - observer]);
+        append_player_stats(
+            writer,
+            terminal_result
+                ->player_stats[observer]);
+        append_player_stats(
+            writer,
+            terminal_result
+                ->player_stats[1 - observer]);
+    }
+    return artifact_integrity::sha256_string(writer.data());
+}
+
+std::string canonical_priority_consequence_sha256(
+    const GameState& state, std::size_t observer,
+    const LearnedDecisionContext& context,
+    const PriorityAction& action) {
+    validate_priority_context(state, context);
+    if (observer != context.decision_player) {
+        throw std::invalid_argument(
+            "FQ0 Priority consequence observer must own the "
+            "information set");
+    }
+    if (terminal_disposition(state).has_value()) {
+        throw std::invalid_argument(
+            "FQ0 Priority consequence root is already terminal");
+    }
+    const std::vector<PriorityAction> authoritative =
+        legal_priority_actions(
+            state, context.decision_player,
+            context.sorcery_actions);
+    if (std::find(
+            authoritative.begin(), authoritative.end(),
+            action) == authoritative.end()) {
+        throw std::invalid_argument(
+            "FQ0 Priority consequence action is not exactly legal");
+    }
+
+    GameState successor = state;
+    LearnedDecisionContext successor_context = context;
+    PriorityConsequenceDisposition disposition =
+        PriorityConsequenceDisposition::ActionApplied;
+    std::optional<TerminalDisposition> terminal;
+    if (action.kind == PriorityActionKind::Pass) {
+        PriorityState priority{
+            .player = context.decision_player,
+            .consecutive_passes =
+                context.consecutive_passes,
+        };
+        const PriorityPassResult pass =
+            pass_priority(successor, priority);
+        switch (pass) {
+        case PriorityPassResult::Passed:
+            disposition =
+                PriorityConsequenceDisposition::Passed;
+            successor_context.decision_player =
+                priority.player;
+            successor_context.consecutive_passes =
+                priority.consecutive_passes;
+            break;
+        case PriorityPassResult::StackObjectResolved:
+            terminal = terminal_disposition(successor);
+            if (terminal.has_value()) {
+                disposition =
+                    PriorityConsequenceDisposition::Terminal;
+                successor_context = {};
+            } else {
+                disposition = PriorityConsequenceDisposition::
+                    StackObjectResolved;
+                successor_context.decision_player =
+                    priority.player;
+                successor_context.consecutive_passes =
+                    priority.consecutive_passes;
+            }
+            break;
+        case PriorityPassResult::WindowEnded:
+            disposition =
+                PriorityConsequenceDisposition::WindowEnded;
+            successor_context = {};
+            break;
         }
-        for (const PlayerGameStats& stats :
-             terminal_result->player_stats) {
-            append_player_stats(writer, stats);
+    } else {
+        if (!apply_priority_action(
+                successor, context.decision_player, action,
+                context.sorcery_actions)) {
+            throw std::logic_error(
+                "validated FQ0 Priority action became illegal");
         }
+        successor_context.consecutive_passes = 0;
+    }
+
+    PlayerObservation observation =
+        observe_game_state(successor, observer);
+    std::sort(
+        observation.hand.begin(), observation.hand.end());
+    validate_observation(observation);
+    if (disposition ==
+            PriorityConsequenceDisposition::ActionApplied ||
+        disposition ==
+            PriorityConsequenceDisposition::Passed ||
+        disposition ==
+            PriorityConsequenceDisposition::
+                StackObjectResolved) {
+        validate_priority_context(
+            successor, successor_context);
+    } else if (successor_context !=
+               LearnedDecisionContext{}) {
+        throw std::logic_error(
+            "closed FQ0 Priority consequence retained context");
+    }
+
+    ByteWriter writer;
+    writer.text(kPriorityConsequenceSchema);
+    append_canonical_leaf_observation(
+        writer, observation);
+    append_canonical_leaf_context(
+        writer, successor_context, observer);
+    writer.integer<std::uint64_t>(
+        static_cast<std::uint64_t>(disposition));
+    writer.boolean(terminal.has_value());
+    if (terminal.has_value()) {
+        const int winner =
+            terminal->winner < 0
+                ? -1
+                : static_cast<int>(
+                      observer_relative_player(
+                          static_cast<std::size_t>(
+                              terminal->winner),
+                          observer));
+        writer.integer(winner);
+        writer.integer<std::uint64_t>(
+            static_cast<std::uint64_t>(
+                terminal->reason));
     }
     return artifact_integrity::sha256_string(writer.data());
 }

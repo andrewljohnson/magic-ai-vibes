@@ -80,12 +80,24 @@ descriptor_canonical_action_rows(
 
 // Redacted evidence hash for a critic or terminal leaf. It binds the complete
 // owner observation, decision context, and (when present) terminal outcome,
-// but never any hand/library identity hidden from `observer`.
+// but never any hand/library identity hidden from `observer`. Physical
+// permanent/stack IDs are canonically relabeled in this consequence-only
+// projection; information-set identities above deliberately remain exact.
 std::string redacted_leaf_consequence_sha256(
     const GameState& state, std::size_t observer,
     const LearnedDecisionContext& context,
     const std::optional<GameResult>& terminal_result =
         std::nullopt);
+
+// Validates `action` against the exact engine-authoritative legal Priority
+// actions, applies only that action with production cast/pass semantics, and
+// hashes the ID-normalized owner-observable result. The hash binds whether the
+// immediate transition applied an action, passed priority, resolved a stack
+// object, ended the window, or ended the game.
+std::string canonical_priority_consequence_sha256(
+    const GameState& state, std::size_t observer,
+    const LearnedDecisionContext& context,
+    const PriorityAction& action);
 
 enum class SeedDomain : std::uint8_t {
     RootDeterminization,

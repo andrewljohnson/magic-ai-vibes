@@ -120,6 +120,155 @@ old_school::GameState information_state() {
     return state;
 }
 
+old_school::GameState canonicalization_state() {
+    using old_school::CardId;
+    old_school::GameState state = information_state();
+    state.next_permanent_id = 50;
+    state.next_stack_object_id = 200;
+    state.players[0].creatures = {
+        {
+            .id = 10,
+            .card = CardId::GrizzlyBears,
+            .tapped = false,
+            .summoning_sick = true,
+        },
+        {
+            .id = 11,
+            .card = CardId::IronrootTreefolk,
+            .tapped = true,
+            .summoning_sick = false,
+            .damage = 2,
+        },
+    };
+    state.players[0].artifacts = {
+        {
+            .id = 20,
+            .card = CardId::Millstone,
+            .tapped = false,
+        },
+        {
+            .id = 21,
+            .card = CardId::SolRing,
+            .tapped = true,
+        },
+    };
+    state.players[0].enchantments = {
+        CardId::Moat,
+        CardId::GiantGrowth,
+    };
+    state.players[1].creatures = {
+        {
+            .id = 30,
+            .card = CardId::FlyingMen,
+            .tapped = false,
+            .summoning_sick = false,
+        },
+        {
+            .id = 31,
+            .card = CardId::AirElemental,
+            .tapped = true,
+            .summoning_sick = false,
+            .damage = 1,
+        },
+    };
+    state.players[1].artifacts = {
+        {
+            .id = 40,
+            .card = CardId::MoxSapphire,
+            .tapped = false,
+        },
+    };
+    state.stack = {
+        {
+            .id = 100,
+            .card = CardId::LightningBolt,
+            .controller = 1,
+            .target =
+                old_school::Target::creature_target(0, 10),
+        },
+        {
+            .id = 101,
+            .card = CardId::GiantGrowth,
+            .controller = 0,
+            .target =
+                old_school::Target::creature_target(0, 11),
+        },
+        {
+            .id = 102,
+            .card = CardId::Counterspell,
+            .controller = 1,
+            .spell_target = 100,
+        },
+        {
+            .id = 103,
+            .card = CardId::ForceSpike,
+            .controller = 0,
+            .spell_target = 102,
+        },
+    };
+    return state;
+}
+
+old_school::GameState relabeled_canonicalization_state() {
+    old_school::GameState state = canonicalization_state();
+    std::reverse(
+        state.players[0].lands.begin(),
+        state.players[0].lands.end());
+    state.players[0].creatures[0].id = 901;
+    state.players[0].creatures[1].id = 115;
+    std::reverse(
+        state.players[0].creatures.begin(),
+        state.players[0].creatures.end());
+    state.players[0].artifacts[0].id = 777;
+    state.players[0].artifacts[1].id = 333;
+    std::reverse(
+        state.players[0].artifacts.begin(),
+        state.players[0].artifacts.end());
+    std::reverse(
+        state.players[0].enchantments.begin(),
+        state.players[0].enchantments.end());
+    state.players[1].creatures[0].id = 84;
+    state.players[1].creatures[1].id = 72;
+    std::reverse(
+        state.players[1].creatures.begin(),
+        state.players[1].creatures.end());
+    state.players[1].artifacts[0].id = 45;
+
+    state.stack[0].id = 950;
+    state.stack[0].target =
+        old_school::Target::creature_target(0, 901);
+    state.stack[1].id = 120;
+    state.stack[1].target =
+        old_school::Target::creature_target(0, 115);
+    state.stack[2].id = 810;
+    state.stack[2].spell_target = 950;
+    state.stack[3].id = 4;
+    state.stack[3].spell_target = 810;
+    state.next_permanent_id = 5000;
+    state.next_stack_object_id = 9000;
+    return state;
+}
+
+old_school::GameState seat_swapped_canonicalization_state() {
+    old_school::GameState state = canonicalization_state();
+    std::swap(state.players[0], state.players[1]);
+    std::swap(state.stats[0], state.stats[1]);
+    std::swap(
+        state.extra_turns_pending[0],
+        state.extra_turns_pending[1]);
+    std::swap(state.failed_draw[0], state.failed_draw[1]);
+    state.active_player = 1 - state.active_player;
+    state.starting_player = 1 - state.starting_player;
+    for (old_school::StackObject& object : state.stack) {
+        object.controller = 1 - object.controller;
+        if (object.target.has_value()) {
+            object.target->player =
+                1 - object.target->player;
+        }
+    }
+    return state;
+}
+
 old_school::LearnedDecisionContext information_context() {
     return {
         .valid = true,
@@ -449,6 +598,285 @@ void test_leaf_hash_redacts_future_libraries() {
         "terminal outcome did not enter the leaf hash");
 }
 
+void test_leaf_consequence_canonicalizes_public_object_ids() {
+    const old_school::GameState original =
+        canonicalization_state();
+    const old_school::GameState relabeled =
+        relabeled_canonicalization_state();
+    const auto context = information_context();
+    const auto original_hash =
+        fq0::redacted_leaf_consequence_sha256(
+            original, 0, context);
+    const auto relabeled_hash =
+        fq0::redacted_leaf_consequence_sha256(
+            relabeled, 0, context);
+    expect(
+        original_hash == relabeled_hash,
+        "physical public-object IDs or battlefield vector order "
+        "changed the leaf consequence");
+
+    const auto original_key = key_for(original);
+    const auto relabeled_key = key_for(relabeled);
+    expect(
+        original_key != relabeled_key &&
+            fq0::information_set_sha256(original_key) !=
+                fq0::information_set_sha256(relabeled_key),
+        "consequence canonicalization leaked into exact "
+        "information-set/action identity");
+
+    const auto original_growth =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 10));
+    const auto relabeled_growth =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 901));
+    expect(
+        fq0::canonical_priority_consequence_sha256(
+            original, 0, context, original_growth) ==
+            fq0::canonical_priority_consequence_sha256(
+                relabeled, 0, context, relabeled_growth),
+        "immediate Priority consequence retained physical IDs");
+
+    auto dangling_first = original;
+    dangling_first.stack[0].target =
+        old_school::Target::creature_target(0, 50000);
+    auto dangling_second = original;
+    dangling_second.stack[0].target =
+        old_school::Target::creature_target(1, 60000);
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            dangling_first, 0, context) ==
+            fq0::redacted_leaf_consequence_sha256(
+                dangling_second, 0, context),
+        "rules-equivalent missing creature targets retained "
+        "physical IDs or former target players");
+
+    dangling_first.stack[2].spell_target = 50001;
+    dangling_second.stack[2].spell_target = 60001;
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            dangling_first, 0, context) ==
+            fq0::redacted_leaf_consequence_sha256(
+                dangling_second, 0, context),
+        "rules-equivalent missing spell targets retained "
+        "physical IDs");
+}
+
+void test_leaf_consequence_preserves_public_semantics() {
+    const old_school::GameState state =
+        canonicalization_state();
+    const auto context = information_context();
+    const auto baseline =
+        fq0::redacted_leaf_consequence_sha256(
+            state, 0, context);
+
+    auto creature_target = state;
+    creature_target.stack[0].target =
+        old_school::Target::creature_target(0, 11);
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            creature_target, 0, context) != baseline,
+        "targeting a semantically different creature collapsed");
+
+    auto spell_target = state;
+    spell_target.stack[2].spell_target = 101;
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            spell_target, 0, context) != baseline,
+        "targeting a different live stack object collapsed");
+
+    auto artifact_state = state;
+    artifact_state.players[0].artifacts[0].tapped = true;
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            artifact_state, 0, context) != baseline,
+        "artifact rules state did not enter the consequence");
+
+    auto stack_order = state;
+    std::swap(stack_order.stack[0], stack_order.stack[1]);
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            stack_order, 0, context) != baseline,
+        "rules-significant stack order was canonicalized away");
+
+    auto graveyard_order = state;
+    graveyard_order.players[0].graveyard = {
+        old_school::CardId::GrizzlyBears,
+        old_school::CardId::GiantGrowth,
+    };
+    const auto first_order =
+        fq0::redacted_leaf_consequence_sha256(
+            graveyard_order, 0, context);
+    std::reverse(
+        graveyard_order.players[0].graveyard.begin(),
+        graveyard_order.players[0].graveyard.end());
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            graveyard_order, 0, context) != first_order,
+        "public zone order was canonicalized away");
+
+    auto exile_order = state;
+    exile_order.players[0].exile = {
+        old_school::CardId::GiantGrowth,
+        old_school::CardId::GrizzlyBears,
+    };
+    const auto first_exile_order =
+        fq0::redacted_leaf_consequence_sha256(
+            exile_order, 0, context);
+    std::reverse(
+        exile_order.players[0].exile.begin(),
+        exile_order.players[0].exile.end());
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            exile_order, 0, context) ==
+            first_exile_order,
+        "unordered exile permutation changed the consequence");
+
+    auto duplicate_permanent = state;
+    duplicate_permanent.players[0].artifacts[0].id =
+        duplicate_permanent.players[0].creatures[0].id;
+    expect_invalid(
+        [&] {
+            fq0::redacted_leaf_consequence_sha256(
+                duplicate_permanent, 0, context);
+        },
+        "ambiguous duplicate permanent IDs were accepted");
+
+    auto duplicate_stack = state;
+    duplicate_stack.stack[1].id =
+        duplicate_stack.stack[0].id;
+    expect_invalid(
+        [&] {
+            fq0::redacted_leaf_consequence_sha256(
+                duplicate_stack, 0, context);
+        },
+        "ambiguous duplicate stack IDs were accepted");
+}
+
+void test_leaf_consequence_is_observer_relative() {
+    const old_school::GameState original =
+        canonicalization_state();
+    const old_school::GameState swapped =
+        seat_swapped_canonicalization_state();
+    const auto original_context = information_context();
+    auto swapped_context = original_context;
+    swapped_context.decision_player = 1;
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            original, 0, original_context) ==
+            fq0::redacted_leaf_consequence_sha256(
+                swapped, 1, swapped_context),
+        "seat-swapped owner-equivalent leaf changed the "
+        "consequence");
+
+    const auto original_growth =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 10));
+    const auto swapped_growth =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(1, 10));
+    expect(
+        fq0::canonical_priority_consequence_sha256(
+            original, 0, original_context,
+            original_growth) ==
+            fq0::canonical_priority_consequence_sha256(
+                swapped, 1, swapped_context,
+                swapped_growth),
+        "seat-swapped owner-equivalent Priority action changed "
+        "the consequence");
+
+    old_school::GameResult original_terminal;
+    original_terminal.winner = 0;
+    original_terminal.reason =
+        old_school::EndReason::LifeTotal;
+    original_terminal.turns = 11;
+    original_terminal.starting_player = 1;
+    original_terminal.ending_life = {7, -2};
+    original_terminal.player_stats[0].spells_cast = 3;
+    original_terminal.player_stats[1].spells_cast = 5;
+    old_school::GameResult swapped_terminal =
+        original_terminal;
+    swapped_terminal.winner = 1;
+    swapped_terminal.starting_player = 0;
+    std::swap(
+        swapped_terminal.ending_life[0],
+        swapped_terminal.ending_life[1]);
+    std::swap(
+        swapped_terminal.player_stats[0],
+        swapped_terminal.player_stats[1]);
+    expect(
+        fq0::redacted_leaf_consequence_sha256(
+            original, 0, {}, original_terminal) ==
+            fq0::redacted_leaf_consequence_sha256(
+                swapped, 1, {}, swapped_terminal),
+        "seat-swapped terminal outcome changed the consequence");
+}
+
+void test_canonical_priority_consequence_transition_semantics() {
+    const auto context = information_context();
+    const old_school::GameState cast_state =
+        canonicalization_state();
+    const auto growth =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 10));
+    const auto cast_hash =
+        fq0::canonical_priority_consequence_sha256(
+            cast_state, 0, context, growth);
+    expect(
+        cast_hash ==
+                fq0::canonical_priority_consequence_sha256(
+                    cast_state, 0, context, growth) &&
+            cast_hash.size() == 64,
+        "cast-retains-priority consequence was not stable");
+
+    const auto pass =
+        old_school::PriorityAction::pass();
+    const auto transferred =
+        fq0::canonical_priority_consequence_sha256(
+            cast_state, 0, context, pass);
+    auto resolving_context = context;
+    resolving_context.consecutive_passes = 1;
+    const auto resolved =
+        fq0::canonical_priority_consequence_sha256(
+            cast_state, 0, resolving_context, pass);
+
+    auto empty_stack = cast_state;
+    empty_stack.stack.clear();
+    const auto window_ended =
+        fq0::canonical_priority_consequence_sha256(
+            empty_stack, 0, resolving_context, pass);
+
+    auto lethal = information_state();
+    lethal.players[0].life = 3;
+    lethal.stack[0].target =
+        old_school::Target::player_target(0);
+    const auto terminal =
+        fq0::canonical_priority_consequence_sha256(
+            lethal, 0, resolving_context, pass);
+    expect(
+        cast_hash != transferred &&
+            transferred != resolved &&
+            resolved != window_ended &&
+            window_ended != terminal,
+        "Priority transition dispositions collapsed");
+
+    const auto illegal =
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 99999));
+    expect_invalid(
+        [&] {
+            fq0::canonical_priority_consequence_sha256(
+                cast_state, 0, context, illegal);
+        },
+        "non-authoritative Priority action was accepted");
+    expect_invalid(
+        [&] {
+            fq0::canonical_priority_consequence_sha256(
+                cast_state, 1, context, pass);
+        },
+        "non-owner consequence observer was accepted");
+}
+
 void test_indexed_seed_uses_every_coordinate() {
     constexpr std::uint64_t kBase = 0xF00B411ULL;
     const fq0::IndexedSeedCoordinates baseline{
@@ -631,6 +1059,22 @@ int main() {
             {
                 "leaf future-library redaction",
                 test_leaf_hash_redacts_future_libraries,
+            },
+            {
+                "leaf public-object canonicalization",
+                test_leaf_consequence_canonicalizes_public_object_ids,
+            },
+            {
+                "leaf public semantic distinction",
+                test_leaf_consequence_preserves_public_semantics,
+            },
+            {
+                "leaf observer-relative canonicalization",
+                test_leaf_consequence_is_observer_relative,
+            },
+            {
+                "Priority consequence transition",
+                test_canonical_priority_consequence_transition_semantics,
             },
             {
                 "indexed seed coordinates",
