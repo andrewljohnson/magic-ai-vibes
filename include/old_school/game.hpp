@@ -766,6 +766,80 @@ struct LearnedPriorityH0Boundary {
         const LearnedPriorityH0Boundary&) const = default;
 };
 
+inline constexpr std::size_t
+    kLearnedPriorityMacroActionBound = 4096;
+inline constexpr std::size_t
+    kLearnedPriorityMacroPhaseTransitionBound = 1024;
+inline constexpr std::size_t
+    kLearnedPriorityMacroTurnAdvanceBound = 64;
+
+enum class LearnedPriorityMacroDisposition : std::uint8_t {
+    PriorityBoundary,
+    Terminal,
+    Incomplete,
+};
+
+enum class LearnedPriorityMacroLimit : std::uint8_t {
+    None,
+    Action,
+    PhaseTransition,
+    TurnAdvance,
+};
+
+// Fixed, no-knob accounting used by the Priority macro-transition. Keeping
+// the arithmetic in this small value type makes exact-bound behavior directly
+// testable without weakening the production limits.
+struct LearnedPriorityMacroBudget {
+    // The caller-forced root Priority action has already been applied.
+    std::size_t actions_applied = 1;
+    std::size_t priority_actions_applied = 1;
+    std::size_t phase_transitions = 0;
+    std::size_t turn_advances = 0;
+
+    bool try_apply_actions(std::size_t count) noexcept;
+    bool try_apply_forced_priority_action() noexcept;
+    bool try_advance_phase() noexcept;
+    bool try_advance_turn() noexcept;
+
+    bool operator==(
+        const LearnedPriorityMacroBudget&) const = default;
+};
+
+// Evaluation-only result of forcing one legal Priority action and then
+// advancing through production rules. Forced singleton Priority actions are
+// taken automatically. A nonterminal result stops before the first subsequent
+// multi-action Priority policy call, preserving its exact state, context, and
+// ordered legal actions. Limit exhaustion is incomplete evidence, never a
+// terminal draw.
+struct LearnedPriorityMacroTransition {
+    LearnedPriorityMacroDisposition disposition =
+        LearnedPriorityMacroDisposition::Incomplete;
+    LearnedPriorityMacroLimit exhausted_limit =
+        LearnedPriorityMacroLimit::None;
+    GameState state;
+    LearnedDecisionContext context;
+    std::vector<PriorityAction> legal_actions;
+    std::optional<GameResult> terminal_result;
+    // Includes the caller-forced root action and every production
+    // non-Priority policy choice.
+    std::size_t actions_applied = 0;
+    std::size_t priority_actions_applied = 0;
+    std::size_t phase_transitions = 0;
+    std::size_t turn_advances = 0;
+
+    bool operator==(
+        const LearnedPriorityMacroTransition&) const = default;
+};
+
+LearnedPriorityMacroTransition
+advance_learned_priority_macro_transition(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, const PriorityAction& action,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed);
+
 struct LearnedActionSamples {
     // Outer order matches the caller's candidate order. Inner samples are
     // flattened world-major, then rollout-major, and are paired across every
@@ -1048,6 +1122,14 @@ class Game {
         const std::vector<PriorityAction>& candidates,
         std::shared_ptr<const LearnedModel> model,
         LearnedSearchConfig config);
+    friend LearnedPriorityMacroTransition
+    advance_learned_priority_macro_transition(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t player, bool sorcery_actions, TurnPhase phase,
+        int consecutive_passes, const PriorityAction& action,
+        std::shared_ptr<const LearnedModel> model,
+        std::uint64_t seed);
     friend LearnedActionSamples learned_binary_attack_samples(
         const GameState& state,
         const std::array<std::vector<CardId>, 2>& original_decks,
@@ -1156,6 +1238,13 @@ class Game {
     bool has_human_observer() const;
     void notify_human_observers(const GameEvent& event) const;
 
+    struct LearnedPriorityMacroControl;
+    void note_learned_priority_macro_phase(TurnPhase phase);
+    void note_learned_priority_macro_cleanup();
+    void note_learned_priority_macro_turn_advance();
+    void note_learned_priority_macro_nonpriority_actions(
+        std::size_t count = 1);
+
     enum class LearnedDecisionRole : std::uint8_t {
         RealRoot,
         ValueContinuation,
@@ -1173,6 +1262,9 @@ class Game {
         LearnedDecisionTraceMode::Sparse;
     LearnedDecisionRole learned_decision_role_ =
         LearnedDecisionRole::RealRoot;
+    // Non-null only inside the evaluation-only macro-transition driver.
+    LearnedPriorityMacroControl*
+        learned_priority_macro_control_ = nullptr;
 };
 
 struct DeckSimulationStats {

@@ -6748,6 +6748,490 @@ TEST(priority_h0_boundary_capture_rejects_non_priority_samplers) {
         "unavailable for Block"));
 }
 
+TEST(priority_macro_transition_cast_retains_priority_before_policy) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 4;
+    state.next_permanent_id = 2;
+    state.players[0].hand = {
+        old_school::CardId::GrizzlyBears,
+        old_school::CardId::GiantGrowth,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+        {.card = old_school::CardId::Forest},
+    };
+    state.players[0].creatures = {bear(1)};
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::GrizzlyBears,
+            old_school::CardId::GiantGrowth,
+            old_school::CardId::Forest,
+            old_school::CardId::Forest,
+            old_school::CardId::Forest,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+        },
+    };
+
+    const auto result =
+        old_school::advance_learned_priority_macro_transition(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0,
+            old_school::PriorityAction::cast_creature(
+                old_school::CardId::GrizzlyBears),
+            small_value_model(), 0xF000CA57ULL);
+
+    CHECK(result.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(result.exhausted_limit ==
+          old_school::LearnedPriorityMacroLimit::None);
+    CHECK(!result.terminal_result.has_value());
+    CHECK(result.context.valid);
+    CHECK(result.context.phase ==
+          old_school::TurnPhase::FirstMain);
+    CHECK(result.context.decision_player == 0);
+    CHECK(result.context.consecutive_passes == 0);
+    CHECK(result.context.sorcery_actions);
+    CHECK(result.actions_applied == 1);
+    CHECK(result.priority_actions_applied == 1);
+    CHECK(result.phase_transitions == 0);
+    CHECK(result.turn_advances == 0);
+    CHECK(result.state.stack.size() == 1);
+    CHECK(result.state.stack.back().card ==
+          old_school::CardId::GrizzlyBears);
+    CHECK(result.state.stack.back().controller == 0);
+    CHECK(result.state.stats[0].spells_cast == 1);
+    CHECK(result.state.stats[0].decisions == 0);
+    CHECK(result.legal_actions ==
+          old_school::legal_priority_actions(
+              result.state, 0, true));
+    CHECK(has_action(
+        result.legal_actions,
+        old_school::PriorityAction::cast_giant_growth(
+            old_school::Target::creature_target(0, 1))));
+}
+
+TEST(priority_macro_transition_preserves_first_and_second_pass_semantics) {
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+            old_school::CardId::LightningBolt,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+            old_school::CardId::LightningBolt,
+            old_school::CardId::GrizzlyBears,
+        },
+    };
+    old_school::GameState first_pass;
+    first_pass.active_player = 0;
+    first_pass.starting_player = 0;
+    first_pass.turn_number = 4;
+    first_pass.players[1].hand = {
+        old_school::CardId::LightningBolt,
+    };
+    first_pass.players[1].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+
+    const auto transferred =
+        old_school::advance_learned_priority_macro_transition(
+            first_pass, decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 0,
+            old_school::PriorityAction::pass(),
+            small_value_model(), 0xF000A551ULL);
+    CHECK(transferred.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(transferred.context.decision_player == 1);
+    CHECK(transferred.context.consecutive_passes == 1);
+    CHECK(transferred.context.phase ==
+          old_school::TurnPhase::BeginCombat);
+    CHECK(!transferred.context.sorcery_actions);
+    CHECK(transferred.priority_actions_applied == 1);
+    CHECK(transferred.state.stack.empty());
+    CHECK(transferred.state.stats[1].decisions == 0);
+
+    old_school::GameState second_pass;
+    second_pass.active_player = 0;
+    second_pass.starting_player = 0;
+    second_pass.turn_number = 4;
+    second_pass.next_permanent_id = 1;
+    second_pass.next_stack_object_id = 2;
+    second_pass.players[0].hand = {
+        old_school::CardId::LightningBolt,
+    };
+    second_pass.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+    second_pass.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::GrizzlyBears,
+            .controller = 1,
+        },
+    };
+
+    const auto resolved =
+        old_school::advance_learned_priority_macro_transition(
+            second_pass, decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 1,
+            old_school::PriorityAction::pass(),
+            small_value_model(), 0xF000A552ULL);
+    CHECK(resolved.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(resolved.context.decision_player == 0);
+    CHECK(resolved.context.consecutive_passes == 0);
+    CHECK(resolved.context.phase ==
+          old_school::TurnPhase::BeginCombat);
+    CHECK(resolved.state.stack.empty());
+    CHECK(resolved.state.players[1].creatures.size() == 1);
+    CHECK(resolved.state.players[1].creatures.front().card ==
+          old_school::CardId::GrizzlyBears);
+    CHECK(resolved.state.stats[0].decisions == 0);
+    CHECK(resolved.priority_actions_applied == 1);
+}
+
+TEST(priority_macro_transition_uses_every_empty_stack_phase_exit) {
+    struct PhaseCase {
+        old_school::TurnPhase root;
+        old_school::TurnPhase successor;
+        std::size_t successor_player = 0;
+        bool successor_sorcery = false;
+        std::size_t phase_transitions = 0;
+        std::size_t turn_advances = 0;
+    };
+    const std::array<PhaseCase, 4> cases = {{
+        {
+            .root = old_school::TurnPhase::FirstMain,
+            .successor = old_school::TurnPhase::BeginCombat,
+            .successor_player = 0,
+            .successor_sorcery = false,
+            .phase_transitions = 1,
+        },
+        {
+            .root = old_school::TurnPhase::BeginCombat,
+            .successor = old_school::TurnPhase::EndCombat,
+            .successor_player = 0,
+            .successor_sorcery = false,
+            .phase_transitions = 2,
+        },
+        {
+            .root = old_school::TurnPhase::EndCombat,
+            .successor = old_school::TurnPhase::SecondMain,
+            .successor_player = 0,
+            .successor_sorcery = true,
+            .phase_transitions = 1,
+        },
+        {
+            .root = old_school::TurnPhase::SecondMain,
+            .successor = old_school::TurnPhase::FirstMain,
+            .successor_player = 1,
+            .successor_sorcery = true,
+            .phase_transitions = 2,
+            .turn_advances = 1,
+        },
+    }};
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+            old_school::CardId::LightningBolt,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+            old_school::CardId::LightningBolt,
+            old_school::CardId::Mountain,
+        },
+    };
+
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        old_school::GameState state;
+        state.active_player = 0;
+        state.starting_player = 0;
+        state.turn_number = 4;
+        for (std::size_t player = 0; player < 2; ++player) {
+            state.players[player].hand = {
+                old_school::CardId::LightningBolt,
+            };
+            state.players[player].lands = {
+                {.card = old_school::CardId::Mountain},
+            };
+        }
+        state.players[1].library = {
+            old_school::CardId::Mountain,
+        };
+
+        const bool root_sorcery =
+            cases[index].root ==
+                old_school::TurnPhase::FirstMain ||
+            cases[index].root ==
+                old_school::TurnPhase::SecondMain;
+        const auto result =
+            old_school::advance_learned_priority_macro_transition(
+                state, decks, 0, root_sorcery,
+                cases[index].root, 1,
+                old_school::PriorityAction::pass(),
+                small_value_model(),
+                0xF000FA5EULL + index);
+        CHECK(result.disposition ==
+              old_school::LearnedPriorityMacroDisposition::
+                  PriorityBoundary);
+        CHECK(result.context.phase ==
+              cases[index].successor);
+        CHECK(result.context.decision_player ==
+              cases[index].successor_player);
+        CHECK(result.context.consecutive_passes == 0);
+        CHECK(result.context.sorcery_actions ==
+              cases[index].successor_sorcery);
+        CHECK(result.phase_transitions ==
+              cases[index].phase_transitions);
+        CHECK(result.turn_advances ==
+              cases[index].turn_advances);
+        CHECK(result.state.stats[
+                  cases[index].successor_player]
+                  .decisions == 0);
+    }
+}
+
+TEST(priority_macro_transition_runs_cleanup_extra_turn_draw_and_deckout) {
+    const auto model = small_value_model();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::Forest,
+            old_school::CardId::Forest,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+            old_school::CardId::Mountain,
+        },
+    };
+
+    old_school::GameState cleanup;
+    cleanup.active_player = 0;
+    cleanup.starting_player = 0;
+    cleanup.turn_number = 4;
+    cleanup.players[0].hand.assign(
+        8, old_school::CardId::Forest);
+    cleanup.players[1].hand = {
+        old_school::CardId::Mountain,
+    };
+    cleanup.players[1].library = {
+        old_school::CardId::Mountain,
+    };
+    const auto cleaned =
+        old_school::advance_learned_priority_macro_transition(
+            cleanup, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            old_school::PriorityAction::pass(), model,
+            0xF000C1EAULL);
+    CHECK(cleaned.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(cleaned.state.players[0].hand.size() == 7);
+    CHECK(cleaned.state.players[0].graveyard ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::Forest});
+    CHECK(cleaned.state.active_player == 1);
+    CHECK(cleaned.state.turn_number == 5);
+    CHECK(cleaned.state.stats[1].cards_drawn == 1);
+    CHECK(cleaned.context.phase ==
+          old_school::TurnPhase::FirstMain);
+
+    old_school::GameState extra_turn;
+    extra_turn.active_player = 0;
+    extra_turn.starting_player = 0;
+    extra_turn.turn_number = 4;
+    extra_turn.extra_turns_pending[0] = 1;
+    extra_turn.players[0].hand = {
+        old_school::CardId::Forest,
+    };
+    extra_turn.players[0].library = {
+        old_school::CardId::Forest,
+    };
+    const auto extra =
+        old_school::advance_learned_priority_macro_transition(
+            extra_turn, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            old_school::PriorityAction::pass(), model,
+            0xF000E471ULL);
+    CHECK(extra.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(extra.state.active_player == 0);
+    CHECK(extra.state.turn_number == 5);
+    CHECK(extra.state.extra_turns_pending[0] == 0);
+    CHECK(extra.state.stats[0].cards_drawn == 1);
+    CHECK(extra.context.decision_player == 0);
+
+    old_school::GameState draw_skip;
+    draw_skip.active_player = 1;
+    draw_skip.starting_player = 0;
+    draw_skip.turn_number = 0;
+    draw_skip.players[0].hand = {
+        old_school::CardId::Forest,
+    };
+    draw_skip.players[0].library = {
+        old_school::CardId::Forest,
+    };
+    const auto skipped =
+        old_school::advance_learned_priority_macro_transition(
+            draw_skip, decks, 1, true,
+            old_school::TurnPhase::SecondMain, 1,
+            old_school::PriorityAction::pass(), model,
+            0xF000D2A5ULL);
+    CHECK(skipped.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(skipped.state.turn_number == 1);
+    CHECK(skipped.state.active_player == 0);
+    CHECK(skipped.state.stats[0].cards_drawn == 0);
+    CHECK(skipped.state.players[0].library ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::Forest});
+
+    old_school::GameState deckout;
+    deckout.active_player = 0;
+    deckout.starting_player = 0;
+    deckout.turn_number = 4;
+    const auto empty =
+        old_school::advance_learned_priority_macro_transition(
+            deckout, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            old_school::PriorityAction::pass(), model,
+            0xF000DEC0ULL);
+    CHECK(empty.disposition ==
+          old_school::LearnedPriorityMacroDisposition::Terminal);
+    CHECK(empty.exhausted_limit ==
+          old_school::LearnedPriorityMacroLimit::None);
+    CHECK(empty.terminal_result.has_value());
+    CHECK(empty.terminal_result->winner == 0);
+    CHECK(empty.terminal_result->reason ==
+          old_school::EndReason::EmptyLibrary);
+    CHECK(empty.state.turn_number == 5);
+    CHECK(empty.state.active_player == 1);
+    CHECK(empty.turn_advances == 1);
+}
+
+TEST(priority_macro_transition_forces_singletons_and_bounds_turns) {
+    const auto model = small_value_model();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::GrizzlyBears,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+        },
+    };
+    old_school::GameState chain;
+    chain.active_player = 0;
+    chain.starting_player = 0;
+    chain.turn_number = 4;
+    chain.next_permanent_id = 1;
+    chain.next_stack_object_id = 2;
+    chain.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::GrizzlyBears,
+            .controller = 0,
+        },
+    };
+    chain.players[1].library = {
+        old_school::CardId::Mountain,
+    };
+    const auto stopped =
+        old_school::advance_learned_priority_macro_transition(
+            chain, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0,
+            old_school::PriorityAction::pass(), model,
+            0xF00051A6ULL);
+    CHECK(stopped.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(stopped.priority_actions_applied > 1);
+    CHECK(stopped.context.phase ==
+          old_school::TurnPhase::FirstMain);
+    CHECK(stopped.context.decision_player == 1);
+    CHECK(stopped.state.stack.empty());
+    CHECK(stopped.state.players[0].creatures.size() == 1);
+    CHECK(stopped.state.players[0].creatures.front().card ==
+          old_school::CardId::GrizzlyBears);
+
+    old_school::GameState action_bounded;
+    action_bounded.active_player = 0;
+    action_bounded.starting_player = 0;
+    action_bounded.turn_number = 4;
+    action_bounded.players[0].hand.assign(
+        old_school::kMaximumHandSize +
+            old_school::kLearnedPriorityMacroActionBound,
+        old_school::CardId::FireElemental);
+    const std::array<std::vector<old_school::CardId>, 2>
+        action_bounded_decks = {
+            action_bounded.players[0].hand,
+            std::vector<old_school::CardId>{
+                old_school::CardId::FireElemental,
+            },
+        };
+    const auto action_incomplete =
+        old_school::advance_learned_priority_macro_transition(
+            action_bounded, action_bounded_decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            old_school::PriorityAction::pass(), model,
+            0xF000AC71ULL);
+    CHECK(action_incomplete.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              Incomplete);
+    CHECK(action_incomplete.exhausted_limit ==
+          old_school::LearnedPriorityMacroLimit::Action);
+    CHECK(action_incomplete.actions_applied == 1);
+    CHECK(action_incomplete.priority_actions_applied == 1);
+    CHECK(action_incomplete.phase_transitions == 1);
+    CHECK(action_incomplete.turn_advances == 0);
+
+    old_school::GameState bounded;
+    bounded.active_player = 0;
+    bounded.starting_player = 0;
+    bounded.turn_number = 1;
+    bounded.players[0].library.assign(
+        100, old_school::CardId::FireElemental);
+    bounded.players[1].library.assign(
+        100, old_school::CardId::FireElemental);
+    const std::array<std::vector<old_school::CardId>, 2>
+        bounded_decks = {
+            bounded.players[0].library,
+            bounded.players[1].library,
+        };
+    const auto incomplete =
+        old_school::advance_learned_priority_macro_transition(
+            bounded, bounded_decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            old_school::PriorityAction::pass(), model,
+            0xF000B00DULL);
+    CHECK(incomplete.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              Incomplete);
+    CHECK(incomplete.exhausted_limit ==
+          old_school::LearnedPriorityMacroLimit::TurnAdvance);
+    CHECK(!incomplete.terminal_result.has_value());
+    CHECK(!incomplete.context.valid);
+    CHECK(incomplete.legal_actions.empty());
+    CHECK(incomplete.turn_advances ==
+          old_school::kLearnedPriorityMacroTurnAdvanceBound);
+    CHECK(incomplete.actions_applied <=
+          old_school::kLearnedPriorityMacroActionBound);
+    CHECK(incomplete.priority_actions_applied <=
+          incomplete.actions_applied);
+    CHECK(incomplete.phase_transitions <=
+          old_school::kLearnedPriorityMacroPhaseTransitionBound);
+}
+
 TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
     const DeterminizationFixture fixture =
         attack_evaluation_fixture(old_school::CardId::GrizzlyBears);

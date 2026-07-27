@@ -12226,6 +12226,146 @@ PlayerObservation observe_game_state(const GameState& state,
     return observation;
 }
 
+bool LearnedPriorityMacroBudget::try_apply_actions(
+    std::size_t count) noexcept {
+    if (actions_applied >
+            kLearnedPriorityMacroActionBound ||
+        count >
+            kLearnedPriorityMacroActionBound -
+                actions_applied) {
+        return false;
+    }
+    actions_applied += count;
+    return true;
+}
+
+bool LearnedPriorityMacroBudget::
+    try_apply_forced_priority_action() noexcept {
+    if (!try_apply_actions(1)) {
+        return false;
+    }
+    ++priority_actions_applied;
+    return true;
+}
+
+bool LearnedPriorityMacroBudget::try_advance_phase() noexcept {
+    if (phase_transitions >=
+        kLearnedPriorityMacroPhaseTransitionBound) {
+        return false;
+    }
+    ++phase_transitions;
+    return true;
+}
+
+bool LearnedPriorityMacroBudget::try_advance_turn() noexcept {
+    if (turn_advances >=
+        kLearnedPriorityMacroTurnAdvanceBound) {
+        return false;
+    }
+    ++turn_advances;
+    return true;
+}
+
+struct Game::LearnedPriorityMacroControl {
+    enum class StopKind : std::uint8_t {
+        None,
+        PriorityBoundary,
+        ActionLimit,
+        PhaseTransitionLimit,
+        TurnAdvanceLimit,
+    };
+
+    struct Stop {};
+
+    static constexpr std::size_t kCleanupLocation = 7;
+
+    StopKind stop_kind = StopKind::None;
+    std::size_t current_location = 0;
+    LearnedPriorityMacroBudget budget;
+    LearnedDecisionContext boundary_context;
+    std::vector<PriorityAction> boundary_actions;
+
+    [[noreturn]] void stop(StopKind kind) {
+        stop_kind = kind;
+        throw Stop{};
+    }
+
+    void enter_location(std::size_t location) {
+        if (current_location == location) {
+            return;
+        }
+        if (!budget.try_advance_phase()) {
+            stop(StopKind::PhaseTransitionLimit);
+        }
+        current_location = location;
+    }
+
+    void apply_actions(std::size_t count) {
+        if (!budget.try_apply_actions(count)) {
+            stop(StopKind::ActionLimit);
+        }
+    }
+
+    void apply_forced_priority_action() {
+        if (!budget.try_apply_forced_priority_action()) {
+            stop(StopKind::ActionLimit);
+        }
+    }
+
+    void advance_turn() {
+        if (!budget.try_advance_turn()) {
+            stop(StopKind::TurnAdvanceLimit);
+        }
+    }
+
+    [[noreturn]] void capture_priority_boundary(
+        TurnPhase phase, std::size_t player,
+        int consecutive_passes, bool sorcery_actions,
+        const std::vector<PriorityAction>& actions) {
+        boundary_context = {
+            .valid = true,
+            .phase = phase,
+            .decision_player = player,
+            .consecutive_passes = consecutive_passes,
+            .sorcery_actions = sorcery_actions,
+        };
+        boundary_actions = actions;
+        stop(StopKind::PriorityBoundary);
+    }
+};
+
+void Game::note_learned_priority_macro_phase(TurnPhase phase) {
+    if (learned_priority_macro_control_ == nullptr) {
+        return;
+    }
+    learned_priority_macro_control_->enter_location(
+        static_cast<std::size_t>(phase));
+}
+
+void Game::note_learned_priority_macro_cleanup() {
+    if (learned_priority_macro_control_ == nullptr) {
+        return;
+    }
+    learned_priority_macro_control_->enter_location(
+        LearnedPriorityMacroControl::kCleanupLocation);
+}
+
+void Game::note_learned_priority_macro_turn_advance() {
+    if (learned_priority_macro_control_ == nullptr) {
+        return;
+    }
+    learned_priority_macro_control_->advance_turn();
+}
+
+void Game::note_learned_priority_macro_nonpriority_actions(
+    std::size_t count) {
+    if (learned_priority_macro_control_ == nullptr ||
+        count == 0) {
+        return;
+    }
+    learned_priority_macro_control_->apply_actions(count);
+}
+
 Game::Game(std::vector<CardId> player_zero_deck,
            std::vector<CardId> player_one_deck, std::uint64_t seed,
            GameConfig config)
@@ -12432,6 +12572,7 @@ Game::choose_cleanup_discards(std::size_t player,
 }
 
 void Game::perform_cleanup() {
+    note_learned_priority_macro_cleanup();
     const std::size_t active_player = state_.active_player;
     if (active_player >= state_.players.size()) {
         throw std::logic_error(
@@ -12445,6 +12586,8 @@ void Game::perform_cleanup() {
             : 0;
     std::vector<std::size_t> selected;
     if (excess != 0) {
+        note_learned_priority_macro_nonpriority_actions(
+            excess);
         selected =
             choose_cleanup_discards(active_player, excess);
     }
@@ -12542,6 +12685,7 @@ std::optional<GameResult> Game::life_total_result() const {
 
 std::optional<GameResult>
 Game::play_priority_window(bool sorcery_actions, TurnPhase phase) {
+    note_learned_priority_macro_phase(phase);
     PriorityState priority = {
         .player = state_.active_player,
         .consecutive_passes = 0,
@@ -12559,6 +12703,17 @@ Game::continue_priority_window(bool sorcery_actions,
         const auto actions =
             legal_priority_actions(state_, priority.player,
                                    sorcery_actions);
+        if (learned_priority_macro_control_ != nullptr) {
+            if (actions.size() >= 2) {
+                learned_priority_macro_control_
+                    ->capture_priority_boundary(
+                        phase, priority.player,
+                        priority.consecutive_passes,
+                        sorcery_actions, actions);
+            }
+            learned_priority_macro_control_
+                ->apply_forced_priority_action();
+        }
         const std::size_t trace_size_before_choice =
             learned_decision_trace_ == nullptr
                 ? 0
@@ -14135,6 +14290,8 @@ std::optional<GameResult> Game::play_combat() {
 }
 
 std::optional<GameResult> Game::play_combat_after_beginning() {
+    note_learned_priority_macro_phase(
+        TurnPhase::DeclareAttackers);
     auto& attacking_state = state_.players[state_.active_player];
     const std::size_t defending_player = opponent_of(state_.active_player);
     auto& defending_state = state_.players[defending_player];
@@ -14194,6 +14351,7 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
             }
         }
     } else if (learned_value_attacker) {
+        note_learned_priority_macro_nonpriority_actions();
         std::vector<PermanentId> legal_attackers;
         for (const auto& creature : attacking_state.creatures) {
             if (!creature.tapped && !creature.summoning_sick &&
@@ -14339,6 +14497,11 @@ std::optional<GameResult> Game::play_combat_with_attackers(
     const bool handcrafted_attacker =
         config_.bots[state_.active_player].kind ==
         BotKind::Handcrafted;
+    const bool learned_value_attacker =
+        config_.bots[state_.active_player].kind ==
+            BotKind::Learned &&
+        config_.bots[state_.active_player].learned_variant ==
+            LearnedVariant::ValueSearchChampion;
     const bool learned_actor_attacker =
         config_.bots[state_.active_player].kind ==
             BotKind::Learned &&
@@ -14357,6 +14520,8 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         return play_priority_window(false, TurnPhase::EndCombat);
     }
 
+    note_learned_priority_macro_phase(
+        TurnPhase::DeclareBlockers);
     std::vector<PermanentId> available_blockers;
     for (const auto& creature : defending_state.creatures) {
         if (!creature.tapped) {
@@ -14480,6 +14645,7 @@ std::optional<GameResult> Game::play_combat_with_attackers(
             }
         }
     } else if (learned_value_defender) {
+        note_learned_priority_macro_nonpriority_actions();
         const auto candidates =
             learned_value_block_candidates(
                 state_, state_.active_player, attackers,
@@ -14583,6 +14749,8 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         });
     }
 
+    note_learned_priority_macro_phase(
+        TurnPhase::DamageOrder);
     std::vector<std::pair<PermanentId, PermanentId>> blocks;
     const auto* damage_order_controller =
         human_controller(state_.active_player);
@@ -14659,6 +14827,10 @@ std::optional<GameResult> Game::play_combat_with_attackers(
             }
             blockers = std::move(ordered);
         } else {
+            if (learned_value_attacker &&
+                blockers.size() > 1) {
+                note_learned_priority_macro_nonpriority_actions();
+            }
             std::shuffle(blockers.begin(), blockers.end(), random_);
         }
         for (const PermanentId blocker : blockers) {
@@ -14845,6 +15017,7 @@ GameResult Game::run_with_priority_root_trace(
 GameResult Game::run_from_turn(std::size_t first_turn) {
     for (std::size_t turn = first_turn; turn <= config_.max_turns;
          ++turn) {
+        note_learned_priority_macro_turn_advance();
         state_.turn_number = turn;
         if (turn == 1) {
             state_.active_player = state_.starting_player;
@@ -16056,18 +16229,27 @@ void validate_priority_candidates(
         throw std::out_of_range(
             "Learned priority pass count must be zero or one");
     }
+    switch (phase) {
+    case TurnPhase::FirstMain:
+    case TurnPhase::BeginCombat:
+    case TurnPhase::EndCombat:
+    case TurnPhase::SecondMain:
+        break;
+    case TurnPhase::DeclareAttackers:
+    case TurnPhase::DeclareBlockers:
+    case TurnPhase::DamageOrder:
+        throw std::invalid_argument(
+            "priority evaluation requires a supported priority phase");
+    default:
+        throw std::invalid_argument(
+            "priority evaluation phase is invalid");
+    }
     const bool main_phase =
         phase == TurnPhase::FirstMain ||
         phase == TurnPhase::SecondMain;
     if (main_phase != sorcery_actions) {
         throw std::invalid_argument(
             "priority phase and sorcery-action context disagree");
-    }
-    if (phase == TurnPhase::DeclareAttackers ||
-        phase == TurnPhase::DeclareBlockers ||
-        phase == TurnPhase::DamageOrder) {
-        throw std::invalid_argument(
-            "priority evaluation requires a supported priority phase");
     }
     if (candidates.empty()) {
         throw std::invalid_argument(
@@ -21203,6 +21385,206 @@ double blend_evaluation_score(
 }
 
 } // namespace
+
+LearnedPriorityMacroTransition
+advance_learned_priority_macro_transition(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t player, bool sorcery_actions, TurnPhase phase,
+    int consecutive_passes, const PriorityAction& action,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    validate_priority_candidates(
+        state, player, sorcery_actions, phase,
+        consecutive_passes, {action});
+
+    GameConfig game_config;
+    game_config.learned_model = model;
+    game_config.learned_search_depth = 1;
+    game_config.bots = {
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 8,
+            .exploration_rate = 0.0,
+            .value_continuation_epsilon = 0.0,
+            .value_priority_residual_weight = 0.0,
+            .value_pass_dominance = false,
+            .value_continuation_controller =
+                LearnedContinuationController::Legacy,
+            .learned_model = model,
+        },
+        BotConfig{
+            .kind = BotKind::Learned,
+            .learned_variant =
+                LearnedVariant::ValueSearchChampion,
+            .rollouts_per_action = 8,
+            .exploration_rate = 0.0,
+            .value_continuation_epsilon = 0.0,
+            .value_priority_residual_weight = 0.0,
+            .value_pass_dominance = false,
+            .value_continuation_controller =
+                LearnedContinuationController::Legacy,
+            .learned_model = model,
+        },
+    };
+    Game simulation(
+        original_decks[0], original_decks[1], seed,
+        game_config);
+    simulation.state_ = state;
+
+    Game::LearnedPriorityMacroControl control;
+    control.current_location =
+        static_cast<std::size_t>(phase);
+
+    const auto make_result =
+        [&](LearnedPriorityMacroDisposition disposition,
+            LearnedPriorityMacroLimit exhausted_limit,
+            std::optional<GameResult> terminal_result =
+                std::nullopt) {
+            LearnedDecisionContext context;
+            std::vector<PriorityAction> legal_actions;
+            if (disposition ==
+                LearnedPriorityMacroDisposition::
+                    PriorityBoundary) {
+                context = control.boundary_context;
+                legal_actions = control.boundary_actions;
+            }
+            return LearnedPriorityMacroTransition{
+                .disposition = disposition,
+                .exhausted_limit = exhausted_limit,
+                .state = simulation.state_,
+                .context = context,
+                .legal_actions = std::move(legal_actions),
+                .terminal_result =
+                    std::move(terminal_result),
+                .actions_applied =
+                    control.budget.actions_applied,
+                .priority_actions_applied =
+                    control.budget.priority_actions_applied,
+                .phase_transitions =
+                    control.budget.phase_transitions,
+                .turn_advances =
+                    control.budget.turn_advances,
+            };
+        };
+
+    PriorityState priority{
+        .player = player,
+        .consecutive_passes = consecutive_passes,
+    };
+    bool window_ended = false;
+    std::optional<GameResult> terminal;
+    if (action.kind == PriorityActionKind::Pass) {
+        const PriorityPassResult pass =
+            pass_priority(simulation.state_, priority);
+        window_ended =
+            pass == PriorityPassResult::WindowEnded;
+        if (pass == PriorityPassResult::StackObjectResolved) {
+            terminal = simulation.life_total_result();
+        }
+    } else {
+        if (!apply_priority_action(
+                simulation.state_, player, action,
+                sorcery_actions)) {
+            throw std::logic_error(
+                "validated macro-transition action became illegal");
+        }
+        priority = {
+            .player = player,
+            .consecutive_passes = 0,
+        };
+    }
+
+    if (terminal.has_value()) {
+        return make_result(
+            LearnedPriorityMacroDisposition::Terminal,
+            LearnedPriorityMacroLimit::None, terminal);
+    }
+
+    simulation.learned_priority_macro_control_ = &control;
+    try {
+        if (!window_ended) {
+            terminal = simulation.continue_priority_window(
+                sorcery_actions, phase, priority);
+        }
+        if (!terminal.has_value()) {
+            terminal =
+                simulation.finish_turn_after_priority_phase(
+                    phase);
+        }
+        if (!terminal.has_value()) {
+            constexpr std::size_t kRequiredTurnHeadroom =
+                kLearnedPriorityMacroTurnAdvanceBound + 1;
+            static_assert(
+                kRequiredTurnHeadroom >
+                kLearnedPriorityMacroTurnAdvanceBound);
+            if (simulation.state_.turn_number >
+                std::numeric_limits<std::size_t>::max() -
+                    kRequiredTurnHeadroom) {
+                throw std::overflow_error(
+                    "macro-transition lacks turn-bound headroom");
+            }
+            // Permit the 65th attempted advance to enter
+            // run_from_turn, where the fixed macro hook rejects it
+            // before mutating state. This prevents GameConfig's normal
+            // turn-limit draw from preempting the explicit incomplete
+            // disposition.
+            simulation.config_.max_turns =
+                simulation.state_.turn_number +
+                kRequiredTurnHeadroom;
+            terminal = simulation.run_from_turn(
+                simulation.state_.turn_number + 1);
+        }
+        simulation.learned_priority_macro_control_ = nullptr;
+    } catch (
+        const Game::LearnedPriorityMacroControl::Stop&) {
+        simulation.learned_priority_macro_control_ = nullptr;
+        switch (control.stop_kind) {
+        case Game::LearnedPriorityMacroControl::StopKind::
+            PriorityBoundary:
+            return make_result(
+                LearnedPriorityMacroDisposition::
+                    PriorityBoundary,
+                LearnedPriorityMacroLimit::None);
+        case Game::LearnedPriorityMacroControl::StopKind::
+            ActionLimit:
+            return make_result(
+                LearnedPriorityMacroDisposition::Incomplete,
+                LearnedPriorityMacroLimit::Action);
+        case Game::LearnedPriorityMacroControl::StopKind::
+            PhaseTransitionLimit:
+            return make_result(
+                LearnedPriorityMacroDisposition::Incomplete,
+                LearnedPriorityMacroLimit::
+                    PhaseTransition);
+        case Game::LearnedPriorityMacroControl::StopKind::
+            TurnAdvanceLimit:
+            return make_result(
+                LearnedPriorityMacroDisposition::Incomplete,
+                LearnedPriorityMacroLimit::TurnAdvance);
+        case Game::LearnedPriorityMacroControl::StopKind::None:
+            throw std::logic_error(
+                "macro-transition stopped without a reason");
+        }
+        throw std::logic_error(
+            "macro-transition stop reason is invalid");
+    } catch (...) {
+        simulation.learned_priority_macro_control_ = nullptr;
+        throw;
+    }
+
+    if (!terminal.has_value()) {
+        throw std::logic_error(
+            "macro-transition completed without a terminal result");
+    }
+    return make_result(
+        LearnedPriorityMacroDisposition::Terminal,
+        LearnedPriorityMacroLimit::None, terminal);
+}
 
 LearnedActionSamples learned_priority_action_samples(
     const GameState& state,
