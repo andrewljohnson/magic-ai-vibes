@@ -10223,6 +10223,210 @@ ground truth. If the smallest credible critic experiment requires replayable
 agreement states, first extend the serializer or collect a fresh balanced
 corpus; do not relabel the four disagreement records into a training set.
 
+### OC1 frozen-representation output calibration (declared)
+
+Declared 2026-07-26 from pushed DVR2 evidence commit `45ad156`, before
+implementing the new update seam, opening any source or evaluation seed below,
+fitting a candidate, or inspecting any result. Repository and notebook
+searches found no prior use of seeds `202607261927` through `202607261931`.
+`REVIEW.md` was reread through its newest 19:15 PDT cycle. Its critic-
+calibration recommendation agrees with this axis; its corrected note that
+DVR2 retained replayable states for only four disagreements prevents the
+proposed 47-root calibration reuse. DVR2 enters this declaration only as
+hypothesis-generating evidence, never as training data or a label.
+
+#### Falsifiable hypothesis
+
+The immutable Environment-v3 C16 critic has a useful learned state
+representation but its final mapping from that representation to value is
+miscalibrated. Refitting only each ensemble leaf's 16 hidden-output weights
+and scalar output bias to fresh, all-five, frozen-C16-mirror terminal outcomes
+will improve independently held-out Brier and soft log loss, shrink the
+documented Blue bias without recreating TW75's Green damage, and preserve
+enough action ranking to beat exact C16 in paired play.
+
+Failure of the held-out calibration gate rejects OC1 before action probes or
+gameplay. Passing calibration licenses action-regression scoring, not a
+strength claim. No threshold, optimizer, seed, or deck treatment will be
+changed after a result is visible.
+
+#### Exact parent and permitted model change
+
+- Parent is only the immutable Environment-v3 C16 T800/S424242/G16 artifact
+  at
+  `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`,
+  artifact SHA-256
+  `53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+  and model fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+- Recursively deep-clone both critic leaves. Freeze every input-to-hidden
+  weight, hidden bias, direct observation-to-logit weight, ensemble structure,
+  and Priority, Attack, Block, and DamageOrder policy tensor bit-for-bit.
+  Only the 16 hidden-to-output weights and one output bias in each leaf may
+  change.
+- Abort unless the parent topology is exactly one top-level two-member
+  ensemble whose members are non-ensemble `LegacyStateOnly` Value leaves
+  with the declared dimensions. Nested, contextual, actor, wrong-width, or
+  wrong-member-count models are invalid inputs rather than alternate OC1
+  treatments.
+- This is not a new bootstrap distance, terminal-weight endpoint, trace
+  weighting treatment, context feature, search controller, action heuristic,
+  or policy residual. It fits no Handcoded action/value, card name, opponent
+  hidden identity, or C16 deep-Q label.
+
+Because the hidden activations and direct-logit offset are frozen, each
+17-parameter leaf fit is convex logistic regression. For rows `i` with
+positive weights `w_i`, soft targets `z_i`, leaf predictions `p_i(theta)`,
+leaf parameters `theta`, and frozen parent parameters `theta0`, minimize:
+
+```text
+sum_i(w_i * [-z_i*log(p_i) - (1-z_i)*log(1-p_i)]) / sum_i(w_i)
+    + 0.5 * 0.01 * ||theta - theta0||^2
+```
+
+Initialize at `theta0`. Use deterministic full-batch damped Newton updates,
+at most 32 iterations, gradient infinity-norm tolerance `1e-10`, and an
+Armijo line search with initial step one, factor one half, coefficient
+`1e-4`, and at most 32 backtracks. The L2 tether applies to all 17 parameters.
+Numerical linear-solve failure, a non-descent direction, exhausted line
+search, nonfinite value, or failure to decrease the declared objective is an
+infrastructure rejection for every accepted nonconverged step; zero-step
+convergence at the frozen parent is permitted. Reaching iteration 32 without
+gradient infinity
+norm at most `1e-10` is also an infrastructure rejection rather than a
+scientific candidate. There is no learning-rate, epoch, regularization, or
+capacity sweep.
+
+#### Fresh fit corpus
+
+- Fit seed `202607261927`, generation coordinate 17, and exact balanced
+  blocks `0..7`: 320 physical games, 640 actor-game
+  perspectives, and 128 perspectives for each of Green, Red, Blue, White,
+  and RU Aggro.
+- Both seats use the exact frozen C16 Value mirror at K=1/H=4,
+  exploration `0.05`, Legacy continuation, PD0 off, residual off, and a
+  500-turn limit. No candidate action can affect collection.
+- Retain the canonical chronological `run_with_trace` states for both
+  perspectives. Every state in one actor-game receives weight
+  `1 / trace_size`, so every actor-game and therefore every deck contributes
+  equal total fit mass. The target is exactly
+  `learned_discounted_terminal_target(result, perspective)`.
+- Hash and report the schedule, game outcomes, ordered encoded features,
+  targets, weights, per-game record counts, per-deck mass, optimizer input,
+  parent tensors, candidate tensors, and component-isolation ledger.
+  Repeated construction from the frozen input must be bit-identical.
+
+The fitted output parameters and complete provenance will be stored in a
+separate, checksummed, atomic, no-overwrite artifact family at:
+
+```text
+build/model-cache/old-school-value-output-calibration-v1-c16-t800-p424242-f202607261927.bin
+```
+
+The artifact binds the exact parent artifact/model identities, environment
+schema, fit schedule and hashes, optimizer recipe, permitted tensor deltas,
+candidate fingerprint, and all accounting. Generic C16 and prior challenger
+loaders must reject it; its loader must reject wrong parent identity,
+corruption, trailing bytes, cross-family metadata, or an impermissible tensor
+change.
+
+#### Untouched held-out calibration gate
+
+Holdout seed `202607261928`, generation coordinate 18, and exact balanced
+blocks `0..7` produce another 320 physical frozen-parent mirror games, 640
+perspectives, and 128 perspectives per deck. The candidate never selects a
+holdout action. Score every chronological trace record against the same
+discounted terminal target with the same actor-game weighting used for fit:
+each perspective trace has total metric weight one and every one of its
+records has weight `1 / trace_size`. Report weighted Brier, soft log loss,
+signed bias, prediction mean, and saturation pooled and per deck, with
+physical-game-clustered CR1 paired intervals for candidate-minus-C16 loss.
+The holdout collection recipe is otherwise byte-for-byte the fit recipe:
+exact C16 in both seats, K=1/H=4, exploration `0.05`, Legacy continuation,
+PD0 and residual off, and a 500-turn limit; only the seed and generation
+coordinate differ.
+
+For any record statistic `x_i`, its weighted mean is
+`sum(w_i*x_i)/sum(w_i)`. For physical-game cluster `g`, define
+`U_g=sum_{i in g}(w_i*(x_i-mean))`; CR1 variance is
+`G/(G-1) * sum_g(U_g^2) / sum_i(w_i)^2`, and the 95% interval uses
+`1.959963984540054 * SE`. Brier is `(p-z)^2`; signed bias is `p-z`;
+soft log loss clamps `p` to `[1e-12, 1-1e-12]`; saturation is
+`p <= 0.01 || p >= 0.99`. A material-bias interval is this same weighted
+CR1 interval over `p-z`.
+
+All of the following are conjunctive:
+
+1. exact source/holdout schedule, deck/seat/play-draw, target, mass,
+   component-isolation, artifact, determinism, and finite-value accounting;
+2. pooled candidate-minus-C16 Brier and soft-log-loss upper 95% bounds are
+   both strictly below zero;
+3. no deck's point Brier or soft-log loss worsens by more than `0.002`;
+4. Blue absolute signed bias strictly shrinks;
+5. Green absolute signed bias does not increase, no other deck's absolute
+   bias increases by more than `0.010`, and OC1 creates no new material
+   same-sign bias (absolute bias at least `0.05` with its CR1 interval
+   excluding zero) where C16 lacks one; and
+6. opponent-hidden-zone repartition leaves public observations, encoded
+   features, leaf predictions, ensemble predictions, fit parameters, and
+   every scientific report field bit-identical.
+
+The hidden audit is nonvacuous and perspective-local. For every fit and
+holdout trace perspective, deterministically exchange opponent hidden
+hand/library identities while preserving both zone sizes, all public zones,
+and the owner's complete information; use the existing canonical
+repartition operation where a distinct exchange exists. Report attempted,
+changed, and unchanged counts, require at least one changed state in every
+deck in both corpora, and require the original and repartitioned encoded-row
+hashes to be byte-identical. No opponent hidden identity or revealed-hand
+field may enter an artifact or diagnostic.
+
+This 320-game holdout has substantially better precision than a 200-game
+strength smoke but does not establish playing strength. If it fails, reject
+OC1 and do not inspect gameplay seeds.
+
+#### Conditional action and gameplay ladder
+
+Only after the calibration gate passes:
+
+1. Before scoring OC1 on any field fixture, separately preregister and freeze
+   the exact Environment-v3 corpus/cache identities, reference seeds,
+   K/H/world configuration, stable-choice semantics, regret aggregation, and
+   nonvacuous hidden-repartition report. It must cover Counterspell,
+   Force Spike live/payable, same-target counter composition, nonlethal X=0,
+   and Giant Growth timing plus the replayable DVR2 records. These fixtures
+   may reject but cannot promote. No gameplay seed below may open until this
+   conditional action protocol is committed and its implementation passes.
+2. Seed `202607261929`: a 600-paired-game, all-five, seat/play-draw-balanced
+   large-regression screen versus exact C16. Stop below `47.5%` aggregate or
+   below `40%` on any challenger-deck slice. A near-50% result is not an
+   improvement claim.
+3. Seed `202607261930`: 2,040 paired games versus exact C16. Require OC1
+   above 50% aggregate, Wilson 95% lower bound above 50%, and strictly more
+   OC1 wins than losses for every challenger deck.
+4. Seed `202607261931`: only after the C16 gate, 2,040 paired games versus
+   HandcodedPolicy with the same aggregate/Wilson/all-five direct-win
+   requirements.
+5. Only after that milestone, run the fixed evaluation seeds
+   `101,202,303,404,505,606,707,808`, the all-five mixed-field lift gate, the
+   complete certification/test/sanitizer suite, and immutable artifact
+   reload checks. No validation seed may lose.
+
+An OC1 success remains a challenger until this full ladder passes. Exact C16
+stays champion throughout the fit and all offline stages.
+
+Every direct panel above is load-only and uses the exact existing
+`run_bot_benchmark` 15-pairing quartet schedule: 10 repetitions are 600 games
+and 34 are 2,040 games, with each base seed shared across both policy-seat
+assignments and both starting players. Both Learned policies use K=8/H=4,
+root exploration zero, Legacy continuation, PD0 off, residual off, and a
+500-turn limit. The candidate and C16 models are immutable explicit per-seat
+models; training or artifact refresh is forbidden. Wilson uses challenger
+wins divided by all scheduled games, so a draw remains in the denominator;
+every deck sign is `wins > losses`. Report quartet-clustered uncertainty,
+all deck-by-policy-seat-by-play/draw cells, schedule hashes, before/after
+artifact snapshots, and reject any missing, duplicated, or imbalanced task.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
