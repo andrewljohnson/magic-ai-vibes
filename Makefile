@@ -24,6 +24,7 @@ RB0_MECHANICAL_PREFLIGHT_SOURCE := src/rb0_mechanical_preflight.cpp
 DVR2_HARVEST_SOURCE := src/dvr2_harvest.cpp
 OUTPUT_CALIBRATION_SOURCE := src/output_calibration.cpp
 OUTPUT_CALIBRATION_ARTIFACT_SOURCE := src/output_calibration_artifact.cpp
+OUTPUT_CALIBRATION_RUNNER_SOURCE := src/output_calibration_runner.cpp
 WEB_BRIDGE_SOURCE := src/web_bridge.cpp
 SIMULATOR := $(BUILD_DIR)/old-school-sim
 TEST_RUNNER := $(BUILD_DIR)/old-school-tests
@@ -49,6 +50,8 @@ DVR2_HARVEST := $(BUILD_DIR)/old-school-dvr2-harvest
 DVR2_HARVEST_TEST_RUNNER := $(BUILD_DIR)/old-school-dvr2-harvest-tests
 OUTPUT_CALIBRATION_TEST_RUNNER := $(BUILD_DIR)/old-school-output-calibration-tests
 OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER := $(BUILD_DIR)/old-school-output-calibration-artifact-tests
+OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER := $(BUILD_DIR)/old-school-output-calibration-runner-tests
+OUTPUT_CALIBRATION := $(BUILD_DIR)/old-school-output-calibration
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 WEB_BRIDGE_TEST_RUNNER := $(BUILD_DIR)/old-school-web-bridge-tests
 PROBE_HEADER_DEPENDENTS := \
@@ -69,7 +72,7 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-output-calibration test-output-calibration-artifact test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -150,6 +153,12 @@ $(OUTPUT_CALIBRATION_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) 
 $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) tests/test_output_calibration_artifact.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) tests/test_output_calibration_artifact.cpp -o $@
 
+$(OUTPUT_CALIBRATION): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) src/output_calibration_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp include/old_school/output_calibration_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) src/output_calibration_main.cpp -o $@
+
+$(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) tests/test_output_calibration_runner.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp include/old_school/output_calibration_runner.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) tests/test_output_calibration_runner.cpp -o $@
+
 $(WEB_BRIDGE): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/web_bridge.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp -o $@
 
@@ -159,7 +168,7 @@ $(WEB_BRIDGE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BR
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
@@ -181,6 +190,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	sh tests/test_dvr2_once.sh
 	./$(OUTPUT_CALIBRATION_TEST_RUNNER)
 	./$(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER)
+	./$(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER)
 	./$(WEB_BRIDGE_TEST_RUNNER)
 	sh tests/test_cli.sh ./$(SIMULATOR)
 	sh tests/test_capture_once.sh
@@ -279,6 +289,18 @@ test-output-calibration: $(OUTPUT_CALIBRATION_TEST_RUNNER)
 
 test-output-calibration-artifact: $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER)
 	./$(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER)
+
+output-calibration: $(OUTPUT_CALIBRATION)
+
+test-output-calibration-runner: $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION)
+	./$(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER)
+	@set +e; output=`./$(OUTPUT_CALIBRATION) unexpected extra 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'OC1 CLI did not reject extra arguments\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage: old-school-output-calibration' >/dev/null
 
 test-web: $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 	./$(WEB_BRIDGE_TEST_RUNNER)

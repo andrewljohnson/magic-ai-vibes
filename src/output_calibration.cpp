@@ -332,6 +332,12 @@ struct CollectedRow {
     double parent_prediction = 0.5;
     std::array<double, 2> candidate_leaf_predictions{};
     double candidate_prediction = 0.5;
+    std::array<double, 2>
+        repartitioned_parent_leaf_predictions{};
+    double repartitioned_parent_prediction = 0.5;
+    std::array<double, 2>
+        repartitioned_candidate_leaf_predictions{};
+    double repartitioned_candidate_prediction = 0.5;
 };
 
 struct GameSlot {
@@ -740,6 +746,14 @@ RawCorpus collect_raw_corpus(
                                     candidate_leaves,
                                 .candidate_prediction =
                                     candidate_prediction,
+                                .repartitioned_parent_leaf_predictions =
+                                    hidden_parent_leaves,
+                                .repartitioned_parent_prediction =
+                                    hidden_parent_prediction,
+                                .repartitioned_candidate_leaf_predictions =
+                                    hidden_candidate_leaves,
+                                .repartitioned_candidate_prediction =
+                                    hidden_candidate_prediction,
                             });
                         }
                     }
@@ -1062,6 +1076,14 @@ void validate_holdout_record(const Record& record) {
         record.candidate_leaf_predictions,
         record.candidate_prediction,
         "holdout candidate prediction");
+    require_leaf_mean(
+        record.repartitioned_parent_leaf_predictions,
+        record.repartitioned_parent_prediction,
+        "holdout repartitioned parent prediction");
+    require_leaf_mean(
+        record.repartitioned_candidate_leaf_predictions,
+        record.repartitioned_candidate_prediction,
+        "holdout repartitioned candidate prediction");
 }
 
 void validate_complete_holdout_records(
@@ -1826,6 +1848,14 @@ HoldoutCorpus collect_holdout_corpus(
                 row.candidate_leaf_predictions,
             .candidate_prediction =
                 row.candidate_prediction,
+            .repartitioned_parent_leaf_predictions =
+                row.repartitioned_parent_leaf_predictions,
+            .repartitioned_parent_prediction =
+                row.repartitioned_parent_prediction,
+            .repartitioned_candidate_leaf_predictions =
+                row.repartitioned_candidate_leaf_predictions,
+            .repartitioned_candidate_prediction =
+                row.repartitioned_candidate_prediction,
         });
     }
     return output;
@@ -1923,6 +1953,25 @@ HoldoutReport score_holdout_records(
             select_records(
                 records, static_cast<DeckId>(deck)));
     }
+    return output;
+}
+
+std::vector<HoldoutRecord> repartitioned_holdout_records(
+    std::span<const HoldoutRecord> records) {
+    validate_complete_holdout_records(records);
+    std::vector<HoldoutRecord> output(
+        records.begin(), records.end());
+    for (HoldoutRecord& record : output) {
+        record.parent_leaf_predictions =
+            record.repartitioned_parent_leaf_predictions;
+        record.parent_prediction =
+            record.repartitioned_parent_prediction;
+        record.candidate_leaf_predictions =
+            record.repartitioned_candidate_leaf_predictions;
+        record.candidate_prediction =
+            record.repartitioned_candidate_prediction;
+    }
+    validate_complete_holdout_records(output);
     return output;
 }
 

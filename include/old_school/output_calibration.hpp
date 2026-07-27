@@ -212,6 +212,16 @@ struct HoldoutRecord {
     double parent_prediction = 0.5;
     std::array<double, 2> candidate_leaf_predictions{};
     double candidate_prediction = 0.5;
+    // Predictions from the deterministically exchanged opponent-hidden
+    // state. Collection requires these to be bit-identical to the original
+    // predictions, but retaining them lets orchestration independently score
+    // and hash the complete hidden-repartition scientific report.
+    std::array<double, 2>
+        repartitioned_parent_leaf_predictions{};
+    double repartitioned_parent_prediction = 0.5;
+    std::array<double, 2>
+        repartitioned_candidate_leaf_predictions{};
+    double repartitioned_candidate_prediction = 0.5;
 
     bool operator==(const HoldoutRecord&) const = default;
 };
@@ -300,6 +310,8 @@ struct HoldoutReport {
 };
 
 HoldoutReport score_holdout_records(
+    std::span<const HoldoutRecord> records);
+std::vector<HoldoutRecord> repartitioned_holdout_records(
     std::span<const HoldoutRecord> records);
 std::string hash_holdout_report(const HoldoutReport& report);
 

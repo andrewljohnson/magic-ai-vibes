@@ -128,6 +128,12 @@ std::vector<oc::HoldoutRecord> synthetic_records(
                     .candidate_leaf_predictions = {
                         0.55, 0.55},
                     .candidate_prediction = 0.55,
+                    .repartitioned_parent_leaf_predictions = {
+                        0.7, 0.7},
+                    .repartitioned_parent_prediction = 0.7,
+                    .repartitioned_candidate_leaf_predictions = {
+                        0.55, 0.55},
+                    .repartitioned_candidate_prediction = 0.55,
                 });
             }
         }
@@ -509,6 +515,27 @@ void test_holdout_metrics_are_weighted_and_deck_balanced() {
         oc::hash_holdout_report(report) ==
             oc::hash_holdout_report(report),
         "holdout report hash is nondeterministic");
+    const auto repartitioned_records =
+        oc::repartitioned_holdout_records(records);
+    const auto repartitioned_report =
+        oc::score_holdout_records(repartitioned_records);
+    expect(
+        repartitioned_report == report &&
+            oc::hash_holdout_report(repartitioned_report) ==
+                oc::hash_holdout_report(report),
+        "bit-identical hidden predictions changed the report");
+
+    auto changed_hidden = records;
+    changed_hidden.front()
+        .repartitioned_candidate_leaf_predictions =
+        {0.6, 0.6};
+    changed_hidden.front()
+        .repartitioned_candidate_prediction = 0.6;
+    expect(
+        oc::score_holdout_records(
+            oc::repartitioned_holdout_records(
+                changed_hidden)) != report,
+        "repartitioned report seam ignored hidden predictions");
 
     auto incomplete = records;
     incomplete.front().trace_size = 2;
