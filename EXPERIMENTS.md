@@ -9963,8 +9963,16 @@ The maximum 64 primary roots have fixed quotas:
 
 The manifest must cross-sum eligible, selected, duplicate-skipped,
 per-owner-game-skipped, action-cap-skipped, quota-skipped, and budget-skipped
-counts by stratum and owner deck. Missing quotas remain visible and make the
-corresponding coverage gate fail.
+counts by stratum and owner deck. The fixed selector precedence is action cap,
+then owner information/action deduplication, then the two-root owner-game cap,
+then stratum quota, then budget reservation. For each cell,
+`considered = action-cap-skipped + eligible`, and
+`eligible = selected + duplicate-skipped + per-owner-game-skipped +
+quota-skipped + budget-skipped`; the same equations must hold in the grand
+total. Here `eligible` means the root had 2–32 complete legal actions before
+the later selector filters, while a root with more than 32 actions contributes
+only to `considered` and `action-cap-skipped`. Missing quotas remain visible
+and make the corresponding coverage gate fail.
 
 #### Reference, controls, and bounds
 
@@ -9972,31 +9980,47 @@ Every selected root uses the exact frozen-model, unblended Learned-mirror
 reference already bound by DVR1: independently derived K64 scout and K64
 confirmation worlds, H8, one rollout per world, four threads, canonical action
 descriptors, and a bit-identical opponent-hidden repartition clone. Exact
-accounting is `256 * legal_action_count` rollout evaluations per ordinary
-score. The total, including repeat controls, is capped at 131,072 evaluations.
+accounting is `256 * legal_action_count` rollout evaluations for every actual
+BSR call. The primary canonical score costs one such unit. Every retained
+disagreement reserves and spends a second unit to decode, rehydrate, and
+canonical-four-thread re-score its DVR1 bytes. Every retained agreement control
+reserves and spends two further units: one reversed-candidate, one-thread score
+whose thread metadata is normalized only for semantic comparison, and one
+source-locator-regenerated canonical four-thread score. Thus a disagreement
+costs two units and a retained control costs three, including its primary
+score. The total across all actual calls is capped at 131,072 evaluations.
 
 Classify every scored root exactly once as stable disagreement, stable
 agreement, unstable best set, or invalid/invariance failure. Retain the first
 stable agreement for each of the five owner decks as a negative control.
-Re-score each retained control with reversed candidate input and one thread;
-require equal semantic scores/best sets, hidden-repartition identity, and a
-`ReferenceAgreement` DVR1 disposition with no divergence record. Controls are
-stored by exact source locator plus information/action fingerprint and must
-regenerate identically before later use; every disagreement stores full
-replayable DVR1 bytes and must decode and re-score identically before
-publication.
+Re-score each retained control once with reversed candidate input and one
+thread, and separately regenerate it from its exact source locator for a
+canonical four-thread re-score. Require equal semantic scores/best sets after
+normalizing only the expected thread metadata difference, hidden-repartition
+identity, and a `ReferenceAgreement` DVR1 disposition with no divergence
+record. The DVR1 agreement assertion uses the original or regenerated
+canonical four-thread evidence—never the one-thread score, which deliberately
+does not satisfy DVR1's exact reference-configuration contract. Controls are
+stored by exact source locator plus information/action fingerprint; every
+disagreement stores full replayable DVR1 bytes and must decode and re-score
+identically before publication.
 
 A standalone `old-school-dvr2-harvest` process, never called from `Game` or a
 search continuation, prevents evaluator recursion. Fixed constants are not CLI
 dials; only a new output path is accepted. Selection must reserve the known
-`256 * action_count` cost before each score and the two repeat-control costs
-before accepting a control. Roots that cannot fit are counted as
-budget-skipped; resulting quota/control misses are a valid but underpowered
-exit-1 result, not an infrastructure failure. Actually exceeding 131,072,
-misaccounting the cost, a 15-minute watchdog, model mismatch, broken
+`256 * action_count` primary plus its classification-dependent verification
+cost before publishing that root: one repeat for a disagreement, or two for a
+retained control. Roots whose worst-case declared path cannot fit are counted
+as budget-skipped before the primary call; no score may be run and then
+silently dropped for budget. Resulting quota/control misses are a valid but
+underpowered exit-1 result, not an infrastructure failure. Actually exceeding
+131,072, misaccounting the cost, a 15-minute watchdog, model mismatch, broken
 invariance, or decode/re-score mismatch invalidates the run and publishes no
 evidence. The deterministic length-framed bundle is SHA-256 checksummed,
-written atomically, and never overwrites an existing path.
+written atomically with true no-replace semantics, and never overwrites an
+existing path. An existing or symlink destination fails before model loading
+or source games; invalid/watchdog paths publish nothing, while a valid
+exit-1 negative or underpowered run does publish its evidence.
 
 Exit `0` means a valid run meeting the four-divergence/one-high-cost RS1
 license, `1` means a valid negative or underpowered result, and `2` means an
