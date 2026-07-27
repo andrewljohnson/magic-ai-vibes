@@ -11420,3 +11420,168 @@ filter, or license result. The next action remains exactly:
 sh tools/run_dvr2_once.sh \
   "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
 ```
+
+### AC1-T0 next-turn all-action teacher sufficiency audit (declared)
+
+Declared 2026-07-26 after rereading `AGENTS.md`, the OC1-AR1 rejection and
+focused reproduction above, the historical P16/P1R/FT128, QX, PD0/DC1, and
+OSC results, and `REVIEW.md` through its newest 22:06 PDT entry. Diagnostic
+seed `202607262205` was searched in the working tree and all Git history and
+was unused at declaration. Reserved gameplay seeds
+`202607261929..202607261931` remain unopened.
+
+The review calls OC1-AR1's two inherited mistakes “representation-level.”
+That conclusion is stronger than the evidence. The frozen observation and
+Priority-action encoders already distinguish public mana and tapped state,
+phase/pass context, own hand, source/target identity, target ownership,
+target tapped/summoning-sick state, power/toughness, and temporary bonuses.
+Identical C16/OC1 supports prove that an output-only critic recalibration did
+not change those decisions; they do not distinguish representational aliasing
+from missing action-specific credit or continuation healing. AC1-T0 is the
+smallest diagnostic that separates those explanations.
+
+This is not presented as a new H0 method. P16 already measured the old
+Environment-v2 C16 at H0 and found payable Force Spike and X=0 wrong-signed.
+AC1-T0 is a current-Environment-v3 localization: exact OC1 versus current C16,
+the Giant Growth all-action contrast and complete current Priority corpus,
+and a next-turn critic target rather than FT128's terminally saturated target.
+Unlike QX/OSC and P1R it changes neither continuation policy nor a fitted head.
+
+#### Falsifiable hypothesis
+
+After each legal Priority action is forced over common information-set worlds,
+the engine resolves the current priority window, completes the current turn,
+performs cleanup, begins the next turn, and evaluates either an earlier
+terminal result or the frozen OC1 critic at that canonical First Main
+boundary. Removing the remaining multi-turn Learned continuation will reveal
+useful action credit that the deployed K8/H4 search obscures:
+
+1. live Force Spike scores above Pass;
+2. Pass scores above payable Force Spike;
+3. Giant Growth on the attack-capable Ironroot Treefolk scores above Giant
+   Growth on the opponent's tapped Air Elemental, and the opponent-target
+   action is outside the exact selected support.
+
+If OC1 fails any of those three directions, its critic is not a sufficient
+teacher for an all-action Priority head and AC1 training is forbidden. More
+worlds, another output calibration, or a fixture-tuned weight will not be
+tried.
+
+#### Frozen measurement
+
+Add a separate no-knob `old-school-ac1-teacher-audit` executable. It changes
+no gameplay, model, cache, artifact, training path, or deployed policy. It
+must:
+
+- load exact Environment-v3 C16 parent fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+  and exact OC1 fingerprint
+  `64851236ddb8907057ec16d8fe0db9ab1b1966dfff55a3d3a62bde933e94ce0d`,
+  and bind these exact immutable files:
+  - parent path
+    `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`,
+    3,111,437 bytes, SHA-256
+    `53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`;
+  - OC1 path `build/model-cache/old-school-value-output-calibration-v1-c16-t800-p424242-f202607261927.bin`,
+    4,756 bytes, SHA-256
+    `77d02729e4effd4762daefdcbe28ef4f1a081c87f707739f3d243123f4c17e3c`.
+  Snapshot both artifacts before and after and refuse any identity drift.
+- use seed tag `old-school-ac1-t0-next-turn-boundary-v1`, seed base
+  `202607262205`, and the existing
+  `reference_seed_for_probe(tag, stable_id, base)` derivation. C16 and OC1
+  must receive the same derived per-root seed, same 64 information-set worlds,
+  and same continuation-seed schedule. Use K=64, one rollout per world,
+  horizon zero, no shallow-prior blend, four evaluation threads, epsilon zero,
+  residual zero, PD0 off, Legacy continuation controller, and the existing
+  engine-owned aggregate arithmetic. “Value mirror” means that when model
+  `M` is scored, both continuation seats use that exact frozen `M`; no
+  cross-model continuation is allowed. Within a model/root, every action
+  branch uses the corresponding identical sampled world and continuation RNG
+  seed before the action-specific state transition.
+- prove H0 semantics in focused tests: after the forced action, the engine
+  settles the priority window, completes the applicable phase and turn,
+  performs cleanup, increments the turn, advances the active player, untaps
+  and begins the rules-selected next turn player (including pending extra-turn
+  handling), draws or returns an empty-library terminal, and then evaluates
+  the contextual critic at First Main with decision player equal to the
+  active player, consecutive passes zero, and sorcery actions enabled. It
+  must honor the starting-player-first-turn draw skip and must not play the
+  prepared next turn. Critic and terminal scores always use the original root
+  Priority player as perspective, never the newly active player.
+- score C16 and OC1 on the exact live/payable Force Spike controls, the
+  begin-combat Giant Growth fixture, the two counter-composition controls,
+  the sick-Bear Growth fixture, Braingeyser X=0, and Disintegrate X=0; cover
+  all 20 deck-balanced dev-v3 roots by scoring exactly 19 Priority roots and
+  census-checking the one Attack root, which is excluded rather than coerced
+  into a Priority action. The live Force control and
+  `blue.force-spike-tapped-out-gray-ogre.v3` are the same physical root under
+  different corpus IDs: score the control once and reuse those exact rows for
+  the dev-v3 alias rather than counting or sampling it twice. The resulting
+  manifest has exactly 26 unique scored Priority roots. Authored fixtures
+  remain evaluation-only and never enter a fit. Before the scientific
+  command, an implementation-freeze addendum must pin all 26 stable IDs and
+  information/action fingerprints; until that addendum is committed, this
+  declaration licenses implementation and tests only.
+- retain all 64 paired raw samples per action. Each primary oriented contrast
+  passes only when its mean and paired 95% lower confidence bound are above
+  zero and at least six of the eight contiguous K=8 blocks have the correct
+  strict sign for that block's paired mean. A complete contrast that fails
+  the mean, lower-bound, or block predicate, including an exact tie, is an
+  exit-1 scientific failure. A missing contrast is exit-2 incomplete evidence
+  and is never silently dropped. The interval is the fixed normal interval
+  `mean - 1.96 * sample_standard_error`, using paired action differences and
+  the `n-1` sample variance. Exact zero variance gives standard error zero.
+  Any nonfinite sample, mean, variance, interval, or aggregate is an
+  infrastructure failure. Selected support contains every action whose
+  engine aggregate score is bit-exactly equal to the maximum; there is no
+  epsilon tie.
+- require exact OC1 support `{"force-spike-gray-ogre"}` on live Force Spike
+  and, in dev-v3, supports contained entirely in the exact singleton controls
+  `{"counter-fire-elemental"}`, `{"force-spike-gray-ogre"}`,
+  `{"counter-lethal-lightning-bolt"}`, and
+  `{"counter-opponent-counterspell"}`. The redundant same-target counter
+  control must select exactly `{"pass"}`. The intervening-counter row remains
+  descriptive because AR1's reference-margin requirement was inconclusive.
+  Sick-Bear Growth must select exactly `{"pass"}`; Braingeyser and
+  Disintegrate supports must contain no X=0 action. The other 15 dev-v3
+  Priority rows are reported descriptively and cannot accept the teacher.
+  For the Growth primary, Treefolk need not be the global best action: the
+  conjuncts are the robust positive paired Treefolk-minus-opponent contrast
+  above plus absence of opponent-target Growth from the global exact support.
+- reconstruct a fresh opponent-hidden-repartition clone for every root and
+  first require equal owner observations, information/action fingerprints,
+  and complete typed legal actions. The clone must actually change the
+  opponent's five-card hidden-hand histogram on at least one root per deck.
+  Then require bit-identical candidate descriptors, sampled scores, exact
+  aggregates, supports, accounting, and H0-stop public consequence hashes for
+  every root. The consequence serialization is the existing canonical
+  owner-observable projection: all public zones and turn state plus the
+  observer's own hidden zones, with opponent hand/library identities redacted
+  to counts and reporting-only statistics normalized. Original and clone must
+  differ in the actual opponent hand multiset, with a compensating library
+  repartition, before this identity comparison is considered nonvacuous.
+- require descriptor-order invariance, exact 64-sample/action and terminal
+  versus bootstrap accounting, deterministic repeated construction, and
+  `-Werror`, unit, AddressSanitizer, and UndefinedBehaviorSanitizer-clean
+  focused tests.
+
+The first and only scientific command will be:
+
+```sh
+./build/old-school-ac1-teacher-audit
+```
+
+Exit `0` means every infrastructure invariant, control, and all three OC1
+primary contrasts pass. Exit `1` means complete evidence—64 finite pairs for
+every expected contrast—with at least one mean, lower-bound, block, support,
+or complete-evidence control predicate failing, including an exact tie.
+Exit `2` means infrastructure or incomplete evidence and has no scientific
+interpretation: an absent expected fixture/action, manifest or
+information/action-fingerprint drift, fewer than 64 finite pairs, inability
+to construct a contrast, hidden/invariance/accounting failure, or artifact
+drift all belong here. C16 results are a fixed localization control, not an
+alternative endpoint. A pass licenses only a separately
+preregistered, all-five-deck, all-legal-action Priority-head fit with the
+critic and all non-Priority heads frozen. A scientific failure closes this
+teacher and redirects the next treatment to a genuinely different
+Learned-only self-play objective; no gameplay seed is opened in either case.
