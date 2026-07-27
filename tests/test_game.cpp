@@ -6748,6 +6748,67 @@ TEST(priority_h0_boundary_capture_rejects_non_priority_samplers) {
         "unavailable for Block"));
 }
 
+TEST(priority_macro_budget_accepts_exact_limits_and_rejects_next) {
+    old_school::LearnedPriorityMacroBudget actions;
+    CHECK(actions.try_apply_actions(
+        old_school::kLearnedPriorityMacroActionBound - 1));
+    CHECK(actions.actions_applied ==
+          old_school::kLearnedPriorityMacroActionBound);
+    CHECK(!actions.try_apply_actions(1));
+    CHECK(actions.actions_applied ==
+          old_school::kLearnedPriorityMacroActionBound);
+
+    old_school::LearnedPriorityMacroBudget phases;
+    for (std::size_t transition = 0;
+         transition <
+         old_school::kLearnedPriorityMacroPhaseTransitionBound;
+         ++transition) {
+        CHECK(phases.try_advance_phase());
+    }
+    CHECK(phases.phase_transitions ==
+          old_school::kLearnedPriorityMacroPhaseTransitionBound);
+    CHECK(!phases.try_advance_phase());
+    CHECK(phases.phase_transitions ==
+          old_school::kLearnedPriorityMacroPhaseTransitionBound);
+
+    old_school::LearnedPriorityMacroBudget turns;
+    for (std::size_t advance = 0;
+         advance <
+         old_school::kLearnedPriorityMacroTurnAdvanceBound;
+         ++advance) {
+        CHECK(turns.try_advance_turn());
+    }
+    CHECK(turns.turn_advances ==
+          old_school::kLearnedPriorityMacroTurnAdvanceBound);
+    CHECK(!turns.try_advance_turn());
+    CHECK(turns.turn_advances ==
+          old_school::kLearnedPriorityMacroTurnAdvanceBound);
+}
+
+TEST(priority_macro_transition_rejects_invalid_phase) {
+    old_school::GameState state;
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::Forest,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+        },
+    };
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    advance_learned_priority_macro_transition(
+                        state, decks, 0, false,
+                        static_cast<old_school::TurnPhase>(
+                            std::numeric_limits<std::uint8_t>::max()),
+                        0, old_school::PriorityAction::pass(),
+                        small_value_model(), 0xF000BAD0ULL));
+        },
+        "priority evaluation phase is invalid"));
+}
+
 TEST(priority_macro_transition_cast_retains_priority_before_policy) {
     old_school::GameState state;
     state.active_player = 0;
@@ -7000,6 +7061,73 @@ TEST(priority_macro_transition_uses_every_empty_stack_phase_exit) {
     }
 }
 
+TEST(priority_macro_transition_runs_attack_block_and_damage_order) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 4;
+    state.next_permanent_id = 4;
+    state.players[0].hand = {
+        old_school::CardId::LightningBolt,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+    state.players[0].creatures = {
+        creature(1, old_school::CardId::HillGiant),
+    };
+    state.players[1].life = 1;
+    state.players[1].creatures = {
+        bear(2),
+        bear(3),
+    };
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+            old_school::CardId::LightningBolt,
+            old_school::CardId::HillGiant,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::GrizzlyBears,
+            old_school::CardId::GrizzlyBears,
+        },
+    };
+
+    const auto result =
+        old_school::advance_learned_priority_macro_transition(
+            state, decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 1,
+            old_school::PriorityAction::pass(),
+            small_value_model(), 0xF000C0B4ULL);
+
+    CHECK(result.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+    CHECK(result.context.phase ==
+          old_school::TurnPhase::EndCombat);
+    CHECK(result.context.decision_player == 0);
+    CHECK(result.context.consecutive_passes == 0);
+    CHECK(!result.context.sorcery_actions);
+    CHECK(result.phase_transitions == 4);
+    CHECK(result.turn_advances == 0);
+    CHECK(result.actions_applied == 4);
+    CHECK(result.priority_actions_applied == 1);
+    CHECK(result.state.players[0].creatures.empty());
+    CHECK(result.state.players[0].graveyard ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::HillGiant});
+    CHECK(result.state.players[1].creatures.size() == 1);
+    CHECK(result.state.players[1].graveyard ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::GrizzlyBears});
+    CHECK(result.state.players[1].life == 1);
+    CHECK(result.state.stats[0].decisions == 0);
+    CHECK(result.state.stats[1].decisions == 0);
+    CHECK(result.legal_actions ==
+          old_school::legal_priority_actions(
+              result.state, 0, false));
+}
+
 TEST(priority_macro_transition_runs_cleanup_extra_turn_draw_and_deckout) {
     const auto model = small_value_model();
     const std::array<std::vector<old_school::CardId>, 2> decks = {
@@ -7198,7 +7326,9 @@ TEST(priority_macro_transition_forces_singletons_and_bounds_turns) {
     old_school::GameState bounded;
     bounded.active_player = 0;
     bounded.starting_player = 0;
-    bounded.turn_number = 1;
+    // Deliberately straddles GameConfig's ordinary turn-500 ceiling. The
+    // macro-specific 65th attempted advance must own termination.
+    bounded.turn_number = 499;
     bounded.players[0].library.assign(
         100, old_school::CardId::FireElemental);
     bounded.players[1].library.assign(
@@ -7224,12 +7354,70 @@ TEST(priority_macro_transition_forces_singletons_and_bounds_turns) {
     CHECK(incomplete.legal_actions.empty());
     CHECK(incomplete.turn_advances ==
           old_school::kLearnedPriorityMacroTurnAdvanceBound);
+    CHECK(incomplete.state.turn_number ==
+          bounded.turn_number +
+              old_school::kLearnedPriorityMacroTurnAdvanceBound);
     CHECK(incomplete.actions_applied <=
           old_school::kLearnedPriorityMacroActionBound);
     CHECK(incomplete.priority_actions_applied <=
           incomplete.actions_applied);
     CHECK(incomplete.phase_transitions <=
           old_school::kLearnedPriorityMacroPhaseTransitionBound);
+}
+
+TEST(priority_macro_hooks_are_default_off_for_fixed_seed_games) {
+    const std::vector<old_school::CardId> forests(
+        8, old_school::CardId::Forest);
+    const std::vector<old_school::CardId> mountains(
+        8, old_school::CardId::Mountain);
+    old_school::GameConfig config;
+    config.max_turns = 8;
+    config.starting_player = 0;
+    const auto run_default_game = [&] {
+        old_school::Game game(
+            forests, mountains, 0xF0000FF0ULL, config);
+        const auto result = game.run();
+        return std::pair{result, game.state()};
+    };
+
+    const auto before = run_default_game();
+
+    old_school::GameState macro_state;
+    macro_state.active_player = 0;
+    macro_state.starting_player = 0;
+    macro_state.turn_number = 4;
+    macro_state.players[1].hand = {
+        old_school::CardId::LightningBolt,
+    };
+    macro_state.players[1].lands = {
+        {.card = old_school::CardId::Mountain},
+    };
+    const std::array<std::vector<old_school::CardId>, 2>
+        macro_decks = {
+            std::vector<old_school::CardId>{
+                old_school::CardId::Forest,
+            },
+            std::vector<old_school::CardId>{
+                old_school::CardId::Mountain,
+                old_school::CardId::LightningBolt,
+            },
+        };
+    const auto boundary =
+        old_school::advance_learned_priority_macro_transition(
+            macro_state, macro_decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 0,
+            old_school::PriorityAction::pass(),
+            small_value_model(), 0xF0000FF1ULL);
+    CHECK(boundary.disposition ==
+          old_school::LearnedPriorityMacroDisposition::
+              PriorityBoundary);
+
+    const auto after = run_default_game();
+    CHECK(after == before);
+    CHECK(before.first.winner == 0);
+    CHECK(before.first.reason ==
+          old_school::EndReason::EmptyLibrary);
+    CHECK(before.first.turns == 4);
 }
 
 TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
