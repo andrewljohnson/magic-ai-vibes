@@ -1732,10 +1732,14 @@ bool reachable_state(const DecisionProbe& probe,
                     "stack object has an invalid controller or ID");
                 valid = false;
             }
+            const bool x_spell =
+                object.kind == StackObjectKind::Spell &&
+                (object.card == CardId::Disintegrate ||
+                 object.card == CardId::Braingeyser);
             if (object.x_value < 0 ||
                 (object.x_value != 0 &&
-                 (object.kind != StackObjectKind::Spell ||
-                  object.card != CardId::Disintegrate))) {
+                 !x_spell) ||
+                (x_spell && !object.target.has_value())) {
                 errors.push_back(
                     "stack object has an invalid public X value");
                 valid = false;
@@ -5573,6 +5577,12 @@ BsrRootScore score_bsr_priority_probe(
     return result;
 }
 
+std::string bsr_information_action_fingerprint(
+    const DecisionProbe& probe) {
+    return bsr_hex64(
+        dc1_stable_hash(bsr_information_action_key(probe)));
+}
+
 BsrAuditReport audit_bsr_blue_stack_regret(
     std::shared_ptr<const LearnedModel> frozen_model,
     BsrAuditConfig config) {
@@ -6308,35 +6318,6 @@ std::vector<std::string> dvr1_best_actions(
     return dvr1_sorted_unique(std::move(result));
 }
 
-void dvr1_canonicalize_public_player(
-    PublicPlayerState& player) {
-    std::sort(
-        player.graveyard.begin(), player.graveyard.end());
-    std::sort(player.exile.begin(), player.exile.end());
-    std::sort(
-        player.lands.begin(), player.lands.end(),
-        [](const LandPermanent& left,
-           const LandPermanent& right) {
-            return std::tie(left.card, left.tapped) <
-                   std::tie(right.card, right.tapped);
-        });
-    std::sort(
-        player.creatures.begin(), player.creatures.end(),
-        [](const CreaturePermanent& left,
-           const CreaturePermanent& right) {
-            return left.id < right.id;
-        });
-    std::sort(
-        player.artifacts.begin(), player.artifacts.end(),
-        [](const ArtifactPermanent& left,
-           const ArtifactPermanent& right) {
-            return left.id < right.id;
-        });
-    std::sort(
-        player.enchantments.begin(),
-        player.enchantments.end());
-}
-
 std::array<std::array<std::size_t, kCardCount>, 2>
 dvr1_deck_compositions(
     const std::array<std::vector<CardId>, 2>& decks) {
@@ -6399,592 +6380,7 @@ bool dvr1_reference_accounting_valid(
             rollout_evaluations - terminal_evaluations;
 }
 
-bool dvr1_record_shape_valid(
-    const Dvr1OwnerVisibleRecord& record) {
-    if (record.schema != kDvr1CaptureSchema ||
-        record.environment_revision !=
-            kBsrEnvironmentRevision ||
-        !dvr1_lower_hex(
-            record.production_model_fingerprint, 64) ||
-        !dvr1_lower_hex(
-            record.information_action_fingerprint, 16) ||
-        !dvr1_valid_deck(record.owner_deck) ||
-        !dvr1_valid_deck(record.opponent_deck) ||
-        record.decision_owner >= kPlayerCount ||
-        record.active_player >= kPlayerCount ||
-        record.starting_player >= kPlayerCount ||
-        record.provenance.tracked_seat !=
-            record.decision_owner ||
-        record.owner_on_play !=
-            (record.starting_player ==
-             record.decision_owner) ||
-        record.provenance.tracked_starts !=
-            record.owner_on_play ||
-        !dvr1_valid_phase(record.phase) ||
-        record.consecutive_passes < 0 ||
-        record.consecutive_passes > 1 ||
-        record.players[record.decision_owner].hand_size !=
-            record.owner_hand.size() ||
-        !std::is_sorted(
-            record.owner_hand.begin(),
-            record.owner_hand.end()) ||
-        record.legal_action_descriptors.size() < 2 ||
-        record.reference_action_means.size() !=
-            record.legal_action_descriptors.size() ||
-        record.reference_model_fingerprint !=
-            record.production_model_fingerprint ||
-        record.reference_seed_base == 0 ||
-        record.reference_scout_seed ==
-            record.reference_confirmation_seed ||
-        record.reference_scout_worlds !=
-            kBsrScoutWorlds ||
-        record.reference_confirmation_worlds !=
-            kBsrConfirmationWorlds ||
-        record.reference_horizon_turns !=
-            kBsrReferenceHorizon ||
-        record.reference_rollouts_per_world != 1 ||
-        record.reference_evaluation_threads !=
-            kBsrReferenceEvaluationThreads ||
-        !dvr1_reference_accounting_valid(
-            record.legal_action_descriptors.size(),
-            record.reference_scout_worlds,
-            record.reference_confirmation_worlds,
-            record.reference_rollouts_per_world,
-            record.reference_sampled_worlds,
-            record.reference_rollout_evaluations,
-            record.reference_terminal_evaluations,
-            record.reference_bootstrapped_evaluations) ||
-        !std::isfinite(record.reference_regret) ||
-        record.reference_regret <= 0.0 ||
-        !std::isfinite(record.paired_standard_error) ||
-        record.paired_standard_error < 0.0 ||
-        !std::isfinite(record.paired_lower_95)) {
-        return false;
-    }
-    if (dvr1_sorted_unique(
-            record.legal_action_descriptors) !=
-            record.legal_action_descriptors ||
-        dvr1_sorted_unique(
-            record.reference_best_actions) !=
-            record.reference_best_actions ||
-        !std::binary_search(
-            record.legal_action_descriptors.begin(),
-            record.legal_action_descriptors.end(),
-            record.production_action_descriptor) ||
-        std::binary_search(
-            record.reference_best_actions.begin(),
-            record.reference_best_actions.end(),
-            record.production_action_descriptor)) {
-        return false;
-    }
-    std::vector<std::string> mean_descriptors;
-    mean_descriptors.reserve(
-        record.reference_action_means.size());
-    for (const auto& mean : record.reference_action_means) {
-        if (!dvr1_finite_probability(mean.scout_mean) ||
-            !dvr1_finite_probability(
-                mean.confirmation_mean)) {
-            return false;
-        }
-        mean_descriptors.push_back(mean.descriptor);
-    }
-    if (mean_descriptors !=
-            record.legal_action_descriptors ||
-        dvr1_best_actions(
-            record.reference_action_means, true) !=
-            record.reference_best_actions ||
-        dvr1_best_actions(
-            record.reference_action_means, false) !=
-            record.reference_best_actions) {
-        return false;
-    }
-    for (const CardId card : record.owner_hand) {
-        if (!dvr1_valid_card(card)) {
-            return false;
-        }
-    }
-    for (const auto& player : record.players) {
-        PublicPlayerState canonical = player;
-        dvr1_canonicalize_public_player(canonical);
-        if (canonical != player) {
-            return false;
-        }
-        if (!std::all_of(
-                player.graveyard.begin(),
-                player.graveyard.end(), dvr1_valid_card) ||
-            !std::all_of(
-                player.exile.begin(), player.exile.end(),
-                dvr1_valid_card) ||
-            !std::all_of(
-                player.enchantments.begin(),
-                player.enchantments.end(),
-                dvr1_valid_card)) {
-            return false;
-        }
-        for (const LandPermanent& land : player.lands) {
-            if (!dvr1_valid_card(land.card)) {
-                return false;
-            }
-        }
-        for (const CreaturePermanent& creature :
-             player.creatures) {
-            if (!dvr1_valid_card(creature.card)) {
-                return false;
-            }
-        }
-        for (const ArtifactPermanent& artifact :
-             player.artifacts) {
-            if (!dvr1_valid_card(artifact.card)) {
-                return false;
-            }
-        }
-    }
-    for (const StackObject& object : record.stack) {
-        if (static_cast<std::size_t>(object.kind) >
-                static_cast<std::size_t>(
-                    StackObjectKind::ActivatedAbility) ||
-            !dvr1_valid_card(object.card) ||
-            object.controller >= kPlayerCount ||
-            (object.target.has_value() &&
-             object.target->player >= kPlayerCount)) {
-            return false;
-        }
-    }
-    for (const auto& composition :
-         record.original_deck_composition) {
-        if (std::accumulate(
-                composition.begin(), composition.end(),
-                std::size_t{0}) == 0) {
-            return false;
-        }
-    }
-    return true;
-}
-
-void dvr1_append_integer(std::string& output,
-                         std::string_view name,
-                         std::uint64_t value) {
-    output.append(name);
-    output.push_back('\t');
-    output += std::to_string(value);
-    output.push_back('\n');
-}
-
-void dvr1_append_signed(std::string& output,
-                        std::string_view name,
-                        std::int64_t value) {
-    output.append(name);
-    output.push_back('\t');
-    output += std::to_string(value);
-    output.push_back('\n');
-}
-
-void dvr1_append_bool(std::string& output,
-                      std::string_view name, bool value) {
-    output.append(name);
-    output.push_back('\t');
-    output.push_back(value ? '1' : '0');
-    output.push_back('\n');
-}
-
-void dvr1_append_text(std::string& output,
-                      std::string_view name,
-                      std::string_view value) {
-    output.append(name);
-    output.push_back('\t');
-    output += std::to_string(value.size());
-    output.push_back(':');
-    output.append(value);
-    output.push_back('\n');
-}
-
-void dvr1_append_real(std::string& output,
-                      std::string_view name, double value) {
-    std::ostringstream formatted;
-    formatted.imbue(std::locale::classic());
-    formatted << std::setprecision(
-                     std::numeric_limits<double>::max_digits10)
-              << value;
-    output.append(name);
-    output.push_back('\t');
-    output += formatted.str();
-    output.push_back('\n');
-}
-
-std::string dvr1_field(std::string_view prefix,
-                       std::size_t first,
-                       std::string_view suffix) {
-    return std::string(prefix) + std::to_string(first) +
-           "." + std::string(suffix);
-}
-
-std::string dvr1_nested_field(
-    std::string_view prefix, std::size_t first,
-    std::string_view middle, std::size_t second) {
-    return std::string(prefix) + std::to_string(first) +
-           "." + std::string(middle) +
-           std::to_string(second);
-}
-
-void dvr1_serialize_cards(
-    std::string& output, std::string_view prefix,
-    const std::vector<CardId>& cards) {
-    dvr1_append_integer(
-        output, std::string(prefix) + ".count",
-        cards.size());
-    for (std::size_t index = 0; index < cards.size();
-         ++index) {
-        dvr1_append_integer(
-            output,
-            std::string(prefix) + "." +
-                std::to_string(index),
-            static_cast<std::size_t>(cards[index]));
-    }
-}
-
-void dvr1_serialize_public_player(
-    std::string& output, std::size_t index,
-    const PublicPlayerState& player) {
-    const std::string prefix =
-        "player." + std::to_string(index);
-    dvr1_append_signed(output, prefix + ".life", player.life);
-    dvr1_append_integer(
-        output, prefix + ".library_count",
-        player.library_size);
-    dvr1_append_integer(
-        output, prefix + ".hand_count", player.hand_size);
-    dvr1_serialize_cards(
-        output, prefix + ".graveyard", player.graveyard);
-    dvr1_serialize_cards(
-        output, prefix + ".exile", player.exile);
-
-    dvr1_append_integer(
-        output, prefix + ".lands.count",
-        player.lands.size());
-    for (std::size_t permanent = 0;
-         permanent < player.lands.size(); ++permanent) {
-        const std::string land =
-            prefix + ".lands." +
-            std::to_string(permanent);
-        dvr1_append_integer(
-            output, land + ".card",
-            static_cast<std::size_t>(
-                player.lands[permanent].card));
-        dvr1_append_bool(
-            output, land + ".tapped",
-            player.lands[permanent].tapped);
-    }
-
-    dvr1_append_integer(
-        output, prefix + ".creatures.count",
-        player.creatures.size());
-    for (std::size_t permanent = 0;
-         permanent < player.creatures.size();
-         ++permanent) {
-        const CreaturePermanent& creature =
-            player.creatures[permanent];
-        const std::string field =
-            prefix + ".creatures." +
-            std::to_string(permanent);
-        dvr1_append_integer(
-            output, field + ".id", creature.id);
-        dvr1_append_integer(
-            output, field + ".card",
-            static_cast<std::size_t>(creature.card));
-        dvr1_append_bool(
-            output, field + ".tapped", creature.tapped);
-        dvr1_append_bool(
-            output, field + ".summoning_sick",
-            creature.summoning_sick);
-        dvr1_append_signed(
-            output, field + ".damage", creature.damage);
-        dvr1_append_signed(
-            output, field + ".temporary_power_bonus",
-            creature.temporary_power_bonus);
-        dvr1_append_signed(
-            output, field + ".temporary_toughness_bonus",
-            creature.temporary_toughness_bonus);
-        dvr1_append_bool(
-            output, field + ".exile_on_death_this_turn",
-            creature.exile_on_death_this_turn);
-    }
-
-    dvr1_append_integer(
-        output, prefix + ".artifacts.count",
-        player.artifacts.size());
-    for (std::size_t permanent = 0;
-         permanent < player.artifacts.size();
-         ++permanent) {
-        const ArtifactPermanent& artifact =
-            player.artifacts[permanent];
-        const std::string field =
-            prefix + ".artifacts." +
-            std::to_string(permanent);
-        dvr1_append_integer(
-            output, field + ".id", artifact.id);
-        dvr1_append_integer(
-            output, field + ".card",
-            static_cast<std::size_t>(artifact.card));
-        dvr1_append_bool(
-            output, field + ".tapped", artifact.tapped);
-    }
-    dvr1_serialize_cards(
-        output, prefix + ".enchantments",
-        player.enchantments);
-    dvr1_append_signed(
-        output, prefix + ".mana.generic",
-        player.mana_pool.generic);
-    dvr1_append_signed(
-        output, prefix + ".mana.green",
-        player.mana_pool.green);
-    dvr1_append_signed(
-        output, prefix + ".mana.red",
-        player.mana_pool.red);
-    dvr1_append_signed(
-        output, prefix + ".mana.blue",
-        player.mana_pool.blue);
-    dvr1_append_signed(
-        output, prefix + ".mana.white",
-        player.mana_pool.white);
-    dvr1_append_bool(
-        output, prefix + ".land_played_this_turn",
-        player.land_played_this_turn);
-}
-
 } // namespace
-
-std::string serialize_dvr1_owner_visible_record(
-    const Dvr1OwnerVisibleRecord& record) {
-    if (!dvr1_record_shape_valid(record)) {
-        throw std::invalid_argument(
-            "invalid DVR1 owner-visible record");
-    }
-
-    std::string output;
-    output.reserve(8192);
-    dvr1_append_text(output, "schema", record.schema);
-    dvr1_append_text(
-        output, "environment_revision",
-        record.environment_revision);
-    dvr1_append_text(
-        output, "production_model_fingerprint",
-        record.production_model_fingerprint);
-    dvr1_append_text(
-        output, "information_action_fingerprint",
-        record.information_action_fingerprint);
-    dvr1_append_integer(
-        output, "source.game_seed",
-        record.provenance.game_seed);
-    dvr1_append_integer(
-        output, "source.block", record.provenance.block);
-    dvr1_append_integer(
-        output, "source.schedule_index",
-        record.provenance.schedule_index);
-    dvr1_append_integer(
-        output, "source.trace_ordinal",
-        record.provenance.trace_ordinal);
-    dvr1_append_integer(
-        output, "source.tracked_seat",
-        record.provenance.tracked_seat);
-    dvr1_append_bool(
-        output, "source.tracked_starts",
-        record.provenance.tracked_starts);
-    dvr1_append_integer(
-        output, "decision.owner", record.decision_owner);
-    dvr1_append_integer(
-        output, "decision.owner_deck",
-        static_cast<std::size_t>(record.owner_deck));
-    dvr1_append_integer(
-        output, "decision.opponent_deck",
-        static_cast<std::size_t>(record.opponent_deck));
-    dvr1_append_integer(
-        output, "decision.active_player",
-        record.active_player);
-    dvr1_append_integer(
-        output, "decision.starting_player",
-        record.starting_player);
-    dvr1_append_bool(
-        output, "decision.owner_on_play",
-        record.owner_on_play);
-    dvr1_append_integer(
-        output, "decision.turn_number",
-        record.turn_number);
-    dvr1_append_integer(
-        output, "decision.phase",
-        static_cast<std::size_t>(record.phase));
-    dvr1_append_signed(
-        output, "decision.consecutive_passes",
-        record.consecutive_passes);
-    for (std::size_t player = 0; player < kPlayerCount;
-         ++player) {
-        dvr1_serialize_public_player(
-            output, player, record.players[player]);
-    }
-    dvr1_serialize_cards(
-        output, "owner.hand", record.owner_hand);
-    for (std::size_t player = 0; player < kPlayerCount;
-         ++player) {
-        dvr1_append_integer(
-            output,
-            dvr1_field(
-                "player.", player,
-                "extra_turns_pending"),
-            record.extra_turns_pending[player]);
-    }
-
-    dvr1_append_integer(
-        output, "stack.count", record.stack.size());
-    for (std::size_t index = 0; index < record.stack.size();
-         ++index) {
-        const StackObject& object = record.stack[index];
-        const std::string prefix =
-            "stack." + std::to_string(index);
-        dvr1_append_integer(
-            output, prefix + ".kind",
-            static_cast<std::size_t>(object.kind));
-        dvr1_append_integer(
-            output, prefix + ".id", object.id);
-        dvr1_append_integer(
-            output, prefix + ".card",
-            static_cast<std::size_t>(object.card));
-        dvr1_append_integer(
-            output, prefix + ".controller",
-            object.controller);
-        dvr1_append_bool(
-            output, prefix + ".target.present",
-            object.target.has_value());
-        if (object.target.has_value()) {
-            dvr1_append_integer(
-                output, prefix + ".target.player",
-                object.target->player);
-            dvr1_append_bool(
-                output,
-                prefix + ".target.creature.present",
-                object.target->creature.has_value());
-            if (object.target->creature.has_value()) {
-                dvr1_append_integer(
-                    output,
-                    prefix + ".target.creature.id",
-                    *object.target->creature);
-            }
-        }
-        dvr1_append_bool(
-            output, prefix + ".spell_target.present",
-            object.spell_target.has_value());
-        if (object.spell_target.has_value()) {
-            dvr1_append_integer(
-                output, prefix + ".spell_target.id",
-                *object.spell_target);
-        }
-        dvr1_append_signed(
-            output, prefix + ".x_value", object.x_value);
-    }
-
-    for (std::size_t player = 0; player < kPlayerCount;
-         ++player) {
-        for (std::size_t card = 0; card < kCardCount;
-             ++card) {
-            dvr1_append_integer(
-                output,
-                dvr1_nested_field(
-                    "original_deck.", player,
-                    "card.", card),
-                record.original_deck_composition[player][card]);
-        }
-    }
-
-    dvr1_append_integer(
-        output, "legal_actions.count",
-        record.legal_action_descriptors.size());
-    for (std::size_t index = 0;
-         index < record.legal_action_descriptors.size();
-         ++index) {
-        dvr1_append_text(
-            output,
-            "legal_actions." + std::to_string(index),
-            record.legal_action_descriptors[index]);
-    }
-    dvr1_append_text(
-        output, "production_action",
-        record.production_action_descriptor);
-    dvr1_append_integer(
-        output, "reference_best.count",
-        record.reference_best_actions.size());
-    for (std::size_t index = 0;
-         index < record.reference_best_actions.size();
-         ++index) {
-        dvr1_append_text(
-            output,
-            "reference_best." + std::to_string(index),
-            record.reference_best_actions[index]);
-    }
-    for (std::size_t index = 0;
-         index < record.reference_action_means.size();
-         ++index) {
-        const auto& mean =
-            record.reference_action_means[index];
-        const std::string prefix =
-            "reference_action." + std::to_string(index);
-        dvr1_append_text(
-            output, prefix + ".descriptor",
-            mean.descriptor);
-        dvr1_append_real(
-            output, prefix + ".scout_q_mean",
-            mean.scout_mean);
-        dvr1_append_real(
-            output, prefix + ".confirmation_q_mean",
-            mean.confirmation_mean);
-    }
-    dvr1_append_text(
-        output, "reference.model_fingerprint",
-        record.reference_model_fingerprint);
-    dvr1_append_integer(
-        output, "reference.seed_base",
-        record.reference_seed_base);
-    dvr1_append_integer(
-        output, "reference.scout_seed",
-        record.reference_scout_seed);
-    dvr1_append_integer(
-        output, "reference.confirmation_seed",
-        record.reference_confirmation_seed);
-    dvr1_append_integer(
-        output, "reference.scout_worlds",
-        record.reference_scout_worlds);
-    dvr1_append_integer(
-        output, "reference.confirmation_worlds",
-        record.reference_confirmation_worlds);
-    dvr1_append_integer(
-        output, "reference.horizon_turns",
-        record.reference_horizon_turns);
-    dvr1_append_integer(
-        output, "reference.rollouts_per_world",
-        record.reference_rollouts_per_world);
-    dvr1_append_integer(
-        output, "reference.evaluation_threads",
-        record.reference_evaluation_threads);
-    dvr1_append_integer(
-        output, "reference.sampled_worlds",
-        record.reference_sampled_worlds);
-    dvr1_append_integer(
-        output, "reference.rollout_evaluations",
-        record.reference_rollout_evaluations);
-    dvr1_append_integer(
-        output, "reference.terminal_evaluations",
-        record.reference_terminal_evaluations);
-    dvr1_append_integer(
-        output, "reference.bootstrapped_evaluations",
-        record.reference_bootstrapped_evaluations);
-    dvr1_append_real(
-        output, "reference.regret",
-        record.reference_regret);
-    dvr1_append_real(
-        output, "reference.paired_standard_error",
-        record.paired_standard_error);
-    dvr1_append_real(
-        output, "reference.paired_lower_95",
-        record.paired_lower_95);
-    return output;
-}
 
 std::string dvr1_owner_visible_record_fingerprint(
     const Dvr1OwnerVisibleRecord& record) {
@@ -7013,6 +6409,8 @@ Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
         !dvr1_valid_phase(probe.phase) ||
         probe.consecutive_passes < 0 ||
         probe.consecutive_passes > 1 ||
+        probe.state.failed_draw[0] ||
+        probe.state.failed_draw[1] ||
         production_action_descriptor.empty() ||
         !dvr1_lower_hex(
             production_model_fingerprint, 64) ||
@@ -7037,8 +6435,9 @@ Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
             Dvr1CaptureDisposition::IncompleteActionSet);
     }
 
-    std::vector<std::string> legal_descriptors;
-    legal_descriptors.reserve(probe.candidates.size());
+    std::vector<std::pair<std::string, PriorityAction>>
+        legal_rows;
+    legal_rows.reserve(probe.candidates.size());
     std::size_t production_matches = 0;
     for (std::size_t index = 0;
          index < probe.candidates.size(); ++index) {
@@ -7050,18 +6449,34 @@ Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
                 Dvr1CaptureDisposition::
                     IncompleteActionSet);
         }
-        legal_descriptors.push_back(candidate.descriptor);
+        legal_rows.emplace_back(
+            candidate.descriptor, priority_actions[index]);
         if (candidate.descriptor ==
             production_action_descriptor) {
             ++production_matches;
         }
     }
-    legal_descriptors =
-        dvr1_sorted_unique(std::move(legal_descriptors));
-    if (legal_descriptors.size() !=
-        probe.candidates.size()) {
+    std::sort(
+        legal_rows.begin(), legal_rows.end(),
+        [](const auto& left, const auto& right) {
+            return left.first < right.first;
+        });
+    if (legal_rows.empty() ||
+        std::adjacent_find(
+            legal_rows.begin(), legal_rows.end(),
+            [](const auto& left, const auto& right) {
+                return left.first == right.first;
+            }) != legal_rows.end()) {
         return reject(
             Dvr1CaptureDisposition::IncompleteActionSet);
+    }
+    std::vector<std::string> legal_descriptors;
+    std::vector<PriorityAction> legal_actions;
+    legal_descriptors.reserve(legal_rows.size());
+    legal_actions.reserve(legal_rows.size());
+    for (const auto& [descriptor, action] : legal_rows) {
+        legal_descriptors.push_back(descriptor);
+        legal_actions.push_back(action);
     }
     if (production_matches != 1 ||
         reference.actual_action_descriptor !=
@@ -7241,13 +6656,9 @@ Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
     if (observation.revealed_opponent_hand.has_value()) {
         return reject(Dvr1CaptureDisposition::InvalidInput);
     }
-    for (PublicPlayerState& player : observation.players) {
-        dvr1_canonicalize_public_player(player);
-    }
-    std::sort(
-        observation.hand.begin(), observation.hand.end());
 
     Dvr1OwnerVisibleRecord record;
+    record.stable_id = probe.stable_id;
     record.production_model_fingerprint =
         std::string(production_model_fingerprint);
     record.information_action_fingerprint =
@@ -7269,6 +6680,11 @@ Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
     record.stack = std::move(observation.stack);
     record.extra_turns_pending =
         observation.extra_turns_pending;
+    record.next_permanent_id =
+        probe.state.next_permanent_id;
+    record.next_stack_object_id =
+        probe.state.next_stack_object_id;
+    record.failed_draw = probe.state.failed_draw;
     try {
         record.original_deck_composition =
             dvr1_deck_compositions(probe.original_decks);
@@ -7277,6 +6693,7 @@ Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
     }
     record.legal_action_descriptors =
         std::move(legal_descriptors);
+    record.legal_actions = std::move(legal_actions);
     record.production_action_descriptor =
         std::string(production_action_descriptor);
     record.reference_best_actions = scout_best;

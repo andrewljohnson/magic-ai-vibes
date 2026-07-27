@@ -9832,3 +9832,76 @@ The falsifiable gate is:
 
 Only after this gate passes may DVR2 be declared and allowed to publish a
 durable divergence/control corpus.
+
+#### DVR1-R result: replay gate passed exactly
+
+Implemented 2026-07-26 after rereading `REVIEW.md` through its newest 17:41
+PDT entry. That review independently reproduced committed DVR1 and reported
+that OSC-1 through OSC-4 plus the joint C17 family are sealed negative, making
+the DVR2 evidence harvest the convergent critical path. DVR1-R remains
+instrumentation only: no source games, strength benchmark, training, or
+deployment change was run or licensed.
+
+The pre-publication v1 record now also binds the stable probe ID, exact next
+permanent and stack-object IDs, both false failed-draw flags, and every legal
+`PriorityAction` as structured kind/card/target/spell-target/source/X fields
+beside its descriptor. Capture preserves exact owner-visible vector order
+rather than sorting it: `pay_mana` can inspect lands and artifacts by vector
+position, so a merely information-fingerprint-equivalent ordering is not a
+lossless continuation root.
+
+Canonical serialization, strict bounded decoding, and replay now live in the
+dedicated `dvr1_replay` module. The decoder consumes the length-framed text
+format in exact schema order, bounds bytes/counts before allocation, parses
+enums through wide integers, rejects noncanonical numeric spellings, and
+requires byte-identical reserialization. Missing, duplicate, unknown,
+out-of-range, truncated, and trailing fields therefore fail closed.
+
+Rehydration subtracts each public zone, every public Spell stack object, and
+the owner's known hand from the exact original 40-card compositions. It keeps
+the owner's hand and all public vectors in their recorded order, constructs a
+canonical synthetic opponent hidden partition only from the remaining prior
+and public hand/library counts, explicitly zeroes both `PlayerGameStats`, and
+restores the exact phase, priority owner, passes, turn context, stack, pending
+extra turns, and monotonic IDs. It then requires full `validate_probe`
+success, exact structured rules-derived legal actions, the one production
+descriptor, and the stored owner information/action fingerprint. Empty-stack
+roots are rejected because the declared BSR reference scorer requires a live
+stack response.
+
+The exact-score fixture deliberately uses noncanonical mixed land,
+Mox/Sol Ring, hand, graveyard, and exile order. Its original and rehydrated
+roots produce equal complete `BsrRootScore` objects under the frozen tiny
+model and exact K64+K64/H8 reference: Q means, best sets, derived seeds,
+terminal/bootstrap accounting, stable ID, and all flags are identical. The
+malformed matrix covers trailing, truncated, missing, duplicate, unknown,
+noncanonical, out-of-range, oversized-count, zero-ID, duplicate-permanent-ID,
+failed-draw, and mutated structured-action cases. Existing opponent
+hidden-repartition bytes remain identical and contain no opponent hand or
+library identities.
+
+During the replay test, the reachability validator was found to treat
+Disintegrate as the only legal public X spell. The rules-only check now also
+accepts targeted Braingeyser with nonnegative X, and a deck-valid Blue
+counter-war fixture proves an on-stack Braingeyser at X=2 validates,
+serializes, decodes, and rehydrates. This is a probe-validation correction,
+not a policy rule or gameplay change.
+
+Exact verification:
+
+```sh
+git diff --check
+make -j4 test-probes
+/usr/bin/time -p make test-probes
+```
+
+Results: 52/52 probe tests, 11/11 probe-metric tests, and 32/32 probe-runner
+tests passed under `-Wall -Wextra -Wpedantic -Werror`. The final warm focused
+run took 15.62 seconds wall time (19.26 user, 0.16 system).
+
+Decision: accept DVR1-R as replayable measurement infrastructure. All five
+falsifiable gates passed, no DVR1 artifact compatibility migration is needed,
+and no bot-strength claim is made. The next research action may now be a
+separately preregistered, simulation-guarded, hard-bounded DVR2 harvest over
+frozen C16, with Blue-owned opponent-stack response roots first and explicit
+coverage/skipped-stratum reporting.

@@ -1,3 +1,4 @@
+#include "old_school/dvr1_replay.hpp"
 #include "old_school/probes.hpp"
 
 #include <algorithm>
@@ -3052,7 +3053,9 @@ void test_bsr_bounded_source_accounting_smoke() {
 old_school::probes::BsrRootScore
 make_dvr1_disagreement_evidence(
     const DecisionProbe& probe,
-    std::string_view production_descriptor) {
+    std::string_view production_descriptor,
+    old_school::probes::BsrRootScore*
+        exact_reference = nullptr) {
     old_school::probes::BsrReferenceConfig config;
     config.seed = old_school::probes::kBsrReferenceSeed;
     config.scout_worlds =
@@ -3067,6 +3070,9 @@ make_dvr1_disagreement_evidence(
         old_school::probes::score_bsr_priority_probe(
             probe, production_descriptor, tiny_bsr_model(),
             config);
+    if (exact_reference != nullptr) {
+        *exact_reference = reference;
+    }
 
     std::vector<std::string> descriptors;
     for (const auto& candidate : probe.candidates) {
@@ -3135,6 +3141,96 @@ DecisionProbe make_dvr1_test_probe() {
     return probe;
 }
 
+void move_library_card(
+    old_school::PlayerState& player, CardId card,
+    const std::function<void(CardId)>& destination) {
+    const auto found =
+        std::find(player.library.begin(), player.library.end(), card);
+    if (found == player.library.end()) {
+        throw std::runtime_error(
+            "DVR1 order fixture is missing a library card");
+    }
+    const CardId moved = *found;
+    player.library.erase(found);
+    destination(moved);
+}
+
+DecisionProbe make_dvr1_order_sensitive_probe() {
+    DecisionProbe probe = make_dvr1_test_probe();
+    probe.stable_id =
+        "dvr1.order-sensitive-owner-visible-replay.v1";
+    old_school::PlayerState& owner =
+        probe.state.players[probe.root_player];
+
+    move_library_card(
+        owner, CardId::Island,
+        [&](CardId card) {
+            owner.lands.insert(
+                owner.lands.begin(),
+                {.card = card, .tapped = true});
+        });
+    move_library_card(
+        owner, CardId::Island,
+        [&](CardId card) {
+            owner.lands.push_back(
+                {.card = card, .tapped = true});
+        });
+    move_library_card(
+        owner, CardId::SolRing,
+        [&](CardId card) {
+            owner.artifacts.push_back({
+                .id = 9,
+                .card = card,
+                .tapped = false,
+            });
+        });
+    move_library_card(
+        owner, CardId::MoxSapphire,
+        [&](CardId card) {
+            owner.artifacts.push_back({
+                .id = 3,
+                .card = card,
+                .tapped = false,
+            });
+        });
+    move_library_card(
+        owner, CardId::AirElemental,
+        [&](CardId card) { owner.hand.insert(
+            owner.hand.begin(), card); });
+    move_library_card(
+        owner, CardId::Island,
+        [&](CardId card) { owner.hand.push_back(card); });
+    move_library_card(
+        owner, CardId::Counterspell,
+        [&](CardId card) { owner.hand.push_back(card); });
+    move_library_card(
+        owner, CardId::TimeWalk,
+        [&](CardId card) { owner.graveyard.push_back(card); });
+    move_library_card(
+        owner, CardId::AncestralRecall,
+        [&](CardId card) { owner.graveyard.push_back(card); });
+    move_library_card(
+        owner, CardId::Braingeyser,
+        [&](CardId card) { owner.exile.push_back(card); });
+    move_library_card(
+        owner, CardId::FlyingMen,
+        [&](CardId card) { owner.exile.push_back(card); });
+    probe.state.next_permanent_id = 10;
+
+    const auto actions = old_school::legal_priority_actions(
+        probe.state, probe.root_player, true);
+    probe.candidates.clear();
+    for (const PriorityAction& action : actions) {
+        probe.candidates.push_back({
+            .descriptor =
+                old_school::probes::
+                    stable_priority_action_descriptor(action),
+            .action = action,
+        });
+    }
+    return probe;
+}
+
 old_school::probes::BsrRootKeyContext
 dvr1_test_provenance(const DecisionProbe& probe) {
     return {
@@ -3176,9 +3272,10 @@ void test_dvr1_capture_is_complete_and_hidden_safe() {
 
     const auto& record = *captured.record;
     const std::string& bytes = captured.serialized_record;
-    const std::array<std::string_view, 36>
+    const std::array<std::string_view, 43>
         required_fields = {
             "schema\t",
+            "stable_id\t",
             "source.game_seed\t",
             "source.trace_ordinal\t",
             "source.tracked_seat\t",
@@ -3190,6 +3287,10 @@ void test_dvr1_capture_is_complete_and_hidden_safe() {
             "decision.phase\t",
             "decision.consecutive_passes\t",
             "decision.owner_on_play\t",
+            "state.next_permanent_id\t",
+            "state.next_stack_object_id\t",
+            "state.failed_draw.0\t",
+            "state.failed_draw.1\t",
             "owner.hand.count\t",
             "player.0.graveyard.count\t",
             "player.0.exile.count\t",
@@ -3199,6 +3300,8 @@ void test_dvr1_capture_is_complete_and_hidden_safe() {
             "stack.count\t",
             "original_deck.0.card.0\t",
             "legal_actions.count\t",
+            "legal_actions.0.descriptor\t",
+            "legal_actions.0.action.kind\t",
             "reference_action.0.scout_q_mean\t",
             "reference.model_fingerprint\t",
             "reference.seed_base\t",
@@ -3229,14 +3332,7 @@ void test_dvr1_capture_is_complete_and_hidden_safe() {
             bytes.find("player.1.hand.0") ==
                 std::string::npos &&
             record.owner_hand ==
-                [&] {
-                    auto hand =
-                        probe.state.players[
-                            probe.root_player]
-                            .hand;
-                    std::sort(hand.begin(), hand.end());
-                    return hand;
-                }() &&
+                probe.state.players[probe.root_player].hand &&
             record.players[1 - probe.root_player]
                     .hand_size ==
                 probe.state.players[1 - probe.root_player]
@@ -3320,6 +3416,327 @@ void test_dvr1_capture_is_complete_and_hidden_safe() {
         "zone");
 }
 
+old_school::probes::Dvr1CaptureResult
+capture_dvr1_test_probe(
+    const DecisionProbe& probe,
+    old_school::probes::BsrRootScore*
+        exact_reference = nullptr) {
+    const std::string production =
+        old_school::probes::
+            stable_priority_action_descriptor(
+                PriorityAction::pass());
+    const auto evidence =
+        make_dvr1_disagreement_evidence(
+            probe, production, exact_reference);
+    return old_school::probes::
+        capture_dvr1_owner_visible_divergence(
+            probe, production,
+            old_school::learned_model_fingerprint(
+                tiny_bsr_model()),
+            dvr1_test_provenance(probe), evidence);
+}
+
+void test_dvr1_roundtrip_rehydrates_exact_reference_root() {
+    const DecisionProbe probe =
+        make_dvr1_order_sensitive_probe();
+    const Validation source_validation =
+        old_school::probes::validate_probe(probe);
+    expect(
+        source_validation.ok(),
+        "DVR1 order-sensitive source fixture is invalid");
+
+    old_school::probes::BsrRootScore original_score;
+    const auto captured =
+        capture_dvr1_test_probe(
+            probe, &original_score);
+    expect(
+        captured.captured() && captured.record.has_value(),
+        "DVR1 failed to capture the replay fixture");
+    const auto decoded =
+        old_school::probes::
+            deserialize_dvr1_owner_visible_record(
+                captured.serialized_record);
+    const DecisionProbe replay =
+        old_school::probes::
+            rehydrate_dvr1_decision_probe(decoded);
+    const old_school::PlayerObservation source_observation =
+        old_school::observe_game_state(
+            probe.state, probe.root_player);
+    const old_school::PlayerObservation replay_observation =
+        old_school::observe_game_state(
+            replay.state, replay.root_player);
+
+    old_school::probes::BsrReferenceConfig config;
+    config.seed = old_school::probes::kBsrReferenceSeed;
+    config.scout_worlds =
+        old_school::probes::kBsrScoutWorlds;
+    config.confirmation_worlds =
+        old_school::probes::kBsrConfirmationWorlds;
+    config.horizon_turns =
+        old_school::probes::kBsrReferenceHorizon;
+    config.rollouts_per_world = 1;
+    config.evaluation_threads =
+        old_school::probes::
+            kBsrReferenceEvaluationThreads;
+    const std::string production =
+        old_school::probes::
+            stable_priority_action_descriptor(
+                PriorityAction::pass());
+    const auto replay_score =
+        old_school::probes::score_bsr_priority_probe(
+            replay, production, tiny_bsr_model(), config);
+
+    std::array<std::array<std::size_t,
+                          old_school::kCardCount>,
+               2>
+        replay_composition{};
+    for (std::size_t player = 0; player < 2; ++player) {
+        for (const CardId card :
+             replay.original_decks[player]) {
+            ++replay_composition[player]
+                                [static_cast<std::size_t>(card)];
+        }
+    }
+    expect(
+        decoded == *captured.record &&
+            old_school::probes::
+                    serialize_dvr1_owner_visible_record(
+                        decoded) ==
+                captured.serialized_record &&
+            source_observation == replay_observation &&
+            replay.state.next_permanent_id ==
+                probe.state.next_permanent_id &&
+            replay.state.next_stack_object_id ==
+                probe.state.next_stack_object_id &&
+            replay.state.failed_draw ==
+                std::array<bool, 2>{false, false} &&
+            replay.state.stats ==
+                std::array<old_school::PlayerGameStats, 2>{} &&
+            replay_composition ==
+                decoded.original_deck_composition &&
+            replay.stable_id == probe.stable_id &&
+            replay.phase == probe.phase &&
+            replay.root_player == probe.root_player &&
+            replay.consecutive_passes ==
+                probe.consecutive_passes &&
+            old_school::probes::
+                    bsr_information_action_fingerprint(replay) ==
+                decoded.information_action_fingerprint &&
+            replay_score == original_score,
+        "DVR1 round-trip changed owner-visible vector order, "
+        "context, IDs, deck composition, or the exact K64/H8 "
+        "reference score");
+}
+
+std::string replace_dvr1_scalar(
+    std::string bytes, std::string_view field_name,
+    std::string_view replacement) {
+    const std::string marker =
+        std::string(field_name) + "\t";
+    const std::size_t marker_position = bytes.find(marker);
+    if (marker_position == std::string::npos) {
+        throw std::runtime_error(
+            "DVR1 malformed fixture field is absent");
+    }
+    const std::size_t value_begin =
+        marker_position + marker.size();
+    const std::size_t value_end =
+        bytes.find('\n', value_begin);
+    if (value_end == std::string::npos) {
+        throw std::runtime_error(
+            "DVR1 malformed fixture field is truncated");
+    }
+    bytes.replace(
+        value_begin, value_end - value_begin,
+        replacement);
+    return bytes;
+}
+
+void test_dvr1_decoder_and_rehydration_fail_closed() {
+    const DecisionProbe probe = make_dvr1_test_probe();
+    const auto captured = capture_dvr1_test_probe(probe);
+    expect(
+        captured.captured() && captured.record.has_value(),
+        "DVR1 malformed-input test failed to capture a record");
+    const std::string& canonical =
+        captured.serialized_record;
+    std::vector<std::string> malformed;
+    malformed.push_back(canonical + "unknown\t0\n");
+    malformed.push_back(canonical.substr(
+        0, canonical.size() - 1));
+    malformed.push_back(
+        replace_dvr1_scalar(
+            canonical, "decision.owner", "2"));
+    malformed.push_back(
+        replace_dvr1_scalar(
+            canonical, "decision.owner", "00"));
+    malformed.push_back(
+        replace_dvr1_scalar(
+            canonical, "state.next_permanent_id", "0"));
+    malformed.push_back(
+        replace_dvr1_scalar(
+            canonical, "state.failed_draw.0", "1"));
+    malformed.push_back(
+        replace_dvr1_scalar(
+            canonical, "player.0.library_count", "999"));
+    malformed.push_back(
+        replace_dvr1_scalar(
+            canonical, "legal_actions.count", "513"));
+    malformed.push_back(
+        replace_dvr1_scalar(
+            canonical,
+            "legal_actions.0.action.kind", "99"));
+    std::string unknown = canonical;
+    unknown.replace(0, 6, "opaque");
+    malformed.push_back(std::move(unknown));
+    const std::size_t first_line_end =
+        canonical.find('\n') + 1;
+    malformed.push_back(
+        canonical.substr(0, first_line_end) + canonical);
+    malformed.push_back(
+        canonical.substr(first_line_end));
+
+    for (const std::string& bytes : malformed) {
+        bool rejected = false;
+        try {
+            static_cast<void>(
+                old_school::probes::
+                    deserialize_dvr1_owner_visible_record(
+                        bytes));
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        expect(
+            rejected,
+            "DVR1 strict decoder accepted malformed bytes");
+    }
+
+    auto duplicate_id = *captured.record;
+    expect(
+        duplicate_id.players[probe.root_player]
+                .artifacts.empty(),
+        "DVR1 base malformed fixture unexpectedly has artifacts");
+    duplicate_id.players[probe.root_player]
+        .artifacts = {
+        {
+            .id = 1,
+            .card = CardId::MoxSapphire,
+        },
+        {
+            .id = 1,
+            .card = CardId::SolRing,
+        },
+    };
+    duplicate_id.next_permanent_id = 2;
+    bool duplicate_rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::
+                rehydrate_dvr1_decision_probe(
+                    duplicate_id));
+    } catch (const std::invalid_argument&) {
+        duplicate_rejected = true;
+    }
+
+    auto wrong_action = *captured.record;
+    ++wrong_action.legal_actions.front().x_value;
+    bool action_rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::
+                rehydrate_dvr1_decision_probe(
+                    wrong_action));
+    } catch (const std::invalid_argument&) {
+        action_rejected = true;
+    }
+    expect(
+        duplicate_rejected && action_rejected,
+        "DVR1 rehydration accepted duplicate IDs or a mutated "
+        "structured action");
+}
+
+void test_dvr1_replays_braingeyser_public_x() {
+    const auto dev = old_school::probes::make_probe_dev_v3();
+    const auto found = std::find_if(
+        dev.begin(), dev.end(),
+        [](const DecisionProbe& candidate) {
+            return candidate.category ==
+                   Category::BlueCounterWar;
+        });
+    expect(
+        found != dev.end() && found->state.stack.size() >= 2,
+        "DVR1 Braingeyser fixture needs the Blue counter-war "
+        "root");
+    DecisionProbe probe = *found;
+    probe.stable_id =
+        "dvr1.braingeyser-public-x-replay.v1";
+    old_school::StackObject& base_spell =
+        probe.state.stack.front();
+    expect(
+        base_spell.kind ==
+                old_school::StackObjectKind::Spell &&
+            base_spell.card == CardId::AirElemental,
+        "DVR1 Braingeyser fixture expected Air Elemental as "
+        "the base spell");
+    const std::size_t caster = base_spell.controller;
+    auto replaced = std::find(
+        probe.state.players[caster].library.begin(),
+        probe.state.players[caster].library.end(),
+        CardId::Braingeyser);
+    expect(
+        replaced !=
+            probe.state.players[caster].library.end(),
+        "DVR1 Braingeyser fixture has no hidden Braingeyser");
+    *replaced = CardId::AirElemental;
+    base_spell.card = CardId::Braingeyser;
+    base_spell.target =
+        old_school::Target::player_target(caster);
+    base_spell.x_value = 2;
+    for (auto& candidate : probe.candidates) {
+        const auto* action =
+            std::get_if<PriorityAction>(
+                &candidate.action);
+        expect(
+            action != nullptr,
+            "DVR1 Braingeyser fixture has a non-Priority "
+            "candidate");
+        candidate.descriptor =
+            old_school::probes::
+                stable_priority_action_descriptor(*action);
+    }
+
+    const Validation source_validation =
+        old_school::probes::validate_probe(probe);
+    std::string validation_message =
+        "probe validation rejected a legal Braingeyser X stack "
+        "object";
+    for (const std::string& error :
+         source_validation.errors) {
+        validation_message += "; " + error;
+    }
+    expect(
+        source_validation.ok(),
+        validation_message);
+    const auto captured = capture_dvr1_test_probe(probe);
+    expect(
+        captured.captured(),
+        "DVR1 failed to capture the Braingeyser X fixture");
+    const auto decoded =
+        old_school::probes::
+            deserialize_dvr1_owner_visible_record(
+                captured.serialized_record);
+    const DecisionProbe replay =
+        old_school::probes::
+            rehydrate_dvr1_decision_probe(decoded);
+    expect(
+        old_school::probes::validate_probe(replay).ok() &&
+            replay.state.stack.size() >= 2 &&
+            replay.state.stack.front().card ==
+                CardId::Braingeyser &&
+            replay.state.stack.front().x_value == 2,
+        "DVR1 failed to validate and replay Braingeyser X>0");
+}
+
 void test_dvr1_capture_fails_closed() {
     DecisionProbe probe = make_dvr1_test_probe();
     const std::string production =
@@ -3381,6 +3798,8 @@ void test_dvr1_capture_fails_closed() {
     DecisionProbe unstable_descriptor = probe;
     unstable_descriptor.candidates.front().descriptor +=
         ".not-stable";
+    DecisionProbe failed_draw = probe;
+    failed_draw.state.failed_draw[0] = true;
     auto wrong_model = evidence;
     wrong_model.reference_model_fingerprint += ".wrong";
     auto wrong_worlds = evidence;
@@ -3412,6 +3831,9 @@ void test_dvr1_capture_fails_closed() {
                 old_school::probes::
                     Dvr1CaptureDisposition::
                         IncompleteActionSet &&
+            disposition(failed_draw, production, evidence) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::InvalidInput &&
             disposition(probe, production, wrong_model) ==
                 old_school::probes::
                     Dvr1CaptureDisposition::
@@ -3602,6 +4024,12 @@ int main() {
                test_bsr_bounded_source_accounting_smoke);
     runner.run("DVR1 complete hidden-safe capture",
                test_dvr1_capture_is_complete_and_hidden_safe);
+    runner.run("DVR1 exact replay and K64/H8 identity",
+               test_dvr1_roundtrip_rehydrates_exact_reference_root);
+    runner.run("DVR1 strict replay rejection",
+               test_dvr1_decoder_and_rehydration_fail_closed);
+    runner.run("DVR1 Braingeyser public X replay",
+               test_dvr1_replays_braingeyser_public_x);
     runner.run("DVR1 fail-closed capture gate",
                test_dvr1_capture_fails_closed);
     runner.run("DVR1 Blue stack-root selector",

@@ -746,6 +746,11 @@ BsrRootScore score_bsr_priority_probe(
     std::shared_ptr<const LearnedModel> frozen_model,
     BsrReferenceConfig config = {});
 
+// Hidden-information-safe digest of the owner observation plus the complete
+// stable Priority action descriptor set.
+std::string bsr_information_action_fingerprint(
+    const DecisionProbe& probe);
+
 struct BsrSourceCellSummary {
     DeckId opponent_deck = DeckId::Green;
     std::size_t tracked_seat = 0;
@@ -882,6 +887,7 @@ struct Dvr1OwnerVisibleRecord {
     std::string schema = std::string(kDvr1CaptureSchema);
     std::string environment_revision =
         std::string(kBsrEnvironmentRevision);
+    std::string stable_id;
     std::string production_model_fingerprint;
     std::string information_action_fingerprint;
     BsrRootKeyContext provenance;
@@ -898,9 +904,13 @@ struct Dvr1OwnerVisibleRecord {
     std::vector<CardId> owner_hand;
     std::vector<StackObject> stack;
     std::array<std::size_t, 2> extra_turns_pending = {0, 0};
+    PermanentId next_permanent_id = 1;
+    StackObjectId next_stack_object_id = 1;
+    std::array<bool, 2> failed_draw = {false, false};
     std::array<std::array<std::size_t, kCardCount>, 2>
         original_deck_composition{};
     std::vector<std::string> legal_action_descriptors;
+    std::vector<PriorityAction> legal_actions;
     std::string production_action_descriptor;
     std::vector<std::string> reference_best_actions;
     std::vector<BsrRootScore::ActionMean> reference_action_means;
@@ -962,9 +972,8 @@ Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
     const BsrRootScore& reference);
 
 // Canonical, locale-independent record bytes and their stable FNV-1a
-// fingerprint. Serialization is intentionally one-way in DVR1: the immutable
-// bytes are the evidence artifact, while gameplay restoration remains out of
-// scope until a separately declared harvest run.
+// fingerprint. Strict decoding and DecisionProbe rehydration live in the
+// dedicated dvr1_replay module.
 std::string serialize_dvr1_owner_visible_record(
     const Dvr1OwnerVisibleRecord& record);
 

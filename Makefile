@@ -6,7 +6,7 @@ BUILD_DIR := build
 ENGINE_SOURCE := src/game.cpp
 INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
-PROBE_SOURCE := src/probes.cpp
+PROBE_SOURCE := src/probes.cpp src/dvr1_replay.cpp
 PROBE_EVAL_SOURCE := src/probe_eval.cpp
 PROBE_RUNNER_SOURCE := src/probe_runner.cpp
 AUDIT_COMMON_SOURCE := src/audit_common.cpp
@@ -44,6 +44,19 @@ RB0_MECHANICAL_PREFLIGHT := $(BUILD_DIR)/rb0-mechanical-preflight
 RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER := $(BUILD_DIR)/old-school-rb0-mechanical-preflight-tests
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 WEB_BRIDGE_TEST_RUNNER := $(BUILD_DIR)/old-school-web-bridge-tests
+PROBE_HEADER_DEPENDENTS := \
+	$(SIMULATOR) \
+	$(PROBE_TEST_RUNNER) \
+	$(PROBE_RUNNER_TEST_RUNNER) \
+	$(ATTACK_REGRESSION) \
+	$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) \
+	$(JOINT_C17_EXECUTION_TEST_RUNNER) \
+	$(JOINT_C17_ORCHESTRATION_TEST_RUNNER) \
+	$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) \
+	$(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) \
+	$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) \
+	$(RB0_MECHANICAL_PREFLIGHT) \
+	$(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER)
 WEB_DEPENDENCIES := web/node_modules/.package-lock.json
 LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
@@ -56,6 +69,8 @@ all: $(SIMULATOR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
+$(PROBE_HEADER_DEPENDENTS): include/old_school/dvr1_replay.hpp
+
 $(SIMULATOR): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_execution.hpp include/old_school/joint_c17_training.hpp include/old_school/joint_c17_orchestration.hpp include/old_school/turn_alignment_audit.hpp include/old_school/target_factorial_audit.hpp include/old_school/replay_weight_audit.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp -o $@
 
@@ -65,7 +80,7 @@ $(TEST_RUNNER): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURC
 $(LEARNED_ITERATION_TEST_RUNNER): $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp -o $@
 
-$(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp | $(BUILD_DIR)
+$(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp -o $@
 
 $(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp include/old_school/game.hpp include/old_school/probe_eval.hpp | $(BUILD_DIR)
