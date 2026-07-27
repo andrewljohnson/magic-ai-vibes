@@ -1197,6 +1197,22 @@ void test_atomic_no_replace_publication() {
             std::filesystem::symlink_status(injected)),
         "DVR2 post-link infrastructure failure left "
         "published evidence");
+
+    const auto expired =
+        temporary.path() / "expired.dvr2";
+    expect_rejected(
+        [&] {
+            dvr2::testing::
+                write_bundle_atomic_no_replace(
+                    expired, bundle,
+                    dvr2::testing::PublicationFault::
+                        WatchdogExpiredBeforeLink);
+        },
+        "DVR2 pre-link watchdog fault did not fail");
+    expect(
+        !std::filesystem::exists(
+            std::filesystem::symlink_status(expired)),
+        "DVR2 pre-link watchdog failure published evidence");
 }
 
 void test_invalid_and_watchdog_reports_do_not_publish() {

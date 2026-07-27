@@ -1265,11 +1265,16 @@ namespace {
 void write_bundle_atomic_no_replace_impl(
     const std::filesystem::path& path,
     std::string_view bundle,
-    testing::PublicationFault fault) {
+    testing::PublicationFault fault,
+    std::optional<
+        std::chrono::steady_clock::time_point>
+        publication_deadline) {
     if (path.empty() || path.filename().empty() ||
         path.string().find('\0') != std::string::npos ||
         !verify_checksummed_bundle(bundle) ||
         (fault != testing::PublicationFault::None &&
+         fault != testing::PublicationFault::
+                      WatchdogExpiredBeforeLink &&
          fault != testing::PublicationFault::
                       AfterLinkBeforeDirectorySync)) {
         throw std::invalid_argument(
@@ -1391,6 +1396,19 @@ void write_bundle_atomic_no_replace_impl(
             "cannot open DVR2 publication directory: " +
             detail);
     }
+    if (fault == testing::PublicationFault::
+                     WatchdogExpiredBeforeLink) {
+        publication_deadline =
+            std::chrono::steady_clock::time_point::min();
+    }
+    if (publication_deadline.has_value() &&
+        std::chrono::steady_clock::now() >=
+            *publication_deadline) {
+        static_cast<void>(::close(directory_descriptor));
+        static_cast<void>(::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "DVR2 watchdog expired before atomic publication");
+    }
     if (::link(temporary.c_str(), path.c_str()) != 0) {
         const int link_error = errno;
         static_cast<void>(::close(directory_descriptor));
@@ -1459,7 +1477,8 @@ void write_bundle_atomic_no_replace(
     std::string_view bundle) {
     write_bundle_atomic_no_replace_impl(
         path, bundle,
-        testing::PublicationFault::None);
+        testing::PublicationFault::None,
+        std::nullopt);
 }
 
 namespace testing {
@@ -1469,7 +1488,7 @@ void write_bundle_atomic_no_replace(
     std::string_view bundle,
     PublicationFault fault) {
     write_bundle_atomic_no_replace_impl(
-        path, bundle, fault);
+        path, bundle, fault, std::nullopt);
 }
 
 } // namespace testing
@@ -2779,8 +2798,10 @@ RunResult run(const std::filesystem::path& output_path,
         write_summary(report, progress);
         return result;
     }
-    write_bundle_atomic_no_replace(
-        output_path, result.bundle);
+    write_bundle_atomic_no_replace_impl(
+        output_path, result.bundle,
+        testing::PublicationFault::None,
+        deadline);
     result.published = true;
     write_summary(report, progress);
     progress << "DVR2 bundle: " << output_path.string()

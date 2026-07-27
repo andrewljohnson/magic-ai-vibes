@@ -290,6 +290,7 @@ namespace testing {
 
 enum class PublicationFault : std::uint8_t {
     None,
+    WatchdogExpiredBeforeLink,
     AfterLinkBeforeDirectorySync,
 };
 
