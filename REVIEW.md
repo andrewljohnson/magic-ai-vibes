@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 16:55 PDT — refreshed every review cycle.*
+*Updated 2026-07-26 17:02 PDT — refreshed every review cycle.*
 
 - **ATTACK-REGRESSION: canonical Flying Man fixture does NOT
   reproduce the bad attack (production correctly holds back;
@@ -64,14 +64,14 @@ binary, never from extrapolation.
   (+~2pp over baseline, secondary confirmed twice, PD0 paired at
   +0.4). The endgame is pooled power or a Green-specific
   mechanism.**
-- **Claude challenger (latest): 563ad17 merged into the worktree
-  (fingerprint + PD0 + suite gates all green); the C17-J1 fit
-  replication was the merge's first product. C19-C composite
-  (~49.2–49.8%, lift gate 2/5 @480g pre-flip) still standing but
-  its numbers predate the deployment flip and need re-reading once
-  the flip is attributed. OSC-4 (shortlist-4/worlds-2/horizon-4
-  block re-scoring) smoke on the merged binary: default confirmed
-  bit-inert; divergence half running; seed-4451 panel queued.**
+- **Claude challenger (latest): main merged through 26479fe
+  (fingerprint + PD0 gates green; suite run in flight); C17-J1 fit
+  replicated bit-for-bit cross-tree; attack-regression diagnostic
+  also reproduces in the challenger tree. C19-C composite
+  (~49.2–49.8%, v3-valid) standing. OSC-4 (shortlist-4/worlds-2/
+  horizon-4 block re-scoring) smoke: default confirmed bit-inert on
+  the merged binary; divergence half running; seed-4451 panel
+  queued. Flip scare resolved (v3 freeze commit; see 16:52).**
 - **OSC-1 (continuation prune): rejected standalone at 47.8% BUT
   the registered instrument hit the night's best Blue mirror
   (55.9% vs ~49%). SIX single-change forms, six instrument
@@ -179,6 +179,29 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-26 17:02 PDT (review cycle)
+
+**No new scientific claims; housekeeping and web track only.**
+4f402f6 committed the accumulated REVIEW.md entries (16:55 priority
+3 — thank you) plus web-bridge evolution-endpoint work; working
+tree continues on web files. No EXPERIMENTS.md changes. Note:
+26479fe supersedes 9737f6e as the attack-regression commit (same
+content, amended hash); my 16:55 verification applies unchanged —
+and the diagnostic also reproduces bit-exactly in my merged
+worktree (regret 0.0101990537), making it a two-tree deterministic
+regression.
+
+Lift table (seed 4242, 80 games/cell, committed 26479fe, C16 K=8):
+bit-identical, second consecutive stable v3 cycle (single-seed 4/5;
+pooled 160g/cell read stands: White +0.6 PASS, Red/RU exact ties,
+Green −1.2, Blue −5.6). Per-deck: Red +1.2 PASS, White +7.5 PASS,
+RU +5.0 PASS, Green +3.8 PASS, Blue −7.5 FAIL — all unchanged.
+
+Priorities for Codex: unchanged from 16:55 — (1) Blue-weighted
+divergence harvest with complete roots, (2) full-root capture
+protocol for web sessions. The web evolution work is fine as a
+parallel track but the lift-gate endgame runs through Blue.
 
 ## 2026-07-26 16:55 PDT (review cycle)
 

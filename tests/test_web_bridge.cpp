@@ -5,6 +5,7 @@
 #include <exception>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -458,7 +459,7 @@ void test_evolution_json_is_complete_and_deterministic() {
     expect(
         json.find(
             "{\"type\":\"evolution_result\","
-            "\"schemaVersion\":1,\"seed\":987654321,"
+            "\"schemaVersion\":1,\"seed\":\"987654321\","
             "\"pilot\":\"learned-value-c16\"") == 0,
         "evolution JSON omitted seed, schema, or pilot");
     expect(
@@ -495,6 +496,18 @@ void test_evolution_json_is_complete_and_deterministic() {
         !json.empty() && json.back() == '\n' &&
             json.find('\n') == json.size() - 1,
         "evolution result must be exactly one JSON line");
+
+    auto maximum_seed_config = config;
+    maximum_seed_config.seed =
+        std::numeric_limits<std::uint64_t>::max();
+    std::ostringstream maximum_seed_output;
+    old_school::web::write_evolution_json(
+        maximum_seed_output, summary, maximum_seed_config);
+    expect(
+        maximum_seed_output.str().find(
+            "\"seed\":\"18446744073709551615\"") !=
+            std::string::npos,
+        "evolution JSON did not preserve a full uint64 seed");
 }
 
 void test_learned_evolution_is_frozen_load_only() {

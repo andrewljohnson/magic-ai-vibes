@@ -1323,8 +1323,9 @@ void write_evolution_json(
     }
 
     output << "{\"type\":\"evolution_result\","
-              "\"schemaVersion\":1,\"seed\":"
-           << config.seed << ",\"pilot\":";
+              "\"schemaVersion\":1,\"seed\":";
+    write_json_string(output, std::to_string(config.seed));
+    output << ",\"pilot\":";
     write_json_string(output, evolution_pilot_token(config.pilot));
     output << ",\"parameters\":{\"generations\":"
            << config.generations

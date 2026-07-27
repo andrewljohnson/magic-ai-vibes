@@ -13,6 +13,9 @@ const writeJson = (value) => {
 };
 
 if (args.includes("--evolve-json")) {
+  if (args.includes("--evolution-ignore-sigterm")) {
+    process.on("SIGTERM", () => {});
+  }
   const delay = Number(valueAfter("--evolution-delay-ms", "0"));
   if (Number.isFinite(delay) && delay > 0) {
     await new Promise((resolve) => setTimeout(resolve, delay));

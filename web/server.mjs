@@ -19,6 +19,7 @@ const EVOLUTION_TIMEOUT_MS = 120_000;
 const MAX_EVOLUTION_OUTPUT_BYTES = 512 * 1024;
 const MAX_EVOLUTION_RESULTS = 32;
 const MAX_SAVED_DECKS = 32;
+const MAX_WEB_EVOLUTION_SEED = 4_294_967_295;
 
 const CARD_NAMES = Object.freeze([
   "Forest",
@@ -242,7 +243,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
 });
 
 export const EVOLUTION_LIMITS = Object.freeze({
-  seed: { min: "0", max: UINT64_MAX.toString() },
+  seed: { min: 0, max: MAX_WEB_EVOLUTION_SEED },
   generations: { min: 1, max: 20 },
   population: { min: 5, max: 32 },
   games: { min: 1, max: 16 },
@@ -588,6 +589,18 @@ export function normalizeEvolutionConfig(body) {
     );
   }
   try {
+    const seed = normalizedUint64(
+      body.seed,
+      "seed",
+      EVOLUTION_DEFAULTS.seed,
+    );
+    if (BigInt(seed) > BigInt(MAX_WEB_EVOLUTION_SEED)) {
+      throw new ApiError(
+        400,
+        "invalid_config",
+        `seed must be an integer from 0 to ${MAX_WEB_EVOLUTION_SEED}`,
+      );
+    }
     return {
       generations: positiveBoundedInteger(
         body.generations,
@@ -608,11 +621,7 @@ export function normalizeEvolutionConfig(body) {
         EVOLUTION_DEFAULTS.games,
       ),
       pilot,
-      seed: normalizedUint64(
-        body.seed,
-        "seed",
-        EVOLUTION_DEFAULTS.seed,
-      ),
+      seed,
       learnedRollouts: positiveBoundedInteger(
         body.learnedRollouts,
         "learnedRollouts",
@@ -1057,6 +1066,7 @@ class EvolutionManager {
     this.bridgeArgsPrefix = options.bridgeArgsPrefix;
     this.spawnImpl = options.spawnImpl;
     this.timeoutMs = options.timeoutMs;
+    this.terminationGraceMs = options.terminationGraceMs;
     this.maxOutputBytes = options.maxOutputBytes;
     this.deckCatalog = options.deckCatalog;
     this.active = null;
@@ -1121,24 +1131,23 @@ class EvolutionManager {
       let stderr = "";
       let outputBytes = 0;
       let settled = false;
+      let pendingTerminationError = null;
+      let killTimer = null;
       const timer = setTimeout(() => {
-        finish(
+        terminate(
           new ApiError(
             504,
             "evolution_timeout",
             "Deck evolution exceeded its runtime limit",
           ),
-          true,
         );
       }, this.timeoutMs);
 
-      const finish = (error, kill = false) => {
+      const finish = (error) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (kill && typeof child.kill === "function") {
-          child.kill("SIGTERM");
-        }
+        if (killTimer !== null) clearTimeout(killTimer);
         if (error !== null) {
           reject(error);
           return;
@@ -1170,18 +1179,29 @@ class EvolutionManager {
         resolve(parsed);
       };
 
+      const terminate = (error) => {
+        if (settled || pendingTerminationError !== null) return;
+        pendingTerminationError = error;
+        clearTimeout(timer);
+        if (typeof child.kill === "function") child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          if (!settled && typeof child.kill === "function") {
+            child.kill("SIGKILL");
+          }
+        }, this.terminationGraceMs);
+      };
+
       const receive = (channel, chunk) => {
-        if (settled) return;
+        if (settled || pendingTerminationError !== null) return;
         const text = String(chunk);
         outputBytes += Buffer.byteLength(text);
         if (outputBytes > this.maxOutputBytes) {
-          finish(
+          terminate(
             new ApiError(
               502,
               "evolution_output_too_large",
               "Deck evolution exceeded its output limit",
             ),
-            true,
           );
           return;
         }
@@ -1203,6 +1223,10 @@ class EvolutionManager {
         );
       });
       child.once("close", (code, signal) => {
+        if (pendingTerminationError !== null) {
+          finish(pendingTerminationError);
+          return;
+        }
         if (code !== 0) {
           const reason =
             signal === null
@@ -2106,6 +2130,7 @@ function createEvolutionManager(options = {}) {
     bridgeArgsPrefix: options.bridgeArgsPrefix ?? [],
     spawnImpl: options.spawnImpl ?? nodeSpawn,
     timeoutMs: options.evolutionTimeoutMs ?? EVOLUTION_TIMEOUT_MS,
+    terminationGraceMs: options.evolutionTerminationGraceMs ?? 250,
     maxOutputBytes:
       options.evolutionMaxOutputBytes ?? MAX_EVOLUTION_OUTPUT_BYTES,
     deckCatalog: options.deckCatalog,
