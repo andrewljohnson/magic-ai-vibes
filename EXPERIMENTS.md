@@ -10503,6 +10503,221 @@ identities and required Counterspell, Force Spike, duplicate-counter,
 nonlethal-X=0, Giant Growth, and DVR2 coverage before scoring OC1 on any
 fixture or opening a gameplay seed.
 
+### OC1-AR1: conditional all-five action-regression gate
+
+Preregistered 2026-07-26 after the OC1 calibration pass, before loading OC1
+into any action scorer and before opening gameplay seed `202607261929`.
+`REVIEW.md` was reread through its 20:36 PDT entry, which independently
+reproduced the complete OC1 artifact and holdout pass bit-for-bit and endorsed
+the declared conditional ladder. Three independent design-only audits
+inventoried the frozen corpora, model-loading seam, and statistical gate; none
+scored OC1.
+
+#### Falsifiable hypothesis
+
+The output-only terminal calibration repaired critic bias without creating a
+material action-selection regression. At exact production deployment, OC1
+will preserve every jointly stable C16 action agreement in a balanced
+five-deck corpus, not worsen pooled action regret under either of two
+candidate-blind references, and pass the focused controls for the concrete
+Counterspell, Force Spike, X=0, Giant Growth, attack, and block failures
+reported during interactive play.
+
+Failure of any conjunctive gate below rejects OC1-AR1 and leaves gameplay
+seeds `202607261929..202607261931` unopened. Passing means only “no detected
+action regression” and licenses the 600-game large-regression screen; these
+fixtures cannot promote OC1 or establish playing strength.
+
+#### Immutable inputs
+
+The runner must verify stable regular-file snapshots before and after scoring.
+No training, cache refresh, HandcodedPolicy, source-game harvest, or gameplay
+is permitted.
+
+- Exact C16 parent:
+  `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`,
+  3,111,437 bytes, SHA-256
+  `53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+  model
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+- Exact OC1:
+  `build/model-cache/old-school-value-output-calibration-v1-c16-t800-p424242-f202607261927.bin`,
+  4,756 bytes, SHA-256
+  `77d02729e4effd4762daefdcbe28ef4f1a081c87f707739f3d243123f4c17e3c`,
+  model
+  `64851236ddb8907057ec16d8fe0db9ab1b1966dfff55a3d3a62bde933e94ce0d`.
+- Balanced reference cache:
+  `data/old-school-probe-dev-v3-k64-h8-c17-j1.labels.tsv`, 276,387
+  bytes, SHA-256
+  `949ea2fda448fa76b31a61927721629cfba9e6addee2da383cfbb68450b04770`.
+  It is the immutable Environment-v3
+  `actor-mirror-common-world-v3` cache for
+  `old-school-probe-dev-v3`, information-set fingerprint
+  `cf4729a535378a12`, Actor model
+  `dd58d3814f46d6661d40690f6ad7ac73226c2160137b2e42bfadf3e6ac7a1b72`,
+  reference seed `5787775617173964102`, K64/H8/one rollout, 20 roots
+  and exactly four roots per deck.
+- DVR2 replay bundle:
+  `data/old-school-dvr2-c16-mirror-v1.dvr2`, 221,079 bytes, SHA-256
+  `c6b5c199133b931de85386506ace16ff823407599362637e2000b743d9529804`,
+  payload SHA-256
+  `82f6b27fdead69c9273e72e96770f1ebcf29ae4a7d44cc74f621c77c6470690c`.
+  A strict reader must recover exactly 52 roots and exactly the four
+  stable-disagreement DVR1 records/fingerprints:
+  `dvr2.s0.g29.p0.r63.k6af43f6ef6b90e1c`/`46be73d098e9e94c`,
+  `dvr2.s1.g28.p0.r69.k0c4f5b13903b8e4b`/`14fa5ce62b1ef025`,
+  `dvr2.s0.g2.p0.r114.k330a025bc74cc0bc`/`d36c43b2102e0b06`,
+  and `dvr2.s0.g15.p0.r127.kd7d0db3716665337`/`d48b00cbd5cc90f2`.
+
+The old validation-v1 label files are inadmissible: they predate the current
+cache schema/environment identity. The X=0 control is scored cache-free.
+
+#### Frozen corpora and action coverage
+
+The balanced backbone is the complete, validated `old-school-probe-dev-v3`
+corpus in stable-ID order. Its 20 roots cover three Counterspell decisions,
+live Force Spike, the existing counter-war composition, and Giant Growth
+save/push/hold decisions while preserving four roots for Green, Red, Blue,
+White, and RU Aggro.
+
+Focused roots are never pooled with the balanced metrics:
+
+1. payable Force Spike
+   `control.blue.force-spike-payable-gray-ogre.v1`; the live control is
+   required to be information/action-identical to its DevV3 source rather
+   than counted twice;
+2. nonlethal X=0
+   `validation.ru.disintegrate-hold-x0.v1`;
+3. all six exact `old-school-field-regressions-v1` roots and the exact
+   `old-school-attack-regression-v1` root;
+4. the four exact DVR2 replay records above; and
+5. a new typed `old-school-counter-composition-controls-v1` pair:
+   `control.blue.counter-redundant-same-target.v1` has an opponent Air
+   Elemental, one own Counterspell already targeting it, another
+   Counterspell in hand, and the complete legal action set; the expected
+   safe choice is Pass. The companion
+   `control.blue.counter-same-target-after-intervening-counter.v1` adds an
+   opponent Counterspell targeting the first counter, proving that responding
+   to an intervening counter and a second counter aimed at the original spell
+   remain legal/productive rather than encoding a blanket same-target rule.
+
+The two new typed roots must validate exact card conservation, reachability,
+complete legal actions, public stack ordering/targets, and hidden
+determinization before any candidate scorer is implemented. Their ordered
+stable IDs, information/action fingerprints, candidate descriptors, and
+forced public consequences will be recorded in a committed mechanical-freeze
+addendum. Until that addendum exists, OC1-AR1 is not fully frozen and OC1 must
+not be action-scored.
+
+#### Candidate-blind references
+
+Two references are used for the balanced backbone:
+
+1. the exact frozen Actor K64/H8 common-world cache above; and
+2. a cache-free exact-C16 Value-mirror cross-reference, K64/H8/one rollout,
+   unblended, exploration/epsilon zero, Legacy continuation, PD0 off, and
+   residual off. Its seed for each root is the stable FNV derivation over
+   Environment-v3, corpus ID `old-school-oc1-action-regression-v1`, stable
+   ID, and base `1414213562`.
+
+Focused authored roots use two disjoint exact-C16 Value-mirror panels,
+K64/H8/one rollout each, with scout/confirmation tags derived from the same
+base and stable information/action identity. The best set is stable only when
+both panels return the same exact descriptor set. DVR2 instead uses and
+bit-exactly reproduces its already sealed K64+K64/H8 scout/confirmation
+evidence; it is not relabeled.
+
+For one reference, action `a` robustly dominates `b` only when paired
+`Q(a)-Q(b) >= 0.03` and its paired normal 95% lower bound is above zero.
+A balanced-root preference is joint only when the Actor and C16 references
+robustly agree in direction. The joint robust-best set contains every action
+not jointly dominated by another action. A root is robust-stable only when
+that set is a proper subset of all legal actions.
+
+#### Exact deployment and aggregation
+
+C16 and OC1 Priority choices use identical production worlds derived from
+base `5787775625948253273` and stable ID: K8/H4, one rollout/world, aggregate
+shallow-prior blend on, exploration/epsilon zero, Legacy continuation, PD0
+off, and residual off. Priority selection is the complete exact-score argmax
+support, interpreted as a uniform distribution; no sampled tie may enter the
+report. Attack and Block roots use their exact immediate production selectors
+and expose the native deterministic first-on-exact-tie choice.
+
+Reference value for a multi-action support is its uniform per-world mean.
+Regret is best-reference value minus support value. Pooled and deck summaries
+give every root equal weight, never every candidate pair, so positions with
+many legal targets cannot dominate. Candidate order is descriptor-canonical
+for Priority reference scoring; reversed-input repeats must be
+descriptor-keyed bit-identical. Exact evaluation counts must cross-sum into
+terminal plus bootstrapped evaluations.
+
+#### Conjunctive scientific gates
+
+On the balanced 20-root corpus, separately under the Actor and C16
+references:
+
+1. OC1 pooled equal-root mean regret is no greater than C16's;
+2. OC1 pooled top-one expected agreement is no lower than C16's;
+3. no deck's OC1 mean regret exceeds C16's by more than `0.010`; and
+4. each deck has at least one jointly robust-stable root, and OC1 loses zero
+   C16 agreements: whenever C16's entire deployed support is inside the joint
+   robust-best set, OC1's entire support must also be inside it.
+
+Additionally, no singleton C16-to-OC1 selection change may favor the C16
+action over the OC1 action by at least `0.03` with a paired lower 95% bound
+above zero under both references. A gain elsewhere cannot offset such a loss.
+Actor-versus-Value sign reversals and unstable roots are reported but cannot
+be called gains.
+
+Focused gates are conjunctive and cannot be offset:
+
+- OC1 uniquely selects Force Spike when live and uniquely selects Pass when
+  the opponent can pay.
+- OC1 uniquely selects Pass in the redundant same-target counter root. In
+  the intervening-counter companion it retains the complete legal set and
+  loses no stable C16/reference-best agreement.
+- OC1 excludes opponent-targeted nonlethal Disintegrate X=0 from its exact
+  selected support while a productive positive-X action remains legal.
+- The three balanced Growth timing roots lose no stable C16 agreement.
+  In the field roots, OC1 selects Pass over growing a summoning-sick Bear in
+  second main, never selects Giant Growth on the opponent's tapped Air
+  Elemental, attacks with Ironroot Treefolk in the linked tapped-Air state,
+  and does not attack it into the untapped 7/7 control.
+- At life 20 OC1 does not chump Air Elemental with Flying Men; at life 4 it
+  does. It does not attack Flying Men into an untapped Air Elemental.
+- Across the four replayable DVR2 disagreements, OC1 total
+  confirmation-reference regret is no greater than C16's, it loses no C16
+  stable-best agreement, and no root worsens by at least `0.03`.
+
+If a required reference-dependent comparison is unstable, internally
+inconsistent, or missing, the protocol is inconclusive and suppresses
+gameplay exactly like a scientific rejection; it is never silently dropped.
+
+#### Integrity and hidden-information gates
+
+Every authored and replayed root must have a complete, distinct legal action
+set and exact descriptor/target/X/stack-ID association. DVR2 parsing rejects
+wrong file/payload hashes, duplicate or missing framed fields, bad lengths,
+corruption, extra roots, wrong classifications, empty required records, or
+trailing bytes. Strict DVR1 decoding, record fingerprinting, and rehydration
+must reproduce each stored information/action identity.
+
+For every reference and both deployed policies, deterministically exchange
+opponent hand/library identities without changing sizes, public state, or the
+owner's information. The report must count attempted/changed/unchanged roots,
+change at least one root in every balanced deck and every focused family, and
+leave observations, complete legal actions, reference samples, raw/deployed
+scores, exact selected support, regret, and the complete scientific-report
+hash bit-identical. Input artifact snapshots and a repeated full construction
+must also be bit-identical.
+
+Implementation will be a separate no-knob
+`build/old-school-oc1-action-regression` binary. Exit `0` means every gate
+passed, `1` means scientific rejection/inconclusive, and `2` means
+artifact/integrity/infrastructure failure. Its exact command, output, hashes,
+and decision will be recorded before any gameplay seed is opened.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
