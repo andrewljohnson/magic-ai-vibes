@@ -57,9 +57,11 @@ class TestRunner {
             << passed_
             << " probe tests passed (20 dev fixtures + 1 harvested "
                "validation fixture + 2 supplemental Force Spike "
-               "controls + 6 reject-only field regressions + 1 "
-               "post-C17 attack diagnostic + 1 counter-fizzle "
-               "reachability regression)\n";
+               "controls + 2 supplemental counter-composition "
+               "controls + 1 Braingeyser X=0 control + 6 "
+               "reject-only field regressions + 1 post-C17 attack "
+               "diagnostic + 1 counter-fizzle reachability "
+               "regression)\n";
         return 0;
     }
 
@@ -322,6 +324,65 @@ void expect_dc1_raw_card_conservation(
     }
 }
 
+GameState repartition_opponent_hidden_cards(
+    const GameState& world, std::size_t observer) {
+    GameState repartitioned = world;
+    const std::size_t opponent = 1 - observer;
+    auto& hand = repartitioned.players[opponent].hand;
+    auto& library = repartitioned.players[opponent].library;
+    for (CardId& held : hand) {
+        const auto different = std::find_if(
+            library.begin(), library.end(),
+            [&](CardId card) { return card != held; });
+        if (different != library.end()) {
+            std::swap(held, *different);
+            return repartitioned;
+        }
+    }
+    throw std::runtime_error(
+        "fixture lacks two distinct opponent hidden cards");
+}
+
+std::vector<std::string> dc1_public_consequence_fingerprints(
+    const DecisionProbe& probe,
+    const std::vector<std::string_view>& descriptors,
+    std::uint64_t seed) {
+    const GameState world = old_school::sample_determinization(
+        probe.state, probe.original_decks, probe.root_player, seed);
+    const GameState repartitioned =
+        repartition_opponent_hidden_cards(
+            world, probe.root_player);
+    expect(
+        !game_states_equal(world, repartitioned),
+        "opponent hidden repartition did not change the full world");
+
+    std::vector<std::string> fingerprints;
+    fingerprints.reserve(descriptors.size());
+    for (const std::string_view descriptor : descriptors) {
+        const std::size_t candidate =
+            candidate_index(probe, descriptor);
+        const auto settlement =
+            old_school::probes::settle_dc1_priority_candidate(
+                probe, world, candidate);
+        const auto repartitioned_settlement =
+            old_school::probes::settle_dc1_priority_candidate(
+                probe, repartitioned, candidate);
+        const std::string fingerprint =
+            old_school::probes::
+                dc1_public_consequence_fingerprint(
+                    probe, settlement);
+        expect(
+            fingerprint ==
+                old_school::probes::
+                    dc1_public_consequence_fingerprint(
+                        probe, repartitioned_settlement),
+            "DC1 public consequence fingerprint leaked an opponent "
+            "hidden repartition");
+        fingerprints.push_back(fingerprint);
+    }
+    return fingerprints;
+}
+
 std::string validation_errors(const Validation& validation) {
     std::string joined;
     for (const std::string& error : validation.errors) {
@@ -371,6 +432,7 @@ std::size_t expected_candidate_count(Category category) {
     case Category::FieldGreenAttackAfterGrowthTappedAir:
     case Category::FieldGreenAttackAfterGrowthUntappedAirControl:
     case Category::DiagnosticRUAttackFlyingIntoLargerFlyingBlocker:
+    case Category::ControlBlueBraingeyserXZero:
         break;
     }
     throw std::runtime_error(
@@ -1049,6 +1111,498 @@ void test_force_spike_policy_controls_isolate_payable_tax() {
              validate_force_spike_policy_controls_v1(malformed)
                  .empty(),
         "specialized validator accepted two unpayable controls");
+}
+
+void test_counter_composition_controls_are_frozen_and_valid() {
+    using old_school::probes::bsr_information_action_fingerprint;
+    using old_school::probes::kCounterCompositionControlsV1;
+    using old_school::probes::
+        make_counter_composition_controls_v1;
+    using old_school::probes::
+        validate_counter_composition_controls_v1;
+
+    expect(
+        kCounterCompositionControlsV1 ==
+            "old-school-counter-composition-controls-v1",
+        "counter-composition corpus identity changed");
+    const std::vector<DecisionProbe> controls =
+        make_counter_composition_controls_v1();
+    expect(
+        validate_counter_composition_controls_v1(controls).empty(),
+        "counter-composition controls failed strict validation");
+    expect(controls.size() == 2,
+           "counter-composition controls lost their paired roots");
+
+    const DecisionProbe& redundant = controls[0];
+    const DecisionProbe& intervening = controls[1];
+    expect(
+        redundant.stable_id ==
+                "control.blue.counter-redundant-same-target.v1" &&
+            intervening.stable_id ==
+                "control.blue.counter-same-target-after-"
+                "intervening-counter.v1",
+        "counter-composition stable identity or order changed");
+    expect(
+        bsr_information_action_fingerprint(redundant) ==
+                "faf53e39aba9e69b" &&
+            bsr_information_action_fingerprint(intervening) ==
+                "7a6e19b2b016fb58",
+        "counter-composition information/action fingerprint changed");
+
+    const std::vector<std::string> redundant_descriptors = {
+        "pass",
+        "counter-same-air-elemental",
+        "counter-own-counterspell",
+    };
+    const std::vector<std::string> intervening_descriptors = {
+        "pass",
+        "counter-same-air-elemental",
+        "counter-own-counterspell",
+        "counter-opponent-counterspell",
+    };
+    const auto descriptors =
+        [](const DecisionProbe& probe) {
+            std::vector<std::string> result;
+            result.reserve(probe.candidates.size());
+            for (const auto& candidate : probe.candidates) {
+                result.push_back(candidate.descriptor);
+            }
+            return result;
+        };
+    expect(
+        descriptors(redundant) == redundant_descriptors &&
+            descriptors(intervening) == intervening_descriptors,
+        "counter-composition descriptor order changed");
+    expect(
+        redundant.consecutive_passes == 0 &&
+            intervening.consecutive_passes == 1 &&
+            redundant.state.turn_number == 13 &&
+            intervening.state.turn_number == 13 &&
+            !redundant.state.players[1]
+                 .land_played_this_turn &&
+            intervening.state.players[1]
+                .land_played_this_turn &&
+            redundant.state.stack.size() == 2 &&
+            intervening.state.stack.size() == 3 &&
+            priority_candidate(
+                redundant, "counter-same-air-elemental") ==
+                PriorityAction::cast_counterspell(1) &&
+            priority_candidate(
+                redundant, "counter-own-counterspell") ==
+                PriorityAction::cast_counterspell(2) &&
+            priority_candidate(
+                intervening,
+                "counter-opponent-counterspell") ==
+                PriorityAction::cast_counterspell(3),
+        "counter-composition priority or target association changed");
+    expect(
+        old_school::probes::
+                hidden_clone_is_determinization_invariant(
+                    redundant,
+                    old_school::probes::kProbeValidationSeed) &&
+            old_school::probes::
+                hidden_clone_is_determinization_invariant(
+                    intervening,
+                    old_school::probes::kProbeValidationSeed + 1),
+        "counter-composition hidden repartition changed a fixed "
+        "information set");
+
+    std::vector<DecisionProbe> malformed = controls;
+    std::swap(malformed[0], malformed[1]);
+    expect(
+        !validate_counter_composition_controls_v1(malformed).empty(),
+        "counter-composition validator accepted reordered roots");
+    malformed = controls;
+    std::get<PriorityAction>(
+        malformed[0].candidates[1].action) =
+        PriorityAction::cast_counterspell(2);
+    expect(
+        !validate_counter_composition_controls_v1(malformed).empty(),
+        "counter-composition validator accepted a changed same-target "
+        "association");
+    malformed = controls;
+    malformed[1].state.players[1].lands.back().tapped = false;
+    expect(
+        !validate_counter_composition_controls_v1(malformed).empty(),
+        "counter-composition validator accepted an impossible public "
+        "mana history");
+    malformed = controls;
+    malformed[0].state.turn_number = 7;
+    expect(
+        !validate_counter_composition_controls_v1(malformed).empty(),
+        "counter-composition validator accepted a pre-land-drop "
+        "turn");
+    malformed = controls;
+    malformed[1].state.players[1].land_played_this_turn = false;
+    expect(
+        !validate_counter_composition_controls_v1(malformed).empty(),
+        "counter-composition validator accepted a missing seventh "
+        "land-drop witness");
+    malformed = controls;
+    --malformed[0].state.players[0].life;
+    expect(
+        !validate_counter_composition_controls_v1(malformed).empty(),
+        "counter-composition validator accepted a changed public "
+        "life total");
+}
+
+void test_counter_composition_forced_consequences() {
+    const std::vector<DecisionProbe> controls =
+        old_school::probes::
+            make_counter_composition_controls_v1();
+    const DecisionProbe& redundant = controls[0];
+    const DecisionProbe& intervening = controls[1];
+
+    const auto settle =
+        [](const DecisionProbe& probe,
+           std::string_view descriptor) {
+            const GameState world =
+                old_school::sample_determinization(
+                    probe.state, probe.original_decks,
+                    probe.root_player, 577215);
+            return old_school::probes::
+                settle_dc1_priority_candidate(
+                    probe, world,
+                    candidate_index(probe, descriptor));
+        };
+    const auto card_count =
+        [](const GameState& state, std::size_t player,
+           CardId card) {
+            return static_cast<std::size_t>(std::count(
+                state.players[player].graveyard.begin(),
+                state.players[player].graveyard.end(), card));
+        };
+    const auto air_count =
+        [](const GameState& state) {
+            return static_cast<std::size_t>(std::count_if(
+                state.players[1].creatures.begin(),
+                state.players[1].creatures.end(),
+                [](const old_school::CreaturePermanent& creature) {
+                    return creature.card == CardId::AirElemental;
+                }));
+        };
+
+    const auto redundant_pass = settle(redundant, "pass");
+    const auto redundant_same =
+        settle(redundant, "counter-same-air-elemental");
+    const auto redundant_own =
+        settle(redundant, "counter-own-counterspell");
+    expect(
+        redundant_pass.window_ended &&
+            redundant_pass.settled_state.stack.empty() &&
+            air_count(redundant_pass.settled_state) == 0 &&
+            card_count(
+                redundant_pass.settled_state, 0,
+                CardId::Counterspell) == 1 &&
+            card_count(
+                redundant_pass.settled_state, 1,
+                CardId::AirElemental) == 1,
+        "passing the redundant-counter root did not preserve the "
+        "already-winning exchange");
+    expect(
+        redundant_same.window_ended &&
+            redundant_same.settled_state.stack.empty() &&
+            air_count(redundant_same.settled_state) == 0 &&
+            card_count(
+                redundant_same.settled_state, 0,
+                CardId::Counterspell) == 2 &&
+            card_count(
+                redundant_same.settled_state, 1,
+                CardId::AirElemental) == 1,
+        "the redundant second counter did not produce the same "
+        "spell outcome at an extra card cost");
+    expect(
+        redundant_own.window_ended &&
+            redundant_own.settled_state.stack.empty() &&
+            air_count(redundant_own.settled_state) == 1 &&
+            card_count(
+                redundant_own.settled_state, 0,
+                CardId::Counterspell) == 2,
+        "countering the friendly counter did not let Air Elemental "
+        "resolve");
+
+    const auto pass_vs_same =
+        old_school::probes::compare_dc1_priority_pair(
+            redundant, candidate_index(redundant, "pass"),
+            candidate_index(
+                redundant, "counter-same-air-elemental"),
+            8, 577215);
+    expect(
+        pass_vs_same.unanimous_orientation ==
+                Dc1Dominance::FirstDominatesSecond &&
+            pass_vs_same.hidden_repartition_bit_identical,
+        "redundant same-target Counterspell is not mechanically "
+        "Pass-dominated over K=8 hidden worlds");
+    const auto pass_vs_own =
+        old_school::probes::compare_dc1_priority_pair(
+            redundant, candidate_index(redundant, "pass"),
+            candidate_index(
+                redundant, "counter-own-counterspell"),
+            8, 577215);
+    expect(
+        pass_vs_own.unanimous_orientation ==
+                Dc1Dominance::Incomparable &&
+            pass_vs_own.hidden_repartition_bit_identical,
+        "different Pass/counter-own rules outcomes were mislabeled "
+        "as resource dominance");
+    for (std::size_t world_index = 0; world_index < 8;
+         ++world_index) {
+        const GameState world = old_school::sample_determinization(
+            redundant.state, redundant.original_decks,
+            redundant.root_player, 577215 + world_index);
+        const auto pass =
+            old_school::probes::settle_dc1_priority_candidate(
+                redundant, world,
+                candidate_index(redundant, "pass"));
+        const auto own =
+            old_school::probes::settle_dc1_priority_candidate(
+                redundant, world,
+                candidate_index(
+                    redundant, "counter-own-counterspell"));
+        expect(
+            air_count(pass.settled_state) == 0 &&
+                air_count(own.settled_state) == 1 &&
+                pass.resources[0].hand_cards_consumed[
+                    static_cast<std::size_t>(
+                        CardId::Counterspell)] == 0 &&
+                own.resources[0].hand_cards_consumed[
+                    static_cast<std::size_t>(
+                        CardId::Counterspell)] == 1,
+            "counter-own did not lose the Air exchange and an extra "
+            "card in every hidden world");
+    }
+
+    const auto intervening_pass = settle(intervening, "pass");
+    const auto intervening_same =
+        settle(intervening, "counter-same-air-elemental");
+    const auto intervening_own =
+        settle(intervening, "counter-own-counterspell");
+    const auto intervening_answer =
+        settle(intervening, "counter-opponent-counterspell");
+    expect(
+        air_count(intervening_pass.settled_state) == 1 &&
+            air_count(intervening_own.settled_state) == 1,
+        "declining or undoing the first counter did not let Air "
+        "Elemental resolve");
+    expect(
+        intervening_same.window_ended &&
+            intervening_same.settled_state.stack.empty() &&
+            air_count(intervening_same.settled_state) == 0 &&
+            card_count(
+                intervening_same.settled_state, 1,
+                CardId::AirElemental) == 1 &&
+            intervening_answer.window_ended &&
+            intervening_answer.settled_state.stack.empty() &&
+            air_count(intervening_answer.settled_state) == 0 &&
+            card_count(
+                intervening_answer.settled_state, 1,
+                CardId::AirElemental) == 1,
+        "intervening-counter control lost one of its two productive "
+        "responses");
+
+    const std::vector<std::string_view> redundant_descriptors = {
+        "pass",
+        "counter-same-air-elemental",
+        "counter-own-counterspell",
+    };
+    const std::vector<std::string_view> intervening_descriptors = {
+        "pass",
+        "counter-same-air-elemental",
+        "counter-own-counterspell",
+        "counter-opponent-counterspell",
+    };
+    const std::vector<std::string> redundant_fingerprints =
+        dc1_public_consequence_fingerprints(
+            redundant, redundant_descriptors, 577215);
+    const std::vector<std::string> intervening_fingerprints =
+        dc1_public_consequence_fingerprints(
+            intervening, intervening_descriptors, 577215);
+    expect(
+        redundant_fingerprints ==
+                std::vector<std::string>{
+                    "324576b473223a86",
+                    "a0a47325a3afed35",
+                    "5d5911104c4d6fdf",
+                } &&
+            intervening_fingerprints ==
+                std::vector<std::string>{
+                    "aa6ccab048f0ab1a",
+                    "8447ddf641a58a45",
+                    "3184c58f7888fb6b",
+                    "8447ddf641a58a45",
+                },
+        "counter-composition public consequence fingerprints "
+        "changed");
+
+    expect_dc1_raw_card_conservation(
+        redundant, {0, 1, 2}, 577215);
+    expect_dc1_raw_card_conservation(
+        intervening, {0, 1, 2, 3}, 577215);
+}
+
+void test_braingeyser_x_zero_control_is_frozen_and_dominated() {
+    using old_school::probes::bsr_information_action_fingerprint;
+    using old_school::probes::kBraingeyserXZeroControlV1;
+    using old_school::probes::
+        make_braingeyser_x_zero_control_v1;
+    using old_school::probes::
+        validate_braingeyser_x_zero_control_v1;
+
+    expect(
+        kBraingeyserXZeroControlV1 ==
+            "old-school-braingeyser-x0-control-v1",
+        "Braingeyser X=0 corpus identity changed");
+    const std::vector<DecisionProbe> controls =
+        make_braingeyser_x_zero_control_v1();
+    expect(
+        validate_braingeyser_x_zero_control_v1(controls).empty(),
+        "Braingeyser X=0 control failed strict validation");
+    expect(controls.size() == 1,
+           "Braingeyser X=0 control lost its single root");
+    const DecisionProbe& probe = controls.front();
+    expect(
+        probe.stable_id == "control.blue.braingeyser-x0.v1",
+        "Braingeyser X=0 stable ID changed");
+    const std::string fingerprint =
+        bsr_information_action_fingerprint(probe);
+    expect(fingerprint == "a68cd5b38da84990",
+           "Braingeyser X=0 information/action fingerprint changed");
+
+    const std::vector<std::string> expected_descriptors = {
+        "pass",
+        "braingeyser-x0-self",
+        "braingeyser-x0-opponent",
+        "braingeyser-x1-self",
+        "braingeyser-x1-opponent",
+    };
+    std::vector<std::string> descriptors;
+    for (const auto& candidate : probe.candidates) {
+        descriptors.push_back(candidate.descriptor);
+    }
+    expect(
+        descriptors == expected_descriptors &&
+            priority_candidate(probe, "braingeyser-x0-self") ==
+                PriorityAction::cast_braingeyser(
+                    0, old_school::Target::player_target(0)) &&
+            priority_candidate(
+                probe, "braingeyser-x0-opponent") ==
+                PriorityAction::cast_braingeyser(
+                    0, old_school::Target::player_target(1)) &&
+            priority_candidate(probe, "braingeyser-x1-self") ==
+                PriorityAction::cast_braingeyser(
+                    1, old_school::Target::player_target(0)) &&
+            priority_candidate(
+                probe, "braingeyser-x1-opponent") ==
+                PriorityAction::cast_braingeyser(
+                    1, old_school::Target::player_target(1)),
+        "Braingeyser descriptor, X, or target association changed");
+    expect(
+        old_school::probes::
+            hidden_clone_is_determinization_invariant(
+                probe, old_school::probes::kProbeValidationSeed),
+        "Braingeyser control is not hidden-repartition invariant");
+    expect(
+        std::all_of(
+            probe.state.players[1].lands.begin(),
+            probe.state.players[1].lands.end(),
+            [](const old_school::LandPermanent& permanent) {
+                return permanent.card == CardId::Mountain &&
+                       !permanent.tapped;
+            }) &&
+            probe.state.players[1].land_played_this_turn,
+        "Braingeyser opponent retained unwitnessed tapped lands");
+
+    const std::size_t pass = candidate_index(probe, "pass");
+    for (const std::string_view descriptor :
+         {"braingeyser-x0-self",
+          "braingeyser-x0-opponent"}) {
+        const auto comparison =
+            old_school::probes::compare_dc1_priority_pair(
+                probe, pass, candidate_index(probe, descriptor),
+                8, 577215);
+        expect(
+            comparison.unanimous_orientation ==
+                    Dc1Dominance::FirstDominatesSecond &&
+                comparison.hidden_repartition_bit_identical,
+            "Pass did not mechanically dominate every "
+            "Braingeyser X=0 target over K=8 hidden worlds");
+    }
+
+    const GameState world = old_school::sample_determinization(
+        probe.state, probe.original_decks, probe.root_player,
+        577215);
+    const auto x_one_self =
+        old_school::probes::settle_dc1_priority_candidate(
+            probe, world,
+            candidate_index(probe, "braingeyser-x1-self"));
+    const auto x_one_opponent =
+        old_school::probes::settle_dc1_priority_candidate(
+            probe, world,
+            candidate_index(probe, "braingeyser-x1-opponent"));
+    expect(
+        x_one_self.window_ended &&
+            x_one_self.settled_state.stack.empty() &&
+            x_one_self.settled_state.stats[0].cards_drawn == 1 &&
+            x_one_self.settled_state.players[0].hand.size() == 1 &&
+            x_one_opponent.window_ended &&
+            x_one_opponent.settled_state.stack.empty() &&
+            x_one_opponent.settled_state.stats[1].cards_drawn == 1 &&
+            x_one_opponent.settled_state.players[1].hand.size() == 6,
+        "Braingeyser control lost its productive positive-X "
+        "actions");
+    const std::vector<std::string_view> consequence_descriptors = {
+        "pass",
+        "braingeyser-x0-self",
+        "braingeyser-x0-opponent",
+        "braingeyser-x1-self",
+        "braingeyser-x1-opponent",
+    };
+    const std::vector<std::string> consequence_fingerprints =
+        dc1_public_consequence_fingerprints(
+            probe, consequence_descriptors, 577215);
+    expect(
+        consequence_fingerprints ==
+            std::vector<std::string>{
+                "de125649ad24344a",
+                "46d4f822377eea6d",
+                "46d4f822377eea6d",
+                "1a8bcf6486c13ae9",
+                "2c854eb335381c90",
+            },
+        "Braingeyser public consequence fingerprints changed");
+    expect_dc1_raw_card_conservation(
+        probe, {0, 1, 2, 3, 4}, 577215);
+
+    std::vector<DecisionProbe> malformed = controls;
+    std::get<PriorityAction>(
+        malformed.front().candidates[2].action) =
+        PriorityAction::cast_braingeyser(
+            0, old_school::Target::player_target(0));
+    expect(
+        !validate_braingeyser_x_zero_control_v1(malformed).empty(),
+        "Braingeyser validator accepted a duplicate X=0 target");
+    malformed = controls;
+    malformed.front().state.players[0].lands.back().tapped = true;
+    expect(
+        !validate_braingeyser_x_zero_control_v1(malformed).empty(),
+        "Braingeyser validator accepted missing positive-X mana");
+    malformed = controls;
+    malformed.front().state.players[1].lands.back().tapped = true;
+    expect(
+        !validate_braingeyser_x_zero_control_v1(malformed).empty(),
+        "Braingeyser validator accepted an unwitnessed opponent "
+        "land tap");
+    malformed = controls;
+    malformed.front().state.players[1].land_played_this_turn = false;
+    expect(
+        !validate_braingeyser_x_zero_control_v1(malformed).empty(),
+        "Braingeyser validator accepted a missing third-land-drop "
+        "witness");
+    malformed = controls;
+    --malformed.front().state.players[0].life;
+    expect(
+        !validate_braingeyser_x_zero_control_v1(malformed).empty(),
+        "Braingeyser validator accepted a changed public life total");
 }
 
 void test_response_windows_record_the_casters_pass() {
@@ -4292,6 +4846,15 @@ int main() {
                test_force_spike_probe_is_a_live_mana_advantage_counter);
     runner.run("Force Spike policy controls",
                test_force_spike_policy_controls_isolate_payable_tax);
+    runner.run(
+        "counter-composition controls",
+        test_counter_composition_controls_are_frozen_and_valid);
+    runner.run(
+        "counter-composition forced consequences",
+        test_counter_composition_forced_consequences);
+    runner.run(
+        "Braingeyser X=0 control",
+        test_braingeyser_x_zero_control_is_frozen_and_dominated);
     runner.run("response priority context",
                test_response_windows_record_the_casters_pass);
     runner.run("unique v3 stable IDs and categories",

@@ -23,6 +23,10 @@ inline constexpr std::uint64_t kProbeValidationV1GameSeed =
     0x52555830484F4C44ULL;
 inline constexpr std::string_view kForceSpikePolicyControlsV1 =
     "old-school-force-spike-policy-controls-v1";
+inline constexpr std::string_view kCounterCompositionControlsV1 =
+    "old-school-counter-composition-controls-v1";
+inline constexpr std::string_view kBraingeyserXZeroControlV1 =
+    "old-school-braingeyser-x0-control-v1";
 inline constexpr std::string_view kFieldRegressionsV1 =
     "old-school-field-regressions-v1";
 inline constexpr std::string_view kAttackRegressionV1 =
@@ -73,6 +77,7 @@ enum class Category : std::uint8_t {
     FieldGreenAttackAfterGrowthTappedAir,
     FieldGreenAttackAfterGrowthUntappedAirControl,
     DiagnosticRUAttackFlyingIntoLargerFlyingBlocker,
+    ControlBlueBraingeyserXZero,
 };
 
 struct BinaryAttackDecision {
@@ -163,6 +168,19 @@ std::vector<DecisionProbe> make_probe_validation_v1();
 // any promotion-eligible corpus.
 std::vector<DecisionProbe> make_force_spike_policy_controls_v1();
 
+// Two eval-only stack-composition controls. The first offers a redundant
+// second Counterspell aimed at an Air Elemental that an existing friendly
+// Counterspell already targets. The companion adds an opposing Counterspell
+// targeting that first counter, preserving both ways to save the exchange.
+// These controls are supplemental and cannot support promotion claims.
+std::vector<DecisionProbe> make_counter_composition_controls_v1();
+
+// One eval-only Blue main-phase control containing the complete legal
+// Pass/Braingeyser action set at X=0 and X=1. It mechanically isolates the
+// resource waste from either zero-card target while retaining productive
+// positive-X controls.
+std::vector<DecisionProbe> make_braingeyser_x_zero_control_v1();
+
 // A reject-only corpus made from concrete field reports. It is deliberately
 // separate from probe-dev-v3 and every label-cache path: the paired states
 // describe legal decisions and their rules consequences, but encode no
@@ -190,6 +208,14 @@ std::vector<std::string> validate_probe_validation_v1(
     std::uint64_t hidden_seed = kProbeValidationSeed);
 
 std::vector<std::string> validate_force_spike_policy_controls_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed = kProbeValidationSeed);
+
+std::vector<std::string> validate_counter_composition_controls_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed = kProbeValidationSeed);
+
+std::vector<std::string> validate_braingeyser_x_zero_control_v1(
     const std::vector<DecisionProbe>& probes,
     std::uint64_t hidden_seed = kProbeValidationSeed);
 
@@ -328,6 +354,13 @@ Dc1LegalActionSetSummary summarize_dc1_legal_actions(
 Dc1CanonicalSettlement settle_dc1_priority_candidate(
     const DecisionProbe& probe, const GameState& information_set_world,
     std::size_t candidate_index);
+
+// Hidden-information-safe digest of a settled DC1 branch as observed by the
+// probe owner. The settled state is serialized through the same canonical
+// information-set key used by DC1, with the canonical stop context appended.
+std::string dc1_public_consequence_fingerprint(
+    const DecisionProbe& probe,
+    const Dc1CanonicalSettlement& settlement);
 
 // True only when the two raw branches differ by their recorded branch-local
 // resource ledgers and not by any normalized rules effect or stop context.

@@ -910,6 +910,98 @@ DecisionProbe blue_counter_war_probe() {
     return probe;
 }
 
+DecisionProbe blue_counter_composition_control(
+    bool intervening_counter) {
+    constexpr StackObjectId kAirSpell = 1;
+    constexpr StackObjectId kOwnCounter = 2;
+    constexpr StackObjectId kOpponentCounter = 3;
+    DecisionProbe probe = make_base(
+        intervening_counter
+            ? "control.blue.counter-same-target-after-"
+              "intervening-counter.v1"
+            : "control.blue.counter-redundant-same-target.v1",
+        Category::BlueCounterWar, DecisionKind::Priority,
+        DeckId::Blue, DeckId::Blue, TurnPhase::FirstMain, 13, 1);
+    probe.state.starting_player = 1;
+    probe.consecutive_passes = intervening_counter ? 1 : 0;
+
+    probe.state.players[0].hand = {CardId::Counterspell};
+    probe.state.players[0].lands = {
+        land(CardId::Island, true),
+        land(CardId::Island, true),
+        land(CardId::Island),
+        land(CardId::Island),
+    };
+    probe.state.players[1].lands.assign(
+        intervening_counter ? 7 : 5,
+        land(CardId::Island, true));
+    probe.state.players[1].land_played_this_turn =
+        intervening_counter;
+    probe.state.stack = {
+        spell(kAirSpell, CardId::AirElemental, 1),
+        spell(kOwnCounter, CardId::Counterspell, 0, std::nullopt,
+              kAirSpell),
+    };
+    if (intervening_counter) {
+        probe.state.stack.push_back(
+            spell(kOpponentCounter, CardId::Counterspell, 1,
+                  std::nullopt, kOwnCounter));
+    }
+
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "counter-same-air-elemental",
+            PriorityAction::cast_counterspell(kAirSpell)),
+        priority_candidate(
+            "counter-own-counterspell",
+            PriorityAction::cast_counterspell(kOwnCounter)),
+    };
+    if (intervening_counter) {
+        probe.candidates.push_back(priority_candidate(
+            "counter-opponent-counterspell",
+            PriorityAction::cast_counterspell(kOpponentCounter)));
+    }
+    finish_hidden_zones(probe);
+    return probe;
+}
+
+DecisionProbe blue_braingeyser_x_zero_control() {
+    DecisionProbe probe = make_base(
+        "control.blue.braingeyser-x0.v1",
+        Category::ControlBlueBraingeyserXZero,
+        DecisionKind::Priority, DeckId::Blue, DeckId::Red,
+        TurnPhase::SecondMain, 7);
+    PlayerState& root = probe.state.players[0];
+    root.hand = {CardId::Braingeyser};
+    root.lands.assign(3, land(CardId::Island));
+    root.land_played_this_turn = true;
+    probe.state.players[1].lands.assign(
+        3, land(CardId::Mountain));
+    probe.state.players[1].land_played_this_turn = true;
+    probe.candidates = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "braingeyser-x0-self",
+            PriorityAction::cast_braingeyser(
+                0, Target::player_target(0))),
+        priority_candidate(
+            "braingeyser-x0-opponent",
+            PriorityAction::cast_braingeyser(
+                0, Target::player_target(1))),
+        priority_candidate(
+            "braingeyser-x1-self",
+            PriorityAction::cast_braingeyser(
+                1, Target::player_target(0))),
+        priority_candidate(
+            "braingeyser-x1-opponent",
+            PriorityAction::cast_braingeyser(
+                1, Target::player_target(1))),
+    };
+    finish_hidden_zones(probe);
+    return probe;
+}
+
 DecisionProbe white_emergency_moat_probe() {
     constexpr PermanentId kFire = 1;
     DecisionProbe probe = make_base(
@@ -2187,6 +2279,17 @@ std::vector<DecisionProbe> make_force_spike_policy_controls_v1() {
     return {std::move(live), std::move(payable)};
 }
 
+std::vector<DecisionProbe> make_counter_composition_controls_v1() {
+    return {
+        blue_counter_composition_control(false),
+        blue_counter_composition_control(true),
+    };
+}
+
+std::vector<DecisionProbe> make_braingeyser_x_zero_control_v1() {
+    return {blue_braingeyser_x_zero_control()};
+}
+
 std::vector<DecisionProbe> make_field_regressions_v1() {
     std::vector<DecisionProbe> probes;
     probes.reserve(6);
@@ -2584,6 +2687,267 @@ std::vector<std::string> validate_force_spike_policy_controls_v1(
                     break;
                 }
             }
+        }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_counter_composition_controls_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed) {
+    constexpr std::array<std::string_view, 2> kExpectedIds = {
+        "control.blue.counter-redundant-same-target.v1",
+        "control.blue.counter-same-target-after-intervening-counter.v1",
+    };
+    constexpr std::array<std::size_t, 2> kExpectedStackSizes = {
+        2, 3,
+    };
+    constexpr std::array<int, 2> kExpectedPriorPasses = {
+        0, 1,
+    };
+    constexpr std::array<std::size_t, 2> kExpectedOpponentLands = {
+        5, 7,
+    };
+    constexpr std::array<std::string_view, 2>
+        kExpectedInformationActionFingerprints = {
+            "faf53e39aba9e69b",
+            "7a6e19b2b016fb58",
+        };
+
+    std::vector<std::string> errors;
+    if (probes.size() != kExpectedIds.size()) {
+        errors.push_back(
+            "counter-composition controls must contain exactly two "
+            "probes");
+    }
+
+    const std::size_t checked =
+        std::min(probes.size(), kExpectedIds.size());
+    for (std::size_t index = 0; index < checked; ++index) {
+        const DecisionProbe& probe = probes[index];
+        const std::string prefix = probe.stable_id + ": ";
+        if (probe.stable_id != kExpectedIds[index]) {
+            errors.push_back(
+                "counter-composition controls have an unknown or "
+                "reordered stable ID");
+        }
+        if (probe.category != Category::BlueCounterWar ||
+            probe.decision_kind != DecisionKind::Priority ||
+            probe.root_deck != DeckId::Blue ||
+            probe.opponent_deck != DeckId::Blue ||
+            probe.root_player != 0 ||
+            probe.phase != TurnPhase::FirstMain ||
+            probe.consecutive_passes !=
+                kExpectedPriorPasses[index] ||
+            probe.state.active_player != 1 ||
+            probe.state.starting_player != 1 ||
+            probe.state.turn_number != 13 ||
+            probe.harvest.has_value()) {
+            errors.push_back(
+                prefix +
+                "counter-composition decision context changed");
+        }
+
+        const PlayerState& root = probe.state.players[0];
+        const PlayerState& opponent = probe.state.players[1];
+        const std::size_t root_untapped_islands =
+            static_cast<std::size_t>(std::count_if(
+                root.lands.begin(), root.lands.end(),
+                [](const LandPermanent& permanent) {
+                    return permanent.card == CardId::Island &&
+                           !permanent.tapped;
+                }));
+        if (root.hand !=
+                std::vector<CardId>{CardId::Counterspell} ||
+            root.lands.size() != 4 ||
+            root_untapped_islands != 2 ||
+            !std::all_of(
+                root.lands.begin(), root.lands.end(),
+                [](const LandPermanent& permanent) {
+                    return permanent.card == CardId::Island;
+                })) {
+            errors.push_back(
+                prefix +
+                "root must retain one Counterspell and two open "
+                "Islands after casting the first counter");
+        }
+        if (opponent.lands.size() !=
+                kExpectedOpponentLands[index] ||
+            opponent.land_played_this_turn != (index == 1) ||
+            !std::all_of(
+                opponent.lands.begin(), opponent.lands.end(),
+                [](const LandPermanent& permanent) {
+                    return permanent.card == CardId::Island &&
+                           permanent.tapped;
+                })) {
+            errors.push_back(
+                prefix +
+                "opponent mana history does not match the public "
+                "stack");
+        }
+
+        const bool stack_shape =
+            probe.state.stack.size() ==
+                kExpectedStackSizes[index] &&
+            probe.state.next_stack_object_id ==
+                kExpectedStackSizes[index] + 1 &&
+            probe.state.stack[0] ==
+                spell(1, CardId::AirElemental, 1) &&
+            probe.state.stack[1] ==
+                spell(2, CardId::Counterspell, 0, std::nullopt, 1) &&
+            (index == 0 ||
+             probe.state.stack[2] ==
+                 spell(3, CardId::Counterspell, 1,
+                       std::nullopt, 2));
+        if (!stack_shape) {
+            errors.push_back(
+                prefix +
+                "public stack ordering, ownership, or targets "
+                "changed");
+        }
+
+        std::vector<Candidate> expected = {
+            priority_candidate("pass", PriorityAction::pass()),
+            priority_candidate(
+                "counter-same-air-elemental",
+                PriorityAction::cast_counterspell(1)),
+            priority_candidate(
+                "counter-own-counterspell",
+                PriorityAction::cast_counterspell(2)),
+        };
+        if (index == 1) {
+            expected.push_back(priority_candidate(
+                "counter-opponent-counterspell",
+                PriorityAction::cast_counterspell(3)));
+        }
+        if (probe.candidates != expected) {
+            errors.push_back(
+                prefix +
+                "complete descriptor-to-target candidate set "
+                "changed");
+        }
+        if (bsr_information_action_fingerprint(probe) !=
+            kExpectedInformationActionFingerprints[index]) {
+            errors.push_back(
+                prefix +
+                "frozen information/action fingerprint changed");
+        }
+
+        const Validation validation =
+            validate_probe(probe, hidden_seed + index);
+        for (const std::string& error : validation.errors) {
+            errors.push_back(prefix + error);
+        }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_braingeyser_x_zero_control_v1(
+    const std::vector<DecisionProbe>& probes,
+    std::uint64_t hidden_seed) {
+    std::vector<std::string> errors;
+    if (probes.size() != 1) {
+        errors.push_back(
+            "Braingeyser X=0 control must contain exactly one probe");
+    }
+    if (probes.empty()) {
+        return errors;
+    }
+
+    const DecisionProbe& probe = probes.front();
+    const std::string prefix = probe.stable_id + ": ";
+    if (probe.stable_id != "control.blue.braingeyser-x0.v1") {
+        errors.push_back(
+            "Braingeyser X=0 control has an unknown stable ID");
+    }
+    if (probe.category !=
+            Category::ControlBlueBraingeyserXZero ||
+        probe.decision_kind != DecisionKind::Priority ||
+        probe.root_deck != DeckId::Blue ||
+        probe.opponent_deck != DeckId::Red ||
+        probe.root_player != 0 ||
+        probe.phase != TurnPhase::SecondMain ||
+        probe.consecutive_passes != 0 ||
+        probe.state.active_player != 0 ||
+        probe.state.starting_player != 0 ||
+        probe.state.turn_number != 7 ||
+        !probe.state.stack.empty() ||
+        probe.harvest.has_value()) {
+        errors.push_back(
+            prefix + "Braingeyser decision context changed");
+    }
+
+    const PlayerState& root = probe.state.players[0];
+    const PlayerState& opponent = probe.state.players[1];
+    if (root.hand !=
+            std::vector<CardId>{CardId::Braingeyser} ||
+        root.lands.size() != 3 ||
+        !root.land_played_this_turn ||
+        !std::all_of(
+            root.lands.begin(), root.lands.end(),
+            [](const LandPermanent& permanent) {
+                return permanent.card == CardId::Island &&
+                       !permanent.tapped;
+            })) {
+        errors.push_back(
+            prefix +
+            "root must have only Braingeyser and exactly three "
+            "open Islands");
+    }
+    if (opponent.lands.size() != 3 ||
+        !opponent.land_played_this_turn ||
+        !std::all_of(
+            opponent.lands.begin(), opponent.lands.end(),
+            [](const LandPermanent& permanent) {
+                return permanent.card == CardId::Mountain &&
+                       !permanent.tapped;
+            })) {
+        errors.push_back(
+            prefix +
+            "opponent must expose exactly three untapped Mountains");
+    }
+
+    const std::vector<Candidate> expected = {
+        priority_candidate("pass", PriorityAction::pass()),
+        priority_candidate(
+            "braingeyser-x0-self",
+            PriorityAction::cast_braingeyser(
+                0, Target::player_target(0))),
+        priority_candidate(
+            "braingeyser-x0-opponent",
+            PriorityAction::cast_braingeyser(
+                0, Target::player_target(1))),
+        priority_candidate(
+            "braingeyser-x1-self",
+            PriorityAction::cast_braingeyser(
+                1, Target::player_target(0))),
+        priority_candidate(
+            "braingeyser-x1-opponent",
+            PriorityAction::cast_braingeyser(
+                1, Target::player_target(1))),
+    };
+    if (probe.candidates != expected) {
+        errors.push_back(
+            prefix +
+            "complete Pass/X=0/X=1 descriptor-to-target set changed");
+    }
+    if (bsr_information_action_fingerprint(probe) !=
+        "a68cd5b38da84990") {
+        errors.push_back(
+            prefix +
+            "frozen information/action fingerprint changed");
+    }
+
+    const Validation validation =
+        validate_probe(probe, hidden_seed);
+    for (const std::string& error : validation.errors) {
+        errors.push_back(prefix + error);
+    }
+    if (probes.size() > 1) {
+        for (std::size_t index = 1; index < probes.size(); ++index) {
+            errors.push_back(
+                probes[index].stable_id +
+                ": unexpected extra Braingeyser X=0 control");
         }
     }
     return errors;
@@ -5610,6 +5974,22 @@ std::string bsr_information_action_fingerprint(
     const DecisionProbe& probe) {
     return bsr_hex64(
         dc1_stable_hash(bsr_information_action_key(probe)));
+}
+
+std::string dc1_public_consequence_fingerprint(
+    const DecisionProbe& probe,
+    const Dc1CanonicalSettlement& settlement) {
+    DecisionProbe settled_probe = probe;
+    settled_probe.state = settlement.settled_state;
+    settled_probe.phase = settlement.phase;
+    settled_probe.consecutive_passes =
+        settlement.final_consecutive_passes;
+
+    std::string key = dc1_information_set_key(settled_probe);
+    dc1_append_u64(key, settlement.final_priority_player);
+    dc1_append_bool(key, settlement.terminal);
+    dc1_append_bool(key, settlement.window_ended);
+    return bsr_hex64(dc1_stable_hash(key));
 }
 
 BsrAuditReport audit_bsr_blue_stack_regret(

@@ -10806,6 +10806,211 @@ the literal scout/confirmation seed tags passed to
 is committed and independently reviewed, the candidate remains unscored and
 seed `202607261929` remains unopened.
 
+#### OC1-AR1 mechanical-freeze addendum
+
+Recorded 2026-07-26 before loading OC1 into any action scorer and before
+opening gameplay seed `202607261929`. `REVIEW.md` was reread through its
+newest 20:47 PDT entry. The entry independently replicated OC1's calibration
+artifact and mechanism pass, but contains no OC1 action score. The typed
+fixture builders and strict DVR2 reader were implemented without loading
+either candidate model.
+
+The exact supplemental fixture identities are:
+
+| Corpus / stable ID | Information/action fingerprint | Ordered candidate descriptors |
+| --- | --- | --- |
+| `old-school-counter-composition-controls-v1` / `control.blue.counter-redundant-same-target.v1` | `faf53e39aba9e69b` | `pass`; `counter-same-air-elemental`; `counter-own-counterspell` |
+| `old-school-counter-composition-controls-v1` / `control.blue.counter-same-target-after-intervening-counter.v1` | `7a6e19b2b016fb58` | `pass`; `counter-same-air-elemental`; `counter-own-counterspell`; `counter-opponent-counterspell` |
+| `old-school-braingeyser-x0-control-v1` / `control.blue.braingeyser-x0.v1` | `a68cd5b38da84990` | `pass`; `braingeyser-x0-self`; `braingeyser-x0-opponent`; `braingeyser-x1-self`; `braingeyser-x1-opponent` |
+
+Both counter roots are Blue-versus-Blue first-main Priority decisions on
+turn 13. The redundant root has Air Elemental stack object 1, the owner's
+Counterspell object 2 targeting object 1, five tapped opposing Islands, and
+two of the owner's four Islands still untapped. The intervening root adds
+opposing Counterspell object 3 targeting object 2 and has seven tapped
+opposing Islands with `land_played_this_turn=true`. Turn 13 is the earliest
+shared fixture turn that makes the seven-land public history possible for the
+starting active player; the discard-cleanup environment makes the remaining
+hidden-zone counts legal.
+The Braingeyser root is Blue versus Red, second main on turn 7, with one
+Braingeyser, three open Islands, the land already played, and exactly three
+untapped opposing Mountains whose prior-turn
+`land_played_this_turn=true` flag persists because only the active player's
+flag resets at turn start. Untapped opponent lands avoid inventing an
+unwitnessed public mana payment.
+
+The complete legal action sets, descriptor-to-stack-ID/target/X mappings,
+stack ordering, public mana histories, raw card conservation, and hidden
+repartition invariance are typed validator/test obligations. The mechanical
+consequences are:
+
+- in the redundant root, Pass lets object 2 counter Air Elemental while
+  preserving the Counterspell in hand; `counter-same-air-elemental` produces
+  the same Air-Elemental outcome while consuming that extra Counterspell, so
+  Pass DC1-dominates it in every one of eight determinized hidden worlds;
+- `counter-own-counterspell` instead consumes the extra card, removes the
+  friendly counter, and lets Air Elemental resolve. Because the public
+  outcomes differ, DC1 correctly calls the pair incomparable rather than
+  manufacturing a resource-dominance proof;
+- after the intervening opposing counter, both
+  `counter-same-air-elemental` and `counter-opponent-counterspell` legally
+  preserve the intended Air-Elemental exchange, while Pass and
+  `counter-own-counterspell` let Air Elemental resolve; and
+- both Braingeyser X=0 targets consume the spell and two Islands, draw no
+  cards, and are DC1 Pass-dominated in every one of eight determinized hidden
+  worlds. Both X=1 targets are legal, spend all three Islands, and draw
+  exactly one card for the named player.
+
+The public consequence digest reuses the existing DC1 owner-visible
+information-set serializer on the settled state, appends the canonical stop
+context, then applies the existing FNV-1a/hex encoding. It therefore exposes
+no opponent hidden identity and adds no second state serializer. At
+determinization seed `577215`, the exact ordered hashes are:
+
+- redundant root: Pass `324576b473223a86`; same-Air
+  `a0a47325a3afed35`; own-counter `5d5911104c4d6fdf`;
+- intervening root: Pass `aa6ccab048f0ab1a`; same-Air
+  `8447ddf641a58a45`; own-counter `3184c58f7888fb6b`;
+  opponent-counter `8447ddf641a58a45`; and
+- Braingeyser root: Pass `de125649ad24344a`; X=0 self
+  `46d4f822377eea6d`; X=0 opponent `46d4f822377eea6d`; X=1 self
+  `1a8bcf6486c13ae9`; X=1 opponent `2c854eb335381c90`.
+
+Every branch exchanges distinct opponent hand/library identities and must
+reproduce the same digest. The information/action fingerprints, consequence
+hashes, exact card/stack/resource assertions, and mutation tests jointly
+freeze identity and effect.
+
+Correction item 10 is now resolved narrowly. The mechanical hard gate does
+**not** require unique Pass. It requires the deployed scorer to retain and
+score the complete three-action legal set and requires OC1's exact support to
+exclude `counter-same-air-elemental`, the only action proved
+Pass-dominated. Separately, selecting `counter-own-counterspell` fails the
+user-authored “do not counter your own spell” behavior contract; this is a
+reject-only field check, not scientific evidence that OC1 improved. The
+intervening root must retain and score all four legal actions and must not
+lose a stable parent/reference agreement; no blanket same-target filter is
+permitted.
+
+The previously frozen focused identities remain:
+
+- live Force Spike `control.blue.force-spike-live-gray-ogre.v1`,
+  information/action fingerprint `b792d7434096d2cc`;
+- payable Force Spike `control.blue.force-spike-payable-gray-ogre.v1`,
+  information/action fingerprint `8e24d4696a7c2ad5`;
+- Disintegrate X=0 `validation.ru.disintegrate-hold-x0.v1`,
+  information/action fingerprint `04d02e0ea36d34be`, validation corpus
+  fingerprint `cac989a21b0d18cb`;
+- all six roots from `old-school-field-regressions-v1`; and
+- the one root from `old-school-attack-regression-v1`.
+
+The literal scoring identities and parallelism are now frozen:
+
+- balanced C16 Value reference corpus/seed tag
+  `old-school-oc1-action-regression-v1.value-balanced`;
+- focused C16 scout tag
+  `old-school-oc1-action-regression-v1.focused-scout`;
+- focused C16 confirmation tag
+  `old-school-oc1-action-regression-v1.focused-confirmation`;
+- production deployment tag
+  `old-school-oc1-action-regression-v1.production`;
+- every cache-free reference seed is exactly
+  `reference_seed_for_probe(literal_tag, stable_id, 1414213562)`;
+- every Priority or Attack production seed is exactly
+  `reference_seed_for_probe("old-school-oc1-action-regression-v1.production",
+  stable_id, 5787775625948253273)`;
+- balanced and focused C16 references are K64/H8/one rollout, unblended,
+  exact-C16 Value-mirror, Legacy continuation, epsilon zero, residual zero,
+  PD0 off, and exactly four evaluation threads;
+- C16 and OC1 Priority deployment are K8/H4/one rollout, blended,
+  Value-mirror, Legacy continuation, epsilon zero, residual zero, PD0 off,
+  exactly one evaluation thread, and use that exact production-seed
+  derivation; and
+- Attack deployment uses the exact immediate production selector with that
+  same per-root production-seed derivation. Block is the exact immediate,
+  seedless production selector. Both retain the native deterministic
+  first-on-exact-tie result rather than converting it into a sampled tie.
+
+The frozen Actor cache is loaded twice as grandfathered evidence. Both loads
+must reproduce its exact metadata and all 64 raw common-world Q rows for every
+action before those rows are reduced to labels; pair standard errors cannot
+be reverse-engineered into arbitrary-support samples. The two raw loads must
+be byte- and value-identical. No Actor rollout, hidden-sample reconstruction,
+or Actor accounting claim is made.
+
+For hidden-repartition counting, the balanced corpus requires at least one
+changed opponent hidden identity in each of Green, Red, Blue, White, and RU
+Aggro. The focused family partition is exactly: the two Force Spike controls;
+the two counter-composition controls; the one Braingeyser control; the one
+Disintegrate validation control; the six field regressions; the one attack
+regression; and the four DVR2 replays. Each of those seven families must have
+at least one changed identity and zero changed owner observations, typed
+legal-action sets, information/action fingerprints, raw score bits, selected
+supports, or accounting values.
+
+All paired intervals use `probe_eval::kNormal95CriticalValue`, exactly
+`1.96`. A robust effect includes a point difference of exactly `0.03` and
+requires a strictly positive lower bound. Per-deck regret accepts exactly
+`+0.010`; pooled regret, pooled top-one, and DVR total-regret comparisons use
+literal `<=`/`>=` with no numeric tolerance. Actor top-one retains
+`probe_eval`'s frozen label best-set semantics. Cache-free C16 panel best sets
+are the complete exact maximum-mean descriptor sets. For a stable focused
+reference, “loses no parent/reference agreement” means: if C16's entire
+deployed support is contained in the identical scout/confirmation best set,
+OC1's entire deployed support must also be contained in it.
+
+The canonical scientific-report hash covers, in this order: immutable file
+snapshots and model/cache/DVR identities; literal recipe tags, seeds, widths,
+horizons, rollout counts, controller flags, and thread counts; stable-ID
+sorted roots; descriptor-sorted actions; every raw Q as its IEEE-754 binary64
+bits; evaluation accounting; exact deployed raw scores and sorted supports;
+derived means, intervals, robust relations, regret/top-one/deck summaries;
+hidden-family counts; every hard-gate boolean/failure; and the final verdict.
+Counts and strings are length-framed. A repeated original construction and
+its hidden-repartition audit must reproduce that complete typed report and
+hash bit-for-bit. In addition, an original-versus-repartitioned scientific
+projection excludes only provenance and hidden-change counters and must hash
+bit-for-bit identically; the counters live in the full integrity report and
+must satisfy the nonvacuity gates above.
+
+The strict DVR2 boundary is:
+
+- payload ordered name/encoding schema SHA-256
+  `36814934f5bd5d71855779cc64c80b35c9848a3f3af482b8e6e2e88d42180c40`;
+- 52-root identity-manifest SHA-256
+  `11c17fa294d53c4dd58112b0bf143288c0a1a73051df059ab66d799efe98c95a`;
+- exactly 4,019 payload fields and exactly 52 roots with the already frozen
+  43 stable-agreement / 4 stable-disagreement / 5 unstable census; and
+- exactly replay roots 16, 19, 46, and 50 with the stable IDs, DVR1 record
+  fingerprints, information/action fingerprints, source metadata, complete
+  `BsrRootScore`, and reconstructed probes declared above.
+
+The strict reader must decode then canonically reserialize every embedded
+DVR1 record, reproduce its record fingerprint, rehydrate and validate the
+probe, recompute reference best sets, actual/best means and regret from the
+action table, require a finite nonnegative stored paired standard error, and
+recompute the lower bound from regret and that standard error. DVR1 does not
+preserve opponent private identities: each replay probe contains a
+deterministic synthetic opponent hand/library partition and every scorer must
+resample a determinization from the owner observation. Using that synthetic
+partition as ground truth is an infrastructure failure. DVR2 ephemeral
+common-world confirmation uses the stored per-root confirmation seed, K64,
+H8, one rollout, and four threads; it does not create a new cache or mutate
+the sealed bundle.
+
+Focused verification before this freeze:
+
+```sh
+make -j4 test-probes test-dvr2-replay-bundle
+git diff --check
+```
+
+The probe side passed 57/57 fixture tests, 11/11 metric tests, and 32/32
+runner tests under `-Werror`; the strict DVR2 loader passed 7/7 focused
+tests. `git diff --check` was clean. This addendum freezes mechanics and
+identities only. OC1 is still unscored, the action result remains unknown,
+and gameplay seed `202607261929` remains unopened.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after

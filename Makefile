@@ -22,6 +22,7 @@ TARGET_FACTORIAL_AUDIT_SOURCE := src/target_factorial_audit.cpp
 REPLAY_WEIGHT_AUDIT_SOURCE := src/replay_weight_audit.cpp
 RB0_MECHANICAL_PREFLIGHT_SOURCE := src/rb0_mechanical_preflight.cpp
 DVR2_HARVEST_SOURCE := src/dvr2_harvest.cpp
+DVR2_REPLAY_BUNDLE_SOURCE := src/dvr2_replay_bundle.cpp
 OUTPUT_CALIBRATION_SOURCE := src/output_calibration.cpp
 OUTPUT_CALIBRATION_ARTIFACT_SOURCE := src/output_calibration_artifact.cpp
 OUTPUT_CALIBRATION_RUNNER_SOURCE := src/output_calibration_runner.cpp
@@ -48,6 +49,7 @@ RB0_MECHANICAL_PREFLIGHT := $(BUILD_DIR)/rb0-mechanical-preflight
 RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER := $(BUILD_DIR)/old-school-rb0-mechanical-preflight-tests
 DVR2_HARVEST := $(BUILD_DIR)/old-school-dvr2-harvest
 DVR2_HARVEST_TEST_RUNNER := $(BUILD_DIR)/old-school-dvr2-harvest-tests
+DVR2_REPLAY_BUNDLE_TEST_RUNNER := $(BUILD_DIR)/old-school-dvr2-replay-bundle-tests
 OUTPUT_CALIBRATION_TEST_RUNNER := $(BUILD_DIR)/old-school-output-calibration-tests
 OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER := $(BUILD_DIR)/old-school-output-calibration-artifact-tests
 OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER := $(BUILD_DIR)/old-school-output-calibration-runner-tests
@@ -72,7 +74,7 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -147,6 +149,9 @@ $(DVR2_HARVEST): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(
 $(DVR2_HARVEST_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) tests/test_dvr2_harvest.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp include/old_school/artifact_integrity.hpp include/old_school/dvr2_harvest.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) tests/test_dvr2_harvest.cpp -o $@
 
+$(DVR2_REPLAY_BUNDLE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_REPLAY_BUNDLE_SOURCE) tests/test_dvr2_replay_bundle.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp include/old_school/artifact_integrity.hpp include/old_school/dvr2_replay_bundle.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_REPLAY_BUNDLE_SOURCE) tests/test_dvr2_replay_bundle.cpp -o $@
+
 $(OUTPUT_CALIBRATION_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) tests/test_output_calibration.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/output_calibration.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) tests/test_output_calibration.cpp -o $@
 
@@ -168,7 +173,7 @@ $(WEB_BRIDGE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BR
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
@@ -187,6 +192,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER)
 	./$(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER)
 	./$(DVR2_HARVEST_TEST_RUNNER)
+	./$(DVR2_REPLAY_BUNDLE_TEST_RUNNER)
 	sh tests/test_dvr2_once.sh
 	./$(OUTPUT_CALIBRATION_TEST_RUNNER)
 	./$(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER)
@@ -283,6 +289,9 @@ test-dvr2-harvest: $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_HARVEST)
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'accepts only its new evidence output path' >/dev/null
+
+test-dvr2-replay-bundle: $(DVR2_REPLAY_BUNDLE_TEST_RUNNER)
+	./$(DVR2_REPLAY_BUNDLE_TEST_RUNNER)
 
 test-output-calibration: $(OUTPUT_CALIBRATION_TEST_RUNNER)
 	./$(OUTPUT_CALIBRATION_TEST_RUNNER)
