@@ -9927,9 +9927,9 @@ stable divergences may be retained diagnostically but cannot license RS1.
   `old-school-value-challenger-v3-c16-t800-s424242.bin`; require fingerprint
   `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
 - Run exact production C16 (`K=8`, `H=4`, shallow blend on, zero epsilon,
-  residual, pass filter, and alternate continuation controller) in both
-  seats. No Handcoded trajectory, outcome filter, or card-name predicate is
-  permitted.
+  residual weight `0`, pass-dominance filter `false`, and continuation
+  controller `Legacy`) in both seats. No Handcoded trajectory, outcome filter,
+  or card-name predicate is permitted.
 - Use `learned_iteration::balanced_schedule` once for each root seed base
   `4242` and `7801`, generation namespace `0x44565232` (`DVR2`), block zero,
   and a fixed 128-turn source cap.
@@ -9988,11 +9988,15 @@ publication.
 
 A standalone `old-school-dvr2-harvest` process, never called from `Game` or a
 search continuation, prevents evaluator recursion. Fixed constants are not CLI
-dials; only a new output path is accepted. A 15-minute watchdog, model mismatch,
-missing all-five agreement controls, broken quota/accounting/invariance,
-decode/re-score mismatch, or total-budget breach invalidates the run and
-publishes no evidence. The deterministic length-framed bundle is SHA-256
-checksummed, written atomically, and never overwrites an existing path.
+dials; only a new output path is accepted. Selection must reserve the known
+`256 * action_count` cost before each score and the two repeat-control costs
+before accepting a control. Roots that cannot fit are counted as
+budget-skipped; resulting quota/control misses are a valid but underpowered
+exit-1 result, not an infrastructure failure. Actually exceeding 131,072,
+misaccounting the cost, a 15-minute watchdog, model mismatch, broken
+invariance, or decode/re-score mismatch invalidates the run and publishes no
+evidence. The deterministic length-framed bundle is SHA-256 checksummed,
+written atomically, and never overwrites an existing path.
 
 Exit `0` means a valid run meeting the four-divergence/one-high-cost RS1
 license, `1` means a valid negative or underpowered result, and `2` means an
