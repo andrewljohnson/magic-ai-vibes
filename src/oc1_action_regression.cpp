@@ -2237,12 +2237,6 @@ std::vector<AuthoredProbe> make_focused_corpus() {
     append(
         "attack-regression",
         probes::make_attack_regression_v1());
-    std::sort(
-        result.begin(), result.end(),
-        [](const auto& left, const auto& right) {
-            return left.probe.stable_id <
-                   right.probe.stable_id;
-        });
     return result;
 }
 
@@ -2644,6 +2638,14 @@ int run_cli(
 }
 
 namespace testing {
+
+void validate_frozen_corpus_preflight() {
+    const std::vector<probes::DecisionProbe> balanced =
+        probes::make_probe_dev_v3();
+    const std::vector<AuthoredProbe> focused =
+        make_focused_corpus();
+    validate_all_corpora(balanced, focused);
+}
 
 bool snapshot_matches_requirement(
     const artifact_integrity::RegularFileSnapshot& snapshot,

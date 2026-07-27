@@ -313,6 +313,8 @@ int run_cli(
 
 namespace testing {
 
+void validate_frozen_corpus_preflight();
+
 bool snapshot_matches_requirement(
     const artifact_integrity::RegularFileSnapshot& snapshot,
     const FileRequirement& requirement);

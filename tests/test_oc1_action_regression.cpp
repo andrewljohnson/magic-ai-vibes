@@ -378,6 +378,10 @@ void test_focused_family_census_has_seven_bounded_slots() {
         "DVR family leaked into authored focused census");
 }
 
+void test_frozen_corpus_preflight_uses_typed_factory_order() {
+    ar1::testing::validate_frozen_corpus_preflight();
+}
+
 void test_cli_rejects_every_argument_without_running_evidence() {
     char program[] = "old-school-oc1-action-regression";
     char extra[] = "--seed";
@@ -432,6 +436,9 @@ int main() {
     tests.run(
         "focused family census has seven bounded slots",
         test_focused_family_census_has_seven_bounded_slots);
+    tests.run(
+        "frozen corpus preflight uses typed factory order",
+        test_frozen_corpus_preflight_uses_typed_factory_order);
     tests.run(
         "CLI rejects every argument without running evidence",
         test_cli_rejects_every_argument_without_running_evidence);

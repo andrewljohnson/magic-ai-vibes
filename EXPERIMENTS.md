@@ -11069,6 +11069,49 @@ no candidate action result is known, and gameplay seeds
 implementation, obtain the independent committed-state review, then execute
 the one no-knob action-regression gate.
 
+#### OC1-AR1 execution attempt 1: focused-corpus ordering infrastructure void
+
+Executed 2026-07-26 from committed and pushed implementation
+`84064be7dee0e506e05073a057401b42f28d452d`, after the committed-state
+review returned GO and after rereading `REVIEW.md` through its newest 21:40
+PDT entry:
+
+```sh
+./build/old-school-oc1-action-regression
+```
+
+The process exited `2` immediately:
+
+```text
+OC1-AR1: verifying all immutable inputs before candidate action scoring...
+OC1-AR1 infrastructure failure: old-school-field-regressions-v1 is invalid:
+field-regressions-v1 has an unknown, reordered, or duplicate stable ID
+```
+
+This attempt is an infrastructure void, not an action result. The failure
+occurs in `validate_all_corpora` after exact file snapshots but before the
+frozen artifacts are parsed, either model is constructed, or any
+candidate/reference action score is computed. The candidate remains unscored
+and gameplay seeds `202607261929..202607261931` remain unopened.
+
+Root cause: `make_focused_corpus` appended each already validated typed family
+in its factory order, then globally sorted all authored roots by stable ID.
+`validate_field_regressions_v1` deliberately validates its six fixtures in
+their frozen factory order, so collecting that family after the global sort
+presented the same six identities in a different order. Canonical report
+serialization already sorts roots independently; the pre-validation sort was
+unnecessary.
+
+Prospective repair, declared before another execution: remove only that
+pre-validation global sort, preserve each typed family's frozen factory order,
+and add a runner-layer corpus-preflight test that executes the exact production
+assembly plus validators without loading any model. Corpus identities,
+candidate sets, consequence hashes, recipe tags, seeds, references,
+thresholds, gates, artifacts, and reserved gameplay seeds remain unchanged.
+Rebuild, rerun the synthetic/wrong-argument suites, commit and push the
+mechanical repair, obtain committed-state review, then re-execute the same
+no-argument gate.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
