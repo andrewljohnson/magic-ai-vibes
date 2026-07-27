@@ -2401,6 +2401,63 @@ void print_summary(
     for (const std::string& failure : report.gate.failures) {
         output << "    - " << failure << '\n';
     }
+    const auto print_set =
+        [&output](
+            std::string_view label,
+            const std::vector<std::string>& values) {
+            output << "      " << label << ':';
+            if (values.empty()) {
+                output << " <empty>";
+            } else {
+                for (const std::string& value : values) {
+                    output << ' ' << value;
+                }
+            }
+            output << '\n';
+        };
+    for (const FocusedDecision& decision :
+         report.scientific.focused.decisions) {
+        const bool required_reference_failure =
+            decision.reference_required &&
+            (!decision.reference_stable ||
+             !decision
+                  .parent_reference_agreement_preserved);
+        if (decision.behavior_contract_passed &&
+            !required_reference_failure) {
+            continue;
+        }
+        output
+            << "    focused detail: " << decision.stable_id
+            << '\n'
+            << "      behavior/reference-required/stable/"
+               "preserved: "
+            << (decision.behavior_contract_passed ? "PASS"
+                                                  : "FAIL")
+            << " / "
+            << (decision.reference_required ? "yes" : "no")
+            << " / "
+            << (decision.reference_stable ? "yes" : "no")
+            << " / "
+            << (decision
+                        .parent_reference_agreement_preserved
+                    ? "yes"
+                    : "no")
+            << '\n';
+        print_set(
+            "C16 support",
+            decision.c16_deployment.selected_support);
+        print_set(
+            "OC1 support",
+            decision.candidate_deployment.selected_support);
+        print_set(
+            "scout best",
+            decision.scout_best_set.actions);
+        print_set(
+            "confirmation best",
+            decision.confirmation_best_set.actions);
+        output << "      disposition: "
+               << decision.disposition << '\n';
+    }
 }
 
 } // namespace

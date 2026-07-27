@@ -11112,6 +11112,61 @@ Rebuild, rerun the synthetic/wrong-argument suites, commit and push the
 mechanical repair, obtain committed-state review, then re-execute the same
 no-argument gate.
 
+#### OC1-AR1 execution attempt 2: sealed scientific rejection/inconclusive
+
+Executed 2026-07-26 from committed and pushed repair
+`08ce5f5966220d40fc05f1b19540cbe7e09e8215`, after committed-state review
+returned GO and after rereading `REVIEW.md` through its newest 21:48 PDT
+entry:
+
+```sh
+./build/old-school-oc1-action-regression
+```
+
+The deterministic run completed in about 41 seconds and exited `1`:
+
+```text
+OC1-AR1: verifying all immutable inputs before candidate action scoring...
+OC1-AR1: independently constructing two complete original/hidden report bundles...
+OC1-AR1 sealed action-regression gate
+  parent: 68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+  candidate: 64851236ddb8907057ec16d8fe0db9ab1b1966dfff55a3d3a62bde933e94ce0d
+  balanced Actor regret C16/OC1: 0.000000 / 0.000000
+  balanced Actor top1 C16/OC1: 1.000000 / 1.000000
+  joint-stable roots by deck: Green=1 Red=4 Blue=4 White=2 RU Aggro=2
+  balanced changed/lost/material: 1 / 0 / 0
+  focused contracts failed/inconclusive: 2 / 1
+  DVR regret C16/OC1: 0.049507 / 0.047803
+  hidden changed/attempted: 37 / 37
+  scientific hash: 4b6062e968f43401c6b21fbc2e8f8775405cfff84d74828baeccd53fd0337aad
+  full report hash: 4bcc2fad6e0d270ca8c47966f4d4420da8a955c197a8a6ec1efadcf1e980c0b6
+  verdict: REJECT/INCONCLUSIVE
+    - focused behavior/reference gate failed
+```
+
+Decision: **REJECT/INCONCLUSIVE** at ladder stage 1. C16 remains champion.
+The reserved gameplay screen and all later promotion stages are suppressed;
+seeds `202607261929..202607261931` remain unopened.
+
+The result sharply localizes the problem. On the balanced all-five-deck
+backbone, OC1 ties C16 at zero Actor regret and perfect expected top-one
+agreement, changes one deployed support, loses no joint-stable agreement, and
+has no material regression. It also improves total DVR confirmation regret
+from `0.049507` to `0.047803`, preserves hidden identity invariance on all
+37/37 roots, and supplies at least one jointly stable root in every deck.
+The rejection is entirely focused: two explicit field behavior contracts
+failed and the one mandatory parent/reference comparison was inconclusive.
+The existing summary intentionally did not print the failing stable IDs or
+supports, so no causal treatment is selected yet.
+
+Next experiment: a reporting-only diagnostic amendment that prints, for each
+failed/inconclusive focused root, its stable ID, C16/OC1 exact support,
+scout/confirmation best sets, stability/preservation booleans, and frozen
+disposition. It must not change construction, scores, hashes, gates, seeds, or
+artifacts. Re-running the exact deterministic gate after that amendment must
+reproduce both hashes above before its details are used to choose the next
+card-agnostic treatment.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
