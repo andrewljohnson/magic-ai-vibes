@@ -11167,6 +11167,67 @@ artifacts. Re-running the exact deterministic gate after that amendment must
 reproduce both hashes above before its details are used to choose the next
 card-agnostic treatment.
 
+#### OC1-AR1 focused diagnostic reproduction
+
+Executed 2026-07-26 from reporting-only commit
+`9080a256bdf388bbe4cc897969d1dd4f044cdd93`, after independent review
+verified that the added output runs only after gate evaluation and full-hash
+construction. Acceptance required exit `1` and exact reproduction of both
+attempt-2 hashes:
+
+```sh
+./build/old-school-oc1-action-regression
+```
+
+The run completed in about 41 seconds, exited `1`, reproduced scientific hash
+`4b6062e968f43401c6b21fbc2e8f8775405cfff84d74828baeccd53fd0337aad`
+and full hash
+`4bcc2fad6e0d270ca8c47966f4d4420da8a955c197a8a6ec1efadcf1e980c0b6`
+exactly, and added only these focused diagnostics:
+
+```text
+focused detail: control.blue.counter-same-target-after-intervening-counter.v1
+  behavior/reference-required/stable/preserved: PASS / yes / no / yes
+  C16 support: pass
+  OC1 support: pass
+  scout best: pass
+  confirmation best: pass
+  disposition: required-reference-inconclusive
+focused detail: control.blue.force-spike-payable-gray-ogre.v1
+  behavior/reference-required/stable/preserved: FAIL / no / yes / yes
+  C16 support: force-spike-gray-ogre
+  OC1 support: force-spike-gray-ogre
+  scout best: force-spike-gray-ogre
+  confirmation best: force-spike-gray-ogre
+  disposition: behavior-contract-failed
+focused detail: field.green.begin-combat-growth-tapped-air.v1
+  behavior/reference-required/stable/preserved: FAIL / no / no / yes
+  C16 support: growth-opponent-tapped-air-elemental
+  OC1 support: growth-opponent-tapped-air-elemental
+  scout best: growth-opponent-tapped-air-elemental
+               growth-own-ironroot-treefolk pass
+  confirmation best: growth-own-ironroot-treefolk
+  disposition: behavior-contract-failed
+```
+
+Interpretation: OC1 did not introduce either concrete mistake. C16 and OC1
+have identical bad supports on both failed behavior roots. On payable Force
+Spike, even both deep C16 panels stably prefer casting it, so this fixture
+exposes continuation/critic bias rather than an output-calibration regression.
+On opponent-target Giant Growth, the panels disagree: scout ties the bad
+target, own Treefolk, and Pass, while confirmation uniquely prefers own
+Treefolk. The intervening-counter behavior itself is correct for both
+policies; it is inconclusive only because the identical Pass argmax lacks the
+preregistered robust margin over every outside action.
+
+The OC1 ladder remains rejected and closed at AR1. C16 remains champion and
+gameplay seeds `202607261929..202607261931` remain unopened. The next
+treatment must improve learned action credit rather than perform another
+output-only calibration. Before declaring it, inspect whether these failures
+come from action representation, terminal/bootstrap credit, or search
+continuation bias, and use a card-agnostic learned teacher/data source; do not
+turn the behavior fixtures into card-specific training labels.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
