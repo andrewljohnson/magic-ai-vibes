@@ -795,32 +795,115 @@ SelectionReport select_roots(
     return result;
 }
 
+namespace {
+
+struct ReferenceInvariantAudit {
+    using NamedCheck =
+        std::pair<std::string_view, bool>;
+
+    bool action_count_in_range = false;
+    bool scout_worlds_exact = false;
+    bool confirmation_worlds_exact = false;
+    bool horizon_turns_exact = false;
+    bool rollouts_per_world_exact = false;
+    bool evaluation_threads_exact = false;
+    bool descriptor_order_invariant = false;
+    bool hidden_repartition_eligible = false;
+    bool hidden_repartition_bit_identical = false;
+    bool accounting_passed = false;
+    bool rollout_evaluations_exact = false;
+    bool terminal_evaluations_within_rollout = false;
+    bool bootstrapped_evaluations_exact = false;
+    bool scout_confirmation_seeds_distinct = false;
+
+    std::array<NamedCheck, 14> named_checks() const {
+        return {{
+            {"action_count_in_range", action_count_in_range},
+            {"scout_worlds_exact", scout_worlds_exact},
+            {"confirmation_worlds_exact",
+             confirmation_worlds_exact},
+            {"horizon_turns_exact", horizon_turns_exact},
+            {"rollouts_per_world_exact",
+             rollouts_per_world_exact},
+            {"evaluation_threads_exact",
+             evaluation_threads_exact},
+            {"descriptor_order_invariant",
+             descriptor_order_invariant},
+            {"hidden_repartition_eligible",
+             hidden_repartition_eligible},
+            {"hidden_repartition_bit_identical",
+             hidden_repartition_bit_identical},
+            {"accounting_passed", accounting_passed},
+            {"rollout_evaluations_exact",
+             rollout_evaluations_exact},
+            {"terminal_evaluations_within_rollout",
+             terminal_evaluations_within_rollout},
+            {"bootstrapped_evaluations_exact",
+             bootstrapped_evaluations_exact},
+            {"scout_confirmation_seeds_distinct",
+             scout_confirmation_seeds_distinct},
+        }};
+    }
+
+    bool passed() const {
+        const auto checks = named_checks();
+        return std::all_of(
+            checks.begin(), checks.end(),
+            [](const NamedCheck& check) {
+                return check.second;
+            });
+    }
+};
+
+ReferenceInvariantAudit audit_reference_invariants(
+    const probes::BsrRootScore& score) {
+    const bool terminal_within =
+        score.terminal_evaluations <=
+        score.rollout_evaluations;
+    return {
+        .action_count_in_range =
+            score.action_count >= 2 &&
+            score.action_count <= kMaximumLegalActions,
+        .scout_worlds_exact =
+            score.scout_worlds == probes::kBsrScoutWorlds,
+        .confirmation_worlds_exact =
+            score.confirmation_worlds ==
+            probes::kBsrConfirmationWorlds,
+        .horizon_turns_exact =
+            score.horizon_turns ==
+            probes::kBsrReferenceHorizon,
+        .rollouts_per_world_exact =
+            score.rollouts_per_world == 1,
+        .evaluation_threads_exact =
+            score.evaluation_threads ==
+            probes::kBsrReferenceEvaluationThreads,
+        .descriptor_order_invariant =
+            score.descriptor_order_invariant,
+        .hidden_repartition_eligible =
+            score.hidden_repartition_eligible,
+        .hidden_repartition_bit_identical =
+            score.hidden_repartition_bit_identical,
+        .accounting_passed = score.accounting_passed,
+        .rollout_evaluations_exact =
+            score.rollout_evaluations ==
+            kReferenceCostPerAction * score.action_count,
+        .terminal_evaluations_within_rollout =
+            terminal_within,
+        .bootstrapped_evaluations_exact =
+            terminal_within &&
+            score.bootstrapped_evaluations ==
+                score.rollout_evaluations -
+                    score.terminal_evaluations,
+        .scout_confirmation_seeds_distinct =
+            score.scout_seed != score.confirmation_seed,
+    };
+}
+
+} // namespace
+
 ReferenceClassification classify_reference(
     const probes::BsrRootScore& score) {
-    const bool invariant =
-        score.action_count >= 2 &&
-        score.action_count <= kMaximumLegalActions &&
-        score.scout_worlds == probes::kBsrScoutWorlds &&
-        score.confirmation_worlds ==
-            probes::kBsrConfirmationWorlds &&
-        score.horizon_turns ==
-            probes::kBsrReferenceHorizon &&
-        score.rollouts_per_world == 1 &&
-        score.evaluation_threads ==
-            probes::kBsrReferenceEvaluationThreads &&
-        score.descriptor_order_invariant &&
-        score.hidden_repartition_eligible &&
-        score.hidden_repartition_bit_identical &&
-        score.accounting_passed &&
-        score.rollout_evaluations ==
-            kReferenceCostPerAction * score.action_count &&
-        score.terminal_evaluations <=
-            score.rollout_evaluations &&
-        score.bootstrapped_evaluations ==
-            score.rollout_evaluations -
-                score.terminal_evaluations &&
-        score.scout_seed != score.confirmation_seed;
-    if (!invariant) {
+    if (!audit_reference_invariants(score).passed()) {
         return ReferenceClassification::InvalidInvariance;
     }
     if (!score.scout_confirmation_best_set_stable) {
@@ -2138,6 +2221,66 @@ bool deadline_passed(
     return std::chrono::steady_clock::now() >= deadline;
 }
 
+std::string reference_invariance_failure(
+    const SourceLocator& source, Stratum stratum,
+    const probes::BsrRootScore& score) {
+    const ReferenceInvariantAudit audit =
+        audit_reference_invariants(score);
+    std::ostringstream detail;
+    detail << std::boolalpha
+           << "DVR2 selected root failed invariance"
+           << " [source seed_base=" << source.seed_base
+           << ", seed_base_index=" << source.seed_base_index
+           << ", schedule_index=" << source.schedule_index
+           << ", pairing_index=" << source.pairing_index
+           << ", game_seed=" << source.game_seed
+           << ", owner_seat=" << source.owner_seat
+           << ", owner_on_play=" << source.owner_on_play
+           << ", starting_player=" << source.starting_player
+           << ", trace_ordinal=" << source.trace_ordinal
+           << "] [stratum=" << stratum_name(stratum)
+           << "] [failed=";
+    bool first_failure = true;
+    for (const auto& [name, passed] :
+         audit.named_checks()) {
+        if (passed) {
+            continue;
+        }
+        detail << (first_failure ? "" : ",") << name;
+        first_failure = false;
+    }
+    detail << "] [counts actions=" << score.action_count << "/2.."
+           << kMaximumLegalActions
+           << ", worlds=" << score.scout_worlds << "/"
+           << score.confirmation_worlds << " expected="
+           << probes::kBsrScoutWorlds << "/"
+           << probes::kBsrConfirmationWorlds
+           << ", horizon=" << score.horizon_turns << "/"
+           << probes::kBsrReferenceHorizon
+           << ", rollouts_per_world=" << score.rollouts_per_world
+           << "/1"
+           << ", threads=" << score.evaluation_threads << "/"
+           << probes::kBsrReferenceEvaluationThreads
+           << ", rollout_evals=" << score.rollout_evaluations
+           << "/"
+           << kReferenceCostPerAction * score.action_count
+           << ", terminal_evals=" << score.terminal_evaluations
+           << "<="
+           << score.rollout_evaluations
+           << ", bootstrap_evals="
+           << score.bootstrapped_evaluations << "/";
+    if (audit.terminal_evaluations_within_rollout) {
+        detail << score.rollout_evaluations -
+                      score.terminal_evaluations;
+    } else {
+        detail << "unavailable";
+    }
+    detail << ", seed_equal="
+           << (score.scout_seed == score.confirmation_seed)
+           << "]";
+    return detail.str();
+}
+
 void add_error(HarvestReport& report,
                std::string message) {
     report.errors.push_back(std::move(message));
@@ -2632,7 +2775,8 @@ RunResult run(const std::filesystem::path& output_path,
         case ReferenceClassification::InvalidInvariance:
             ++report.invalid_invariance;
             throw std::logic_error(
-                "DVR2 selected root failed invariance");
+                reference_invariance_failure(
+                    root.source, evidence.stratum, score));
         }
         scored_indices.push_back(candidate_index);
         report.roots.push_back(std::move(evidence));

@@ -10108,6 +10108,103 @@ sh tools/run_dvr2_once.sh \
   "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
 ```
 
+#### DVR2 execution attempt 2: own-top eligibility infrastructure void
+
+Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
+rereading `REVIEW.md` through its newest 18:46 PDT entry:
+
+```sh
+sh tools/run_dvr2_once.sh \
+  "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
+```
+
+The process completed both fixed source blocks and then exited `2` after about
+71 seconds:
+
+```text
+DVR2: loading exact frozen Environment-v3 C16...
+DVR2: completed source seed base 4242 (40/80 games)
+DVR2: completed source seed base 7801 (80/80 games)
+DVR2 infrastructure failure: DVR2 selected root failed invariance
+```
+
+It published neither the destination bundle nor a temporary file. It had begun
+reference scoring, but exposed no source locator, selected-root identity,
+action score, best set, agreement/disagreement classification, game outcome,
+or license count. This is therefore another fail-closed infrastructure void,
+not strength evidence.
+
+The defect is a deterministic contract mismatch between the generic BSR
+scorer and its legacy source-harvest filter. DVR2 deliberately preregisters
+both opponent-controlled and owner-controlled stack-top strata. Inside
+`score_bsr_priority_probe`, however, the hidden-repartition check reused
+`classify_bsr_trace_root`, whose older BSR-harvest policy intentionally returns
+`TrackedSpellOnTop` before enumerating actions whenever the root owner controls
+the stack top. Consequently every valid DVR2 own-top root necessarily set
+`hidden_repartition_eligible=false`, even when its hidden-clone samples were
+bit-identical.
+
+This diagnosis was reproduced without changing repository code by constructing
+an own-top root through a legal Counterspell cast from the existing
+counter-war fixture. The root passed probe validation and had four complete
+legal actions. A small K1/H0 score reported:
+
+```text
+top_controller=0 root_player=0 legal_actions=4 validation_ok=1
+classification=TrackedSpellOnTop eligible=0
+hidden_repartition_eligible=0 hidden_repartition_bit_identical=1
+descriptor_order_invariant=1 accounting_passed=1
+```
+
+Mechanical-retry hypothesis: the generic scorer should define hidden
+eligibility as preservation of the owner-visible information/action key and
+the complete legal action set, independent of who controls the stack top.
+`classify_bsr_trace_root` must remain unchanged for its historical
+opponent-top source-selection policy. Replace only the scorer's dependency
+with the existing `bsr_complete_action_set(hidden, candidates)` plus explicit
+information/action-key identity; add an engine-constructed own-top regression
+that proves the legacy classifier still returns `TrackedSpellOnTop` while the
+generic scorer passes hidden eligibility, bit identity, descriptor ordering,
+seed separation, and accounting. Add public source locator and boolean/count
+details to any future DVR2 invariance exception without printing Q means,
+best actions, or classifications.
+
+Retrying the same frozen schedule remains licensed only after those focused
+gates and independent protocol review pass. Attempt 2 revealed exactly the
+preexisting policy/validator mismatch needed to repair it and no result from
+which the repair could be tuned.
+
+The mechanical repair now implements that exact boundary. The legacy BSR
+source classifier is byte-for-byte unchanged. Generic hidden eligibility is
+the conjunction of owner-visible information/action-key identity and the
+existing complete-legal-action-set comparison; hidden-clone scout and
+confirmation samples must still be bit-identical. A shared named invariant
+audit now drives both `classify_reference` and compact failure diagnostics, so
+the diagnostic cannot drift from the classification gate. It changes no Q
+calculation, source schedule, root selection, reference seed, quota, threshold,
+or license rule.
+
+Exact verification:
+
+```sh
+make -j4 test-probes test-dvr2-harvest
+git diff --check
+```
+
+Results: 54/54 probe tests, 11/11 probe-metric tests, 32/32 probe-runner
+tests, 12/12 DVR2 tests, and the one-shot wrapper contract passed under the
+`-Werror` build; `git diff --check` is clean. The new regression legally casts
+the owner-controlled stack top, retains `TrackedSpellOnTop` in the legacy
+classifier, reverses candidate input, and obtains identical generic scores
+with distinct scout/confirmation seeds, complete hidden eligibility,
+bit-identical hidden samples, and exact accounting.
+
+Independent design and final protocol reviews found no P0/P1 blocker. The
+protocol review specifically licensed attempt 3 on the same fixed seeds
+because attempt 2 published nothing and exposed no locator, action, Q score,
+best set, stable classification, outcome, or license result; the diagnosis
+used only a synthetic K1/H0 fixture. The exact retry command is unchanged.
+
 The destination was confirmed absent before this record. Exit `0`, `1`, and
 `2` retain exactly the meanings declared above; no result has yet been
 observed.

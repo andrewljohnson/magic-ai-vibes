@@ -5445,24 +5445,11 @@ BsrRootScore score_bsr_priority_probe(
 
     DecisionProbe hidden = canonical;
     hidden.state = dc1_hidden_repartition_clone(canonical);
-    LearnedDecisionTracePoint hidden_point{
-        .state = hidden.state,
-        .context = {
-            .valid = true,
-            .phase = hidden.phase,
-            .decision_player = hidden.root_player,
-            .consecutive_passes =
-                hidden.consecutive_passes,
-            .sorcery_actions =
-                bsr_sorcery_actions(hidden.phase),
-        },
-        .selected_priority_action =
-            candidates[actual_index],
-    };
-    const BsrRootClassification hidden_classification =
-        classify_bsr_trace_root(
-            hidden_point, hidden.root_player,
-            kBsrMaximumLegalActions);
+    const bool hidden_information_action_key_equal =
+        bsr_information_action_key(hidden) ==
+        information_action_key;
+    const bool hidden_action_set_complete =
+        bsr_complete_action_set(hidden, candidates);
     const LearnedActionSamples hidden_scout = bsr_score_pass(
         hidden, candidates, frozen_model, config,
         scout_seed, config.scout_worlds);
@@ -5600,20 +5587,8 @@ BsrRootScore score_bsr_priority_probe(
                        right.descriptor;
             });
     result.hidden_repartition_eligible =
-        hidden_classification.eligible() &&
-        hidden_classification.legal_actions.size() ==
-            candidates.size() &&
-        std::all_of(
-            candidates.begin(), candidates.end(),
-            [&](const PriorityAction& action) {
-                return static_cast<std::size_t>(
-                           std::count(
-                               hidden_classification
-                                   .legal_actions.begin(),
-                               hidden_classification
-                                   .legal_actions.end(),
-                               action)) == 1;
-            });
+        hidden_information_action_key_equal &&
+        hidden_action_set_complete;
     result.hidden_repartition_bit_identical =
         bsr_samples_bit_identical(
             scout, hidden_scout) &&

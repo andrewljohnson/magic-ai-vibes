@@ -2913,6 +2913,103 @@ void test_bsr_reference_is_order_hidden_and_seed_invariant() {
         "repartition, reused seeds, or misaccounted samples");
 }
 
+void test_bsr_reference_own_top_uses_generic_hidden_invariance() {
+    const auto corpus =
+        old_school::probes::make_probe_dev_v3();
+    DecisionProbe probe =
+        find_probe(corpus, Category::BlueCounterWar);
+    old_school::PlayerState& root =
+        probe.state.players[probe.root_player];
+    const auto spare_counter = std::find(
+        root.library.begin(), root.library.end(),
+        CardId::Counterspell);
+    expect(
+        spare_counter != root.library.end(),
+        "own-top fixture has no spare Counterspell");
+    root.hand.push_back(*spare_counter);
+    root.library.erase(spare_counter);
+    for (old_school::LandPermanent& land : root.lands) {
+        land.tapped = false;
+    }
+    expect(
+        old_school::apply_priority_action(
+            probe.state, probe.root_player,
+            PriorityAction::cast_counterspell(1), false),
+        "own-top fixture could not cast its third spell");
+    probe.consecutive_passes = 0;
+    probe.candidates.clear();
+    const auto actions =
+        old_school::legal_priority_actions(
+            probe.state, probe.root_player, true);
+    for (const PriorityAction& action : actions) {
+        probe.candidates.push_back({
+            .descriptor =
+                old_school::probes::
+                    stable_priority_action_descriptor(action),
+            .action = action,
+        });
+    }
+    const Validation validation =
+        old_school::probes::validate_probe(probe);
+    expect(
+        validation.ok() && actions.size() == 4 &&
+            probe.state.stack.back().controller ==
+                probe.root_player,
+        "own-top reference fixture is not a complete legal root");
+
+    const PriorityAction pass = PriorityAction::pass();
+    const old_school::LearnedDecisionTracePoint trace_point{
+        .state = probe.state,
+        .context = {
+            .valid = true,
+            .phase = probe.phase,
+            .decision_player = probe.root_player,
+            .consecutive_passes =
+                probe.consecutive_passes,
+            .sorcery_actions = true,
+        },
+        .selected_priority_action = pass,
+    };
+    const auto legacy_classification =
+        old_school::probes::classify_bsr_trace_root(
+            trace_point, probe.root_player);
+    expect(
+        legacy_classification.eligibility ==
+            old_school::probes::BsrRootEligibility::
+                TrackedSpellOnTop,
+        "legacy BSR harvest filter accepted an own-top root");
+
+    const old_school::probes::BsrReferenceConfig config{
+        .seed = 0x2718281828ULL,
+        .scout_worlds = 1,
+        .confirmation_worlds = 1,
+        .horizon_turns = 0,
+        .rollouts_per_world = 1,
+        .evaluation_threads = 1,
+    };
+    const std::string pass_descriptor =
+        old_school::probes::
+            stable_priority_action_descriptor(pass);
+    const auto first =
+        old_school::probes::score_bsr_priority_probe(
+            probe, pass_descriptor, tiny_bsr_model(), config);
+    std::reverse(
+        probe.candidates.begin(), probe.candidates.end());
+    const auto reversed =
+        old_school::probes::score_bsr_priority_probe(
+            probe, pass_descriptor, tiny_bsr_model(), config);
+    expect(
+        first == reversed &&
+            first.scout_seed !=
+                first.confirmation_seed &&
+            first.hidden_repartition_eligible &&
+            first.hidden_repartition_bit_identical &&
+            first.accounting_passed &&
+            first.descriptor_order_invariant,
+        "generic BSR scorer inherited the legacy own-top filter "
+        "or lost an invariance");
+}
+
 void test_bsr_stable_root_key_binds_actual_and_model_not_hidden() {
     DecisionProbe probe =
         old_school::probes::
@@ -4252,6 +4349,9 @@ int main() {
                test_bsr_owner_filter_retains_binary_and_maps_action);
     runner.run("BSR reference invariances and seed split",
                test_bsr_reference_is_order_hidden_and_seed_invariant);
+    runner.run(
+        "BSR own-top generic hidden invariance",
+        test_bsr_reference_own_top_uses_generic_hidden_invariance);
     runner.run("BSR stable root identity",
                test_bsr_stable_root_key_binds_actual_and_model_not_hidden);
     runner.run("BSR paired regret math",
