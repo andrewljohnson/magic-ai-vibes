@@ -3049,6 +3049,460 @@ void test_bsr_bounded_source_accounting_smoke() {
         "frozen model");
 }
 
+old_school::probes::BsrRootScore
+make_dvr1_disagreement_evidence(
+    const DecisionProbe& probe,
+    std::string_view production_descriptor) {
+    old_school::probes::BsrReferenceConfig config;
+    config.seed = old_school::probes::kBsrReferenceSeed;
+    config.scout_worlds =
+        old_school::probes::kBsrScoutWorlds;
+    config.confirmation_worlds =
+        old_school::probes::kBsrConfirmationWorlds;
+    config.horizon_turns =
+        old_school::probes::kBsrReferenceHorizon;
+    config.rollouts_per_world = 1;
+    config.evaluation_threads = 4;
+    auto reference =
+        old_school::probes::score_bsr_priority_probe(
+            probe, production_descriptor, tiny_bsr_model(),
+            config);
+
+    std::vector<std::string> descriptors;
+    for (const auto& candidate : probe.candidates) {
+        descriptors.push_back(candidate.descriptor);
+    }
+    std::sort(descriptors.begin(), descriptors.end());
+    const auto best = std::find_if(
+        descriptors.begin(), descriptors.end(),
+        [production_descriptor](const std::string& descriptor) {
+            return descriptor != production_descriptor;
+        });
+    if (best == descriptors.end()) {
+        throw std::runtime_error(
+            "DVR1 test fixture needs a non-production action");
+    }
+
+    reference.action_count = descriptors.size();
+    reference.actual_action_index =
+        static_cast<std::size_t>(
+            std::distance(
+                descriptors.begin(),
+                std::lower_bound(
+                    descriptors.begin(), descriptors.end(),
+                    production_descriptor)));
+    reference.actual_action_descriptor =
+        std::string(production_descriptor);
+    reference.scout_best_actions = {*best};
+    reference.confirmation_best_actions = {*best};
+    reference.action_means.clear();
+    for (const std::string& descriptor : descriptors) {
+        const bool is_best = descriptor == *best;
+        reference.action_means.push_back({
+            .descriptor = descriptor,
+            .scout_mean = is_best ? 0.8 : 0.2,
+            .confirmation_mean = is_best ? 0.8 : 0.2,
+        });
+    }
+    reference.scout_actual_mean = 0.2;
+    reference.scout_best_mean = 0.8;
+    reference.confirmation_actual_mean = 0.2;
+    reference.confirmation_best_mean = 0.8;
+    reference.confirmation_regret = 0.6;
+    reference.paired_standard_error = 0.05;
+    reference.paired_lower_95 = 0.6 - 1.96 * 0.05;
+    reference.scout_confirmation_best_set_stable = true;
+    reference.actual_outside_best_sets = true;
+    return reference;
+}
+
+DecisionProbe make_dvr1_test_probe() {
+    DecisionProbe probe =
+        old_school::probes::
+            make_force_spike_policy_controls_v1()
+                .front();
+    for (auto& candidate : probe.candidates) {
+        const auto* action =
+            std::get_if<PriorityAction>(&candidate.action);
+        if (action == nullptr) {
+            throw std::runtime_error(
+                "DVR1 test root is not a Priority root");
+        }
+        candidate.descriptor =
+            old_school::probes::
+                stable_priority_action_descriptor(*action);
+    }
+    return probe;
+}
+
+old_school::probes::BsrRootKeyContext
+dvr1_test_provenance(const DecisionProbe& probe) {
+    return {
+        .game_seed = 0xD1A3E5EEDULL,
+        .block = 7,
+        .schedule_index = 11,
+        .tracked_seat = probe.root_player,
+        .tracked_starts =
+            probe.state.starting_player ==
+            probe.root_player,
+        .trace_ordinal = 29,
+    };
+}
+
+void test_dvr1_capture_is_complete_and_hidden_safe() {
+    DecisionProbe probe = make_dvr1_test_probe();
+    const std::string production =
+        old_school::probes::
+            stable_priority_action_descriptor(
+                PriorityAction::pass());
+    const auto reference =
+        make_dvr1_disagreement_evidence(
+            probe, production);
+    const std::string model_fingerprint =
+        old_school::learned_model_fingerprint(
+            tiny_bsr_model());
+    const auto provenance = dvr1_test_provenance(probe);
+    const auto captured =
+        old_school::probes::
+            capture_dvr1_owner_visible_divergence(
+                probe, production, model_fingerprint,
+                provenance, reference);
+    expect(
+        captured.captured() &&
+            captured.record_fingerprint.size() == 16 &&
+            captured.record.has_value(),
+        "DVR1 failed to capture an exact stable production/"
+        "reference disagreement");
+
+    const auto& record = *captured.record;
+    const std::string& bytes = captured.serialized_record;
+    const std::array<std::string_view, 36>
+        required_fields = {
+            "schema\t",
+            "source.game_seed\t",
+            "source.trace_ordinal\t",
+            "source.tracked_seat\t",
+            "source.tracked_starts\t",
+            "information_action_fingerprint\t",
+            "decision.owner\t",
+            "decision.active_player\t",
+            "decision.turn_number\t",
+            "decision.phase\t",
+            "decision.consecutive_passes\t",
+            "decision.owner_on_play\t",
+            "owner.hand.count\t",
+            "player.0.graveyard.count\t",
+            "player.0.exile.count\t",
+            "player.0.mana.blue\t",
+            "player.1.library_count\t",
+            "player.1.hand_count\t",
+            "stack.count\t",
+            "original_deck.0.card.0\t",
+            "legal_actions.count\t",
+            "reference_action.0.scout_q_mean\t",
+            "reference.model_fingerprint\t",
+            "reference.seed_base\t",
+            "reference.scout_seed\t",
+            "reference.confirmation_seed\t",
+            "reference.scout_worlds\t",
+            "reference.confirmation_worlds\t",
+            "reference.horizon_turns\t",
+            "reference.rollouts_per_world\t",
+            "reference.evaluation_threads\t",
+            "reference.sampled_worlds\t",
+            "reference.rollout_evaluations\t",
+            "reference.terminal_evaluations\t",
+            "reference.bootstrapped_evaluations\t",
+            "reference.paired_lower_95\t",
+        };
+    expect(
+        std::all_of(
+            required_fields.begin(), required_fields.end(),
+            [&](std::string_view field) {
+                return bytes.find(field) !=
+                       std::string::npos;
+            }) &&
+            bytes.find("revealed_opponent_hand") ==
+                std::string::npos &&
+            bytes.find("opponent_hidden") ==
+                std::string::npos &&
+            bytes.find("player.1.hand.0") ==
+                std::string::npos &&
+            record.owner_hand ==
+                [&] {
+                    auto hand =
+                        probe.state.players[
+                            probe.root_player]
+                            .hand;
+                    std::sort(hand.begin(), hand.end());
+                    return hand;
+                }() &&
+            record.players[1 - probe.root_player]
+                    .hand_size ==
+                probe.state.players[1 - probe.root_player]
+                    .hand.size() &&
+            record.stack == probe.state.stack,
+        "DVR1 serialization omitted an owner-visible field or "
+        "introduced an opponent hidden-hand field");
+
+    DecisionProbe hidden = probe;
+    auto& opponent =
+        hidden.state.players[1 - hidden.root_player];
+    const std::size_t hand_size = opponent.hand.size();
+    std::vector<CardId> hidden_cards = opponent.hand;
+    hidden_cards.insert(
+        hidden_cards.end(), opponent.library.begin(),
+        opponent.library.end());
+    if (hidden_cards.size() > 1) {
+        std::rotate(
+            hidden_cards.begin(),
+            hidden_cards.begin() + 1,
+            hidden_cards.end());
+        std::reverse(
+            hidden_cards.begin(), hidden_cards.end());
+    }
+    const auto hand_end =
+        hidden_cards.begin() +
+        static_cast<std::ptrdiff_t>(hand_size);
+    opponent.hand.assign(
+        hidden_cards.begin(), hand_end);
+    opponent.library.assign(
+        hand_end, hidden_cards.end());
+    const auto hidden_capture =
+        old_school::probes::
+            capture_dvr1_owner_visible_divergence(
+                hidden, production, model_fingerprint,
+                provenance, reference);
+    expect(
+        hidden_capture.captured() &&
+            hidden_capture.serialized_record ==
+                captured.serialized_record &&
+            hidden_capture.record_fingerprint ==
+                captured.record_fingerprint,
+        "DVR1 record changed under opponent hidden-zone "
+        "repartition");
+
+    auto changed_hand = record;
+    expect(
+        !changed_hand.owner_hand.empty(),
+        "DVR1 sensitivity fixture has no owner hand");
+    const std::size_t original_card =
+        static_cast<std::size_t>(
+            changed_hand.owner_hand.front());
+    changed_hand.owner_hand.front() =
+        static_cast<CardId>(
+            (original_card + 1) %
+            old_school::kCardCount);
+    std::sort(
+        changed_hand.owner_hand.begin(),
+        changed_hand.owner_hand.end());
+    auto changed_public_zone = record;
+    changed_public_zone
+        .players[1 - record.decision_owner]
+        .graveyard.push_back(CardId::Forest);
+    std::sort(
+        changed_public_zone
+            .players[1 - record.decision_owner]
+            .graveyard.begin(),
+        changed_public_zone
+            .players[1 - record.decision_owner]
+            .graveyard.end());
+    expect(
+        old_school::probes::
+                dvr1_owner_visible_record_fingerprint(
+                    changed_hand) !=
+            captured.record_fingerprint &&
+            old_school::probes::
+                    dvr1_owner_visible_record_fingerprint(
+                        changed_public_zone) !=
+                captured.record_fingerprint,
+        "DVR1 fingerprint ignored the owner's hand or a public "
+        "zone");
+}
+
+void test_dvr1_capture_fails_closed() {
+    DecisionProbe probe = make_dvr1_test_probe();
+    const std::string production =
+        old_school::probes::
+            stable_priority_action_descriptor(
+                PriorityAction::pass());
+    const std::string model_fingerprint =
+        old_school::learned_model_fingerprint(
+            tiny_bsr_model());
+    const auto provenance = dvr1_test_provenance(probe);
+    const auto evidence =
+        make_dvr1_disagreement_evidence(
+            probe, production);
+    const auto disposition =
+        [&](const DecisionProbe& candidate_probe,
+            std::string_view selected,
+            const old_school::probes::BsrRootScore&
+                reference) {
+            return old_school::probes::
+                capture_dvr1_owner_visible_divergence(
+                    candidate_probe, selected,
+                    model_fingerprint, provenance,
+                    reference)
+                    .disposition;
+        };
+
+    auto agreement = evidence;
+    for (auto& mean : agreement.action_means) {
+        const bool selected =
+            mean.descriptor == production;
+        mean.scout_mean = selected ? 0.8 : 0.2;
+        mean.confirmation_mean =
+            selected ? 0.8 : 0.2;
+    }
+    agreement.scout_best_actions = {production};
+    agreement.confirmation_best_actions = {production};
+    agreement.scout_actual_mean = 0.8;
+    agreement.scout_best_mean = 0.8;
+    agreement.confirmation_actual_mean = 0.8;
+    agreement.confirmation_best_mean = 0.8;
+    agreement.confirmation_regret = 0.0;
+    agreement.paired_standard_error = 0.0;
+    agreement.paired_lower_95 = 0.0;
+    agreement.actual_outside_best_sets = false;
+
+    auto unstable = evidence;
+    for (auto& mean : unstable.action_means) {
+        const bool selected =
+            mean.descriptor == production;
+        mean.scout_mean = selected ? 0.2 : 0.8;
+        mean.confirmation_mean =
+            selected ? 0.8 : 0.2;
+    }
+    unstable.confirmation_best_actions = {production};
+    unstable.scout_confirmation_best_set_stable = false;
+
+    DecisionProbe incomplete = probe;
+    incomplete.candidates.pop_back();
+    DecisionProbe unstable_descriptor = probe;
+    unstable_descriptor.candidates.front().descriptor +=
+        ".not-stable";
+    auto wrong_model = evidence;
+    wrong_model.reference_model_fingerprint += ".wrong";
+    auto wrong_worlds = evidence;
+    --wrong_worlds.scout_worlds;
+    auto wrong_horizon = evidence;
+    --wrong_horizon.horizon_turns;
+    auto wrong_threads = evidence;
+    --wrong_threads.evaluation_threads;
+    auto wrong_seed_base = evidence;
+    ++wrong_seed_base.reference_seed_base;
+    auto wrong_accounting = evidence;
+    --wrong_accounting.rollout_evaluations;
+    expect(
+        disposition(probe, production, agreement) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        ReferenceAgreement &&
+            disposition(probe, production, unstable) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        UnstableReferenceBestSet &&
+            disposition(incomplete, production, evidence) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        IncompleteActionSet &&
+            disposition(
+                unstable_descriptor, production,
+                evidence) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        IncompleteActionSet &&
+            disposition(probe, production, wrong_model) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        InconsistentReferenceEvidence &&
+            disposition(probe, production, wrong_worlds) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        InconsistentReferenceEvidence &&
+            disposition(probe, production, wrong_horizon) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        InconsistentReferenceEvidence &&
+            disposition(probe, production, wrong_threads) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        InconsistentReferenceEvidence &&
+            disposition(
+                probe, production, wrong_seed_base) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        InconsistentReferenceEvidence &&
+            disposition(
+                probe, production, wrong_accounting) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        InconsistentReferenceEvidence &&
+            disposition(
+                probe, "not-a-production-action",
+                evidence) ==
+                old_school::probes::
+                    Dvr1CaptureDisposition::
+                        ProductionDescriptorMismatch,
+        "DVR1 accepted agreement, unstable reference sets, an "
+        "incomplete action set, or a mismatched production "
+        "descriptor");
+}
+
+void test_dvr1_selector_prioritizes_blue_stack_roots() {
+    const DecisionProbe base = make_dvr1_test_probe();
+    std::vector<DecisionProbe> roots(6, base);
+    roots[0].root_deck = DeckId::Red;
+    roots[1].state.stack.clear();
+    roots[2].state.stack.back().controller =
+        roots[2].root_player;
+    roots[3].state.stack.back().controller =
+        1 - roots[3].root_player;
+    roots[4].root_player = 1;
+    roots[4].state.stack.back().controller = 0;
+    roots[5].root_deck = DeckId::Green;
+    roots[5].root_player = 1;
+    roots[5].state.stack.back().controller = 0;
+
+    const auto report =
+        old_school::probes::
+            select_dvr1_capture_roots(roots, 3);
+    const auto empty =
+        old_school::probes::
+            select_dvr1_capture_roots(roots, 0);
+    expect(
+        report.selected_indices ==
+                std::vector<std::size_t>({3, 4, 0}) &&
+            report.blue_opponent_stack_candidates == 2 &&
+            report.blue_opponent_stack_selected == 2 &&
+            report.blue_opponent_stack_skipped() == 0 &&
+            report.other_candidates == 4 &&
+            report.other_selected == 1 &&
+            report.other_skipped() == 3 &&
+            empty.selected_indices.empty() &&
+            empty.blue_opponent_stack_skipped() == 2 &&
+            empty.other_skipped() == 4,
+        "DVR1 bounded selector did not put Blue-owned "
+        "opponent-stack responses first or report skipped "
+        "coverage");
+
+    auto invalid = roots;
+    invalid.front().root_player = 2;
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            old_school::probes::
+                select_dvr1_capture_roots(
+                    invalid, 1));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    expect(
+        rejected,
+        "DVR1 bounded selector accepted an invalid decision "
+        "owner");
+}
+
 } // namespace
 
 int main() {
@@ -3146,5 +3600,11 @@ int main() {
                test_bsr_practical_gate_boundaries_are_exact);
     runner.run("BSR bounded source accounting smoke",
                test_bsr_bounded_source_accounting_smoke);
+    runner.run("DVR1 complete hidden-safe capture",
+               test_dvr1_capture_is_complete_and_hidden_safe);
+    runner.run("DVR1 fail-closed capture gate",
+               test_dvr1_capture_fails_closed);
+    runner.run("DVR1 Blue stack-root selector",
+               test_dvr1_selector_prioritizes_blue_stack_roots);
     return runner.finish();
 }

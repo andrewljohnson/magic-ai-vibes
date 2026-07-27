@@ -9664,3 +9664,121 @@ not an undeclared C16-policy change. That correction removes the unrelated
 baseline alarm and does not alter this fixture verdict. Its pooled lift read
 also concentrates the remaining Handcoded-policy deficit in Blue, reinforcing
 exact stack-response/action-evaluation harvesting as the next research target.
+
+### DVR1 complete owner-visible divergence-root capture (declared)
+
+Declared 2026-07-26 after rereading `AGENTS.md`, the post-C17
+attack-regression result, and `REVIEW.md` through its newest 17:02 PDT entry.
+This is instrumentation only. It does not train, deploy, or change C16 and
+cannot make a bot-strength claim.
+
+Repository archaeology fixes the starting evidence. The independent
+`harvest-v2` / QX lineage is reproducible in git history (`590e814`,
+`c198a5e`, `d2db290`, `057aa19`, `c2ec8ca`), and its strongest observation is
+the dual-qualified Blue-held turn-9 two-action stack binary where deployed
+C16 selected action 0 (0.22 realized win rate) over action 1 (0.55), for
+32.5 percentage points of outcome regret. QX-1's fixed ladder left the wrong
+pick unchanged after removing the shallow blend and raising worlds to 64 at
+horizon 4, then flipped at horizon 8. However, the retained evidence contains
+only opponent, turn, action indices, branch rates, and ladder Q-values. It
+does **not** contain the source game seed, trace ordinal, stable action
+descriptors, owner-visible zones, stack objects, phase/pass context, or a
+serialized state. The historical root therefore cannot be reconstructed
+exactly from the published record and must not be silently re-authored.
+
+Hypothesis: a small card-agnostic capture seam can close that provenance gap
+without exposing hidden information. Given a complete legal Priority root,
+the production action, and a deeper information-set reference whose
+independent scout and confirmation agree that production lies outside the
+best set, it will emit one immutable owner-visible record containing:
+
+- source seed/ordinal provenance and stable information/action fingerprint;
+- the decision owner, active player, turn, phase, pass count, and play/draw;
+- the owner's hand identities and both players' public permanents, graveyard,
+  exile, mana, life, hand/library counts, and public stack;
+- the complete stable legal-action descriptor set, production selection,
+  reference-best set, Q means, regret, standard error, and lower bound; and
+- original deck compositions, which define the information set but never the
+  opponent's actual hidden hand or library partition.
+
+The implementation gate is deterministic and falsifiable:
+
+1. Capturing an exact production/reference disagreement succeeds, while
+   agreement, unstable reference-best sets, incomplete action sets, or
+   mismatched production descriptors fail closed.
+2. Repartitioning only the opponent's hidden hand/library produces a
+   byte-identical record and fingerprint; changing the owner's hand or any
+   public zone changes them.
+3. The serialization contains every owner-visible field above and contains no
+   revealed-opponent-hand field or opponent hidden card identities.
+4. A bounded selector orders Blue-owned nonempty-stack responses ahead of all
+   other roots using only deck identity, decision ownership, and public stack
+   controller—not card names, card values, or Handcoded scores.
+5. Existing probe, metric, and runner suites remain `-Werror` clean.
+
+No gameplay or strength run is licensed by this declaration. After the seam
+passes focused tests, the next separately declared DVR2 run will use a frozen
+C16 artifact and fixed source schedule to harvest real Environment-v3
+production-versus-K64/H8 disagreements, with a hard root/evaluation bound and
+Blue-held opponent-stack responses as the first stratum. Its first corpus must
+include complete records; the historical turn-9 observation is a lineage
+target, not an acceptance fixture.
+
+#### DVR1 implementation result: owner-visible capture gate passed
+
+Implemented 2026-07-26 after rereading `REVIEW.md` through its newest 17:20
+PDT entry. The 17:11 review countersigned the declaration and requested that
+reference seed provenance and skipped-stratum coverage be retained; both are
+included. The 17:20 review warned that evaluation mechanisms must not recurse
+inside their own rollouts. DVR1 is a pure post-reference capture seam and is
+not called by gameplay or reference continuations, so it introduces no such
+trigger. The separately declared DVR2 runner must still carry an explicit
+simulation guard and wall-clock/evaluation bound.
+
+The implementation reuses the BSR `DecisionProbe`, stable action descriptor,
+owner-information fingerprint, K64/H8 scorer, and hidden-repartition path. A
+successful record now binds and serializes:
+
+- source seed/block/schedule/trace ordinal, play/draw, decision context, owner
+  hand, both public player states, stack, original deck compositions, and the
+  complete rules-derived legal-action descriptor set;
+- the production descriptor, stable scout/confirmation best set, every
+  descriptor's two Q means, paired regret/SE/lower bound; and
+- the reference model fingerprint, base/scout/confirmation seeds, exact
+  K64+K64/H8/one-rollout configuration, thread count, and sampled-world,
+  rollout, terminal, and bootstrap accounting.
+
+Capture recomputes the information/action fingerprint and derived reference
+seeds, requires the reference model to equal the production artifact, and
+fails closed on noncanonical action descriptors, an incomplete legal set,
+production mismatch, agreement, unstable scout/confirmation best sets, wrong
+model/configuration, or inconsistent evaluation counts. The selector derives
+deck, owner, and top stack controller from the public `DecisionProbe` instead
+of trusting caller-supplied classification fields. It stably places
+Blue-owned opponent-stack roots first and reports candidates, selections, and
+skips for both the preferred and remainder strata.
+
+Exact verification:
+
+```sh
+git diff --check
+make -j4 test-probes
+/usr/bin/time -p make test-probes
+```
+
+Results: 49/49 probe tests, 11/11 probe-metric tests, and 32/32 probe-runner
+tests passed under `-Wall -Wextra -Wpedantic -Werror`. The warm focused suite
+took 15.55 seconds wall time (14.95 user, 0.20 system). The new tests require
+byte-identical serialized records and fingerprints after opponent hidden-zone
+repartition; distinct fingerprints after changing the owner's hand or a
+public graveyard; every declared owner-visible serialization field and no
+opponent-hand identity field; all four declared fail-closed cases plus wrong
+K/H/model/accounting; and exact Blue-stack-first selection with skipped-root
+coverage.
+
+Decision: accept DVR1 as instrumentation only. It changes no gameplay,
+training, deployed C16 policy, corpus/cache identity, or strength gate and
+makes no bot-strength claim. The next research action remains a separately
+declared, hard-bounded DVR2 run over frozen C16 and a fixed source schedule,
+with Blue-held opponent-stack responses first and complete DVR1 records for
+every retained production-versus-K64/H8 disagreement.

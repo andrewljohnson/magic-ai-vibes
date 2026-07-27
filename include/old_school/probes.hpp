@@ -534,6 +534,7 @@ inline constexpr std::size_t kBsrMaximumLegalActions = 512;
 inline constexpr std::size_t kBsrScoutWorlds = 64;
 inline constexpr std::size_t kBsrConfirmationWorlds = 64;
 inline constexpr std::size_t kBsrReferenceHorizon = 8;
+inline constexpr std::size_t kBsrReferenceEvaluationThreads = 4;
 inline constexpr double kBsrDiagnosticRegretThreshold = 0.05;
 inline constexpr double kBsrPracticalRegretThreshold = 0.20;
 inline constexpr double kBsrPracticalLower95Threshold = 0.10;
@@ -586,6 +587,11 @@ struct BsrRootClassification {
 
     bool operator==(const BsrRootClassification&) const = default;
 };
+
+// Card-agnostic, lossless descriptor used by harvested Priority roots. It is
+// derived only from the rules action fields, including targets and X.
+std::string stable_priority_action_descriptor(
+    const PriorityAction& action);
 
 BsrRootClassification classify_bsr_trace_root(
     const LearnedDecisionTracePoint& point,
@@ -645,7 +651,8 @@ struct BsrReferenceConfig {
         kBsrConfirmationWorlds;
     std::size_t horizon_turns = kBsrReferenceHorizon;
     std::size_t rollouts_per_world = 1;
-    std::size_t evaluation_threads = 4;
+    std::size_t evaluation_threads =
+        kBsrReferenceEvaluationThreads;
 
     bool operator==(const BsrReferenceConfig&) const = default;
 };
@@ -678,15 +685,34 @@ bool bsr_practical_audit_gate(
     std::size_t practical_high_cost_mistakes);
 
 struct BsrRootScore {
+    struct ActionMean {
+        std::string descriptor;
+        double scout_mean = 0.0;
+        double confirmation_mean = 0.0;
+
+        bool operator==(const ActionMean&) const = default;
+    };
+
     std::string stable_id;
     std::string information_action_fingerprint;
     std::size_t action_count = 0;
     std::size_t actual_action_index = 0;
     std::string actual_action_descriptor;
+    std::string reference_model_fingerprint;
+    std::uint64_t reference_seed_base = 0;
     std::uint64_t scout_seed = 0;
     std::uint64_t confirmation_seed = 0;
+    std::size_t scout_worlds = 0;
+    std::size_t confirmation_worlds = 0;
+    std::size_t horizon_turns = 0;
+    std::size_t rollouts_per_world = 0;
+    std::size_t evaluation_threads = 0;
     std::vector<std::string> scout_best_actions;
     std::vector<std::string> confirmation_best_actions;
+    // Descriptor-keyed means retain the complete reference result needed to
+    // preserve a divergence root. Rows are canonical descriptor order and
+    // never contain a sampled opponent hidden-zone identity.
+    std::vector<ActionMean> action_means;
     double scout_actual_mean = 0.0;
     double scout_best_mean = 0.0;
     double confirmation_actual_mean = 0.0;
@@ -844,5 +870,128 @@ struct BsrAuditReport {
 BsrAuditReport audit_bsr_blue_stack_regret(
     std::shared_ptr<const LearnedModel> frozen_model,
     BsrAuditConfig config = {});
+
+// DVR1 is an instrumentation-only, owner-visible serialization boundary for
+// exact production/reference Priority disagreements. It deliberately stores
+// original deck compositions (the information-set prior) while omitting the
+// opponent's actual hidden hand and library partition.
+inline constexpr std::string_view kDvr1CaptureSchema =
+    "old-school-owner-visible-divergence-root-v1";
+
+struct Dvr1OwnerVisibleRecord {
+    std::string schema = std::string(kDvr1CaptureSchema);
+    std::string environment_revision =
+        std::string(kBsrEnvironmentRevision);
+    std::string production_model_fingerprint;
+    std::string information_action_fingerprint;
+    BsrRootKeyContext provenance;
+    DeckId owner_deck = DeckId::Green;
+    DeckId opponent_deck = DeckId::Red;
+    std::size_t decision_owner = 0;
+    std::size_t active_player = 0;
+    std::size_t starting_player = 0;
+    bool owner_on_play = false;
+    std::size_t turn_number = 0;
+    TurnPhase phase = TurnPhase::FirstMain;
+    int consecutive_passes = 0;
+    std::array<PublicPlayerState, 2> players;
+    std::vector<CardId> owner_hand;
+    std::vector<StackObject> stack;
+    std::array<std::size_t, 2> extra_turns_pending = {0, 0};
+    std::array<std::array<std::size_t, kCardCount>, 2>
+        original_deck_composition{};
+    std::vector<std::string> legal_action_descriptors;
+    std::string production_action_descriptor;
+    std::vector<std::string> reference_best_actions;
+    std::vector<BsrRootScore::ActionMean> reference_action_means;
+    std::string reference_model_fingerprint;
+    std::uint64_t reference_seed_base = 0;
+    std::uint64_t reference_scout_seed = 0;
+    std::uint64_t reference_confirmation_seed = 0;
+    std::size_t reference_scout_worlds = 0;
+    std::size_t reference_confirmation_worlds = 0;
+    std::size_t reference_horizon_turns = 0;
+    std::size_t reference_rollouts_per_world = 0;
+    std::size_t reference_evaluation_threads = 0;
+    std::size_t reference_sampled_worlds = 0;
+    std::size_t reference_rollout_evaluations = 0;
+    std::size_t reference_terminal_evaluations = 0;
+    std::size_t reference_bootstrapped_evaluations = 0;
+    double reference_regret = 0.0;
+    double paired_standard_error = 0.0;
+    double paired_lower_95 = 0.0;
+
+    bool operator==(const Dvr1OwnerVisibleRecord&) const = default;
+};
+
+enum class Dvr1CaptureDisposition : std::uint8_t {
+    Captured,
+    InvalidInput,
+    IncompleteActionSet,
+    ProductionDescriptorMismatch,
+    InconsistentReferenceEvidence,
+    UnstableReferenceBestSet,
+    ReferenceAgreement,
+};
+
+struct Dvr1CaptureResult {
+    Dvr1CaptureDisposition disposition =
+        Dvr1CaptureDisposition::InvalidInput;
+    std::optional<Dvr1OwnerVisibleRecord> record;
+    std::string serialized_record;
+    std::string record_fingerprint;
+
+    bool captured() const {
+        return disposition == Dvr1CaptureDisposition::Captured &&
+               record.has_value() &&
+               !serialized_record.empty() &&
+               !record_fingerprint.empty();
+    }
+
+    bool operator==(const Dvr1CaptureResult&) const = default;
+};
+
+// Fails closed unless the probe contains the complete legal Priority action
+// set, the production descriptor maps exactly once, and independent
+// scout/confirmation references agree on a best set that excludes production.
+Dvr1CaptureResult capture_dvr1_owner_visible_divergence(
+    const DecisionProbe& probe,
+    std::string_view production_action_descriptor,
+    std::string_view production_model_fingerprint,
+    const BsrRootKeyContext& provenance,
+    const BsrRootScore& reference);
+
+// Canonical, locale-independent record bytes and their stable FNV-1a
+// fingerprint. Serialization is intentionally one-way in DVR1: the immutable
+// bytes are the evidence artifact, while gameplay restoration remains out of
+// scope until a separately declared harvest run.
+std::string serialize_dvr1_owner_visible_record(
+    const Dvr1OwnerVisibleRecord& record);
+
+std::string dvr1_owner_visible_record_fingerprint(
+    const Dvr1OwnerVisibleRecord& record);
+
+struct Dvr1SelectorReport {
+    std::vector<std::size_t> selected_indices;
+    std::size_t blue_opponent_stack_candidates = 0;
+    std::size_t blue_opponent_stack_selected = 0;
+    std::size_t other_candidates = 0;
+    std::size_t other_selected = 0;
+
+    std::size_t blue_opponent_stack_skipped() const {
+        return blue_opponent_stack_candidates -
+               blue_opponent_stack_selected;
+    }
+
+    std::size_t other_skipped() const {
+        return other_candidates - other_selected;
+    }
+
+    bool operator==(const Dvr1SelectorReport&) const = default;
+};
+
+Dvr1SelectorReport select_dvr1_capture_roots(
+    const std::vector<DecisionProbe>& roots,
+    std::size_t maximum_roots);
 
 } // namespace old_school::probes
