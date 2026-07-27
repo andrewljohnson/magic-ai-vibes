@@ -1673,11 +1673,41 @@ struct LearnedOutputCalibrationResult {
     LearnedOutputCalibrationDiagnostics diagnostics;
 };
 
+inline constexpr std::size_t
+    kLearnedOutputCalibrationLeafCount = 2;
+inline constexpr std::size_t
+    kLearnedOutputCalibrationParameterCount = 17;
+
+struct LearnedOutputCalibrationParameters {
+    std::array<
+        std::array<
+            double,
+            kLearnedOutputCalibrationParameterCount>,
+        kLearnedOutputCalibrationLeafCount>
+        leaves{};
+
+    bool operator==(
+        const LearnedOutputCalibrationParameters&) const =
+        default;
+};
+
 LearnedOutputCalibrationResult
 calibrate_learned_value_output_layer(
     std::shared_ptr<const LearnedModel> parent,
     const std::vector<LearnedWeightedCriticTrainingExample>& examples,
     LearnedOutputCalibrationConfig config = {});
+
+// Exact OC1 persistence seam. Both operations require the frozen
+// two-leaf LegacyStateOnly Value topology. Applying parameters deep-clones
+// the parent and changes only the 16 hidden-to-output weights and scalar
+// output bias in each leaf.
+LearnedOutputCalibrationParameters
+learned_output_calibration_parameters(
+    std::shared_ptr<const LearnedModel> model);
+std::shared_ptr<const LearnedModel>
+with_learned_output_calibration_parameters(
+    std::shared_ptr<const LearnedModel> parent,
+    const LearnedOutputCalibrationParameters& parameters);
 
 // Returns an immutable deep clone with a separate, zero-initialized
 // DecisionContextV1 input path. The legacy state weights, policy tensors,

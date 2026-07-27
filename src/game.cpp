@@ -1156,6 +1156,34 @@ class LearnedModel {
         };
     }
 
+    std::array<double, kHiddenCount + 1>
+    output_calibration_parameters() const {
+        if (!ensemble_.empty()) {
+            throw std::logic_error(
+                "cannot export output parameters from a "
+                "composite Learned model");
+        }
+        std::array<double, kHiddenCount + 1> parameters{};
+        std::copy(
+            output_weights_.begin(), output_weights_.end(),
+            parameters.begin());
+        parameters.back() = output_bias_;
+        return parameters;
+    }
+
+    void set_output_calibration_parameters(
+        const std::array<double, kHiddenCount + 1>& parameters) {
+        if (!ensemble_.empty()) {
+            throw std::logic_error(
+                "cannot apply output parameters to a composite "
+                "Learned model");
+        }
+        std::copy_n(
+            parameters.begin(), kHiddenCount,
+            output_weights_.begin());
+        output_bias_ = parameters.back();
+    }
+
     void train_contextual(
         const std::vector<ContextTrainingExample>& examples,
         std::size_t epochs, double learning_rate,
@@ -2073,6 +2101,13 @@ class LearnedModel {
     friend LearnedCriticTensorFingerprints
     learned_critic_tensor_fingerprints(
         std::shared_ptr<const LearnedModel> model);
+    friend LearnedOutputCalibrationParameters
+    learned_output_calibration_parameters(
+        std::shared_ptr<const LearnedModel> model);
+    friend std::shared_ptr<const LearnedModel>
+    with_learned_output_calibration_parameters(
+        std::shared_ptr<const LearnedModel> parent,
+        const LearnedOutputCalibrationParameters& parameters);
     friend void write_learned_value_g8_bundle_atomic(
         const std::string& path,
         const LearnedValueG8Result& result);
@@ -7162,6 +7197,66 @@ calibrate_learned_value_output_layer(
         .model = std::move(candidate),
         .diagnostics = diagnostics,
     };
+}
+
+LearnedOutputCalibrationParameters
+learned_output_calibration_parameters(
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model ||
+        !model->has_output_calibration_topology()) {
+        throw std::invalid_argument(
+            "Learned output parameter export requires exactly "
+            "one top-level two-member LegacyStateOnly Value "
+            "ensemble");
+    }
+    LearnedOutputCalibrationParameters parameters;
+    for (std::size_t leaf = 0;
+         leaf < parameters.leaves.size(); ++leaf) {
+        parameters.leaves[leaf] =
+            model->ensemble_[leaf]
+                ->output_calibration_parameters();
+    }
+    return parameters;
+}
+
+std::shared_ptr<const LearnedModel>
+with_learned_output_calibration_parameters(
+    std::shared_ptr<const LearnedModel> parent,
+    const LearnedOutputCalibrationParameters& parameters) {
+    if (!parent ||
+        !parent->has_output_calibration_topology()) {
+        throw std::invalid_argument(
+            "Learned output parameter application requires "
+            "exactly one top-level two-member LegacyStateOnly "
+            "Value ensemble");
+    }
+    for (const auto& leaf : parameters.leaves) {
+        if (!std::all_of(
+                leaf.begin(), leaf.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                })) {
+            throw std::invalid_argument(
+                "Learned output parameters must be finite");
+        }
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> critic_leaves;
+    auto candidate =
+        parent->deep_clone_mutable(critic_leaves);
+    if (critic_leaves.size() !=
+        kLearnedOutputCalibrationLeafCount) {
+        throw std::runtime_error(
+            "Learned output parameter infrastructure error: "
+            "deep clone violated the two-leaf topology");
+    }
+    for (std::size_t leaf = 0;
+         leaf < critic_leaves.size(); ++leaf) {
+        critic_leaves[leaf]
+            ->set_output_calibration_parameters(
+                parameters.leaves[leaf]);
+    }
+    return candidate;
 }
 
 std::shared_ptr<const LearnedModel>

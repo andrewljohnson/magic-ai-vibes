@@ -3765,6 +3765,29 @@ TEST(learned_output_calibration_is_deterministic_and_isolated) {
     CHECK(candidate_tensors.direct_paths ==
           parent_tensors.direct_paths);
 
+    const auto parent_parameters =
+        old_school::learned_output_calibration_parameters(
+            parent);
+    const auto candidate_parameters =
+        old_school::learned_output_calibration_parameters(
+            first.model);
+    CHECK(candidate_parameters != parent_parameters);
+    const auto restored_candidate =
+        old_school::with_learned_output_calibration_parameters(
+            parent, candidate_parameters);
+    CHECK(old_school::learned_model_fingerprint(
+              restored_candidate) ==
+          old_school::learned_model_fingerprint(first.model));
+    CHECK(old_school::learned_model_component_fingerprints(
+              restored_candidate) == candidate_components);
+    CHECK(old_school::learned_critic_tensor_fingerprints(
+              restored_candidate) == candidate_tensors);
+    const auto restored_parent =
+        old_school::with_learned_output_calibration_parameters(
+            parent, parent_parameters);
+    CHECK(old_school::learned_model_fingerprint(
+              restored_parent) == parent_fingerprint);
+
     CHECK(old_school::learned_model_fingerprint(parent) ==
           parent_fingerprint);
     CHECK(old_school::learned_model_component_fingerprints(
@@ -4036,6 +4059,26 @@ TEST(learned_output_calibration_rejects_malformed_inputs) {
         static_cast<void>(
             old_school::learned_critic_tensor_fingerprints(
                 nullptr));
+    }));
+    CHECK(rejects_invalid([] {
+        static_cast<void>(
+            old_school::learned_output_calibration_parameters(
+                nullptr));
+    }));
+    CHECK(rejects_invalid([] {
+        static_cast<void>(
+            old_school::learned_output_calibration_parameters(
+                small_actor_model()));
+    }));
+    auto parameters =
+        old_school::learned_output_calibration_parameters(
+            parent);
+    parameters.leaves[0][0] =
+        std::numeric_limits<double>::quiet_NaN();
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::with_learned_output_calibration_parameters(
+                parent, parameters));
     }));
 }
 
