@@ -6312,6 +6312,442 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
     CHECK(deck_out_samples.bootstrapped_evaluations == 0);
 }
 
+TEST(priority_h0_boundary_capture_is_bit_inert_ordered_and_thread_exact) {
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
+    };
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    CHECK(actions.size() == 4);
+
+    old_school::LearnedSearchConfig default_off = {
+        .seed = 0xAC1B0A0D4ULL,
+        .worlds = 2,
+        .rollouts_per_world = 2,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .blend_shallow_prior = false,
+        .evaluation_threads = 4,
+    };
+    CHECK(!default_off.capture_priority_h0_boundaries);
+    const auto model = small_actor_model();
+    const auto before =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, default_off);
+
+    auto capture_parallel = default_off;
+    capture_parallel.capture_priority_h0_boundaries = true;
+    const auto captured =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, capture_parallel);
+    const auto subsequent_default =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, default_off);
+
+    const auto check_scoring_bits =
+        [](const old_school::LearnedActionSamples& left,
+           const old_school::LearnedActionSamples& right) {
+            CHECK(left.q_samples.size() ==
+                  right.q_samples.size());
+            for (std::size_t action = 0;
+                 action < left.q_samples.size(); ++action) {
+                CHECK(left.q_samples[action].size() ==
+                      right.q_samples[action].size());
+                for (std::size_t sample = 0;
+                     sample < left.q_samples[action].size();
+                     ++sample) {
+                    CHECK(std::bit_cast<std::uint64_t>(
+                              left.q_samples[action][sample]) ==
+                          std::bit_cast<std::uint64_t>(
+                              right.q_samples[action][sample]));
+                }
+            }
+            CHECK(left.exact_priority_aggregate_scores.size() ==
+                  right.exact_priority_aggregate_scores.size());
+            for (std::size_t action = 0;
+                 action <
+                 left.exact_priority_aggregate_scores.size();
+                 ++action) {
+                CHECK(std::bit_cast<std::uint64_t>(
+                          left.exact_priority_aggregate_scores[
+                              action]) ==
+                      std::bit_cast<std::uint64_t>(
+                          right.exact_priority_aggregate_scores[
+                              action]));
+            }
+            CHECK(left.sampled_worlds ==
+                  right.sampled_worlds);
+            CHECK(left.rollout_evaluations ==
+                  right.rollout_evaluations);
+            CHECK(left.terminal_evaluations ==
+                  right.terminal_evaluations);
+            CHECK(left.bootstrapped_evaluations ==
+                  right.bootstrapped_evaluations);
+        };
+    check_scoring_bits(before, captured);
+    check_scoring_bits(before, subsequent_default);
+    CHECK(before.priority_h0_boundaries.empty());
+    CHECK(subsequent_default.priority_h0_boundaries.empty());
+    CHECK(captured.priority_h0_boundaries.size() ==
+          actions.size());
+    CHECK(captured.rollout_evaluations ==
+          actions.size() * 4);
+    CHECK(captured.terminal_evaluations +
+              captured.bootstrapped_evaluations ==
+          captured.rollout_evaluations);
+    for (std::size_t action = 0; action < actions.size();
+         ++action) {
+        CHECK(captured.priority_h0_boundaries[action].size() ==
+              4);
+        for (std::size_t sample = 0; sample < 4; ++sample) {
+            CHECK(std::bit_cast<std::uint64_t>(
+                      captured.priority_h0_boundaries[action]
+                                                     [sample]
+                                                         .continuation_score) ==
+                  std::bit_cast<std::uint64_t>(
+                      captured.q_samples[action][sample]));
+        }
+    }
+
+    auto capture_serial = capture_parallel;
+    capture_serial.evaluation_threads = 1;
+    const auto serial =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, capture_serial);
+    check_scoring_bits(serial, captured);
+    CHECK(serial.priority_h0_boundaries ==
+          captured.priority_h0_boundaries);
+
+    auto reversed_actions = actions;
+    std::reverse(
+        reversed_actions.begin(), reversed_actions.end());
+    const auto reversed =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0,
+            reversed_actions, model, capture_parallel);
+    CHECK(reversed.priority_h0_boundaries.size() ==
+          captured.priority_h0_boundaries.size());
+    for (std::size_t action = 0; action < actions.size();
+         ++action) {
+        const std::size_t original =
+            actions.size() - action - 1;
+        CHECK(reversed.priority_h0_boundaries[action] ==
+              captured.priority_h0_boundaries[original]);
+        CHECK(reversed.q_samples[action] ==
+              captured.q_samples[original]);
+        CHECK(std::bit_cast<std::uint64_t>(
+                  reversed.exact_priority_aggregate_scores[
+                      action]) ==
+              std::bit_cast<std::uint64_t>(
+                  captured.exact_priority_aggregate_scores[
+                      original]));
+    }
+}
+
+TEST(priority_h0_boundary_prepares_exact_next_turn_without_acting) {
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        std::vector<old_school::CardId>{
+            old_school::CardId::Forest,
+        },
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+        },
+    };
+    old_school::GameState state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 4;
+    state.players[0].life = 19;
+    state.players[0].graveyard = decks[0];
+    state.players[1].life = 7;
+    state.players[1].library = decks[1];
+
+    const auto model = context_sensitive_value_model();
+    const old_school::LearnedSearchConfig capture = {
+        .seed = 0xAC1B0A0D5ULL,
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = false,
+        .evaluation_threads = 1,
+        .capture_priority_h0_boundaries = true,
+    };
+    const auto samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            {old_school::PriorityAction::pass()},
+            model, capture);
+    CHECK(samples.priority_h0_boundaries.size() == 1);
+    CHECK(samples.priority_h0_boundaries[0].size() == 1);
+    const auto& boundary =
+        samples.priority_h0_boundaries[0][0];
+    CHECK(!boundary.terminal);
+    CHECK(boundary.state.turn_number == 5);
+    CHECK(boundary.state.active_player == 1);
+    CHECK(boundary.state.active_player != 0);
+    CHECK(boundary.state.players[1].library.empty());
+    CHECK(boundary.state.players[1].hand ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::Mountain});
+    CHECK(boundary.state.stats[1].cards_drawn == 1);
+    CHECK(boundary.state.players[1].lands.empty());
+    CHECK(!boundary.state.players[1].land_played_this_turn);
+    CHECK(boundary.state.stats[1].decisions == 0);
+    const old_school::LearnedDecisionContext expected_context = {
+        .valid = true,
+        .phase = old_school::TurnPhase::FirstMain,
+        .decision_player = 1,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    CHECK(boundary.context == expected_context);
+
+    const double root_perspective =
+        old_school::learned_contextual_critic_value(
+            boundary.state, 0, boundary.context, model);
+    const double active_perspective =
+        old_school::learned_contextual_critic_value(
+            boundary.state, 1, boundary.context, model);
+    CHECK(std::bit_cast<std::uint64_t>(
+              boundary.continuation_score) ==
+          std::bit_cast<std::uint64_t>(root_perspective));
+    CHECK(std::bit_cast<std::uint64_t>(
+              boundary.continuation_score) !=
+          std::bit_cast<std::uint64_t>(active_perspective));
+    CHECK(std::bit_cast<std::uint64_t>(
+              samples.q_samples[0][0]) ==
+          std::bit_cast<std::uint64_t>(
+              boundary.continuation_score));
+    CHECK(samples.terminal_evaluations == 0);
+    CHECK(samples.bootstrapped_evaluations == 1);
+
+    auto first_turn_skip = old_school::GameState{};
+    first_turn_skip.active_player = 1;
+    first_turn_skip.starting_player = 0;
+    first_turn_skip.turn_number = 0;
+    first_turn_skip.players[0].library = decks[0];
+    first_turn_skip.players[1].graveyard = decks[1];
+    const auto skipped =
+        old_school::learned_priority_action_samples(
+            first_turn_skip, decks, 1, true,
+            old_school::TurnPhase::SecondMain, 1,
+            {old_school::PriorityAction::pass()},
+            model, capture);
+    const auto& skipped_boundary =
+        skipped.priority_h0_boundaries[0][0];
+    CHECK(!skipped_boundary.terminal);
+    CHECK(skipped_boundary.state.turn_number == 1);
+    CHECK(skipped_boundary.state.active_player == 0);
+    CHECK(skipped_boundary.state.players[0].hand.empty());
+    CHECK(skipped_boundary.state.players[0].library ==
+          decks[0]);
+    CHECK(skipped_boundary.state.stats[0].cards_drawn == 0);
+
+    auto extra_turn = old_school::GameState{};
+    extra_turn.active_player = 0;
+    extra_turn.starting_player = 0;
+    extra_turn.turn_number = 4;
+    extra_turn.extra_turns_pending[0] = 1;
+    extra_turn.players[0].library = decks[0];
+    extra_turn.players[1].graveyard = decks[1];
+    const auto extra =
+        old_school::learned_priority_action_samples(
+            extra_turn, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            {old_school::PriorityAction::pass()},
+            model, capture);
+    const auto& extra_boundary =
+        extra.priority_h0_boundaries[0][0];
+    CHECK(!extra_boundary.terminal);
+    CHECK(extra_boundary.state.turn_number == 5);
+    CHECK(extra_boundary.state.active_player == 0);
+    CHECK(extra_boundary.state.extra_turns_pending[0] == 0);
+    CHECK(extra_boundary.state.players[0].library.empty());
+    CHECK(extra_boundary.state.players[0].hand ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::Forest});
+    CHECK(extra_boundary.state.stats[0].cards_drawn == 1);
+    CHECK(extra_boundary.state.players[0].lands.empty());
+    CHECK(extra_boundary.state.stats[0].decisions == 0);
+
+    auto invalid = capture;
+    invalid.horizon_turns = 1;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_priority_action_samples(
+                    state, decks, 0, true,
+                    old_school::TurnPhase::SecondMain, 1,
+                    {old_school::PriorityAction::pass()},
+                    model, invalid));
+        },
+        "requires horizon zero"));
+}
+
+TEST(priority_h0_boundary_preserves_early_and_next_draw_terminals) {
+    const auto model = small_value_model();
+    const old_school::LearnedSearchConfig capture = {
+        .seed = 0xAC1B0A0D6ULL,
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = false,
+        .evaluation_threads = 1,
+        .capture_priority_h0_boundaries = true,
+    };
+
+    const std::array<std::vector<old_school::CardId>, 2>
+        lethal_decks = {
+            std::vector<old_school::CardId>{
+                old_school::CardId::Forest,
+            },
+            std::vector<old_school::CardId>{
+                old_school::CardId::Mountain,
+                old_school::CardId::LightningBolt,
+            },
+        };
+    old_school::GameState lethal;
+    lethal.active_player = 1;
+    lethal.starting_player = 1;
+    lethal.turn_number = 10;
+    lethal.next_stack_object_id = 2;
+    lethal.players[0].life = 3;
+    lethal.players[0].graveyard = lethal_decks[0];
+    lethal.players[1].lands = {
+        {
+            .card = old_school::CardId::Mountain,
+            .tapped = true,
+        },
+    };
+    lethal.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::LightningBolt,
+            .controller = 1,
+            .target =
+                old_school::Target::player_target(0),
+            .spell_target = std::nullopt,
+        },
+    };
+    const auto lethal_samples =
+        old_school::learned_priority_action_samples(
+            lethal, lethal_decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 1,
+            {old_school::PriorityAction::pass()},
+            model, capture);
+    const auto& lethal_boundary =
+        lethal_samples.priority_h0_boundaries[0][0];
+    CHECK(lethal_boundary.terminal);
+    CHECK(!lethal_boundary.context.valid);
+    CHECK(lethal_boundary.state.turn_number == 10);
+    CHECK(lethal_boundary.state.active_player == 1);
+    CHECK(lethal_boundary.state.players[0].life == 0);
+    CHECK(lethal_boundary.continuation_score == 0.0);
+    CHECK(lethal_samples.q_samples[0][0] == 0.0);
+    CHECK(lethal_samples.terminal_evaluations == 1);
+    CHECK(lethal_samples.bootstrapped_evaluations == 0);
+
+    const std::array<std::vector<old_school::CardId>, 2>
+        draw_decks = {
+            std::vector<old_school::CardId>{
+                old_school::CardId::Forest,
+            },
+            std::vector<old_school::CardId>{
+                old_school::CardId::Mountain,
+            },
+        };
+    old_school::GameState empty_draw;
+    empty_draw.active_player = 0;
+    empty_draw.starting_player = 0;
+    empty_draw.turn_number = 4;
+    empty_draw.players[0].graveyard = draw_decks[0];
+    empty_draw.players[1].graveyard = draw_decks[1];
+    const auto draw_samples =
+        old_school::learned_priority_action_samples(
+            empty_draw, draw_decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            {old_school::PriorityAction::pass()},
+            model, capture);
+    const auto& draw_boundary =
+        draw_samples.priority_h0_boundaries[0][0];
+    CHECK(draw_boundary.terminal);
+    CHECK(!draw_boundary.context.valid);
+    CHECK(draw_boundary.state.turn_number == 5);
+    CHECK(draw_boundary.state.active_player == 1);
+    CHECK(draw_boundary.state.players[1].library.empty());
+    CHECK(draw_boundary.state.players[1].hand.empty());
+    CHECK(draw_boundary.state.stats[1].cards_drawn == 0);
+    CHECK(draw_boundary.continuation_score == 1.0);
+    CHECK(draw_samples.q_samples[0][0] == 1.0);
+    CHECK(draw_samples.terminal_evaluations == 1);
+    CHECK(draw_samples.bootstrapped_evaluations == 0);
+}
+
+TEST(priority_h0_boundary_capture_rejects_non_priority_samplers) {
+    const auto attack =
+        attack_evaluation_fixture(
+            old_school::CardId::GrizzlyBears);
+    const old_school::LearnedSearchConfig attack_capture = {
+        .seed = 0xAC1B0A0D7ULL,
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::UnifiedActor,
+        .blend_shallow_prior = false,
+        .evaluation_threads = 1,
+        .capture_priority_h0_boundaries = true,
+    };
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_binary_attack_samples(
+                    attack.state, attack.decks, 0, {}, 1, {},
+                    small_actor_model(), attack_capture));
+        },
+        "unavailable for Attack"));
+
+    const auto block = block_evaluation_fixture();
+    const old_school::LearnedSearchConfig block_capture = {
+        .seed = 0xAC1B0A0D8ULL,
+        .worlds = 1,
+        .rollouts_per_world = 1,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = false,
+        .evaluation_threads = 1,
+        .capture_priority_h0_boundaries = true,
+    };
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_binary_block_samples(
+                    block.state, block.decks, 1, 1, 2,
+                    small_value_model(), block_capture));
+        },
+        "unavailable for Block"));
+}
+
 TEST(generic_binary_attack_samples_use_deployed_combat_and_obey_moat) {
     const DeterminizationFixture fixture =
         attack_evaluation_fixture(old_school::CardId::GrizzlyBears);

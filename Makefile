@@ -29,6 +29,7 @@ OUTPUT_CALIBRATION_RUNNER_SOURCE := src/output_calibration_runner.cpp
 OC1_ACTION_EVAL_SOURCE := src/oc1_action_eval.cpp
 OC1_ACTION_SCORING_SOURCE := src/oc1_action_scoring.cpp
 OC1_ACTION_REGRESSION_SOURCE := src/oc1_action_regression.cpp
+AC1_TEACHER_AUDIT_SOURCE := src/ac1_teacher_audit.cpp
 WEB_BRIDGE_SOURCE := src/web_bridge.cpp
 SIMULATOR := $(BUILD_DIR)/old-school-sim
 TEST_RUNNER := $(BUILD_DIR)/old-school-tests
@@ -61,6 +62,8 @@ OC1_ACTION_EVAL_TEST_RUNNER := $(BUILD_DIR)/old-school-oc1-action-eval-tests
 OC1_ACTION_SCORING_TEST_RUNNER := $(BUILD_DIR)/old-school-oc1-action-scoring-tests
 OC1_ACTION_REGRESSION_TEST_RUNNER := $(BUILD_DIR)/old-school-oc1-action-regression-tests
 OC1_ACTION_REGRESSION := $(BUILD_DIR)/old-school-oc1-action-regression
+AC1_TEACHER_AUDIT_TEST_RUNNER := $(BUILD_DIR)/old-school-ac1-teacher-audit-tests
+AC1_TEACHER_AUDIT := $(BUILD_DIR)/old-school-ac1-teacher-audit
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 WEB_BRIDGE_TEST_RUNNER := $(BUILD_DIR)/old-school-web-bridge-tests
 PROBE_HEADER_DEPENDENTS := \
@@ -81,7 +84,7 @@ LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -186,6 +189,15 @@ $(OC1_ACTION_REGRESSION_TEST_RUNNER): $(OC1_ACTION_REGRESSION_LINK_SOURCES) test
 $(OC1_ACTION_REGRESSION): $(OC1_ACTION_REGRESSION_LINK_SOURCES) src/oc1_action_regression_main.cpp $(OC1_ACTION_REGRESSION_HEADERS) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(OC1_ACTION_REGRESSION_LINK_SOURCES) src/oc1_action_regression_main.cpp -o $@
 
+AC1_TEACHER_AUDIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(AC1_TEACHER_AUDIT_SOURCE)
+AC1_TEACHER_AUDIT_HEADERS := include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp include/old_school/oc1_action_scoring.hpp include/old_school/oc1_action_regression.hpp include/old_school/ac1_teacher_audit.hpp
+
+$(AC1_TEACHER_AUDIT_TEST_RUNNER): $(AC1_TEACHER_AUDIT_LINK_SOURCES) tests/test_ac1_teacher_audit.cpp $(AC1_TEACHER_AUDIT_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AC1_TEACHER_AUDIT_LINK_SOURCES) tests/test_ac1_teacher_audit.cpp -o $@
+
+$(AC1_TEACHER_AUDIT): $(AC1_TEACHER_AUDIT_LINK_SOURCES) src/ac1_teacher_audit_main.cpp $(AC1_TEACHER_AUDIT_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AC1_TEACHER_AUDIT_LINK_SOURCES) src/ac1_teacher_audit_main.cpp -o $@
+
 $(WEB_BRIDGE): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/web_bridge.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp -o $@
 
@@ -195,7 +207,7 @@ $(WEB_BRIDGE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BR
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
@@ -222,6 +234,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(OC1_ACTION_EVAL_TEST_RUNNER)
 	./$(OC1_ACTION_SCORING_TEST_RUNNER)
 	./$(OC1_ACTION_REGRESSION_TEST_RUNNER)
+	./$(AC1_TEACHER_AUDIT_TEST_RUNNER)
 	./$(WEB_BRIDGE_TEST_RUNNER)
 	sh tests/test_cli.sh ./$(SIMULATOR)
 	sh tests/test_capture_once.sh
@@ -353,6 +366,18 @@ test-oc1-action-regression: $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_RE
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'Usage: old-school-oc1-action-regression' >/dev/null
+
+ac1-teacher-audit: $(AC1_TEACHER_AUDIT)
+
+test-ac1-teacher-audit: $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT)
+	./$(AC1_TEACHER_AUDIT_TEST_RUNNER)
+	@set +e; output=`./$(AC1_TEACHER_AUDIT) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'AC1-T0 CLI accepted an argument\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage: old-school-ac1-teacher-audit' >/dev/null
 
 test-web: $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 	./$(WEB_BRIDGE_TEST_RUNNER)

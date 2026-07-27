@@ -21077,6 +21077,11 @@ void validate_search_config(
         throw std::invalid_argument(
             "Learned search evaluation threads must be in [1, 64]");
     }
+    if (config.capture_priority_h0_boundaries &&
+        config.horizon_turns != 0) {
+        throw std::invalid_argument(
+            "Priority H0 boundary capture requires horizon zero");
+    }
 }
 
 std::size_t checked_rollout_evaluations(
@@ -21250,6 +21255,7 @@ LearnedActionSamples learned_priority_action_samples(
         double shallow_prior = 0.0;
         double continuation = 0.0;
         bool terminal = false;
+        std::optional<LearnedPriorityH0Boundary> h0_boundary;
     };
     std::vector<std::vector<double>> shallow_priors(
         candidates.size(),
@@ -21337,17 +21343,46 @@ LearnedActionSamples learned_priority_action_samples(
         if (config.value_priority_residual_weight != 0.0) {
             score += priority_residuals[action_index];
         }
+        std::optional<LearnedPriorityH0Boundary> h0_boundary;
+        if (config.capture_priority_h0_boundaries) {
+            LearnedDecisionContext context;
+            if (!terminal_evaluation) {
+                context = {
+                    .valid = true,
+                    .phase = TurnPhase::FirstMain,
+                    .decision_player =
+                        simulation.state_.active_player,
+                    .consecutive_passes = 0,
+                    .sorcery_actions = true,
+                };
+            }
+            h0_boundary = LearnedPriorityH0Boundary{
+                .state = simulation.state_,
+                .context = context,
+                .continuation_score = continuation,
+                .terminal = terminal_evaluation,
+            };
+        }
         return {
             .q_score = score,
             .shallow_prior = shallow_prior,
             .continuation = continuation,
             .terminal = terminal_evaluation,
+            .h0_boundary = std::move(h0_boundary),
         };
     };
 
+    if (config.capture_priority_h0_boundaries) {
+        result.priority_h0_boundaries.resize(
+            candidates.size());
+    }
     if (config.evaluation_threads == 1) {
         for (auto& samples : result.q_samples) {
             samples.reserve(samples_per_action);
+        }
+        for (auto& boundaries :
+             result.priority_h0_boundaries) {
+            boundaries.reserve(samples_per_action);
         }
         for (std::size_t action_index = 0;
              action_index < candidates.size(); ++action_index) {
@@ -21371,6 +21406,16 @@ LearnedActionSamples learned_priority_action_samples(
                         evaluation.shallow_prior;
                     continuations[action_index][sample_index] =
                         evaluation.continuation;
+                    if (config.capture_priority_h0_boundaries) {
+                        if (!evaluation.h0_boundary.has_value()) {
+                            throw std::logic_error(
+                                "Priority H0 boundary capture is "
+                                "missing a serial cell");
+                        }
+                        result.priority_h0_boundaries[action_index]
+                                                     .push_back(
+                            *evaluation.h0_boundary);
+                    }
                     ++result.rollout_evaluations;
                     if (evaluation.terminal) {
                         ++result.terminal_evaluations;
@@ -21383,6 +21428,10 @@ LearnedActionSamples learned_priority_action_samples(
     } else {
         for (auto& samples : result.q_samples) {
             samples.resize(samples_per_action);
+        }
+        for (auto& boundaries :
+             result.priority_h0_boundaries) {
+            boundaries.resize(samples_per_action);
         }
         std::vector<unsigned char> terminal_flags(
             expected_evaluations, 0);
@@ -21424,6 +21473,16 @@ LearnedActionSamples learned_priority_action_samples(
                         continuations[action_index]
                                      [sample_index] =
                             result_cell.continuation;
+                        if (config.capture_priority_h0_boundaries) {
+                            if (!result_cell.h0_boundary.has_value()) {
+                                throw std::logic_error(
+                                    "Priority H0 boundary capture is "
+                                    "missing a parallel cell");
+                            }
+                            result.priority_h0_boundaries[action_index]
+                                                         [sample_index] =
+                                *result_cell.h0_boundary;
+                        }
                         terminal_flags[evaluation] =
                             result_cell.terminal ? 1U : 0U;
                     } catch (...) {
@@ -21497,6 +21556,10 @@ LearnedActionSamples learned_binary_attack_samples(
     std::shared_ptr<const LearnedModel> model,
     LearnedSearchConfig config) {
     validate_search_config(config, model);
+    if (config.capture_priority_h0_boundaries) {
+        throw std::invalid_argument(
+            "Priority H0 boundary capture is unavailable for Attack");
+    }
     validate_binary_attack_context(
         state, attacking_player, selected_attackers, subject,
         remaining_attackers);
@@ -21672,6 +21735,10 @@ LearnedActionSamples learned_binary_block_samples(
     std::shared_ptr<const LearnedModel> model,
     LearnedSearchConfig config) {
     validate_search_config(config, model);
+    if (config.capture_priority_h0_boundaries) {
+        throw std::invalid_argument(
+            "Priority H0 boundary capture is unavailable for Block");
+    }
     const std::size_t attacking_player =
         validate_binary_block_context(
             state, defending_player, attacker, blocker);

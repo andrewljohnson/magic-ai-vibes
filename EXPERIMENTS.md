@@ -11585,3 +11585,119 @@ preregistered, all-five-deck, all-legal-action Priority-head fit with the
 critic and all non-Priority heads frozen. A scientific failure closes this
 teacher and redirects the next treatment to a genuinely different
 Learned-only self-play objective; no gameplay seed is opened in either case.
+
+#### AC1-T0 implementation freeze addendum
+
+Frozen 2026-07-26 22:52 PDT after the implementation-only review. This
+addendum licenses the one scientific command above; it reports no AC1 score
+and opens no scientific or gameplay seed.
+
+The executable has no knobs. Its physical Priority-root manifest, in stable
+report order, is pinned below. `IA` is the existing information/action
+fingerprint. `Contract` is the SHA-256 of the complete factory output:
+stable ID, category, decision kind, decks, root player, phase/pass context,
+full state, original decks, ordered descriptors, complete typed Priority
+actions, and harvest metadata.
+
+| Stable ID | IA | Contract |
+| --- | --- | --- |
+| `field.green.begin-combat-growth-tapped-air.v1` | `0fe2f0471ba9019a` | `95f65b5658e44f5464cb02aa5d1efa25aa8289135661d32ddca97853c369c364` |
+| `field.green.second-main-sick-bear-growth.v1` | `6bf340aaaca49e8a` | `e1b8ee97281311efa4270a42ca21de583c0b3a829835415ac1c15b24403df689` |
+| `green.begin-combat-growth-targets.v3` | `e818f6ca92730bb4` | `df518a8176ae8942963116058a9e08a7408b6107f72a6671837e5eac3779424c` |
+| `green.bolt-on-bear-response.v3` | `f21baf227fe0161f` | `02f5077bee388f6b6437a45a7ccceda5a9c3bb9147bd91ad8c1b4c31c46b81fc` |
+| `green.develop-bears.v3` | `13f0067204d7daf9` | `6a4e8f5fab81f966de2674111c567b96883537cf9e3c93dd4c1805f6c251c9d3` |
+| `green.second-main-growth-options.v3` | `612358f4590a4f23` | `f7f422d7bad3c9d0abe67f0254801f6163b5832d2ff534f31d6a1f7e0752cd68` |
+| `red.bolt-blocker.v3` | `59ca1ec298807937` | `396099d98558db7afa4c6bdaa230691269d3e02185e96a8a59d22719cd4f392f` |
+| `red.bolt-face-lethal.v3` | `c0a25e7c6ad3992f` | `014204bde41dd4a76e8282bb272f3012caaf6bb3a24b59332821521217a1890f` |
+| `red.finish-damaged-air.v3` | `1478f77ad89ad54a` | `f0f84a58cd4627cab41623ce46d5715b28169a800ceaa164bfcbaeebcdde1af2` |
+| `red.stack-race.v3` | `249de389db436bf5` | `a8315b402d1594156e5d597852f9e5e4cb7b29aaab3331932ed092df67a982e0` |
+| `blue.counter-fire-elemental.v3` | `6c90355960714c47` | `7e683fac8c5f6e6add8f2720a255498d083af0ec91db02cafdafc67cd8840b6d` |
+| `blue.counter-lethal-bolt.v3` | `30ff11b9ec056b21` | `e8cfd9e9ab30682f5d002788acbcebe3633b313490cfeaefcb51ce3901c4e076` |
+| `blue.counter-war.v3` | `fc276ae226a9f512` | `49f7e5a00e93af415ad2ce78e91079707312fbd93c659a986b9fde94f641fce3` |
+| `control.blue.braingeyser-x0.v1` | `a68cd5b38da84990` | `c62588ebe6378ec8a86405f993ae4b43baa9f76fa73b9467ddc8762bffc156cb` |
+| `control.blue.counter-redundant-same-target.v1` | `faf53e39aba9e69b` | `bc8111f01e70652d4cadb0c596b95712eecd200e5525e44be4139d39dc238738` |
+| `control.blue.counter-same-target-after-intervening-counter.v1` | `7a6e19b2b016fb58` | `103b8900b5903f02437a0ad0af093398ae9f4ee8ddd7ea3f1982c3b2fc842d1f` |
+| `control.blue.force-spike-live-gray-ogre.v1` | `b792d7434096d2cc` | `3b40f3d75c7192c5a1e0d1278981dd9acefc6a0542d84c8976d59b30da4c6a30` |
+| `control.blue.force-spike-payable-gray-ogre.v1` | `8e24d4696a7c2ad5` | `5dace3436bc53eb64eb8331771a96c14fd0c40d668d37c1f9e714042a521bff1` |
+| `white.avoid-redundant-moat.v3` | `9057eeb3a051d05a` | `d8a6262824b75b091064fdd8bdb127d3a96be1b69c8ba9cdb7153260b1f6eeb0` |
+| `white.emergency-moat.v3` | `dd622f3af7e12e88` | `18e8b000842160cd68ea422e25329ccd51c1303c02dd446f63021a42310d7d03` |
+| `white.establish-millstone.v3` | `01f521b19b58c5f3` | `2360a3cbfbdb30990a43a63705805e27858290109c5d692d53fd05b3ff3ee094` |
+| `white.mill-before-draw.v3` | `7a7bfb7ff8a0cb56` | `cdbdbf97b88a92e435ddabc60320554479b8f361d6af1e3fe9f43b01b49a5370` |
+| `ru.second-main-blocker-development.v3` | `93137492d8498321` | `1bdfddfd27e32072f5d17528f98c46f720c98aa4689b2e03d0b9dc131724ce70` |
+| `ru.disintegrate-player-x.v3` | `6345aec096735eb9` | `4997260699a9b3305c353aec3dfcc6d33864a05cf269f9ea56c27f072c671424` |
+| `ru.second-main-land-colors.v3` | `c99c947e9e9eb992` | `be7e1c4fe8587bc83e5af05d5a054ad42846d0ba68a86f059d06363813cec276` |
+| `validation.ru.disintegrate-hold-x0.v1` | `04d02e0ea36d34be` | `d6cb73bd54a52bf86489fd4322152e1a67b125f83f2c3359e2a61d090c65135a` |
+
+The manifest is exactly 26 physical Priority roots by deck
+Green/Red/Blue/White/RU = `6/4/8/4/4`. The logical dev-v3 census remains
+four per deck. Logical ID
+`blue.force-spike-tapped-out-gray-ogre.v3` is proven physically identical
+to `control.blue.force-spike-live-gray-ogre.v1` after ignoring only the
+stable ID; it reuses the latter's rows and seed and is never sampled or
+counted twice. The one excluded Attack census root is
+`ru.flying-men-moat-attack.v3`, IA `41172fde564f86ea`.
+
+The implementation adds a default-off H0 Priority-boundary capture seam.
+With capture off, existing scores, aggregate IEEE bits, accounting, and the
+subsequent RNG path are unchanged. Capture is legal only for H0 Priority
+evaluation. It retains the already-computed earlier terminal or canonical
+next-turn First Main state and does not make another model call or play an
+action on the prepared turn. The scorer preserves caller action order
+through the engine, canonicalizes only the returned evidence rows, and uses
+an AC1-local finite, duplicate-rejecting, IEEE-bit-exact max-support
+definition. Shared frozen OC1 scoring is untouched.
+
+The evidence schema is
+`old-school-ac1-t0-next-turn-evidence-v1`, at the fixed path
+`build/experiments/old-school-ac1-t0-next-turn-v1.evidence.tsv`. It stores
+canonical `metadata`, `manifest`, `scores`, `contrasts`, and `integrity`
+sections with a SHA-256 for each section and the pre-footer payload, followed
+by a SHA-256 of the complete file for stdout. Every physical C16/OC1 action
+retains its aggregate IEEE bits, all 64 raw IEEE-bit samples, and 64
+canonical redacted H0 state hashes, plus support and terminal/bootstrap
+accounting. Canonical artifact paths—not absolute worktree paths—enter the
+hashes.
+
+The destination and `.tmp` must both be absent before model loading and are
+checked again at publication. Publication uses a same-directory, fsynced,
+exclusive temporary and an atomic no-replace hard link. All allocation,
+hashing, and summary rendering happen before that commit point. A complete
+exit-0 or exit-1 result is published before its pre-rendered summary is
+emitted through a no-throw path. Exit 2 publishes no bundle and emits no
+scores, supports, contrasts, or scientific verdict. Existing targets,
+temporary files, and symlinks are refused.
+
+Implementation-only verification, with the fixed evidence target and
+temporary confirmed absent before and after:
+
+- `make -B -j4 test-ac1-teacher-audit`: 11/11 focused tests passed and the
+  no-knob CLI rejected an extra argument with exit 2.
+- `./build/old-school-tests`: 159/159 passed.
+- `make -j4 test-oc1-action-scoring`: 7/7 passed.
+- `c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror
+  -fsanitize=address,undefined -fno-omit-frame-pointer src/game.cpp
+  src/learned_iteration.cpp src/probes.cpp src/dvr1_replay.cpp
+  src/probe_eval.cpp src/probe_runner.cpp src/audit_common.cpp
+  src/artifact_integrity.cpp src/output_calibration.cpp
+  src/output_calibration_artifact.cpp src/oc1_action_scoring.cpp
+  src/ac1_teacher_audit.cpp tests/test_ac1_teacher_audit.cpp -o
+  build/old-school-ac1-teacher-audit-tests-sanitized`, then
+  `ASAN_OPTIONS=detect_leaks=0
+  ./build/old-school-ac1-teacher-audit-tests-sanitized`: 11/11 passed with
+  AddressSanitizer and UndefinedBehaviorSanitizer clean.
+- `git diff --check`: clean.
+
+Independent review gave implementation GO with no remaining P0/P1 and kept
+the scientific command on HOLD only until this addendum is committed. A
+nonblocking P2 remains: bundle validation trusts the construct-derived
+contrast/support fields rather than independently rederiving them from its
+raw rows. Construction derives them directly, both full constructions must
+be bit-identical, and the raw bundle permits independent recomputation, so
+this does not weaken the frozen result path.
+
+After the commit containing this addendum is pushed, the sole next action is
+exactly:
+
+```sh
+./build/old-school-ac1-teacher-audit
+```

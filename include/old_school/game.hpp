@@ -749,6 +749,21 @@ struct LearnedSearchConfig {
     // concurrently; sample order, seeds, scores, and accounting remain
     // unchanged. Binary-attack samples remain serial.
     std::size_t evaluation_threads = 1;
+    // Evaluation-only AC1 seam. When enabled on a Priority search with
+    // horizon zero, retain the exact terminal or prepared-next-turn boundary
+    // already produced by each candidate/world/rollout evaluation. The
+    // default leaves the historical result schema and execution untouched.
+    bool capture_priority_h0_boundaries = false;
+};
+
+struct LearnedPriorityH0Boundary {
+    GameState state;
+    LearnedDecisionContext context;
+    double continuation_score = 0.5;
+    bool terminal = false;
+
+    bool operator==(
+        const LearnedPriorityH0Boundary&) const = default;
 };
 
 struct LearnedActionSamples {
@@ -768,6 +783,10 @@ struct LearnedActionSamples {
     // Each rollout is classified exactly once by the score source.
     std::size_t terminal_evaluations = 0;
     std::size_t bootstrapped_evaluations = 0;
+    // Present only when capture_priority_h0_boundaries is enabled. Outer and
+    // inner order exactly match q_samples.
+    std::vector<std::vector<LearnedPriorityH0Boundary>>
+        priority_h0_boundaries;
 };
 
 struct LearnedValueAttackSetScores {
