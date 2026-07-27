@@ -12052,6 +12052,14 @@ rows are identified from `PriorityAction` kind/`x_value`, then bound to the
 exact descriptor stored by the frozen manifest; no human-readable spelling
 such as `pass` or `x0` is assumed.
 
+The descriptive C16 comparison is also fixed prospectively:
+`oc1_action_scoring::score_production(probe, model)` with its already-frozen
+K8/H4 production recipe and preexisting derived seed namespace. The bundle
+stores every descriptor-canonical C16 score/support beside FQ0's support,
+then reports changed-support counts with equal root weight inside each deck
+and equal deck weight pooled. Those rows never enter a target, contrast,
+dominance decision, collision decision, or pass/fail gate.
+
 #### Scientific gates
 
 The primary is
