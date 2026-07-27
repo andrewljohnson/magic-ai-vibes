@@ -13,6 +13,13 @@ make web
 Then open <http://127.0.0.1:4173>. `Ctrl-C` stops the server and its active game
 processes.
 
+`Evolve deck` opens a separate workflow backed by the C++ engine's existing
+deck-evolution loop. Choose a bounded generation/population budget, seed, and
+either the Handcoded Policy or frozen Learned Value C16 pilot. A completed
+result shows its 40 cards, fitness trace, and metagame splits. `Save for this
+session` makes it available to either seat in `New match`; the deck lives only
+in Node process memory and disappears when this server restarts.
+
 Useful development commands:
 
 ```sh

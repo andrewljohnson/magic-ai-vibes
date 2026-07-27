@@ -2432,6 +2432,10 @@ function EvolutionDialog({
     value: string,
   ) => {
     if (!config) return;
+    if (field === "seed") {
+      setConfig({ ...config, seed: value });
+      return;
+    }
     setConfig({ ...config, [field]: Number(value) });
   };
   const submitEvolution = (event: FormEvent) => {
@@ -2448,7 +2452,7 @@ function EvolutionDialog({
         const pilotName =
           evolution?.pilots.find((pilot) => pilot.id === next.pilot)?.name ??
           next.pilot;
-        setSaveName(`Evolved ${pilotName} · seed ${next.seed}`);
+        setSaveName(`Evolved ${pilotName} · ${next.seed}`.slice(0, 48));
       })
       .catch((nextError: unknown) => {
         setError(
@@ -2656,7 +2660,7 @@ function EvolutionDialog({
                 <button
                   type="submit"
                   className="button-primary evolution-generate"
-                  disabled={generating || evolution.active === true}
+                  disabled={generating}
                 >
                   {generating ? (
                     <>
@@ -2869,7 +2873,7 @@ function EvolutionDialog({
                       <input
                         type="text"
                         required
-                        maxLength={60}
+                        maxLength={48}
                         value={saveName}
                         onChange={(event) => setSaveName(event.target.value)}
                       />

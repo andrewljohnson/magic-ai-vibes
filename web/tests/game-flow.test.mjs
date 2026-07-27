@@ -720,6 +720,15 @@ test("deck evolution is a separate bounded session-only workflow", async () => {
   assert.match(evolutionDialog, /result\.best\.byOpponent\.map/);
   assert.match(evolutionDialog, /Aggregate fitness/);
   assert.match(evolutionDialog, /Save for this session/);
+  assert.match(evolutionDialog, /maxLength=\{48\}/);
+  assert.match(
+    evolutionDialog,
+    /className="button-primary evolution-generate"[\s\S]+?disabled=\{generating\}/,
+  );
+  assert.doesNotMatch(
+    evolutionDialog,
+    /disabled=\{[^}]*evolution\.active/,
+  );
   assert.match(
     evolutionDialog,
     /disappears when the Node server restarts/,

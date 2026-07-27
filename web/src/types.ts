@@ -523,12 +523,12 @@ export interface EvolutionPilotMeta {
 }
 
 export interface EvolutionNumericLimit {
-  min: number;
-  max: number;
+  min: number | string;
+  max: number | string;
 }
 
 export interface EvolutionConfig {
-  seed: number;
+  seed: number | string;
   generations: number;
   population: number;
   games: number;
@@ -580,7 +580,7 @@ export interface EvolutionOpponentStats extends EvolutionStats {
 
 export interface EvolutionResult {
   id: string;
-  seed: number;
+  seed: number | string;
   pilot: string;
   config?: EvolutionConfig;
   generations: number[];

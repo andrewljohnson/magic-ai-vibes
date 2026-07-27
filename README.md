@@ -93,6 +93,13 @@ trainable choice; select it before lowering `train games` for a faster smoke
 match. The in-game `REPRO` panel shows the actual generation, K/H, and complete
 model fingerprint so manual behavior reports identify the model that played.
 
+Use the separate `Evolve deck` menu to run the engine's deck-evolution loop
+against the five-deck metagame. It can use either Handcoded Policy or the
+frozen Learned Value C16 pilot and reports the exact manifest, fitness,
+generation trace, and opponent splits. Saving a result adds it to both match
+deck selectors for the lifetime of the current Node server only; restarting
+`make web` intentionally clears evolved decks.
+
 The Node server starts one structured C++ engine session per match. Game state
 and clickable choices come directly from the engine's legal-action callbacks;
 the browser does not parse terminal output or recreate rules. Opponent hand

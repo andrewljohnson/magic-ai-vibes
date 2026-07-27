@@ -242,6 +242,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
 });
 
 export const EVOLUTION_LIMITS = Object.freeze({
+  seed: { min: "0", max: UINT64_MAX.toString() },
   generations: { min: 1, max: 20 },
   population: { min: 5, max: 32 },
   games: { min: 1, max: 16 },
@@ -1474,6 +1475,7 @@ class GameSession {
     bridgeArgsPrefix,
     spawnImpl,
     actionTimeoutMs,
+    deckCatalog,
   }) {
     this.id = id;
     this.config = config;
@@ -1496,7 +1498,7 @@ class GameSession {
 
     const args = [
       ...bridgeArgsPrefix,
-      ...bridgeArguments(config),
+      ...bridgeArguments(config, deckCatalog),
     ];
     this.child = spawnImpl(bridgePath, args, {
       stdio: ["pipe", "pipe", "pipe"],
@@ -1755,6 +1757,7 @@ class GameManager {
     this.initialTimeoutMs = options.initialTimeoutMs;
     this.actionTimeoutMs = options.actionTimeoutMs;
     this.idFactory = options.idFactory;
+    this.deckCatalog = options.deckCatalog;
   }
 
   async create(config) {
@@ -1766,6 +1769,7 @@ class GameManager {
       bridgeArgsPrefix: this.bridgeArgsPrefix,
       spawnImpl: this.spawnImpl,
       actionTimeoutMs: this.actionTimeoutMs,
+      deckCatalog: this.deckCatalog,
     });
     this.sessions.set(id, session);
     try {
@@ -1874,10 +1878,10 @@ function methodNotAllowed(response, methods) {
   );
 }
 
-export function webGameMetadata() {
+export function webGameMetadata(deckCatalog = null, evolutionManager = null) {
   return {
     apiVersion: 1,
-    decks: DECKS,
+    decks: [...DECKS, ...(deckCatalog?.publicDecks() ?? [])],
     policies: POLICIES,
     decisionKinds: [
       "priority",
@@ -1888,16 +1892,68 @@ export function webGameMetadata() {
     ],
     defaults: DEFAULT_CONFIG,
     limits: LIMITS,
+    evolution: {
+      pilots: EVOLUTION_PILOTS,
+      defaults: EVOLUTION_DEFAULTS,
+      limits: EVOLUTION_LIMITS,
+      active: evolutionManager?.isActive() ?? false,
+      storage: "server-memory",
+      notice: "Saved decks last until this server restarts.",
+    },
   };
 }
 
-async function handleApi(request, response, pathname, manager) {
+async function handleApi(
+  request,
+  response,
+  pathname,
+  manager,
+  evolutionManager,
+  deckCatalog,
+) {
   if (pathname === "/api/meta") {
     if (request.method !== "GET") {
       methodNotAllowed(response, ["GET"]);
       return;
     }
-    sendJson(response, 200, webGameMetadata());
+    sendJson(
+      response,
+      200,
+      webGameMetadata(deckCatalog, evolutionManager),
+    );
+    return;
+  }
+
+  if (pathname === "/api/evolutions") {
+    if (request.method !== "POST") {
+      methodNotAllowed(response, ["POST"]);
+      return;
+    }
+    const config = normalizeEvolutionConfig(await readJson(request));
+    const evolution = await evolutionManager.create(config);
+    sendJson(response, 201, { evolution });
+    return;
+  }
+
+  const evolutionMatch =
+    /^\/api\/evolutions\/([^/]+)\/save$/.exec(pathname);
+  if (evolutionMatch !== null) {
+    if (request.method !== "POST") {
+      methodNotAllowed(response, ["POST"]);
+      return;
+    }
+    let id;
+    try {
+      id = decodeURIComponent(evolutionMatch[1]);
+    } catch {
+      throw new ApiError(
+        400,
+        "invalid_evolution_id",
+        "The evolution ID is not valid",
+      );
+    }
+    const deck = deckCatalog.save(id, await readJson(request));
+    sendJson(response, 201, { deck });
     return;
   }
 
@@ -1906,7 +1962,10 @@ async function handleApi(request, response, pathname, manager) {
       methodNotAllowed(response, ["POST"]);
       return;
     }
-    const config = normalizeGameConfig(await readJson(request));
+    const config = normalizeGameConfig(
+      await readJson(request),
+      deckCatalog.availableDeckIds(),
+    );
     const session = await manager.create(config);
     sendJson(response, 201, { game: session.publicState() });
     return;
@@ -2030,18 +2089,54 @@ function createGameManager(options = {}) {
     initialTimeoutMs: options.initialTimeoutMs ?? 120_000,
     actionTimeoutMs: options.actionTimeoutMs ?? 120_000,
     idFactory: options.idFactory ?? randomUUID,
+    deckCatalog: options.deckCatalog,
+  });
+}
+
+function createEvolutionManager(options = {}) {
+  const defaultBridge = path.resolve(
+    SERVER_DIRECTORY,
+    "../build/old-school-web-bridge",
+  );
+  return new EvolutionManager({
+    bridgePath:
+      options.bridgePath ??
+      process.env.OLD_SCHOOL_WEB_BRIDGE ??
+      defaultBridge,
+    bridgeArgsPrefix: options.bridgeArgsPrefix ?? [],
+    spawnImpl: options.spawnImpl ?? nodeSpawn,
+    timeoutMs: options.evolutionTimeoutMs ?? EVOLUTION_TIMEOUT_MS,
+    maxOutputBytes:
+      options.evolutionMaxOutputBytes ?? MAX_EVOLUTION_OUTPUT_BYTES,
+    deckCatalog: options.deckCatalog,
   });
 }
 
 export function createGameContractHarness(options = {}) {
-  const manager = createGameManager(options);
+  const deckCatalog = new EphemeralDeckCatalog(options);
+  const manager = createGameManager({ ...options, deckCatalog });
+  const evolutionManager = createEvolutionManager({
+    ...options,
+    deckCatalog,
+  });
   return {
     metadata() {
-      return webGameMetadata();
+      return webGameMetadata(deckCatalog, evolutionManager);
     },
     async create(config) {
-      const session = await manager.create(normalizeGameConfig(config));
+      const session = await manager.create(
+        normalizeGameConfig(config, deckCatalog.availableDeckIds()),
+      );
       return { game: session.publicState() };
+    },
+    async evolve(config) {
+      const evolution = await evolutionManager.create(
+        normalizeEvolutionConfig(config),
+      );
+      return { evolution };
+    },
+    saveEvolution(id, body) {
+      return { deck: deckCatalog.save(id, body) };
     },
     get(id) {
       return { game: manager.get(id).publicState() };
@@ -2055,6 +2150,7 @@ export function createGameContractHarness(options = {}) {
     },
     shutdown() {
       manager.shutdown();
+      evolutionManager.shutdown();
     },
   };
 }
@@ -2065,13 +2161,25 @@ export function createServer(options = {}) {
       process.env.OLD_SCHOOL_WEB_DIST ??
       path.join(SERVER_DIRECTORY, "dist-game"),
   );
-  const manager = createGameManager(options);
+  const deckCatalog = new EphemeralDeckCatalog(options);
+  const manager = createGameManager({ ...options, deckCatalog });
+  const evolutionManager = createEvolutionManager({
+    ...options,
+    deckCatalog,
+  });
 
   const server = createHttpServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (url.pathname.startsWith("/api/")) {
-        await handleApi(request, response, url.pathname, manager);
+        await handleApi(
+          request,
+          response,
+          url.pathname,
+          manager,
+          evolutionManager,
+          deckCatalog,
+        );
       } else {
         serveStatic(request, response, url.pathname, distDirectory);
       }
@@ -2081,7 +2189,12 @@ export function createServer(options = {}) {
   });
 
   server.gameManager = manager;
-  server.once("close", () => manager.shutdown());
+  server.evolutionManager = evolutionManager;
+  server.deckCatalog = deckCatalog;
+  server.once("close", () => {
+    manager.shutdown();
+    evolutionManager.shutdown();
+  });
   return server;
 }
 
