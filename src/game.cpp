@@ -876,6 +876,18 @@ class LearnedModel {
     static constexpr std::size_t kPolicyHiddenCount = 32;
     using FeatureVector = std::array<double, kFeatureCount>;
     using TrainingExample = std::pair<FeatureVector, double>;
+    struct WeightedTrainingExample {
+        FeatureVector features{};
+        double target = 0.5;
+        double weight = 1.0;
+    };
+    struct OutputCalibrationDiagnostics {
+        std::size_t iterations = 0;
+        bool converged = false;
+        double before_weighted_bce = 0.0;
+        double after_weighted_bce = 0.0;
+        double max_parameter_delta = 0.0;
+    };
     using ContextFeatureVector = LearnedDecisionContextFeatures;
     struct ContextTrainingExample {
         FeatureVector features{};
@@ -1105,6 +1117,43 @@ class LearnedModel {
                 }
             }
         }
+    }
+
+    OutputCalibrationDiagnostics calibrate_output_layer(
+        const std::vector<WeightedTrainingExample>& examples,
+        LearnedOutputCalibrationConfig config);
+
+    bool has_output_calibration_topology() const {
+        if (variant_ != LearnedVariant::ValueSearchChampion ||
+            critic_schema_ !=
+                LearnedCriticSchema::LegacyStateOnly ||
+            ensemble_.size() != 2) {
+            return false;
+        }
+        return std::all_of(
+            ensemble_.begin(), ensemble_.end(),
+            [](const auto& member) {
+                return member &&
+                       member->variant_ ==
+                           LearnedVariant::ValueSearchChampion &&
+                       member->critic_schema_ ==
+                           LearnedCriticSchema::
+                               LegacyStateOnly &&
+                       member->ensemble_.empty();
+            });
+    }
+
+    std::array<double, 2> output_calibration_leaf_values(
+        const FeatureVector& features) const {
+        if (!has_output_calibration_topology()) {
+            throw std::invalid_argument(
+                "Learned critic leaf values require an exact "
+                "two-leaf legacy Value ensemble");
+        }
+        return {
+            ensemble_[0]->predict(features),
+            ensemble_[1]->predict(features),
+        };
     }
 
     void train_contextual(
@@ -1938,6 +1987,58 @@ class LearnedModel {
         }
     }
 
+    void append_critic_input_hidden_fingerprint(
+        ModelFingerprintHash& hash) const {
+        hash.add(0x43524954494E5054ULL);
+        hash.add(static_cast<std::uint64_t>(critic_schema_));
+        add_model_fingerprint_value(hash, input_weights_);
+        add_model_fingerprint_value(hash, hidden_biases_);
+        add_model_fingerprint_value(
+            hash, context_input_weights_);
+        hash.add(static_cast<std::uint64_t>(ensemble_.size()));
+        for (const auto& member : ensemble_) {
+            hash.add(member ? 1ULL : 0ULL);
+            if (member) {
+                member->append_critic_input_hidden_fingerprint(
+                    hash);
+            }
+        }
+    }
+
+    void append_critic_output_layer_fingerprint(
+        ModelFingerprintHash& hash) const {
+        hash.add(0x435249544F555450ULL);
+        hash.add(static_cast<std::uint64_t>(critic_schema_));
+        add_model_fingerprint_value(hash, output_weights_);
+        add_model_fingerprint_value(hash, output_bias_);
+        hash.add(static_cast<std::uint64_t>(ensemble_.size()));
+        for (const auto& member : ensemble_) {
+            hash.add(member ? 1ULL : 0ULL);
+            if (member) {
+                member->append_critic_output_layer_fingerprint(
+                    hash);
+            }
+        }
+    }
+
+    void append_critic_direct_paths_fingerprint(
+        ModelFingerprintHash& hash) const {
+        hash.add(0x4352495444495243ULL);
+        hash.add(static_cast<std::uint64_t>(critic_schema_));
+        add_model_fingerprint_value(
+            hash, direct_output_weights_);
+        add_model_fingerprint_value(
+            hash, context_direct_output_weights_);
+        hash.add(static_cast<std::uint64_t>(ensemble_.size()));
+        for (const auto& member : ensemble_) {
+            hash.add(member ? 1ULL : 0ULL);
+            if (member) {
+                member->append_critic_direct_paths_fingerprint(
+                    hash);
+            }
+        }
+    }
+
     void append_policy_head_fingerprint(
         ModelFingerprintHash& hash,
         std::size_t decision_kind) const {
@@ -1968,6 +2069,9 @@ class LearnedModel {
         std::shared_ptr<const LearnedModel> model);
     friend LearnedModelComponentFingerprints
     learned_model_component_fingerprints(
+        std::shared_ptr<const LearnedModel> model);
+    friend LearnedCriticTensorFingerprints
+    learned_critic_tensor_fingerprints(
         std::shared_ptr<const LearnedModel> model);
     friend void write_learned_value_g8_bundle_atomic(
         const std::string& path,
@@ -2068,6 +2172,408 @@ class LearnedModel {
     std::vector<std::shared_ptr<const LearnedModel>> ensemble_;
 };
 
+LearnedModel::OutputCalibrationDiagnostics
+LearnedModel::calibrate_output_layer(
+    const std::vector<WeightedTrainingExample>& examples,
+    LearnedOutputCalibrationConfig config) {
+    if (!ensemble_.empty()) {
+        throw std::logic_error(
+            "cannot calibrate a composite learned ensemble leaf");
+    }
+    if (examples.empty()) {
+        return {
+            .iterations = 0,
+            .converged = true,
+            .before_weighted_bce = 0.0,
+            .after_weighted_bce = 0.0,
+            .max_parameter_delta = 0.0,
+        };
+    }
+
+    static constexpr std::size_t kParameterCount =
+        kHiddenCount + 1;
+    using Parameters = std::array<double, kParameterCount>;
+    using Hessian =
+        std::array<Parameters, kParameterCount>;
+    struct CalibrationRow {
+        Parameters design{};
+        double fixed_logit = 0.0;
+        double target = 0.5;
+        double weight = 1.0;
+    };
+    struct Evaluation {
+        double objective = 0.0;
+        double weighted_bce = 0.0;
+        Parameters gradient{};
+        Hessian hessian{};
+    };
+    const auto infrastructure_failure =
+        [](std::string_view detail) -> void {
+            throw std::runtime_error(
+                "Learned output calibration infrastructure "
+                "error: " +
+                std::string(detail));
+        };
+
+    double total_weight = 0.0;
+    for (const auto& example : examples) {
+        total_weight += example.weight;
+    }
+    if (!std::isfinite(total_weight) ||
+        total_weight <= 0.0) {
+        throw std::invalid_argument(
+            "calibration example weights have invalid total");
+    }
+
+    std::vector<CalibrationRow> rows;
+    rows.reserve(examples.size());
+    for (const auto& example : examples) {
+        CalibrationRow row{
+            .design = {},
+            .fixed_logit = 0.0,
+            .target = example.target,
+            .weight = example.weight / total_weight,
+        };
+        const auto hidden = hidden_values(example.features);
+        for (std::size_t index = 0;
+             index < kHiddenCount; ++index) {
+            row.design[index] = hidden[index];
+        }
+        row.design[kHiddenCount] = 1.0;
+        for (std::size_t feature = 0;
+             feature < kFeatureCount; ++feature) {
+            if (example.features[feature] != 0.0) {
+                row.fixed_logit +=
+                    direct_output_weights_[feature] *
+                    example.features[feature];
+            }
+        }
+        if (!std::isfinite(row.fixed_logit) ||
+            !std::all_of(
+                row.design.begin(), row.design.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                })) {
+            infrastructure_failure(
+                "encoded row exceeds numerical range");
+        }
+        rows.push_back(row);
+    }
+
+    Parameters origin{};
+    std::copy(
+        output_weights_.begin(), output_weights_.end(),
+        origin.begin());
+    origin[kHiddenCount] = output_bias_;
+    Parameters parameters = origin;
+
+    const auto evaluate =
+        [&](const Parameters& candidate) {
+            Evaluation result;
+            for (const CalibrationRow& row : rows) {
+                double logit = row.fixed_logit;
+                for (std::size_t index = 0;
+                     index < kParameterCount; ++index) {
+                    logit +=
+                        candidate[index] * row.design[index];
+                }
+                if (!std::isfinite(logit)) {
+                    infrastructure_failure(
+                        "candidate logit is nonfinite");
+                }
+                const double exponential =
+                    std::exp(-std::abs(logit));
+                const double probability =
+                    logit >= 0.0
+                        ? 1.0 / (1.0 + exponential)
+                        : exponential / (1.0 + exponential);
+                const double loss =
+                    std::max(0.0, logit) -
+                    logit * row.target +
+                    std::log1p(exponential);
+                result.weighted_bce += row.weight * loss;
+                const double residual =
+                    row.weight * (probability - row.target);
+                for (std::size_t index = 0;
+                     index < kParameterCount; ++index) {
+                    result.gradient[index] +=
+                        residual * row.design[index];
+                }
+                const double curvature =
+                    row.weight * probability *
+                    (1.0 - probability);
+                for (std::size_t row_index = 0;
+                     row_index < kParameterCount;
+                     ++row_index) {
+                    for (std::size_t column = 0;
+                         column < kParameterCount;
+                         ++column) {
+                        result.hessian[row_index][column] +=
+                            curvature *
+                            row.design[row_index] *
+                            row.design[column];
+                    }
+                }
+            }
+            result.objective = result.weighted_bce;
+            for (std::size_t index = 0;
+                 index < kParameterCount; ++index) {
+                const double delta =
+                    candidate[index] - origin[index];
+                result.objective +=
+                    0.5 * config.l2_tether * delta * delta;
+                result.gradient[index] +=
+                    config.l2_tether * delta;
+                result.hessian[index][index] +=
+                    config.l2_tether;
+            }
+            if (!std::isfinite(result.objective) ||
+                !std::isfinite(result.weighted_bce) ||
+                !std::all_of(
+                    result.gradient.begin(),
+                    result.gradient.end(),
+                    [](double value) {
+                        return std::isfinite(value);
+                    }) ||
+                !std::all_of(
+                    result.hessian.begin(),
+                    result.hessian.end(),
+                    [](const Parameters& row) {
+                        return std::all_of(
+                            row.begin(), row.end(),
+                            [](double value) {
+                                return std::isfinite(value);
+                            });
+                    })) {
+                infrastructure_failure(
+                    "objective derivatives are nonfinite");
+            }
+            return result;
+        };
+
+    const auto gradient_infinity_norm =
+        [](const Parameters& gradient) {
+            double norm = 0.0;
+            for (const double value : gradient) {
+                norm = std::max(norm, std::abs(value));
+            }
+            return norm;
+        };
+    const auto newton_direction =
+        [&](const Evaluation& evaluation) {
+            Hessian system = evaluation.hessian;
+            Parameters right_hand_side{};
+            double matrix_scale = 0.0;
+            for (std::size_t row = 0;
+                 row < kParameterCount; ++row) {
+                right_hand_side[row] =
+                    -evaluation.gradient[row];
+                for (const double value : system[row]) {
+                    matrix_scale =
+                        std::max(matrix_scale, std::abs(value));
+                }
+            }
+            const double pivot_floor =
+                std::numeric_limits<double>::epsilon() *
+                static_cast<double>(kParameterCount) *
+                std::max(1.0, matrix_scale);
+            for (std::size_t pivot = 0;
+                 pivot < kParameterCount; ++pivot) {
+                std::size_t pivot_row = pivot;
+                double pivot_magnitude =
+                    std::abs(system[pivot][pivot]);
+                for (std::size_t row = pivot + 1;
+                     row < kParameterCount; ++row) {
+                    const double magnitude =
+                        std::abs(system[row][pivot]);
+                    if (magnitude > pivot_magnitude) {
+                        pivot_magnitude = magnitude;
+                        pivot_row = row;
+                    }
+                }
+                if (!std::isfinite(pivot_magnitude) ||
+                    pivot_magnitude <= pivot_floor) {
+                    infrastructure_failure(
+                        "Newton system is singular");
+                }
+                if (pivot_row != pivot) {
+                    std::swap(
+                        system[pivot], system[pivot_row]);
+                    std::swap(
+                        right_hand_side[pivot],
+                        right_hand_side[pivot_row]);
+                }
+                for (std::size_t row = pivot + 1;
+                     row < kParameterCount; ++row) {
+                    const double factor =
+                        system[row][pivot] /
+                        system[pivot][pivot];
+                    system[row][pivot] = 0.0;
+                    for (std::size_t column = pivot + 1;
+                         column < kParameterCount; ++column) {
+                        system[row][column] -=
+                            factor *
+                            system[pivot][column];
+                    }
+                    right_hand_side[row] -=
+                        factor * right_hand_side[pivot];
+                }
+            }
+
+            Parameters direction{};
+            for (std::size_t reverse = kParameterCount;
+                 reverse > 0; --reverse) {
+                const std::size_t row = reverse - 1;
+                double remainder = right_hand_side[row];
+                for (std::size_t column = row + 1;
+                     column < kParameterCount; ++column) {
+                    remainder -=
+                        system[row][column] *
+                        direction[column];
+                }
+                const double diagonal = system[row][row];
+                if (!std::isfinite(diagonal) ||
+                    std::abs(diagonal) <= pivot_floor) {
+                    infrastructure_failure(
+                        "Newton back-substitution failed");
+                }
+                direction[row] = remainder / diagonal;
+            }
+            if (!std::all_of(
+                    direction.begin(), direction.end(),
+                    [](double value) {
+                        return std::isfinite(value);
+                    })) {
+                infrastructure_failure(
+                    "Newton solution is nonfinite");
+            }
+
+            double residual_norm = 0.0;
+            for (std::size_t row = 0;
+                 row < kParameterCount; ++row) {
+                double residual = evaluation.gradient[row];
+                for (std::size_t column = 0;
+                     column < kParameterCount; ++column) {
+                    residual +=
+                        evaluation.hessian[row][column] *
+                        direction[column];
+                }
+                residual_norm =
+                    std::max(residual_norm, std::abs(residual));
+            }
+            const double residual_limit =
+                1e-9 * std::max(
+                           1.0,
+                           gradient_infinity_norm(
+                               evaluation.gradient));
+            if (!std::isfinite(residual_norm) ||
+                residual_norm > residual_limit) {
+                infrastructure_failure(
+                    "Newton solve residual is too large");
+            }
+            return direction;
+        };
+
+    static constexpr double kArmijoCoefficient = 1e-4;
+    static constexpr double kBacktrackingFactor = 0.5;
+    static constexpr std::size_t kMaximumBacktracks = 32;
+    const Evaluation initial = evaluate(parameters);
+    Evaluation current = initial;
+    std::size_t iterations = 0;
+    bool converged = false;
+
+    for (; iterations < config.max_iterations;) {
+        if (gradient_infinity_norm(current.gradient) <=
+            config.gradient_tolerance) {
+            converged = true;
+            break;
+        }
+        const Parameters direction =
+            newton_direction(current);
+        const double directional_derivative =
+            std::inner_product(
+                current.gradient.begin(),
+                current.gradient.end(),
+                direction.begin(), 0.0);
+        if (!std::isfinite(directional_derivative) ||
+            directional_derivative >= 0.0) {
+            infrastructure_failure(
+                "Newton direction is not a descent direction");
+        }
+
+        double step = 1.0;
+        bool accepted = false;
+        Parameters proposal{};
+        Evaluation proposed;
+        for (std::size_t backtrack = 0;
+             backtrack <= kMaximumBacktracks;
+             ++backtrack) {
+            for (std::size_t index = 0;
+                 index < kParameterCount; ++index) {
+                proposal[index] =
+                    parameters[index] +
+                    step * direction[index];
+            }
+            proposed = evaluate(proposal);
+            if (proposed.objective <=
+                current.objective +
+                    kArmijoCoefficient * step *
+                        directional_derivative) {
+                accepted = true;
+                break;
+            }
+            step *= kBacktrackingFactor;
+        }
+        if (!accepted) {
+            infrastructure_failure(
+                "Armijo line search exhausted 32 "
+                "backtracks");
+        }
+        if (!(proposed.objective < current.objective)) {
+            infrastructure_failure(
+                "accepted Newton step did not decrease the "
+                "objective");
+        }
+        parameters = proposal;
+        current = proposed;
+        ++iterations;
+    }
+
+    if (!converged) {
+        converged =
+            gradient_infinity_norm(current.gradient) <=
+            config.gradient_tolerance;
+    }
+    if (!converged) {
+        infrastructure_failure(
+            "Newton optimizer did not converge within " +
+            std::to_string(config.max_iterations) +
+            " iterations");
+    }
+
+    double max_parameter_delta = 0.0;
+    for (std::size_t index = 0;
+         index < kHiddenCount; ++index) {
+        max_parameter_delta = std::max(
+            max_parameter_delta,
+            std::abs(parameters[index] - origin[index]));
+        output_weights_[index] = parameters[index];
+    }
+    max_parameter_delta = std::max(
+        max_parameter_delta,
+        std::abs(parameters[kHiddenCount] -
+                 origin[kHiddenCount]));
+    output_bias_ = parameters[kHiddenCount];
+
+    return {
+        .iterations = iterations,
+        .converged = converged,
+        .before_weighted_bce = initial.weighted_bce,
+        .after_weighted_bce = current.weighted_bce,
+        .max_parameter_delta = max_parameter_delta,
+    };
+}
+
 std::string learned_model_fingerprint(
     std::shared_ptr<const LearnedModel> model) {
     if (!model) {
@@ -2127,6 +2633,55 @@ learned_model_component_fingerprints(
             LearnedPolicyDecisionKind::Block),
         .damage_order = policy_fingerprint(
             LearnedPolicyDecisionKind::DamageOrder),
+    };
+}
+
+LearnedCriticTensorFingerprints
+learned_critic_tensor_fingerprints(
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model) {
+        throw std::invalid_argument(
+            "cannot fingerprint a null Learned model");
+    }
+
+    const auto make_fingerprint =
+        [&](std::uint64_t domain,
+            const auto& append_tensors) {
+            ModelFingerprintHash hash;
+            hash.add(domain);
+            hash.add(1);
+            hash.add(static_cast<std::uint64_t>(
+                LearnedModel::kFeatureCount));
+            hash.add(static_cast<std::uint64_t>(
+                LearnedModel::kHiddenCount));
+            hash.add(static_cast<std::uint64_t>(
+                kLearnedDecisionContextFeatureCount));
+            append_tensors(hash);
+            return hash.finish();
+        };
+
+    return {
+        .input_hidden = make_fingerprint(
+            0x4D41474943434948ULL,
+            [&](ModelFingerprintHash& hash) {
+                model
+                    ->append_critic_input_hidden_fingerprint(
+                        hash);
+            }),
+        .output_layer = make_fingerprint(
+            0x4D41474943434F55ULL,
+            [&](ModelFingerprintHash& hash) {
+                model
+                    ->append_critic_output_layer_fingerprint(
+                        hash);
+            }),
+        .direct_paths = make_fingerprint(
+            0x4D41474943434450ULL,
+            [&](ModelFingerprintHash& hash) {
+                model
+                    ->append_critic_direct_paths_fingerprint(
+                        hash);
+            }),
     };
 }
 
@@ -6495,6 +7050,118 @@ std::shared_ptr<const LearnedModel> update_learned_value_model(
 
     return update_learned_value_model_encoded(
         std::move(parent), encoded, config);
+}
+
+LearnedOutputCalibrationResult
+calibrate_learned_value_output_layer(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedWeightedCriticTrainingExample>& examples,
+    LearnedOutputCalibrationConfig config) {
+    if (!parent) {
+        throw std::invalid_argument(
+            "Learned output calibration requires a parent model");
+    }
+    if (parent->variant() !=
+        LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Learned output calibration requires a Value model");
+    }
+    if (!parent->has_output_calibration_topology()) {
+        throw std::invalid_argument(
+            "Learned output calibration requires exactly one "
+            "top-level two-member LegacyStateOnly Value "
+            "ensemble");
+    }
+    if (config.max_iterations == 0 ||
+        config.max_iterations > 32 ||
+        config.l2_tether != 0.01 ||
+        config.gradient_tolerance != 1e-10) {
+        throw std::invalid_argument(
+            "Learned output calibration requires the fixed OC1 "
+            "optimizer recipe");
+    }
+
+    std::vector<LearnedModel::WeightedTrainingExample> encoded;
+    encoded.reserve(examples.size());
+    double total_weight = 0.0;
+    for (const auto& example : examples) {
+        if (example.features.size() !=
+                LearnedModel::kFeatureCount ||
+            !std::all_of(
+                example.features.begin(),
+                example.features.end(),
+                [](double value) {
+                    return std::isfinite(value);
+                }) ||
+            !std::isfinite(example.target) ||
+            example.target < 0.0 || example.target > 1.0 ||
+            !std::isfinite(example.weight) ||
+            example.weight <= 0.0) {
+            throw std::invalid_argument(
+                "invalid Learned output calibration example");
+        }
+        total_weight += example.weight;
+        if (!std::isfinite(total_weight)) {
+            throw std::invalid_argument(
+                "Learned output calibration weight total "
+                "must be finite");
+        }
+        LearnedModel::FeatureVector features{};
+        std::copy(
+            example.features.begin(), example.features.end(),
+            features.begin());
+        encoded.push_back({
+            .features = features,
+            .target = example.target,
+            .weight = example.weight,
+        });
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> critic_leaves;
+    auto candidate =
+        parent->deep_clone_mutable(critic_leaves);
+    if (critic_leaves.size() != 2) {
+        throw std::runtime_error(
+            "Learned output calibration infrastructure error: "
+            "deep clone violated the two-leaf topology");
+    }
+    LearnedOutputCalibrationDiagnostics diagnostics{
+        .example_count = examples.size(),
+        .leaf_count = critic_leaves.size(),
+        .iterations = 0,
+        .converged = true,
+        .total_weight = total_weight,
+        .before_weighted_bce = 0.0,
+        .after_weighted_bce = 0.0,
+        .max_parameter_delta = 0.0,
+    };
+    for (const auto& leaf : critic_leaves) {
+        const auto leaf_diagnostics =
+            leaf->calibrate_output_layer(encoded, config);
+        diagnostics.iterations = std::max(
+            diagnostics.iterations,
+            leaf_diagnostics.iterations);
+        diagnostics.converged =
+            diagnostics.converged &&
+            leaf_diagnostics.converged;
+        diagnostics.before_weighted_bce +=
+            leaf_diagnostics.before_weighted_bce;
+        diagnostics.after_weighted_bce +=
+            leaf_diagnostics.after_weighted_bce;
+        diagnostics.max_parameter_delta = std::max(
+            diagnostics.max_parameter_delta,
+            leaf_diagnostics.max_parameter_delta);
+    }
+    if (!critic_leaves.empty()) {
+        const double leaf_count =
+            static_cast<double>(critic_leaves.size());
+        diagnostics.before_weighted_bce /= leaf_count;
+        diagnostics.after_weighted_bce /= leaf_count;
+    }
+    return {
+        .model = std::move(candidate),
+        .diagnostics = diagnostics,
+    };
 }
 
 std::shared_ptr<const LearnedModel>
@@ -15575,6 +16242,19 @@ double learned_critic_value(
             "Learned critic perspective must be 0 or 1");
     }
     return model->predict(learned_features(state, perspective));
+}
+
+std::array<double, 2> learned_critic_leaf_values(
+    const GameState& state, std::size_t perspective,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    if (perspective >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned critic perspective must be 0 or 1");
+    }
+    return model->output_calibration_leaf_values(
+        learned_features(state, perspective));
 }
 
 LearnedCriticSchema learned_critic_schema(

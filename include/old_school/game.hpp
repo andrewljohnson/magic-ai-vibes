@@ -842,6 +842,11 @@ std::array<double, 2> learned_actor_binary_attack_logits(
 double learned_critic_value(
     const GameState& state, std::size_t perspective,
     std::shared_ptr<const LearnedModel> model);
+// Evaluation-only access to the two predictions underlying an exact
+// two-leaf LegacyStateOnly Value ensemble.
+std::array<double, 2> learned_critic_leaf_values(
+    const GameState& state, std::size_t perspective,
+    std::shared_ptr<const LearnedModel> model);
 
 // Evaluation-only diagnostics for agreement with the deployed Handcrafted
 // policy. These scores must never be used as Learned labels or training data.
@@ -1629,6 +1634,51 @@ std::shared_ptr<const LearnedModel> update_learned_value_model(
     const std::vector<LearnedCriticTrainingExample>& examples,
     LearnedValueUpdateConfig config = {});
 
+// A deterministic, full-batch calibration seam for frozen Value critics.
+// Each example contributes `weight` times its binary cross-entropy. Only
+// each critic leaf's hidden-to-output weights and output bias may change;
+// the critic trunk, direct path, policy tensors, and parent stay frozen.
+struct LearnedWeightedCriticTrainingExample {
+    std::vector<double> features;
+    double target = 0.5;
+    double weight = 1.0;
+};
+
+struct LearnedOutputCalibrationConfig {
+    // OC1 permits a smaller cap for fail-closed tests, but never more than
+    // the preregistered 32 iterations. The tether and tolerance are fixed.
+    std::size_t max_iterations = 32;
+    double l2_tether = 0.01;
+    double gradient_tolerance = 1e-10;
+};
+
+struct LearnedOutputCalibrationDiagnostics {
+    std::size_t example_count = 0;
+    std::size_t leaf_count = 0;
+    // Maximum number of accepted full-batch updates among critic leaves.
+    std::size_t iterations = 0;
+    bool converged = false;
+    double total_weight = 0.0;
+    // For an ensemble these are the arithmetic means of the leaf losses.
+    double before_weighted_bce = 0.0;
+    double after_weighted_bce = 0.0;
+    double max_parameter_delta = 0.0;
+
+    bool operator==(
+        const LearnedOutputCalibrationDiagnostics&) const = default;
+};
+
+struct LearnedOutputCalibrationResult {
+    std::shared_ptr<const LearnedModel> model;
+    LearnedOutputCalibrationDiagnostics diagnostics;
+};
+
+LearnedOutputCalibrationResult
+calibrate_learned_value_output_layer(
+    std::shared_ptr<const LearnedModel> parent,
+    const std::vector<LearnedWeightedCriticTrainingExample>& examples,
+    LearnedOutputCalibrationConfig config = {});
+
 // Returns an immutable deep clone with a separate, zero-initialized
 // DecisionContextV1 input path. The legacy state weights, policy tensors,
 // predictions, and source model are unchanged.
@@ -1955,6 +2005,20 @@ struct LearnedModelComponentFingerprints {
 };
 LearnedModelComponentFingerprints
 learned_model_component_fingerprints(
+    std::shared_ptr<const LearnedModel> model);
+
+// Critic-only tensor-group fingerprints for narrow-update isolation checks.
+// Each digest also binds recursive ensemble topology and critic schema.
+struct LearnedCriticTensorFingerprints {
+    std::string input_hidden;
+    std::string output_layer;
+    std::string direct_paths;
+
+    bool operator==(
+        const LearnedCriticTensorFingerprints&) const = default;
+};
+LearnedCriticTensorFingerprints
+learned_critic_tensor_fingerprints(
     std::shared_ptr<const LearnedModel> model);
 
 inline constexpr std::uint64_t

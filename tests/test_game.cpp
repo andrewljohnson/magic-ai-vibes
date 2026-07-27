@@ -3668,6 +3668,444 @@ TEST(learned_value_update_deep_clones_without_mutating_parent) {
     }));
 }
 
+TEST(learned_output_calibration_is_deterministic_and_isolated) {
+    const auto parent = small_value_model();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto features =
+        old_school::learned_observation(state, 0);
+    const double parent_value =
+        old_school::learned_critic_value(state, 0, parent);
+    const auto parent_leaf_values =
+        old_school::learned_critic_leaf_values(
+            state, 0, parent);
+    const std::string parent_fingerprint =
+        old_school::learned_model_fingerprint(parent);
+    const auto parent_components =
+        old_school::learned_model_component_fingerprints(parent);
+    const auto parent_tensors =
+        old_school::learned_critic_tensor_fingerprints(parent);
+
+    const auto empty =
+        old_school::calibrate_learned_value_output_layer(
+            parent, {}, {});
+    CHECK(empty.model.get() != parent.get());
+    CHECK(old_school::learned_model_fingerprint(empty.model) ==
+          parent_fingerprint);
+    CHECK(empty.diagnostics.example_count == 0);
+    CHECK(empty.diagnostics.leaf_count > 0);
+    CHECK(empty.diagnostics.iterations == 0);
+    CHECK(empty.diagnostics.converged);
+    CHECK(empty.diagnostics.total_weight == 0.0);
+    CHECK(empty.diagnostics.before_weighted_bce == 0.0);
+    CHECK(empty.diagnostics.after_weighted_bce == 0.0);
+    CHECK(empty.diagnostics.max_parameter_delta == 0.0);
+
+    const double target = parent_value < 0.5 ? 1.0 : 0.0;
+    const std::vector<
+        old_school::LearnedWeightedCriticTrainingExample>
+        examples = {{
+            .features = features,
+            .target = target,
+            .weight = 3.0,
+        }};
+    const auto first =
+        old_school::calibrate_learned_value_output_layer(
+            parent, examples, {});
+    const auto second =
+        old_school::calibrate_learned_value_output_layer(
+            parent, examples, {});
+
+    CHECK(first.diagnostics == second.diagnostics);
+    CHECK(first.diagnostics.example_count == 1);
+    CHECK(first.diagnostics.leaf_count ==
+          empty.diagnostics.leaf_count);
+    CHECK(first.diagnostics.iterations > 0);
+    CHECK(first.diagnostics.iterations <= 32);
+    CHECK(first.diagnostics.total_weight == 3.0);
+    CHECK(first.diagnostics.after_weighted_bce <
+          first.diagnostics.before_weighted_bce);
+    CHECK(first.diagnostics.max_parameter_delta > 0.0);
+    CHECK(old_school::learned_model_fingerprint(first.model) ==
+          old_school::learned_model_fingerprint(second.model));
+    const auto candidate_leaf_values =
+        old_school::learned_critic_leaf_values(
+            state, 0, first.model);
+    for (std::size_t leaf = 0;
+         leaf < candidate_leaf_values.size(); ++leaf) {
+        if (target > parent_leaf_values[leaf]) {
+            CHECK(candidate_leaf_values[leaf] >
+                  parent_leaf_values[leaf]);
+        } else {
+            CHECK(candidate_leaf_values[leaf] <
+                  parent_leaf_values[leaf]);
+        }
+    }
+
+    const auto candidate_components =
+        old_school::learned_model_component_fingerprints(
+            first.model);
+    const auto candidate_tensors =
+        old_school::learned_critic_tensor_fingerprints(
+            first.model);
+    CHECK(candidate_components.critic !=
+          parent_components.critic);
+    CHECK(candidate_components.priority ==
+          parent_components.priority);
+    CHECK(candidate_components.attack ==
+          parent_components.attack);
+    CHECK(candidate_components.block ==
+          parent_components.block);
+    CHECK(candidate_components.damage_order ==
+          parent_components.damage_order);
+    CHECK(candidate_tensors.input_hidden ==
+          parent_tensors.input_hidden);
+    CHECK(candidate_tensors.output_layer !=
+          parent_tensors.output_layer);
+    CHECK(candidate_tensors.direct_paths ==
+          parent_tensors.direct_paths);
+
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+    CHECK(old_school::learned_model_component_fingerprints(
+              parent) == parent_components);
+    CHECK(old_school::learned_critic_tensor_fingerprints(
+              parent) == parent_tensors);
+    CHECK(old_school::learned_critic_value(
+              state, 0, parent) == parent_value);
+}
+
+TEST(learned_critic_leaf_values_are_exact_and_topology_checked) {
+    const auto parent = small_value_model();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto leaves =
+        old_school::learned_critic_leaf_values(
+            state, 0, parent);
+    CHECK((leaves[0] + leaves[1]) / 2.0 ==
+          old_school::learned_critic_value(
+              state, 0, parent));
+
+    old_school::GameState repartitioned =
+        hidden_repartition(state, 0);
+    CHECK(
+        repartitioned.players[1].hand !=
+            state.players[1].hand ||
+        repartitioned.players[1].library !=
+            state.players[1].library);
+    CHECK(old_school::learned_critic_leaf_values(
+              repartitioned, 0, parent) == leaves);
+
+    const auto contextual =
+        old_school::with_learned_decision_context(parent);
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_critic_leaf_values(
+                    state, 0, contextual));
+        },
+        "two-leaf legacy"));
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_critic_leaf_values(
+                    state, 2, parent));
+        },
+        "perspective"));
+}
+
+TEST(learned_output_calibration_honors_example_weights) {
+    const auto parent = small_value_model();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto features =
+        old_school::learned_observation(state, 0);
+    const auto positive =
+        old_school::calibrate_learned_value_output_layer(
+            parent,
+            {
+                {
+                    .features = features,
+                    .target = 1.0,
+                    .weight = 9.0,
+                },
+                {
+                    .features = features,
+                    .target = 0.0,
+                    .weight = 1.0,
+                },
+            },
+            {});
+    const auto negative =
+        old_school::calibrate_learned_value_output_layer(
+            parent,
+            {
+                {
+                    .features = features,
+                    .target = 1.0,
+                    .weight = 1.0,
+                },
+                {
+                    .features = features,
+                    .target = 0.0,
+                    .weight = 9.0,
+                },
+            },
+            {});
+    const auto positive_scaled =
+        old_school::calibrate_learned_value_output_layer(
+            parent,
+            {
+                {
+                    .features = features,
+                    .target = 1.0,
+                    .weight = 90.0,
+                },
+                {
+                    .features = features,
+                    .target = 0.0,
+                    .weight = 10.0,
+                },
+            },
+            {});
+    CHECK(positive.diagnostics.after_weighted_bce <
+          positive.diagnostics.before_weighted_bce);
+    CHECK(negative.diagnostics.after_weighted_bce <
+          negative.diagnostics.before_weighted_bce);
+    CHECK(old_school::learned_critic_value(
+              state, 0, positive.model) >
+          old_school::learned_critic_value(
+              state, 0, negative.model));
+    CHECK(old_school::learned_model_fingerprint(
+              positive.model) ==
+          old_school::learned_model_fingerprint(
+              positive_scaled.model));
+    CHECK(positive.diagnostics.before_weighted_bce ==
+          positive_scaled.diagnostics.before_weighted_bce);
+    CHECK(positive.diagnostics.after_weighted_bce ==
+          positive_scaled.diagnostics.after_weighted_bce);
+}
+
+TEST(learned_output_calibration_rejects_malformed_inputs) {
+    const auto parent = small_value_model();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto features =
+        old_school::learned_observation(state, 0);
+    const auto rejects_invalid =
+        [](const std::function<void()>& operation) {
+            try {
+                operation();
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+
+    CHECK(rejects_invalid([] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                nullptr, {}, {}));
+    }));
+    CHECK(rejects_invalid([] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                small_actor_model(), {}, {}));
+    }));
+
+    auto short_features = features;
+    short_features.pop_back();
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent,
+                {{
+                    .features = short_features,
+                    .target = 0.5,
+                    .weight = 1.0,
+                }},
+                {}));
+    }));
+
+    auto nonfinite_features = features;
+    nonfinite_features.front() =
+        std::numeric_limits<double>::quiet_NaN();
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent,
+                {{
+                    .features = nonfinite_features,
+                    .target = 0.5,
+                    .weight = 1.0,
+                }},
+                {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent,
+                {{
+                    .features = features,
+                    .target = 1.01,
+                    .weight = 1.0,
+                }},
+                {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent,
+                {{
+                    .features = features,
+                    .target = 0.5,
+                    .weight = 0.0,
+                }},
+                {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent,
+                {{
+                    .features = features,
+                    .target = 0.5,
+                    .weight =
+                        std::numeric_limits<double>::
+                            infinity(),
+                }},
+                {}));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent, {},
+                {
+                    .max_iterations = 0,
+                }));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent, {},
+                {
+                    .max_iterations = 32,
+                    .l2_tether = 0.0,
+                }));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent, {},
+                {
+                    .max_iterations = 32,
+                    .l2_tether = 0.01,
+                    .gradient_tolerance =
+                        std::numeric_limits<double>::
+                            quiet_NaN(),
+                }));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent, {},
+                {
+                    .max_iterations = 33,
+                }));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent, {},
+                {
+                    .max_iterations = 32,
+                    .l2_tether = 0.02,
+                }));
+    }));
+    CHECK(rejects_invalid([&] {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent, {},
+                {
+                    .max_iterations = 32,
+                    .l2_tether = 0.01,
+                    .gradient_tolerance = 1e-9,
+                }));
+    }));
+    CHECK(rejects_invalid([] {
+        static_cast<void>(
+            old_school::learned_critic_tensor_fingerprints(
+                nullptr));
+    }));
+}
+
+TEST(learned_output_calibration_fails_closed_on_topology_and_nonconvergence) {
+    const auto parent = small_value_model();
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const auto features =
+        old_school::learned_observation(state, 0);
+    const double value =
+        old_school::learned_critic_value(state, 0, parent);
+    const std::string parent_fingerprint =
+        old_school::learned_model_fingerprint(parent);
+    const auto contextual =
+        old_school::with_learned_decision_context(parent);
+
+    bool topology_invalid = false;
+    try {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                contextual, {}, {}));
+    } catch (const std::invalid_argument&) {
+        topology_invalid = true;
+    }
+    CHECK(topology_invalid);
+
+    bool infrastructure_failure = false;
+    try {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent,
+                {{
+                    .features = features,
+                    .target = value < 0.5 ? 1.0 : 0.0,
+                    .weight = 1.0,
+                }},
+                {
+                    .max_iterations = 1,
+                    .l2_tether = 0.01,
+                    .gradient_tolerance = 1e-10,
+                }));
+    } catch (const std::runtime_error& error) {
+        infrastructure_failure =
+            std::string_view(error.what()).find(
+                "infrastructure error") !=
+                std::string_view::npos &&
+            std::string_view(error.what()).find(
+                "did not converge") !=
+                std::string_view::npos;
+    }
+    CHECK(infrastructure_failure);
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+
+    bool cap_invalid = false;
+    try {
+        static_cast<void>(
+            old_school::calibrate_learned_value_output_layer(
+                parent, {},
+                {
+                    .max_iterations = 33,
+                    .l2_tether = 0.01,
+                    .gradient_tolerance = 1e-10,
+                }));
+    } catch (const std::invalid_argument&) {
+        cap_invalid = true;
+    }
+    CHECK(cap_invalid);
+}
+
 TEST(value_priority_head_adam_is_deterministic_isolated_and_bounded) {
     const auto parent = small_value_model();
     const old_school::GameState state =
