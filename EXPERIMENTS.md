@@ -11571,6 +11571,101 @@ The first and only scientific command will be:
 ./build/old-school-ac1-teacher-audit
 ```
 
+#### AC1-T0 sealed result: REJECT OC1 as the all-action teacher
+
+Run 2026-07-26 immediately after implementation-freeze commit `6f652f8` was
+pushed. `REVIEW.md` was reread through its newest 22:46 PDT entry before the
+run. The fixed evidence target and `.tmp` were absent. The sole command was
+exactly:
+
+```sh
+./build/old-school-ac1-teacher-audit
+```
+
+It exited `1`: complete evidence and a scientific failure, not an
+infrastructure failure. The run used frozen seed base `202607262205`, K=64,
+one rollout/world, H0, four threads, no shallow blend, zero epsilon/residual,
+PD0 off, Legacy Value mirrors, and all 26 physical Priority roots. Both model
+fingerprints and immutable artifacts matched. Repeated construction,
+descriptor order, accounting, artifact stability, and hidden repartition all
+passed; all 26/26 hidden clones changed the opponent-hand histogram and
+retained bit-identical scores and redacted H0 consequence hashes.
+
+Primary paired contrasts:
+
+| Model | Oriented contrast | Mean | Paired lower 95% | Positive K8 blocks | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| C16 | live Force Spike - Pass | +0.066413 | +0.065919 | 8/8 | localization pass |
+| C16 | Pass - payable Force Spike | -0.014300 | -0.016084 | 0/8 | localization fail |
+| C16 | Treefolk Growth - opponent Air Growth | +0.426118 | +0.426118 | 8/8 | localization pass |
+| OC1 | live Force Spike - Pass | +0.070828 | +0.070381 | 8/8 | PASS |
+| OC1 | Pass - payable Force Spike | -0.015306 | -0.017245 | 0/8 | **FAIL** |
+| OC1 | Treefolk Growth - opponent Air Growth | +0.416961 | +0.416961 | 8/8 | PASS |
+
+OC1 passed 7/8 exact-support controls. The sole support failure was Green's
+second-main sick-Bear root: it selected
+`growth-own-summoning-sick-grizzly-bears` at `0.422279` over Pass at
+`0.408924`. C16 made the same mistake (`0.444823` versus `0.431860`).
+Because Giant Growth expires during the cleanup that AC1 explicitly crosses,
+this localizes a critic/resource-valuation error: the critic values the
+otherwise-wasted spell action despite arriving next turn down a card.
+
+Per-deck root disposition:
+
+- Green (6 physical roots): the opponent-target Growth field mistake is
+  exonerated at H0—both models select our attack-capable Treefolk, with OC1
+  scoring Treefolk `1.0` versus opponent Air/Pass `0.583039`. The required
+  sick-Bear support fails. Other four dev roots are descriptive only.
+- Red (4): all descriptive roots choose the productive expected action
+  (remove blocker, face lethal, finish damaged Air Elemental, win stack
+  race); no Red acceptance predicate gates AC1.
+- Blue (8): all six support controls pass—live Force Spike, three exact
+  counter controls, redundant-counter Pass, and no Braingeyser X=0 support.
+  The separate payable-Force primary fails robustly. The intervening-counter
+  root remains the declared descriptive three-way exact tie.
+- White (4): all roots are descriptive; supports are Millstone over redundant
+  Moat, emergency Moat, Pass over establishing Millstone, and mill before
+  draw.
+- RU Aggro (4): the no-Disintegrate-X=0 control passes by selecting the land
+  play; descriptive roots choose X=3 face, Gray Ogre, and Island.
+
+Evidence:
+
+- file:
+  `build/experiments/old-school-ac1-t0-next-turn-v1.evidence.tsv`;
+- bytes: `1,662,073`;
+- complete-file SHA-256:
+  `9fd02d7538a704d55a3e3cdbb108d1c79063fce2b1488156de79c6140809d1e1`;
+- pre-footer payload SHA-256:
+  `533886913b6676c9d4432cf5fd2ba4fabae2d709961e196f38b00d33a3b120ed`;
+- metadata:
+  `af2df95eadb387837ec29118d7c74cdf085955624468053d5ee8dbe7054a9c6f`;
+- manifest:
+  `1fb497b049fef590f0a3a5b919ff0e3b3b7b1826fc24ce91f049a09fb1c3c45d`;
+- scores:
+  `c7899abbe98a31c22f9dc6820160ec3b121ca2c49d17441e0a620cf740029369`;
+- contrasts:
+  `d3f6964c97f407e6659ffe7f2056980a14d8b1e60476df073e3b45d095f71dbe`;
+- integrity:
+  `172eacbff4d5649bf56bcbcbbbe334ad5b697a025da9276314c2d239abbe2375`.
+
+Decision: **REJECT AC1-P1.** OC1 is not a sufficient all-action Priority
+teacher because two declared directions fail; no AC1 head will be fitted.
+The experiment also refines the mechanism map: the opponent-target Growth
+mistake is caused after the next-turn boundary by continuation healing, while
+payable Force Spike and wasteful sick-Bear Growth are already wrong under the
+next-turn critic. This closes another calibrated-critic/horizon-only route
+without opening any reserved gameplay seed. C16 remains champion.
+
+Next experiment: preregister a genuinely different Learned-only objective,
+provisionally FQ4 fitted information-set Bellman policy iteration. It will
+enumerate all legal Priority actions at balanced self-play roots and learn
+action-conditioned recursive Bellman targets from frozen same-generation
+Learned mirrors, with the critic and all non-Priority heads frozen. It must
+pass offline Bellman-loss, all-five-deck action-regret, hidden-information,
+component-isolation, and the focused behavior controls before any gameplay
+screen. No implementation or FQ4 seed is licensed by this result entry.
+
 Exit `0` means every infrastructure invariant, control, and all three OC1
 primary contrasts pass. Exit `1` means complete evidence—64 finite pairs for
 every expected contrast—with at least one mean, lower-bound, block, support,
