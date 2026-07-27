@@ -756,6 +756,13 @@ struct LearnedActionSamples {
     // flattened world-major, then rollout-major, and are paired across every
     // candidate.
     std::vector<std::vector<double>> q_samples;
+    // Priority-only aggregate scores, in caller candidate order. These
+    // reproduce the deployed Learned Value arithmetic exactly: aggregate
+    // the shallow observations first, then the continuation observations,
+    // with the same division order as the live selector. Raw paired
+    // q_samples remain available for statistical comparisons. Binary Attack
+    // and Block samplers leave this empty.
+    std::vector<double> exact_priority_aggregate_scores;
     std::size_t sampled_worlds = 0;
     std::size_t rollout_evaluations = 0;
     // Each rollout is classified exactly once by the score source.

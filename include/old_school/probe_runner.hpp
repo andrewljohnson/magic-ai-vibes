@@ -86,6 +86,13 @@ struct ProbeReferenceSamples {
     std::vector<probe_eval::CandidateSamples> candidates;
 };
 
+struct ProbeLabelCacheContents {
+    ProbeCacheMetadata metadata;
+    // Stable probe-ID order, with candidates in the corpus's canonical
+    // descriptor order and every common-world sample retained in row order.
+    std::vector<ProbeReferenceSamples> samples;
+};
+
 enum class ProbeCacheStatus : std::uint8_t {
     Loaded,
     Generated,
@@ -429,6 +436,19 @@ void write_probe_label_cache_atomic(
     const ProbeCacheMetadata& metadata,
     const std::vector<probes::DecisionProbe>& corpus,
     const std::vector<ProbeReferenceSamples>& samples);
+
+// Read-only cache access retaining exact metadata and every raw common-world
+// sample. Cache corruption or any metadata/corpus mismatch is rejected with
+// the same refresh instruction as the label-only wrapper below.
+ProbeLabelCacheContents load_probe_label_cache_contents(
+    const std::filesystem::path& path,
+    const ProbeCacheMetadata& expected_metadata,
+    const std::vector<probes::DecisionProbe>& corpus);
+
+ProbeLabelCacheContents load_probe_label_cache_contents(
+    ProbeCorpusKind corpus_kind, const std::filesystem::path& path,
+    const ProbeCacheMetadata& expected_metadata,
+    const std::vector<probes::DecisionProbe>& corpus);
 
 // Cache corruption or any metadata/corpus mismatch is rejected with a
 // refresh instruction. Training and runtime policy code never calls this.

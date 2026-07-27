@@ -1956,6 +1956,8 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
     CHECK(baseline.sampled_worlds == 2);
     CHECK(baseline.rollout_evaluations == actions.size() * 4);
     CHECK(baseline.q_samples.size() == actions.size());
+    CHECK(baseline.exact_priority_aggregate_scores.size() ==
+          actions.size());
     for (const auto& samples : baseline.q_samples) {
         CHECK(samples.size() == 4);
         CHECK(std::all_of(
@@ -1965,6 +1967,13 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
                        value >= 0.0 && value <= 1.0;
             }));
     }
+    CHECK(std::all_of(
+        baseline.exact_priority_aggregate_scores.begin(),
+        baseline.exact_priority_aggregate_scores.end(),
+        [](double value) {
+            return std::isfinite(value) &&
+                   value >= 0.0 && value <= 1.0;
+        }));
 
     const old_school::GameState hidden =
         hidden_repartition(state, 0);
@@ -1973,6 +1982,8 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
             hidden, decks, 0, true, old_school::TurnPhase::FirstMain,
             0, actions, model, config);
     CHECK(repeated.q_samples == baseline.q_samples);
+    CHECK(repeated.exact_priority_aggregate_scores ==
+          baseline.exact_priority_aggregate_scores);
     const auto logits =
         old_school::learned_actor_priority_logits(
             state, 0, true, old_school::TurnPhase::FirstMain, 0,
@@ -2042,6 +2053,12 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
     for (std::size_t index = 0; index < actions.size(); ++index) {
         CHECK(reordered.q_samples[index] ==
               baseline.q_samples[actions.size() - index - 1]);
+        CHECK(
+            std::bit_cast<std::uint64_t>(
+                reordered.exact_priority_aggregate_scores[index]) ==
+            std::bit_cast<std::uint64_t>(
+                baseline.exact_priority_aggregate_scores[
+                    actions.size() - index - 1]));
     }
 
     bool rejected_illegal = false;
@@ -6430,6 +6447,7 @@ TEST(generic_binary_block_samples_are_paired_legal_and_hidden_safe) {
     CHECK(fixture.state == original_state);
     CHECK(baseline.sampled_worlds == 3);
     CHECK(baseline.q_samples.size() == 2);
+    CHECK(baseline.exact_priority_aggregate_scores.empty());
     CHECK(baseline.rollout_evaluations == 12);
     CHECK(baseline.terminal_evaluations +
               baseline.bootstrapped_evaluations ==

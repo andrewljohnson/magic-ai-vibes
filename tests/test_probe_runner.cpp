@@ -29,6 +29,7 @@ using old_school::probe_eval::DeckProbeMetrics;
 using old_school::probe_runner::PolicyProbeReport;
 using old_school::probe_runner::ProbeCacheStatus;
 using old_school::probe_runner::ProbeCorpusKind;
+using old_school::probe_runner::ProbeLabelCacheContents;
 using old_school::probe_runner::ProbeReferenceSamples;
 using old_school::probe_runner::ProbeScoreConfig;
 using old_school::probe_runner::ProbeScoreReport;
@@ -127,8 +128,21 @@ bool action_samples_are_bit_identical(
             second.terminal_evaluations ||
         first.bootstrapped_evaluations !=
             second.bootstrapped_evaluations ||
-        first.q_samples.size() != second.q_samples.size()) {
+        first.q_samples.size() != second.q_samples.size() ||
+        first.exact_priority_aggregate_scores.size() !=
+            second.exact_priority_aggregate_scores.size()) {
         return false;
+    }
+    for (std::size_t candidate = 0;
+         candidate <
+         first.exact_priority_aggregate_scores.size();
+         ++candidate) {
+        if (std::bit_cast<std::uint64_t>(
+                first.exact_priority_aggregate_scores[candidate]) !=
+            std::bit_cast<std::uint64_t>(
+                second.exact_priority_aggregate_scores[candidate])) {
+            return false;
+        }
     }
     for (std::size_t candidate = 0;
          candidate < first.q_samples.size(); ++candidate) {
@@ -142,6 +156,103 @@ bool action_samples_are_bit_identical(
                     first.q_samples[candidate][sample]) !=
                 std::bit_cast<std::uint64_t>(
                     second.q_samples[candidate][sample])) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool cache_contents_are_bit_identical(
+    const ProbeLabelCacheContents& first,
+    const ProbeLabelCacheContents& second) {
+    if (first.metadata != second.metadata ||
+        first.samples.size() != second.samples.size()) {
+        return false;
+    }
+    for (std::size_t probe = 0; probe < first.samples.size();
+         ++probe) {
+        const ProbeReferenceSamples& left = first.samples[probe];
+        const ProbeReferenceSamples& right = second.samples[probe];
+        if (left.stable_id != right.stable_id ||
+            left.root_deck != right.root_deck ||
+            left.candidates.size() != right.candidates.size()) {
+            return false;
+        }
+        for (std::size_t candidate = 0;
+             candidate < left.candidates.size(); ++candidate) {
+            const auto& left_candidate =
+                left.candidates[candidate];
+            const auto& right_candidate =
+                right.candidates[candidate];
+            if (left_candidate.key != right_candidate.key ||
+                left_candidate.q_samples.size() !=
+                    right_candidate.q_samples.size()) {
+                return false;
+            }
+            for (std::size_t sample = 0;
+                 sample < left_candidate.q_samples.size();
+                 ++sample) {
+                if (std::bit_cast<std::uint64_t>(
+                        left_candidate.q_samples[sample]) !=
+                    std::bit_cast<std::uint64_t>(
+                        right_candidate.q_samples[sample])) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool labels_are_bit_identical(
+    const std::vector<old_school::probe_eval::ProbeLabel>& first,
+    const std::vector<old_school::probe_eval::ProbeLabel>& second) {
+    const auto same_double = [](double left, double right) {
+        return std::bit_cast<std::uint64_t>(left) ==
+               std::bit_cast<std::uint64_t>(right);
+    };
+    if (first.size() != second.size()) {
+        return false;
+    }
+    for (std::size_t probe = 0; probe < first.size(); ++probe) {
+        const auto& left = first[probe];
+        const auto& right = second[probe];
+        if (left.stable_id != right.stable_id ||
+            left.root_deck != right.root_deck ||
+            left.candidates.size() != right.candidates.size() ||
+            left.pairs.size() != right.pairs.size() ||
+            left.reference_best_set != right.reference_best_set ||
+            !same_double(
+                left.reference_value, right.reference_value)) {
+            return false;
+        }
+        for (std::size_t candidate = 0;
+             candidate < left.candidates.size(); ++candidate) {
+            const auto& left_candidate =
+                left.candidates[candidate];
+            const auto& right_candidate =
+                right.candidates[candidate];
+            if (left_candidate.key != right_candidate.key ||
+                !same_double(left_candidate.q,
+                             right_candidate.q) ||
+                !same_double(
+                    left_candidate.standard_error,
+                    right_candidate.standard_error)) {
+                return false;
+            }
+        }
+        for (std::size_t pair = 0; pair < left.pairs.size();
+             ++pair) {
+            const auto& left_pair = left.pairs[pair];
+            const auto& right_pair = right.pairs[pair];
+            if (left_pair.first != right_pair.first ||
+                left_pair.second != right_pair.second ||
+                !same_double(left_pair.delta_q,
+                             right_pair.delta_q) ||
+                !same_double(
+                    left_pair.paired_standard_error,
+                    right_pair.paired_standard_error)) {
                 return false;
             }
         }
@@ -407,7 +518,9 @@ void test_candidate_mapping_is_descriptor_safe() {
     std::reverse(attack.candidates.begin(),
                  attack.candidates.end());
     const LearnedActionSamples attack_rows{
-        {{0.2, 0.3}, {0.8, 0.9}}};
+        .q_samples = {{0.2, 0.3}, {0.8, 0.9}},
+        .exact_priority_aggregate_scores = {},
+    };
     const auto attack_mapped =
         old_school::probe_runner::map_candidate_samples(
             attack, attack_rows);
@@ -553,6 +666,98 @@ void test_cache_roundtrip_and_stale_rejection() {
     expect(labels.front().stable_id < labels.back().stable_id,
            "cache did not load in deterministic stable-ID order");
 
+    std::ifstream cache_input(path);
+    expect(
+        static_cast<bool>(cache_input),
+        "could not open the synthetic cache fixture");
+    std::ostringstream cache_buffer;
+    cache_buffer << cache_input.rdbuf();
+    expect(
+        !cache_input.bad(),
+        "could not read the complete synthetic cache fixture");
+    const std::string cache_text = cache_buffer.str();
+    const auto write_malformed =
+        [&](std::string_view name, const std::string& contents) {
+            const std::filesystem::path malformed_path =
+                directory.path() / name;
+            std::ofstream output(
+                malformed_path,
+                std::ios::out | std::ios::trunc);
+            output << contents;
+            output.close();
+            expect(
+                static_cast<bool>(output),
+                "could not write malformed cache fixture");
+            return malformed_path;
+        };
+    const auto replace_once =
+        [](std::string text, std::string_view from,
+           std::string_view to) {
+            const std::size_t position = text.find(from);
+            if (position == std::string::npos) {
+                throw std::runtime_error(
+                    "cache mutation source text is missing");
+            }
+            text.replace(position, from.size(), to);
+            return text;
+        };
+
+    const auto malformed_metadata = write_malformed(
+        "malformed-metadata.tsv",
+        replace_once(
+            cache_text, "meta\tworlds\t2\n",
+            "meta\tworlds\tnot-a-number\n"));
+    const std::string malformed_metadata_error = expect_invalid(
+        [&] {
+            static_cast<void>(
+                old_school::probe_runner::
+                    load_probe_label_cache_contents(
+                        malformed_metadata, metadata, probes));
+        },
+        "raw cache loader accepted malformed metadata");
+    expect(
+        malformed_metadata_error.find("invalid worlds") !=
+                std::string::npos &&
+            malformed_metadata_error.find(
+                "--refresh-probe-cache") != std::string::npos,
+        "malformed metadata rejection was not fail-closed");
+
+    const auto malformed_row = write_malformed(
+        "malformed-row.tsv",
+        replace_once(cache_text, "\nsample\t", "\nbroken\t"));
+    const std::string malformed_row_error = expect_invalid(
+        [&] {
+            static_cast<void>(
+                old_school::probe_runner::
+                    load_probe_label_cache_contents(
+                        malformed_row, metadata, probes));
+        },
+        "raw cache loader accepted a malformed sample row");
+    expect(
+        malformed_row_error.find(
+            "sample row is out of canonical order") !=
+                std::string::npos &&
+            malformed_row_error.find(
+                "--refresh-probe-cache") != std::string::npos,
+        "malformed row rejection was not fail-closed");
+
+    const auto trailing = write_malformed(
+        "trailing.tsv", cache_text + "unexpected\n");
+    const std::string trailing_error = expect_invalid(
+        [&] {
+            static_cast<void>(
+                old_school::probe_runner::
+                    load_probe_label_cache_contents(
+                        trailing, metadata, probes));
+        },
+        "raw cache loader accepted trailing input");
+    expect(
+        trailing_error.find("trailing rows") !=
+                std::string::npos &&
+            trailing_error.find("--refresh-probe-cache") !=
+                std::string::npos,
+        "trailing-input rejection was not fail-closed");
+
     auto stale = metadata;
     ++stale.training_seed;
     const std::string error = expect_invalid(
@@ -633,6 +838,104 @@ void test_cache_roundtrip_and_stale_rejection() {
     expect(v2_error.find("unknown magic header") !=
                std::string::npos,
            "Environment-v2 cache rejection did not identify its magic");
+}
+
+void test_frozen_actor_cache_raw_contents_are_lossless() {
+    const std::vector<DecisionProbe> corpus =
+        old_school::probes::make_probe_dev_v3();
+    ProbeScoreConfig config;
+    config.training_games = 800;
+    config.training_seed = 424242;
+    config.reference_worlds = 64;
+    config.reference_horizon_turns = 8;
+    config.reference_rollouts_per_world = 1;
+    const auto expected_metadata =
+        old_school::probe_runner::make_probe_cache_metadata(
+            config, corpus,
+            "dd58d3814f46d6661d40690f6ad7ac73"
+            "226c2160137b2e42bfadf3e6ac7a1b72");
+    const std::filesystem::path path =
+        "data/old-school-probe-dev-v3-k64-h8-c17-j1.labels.tsv";
+
+    const ProbeLabelCacheContents first =
+        old_school::probe_runner::load_probe_label_cache_contents(
+            path, expected_metadata, corpus);
+    const ProbeLabelCacheContents second =
+        old_school::probe_runner::load_probe_label_cache_contents(
+            ProbeCorpusKind::DevV3, path, expected_metadata, corpus);
+    expect(
+        first.metadata == expected_metadata,
+        "raw cache loader did not preserve exact stored metadata");
+    expect(
+        cache_contents_are_bit_identical(first, second),
+        "double-loading the frozen Actor cache changed an IEEE sample "
+        "bit or row");
+
+    std::vector<const DecisionProbe*> canonical;
+    canonical.reserve(corpus.size());
+    for (const DecisionProbe& probe : corpus) {
+        canonical.push_back(&probe);
+    }
+    std::sort(
+        canonical.begin(), canonical.end(),
+        [](const DecisionProbe* left,
+           const DecisionProbe* right) {
+            return left->stable_id < right->stable_id;
+        });
+
+    std::size_t candidate_count = 0;
+    std::size_t sample_row_count = 0;
+    expect(
+        first.samples.size() == canonical.size(),
+        "raw cache loader changed the frozen probe census");
+    for (std::size_t probe_index = 0;
+         probe_index < canonical.size(); ++probe_index) {
+        const DecisionProbe& expected = *canonical[probe_index];
+        const ProbeReferenceSamples& actual =
+            first.samples[probe_index];
+        expect(
+            actual.stable_id == expected.stable_id &&
+                actual.root_deck == expected.root_deck &&
+                actual.candidates.size() ==
+                    expected.candidates.size(),
+            "raw cache probe rows are not in canonical stable-ID "
+            "order");
+        candidate_count += actual.candidates.size();
+        for (std::size_t candidate = 0;
+             candidate < actual.candidates.size(); ++candidate) {
+            expect(
+                actual.candidates[candidate].key ==
+                        expected.candidates[candidate].descriptor &&
+                    actual.candidates[candidate].q_samples.size() ==
+                        64,
+                "raw cache descriptor or common-world sample order "
+                "changed");
+            sample_row_count +=
+                actual.candidates[candidate].q_samples.size();
+        }
+    }
+    expect(
+        first.samples.size() == 20 &&
+            candidate_count == 61 &&
+            sample_row_count == 3904,
+        "raw frozen-cache census is not 20 probes / 61 candidates / "
+        "3,904 common-world rows");
+
+    std::vector<old_school::probe_eval::ProbeLabel> derived;
+    derived.reserve(first.samples.size());
+    for (const ProbeReferenceSamples& samples : first.samples) {
+        derived.push_back(
+            old_school::probe_eval::make_probe_label(
+                samples.stable_id, samples.root_deck,
+                samples.candidates));
+    }
+    const auto wrapped =
+        old_school::probe_runner::load_probe_label_cache(
+            path, expected_metadata, corpus);
+    expect(
+        labels_are_bit_identical(derived, wrapped),
+        "label-only wrapper changed labels derived from raw cache "
+        "rows");
 }
 
 void test_validation_cache_identity_is_fail_closed() {
@@ -1375,7 +1678,9 @@ void test_probe_scoring_rejects_block_decisions_explicitly() {
     const DecisionProbe& block =
         first_probe_of_kind(fields, DecisionKind::Block);
     const LearnedActionSamples pretend_attack{
-        {{0.25, 0.25}, {0.75, 0.75}}};
+        .q_samples = {{0.25, 0.25}, {0.75, 0.75}},
+        .exact_priority_aggregate_scores = {},
+    };
     expect(
         expect_invalid(
             [&] {
@@ -4305,6 +4610,9 @@ int main() {
                test_reference_resource_bounds_reject_early);
     runner.run("cache roundtrip and stale rejection",
                test_cache_roundtrip_and_stale_rejection);
+    runner.run(
+        "frozen Actor cache raw lossless load",
+        test_frozen_actor_cache_raw_contents_are_lossless);
     runner.run("validation cache identity separation",
                test_validation_cache_identity_is_fail_closed);
     runner.run("hidden clone information set",

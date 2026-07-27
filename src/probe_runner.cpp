@@ -852,6 +852,18 @@ void validate_reference_samples(
     }
 }
 
+std::vector<probe_eval::ProbeLabel> labels_from_reference_samples(
+    const std::vector<ProbeReferenceSamples>& samples) {
+    std::vector<probe_eval::ProbeLabel> labels;
+    labels.reserve(samples.size());
+    for (const ProbeReferenceSamples& probe : samples) {
+        labels.push_back(probe_eval::make_probe_label(
+            probe.stable_id, probe.root_deck, probe.candidates));
+    }
+    probe_eval::validate_probe_labels(labels);
+    return labels;
+}
+
 void write_cache_contents(
     std::ostream& output,
     std::string_view cache_magic,
@@ -920,10 +932,34 @@ void require_bit_identical(
     const LearnedActionSamples& first,
     const LearnedActionSamples& second,
     std::string_view stable_id) {
-    if (first.q_samples.size() != second.q_samples.size()) {
+    if (first.sampled_worlds != second.sampled_worlds ||
+        first.rollout_evaluations != second.rollout_evaluations ||
+        first.terminal_evaluations !=
+            second.terminal_evaluations ||
+        first.bootstrapped_evaluations !=
+            second.bootstrapped_evaluations) {
+        throw std::runtime_error(
+            std::string(stable_id) +
+            ": hidden repartition changed reference accounting");
+    }
+    if (first.q_samples.size() != second.q_samples.size() ||
+        first.exact_priority_aggregate_scores.size() !=
+            second.exact_priority_aggregate_scores.size()) {
         throw std::runtime_error(
             std::string(stable_id) +
             ": hidden repartition changed reference sample rows");
+    }
+    for (std::size_t row = 0;
+         row < first.exact_priority_aggregate_scores.size();
+         ++row) {
+        if (!bit_identical(
+                first.exact_priority_aggregate_scores[row],
+                second.exact_priority_aggregate_scores[row])) {
+            throw std::runtime_error(
+                std::string(stable_id) +
+                ": hidden repartition changed exact Priority "
+                "aggregate scores");
+        }
     }
     for (std::size_t row = 0; row < first.q_samples.size();
          ++row) {
@@ -2303,8 +2339,20 @@ bool action_samples_bit_identical(
         first.terminal_evaluations != second.terminal_evaluations ||
         first.bootstrapped_evaluations !=
             second.bootstrapped_evaluations ||
-        first.q_samples.size() != second.q_samples.size()) {
+        first.q_samples.size() != second.q_samples.size() ||
+        first.exact_priority_aggregate_scores.size() !=
+            second.exact_priority_aggregate_scores.size()) {
         return false;
+    }
+    for (std::size_t candidate = 0;
+         candidate <
+         first.exact_priority_aggregate_scores.size();
+         ++candidate) {
+        if (!bit_identical(
+                first.exact_priority_aggregate_scores[candidate],
+                second.exact_priority_aggregate_scores[candidate])) {
+            return false;
+        }
     }
     for (std::size_t candidate = 0;
          candidate < first.q_samples.size(); ++candidate) {
@@ -4514,6 +4562,28 @@ std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
     ProbeCorpusKind corpus_kind, const std::filesystem::path& path,
     const ProbeCacheMetadata& expected_metadata,
     const std::vector<probes::DecisionProbe>& corpus) {
+    const ProbeLabelCacheContents contents =
+        load_probe_label_cache_contents(
+            corpus_kind, path, expected_metadata, corpus);
+    try {
+        return labels_from_reference_samples(contents.samples);
+    } catch (const std::exception& error) {
+        throw_refresh_error(error.what());
+    }
+}
+
+ProbeLabelCacheContents load_probe_label_cache_contents(
+    const std::filesystem::path& path,
+    const ProbeCacheMetadata& expected_metadata,
+    const std::vector<probes::DecisionProbe>& corpus) {
+    return load_probe_label_cache_contents(
+        ProbeCorpusKind::DevV3, path, expected_metadata, corpus);
+}
+
+ProbeLabelCacheContents load_probe_label_cache_contents(
+    ProbeCorpusKind corpus_kind, const std::filesystem::path& path,
+    const ProbeCacheMetadata& expected_metadata,
+    const std::vector<probes::DecisionProbe>& corpus) {
     try {
         const ProbeCorpusDefinition definition =
             corpus_definition(corpus_kind);
@@ -4590,13 +4660,16 @@ std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
 
         const std::size_t sample_count =
             reference_sample_count(actual);
-        std::vector<probe_eval::ProbeLabel> labels;
-        labels.reserve(corpus.size());
+        std::vector<ProbeReferenceSamples> samples;
+        samples.reserve(corpus.size());
         for (const probes::DecisionProbe* probe :
              sorted_probes(corpus)) {
-            std::vector<probe_eval::CandidateSamples>
-                candidate_samples;
-            candidate_samples.reserve(probe->candidates.size());
+            ProbeReferenceSamples probe_samples{
+                .stable_id = probe->stable_id,
+                .root_deck = probe->root_deck,
+            };
+            probe_samples.candidates.reserve(
+                probe->candidates.size());
             for (std::size_t candidate = 0;
                  candidate < probe->candidates.size(); ++candidate) {
                 const std::string& expected_key =
@@ -4632,11 +4705,10 @@ std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
                     }
                     values.q_samples.push_back(q);
                 }
-                candidate_samples.push_back(std::move(values));
+                probe_samples.candidates.push_back(
+                    std::move(values));
             }
-            labels.push_back(probe_eval::make_probe_label(
-                probe->stable_id, probe->root_deck,
-                candidate_samples));
+            samples.push_back(std::move(probe_samples));
         }
         std::string trailing;
         if (std::getline(input, trailing)) {
@@ -4647,8 +4719,13 @@ std::vector<probe_eval::ProbeLabel> load_probe_label_cache(
             throw std::invalid_argument(
                 "probe cache read failed");
         }
-        probe_eval::validate_probe_labels(labels);
-        return labels;
+        validate_reference_samples(actual, corpus, samples);
+        static_cast<void>(
+            labels_from_reference_samples(samples));
+        return {
+            .metadata = actual,
+            .samples = std::move(samples),
+        };
     } catch (const std::exception& error) {
         throw_refresh_error(error.what());
     }

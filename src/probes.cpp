@@ -5431,8 +5431,21 @@ bool bsr_samples_bit_identical(
             second.terminal_evaluations ||
         first.bootstrapped_evaluations !=
             second.bootstrapped_evaluations ||
-        first.q_samples.size() != second.q_samples.size()) {
+        first.q_samples.size() != second.q_samples.size() ||
+        first.exact_priority_aggregate_scores.size() !=
+            second.exact_priority_aggregate_scores.size()) {
         return false;
+    }
+    for (std::size_t action = 0;
+         action <
+         first.exact_priority_aggregate_scores.size();
+         ++action) {
+        if (std::bit_cast<std::uint64_t>(
+                first.exact_priority_aggregate_scores[action]) !=
+            std::bit_cast<std::uint64_t>(
+                second.exact_priority_aggregate_scores[action])) {
+            return false;
+        }
     }
     for (std::size_t action = 0;
          action < first.q_samples.size(); ++action) {

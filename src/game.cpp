@@ -11838,6 +11838,41 @@ choose_value_continuation_greedy(
     };
 }
 
+// Keeps the deployed Learned Value Priority arithmetic in one place. The
+// ordering is intentional and observable at the bit level: all shallow
+// observations are added and averaged first, continuation observations are
+// then added to that mean, and the combined value is divided once more.
+class LearnedValuePriorityScoreAggregate {
+  public:
+    void add_shallow(double value) {
+        score_ += value;
+    }
+
+    void average_shallow(std::size_t shallow_count) {
+        score_ /= static_cast<double>(shallow_count);
+    }
+
+    void add_continuation(double value) {
+        score_ += value;
+    }
+
+    void average_continuations(
+        std::size_t continuation_count,
+        bool includes_shallow_prior) {
+        score_ /=
+            static_cast<double>(
+                continuation_count +
+                (includes_shallow_prior ? 1U : 0U));
+    }
+
+    double score() const {
+        return score_;
+    }
+
+  private:
+    double score_ = 0.0;
+};
+
 } // namespace
 
 std::vector<PriorityAction>
@@ -13007,28 +13042,29 @@ PriorityAction Game::choose_priority_action(
             // The historical champion blended a one-ply value prior with
             // complete continuations. This prior never force-resolves hidden
             // state: its mean is evaluated over the same common worlds.
+            LearnedValuePriorityScoreAggregate aggregate;
             for (const auto& world : worlds) {
-                scores[action_index] +=
+                aggregate.add_shallow(
                     learned_value_shallow_action_score(
-                    actions[action_index], player, sorcery_actions,
-                    phase, consecutive_passes,
-                    world.state);
+                        actions[action_index], player, sorcery_actions,
+                        phase, consecutive_passes,
+                        world.state));
             }
-            scores[action_index] /=
-                static_cast<double>(worlds.size());
+            aggregate.average_shallow(worlds.size());
             if (root_search) {
                 for (const auto& world : worlds) {
-                    scores[action_index] +=
+                    aggregate.add_continuation(
                         learned_value_search_action_score(
                             actions[action_index], player,
                             sorcery_actions, phase,
                             consecutive_passes,
                             world.state,
-                            world.continuation_seed);
+                            world.continuation_seed));
                 }
-                scores[action_index] /=
-                    static_cast<double>(worlds.size() + 1);
+                aggregate.average_continuations(
+                    worlds.size(), true);
             }
+            scores[action_index] = aggregate.score();
         }
         if (root_search) {
             state_.stats[player].monte_carlo_rollouts +=
@@ -21205,12 +21241,26 @@ LearnedActionSamples learned_priority_action_samples(
     const std::size_t expected_evaluations =
         checked_rollout_evaluations(candidates.size(), config);
     result.q_samples.resize(candidates.size());
+    result.exact_priority_aggregate_scores.resize(
+        candidates.size());
     const std::size_t samples_per_action =
         config.worlds * config.rollouts_per_world;
+    struct PriorityEvaluation {
+        double q_score = 0.0;
+        double shallow_prior = 0.0;
+        double continuation = 0.0;
+        bool terminal = false;
+    };
+    std::vector<std::vector<double>> shallow_priors(
+        candidates.size(),
+        std::vector<double>(samples_per_action));
+    std::vector<std::vector<double>> continuations(
+        candidates.size(),
+        std::vector<double>(samples_per_action));
     const auto evaluate =
         [&](std::size_t action_index, std::size_t world_index,
             std::size_t rollout_index)
-        -> std::pair<double, bool> {
+        -> PriorityEvaluation {
         const PriorityAction& action = candidates[action_index];
         const LearnedEvaluationWorld& world = worlds[world_index];
         const std::uint64_t continuation_seed =
@@ -21287,7 +21337,12 @@ LearnedActionSamples learned_priority_action_samples(
         if (config.value_priority_residual_weight != 0.0) {
             score += priority_residuals[action_index];
         }
-        return {score, terminal_evaluation};
+        return {
+            .q_score = score,
+            .shallow_prior = shallow_prior,
+            .continuation = continuation,
+            .terminal = terminal_evaluation,
+        };
     };
 
     if (config.evaluation_threads == 1) {
@@ -21302,14 +21357,22 @@ LearnedActionSamples learned_priority_action_samples(
                      rollout_index <
                      config.rollouts_per_world;
                      ++rollout_index) {
-                    const auto [score, terminal_evaluation] =
+                    const PriorityEvaluation evaluation =
                         evaluate(
                             action_index, world_index,
                             rollout_index);
                     result.q_samples[action_index].push_back(
-                        score);
+                        evaluation.q_score);
+                    const std::size_t sample_index =
+                        world_index *
+                            config.rollouts_per_world +
+                        rollout_index;
+                    shallow_priors[action_index][sample_index] =
+                        evaluation.shallow_prior;
+                    continuations[action_index][sample_index] =
+                        evaluation.continuation;
                     ++result.rollout_evaluations;
-                    if (terminal_evaluation) {
+                    if (evaluation.terminal) {
                         ++result.terminal_evaluations;
                     } else {
                         ++result.bootstrapped_evaluations;
@@ -21348,15 +21411,21 @@ LearnedActionSamples learned_priority_action_samples(
                         const std::size_t rollout_index =
                             sample_index %
                             config.rollouts_per_world;
-                        const auto [score,
-                                    terminal_evaluation] =
+                        const PriorityEvaluation result_cell =
                             evaluate(
                                 action_index, world_index,
                                 rollout_index);
                         result.q_samples[action_index]
-                                        [sample_index] = score;
+                                        [sample_index] =
+                            result_cell.q_score;
+                        shallow_priors[action_index]
+                                      [sample_index] =
+                            result_cell.shallow_prior;
+                        continuations[action_index]
+                                     [sample_index] =
+                            result_cell.continuation;
                         terminal_flags[evaluation] =
-                            terminal_evaluation ? 1U : 0U;
+                            result_cell.terminal ? 1U : 0U;
                     } catch (...) {
                         failures[evaluation] =
                             std::current_exception();
@@ -21380,6 +21449,31 @@ LearnedActionSamples learned_priority_action_samples(
         result.bootstrapped_evaluations =
             expected_evaluations -
             result.terminal_evaluations;
+    }
+    for (std::size_t action_index = 0;
+         action_index < candidates.size(); ++action_index) {
+        LearnedValuePriorityScoreAggregate aggregate;
+        if (config.blend_shallow_prior) {
+            for (const double shallow_prior :
+                 shallow_priors[action_index]) {
+                aggregate.add_shallow(shallow_prior);
+            }
+            aggregate.average_shallow(samples_per_action);
+        }
+        for (const double continuation :
+             continuations[action_index]) {
+            aggregate.add_continuation(continuation);
+        }
+        aggregate.average_continuations(
+            samples_per_action,
+            config.blend_shallow_prior);
+        double aggregate_score = aggregate.score();
+        if (config.value_priority_residual_weight != 0.0) {
+            aggregate_score +=
+                priority_residuals[action_index];
+        }
+        result.exact_priority_aggregate_scores[action_index] =
+            aggregate_score;
     }
     if (result.rollout_evaluations != expected_evaluations ||
         result.terminal_evaluations >
@@ -22170,28 +22264,32 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     for (std::size_t action_index = 0;
          action_index < diagnostic.actions.size();
          ++action_index) {
+        LearnedValuePriorityScoreAggregate aggregate;
         for (const auto& world : worlds) {
-            diagnostic.base_scores[action_index] +=
+            aggregate.add_shallow(
                 evaluator.learned_value_shallow_action_score(
                     diagnostic.actions[action_index], player,
                     sorcery_actions, phase,
                     consecutive_passes,
-                    world.state);
+                    world.state));
         }
-        diagnostic.base_scores[action_index] /=
-            static_cast<double>(worlds.size());
+        aggregate.average_shallow(worlds.size());
         if (rollouts_per_action == 0) {
+            diagnostic.base_scores[action_index] =
+                aggregate.score();
             continue;
         }
         for (const auto& world : worlds) {
-            diagnostic.base_scores[action_index] +=
+            aggregate.add_continuation(
                 evaluator.learned_value_search_action_score(
                     diagnostic.actions[action_index], player,
                     sorcery_actions, phase, consecutive_passes,
-                    world.state, world.continuation_seed);
+                    world.state, world.continuation_seed));
         }
-        diagnostic.base_scores[action_index] /=
-            static_cast<double>(worlds.size() + 1);
+        aggregate.average_continuations(
+            worlds.size(), true);
+        diagnostic.base_scores[action_index] =
+            aggregate.score();
     }
     const auto residual =
         value_priority_residual_unchecked(

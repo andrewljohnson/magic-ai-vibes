@@ -11011,6 +11011,64 @@ tests. `git diff --check` was clean. This addendum freezes mechanics and
 identities only. OC1 is still unscored, the action result remains unknown,
 and gameplay seed `202607261929` remains unopened.
 
+#### OC1-AR1 implementation freeze
+
+Recorded 2026-07-26 before executing the no-argument evidence binary.
+`REVIEW.md` was reread through its newest 21:40 PDT entry. That entry
+reported no changed evidence or critique. The implementation also received a
+candidate-blind static/protocol review; its initial NO-GO findings were fixed
+before this freeze, and the final review returned GO for committing the
+implementation, not for interpreting it as evidence.
+
+The implementation preserves the preregistered hypothesis and thresholds.
+Notable fail-closed repairs made during review were:
+
+- the production Priority scorer now shares the engine's exact arithmetic
+  accumulator with the live Learned Value selector: sum shallow observations,
+  divide by K, add continuations, then divide by K+1. Raw common-world rows
+  remain available for paired statistics, while exact support is taken from
+  the engine aggregate. A multi-action Force Spike fixture proves the old
+  row-mean reduction differs in at least one IEEE-754 result bit and that the
+  scorer instead matches the live aggregate bits;
+- the runner validates the three frozen supplemental consequence-hash vectors
+  at runtime before candidate scoring and requires a real opponent
+  hand/library identity exchange;
+- the seven focused-family census is bounds-safe, only the declared
+  intervening-counter reference comparison is conjunctive, and descriptive
+  reference losses cannot silently reject;
+- DVR confirmation reproduces the stored best set as well as every stored
+  mean, then evaluates arbitrary deployment supports on fresh paired rows; and
+- two genuinely independent complete construction bundles are built. Each
+  obtains fresh before/after artifact snapshots, prepares a fresh hidden
+  repartition/audit, scores both original and hidden roots, and hashes the
+  complete typed result. Mutation tests prove that changing the repeated
+  hidden evidence, hidden audit, or artifact snapshot breaks equality.
+
+The exact compile/test-only verification was:
+
+```sh
+make -j4 test-probes test-dvr2-replay-bundle \
+  test-oc1-action-eval test-oc1-action-scoring \
+  test-oc1-action-regression
+make -j4 build/old-school-tests
+./build/old-school-tests
+git diff --check
+```
+
+Results: 57/57 fixture tests, 11/11 probe-metric tests, 33/33 probe-runner
+tests, 7/7 DVR2 replay tests, 9/9 OC1 action-evaluator tests, 7/7 exact
+action-scorer tests, 10/10 sealed-runner synthetic tests, and 155/155 engine
+tests passed under `-Wall -Wextra -Wpedantic -Werror`; the wrong-argument
+runner contract exited `2`. The exact Priority scorer also passed 7/7 under
+AddressSanitizer/UndefinedBehaviorSanitizer. Generic hidden-sample equality
+helpers were extended to include accounting and the new exact aggregate bits.
+
+No no-argument OC1-AR1 evidence run occurred during implementation or review,
+no candidate action result is known, and gameplay seeds
+`202607261929..202607261931` remain unopened. Next: commit and push this exact
+implementation, obtain the independent committed-state review, then execute
+the one no-knob action-regression gate.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
