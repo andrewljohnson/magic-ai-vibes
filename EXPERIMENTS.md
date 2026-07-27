@@ -10002,3 +10002,27 @@ Exit `0` means a valid run meeting the four-divergence/one-high-cost RS1
 license, `1` means a valid negative or underpowered result, and `2` means an
 invalid/infrastructure run. No 200-game screen or strength seed is licensed by
 DVR2 itself.
+
+#### C19-C promotion sequencing decision
+
+Recorded 2026-07-26 after rereading `REVIEW.md` through its newest 17:50 PDT
+entry. The reviewer recommends promoting its environment-gated C19-C base
+recipe (calendar-8 targets plus continuation hygiene) into committed constants
+so the certification harness can issue a sealed verdict while DVR2 is built.
+That is a reasonable infrastructure boundary—the six fingerprint failures in
+CERT-1R correctly prove that an environment-only recipe is not a certifiable
+artifact—but this program will take the reviewer's explicitly defensible
+DVR2-first alternative.
+
+The reason is scientific rather than scheduling convenience. The reported
+C19-C family remains below the required aggregate threshold at roughly
+`49.2–49.8%`, has not crowned on the all-five-deck lift gate, and its
+calendar-8 increment is already part of the sealed C17-J1 construction that
+failed the held-out critic gate, including wrong-direction Blue and RU
+diagnostics. Promoting it would therefore spend new fingerprints, a fresh
+artifact identity, and certification seeds on a composite with no passed
+offline mechanism gate. C16 remains frozen. DVR2 instead tests the now-shared
+falsifiable hypothesis that real Blue stack-response divergences identify a
+new card-agnostic action-evaluation mechanism. C19-C may be reconsidered only
+under a fresh declaration after DVR2, not silently promoted or certified in
+parallel.
