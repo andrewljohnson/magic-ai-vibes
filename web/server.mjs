@@ -865,6 +865,27 @@ export function validateEvolutionResult(value, config) {
       ),
     };
   });
+  const opponentTotals = byOpponent.reduce(
+    (totals, row) => ({
+      games: totals.games + row.games,
+      wins: totals.wins + row.wins,
+      losses: totals.losses + row.losses,
+      draws: totals.draws + row.draws,
+    }),
+    { games: 0, wins: 0, losses: 0, draws: 0 },
+  );
+  if (
+    opponentTotals.games !== stats.games ||
+    opponentTotals.wins !== stats.wins ||
+    opponentTotals.losses !== stats.losses ||
+    opponentTotals.draws !== stats.draws
+  ) {
+    throw new ApiError(
+      502,
+      "evolution_protocol_error",
+      "Evolution aggregate fitness does not equal its opponent rows",
+    );
+  }
 
   return {
     result: {

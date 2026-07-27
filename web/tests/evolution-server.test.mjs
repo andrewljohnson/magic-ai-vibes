@@ -415,6 +415,11 @@ test("bounds evolution failures, protocol, runtime, and output", async (t) => {
       code: "evolution_protocol_error",
     },
     {
+      prefix: ["--evolution-inconsistent-total"],
+      status: 502,
+      code: "evolution_protocol_error",
+    },
+    {
       prefix: ["--evolution-delay-ms", "100"],
       timeout: 15,
       status: 504,

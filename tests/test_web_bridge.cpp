@@ -422,16 +422,13 @@ old_school::DeckEvolutionSummary sample_evolution_summary() {
         .losses = 6,
         .draws = 2,
     };
-    for (std::size_t opponent = 0;
-         opponent < summary.best.by_opponent.size();
-         ++opponent) {
-        summary.best.by_opponent[opponent] = {
-            .games = 4,
-            .wins = opponent,
-            .losses = 4 - opponent,
-            .draws = 0,
-        };
-    }
+    summary.best.by_opponent = {{
+        {.games = 4, .wins = 1, .losses = 2, .draws = 1},
+        {.games = 4, .wins = 2, .losses = 2, .draws = 0},
+        {.games = 4, .wins = 2, .losses = 1, .draws = 1},
+        {.games = 4, .wins = 3, .losses = 1, .draws = 0},
+        {.games = 4, .wins = 4, .losses = 0, .draws = 0},
+    }};
     summary.generation_best_win_rates = {55.0, 60.0};
     return summary;
 }
@@ -508,6 +505,21 @@ void test_evolution_json_is_complete_and_deterministic() {
             "\"seed\":\"18446744073709551615\"") !=
             std::string::npos,
         "evolution JSON did not preserve a full uint64 seed");
+
+    auto inconsistent = summary;
+    inconsistent.best.total.wins = 11;
+    inconsistent.best.total.losses = 7;
+    std::ostringstream inconsistent_output;
+    bool rejected_inconsistent = false;
+    try {
+        old_school::web::write_evolution_json(
+            inconsistent_output, inconsistent, config);
+    } catch (const std::invalid_argument&) {
+        rejected_inconsistent = true;
+    }
+    expect(
+        rejected_inconsistent && inconsistent_output.str().empty(),
+        "evolution JSON accepted contradictory aggregate/opponent stats");
 }
 
 void test_learned_evolution_is_frozen_load_only() {

@@ -1318,8 +1318,21 @@ void write_evolution_json(
             }
         };
     validate_stats(summary.best.total);
+    DeckSimulationStats opponent_total;
     for (const auto& stats : summary.best.by_opponent) {
         validate_stats(stats);
+        opponent_total.games += stats.games;
+        opponent_total.wins += stats.wins;
+        opponent_total.losses += stats.losses;
+        opponent_total.draws += stats.draws;
+    }
+    if (opponent_total.games != summary.best.total.games ||
+        opponent_total.wins != summary.best.total.wins ||
+        opponent_total.losses != summary.best.total.losses ||
+        opponent_total.draws != summary.best.total.draws) {
+        throw std::invalid_argument(
+            "evolution result aggregate stats do not equal the "
+            "sum of opponent rows");
     }
 
     output << "{\"type\":\"evolution_result\","

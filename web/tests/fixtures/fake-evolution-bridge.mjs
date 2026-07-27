@@ -55,6 +55,9 @@ if (args.includes("--evolve-json")) {
     draws: 0,
     winRate: 50,
   };
+  const aggregateWins = args.includes("--evolution-inconsistent-total")
+    ? (games * opponentDecks.length) / 2 + 1
+    : (games * opponentDecks.length) / 2;
   writeJson({
     type: "evolution_result",
     schemaVersion: 1,
@@ -76,10 +79,12 @@ if (args.includes("--evolve-json")) {
     },
     fitness: {
       games: games * opponentDecks.length,
-      wins: (games * opponentDecks.length) / 2,
-      losses: (games * opponentDecks.length) / 2,
+      wins: aggregateWins,
+      losses: games * opponentDecks.length - aggregateWins,
       draws: 0,
-      winRate: 50,
+      winRate:
+        (100 * aggregateWins) /
+        (games * opponentDecks.length),
     },
     byOpponent: opponentDecks.map(([deck, name]) => ({
       deck,
