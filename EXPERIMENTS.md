@@ -10050,3 +10050,64 @@ falsifiable hypothesis that real Blue stack-response divergences identify a
 new card-agnostic action-evaluation mechanism. C19-C may be reconsidered only
 under a fresh declaration after DVR2, not silently promoted or certified in
 parallel.
+
+#### DVR2 implementation freeze and bundle framing
+
+Recorded 2026-07-26 after rereading `REVIEW.md` through its newest 18:16 PDT
+entry and before opening either fixed source seed base. The standalone
+implementation is frozen at commits `0060785` and `b443a69`; the latter closes
+the final publication-watchdog gap by checking the steady-clock deadline after
+temporary-file write/fsync/close and immediately before the atomic no-replace
+link. The independent protocol review found no remaining P0 or P1 issue and
+explicitly cleared the one reserved harvest.
+
+The implementation now binds:
+
+- the exact 80-game schedule, its unique seeds, every
+  seed-base/ordered-matchup/seat/play-draw cell, and schedule SHA-256
+  `876ac6ce9c89fa3a33b52c1650d46653eb0db9d06c98251b00aaa9733872fd13`;
+- outcome-blind, hierarchical opponent/seed/seat/play-draw round-robin
+  selection with the declared cap/dedup/owner/quota/budget precedence;
+- dynamic three-call worst-case reservation until an owner-deck agreement
+  control is retained and two-call reservation afterward;
+- independent reconstruction of actual calls, rollout/terminal/bootstrap
+  accounting, classifications, controls, and RS1 counters from retained
+  evidence;
+- DVR1 decode, hidden-safe rehydration, canonical K64/H8 re-score, record
+  fingerprint recomputation, and byte-identical recapture; and
+- strict framing/checksum parsing, concurrent no-overwrite publication,
+  rollback after an injected post-link failure, and no publication after an
+  invalid or watchdog-expired result.
+
+Exact verification:
+
+```sh
+make -j4 test-dvr2-harvest
+make -j4 test-probes
+```
+
+Results were 12/12 DVR2 tests plus the one-shot wrapper contract, followed by
+52/52 probe, 11/11 probe-metric, and 32/32 probe-runner tests. A separately
+compiled ASan/UBSan focused DVR2 binary also passed 12/12 under the full
+`-Wall -Wextra -Wpedantic -Werror` warning gate. `git diff --check` is clean.
+No source game or reference root was scored by these gates.
+
+For the reviewer's independent cross-check tool, the outer bundle is exactly
+three strict length-framed fields with no trailing bytes:
+
+```text
+schema<TAB>25:old-school-dvr2-bundle-v1<LF>
+payload_sha256<TAB>64:<64 lowercase hex bytes><LF>
+payload<TAB><canonical decimal byte count>:<canonical payload bytes><LF>
+```
+
+The single reserved execution is:
+
+```sh
+sh tools/run_dvr2_once.sh \
+  "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
+```
+
+The destination was confirmed absent before this record. Exit `0`, `1`, and
+`2` retain exactly the meanings declared above; no result has yet been
+observed.
