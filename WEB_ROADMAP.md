@@ -1539,8 +1539,8 @@ For each web issue:
   JSON-number rounding can corrupt identity.
 
   Focused and integrated gates passed: 18/18 C++ bridge tests,
-  `make test-web-ui` 87/87, and `make test-web` 105/105 Node/UI tests,
-  including 10 evolution server lifecycle/protocol cases. The first rendered
+  `make test-web-ui` 87/87, and `make test-web` 106/106 Node/UI tests,
+  including 11 evolution server lifecycle/protocol cases. The first rendered
   invocation failed only because the sandbox denied every ephemeral localhost
   listener with `EPERM`; the permitted identical rerun passed 10/10 real
   Chromium journeys. At both 1280 × 720 and 1440 × 900 it generated a
