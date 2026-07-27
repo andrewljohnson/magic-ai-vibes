@@ -139,6 +139,7 @@ struct LeafSampleEvidence {
     bool terminal = false;
     bool forced_action_applied = false;
     bool critic_evaluated = false;
+    bool contextual_legacy_critic_bit_identical = false;
     std::uint64_t contextual_score_bits = 0;
     std::uint64_t legacy_score_bits = 0;
     std::size_t actions_applied = 0;

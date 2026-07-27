@@ -152,6 +152,8 @@ void digest_leaf_sample(
     output.boolean(sample.terminal);
     output.boolean(sample.forced_action_applied);
     output.boolean(sample.critic_evaluated);
+    output.boolean(
+        sample.contextual_legacy_critic_bit_identical);
     if (sample.critic_evaluated) {
         output.integer(
             contextual_stream
@@ -221,7 +223,9 @@ void digest_science_group_bank(
             output.text(sample.redacted_leaf_hash);
             output.boolean(sample.terminal);
             output.boolean(sample.critic_evaluated);
-            output.boolean(sample.critic_evaluated);
+            output.boolean(
+                sample
+                    .contextual_legacy_critic_bit_identical);
             output.integer(sample.actions_applied);
             output.integer(
                 sample.priority_actions_applied);
@@ -261,7 +265,9 @@ void digest_operator_group_bank(
             output.text(sample.redacted_leaf_hash);
             output.boolean(sample.terminal);
             output.boolean(sample.critic_evaluated);
-            output.boolean(sample.critic_evaluated);
+            output.boolean(
+                sample
+                    .contextual_legacy_critic_bit_identical);
             output.integer(sample.actions_applied);
             output.integer(
                 sample.priority_actions_applied);
@@ -1508,9 +1514,13 @@ void validate_bank(
                     ? (exact_terminal_value_bits(
                            sample.score_bits) &&
                        !sample.critic_evaluated &&
+                       !sample
+                            .contextual_legacy_critic_bit_identical &&
                        sample.contextual_score_bits == 0 &&
                        sample.legacy_score_bits == 0)
                     : (sample.critic_evaluated &&
+                       sample
+                           .contextual_legacy_critic_bit_identical &&
                        sample.score_bits ==
                            sample
                                .contextual_score_bits &&
@@ -3890,6 +3900,9 @@ void append_bank_rows(
                  bool_text(sample.terminal),
                  bool_text(sample.forced_action_applied),
                  bool_text(sample.critic_evaluated),
+                 bool_text(
+                     sample
+                         .contextual_legacy_critic_bit_identical),
                  real_bits(std::bit_cast<double>(
                      sample.contextual_score_bits)),
                  real_bits(std::bit_cast<double>(

@@ -114,6 +114,9 @@ LeafSampleEvidence take_leaf_sample(science::LeafSample source) {
         .forced_action_applied =
             source.forced_action_applied,
         .critic_evaluated = source.critic_evaluated,
+        .contextual_legacy_critic_bit_identical =
+            source
+                .contextual_legacy_critic_bit_identical,
         .contextual_score_bits =
             source.contextual_score_bits,
         .legacy_score_bits = source.legacy_score_bits,

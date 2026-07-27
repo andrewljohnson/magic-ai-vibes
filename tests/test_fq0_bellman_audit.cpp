@@ -420,6 +420,8 @@ audit::GroupBankEvidence group_bank(
                 .terminal = false,
                 .forced_action_applied = true,
                 .critic_evaluated = true,
+                .contextual_legacy_critic_bit_identical =
+                    true,
                 .contextual_score_bits =
                     std::bit_cast<std::uint64_t>(value),
                 .legacy_score_bits =
@@ -1703,6 +1705,15 @@ void test_successor_operator_v2_omits_only_consequence() {
         audit::binding::
             successor_bank_pair_payload_sha256(
                 bank_a, bank_b, cross_fit);
+    expect(
+        canonical_pair_v1 ==
+                "e26c4033336e666c42545ae04f72986e"
+                "e88d151496ca62add0ac91a7042433b6" &&
+            baseline ==
+                "be5c5c92085fcbeef6806325a4d17fa4"
+                "f4480caba7ad071013a0fa67e39e1c65",
+        "valid successor v1/v2 bytes changed while "
+        "retaining the critic-identity flag");
 
     audit::SuccessorGroupEvidence full_group{
         .information_set_fingerprint =
@@ -1770,9 +1781,14 @@ void test_successor_operator_v2_omits_only_consequence() {
             expect(
                 operator_digest(
                     changed, bank_b, cross_fit) !=
-                    baseline,
+                        baseline &&
+                    audit::binding::
+                            successor_bank_pair_payload_sha256(
+                                changed, bank_b,
+                                cross_fit) !=
+                        canonical_pair_v1,
                 std::string(
-                    "operator v2 omitted ") +
+                    "successor v1/v2 omitted ") +
                     std::string(field));
         };
     expect_bank_change(
@@ -1882,6 +1898,14 @@ void test_successor_operator_v2_omits_only_consequence() {
                 .critic_evaluated = false;
         });
     expect_bank_change(
+        "contextual/legacy critic identity flag",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .contextual_legacy_critic_bit_identical =
+                false;
+        });
+    expect_bank_change(
         "forced-action flag",
         [](auto& bank) {
             bank.actions.front()
@@ -1916,6 +1940,15 @@ void test_successor_operator_v2_omits_only_consequence() {
                   .samples.front()
                   .turn_advances;
         });
+    audit::SuccessorGroupEvidence identity_group =
+        full_group;
+    identity_group.bank_a.actions.front()
+        .samples.front()
+        .contextual_legacy_critic_bit_identical = false;
+    expect(
+        full_digest(identity_group) != full_v1,
+        "full artifact payload omitted contextual/legacy "
+        "critic identity");
 
     const auto expect_cross_fit_change =
         [&](std::string_view field,
@@ -1982,6 +2015,124 @@ void test_successor_operator_v2_omits_only_consequence() {
         std::move(copied_bank),
         "full artifact accepted a consequence-mutated "
         "empirical bank copy");
+
+    audit::RunReport identity_report = complete_report();
+    add_successor_group_to_first_root(identity_report);
+    auto identity_root = std::find_if(
+        identity_report.scientific.roots.begin(),
+        identity_report.scientific.roots.end(),
+        [](const audit::RootEvidence& candidate) {
+            return candidate.stable_id ==
+                   "green.develop-bears.v3";
+        });
+    expect(
+        identity_root !=
+                identity_report.scientific.roots.end() &&
+            !identity_root->actions.front()
+                 .scopes.front()
+                 .groups.empty(),
+        "critic-identity artifact fixture is missing");
+    const audit::EvidenceBundle serialized_before =
+        audit::testing::serialize_evidence_bundle(
+            identity_report);
+    std::vector<std::string> leaf_fields;
+    std::istringstream serialized_lines(
+        serialized_before.bytes);
+    for (std::string line;
+         std::getline(serialized_lines, line);) {
+        if (!line.starts_with("leaf\t")) {
+            continue;
+        }
+        std::istringstream field_stream(line);
+        for (std::string field;
+             std::getline(field_stream, field, '\t');) {
+            leaf_fields.push_back(std::move(field));
+        }
+        break;
+    }
+    expect(
+        leaf_fields.size() == 17 &&
+            leaf_fields[9] == "1" &&
+            leaf_fields[10] == "1",
+        "canonical TSV leaf row omitted or misplaced the "
+        "contextual/legacy critic identity field");
+    identity_root->actions.front()
+        .scopes.front()
+        .groups.front()
+        .bank_a.actions.front()
+        .samples.front()
+        .contextual_legacy_critic_bit_identical = false;
+    rebind_report_witnesses(identity_report);
+    identity_report.gate = audit::evaluate_gate(
+        identity_report.scientific,
+        identity_report.integrity);
+    expect_report_rejected(
+        std::move(identity_report),
+        "full artifact accepted a false nonterminal "
+        "contextual/legacy critic identity");
+
+    audit::RunReport terminal_identity = complete_report();
+    add_successor_group_to_first_root(terminal_identity);
+    auto terminal_root = std::find_if(
+        terminal_identity.scientific.roots.begin(),
+        terminal_identity.scientific.roots.end(),
+        [](const audit::RootEvidence& candidate) {
+            return candidate.stable_id ==
+                   "green.develop-bears.v3";
+        });
+    expect(
+        terminal_root !=
+            terminal_identity.scientific.roots.end(),
+        "terminal critic-identity fixture is missing");
+    auto& terminal_group_sample =
+        terminal_root->actions.front()
+            .scopes.front()
+            .groups.front()
+            .bank_b.actions.front()
+            .samples.front();
+    auto& terminal_canonical_sample =
+        terminal_identity.scientific
+            .successor_feature_evaluations.front()
+            .scopes.front()
+            .bank_b.actions.front()
+            .samples.front();
+    const auto make_valid_terminal =
+        [](audit::LeafSampleEvidence& sample) {
+            expect(
+                sample.score_bits ==
+                    std::bit_cast<std::uint64_t>(0.5),
+                "terminal polarity fixture lacks an exact "
+                "terminal value");
+            sample.terminal = true;
+            sample.critic_evaluated = false;
+            sample
+                .contextual_legacy_critic_bit_identical =
+                false;
+            sample.contextual_score_bits = 0;
+            sample.legacy_score_bits = 0;
+        };
+    make_valid_terminal(terminal_group_sample);
+    make_valid_terminal(terminal_canonical_sample);
+    rebind_report_witnesses(terminal_identity);
+    terminal_identity.gate = audit::evaluate_gate(
+        terminal_identity.scientific,
+        terminal_identity.integrity);
+    static_cast<void>(
+        audit::testing::serialize_evidence_bundle(
+            terminal_identity));
+
+    terminal_group_sample
+        .contextual_legacy_critic_bit_identical = true;
+    terminal_canonical_sample
+        .contextual_legacy_critic_bit_identical = true;
+    rebind_report_witnesses(terminal_identity);
+    terminal_identity.gate = audit::evaluate_gate(
+        terminal_identity.scientific,
+        terminal_identity.integrity);
+    expect_report_rejected(
+        std::move(terminal_identity),
+        "full artifact accepted a true terminal "
+        "contextual/legacy critic identity");
 }
 
 void test_gate_exit_codes_and_internal_consistency() {

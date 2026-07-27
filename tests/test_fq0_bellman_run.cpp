@@ -182,6 +182,7 @@ void test_reduced_core_adapter_is_lossless() {
         "runner core adapter changed root identity");
 
     bool saw_leaf = false;
+    bool saw_critic_identity = false;
     for (std::size_t action_index = 0;
          action_index < source_root.actions.size();
          ++action_index) {
@@ -340,6 +341,9 @@ void test_reduced_core_adapter_is_lossless() {
                         const auto& mapped_leaf =
                             mapped_row.samples[sample];
                         saw_leaf = true;
+                        saw_critic_identity |=
+                            source_leaf
+                                .contextual_legacy_critic_bit_identical;
                         expect(
                             mapped_leaf.score_bits ==
                                     std::bit_cast<
@@ -360,7 +364,11 @@ void test_reduced_core_adapter_is_lossless() {
                                 mapped_leaf
                                         .critic_evaluated ==
                                     source_leaf
-                                        .critic_evaluated,
+                                        .critic_evaluated &&
+                                mapped_leaf
+                                        .contextual_legacy_critic_bit_identical ==
+                                    source_leaf
+                                        .contextual_legacy_critic_bit_identical,
                             "runner adapter changed a leaf "
                             "sample bit pattern");
                     }
@@ -369,8 +377,9 @@ void test_reduced_core_adapter_is_lossless() {
         }
     }
     expect(
-        saw_leaf,
-        "reduced runner fixture did not exercise a leaf");
+        saw_leaf && saw_critic_identity,
+        "reduced runner fixture did not exercise and "
+        "preserve a critic-identity leaf");
 }
 
 std::vector<old_school::fq0_bellman::ActionSamples>
@@ -770,6 +779,17 @@ void test_operator_binding_omits_only_consequence() {
             ++group.bank_a.actions.front()
                   .samples.front()
                   .actions_applied;
+        });
+    expect_operator_rejects(
+        "contextual/legacy critic identity",
+        [](auto& group) {
+            auto& sample =
+                group.bank_a.actions.front()
+                    .samples.front();
+            sample
+                .contextual_legacy_critic_bit_identical =
+                !sample
+                     .contextual_legacy_critic_bit_identical;
         });
     expect_operator_rejects(
         "cross-fit",

@@ -12401,6 +12401,134 @@ freeze check, confirm the evidence and temporary targets are absent, then and
 only then mechanically rerun the original exact no-argument FQ0 command with
 the same registered seed bases.
 
+##### Post-commit mirror-field NO-GO and prospective repair
+
+Declared 2026-07-27 09:22 PDT after commit `14fd274` was pushed, after
+rereading `REVIEW.md` through its 09:16 PDT cycle, and before reopening any
+registered seed. One post-commit reviewer withdrew GO after finding an exact
+science/artifact preimage mismatch:
+
+- science v1/v2 writes
+  `LeafSample::contextual_legacy_critic_bit_identical` after
+  `critic_evaluated`;
+- artifact `LeafSampleEvidence` does not retain that field, and both
+  `digest_science_group_bank` and `digest_operator_group_bank` write
+  `critic_evaluated` a second time in its place.
+
+Every valid frozen row currently makes those booleans equal: terminal rows set
+both false, while nonterminal legacy-C16 critic rows set both true. Therefore
+all existing byte-equality witnesses pass and valid digest bytes will remain
+unchanged, but the independently mirrored every-raw-flag contract is false: an
+identity-flag mutation is not representable in the artifact and is not
+mutation-tested. This is an undeclared field compression, not a scientific
+result. The registered evidence and temporary targets remain absent; the three
+registered seed bases remain mechanically unopened after the original exit-2
+void.
+
+Falsifiable repair hypothesis: propagating that one raw boolean without
+changing any valid row will make the artifact preimage structurally identical
+to science and mutation-sensitive while leaving every valid v1/v2 digest,
+sample value, target, gate, seed, and scientific outcome bit-identical.
+
+The only licensed repair is:
+
+1. Add `contextual_legacy_critic_bit_identical` to
+   `LeafSampleEvidence` and map it exactly from the science leaf.
+2. Replace only the duplicated boolean in the science-mirror v1 and operator
+   v2 digest writers with the retained field.
+3. Bind the field in full leaf/group semantic payloads and the canonical TSV
+   row, and validate it as false for terminal/no-critic leaves and true for
+   the valid nonterminal contextual=legacy critic leaves.
+4. Add adapter, v1, v2, full semantic/validation, and serialization mutation
+   tests. A mutation of this field must change both v1 and v2 and must reject
+   a complete report; valid science/artifact digests must remain equal.
+5. Do not change consequence handling, typed actions, any other raw field,
+   recipe, seed, world count, model, target, gate, evidence destination, or
+   exit semantics.
+
+Acceptance requires focused strict and ASan/UBSan suites, the full strict
+repository suite, explicit before/after valid v1/v2 digest equality, a clean
+diff, a new commit/push, and fresh independent post-commit GO. Until then the
+exact no-argument registered command remains forbidden. C16 remains champion.
+
+###### Mirror-field repair result
+
+Recorded 2026-07-27 09:49 PDT after rereading `REVIEW.md` through its 09:46
+PDT cycle. Accept the uncommitted repair for commit/push and a fresh
+post-commit freeze review; the registered retry remains forbidden until that
+review gives GO.
+
+The implementation follows the five declared items exactly. The artifact leaf
+now retains the raw identity flag, the runner maps it, full leaf/group and TSV
+payloads bind it, terminal leaves require critic=false/identity=false, and
+nonterminal legacy-C16 leaves require critic=true/identity=true. Both
+science-mirror digest writers replace only the duplicated critic boolean with
+the actual retained identity boolean. No science construction, sample, target,
+seed, recipe, gate, or model code changed.
+
+Two independent valid-byte checks passed:
+
+- the existing deterministic two-bank fixture pinned its pre-repair full-v1
+  digest at
+  `e26c4033336e666c42545ae04f72986ee88d151496ca62add0ac91a7042433b6`
+  and operator-v2 digest at
+  `be5c5c92085fcbeef6806325a4d17fa4f4480caba7ad071013a0fa67e39e1c65`;
+  the repaired implementation reproduces both exactly;
+- an external minimal public-binding probe produced identical pre/post full-v1
+  `09c93e65c88884c37dbd9bca797abc21f2488e33fdbf08ea085b0cf6b28ead`
+  and operator-v2
+  `8283275aa5aea187b526662c9b13b40605d7c959e3d50f29955780f044abae40`
+  digests. Its pre-repair source SHA was
+  `a5a1979c4647796e5ee527d964793790b139bd811e31b1cc972d9ce6e7351d6e`;
+  the post-repair source differs only by explicitly setting the newly retained
+  valid identity flag true.
+
+Mutation coverage proves an identity-only change alters v1, v2, the full group
+payload, and the canonical TSV leaf row; a coherently rebound complete report
+rejects it. Separate polarity fixtures prove critic=true/identity=true
+nonterminal rows and critic=false/identity=false exact-terminal rows serialize,
+while either mismatched identity rejects. The runner adapter requires a
+nonvacuous true source flag and preserves it exactly; a stale reconstruction
+witness rejects an identity-only raw-bank mutation.
+
+Exact strict commands:
+
+```sh
+make -j4 test-fq0
+# 66/66 passed: 13 information-set, 8 Bellman, 10 dominance,
+# 4 dominance-transition, 10 science, 13 artifact, 8 runner
+
+make -j4 test
+# engine 168/168; learned 27/27; probes 57/57; probe metrics
+# 11/11; probe runner 33/33; all audit/orchestration suites;
+# FQ0 66/66; web bridge 18/18; web 106/106; certification
+# 48/48; CLI/capture/clean/simulator smoke all passed
+```
+
+Fresh ASan/UBSan builds used
+`-O1 -g -Wall -Wextra -Wpedantic -Werror
+-fsanitize=address,undefined -fno-omit-frame-pointer`; exact runs:
+
+```sh
+ASAN_OPTIONS=detect_leaks=0 \
+  /tmp/old-school-fq0-bellman-audit-mirror-field-asan
+# 13/13
+
+ASAN_OPTIONS=detect_leaks=0 \
+  /tmp/old-school-fq0-bellman-run-tests-mirror-field-sanitized
+# 8/8
+```
+
+An independent exhaustive field-path audit found no other artifact
+compression: bank/stream identity, descriptor, stable typed action, feature
+row/features, every sample census/index/seed/score/hash/flag/counter, and every
+cross-fit field now map and bind one-to-one. Only the prospectively declared
+canonical consequence field remains omitted from v2. Three reviewers give GO
+to commit/push; all retain NO-GO for the registered command until the new
+commit receives a fresh post-commit review. `git diff --check` is clean, the
+frozen C16 SHA remains `53aeb904...f944ca`, and the evidence target and
+temporary remain absent.
+
 Exit `0` means complete evidence and every scientific/structural gate passes.
 It licenses only a separately preregistered FQ1: one fitted scalar
 Priority-Q generation with a frozen parent/target, all-action labels,
