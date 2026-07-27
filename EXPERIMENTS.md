@@ -9782,3 +9782,53 @@ makes no bot-strength claim. The next research action remains a separately
 declared, hard-bounded DVR2 run over frozen C16 and a fixed source schedule,
 with Blue-held opponent-stack responses first and complete DVR1 records for
 every retained production-versus-K64/H8 disagreement.
+
+### DVR1-R replayable owner-visible record extension (declared)
+
+Declared 2026-07-26 after rereading `REVIEW.md` through its newest 17:20 PDT
+entry and after DVR1 passed independent review. This is a schema/instrument
+extension only. It changes no gameplay, training recipe, deployed policy, or
+strength gate and licenses no source-game or reference harvest.
+
+The DVR1 review found that the one-way evidence record satisfies its declared
+capture contract but cannot yet serve as the immutable offline corpus required
+to qualify a response-window policy improvement. In particular, it omits the
+next permanent and stack-object IDs, has no durable decoder, and does not prove
+that a decoded public information set reproduces the original action set and
+K64/H8 scores. No DVR1 artifact has been published, so the v1 schema may be
+extended now without a compatibility migration.
+
+Hypothesis: a lossless, owner-visible replay envelope can reconstruct a
+canonical `DecisionProbe` from DVR1 bytes without storing either opponent
+hidden-zone identity. The extension will:
+
+- serialize the exact next permanent and stack-object IDs and require both
+  failed-draw flags to be false at a live decision;
+- serialize structured legal `PriorityAction` fields in addition to their
+  stable descriptors, so rehydration never parses human-readable labels;
+- decode the bounded DVR1 format strictly, rejecting missing, duplicate,
+  unknown, out-of-range, truncated, or trailing fields;
+- rebuild hidden zones canonically from original deck compositions, public
+  zones/counts, the owner's hand, and public spell objects; explicitly
+  normalize reporting-only `PlayerGameStats` to zero; and
+- keep replay/serialization code in a dedicated module rather than growing
+  `probes.cpp` further.
+
+The falsifiable gate is:
+
+1. `record -> bytes -> record` is exactly equal and serialization is
+   byte-identical after the round trip.
+2. Rehydration preserves the owner information/action fingerprint, complete
+   rules-derived legal-action descriptors, production descriptor, phase,
+   priority owner, pass count, and original deck compositions.
+3. Re-scoring the original and rehydrated probes with the same frozen model
+   and exact K64+K64/H8 reference produces identical `BsrRootScore` values,
+   best sets, seeds, and accounting.
+4. Opponent hidden repartition remains byte-identical; no decoded or serialized
+   field contains opponent hand/library identities.
+5. Mutated IDs, structured actions, counts, malformed bytes, or a nonzero
+   failed-draw state fail closed, and the focused `-Werror` suites remain
+   green.
+
+Only after this gate passes may DVR2 be declared and allowed to publish a
+durable divergence/control corpus.
