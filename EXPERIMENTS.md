@@ -10111,3 +10111,43 @@ sh tools/run_dvr2_once.sh \
 The destination was confirmed absent before this record. Exit `0`, `1`, and
 `2` retain exactly the meanings declared above; no result has yet been
 observed.
+
+#### DVR2 execution attempt 1: infrastructure void
+
+Executed 2026-07-26 from frozen commit `f69f07d` after rereading
+`REVIEW.md` through its newest 18:16 PDT entry:
+
+```sh
+sh tools/run_dvr2_once.sh \
+  "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
+```
+
+The process loaded exact Environment-v3 C16, completed all 40 source games for
+seed base `4242`, then exited `2` while processing an unreported prefix of the
+`7801` block:
+
+```text
+DVR2 infrastructure failure: DVR2 source probe validation failed;
+counterspell has no valid spell target
+```
+
+The runner had not begun reference scoring, emitted no root score or
+classification, and published neither the destination nor a temporary bundle.
+Therefore this is an infrastructure void with no scientific disposition and
+does not spend either seed as strength evidence.
+
+The failure exposes a rules-validator mismatch rather than an illegal engine
+state. In a legal counter war, two counterspells can target the same spell; the
+first to resolve removes that spell, leaving the other counterspell on the
+stack with a now-absent historical target. It remains a legal public stack
+object and will resolve without effect. `validate_probe` instead required every
+stored `spell_target` to still be a present Spell, rejecting this reachable
+fizzle state.
+
+Next action: add a rules-level regression for an on-stack Counterspell whose
+nonzero, older target ID has legally left the stack; retain strict rejection
+for self/future/nonspell present targets; improve any future validation error
+with exact source provenance; rerun all focused/probe gates; then retry the same
+fixed DVR2 command. Reusing the declared source seeds is allowed only for this
+mechanical retry because attempt 1 exposed no selection, score, outcome
+filter, or reference result from which the fix could be tuned.
