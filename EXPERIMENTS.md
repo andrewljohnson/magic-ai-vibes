@@ -11796,3 +11796,303 @@ exactly:
 ```sh
 ./build/old-school-ac1-teacher-audit
 ```
+
+### FQ0-T0: frozen information-set Bellman-operator sufficiency audit
+
+Declared 2026-07-26 23:12 PDT, after AC1-T0 rejected OC1 as an all-action
+teacher and after rereading `REVIEW.md` through the independent 23:07 PDT
+byte-for-byte reproduction. No FQ model is trained by this experiment. Its
+falsifiable hypothesis is that one correctly perspectived, information-set
+safe Bellman backup over exact C16 action values will reverse the unambiguous
+second-main sick-Bear Giant Growth error while retaining the already-stable
+productive-action controls. If the operator cannot see that resource loss
+before fitting, a raw fitted-Q head would only encode the same blind spot and
+is forbidden.
+
+This declaration also resolves a label issue prospectively. The 23:07 review
+calls the existing payable Force Spike branch a spell "that gains nothing,"
+but the engine mechanics and the earlier DC1 audit show a two-sided trade:
+Blue spends Force Spike and one Island while Red loses its only spare mana.
+The historical one-spare fixture is also outcome-degenerate under strong
+pilots. It remains a descriptive mechanics/localization row, not a strategic
+correctness gate. A future high-spare-mana dose-response fixture may qualify
+the user's separate field report, but FQ0 does not tune against an unqualified
+card-lore label.
+
+#### Frozen inputs and randomness
+
+- Load only
+  `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`.
+  Require artifact SHA-256
+  `53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`
+  and exact C16 model fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+  Snapshot the artifact and all component fingerprints before and after.
+- Use exactly the 26 physical Priority roots frozen by AC1-T0, with its
+  manifest contracts, complete ordered typed legal actions, five-deck census
+  Green/Red/Blue/White/RU = `6/4/8/4/4`, and the one logical alias sampled
+  only once. The Attack root is outside a Priority-Q operator and is reported
+  only as unchanged C16 coverage.
+- Root-transition seed base is `202607262351`; successor selection-bank seed
+  base is `202607262352`; successor evaluation-bank seed base is
+  `202607262353`. All three were searched in the tracked worktree and all Git
+  history and were unused before this declaration. Each role has a disjoint,
+  named seed domain derived from stable root, world, information-set, bank,
+  and block coordinates. Root determinizations, successor determinizations,
+  and macro RNG deliberately exclude the candidate coordinate so every
+  candidate in the same root/group begins from common worlds and common
+  randomness. Candidate identity is retained in result/evidence coordinates
+  only. Action order and thread scheduling never select randomness.
+- Use K=64 common root determinizations paired across every legal root action.
+  Successor action values use K=64 common determinizations per information set
+  in each of the two independent banks. The full K64 estimate and each of
+  eight contiguous K8 block estimates independently rebuild successor
+  information-set groups and use separately derived bank streams.
+- Every determinization is produced by the existing
+  `sample_determinization(state, original_decks, observer, seed)` semantics.
+  Root particles use the root actor as observer. After grouping, choose the
+  lowest canonical root-world index only as a physical representative, then
+  freshly determinize that representative for the successor owner in each
+  bank. Never reuse, resample, or bootstrap the empirical group particles as
+  successor belief particles. Every physical representative in a group must
+  yield the same canonical sampled rows under the same seeds, and an
+  opponent-hidden-repartition clone must do likewise; otherwise the group is
+  not an information set and the run is infrastructure failure.
+- No Handcoded policy, opponent hidden identity, OC1 score, gameplay seed,
+  fitted parameter, or policy-head logit enters a target.
+
+#### Scalar action value and macro-transition
+
+For a Priority information set `I_p` owned by player `p`, define scalar
+`q0(I_p,a)` in `[0,1]` as C16's bootstrapped estimate of `p`'s probability
+of winning after legal action `a`:
+
+1. apply `a`;
+2. execute only forced singleton Priority actions and normal rules processing
+   until terminal or the next Priority root with at least two legal actions;
+3. when that path crosses Attack, Block, DamageOrder, cleanup discard,
+   extra-turn, draw, or other non-Priority choices, use the exact frozen C16
+   Value policy for the appropriate seat, with indexed deterministic
+   randomness;
+4. return exact terminal `1/0/0.5`, or call
+   `learned_contextual_critic_value` at the leaf from `p`'s perspective with
+   `{valid=true, phase=leaf phase, decision_player=leaf Priority owner,
+   consecutive_passes=leaf pass count, sorcery_actions=leaf timing}`.
+   Exact C16 is `LegacyStateOnly`, so this must be bit-identical to
+   `learned_critic_value`; disagreement is infrastructure failure.
+
+The evaluation-only driver must use production phase, priority, stack,
+combat, cleanup, extra-turn, draw-skip, and deck-out code. It must preserve
+that casting retains priority, a first Pass transfers priority with pass
+count one, a second Pass resolves the top stack object or closes the window,
+and resolution returns priority to the active player. It has a fixed action
+bound of 4,096, phase-transition bound of 1,024, and turn-advance bound of 64;
+exceeding any bound is incomplete evidence. The two non-Priority seats are
+exact frozen C16 Value with K=8/H=4, search depth one, zero exploration,
+zero continuation epsilon, zero Priority residual, PD0 off, and Legacy
+continuation. For a corresponding root/group world, macro RNG is derived
+without the candidate index so actions begin with common randomness; normal
+branch-dependent RNG consumption may then diverge. Capture off must leave
+production behavior and RNG bit-identical.
+
+For every root action, advance all 64 particles before choosing a successor
+action. Partition nonterminal particles by the next owner's exact
+owner-observable information/action fingerprint: public state, that owner's
+private hand and hidden-zone sizes, phase, priority owner, pass count,
+sorcery timing, and complete ordered typed legal actions. Opponent hand
+identities, opponent library identities/order, and future library order are
+excluded. A next owner may legitimately form different groups when its own
+hand differs.
+
+Within successor group `g`, let `qA(g,a)` and `qB(g,a)` be the canonical
+sequential-double means of the 64 finite samples in banks A and B. Let `SA`
+and `SB` be their respective exact IEEE-bit maximum supports. Define:
+
+```text
+V0(g) = 0.5 * (
+    mean_{a in SA} qB(g,a) +
+    mean_{a in SB} qA(g,a))
+```
+
+This cross-fit removes direct max/evaluation reuse without changing the
+zero-sum objective. Empty, duplicate, nonfinite, or unequal-width action rows
+are infrastructure failure. Actions are stored in canonical descriptor order;
+samples are summed in canonical world order; supports use exact IEEE-bit
+equality to the already-computed maximum. For root action `r`, with terminal
+particle values `z_i` and nonterminal successor groups `g`, define the full
+K64 backed target exactly as:
+
+```text
+Tq0(r) = (
+    sum_i z_i
+    + sum_{same-owner g} mass(g) * V0(g)
+    + sum_{opponent-owner g} mass(g) * (1 - V0(g))
+  ) / 64
+```
+
+The backed-up root-owner target for an individual particle is therefore:
+
+```text
+terminal                         -> exact root-owner 1/0/0.5
+same player owns successor       -> V0
+opponent owns successor          -> 1 - V0
+```
+
+Grouping precedes every max. Computing a per-determinization max and then
+averaging is strategy fusion and is an infrastructure failure, not an
+alternative estimator. Actor-perspective complement tests, including draws,
+must be exact.
+
+The eight K8 estimates repeat the complete formula above on each contiguous
+root-world block, with block-specific successor groups and disjoint A/B
+banks. They are not obtained by slicing a full-K64 result. For a contrast,
+`delta64` is the difference of the two full-K64 targets and `delta_j` is the
+difference in block `j`. Report the block mean, sample standard deviation,
+and Student-t df=7 lower bound
+`mean(delta_j) - 2.3646242515927844 * sd(delta_j) / sqrt(8)`.
+The primary and directional guards require both `delta64 > 0` and this lower
+bound above zero. Thus the nonlinear full estimate is never silently treated
+as the arithmetic mean of its block reconstructions.
+
+#### Resource visibility and representation gates
+
+FQ0 assigns no numeric value to a card, life point, creature, combat event, or
+mana. The spent Giant Growth is visible only through rules-level afterstates:
+the card moves from the actor's known hand to the public graveyard, mana is
+spent, and future legal actions change. To answer the review's resource-price
+concern without recreating P1R's "hold everything" failure, a separate exact
+next-boundary dominance audit is conjunctive:
+
+- force each root action through the remainder of the turn, cleanup, and the
+  next turn's First Main boundary using common hidden worlds. This
+  dominance-only path takes Pass at every discretionary Priority root,
+  declares no attackers or blockers, and uses the canonical lowest typed
+  action only for an unavoidable rules choice such as cleanup discard;
+  it never invokes a Learned or Handcoded policy;
+- compare canonical owner-observable consequences after normalizing only
+  measured resource costs: own hand cards consumed by identity, preexisting
+  mana sources newly tapped, and land-play entitlement, plus reporting-only
+  IDs/counters;
+- action A dominates B only when normalized consequences are exact, A costs
+  the actor componentwise no more, A costs the opponent componentwise no
+  less, and at least one inequality is strict. No card name or assigned card
+  weight participates.
+
+Resource costs use the existing PD0 component definitions and accumulation
+order across the forced root action, priority passes, and stack resolution:
+per-card hand-consumption counts, color-separated mana depletion,
+newly-tapped preexisting source identities, and land entitlement. To
+normalize a consumed card, restore it only when the corresponding excess
+copy is in the final graveyard or exile; a spell that produced a surviving
+permanent or otherwise changed a public object remains different. Restore
+only recorded preexisting sources and the recorded entitlement. Opponent
+resource costs are normalized by the same operation, after which the complete
+owner-observable states and boundary contexts must be exact. A is no-more
+costly than B by componentwise card/mana counts, source-set inclusion, and
+entitlement implication; opponent cost uses the reverse order. At least one
+resource relation must be strict. Failure to match a recorded cost to a
+specific final-zone/source change makes the pair incomparable rather than
+guessing.
+
+This must identify Pass over sick-Bear Growth in 64/64 worlds, Pass over the
+Braingeyser and Disintegrate X=0 no-effect spends when present, and must leave
+live Force Spike, payable Force Spike, lethal/productive spells, and
+non-equivalent public consequences incomparable. Dominance rows diagnose and
+gate the raw Bellman target; they do not overwrite it with a penalty.
+
+The proposed future Q input is the exact current
+`learned_priority_policy_features` vector. FQ0 must globally census
+bit-identical feature vectors among all distinct legal-action rows across
+every root and successor information set and all five decks, not merely
+within a legal set. A collision is harmful when canonical owner-observable
+consequences differ or its targets separate robustly; any harmful collision
+rejects the representation and forbids FQ1. Permutation-equivalent public
+objects must be canonicalized before consequence comparison so IDs alone
+cannot create a false conflict. Common-world rows use the same eight paired
+K8 differences and Student-t bound as root contrasts. Cross-information-set
+rows use the eight independently reconstructed block targets per row and
+reject when
+`abs(mean1-mean2) - 1.959963984540054 *
+sqrt(sd1^2/8 + sd2^2/8) > 0`. Opposing unique exact-max supports within one
+legal set also constitute a target conflict even when the interval touches
+zero.
+
+#### Scientific gates
+
+The primary is
+`field.green.second-main-sick-bear-growth.v1`. Require all of:
+
+- mean `Tq0(Pass) - Tq0(Growth own summoning-sick Grizzly Bears) > 0`;
+- the paired Student-t df=7 95% lower bound over the eight independently
+  recomputed K8 estimates is above zero;
+- at least 6/8 block estimates are positive;
+- exact global support is `{"pass"}`;
+- the exact next-boundary dominance proof above holds in 64/64 worlds.
+
+The following are conjunctive reject-only guards:
+
+- live Force Spike minus Pass has positive mean and lower bound with at least
+  6/8 positive blocks;
+- Treefolk Growth minus opponent tapped-Air Growth has positive mean and lower
+  bound with at least 6/8 positive blocks, and opponent-target Growth is
+  absent from exact support;
+- the productive Counterspell controls retain their declared exact singleton
+  supports, redundant same-target Counterspell selects exactly Pass, and
+  Braingeyser/Disintegrate X=0 actions are absent from support;
+- every exact dominance pair has full-K64
+  `Tq0(dominator) >= Tq0(dominated)` and at least 6/8 nonnegative paired K8
+  differences, no harmful
+  representation collision exists, and hidden-repartition, descriptor-order,
+  repeated-construction, thread-count, accounting, and artifact checks pass.
+
+Payable Force Spike, the intervening-counter tie, all other root rankings, and
+pooled/per-deck changes from C16 are descriptive. Report them completely so a
+later FQ1 declaration can define a held-out five-deck regret gate without
+tuning this operator to the named fixtures. Equal root weight followed by
+equal deck weight is used for summaries; legal-action count never weights a
+deck.
+
+#### Artifact, verification, and decision
+
+Implement a separate no-knob executable
+`build/old-school-fq0-bellman-audit`. It creates no model and publishes one
+no-replace bundle with schema
+`old-school-fq0-t0-bellman-evidence-v1` at
+`build/experiments/old-school-fq0-t0-bellman-v1.evidence.tsv`. The bundle
+contains immutable artifact provenance; frozen root manifests; every root,
+action, K64 and K8 target; terminal/same-owner/opponent-owner accounting;
+successor group fingerprints and masses; every group/bank/action `qA`/`qB`
+aggregate, exact support, all 64 raw IEEE score bits, and canonical redacted
+leaf-consequence hashes; root supports and contrasts; dominance and
+feature-collision rows; hidden/invariance results; section, payload, and
+complete-file SHA-256 hashes. It never serializes full hidden states.
+
+Focused tests must cover cast-retains-priority, first/second Pass semantics,
+stack resolution, every empty-stack phase transition, cleanup discard,
+extra-turn/draw/deck-out handling, singleton-chain stopping, same-owner max,
+opponent `1-max`, draws, a two-world group-before-max strategy-fusion
+counterexample, owner-group fingerprint redaction/sensitivity, common-world
+and action-order invariance, sick-Bear dominance, payable-Force
+incomparability, representation-collision detection, repeated construction,
+artifact/component immutability, corruption/trailing-data/stale-parent,
+symlink refusal, and atomic no-replace publication. Require `-Werror`, all
+unit/integration tests, AddressSanitizer, and UndefinedBehaviorSanitizer.
+
+The first and only scientific command, after an implementation-freeze commit
+and review, will be:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
+
+Exit `0` means complete evidence and every scientific/structural gate passes.
+It licenses only a separately preregistered FQ1: one fitted scalar
+Priority-Q generation with a frozen parent/target, all-action labels,
+sigmoid absolute-Q regression, no base-score blend, and all-five held-out
+loss/regret and component-isolation gates before gameplay. Exit `1` means
+complete scientific rejection. A primary Bellman failure forbids raw FQ1 and
+redirects to a separately declared exact-dominance-constrained objective; a
+representation failure redirects to a neutral public-stack/action encoding
+repair. Exit `2` means infrastructure or incomplete evidence and has no
+scientific interpretation. Any completed result retires all three diagnostic
+seed bases. C16 remains champion in every case.
