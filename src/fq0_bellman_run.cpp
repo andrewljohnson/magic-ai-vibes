@@ -703,6 +703,28 @@ bool support_excludes_typed_x_zero(
         });
 }
 
+const RootActionEvidence& unique_typed_pass_action(
+    const RootEvidence& root) {
+    const RootActionEvidence* pass = nullptr;
+    for (const RootActionEvidence& action : root.actions) {
+        if (action.action.kind != PriorityActionKind::Pass) {
+            continue;
+        }
+        require(
+            pass == nullptr,
+            root.stable_id +
+                ": FQ0 X=0 contrast has multiple typed Pass "
+                "actions");
+        pass = &action;
+    }
+    require(
+        pass != nullptr,
+        root.stable_id +
+            ": FQ0 X=0 contrast is missing its typed Pass "
+            "action");
+    return *pass;
+}
+
 void add_contrast(
     ScientificEvidence& evidence, GateRole role,
     std::string name, std::string stable_id,
@@ -785,6 +807,33 @@ void add_contrast(
     });
 }
 
+void build_x_zero_contrasts(ScientificEvidence& evidence) {
+    const std::array<std::string_view, 3> x_zero_roots{
+        "control.blue.braingeyser-x0.v1",
+        "ru.disintegrate-player-x.v3",
+        "validation.ru.disintegrate-hold-x0.v1",
+    };
+    for (const std::string_view stable_id : x_zero_roots) {
+        const RootEvidence& root =
+            evidence_root_for(evidence, stable_id);
+        const std::string& pass_descriptor =
+            unique_typed_pass_action(root).descriptor;
+        for (const RootActionEvidence& action :
+             root.actions) {
+            if (!typed_x_zero(stable_id, action.action)) {
+                continue;
+            }
+            add_contrast(
+                evidence, GateRole::XZeroGuard,
+                std::string(stable_id) + "." +
+                    action.descriptor +
+                    ".pass-over-x-zero",
+                std::string(stable_id), pass_descriptor,
+                action.descriptor);
+        }
+    }
+}
+
 void build_contrasts(ScientificEvidence& evidence) {
     add_contrast(
         evidence, GateRole::Primary,
@@ -829,28 +878,7 @@ void build_contrasts(ScientificEvidence& evidence) {
         "control.blue.counter-redundant-same-target.v1",
         "pass", "counter-same-air-elemental");
 
-    const std::array<std::string_view, 3> x_zero_roots{
-        "control.blue.braingeyser-x0.v1",
-        "ru.disintegrate-player-x.v3",
-        "validation.ru.disintegrate-hold-x0.v1",
-    };
-    for (const std::string_view stable_id : x_zero_roots) {
-        const RootEvidence& root =
-            evidence_root_for(evidence, stable_id);
-        for (const RootActionEvidence& action :
-             root.actions) {
-            if (!typed_x_zero(stable_id, action.action)) {
-                continue;
-            }
-            add_contrast(
-                evidence, GateRole::XZeroGuard,
-                std::string(stable_id) + "." +
-                    action.descriptor +
-                    ".pass-over-x-zero",
-                std::string(stable_id), "pass",
-                action.descriptor);
-        }
-    }
+    build_x_zero_contrasts(evidence);
 
     add_contrast(
         evidence, GateRole::Descriptive,
@@ -2887,6 +2915,11 @@ bool dominance_pair_passes_for_test(
     return dominance_pair_passed(
         role, matching_worlds, monotonic,
         all_settlements_valid);
+}
+
+void build_x_zero_contrasts_for_test(
+    ScientificEvidence& evidence) {
+    build_x_zero_contrasts(evidence);
 }
 
 } // namespace testing

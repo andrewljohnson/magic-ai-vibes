@@ -54,6 +54,9 @@ bool dominance_pair_passes_for_test(
     GateRole role, std::size_t matching_worlds,
     bool monotonic, bool all_settlements_valid);
 
+void build_x_zero_contrasts_for_test(
+    ScientificEvidence& evidence);
+
 } // namespace old_school::fq0_bellman_audit::testing
 
 namespace {
@@ -114,6 +117,149 @@ old_school::ac1_teacher_audit::Manifest test_manifest() {
     return manifest;
 }
 
+old_school::probes::DecisionProbe find_natural_probe(
+    std::vector<old_school::probes::DecisionProbe> probes,
+    std::string_view stable_id) {
+    const auto found = std::find_if(
+        probes.begin(), probes.end(),
+        [&](const old_school::probes::DecisionProbe& probe) {
+            return probe.stable_id == stable_id;
+        });
+    if (found == probes.end()) {
+        throw std::runtime_error(
+            "natural runner fixture is missing: " +
+            std::string(stable_id));
+    }
+    return *found;
+}
+
+audit::RootEvidence natural_x_zero_root(
+    const old_school::probes::DecisionProbe& probe) {
+    audit::RootEvidence root;
+    root.stable_id = probe.stable_id;
+    root.root_deck = probe.root_deck;
+    root.root_player = probe.root_player;
+    root.actions.reserve(probe.candidates.size());
+    for (const old_school::probes::Candidate& candidate :
+         probe.candidates) {
+        const auto* action =
+            std::get_if<old_school::PriorityAction>(
+                &candidate.action);
+        if (action == nullptr) {
+            throw std::runtime_error(
+                probe.stable_id +
+                ": natural X=0 fixture has a non-Priority "
+                "action");
+        }
+        const bool typed_x_zero =
+            (action->kind ==
+                 old_school::PriorityActionKind::
+                     CastBraingeyser ||
+             action->kind ==
+                 old_school::PriorityActionKind::
+                     CastDisintegrate) &&
+            action->x_value == 0;
+        const double value =
+            action->kind ==
+                    old_school::PriorityActionKind::Pass
+                ? 1.0
+                : (typed_x_zero ? 0.0 : 0.5);
+        audit::RootActionEvidence evidence;
+        evidence.descriptor = candidate.descriptor;
+        evidence.action = *action;
+        evidence.target.full = value;
+        evidence.target.blocks.fill(value);
+        evidence.complete = true;
+        root.actions.push_back(std::move(evidence));
+    }
+    std::sort(
+        root.actions.begin(), root.actions.end(),
+        [](const audit::RootActionEvidence& first,
+           const audit::RootActionEvidence& second) {
+            return first.descriptor < second.descriptor;
+        });
+    const auto pass = std::find_if(
+        root.actions.begin(), root.actions.end(),
+        [](const audit::RootActionEvidence& action) {
+            return action.action.kind ==
+                   old_school::PriorityActionKind::Pass;
+        });
+    if (pass == root.actions.end()) {
+        throw std::runtime_error(
+            probe.stable_id +
+            ": natural X=0 fixture has no typed Pass");
+    }
+    root.exact_support = {pass->descriptor};
+    root.complete = true;
+    return root;
+}
+
+audit::ScientificEvidence natural_x_zero_evidence() {
+    audit::ScientificEvidence evidence;
+    evidence.roots = {
+        natural_x_zero_root(
+            old_school::probes::
+                make_braingeyser_x_zero_control_v1()
+                    .front()),
+        natural_x_zero_root(find_natural_probe(
+            old_school::probes::make_probe_dev_v3(),
+            "ru.disintegrate-player-x.v3")),
+        natural_x_zero_root(
+            old_school::probes::make_probe_validation_v1()
+                .front()),
+    };
+    std::sort(
+        evidence.roots.begin(), evidence.roots.end(),
+        [](const audit::RootEvidence& first,
+           const audit::RootEvidence& second) {
+            return first.stable_id < second.stable_id;
+        });
+    return evidence;
+}
+
+const audit::RootEvidence& test_root(
+    const audit::ScientificEvidence& evidence,
+    std::string_view stable_id) {
+    const auto found = std::find_if(
+        evidence.roots.begin(), evidence.roots.end(),
+        [&](const audit::RootEvidence& root) {
+            return root.stable_id == stable_id;
+        });
+    if (found == evidence.roots.end()) {
+        throw std::runtime_error(
+            "natural X=0 evidence root is missing");
+    }
+    return *found;
+}
+
+audit::RootEvidence& test_root(
+    audit::ScientificEvidence& evidence,
+    std::string_view stable_id) {
+    return const_cast<audit::RootEvidence&>(
+        test_root(
+            static_cast<const audit::ScientificEvidence&>(
+                evidence),
+            stable_id));
+}
+
+const audit::RootActionEvidence& test_action(
+    const audit::ScientificEvidence& evidence,
+    std::string_view stable_id,
+    std::string_view descriptor) {
+    const audit::RootEvidence& root =
+        test_root(evidence, stable_id);
+    const auto found = std::find_if(
+        root.actions.begin(), root.actions.end(),
+        [&](const audit::RootActionEvidence& action) {
+            return action.descriptor == descriptor;
+        });
+    if (found == root.actions.end()) {
+        throw std::runtime_error(
+            "natural X=0 evidence action is missing");
+    }
+    return *found;
+}
+
 void test_cli_rejects_knobs_without_running() {
     char program[] = "old-school-fq0-bellman-audit";
     char knob[] = "--seed";
@@ -127,6 +273,171 @@ void test_cli_rejects_knobs_without_running() {
             error.str().find("accepts no paths, seeds") !=
                 std::string::npos,
         "sealed CLI accepted a knob or touched the runner");
+}
+
+void test_x_zero_contrasts_bind_natural_typed_pass() {
+    audit::ScientificEvidence evidence =
+        natural_x_zero_evidence();
+    const audit::ScientificEvidence original = evidence;
+    const std::string_view validation_id =
+        "validation.ru.disintegrate-hold-x0.v1";
+    const audit::RootEvidence& validation =
+        test_root(evidence, validation_id);
+    const auto is_pass =
+        [](const audit::RootActionEvidence& action) {
+            return action.action.kind ==
+                   old_school::PriorityActionKind::Pass;
+        };
+    const auto is_x_zero =
+        [](const audit::RootActionEvidence& action) {
+            return action.action.kind ==
+                       old_school::PriorityActionKind::
+                           CastDisintegrate &&
+                   action.action.x_value == 0;
+        };
+    expect(
+        validation.actions.size() == 8 &&
+            std::count_if(
+                validation.actions.begin(),
+                validation.actions.end(), is_pass) == 1 &&
+            std::count_if(
+                validation.actions.begin(),
+                validation.actions.end(), is_x_zero) == 2 &&
+            std::none_of(
+                validation.actions.begin(),
+                validation.actions.end(),
+                [](const audit::RootActionEvidence& action) {
+                    return action.descriptor == "pass";
+                }),
+        "natural harvested validation action census drifted");
+
+    audit::testing::build_x_zero_contrasts_for_test(
+        evidence);
+    expect(
+        evidence.roots == original.roots &&
+            evidence.contrasts.size() == 6,
+        "production X=0 contrast assembly changed roots or "
+        "lost a guard");
+
+    std::size_t blue_guards = 0;
+    std::size_t ru_guards = 0;
+    std::size_t validation_guards = 0;
+    std::vector<std::string> validation_negatives;
+    for (const audit::ContrastEvidence& contrast :
+         evidence.contrasts) {
+        const audit::RootActionEvidence& positive =
+            test_action(
+                evidence, contrast.stable_id,
+                contrast.positive_descriptor);
+        const audit::RootActionEvidence& negative =
+            test_action(
+                evidence, contrast.stable_id,
+                contrast.negative_descriptor);
+        expect(
+            contrast.role == audit::GateRole::XZeroGuard &&
+                positive.action.kind ==
+                    old_school::PriorityActionKind::Pass &&
+                negative.action.x_value == 0 &&
+                contrast.support_condition,
+            "production X=0 contrast lost its typed action "
+            "binding");
+        if (contrast.stable_id ==
+            "control.blue.braingeyser-x0.v1") {
+            ++blue_guards;
+            expect(
+                contrast.positive_descriptor == "pass" &&
+                    negative.action.kind ==
+                        old_school::PriorityActionKind::
+                            CastBraingeyser,
+                "hand-authored Braingeyser root lost literal "
+                "Pass binding");
+        } else if (
+            contrast.stable_id ==
+            "ru.disintegrate-player-x.v3") {
+            ++ru_guards;
+            expect(
+                contrast.positive_descriptor == "pass" &&
+                    negative.action.kind ==
+                        old_school::PriorityActionKind::
+                            CastDisintegrate,
+                "hand-authored Disintegrate root lost literal "
+                "Pass binding");
+        } else if (contrast.stable_id == validation_id) {
+            ++validation_guards;
+            expect(
+                contrast.positive_descriptor ==
+                        "kind-0.card-0.x-0" &&
+                    negative.action.kind ==
+                        old_school::PriorityActionKind::
+                            CastDisintegrate,
+                "harvested validation root did not use its "
+                "machine-stable typed Pass");
+            validation_negatives.push_back(
+                contrast.negative_descriptor);
+        } else {
+            throw std::runtime_error(
+                "production X=0 contrast used an unknown root");
+        }
+    }
+    std::sort(
+        validation_negatives.begin(),
+        validation_negatives.end());
+    expect(
+        blue_guards == 2 && ru_guards == 2 &&
+            validation_guards == 2 &&
+            validation_negatives ==
+                std::vector<std::string>{
+                    "kind-7.card-17.x-0.target-player-0",
+                    "kind-7.card-17.x-0.target-player-1",
+                },
+        "production X=0 contrast census or harvested targets "
+        "drifted");
+
+    audit::ScientificEvidence missing =
+        natural_x_zero_evidence();
+    audit::RootEvidence& missing_validation =
+        test_root(missing, validation_id);
+    missing_validation.actions.erase(
+        std::remove_if(
+            missing_validation.actions.begin(),
+            missing_validation.actions.end(), is_pass),
+        missing_validation.actions.end());
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                build_x_zero_contrasts_for_test(missing);
+        },
+        "production X=0 contrast accepted a missing typed "
+        "Pass");
+
+    audit::ScientificEvidence duplicate =
+        natural_x_zero_evidence();
+    audit::RootEvidence& duplicate_validation =
+        test_root(duplicate, validation_id);
+    const auto pass = std::find_if(
+        duplicate_validation.actions.begin(),
+        duplicate_validation.actions.end(), is_pass);
+    expect(
+        pass != duplicate_validation.actions.end(),
+        "duplicate-Pass fixture lost its natural Pass");
+    audit::RootActionEvidence second_pass = *pass;
+    second_pass.descriptor += ".duplicate";
+    duplicate_validation.actions.push_back(
+        std::move(second_pass));
+    std::sort(
+        duplicate_validation.actions.begin(),
+        duplicate_validation.actions.end(),
+        [](const audit::RootActionEvidence& first,
+           const audit::RootActionEvidence& second) {
+            return first.descriptor < second.descriptor;
+        });
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                build_x_zero_contrasts_for_test(duplicate);
+        },
+        "production X=0 contrast accepted duplicate typed "
+        "Pass actions");
 }
 
 void test_reduced_core_adapter_is_lossless() {
@@ -1122,6 +1433,8 @@ int main() {
         tests = {
             {"sealed CLI rejects knobs",
              test_cli_rejects_knobs_without_running},
+            {"natural X=0 typed Pass binding",
+             test_x_zero_contrasts_bind_natural_typed_pass},
             {"reduced construction adapter",
              test_reduced_core_adapter_is_lossless},
             {"feature reconstruction reuse and binding",

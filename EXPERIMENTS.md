@@ -12811,6 +12811,153 @@ Next action: commit and push exactly this mechanical repair and notebook,
 excluding `REVIEW.md`; obtain fresh post-commit source/test GO. Only then may
 the unchanged no-argument registered audit be retried once.
 
+##### FQ0-T0 mechanical retry attempt 3: RU action-binding infrastructure void
+
+Run 2026-07-27 10:45-10:57 PDT from pushed commit
+`ebdb2a144a2b344531acf6600240ac1ef9650fdb`, after three explicit
+post-commit GO reviews. Those reviews independently verified
+`HEAD == origin/main`, FQ0 69/69, artifact 15/15 plus ASan/UBSan, runner 9/9
+plus ASan/UBSan, exact C16 bytes/hash, absent registered outputs, v1/raw
+evidence preservation, and the exact v2 scope. `REVIEW.md` was reread through
+its 10:46 PDT in-flight entry.
+
+Exact sole command:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
+
+The process verified immutable C16 and the frozen manifest, constructed the
+K64/K8 Bellman core, reconstructed every successor information set, and
+completed the previously failing exhaustive dominance stage. It then exited
+`2` during later report construction/validation with:
+
+```text
+FQ0-T0 infrastructure failure:
+validation.ru.disintegrate-hold-x0.v1:
+FQ0 evidence is missing a requested action
+```
+
+The registered evidence destination and temporary remained absent. C16
+remained 3,111,437 bytes with SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+Therefore attempt 3 is another fail-closed infrastructure void, not a
+scientific pass or rejection. It does not license FQ1, replace C16, retire the
+registered seed bases, or change any gate. It also confirms that the White
+Millstone hidden-witness repair passed its formerly failing production stage.
+
+Next action: on quarantined nonregistered/reduced construction only, enumerate
+the named RU root's authoritative typed action descriptors, retained
+`RootEvidence.actions`, `exact_support`, generated X=0 contrasts, and every
+requested descriptor. Localize whether an exact-support descriptor was
+silently derived from a support index/order rather than the canonical sorted
+action identity, or whether a fixed registry asks for an action absent from
+authoritative support. Prospectively repair only the demonstrated binding
+defect, with a named full-action/support regression, then repeat the same
+test/commit/post-commit-review discipline. Do not rerun any registered
+coordinate while diagnosing.
+
+##### FQ0-T0 harvested-Pass binding repair declaration
+
+Preregistered 2026-07-27 11:00 PDT after rereading `REVIEW.md` through its
+10:46 PDT cycle and before changing production or test code. Attempt 3 remains
+an infrastructure void; evidence and temporary are absent, the registered
+seeds remain unresolved, and C16 remains champion.
+
+Three independent read-only traces agree that the failure is a contrast
+registry bug. The production X=0 builder discovers each negative action by
+typed `CastBraingeyser`/`CastDisintegrate` plus `x_value == 0`, but requests
+the positive action using literal descriptor `pass`. The two hand-authored
+X=0 roots use that literal. The harvested validation root assigns every action
+its machine-stable descriptor, so its unique typed Pass is
+`kind-0.card-0.x-0`.
+
+A direct natural-probe diagnostic:
+
+```sh
+c++ -Iinclude -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp /tmp/fq0_ru_action_diag.cpp \
+  -o /tmp/fq0_ru_action_diag
+/tmp/fq0_ru_action_diag
+```
+
+used source SHA-256
+`31ef5b9b36d2d0cc2d22053f48856eba7cfe19d0fec8bc48cac57d654f9e9d1d`
+and binary SHA-256
+`149f1af30f6105f9781bd64c9ed0c48f21504af30b5157a4666aaaf303686eaf`.
+It proves the authoritative harvested census is exactly eight actions:
+typed Pass `kind-0.card-0.x-0`, one creature cast
+`kind-2.card-14.x-0`, and Disintegrate X={0,1,2} targeting each player.
+The two intended X=0 negatives are
+`kind-7.card-17.x-0.target-player-0` and
+`kind-7.card-17.x-0.target-player-1`. Literal `pass` is absent. Exact support
+was never reached by the failure and is derived from the same retained action
+descriptors; exhaustive dominance already resolved Pass structurally and
+completed the correct pairs.
+
+Falsifiable hypothesis: replacing only the X=0 contrast builder's literal Pass
+lookup with a fail-closed lookup of exactly one
+`PriorityActionKind::Pass` will build the same six typed X=0 guards, using
+literal `pass` for the two hand-authored roots and
+`kind-0.card-0.x-0` for the harvested root. It will leave every negative
+action, target, block statistic, support condition, dominance relation,
+scientific gate, seed, model, and output path unchanged.
+
+The repair is frozen to:
+
+1. Add a structural unique-Pass resolver over retained `RootEvidence.actions`.
+   Zero or multiple typed Pass actions must throw.
+2. Use the resolver only when assembling the three X=0 contrast roots. Do not
+   rename a probe action, add a descriptor alias, alter candidate generation,
+   touch typed X=0 detection, or change any artifact validator.
+3. Add a runner regression through production contrast assembly over the
+   natural harvested validation root. It must retain all eight actions, find
+   exactly one typed Pass and two typed X=0 actions, and emit exactly two
+   XZeroGuard contrasts whose positive descriptor is
+   `kind-0.card-0.x-0` and whose distinct negatives are the two X=0 targets.
+4. In the same regression, both named hand-authored roots must retain positive
+   descriptor `pass`; missing and duplicate typed Pass mutations must fail
+   closed.
+5. Preserve the artifact suite's structural X=0 validation: each stored
+   positive resolves to typed Pass, each negative to typed X=0, exactly two
+   typed X=0 actions per root and six contrasts globally, with all X=0 actions
+   excluded from exact-max support.
+
+Acceptance requires the named natural runner regression, strict runner and
+artifact suites, all FQ0 tests, full `make -j4 test`, fresh runner ASan/UBSan,
+unchanged C16 bytes/hash, absent registered outputs, a pushed commit, and fresh
+post-commit review. No registered retry is permitted before every condition
+passes. If they pass, exactly one unchanged retry remains:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
+
+Prospective verification amendment 2026-07-27 11:03 PDT, before implementation:
+`REVIEW.md`'s 11:02 cycle notes that three successive voids have advanced one
+stage at a time and recommends a quarantined full-pipeline dry-run before
+attempt 4. Accept that recommendation without broadening the repair or
+scientific evidence. After the narrow code/test repair passes, make a temporary
+full K64/K8 build whose only differences are:
+
+- audit and science root/bank seed bases
+  `0xF00D00000000A401`, `0xF00D00000000A402`,
+  `0xF00D00000000A403`;
+- evidence destination
+  `/private/tmp/old-school-fq0-quarantine-a4.evidence.tsv`.
+
+The temporary header copies, exact diffs, source/binary hashes, compile
+command, and run result must be recorded. The immutable C16 model, manifest,
+world counts, block counts, gates, code paths, and every non-seed parameter
+remain identical. This dry-run may only answer whether the full pipeline
+finishes without infrastructure exit `2`; any pass/reject statistic it emits
+is scientifically ineligible and must not affect FQ0 or C16. The registered
+destination must remain absent throughout. A quarantine exit `2` blocks the
+commit/retry and triggers another prospective mechanical diagnosis; a complete
+exit `0` or `1` allows the normal commit and post-commit review gate to
+continue.
+
 #### FQ0-T0 implementation-freeze addendum
 
 Recorded 2026-07-27 02:31 PDT after rereading `REVIEW.md` through the

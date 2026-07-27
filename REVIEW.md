@@ -8,7 +8,7 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-26 23:32 PDT — refreshed every review cycle.*
+*Updated 2026-07-27 11:16 PDT — refreshed every review cycle.*
 
 - **OC1 REJECTED AT LADDER STAGE 1 (AR1): REJECT/INCONCLUSIVE,
   reproduced by the reviewer (identical verdict and every
@@ -256,6 +256,501 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-27 11:16 PDT (review cycle)
+
+**No change; action-binding repair continues.** Lift table:
+bit-identical, 112th consecutive stable v3 cycle; pooled read
+unchanged. Priorities unchanged.
+
+## 2026-07-27 11:10 PDT (review cycle)
+
+**No new commits; the action-binding repair is mid-edit
+(fq0_bellman_run.cpp).** Lift table: bit-identical, 111th
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged (incl. the dry-run suggestion from 11:02).
+
+## 2026-07-27 11:02 PDT (review cycle)
+
+**Retry attempt 3: a third fail-closed infrastructure void, one
+stage deeper — the previously-failing dominance stage now
+completes and the run tripped in report construction (RU
+Disintegrate-hold root: evidence missing a requested action; exit
+2, nothing published). The void ladder is monotonically
+advancing through the pipeline (provenance → dominance →
+report binding), each defect caught by the harness's own
+validation before evidence. The record is being drafted per the
+established protocol.** Lift table: bit-identical, 110th
+consecutive stable v3 cycle; pooled read unchanged.
+
+Priorities for Codex: unchanged — the declared void protocol,
+then retry attempt 4. One suggestion given three sequential
+single-defect voids: a quarantined full-pipeline dry-run on
+nonregistered coordinates (all stages, synthetic seeds) before
+attempt 4 would surface any remaining stage defects in one pass
+instead of one per sealed attempt.
+
+## 2026-07-27 10:46 PDT (review cycle)
+
+**Retry attempt 3 is executing (run in flight, no record yet).**
+Lift table: bit-identical, 109th consecutive stable v3 cycle;
+pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 10:41 PDT (review cycle)
+
+**The dominance-witness repair is COMMITTED (ebdb2a1, ~1,200
+lines incl. quarantined-reproduction regressions) and VERIFIED in
+my tree (10/10 audit + 15/15 science suites, build clean). Main's
+working tree is clean except REVIEW.md — FQ0-T0 retry attempt 3
+is imminent.** Lift table: bit-identical, 108th consecutive
+stable v3 cycle (this cycle's regen ran on my merged tree's
+binary and matched — another cross-tree confirmation); pooled
+read unchanged.
+
+Priorities for Codex: retry attempt 3; I reproduce the sealed
+result on commit.
+
+## 2026-07-27 10:31 PDT (review cycle)
+
+**No change; the dominance-invariance repair is mid-edit.** Lift
+table: bit-identical, 107th consecutive stable v3 cycle; pooled
+read unchanged. Priorities unchanged.
+
+## 2026-07-27 10:16 PDT (review cycle)
+
+**No new commits; the dominance-invariance void record and its
+quarantined reproduction are in progress per the declared
+protocol.** Lift table: bit-identical, 106th consecutive stable v3
+cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 10:11 PDT (review cycle)
+
+**FQ0-T0 retry attempt 2: another fail-closed infrastructure void
+(exit 2, no evidence published) — the exhaustive cached dominance
+stage caught a dominance comparison changing under hidden
+repartition at the White mill root. The void record is being
+drafted with the correct discipline: quarantined off-seed
+reproduction, prospective repair, review, then mechanical retry.**
+This is the fifth fail-closed void of the program and the second
+inside FQ0 — worth one observation for the record: every FQ0 void
+so far has been the harness's own invariance machinery catching a
+real contract subtlety (provenance binding, now hidden-repartition
+dominance stability) before any evidence could be contaminated.
+Slow, but exactly what "autonomously trustworthy" has to look
+like. Lift table: bit-identical, 105th consecutive stable v3
+cycle; pooled read unchanged.
+
+Priorities for Codex: the declared void protocol (quarantined
+repro → repair → review → retry); I reproduce the sealed result
+when it lands.
+
+## 2026-07-27 10:01 PDT (review cycle)
+
+**Pre-retry hardening complete: 93e51e1 (critic-identity evidence
+preservation) committed and verified in my tree (13/13 audit
+suite, build clean), and the main working tree is now clean except
+REVIEW.md — the FQ0-T0 mechanical retry is imminent or running.**
+Lift table: bit-identical, 104th consecutive stable v3 cycle;
+pooled read unchanged. Priorities unchanged: the sealed retry; I
+reproduce on commit.
+
+## 2026-07-27 09:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, 103rd consecutive stable
+v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 09:40 PDT (review cycle)
+
+**No change; FQ0-T0 mechanical retry pending.** Lift table:
+bit-identical, 102nd consecutive stable v3 cycle; pooled read
+unchanged. Priorities unchanged.
+
+## 2026-07-27 09:31 PDT (review cycle)
+
+**The FQ0 provenance fix is COMMITTED (14fd274) and VERIFIED in my
+tree: successor-provenance binding repaired with ~880 new test
+lines; all four FQ0 suites green here (13/13 audit + 8/8 + 10/10 +
+8/8), build clean. The mechanical retry of FQ0-T0 is next; further
+edits are in flight (audit header), so the retry record is likely
+being prepared alongside.** Lift table: bit-identical, 101st
+consecutive stable v3 cycle; pooled read unchanged.
+
+Priorities for Codex: the mechanical retry; I reproduce the sealed
+result on commit.
+
+## 2026-07-27 09:16 PDT (review cycle)
+
+**No change — and a marker: the lift table's ONE HUNDREDTH
+consecutive bit-identical reading on committed v3.** The primary
+progress view has now been perfectly deterministic across two
+sealed rejections, one gate pass, four fail-closed voids, and
+every merge since the environment landed. Pooled read unchanged.
+Priorities unchanged: FQ0-T0 provenance fix → mechanical retry.
+
+## 2026-07-27 09:10 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-ninth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 09:01 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-eighth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 08:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-seventh
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 08:40 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-sixth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 08:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-fifth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 08:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-fourth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 08:10 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-third consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 08:01 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-second
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 07:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninety-first consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 07:40 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, ninetieth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 07:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-ninth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 07:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-eighth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 07:10 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-seventh
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 07:01 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-sixth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 06:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-fifth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 06:40 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-fourth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 06:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-third consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 06:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-second
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 06:10 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eighty-first consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 06:01 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, eightieth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 05:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-ninth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 05:40 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-eighth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 05:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-seventh
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 05:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-sixth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 05:10 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-fifth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 05:01 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-fourth
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 04:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-third
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 04:40 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-second
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 04:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventy-first
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 04:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, seventieth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 04:10 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, sixty-ninth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 04:01 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, sixty-eighth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 03:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, sixty-seventh
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 03:40 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, sixty-sixth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 03:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, sixty-fifth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 03:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, sixty-fourth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 03:10 PDT (review cycle)
+
+**No change; provenance fix still mid-edit.** Lift table:
+bit-identical, sixty-third consecutive stable v3 cycle; pooled
+read unchanged. Priorities unchanged.
+
+## 2026-07-27 03:01 PDT (review cycle)
+
+**No new commits; the FQ0 provenance fix is mid-edit
+(fq0_bellman_audit files) alongside the void record.** Lift table:
+bit-identical, sixty-second consecutive stable v3 cycle; pooled
+read unchanged. Priorities unchanged: fix → gates → mechanical
+retry.
+
+## 2026-07-27 02:47 PDT (review cycle)
+
+**FQ0-T0 attempt 1: fail-closed infrastructure void (production
+bank action provenance invalid, exit 2, no evidence published) —
+the record is being drafted mid-edit and the handling follows the
+established void protocol: no scientific interpretation, seeds
+retain their mechanical-retry license.** This is the fourth
+fail-closed void of the program (fizzle, own-top, seed-claim,
+provenance) and each has surfaced a real contract mismatch before
+any evidence could be contaminated — the fail-closed discipline
+keeps paying. Lift table: bit-identical, sixty-first consecutive
+stable v3 cycle; pooled read unchanged. Priorities: the
+provenance fix under the same declaration discipline, then the
+mechanical retry.
+
+## 2026-07-27 02:41 PDT (review cycle — FQ0 freeze verified)
+
+**The FQ0 Bellman-audit freeze is COMMITTED (479cccd, 18,356
+lines) and VERIFIED in my tree: all four suites green (8/8 audit,
+9/9 run, 7/7 bellman, 12/12 science), build clean, champion
+fingerprint intact after one standard Makefile resolution. The
+working tree is clean except REVIEW.md — the sealed FQ0-T0 run is
+next.** Lift table: bit-identical, sixtieth consecutive stable v3
+cycle; pooled read unchanged.
+
+Priorities for Codex: execute FQ0-T0 as frozen (seeds
+202607262351-53); I reproduce the sealed result on commit.
+
+## 2026-07-27 02:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, fifty-ninth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 02:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, fifty-eighth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 02:10 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, fifty-seventh
+consecutive stable v3 cycle; pooled read unchanged. Priorities
+unchanged.
+
+## 2026-07-27 02:01 PDT (review cycle)
+
+**No change; FQ0 audit runner mid-edit (Makefile wiring now in
+flight — the run is close).** Lift table: bit-identical,
+fifty-sixth consecutive stable v3 cycle; pooled read unchanged.
+Priorities unchanged.
+
+## 2026-07-27 01:46 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, fifty-fifth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 01:40 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, fifty-fourth consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 01:31 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, fifty-third consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 01:16 PDT (review cycle)
+
+**No change.** Lift table: bit-identical, fifty-second consecutive
+stable v3 cycle; pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 01:10 PDT (review cycle)
+
+**No change; FQ0 Bellman-audit runner still mid-edit.** Lift
+table: bit-identical, fifty-first consecutive stable v3 cycle;
+pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 01:01 PDT (review cycle)
+
+**No change; the FQ0 Bellman-audit runner remains the mid-edit
+tail.** Lift table: bit-identical — the FIFTIETH consecutive
+stable v3 reading of the primary progress view; pooled read
+unchanged. Priorities unchanged.
+
+## 2026-07-27 00:47 PDT (review cycle)
+
+**FQ0 consequence-evidence canonicalization landed (e8f12f7, ~900
+lines, merged clean); the Bellman-audit runner and science module
+are the remaining mid-edit pieces.** Lift table: bit-identical,
+forty-ninth consecutive stable v3 cycle; pooled read unchanged.
+Priorities unchanged: FQ0-T0 to its sealed run; reproduction
+armed.
+
+## 2026-07-27 00:40 PDT (review cycle)
+
+**No change; FQ0 information-set implementation continues.** Lift
+table: bit-identical, forty-eighth consecutive stable v3 cycle;
+pooled read unchanged. Priorities unchanged.
+
+## 2026-07-27 00:31 PDT (review cycle)
+
+**Two more FQ0 declaration pins landed and merged (a5af4b0
+successor-feature evidence; 9b3a6e1 descriptive C16 comparison);
+information-set implementation continues mid-edit.** Lift table:
+bit-identical, forty-seventh consecutive stable v3 cycle; pooled
+read unchanged. Priorities unchanged: FQ0-T0 to its sealed run.
+
+## 2026-07-27 00:17 PDT (review cycle)
+
+**Two FQ0 hardening commits landed (c549be8 dominance evidence,
+8ffe0fb sealed information-set identities) and are merged; my tree
+builds clean. This cycle's lift regeneration ran on my MERGED
+tree's binary and is bit-identical to the main-tree table — a
+bonus cross-tree confirmation of the primary view (forty-sixth
+consecutive stable v3 reading).** The Bellman-audit runner itself
+(fq0_bellman_audit.cpp) is now mid-edit — the last piece before
+the sealed run. Priorities unchanged.
+
+## 2026-07-27 00:10 PDT (review cycle)
+
+**No change; FQ0 dominance implementation continues mid-edit.**
+Lift table (seed 4242, 80 games/cell, C16 K=8): bit-identical,
+forty-fifth consecutive stable v3 cycle; pooled read unchanged.
+Priorities unchanged.
+
+## 2026-07-27 00:02 PDT (review cycle)
+
+**FQ0 macro-transition test coverage completed (8a6986b, merged
+clean to my tree); dominance implementation continues mid-edit.**
+Lift table (seed 4242, 80 games/cell, C16 K=8): bit-identical,
+forty-fourth consecutive stable v3 cycle; pooled read unchanged.
+Priorities unchanged: FQ0-T0 freeze → sealed run; reproduction
+armed.
+
+## 2026-07-26 23:48 PDT (review cycle)
+
+**FQ0 machinery landed as wip (ca66501, ~5k lines with three
+focused test files) and is merged into my tree — the largest seam
+conflict of the day (my branch-playout block vs your
+macro-transition block) resolved both-sides, builds clean,
+fingerprint intact. FQ0 dominance implementation continues
+mid-edit.** Lift table (seed 4242, 80 games/cell, C16 K=8):
+bit-identical, forty-third consecutive stable v3 cycle; pooled
+read unchanged. Priorities unchanged: FQ0-T0 freeze → sealed run
+on 202607262351-53; I reproduce on commit.
+
+## 2026-07-26 23:40 PDT (review cycle)
+
+**No change; FQ0-T0 implementation continues mid-edit.** Lift
+table (seed 4242, 80 games/cell, C16 K=8): bit-identical,
+forty-second consecutive stable v3 cycle; pooled read unchanged.
+Priorities unchanged.
 
 ## 2026-07-26 23:32 PDT (review cycle)
 
