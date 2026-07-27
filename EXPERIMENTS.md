@@ -12139,3 +12139,87 @@ representation failure redirects to a neutral public-stack/action encoding
 repair. Exit `2` means infrastructure or incomplete evidence and has no
 scientific interpretation. Any completed result retires all three diagnostic
 seed bases. C16 remains champion in every case.
+
+#### FQ0-T0 implementation-freeze addendum
+
+Recorded 2026-07-27 02:31 PDT after rereading `REVIEW.md` through the
+independent 02:16 PDT cycle. The scientific hypothesis remains unresolved:
+the no-argument audit has not run, all three registered seed bases remain
+unopened, and the evidence target and temporary are absent.
+
+Two intermediate implementations were rejected before this freeze:
+
+1. The first runner verified science reconstructions and then discarded their
+   hashes, serializing artifact witnesses as self-equalities. It also reused
+   the feature scope's one global hidden-repartition witness for empirical
+   groups whose representatives had different action/world coordinates.
+2. The first bulk science preflight trusted construction-retained supports,
+   feature rows, collision analysis, and repeated empirical bank copies after
+   checking only a self-recomputed semantic hash. It did not rederive the
+   entire construction before entering registered reconstruction.
+
+Both designs were rejected without opening a registered seed. The frozen
+implementation now:
+
+- rederives the exact manifest/model/census, every root/action/transition,
+  Full+8 scope, particle partition, bank/sample provenance, repeated empirical
+  bank copy, support, complete root and successor feature-row catalog, and
+  collision analysis before its first production reconstruction;
+- reconstructs every physical feature member and every distinct empirical
+  group representative, with opponent hand/library hidden repartitions keyed
+  by exact root action and world;
+- carries the science layer's actual baseline and comparison hashes into the
+  artifact, independently rederives their
+  `old-school-fq0-successor-bank-pair-v1` baseline from raw A/B rows plus
+  cross-fit, binds hidden witnesses to
+  `parent/hidden/member/<world>/<action>`, and rejects comparison mutation or
+  relabeling/reuse;
+- derives the typed X=0 census from raw actions and requires exactly both
+  Braingeyser targets plus both Disintegrate targets in each of the two RU
+  roots (six actions and six X=0 contrasts);
+- validates C16's descriptive scorer with compile-time recipe constants and
+  exact runtime `AppliedRecipe`, support, sample, and accounting equality;
+- keeps the scientific audit in a separate no-knob executable. Ordinary tests
+  invoke only its extra-argument rejection path.
+
+Implementation-only verification:
+
+- `make -j4 test-fq0`: information-set 13/13, Bellman 8/8,
+  dominance 10/10, dominance-transition 4/4, science 9/9, artifact
+  12/12, and runner 7/7 passed.
+- `make test-fq0-bellman-run`: runner 7/7 passed and the standalone
+  executable's `unexpected` argument path returned exit 2 with the sealed
+  usage text.
+- `make -j4 test`: engine 168/168, learned iteration 27/27, probes
+  57/57, probe metrics 11/11, probe runner 33/33, every historical audit and
+  orchestration suite, all FQ0 suites, web bridge 18/18, web 106/106, and
+  certification 48/48 passed. The representative five-game simulator smoke
+  and CLI/capture/clean contracts also passed.
+- `ASAN_OPTIONS=detect_leaks=0
+  ./build/old-school-fq0-bellman-science-tests-review-asan`: 9/9 passed.
+- `ASAN_OPTIONS=detect_leaks=0
+  ./build/old-school-fq0-bellman-audit-tests-rereview-sanitized`: 12/12
+  passed.
+- `ASAN_OPTIONS=detect_leaks=0
+  ./build/old-school-fq0-bellman-run-tests-review-asan`: 7/7 passed.
+- `git diff --check`: clean. The registered evidence and temporary paths were
+  confirmed absent after all verification.
+
+Three independent read-only reviews now give GO to the science layer, artifact
+layer, and finalized runner integration. Their fresh strict and
+AddressSanitizer/UndefinedBehaviorSanitizer reproductions agree with the
+counts above. The science review left one nonblocking hardening suggestion:
+make the reduced distinct-coordinate hidden-repartition test sensitive to the
+exact retained transition's eligibility/change outcome. Source review proves
+the exact coordinate is dereferenced, the runner's relabel/reuse regression is
+mutation-sensitive, and production preflight derives rather than trusts the
+coordinate catalog, so this does not weaken the registered result path.
+
+Freeze decision: accept this implementation for a commit-and-review freeze;
+do not interpret that as accepting FQ0's scientific hypothesis. After the
+freeze commit is pushed and independently checked, the sole scientific action
+remains exactly:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
