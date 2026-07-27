@@ -58,7 +58,8 @@ class TestRunner {
             << " probe tests passed (20 dev fixtures + 1 harvested "
                "validation fixture + 2 supplemental Force Spike "
                "controls + 6 reject-only field regressions + 1 "
-               "post-C17 attack diagnostic)\n";
+               "post-C17 attack diagnostic + 1 counter-fizzle "
+               "reachability regression)\n";
         return 0;
     }
 
@@ -614,6 +615,242 @@ void test_counter_war_lists_every_legal_spell_target() {
                old_school::probes::validate_probe(probe)
                    .candidates_legal_and_complete,
            "counter-war omitted a targetable stack spell");
+}
+
+void test_counter_fizzle_accepts_only_absent_older_target() {
+    const std::vector<DecisionProbe> probes =
+        old_school::probes::make_probe_dev_v3();
+    DecisionProbe predecessor =
+        find_probe(probes, Category::BlueCounterWar);
+    expect(
+        predecessor.state.stack.size() == 2 &&
+            predecessor.state.stack.front().id == 1 &&
+            predecessor.state.stack.back().id == 2 &&
+            predecessor.state.stack.back().card ==
+                CardId::Counterspell &&
+            predecessor.state.stack.back().spell_target ==
+                std::optional<old_school::StackObjectId>{1},
+        "counter-fizzle fixture lost its ordered counter war");
+
+    const auto finish_fizzle =
+        [](DecisionProbe probe) {
+            expect(
+                old_school::apply_priority_action(
+                    probe.state, probe.root_player,
+                    PriorityAction::cast_counterspell(1), false),
+                "counter-fizzle fixture could not cast the "
+                "third spell");
+            expect(
+                probe.state.stack.size() == 3 &&
+                    probe.state.stack.back().id == 3 &&
+                    probe.state.stack.back().spell_target ==
+                        std::optional<
+                            old_school::StackObjectId>{1},
+                "counter-fizzle fixture lost the three-spell "
+                "stack");
+            PriorityState priority{
+                .player = 1 - probe.root_player,
+                .consecutive_passes = 0,
+            };
+            expect(
+                old_school::pass_priority(
+                    probe.state, priority) ==
+                    PriorityPassResult::Passed,
+                "counter-fizzle opponent could not pass");
+            expect(
+                old_school::pass_priority(
+                    probe.state, priority) ==
+                    PriorityPassResult::StackObjectResolved,
+                "counter-fizzle fixture could not resolve the "
+                "top counter");
+            probe.consecutive_passes =
+                priority.consecutive_passes;
+            expect(
+                probe.state.stack.size() == 1 &&
+                    probe.state.stack.back().id == 2 &&
+                    probe.state.stack.back().spell_target ==
+                        std::optional<
+                            old_school::StackObjectId>{1} &&
+                    std::count(
+                        probe.state.players[0].graveyard.begin(),
+                        probe.state.players[0].graveyard.end(),
+                        CardId::AirElemental) == 1 &&
+                    std::count(
+                        probe.state.players[0].graveyard.begin(),
+                        probe.state.players[0].graveyard.end(),
+                        CardId::Counterspell) == 1,
+                "counter-fizzle fixture did not leave the lower "
+                "counter stranded with public history");
+            probe.candidates.clear();
+            for (const PriorityAction& action :
+                 old_school::legal_priority_actions(
+                     probe.state, probe.root_player, true)) {
+                probe.candidates.push_back({
+                    .descriptor =
+                        old_school::probes::
+                            stable_priority_action_descriptor(
+                                action),
+                    .action = action,
+                });
+            }
+            return probe;
+        };
+
+    DecisionProbe fizzle = finish_fizzle(predecessor);
+    const Validation valid =
+        old_school::probes::validate_probe(fizzle);
+    expect(
+        valid.ok(),
+        "legal counter fizzle was rejected: " +
+            validation_errors(valid));
+
+    GameState resolved_fizzle = fizzle.state;
+    GameState expected_fizzle = fizzle.state;
+    const std::size_t stranded_controller =
+        expected_fizzle.stack.back().controller;
+    const std::size_t countered_before =
+        expected_fizzle.stats[stranded_controller]
+            .spells_countered;
+    expected_fizzle.players[stranded_controller]
+        .graveyard.push_back(CardId::Counterspell);
+    expected_fizzle.stack.clear();
+    expect(
+        old_school::resolve_top_of_stack(resolved_fizzle) &&
+            resolved_fizzle == expected_fizzle &&
+            resolved_fizzle.stats[stranded_controller]
+                    .spells_countered ==
+                countered_before,
+        "stranded Counterspell did not resolve as a clean "
+        "fizzle");
+
+    DecisionProbe missing_target = fizzle;
+    missing_target.state.stack.back().spell_target.reset();
+    const Validation missing_target_validation =
+        old_school::probes::validate_probe(missing_target);
+    expect(
+        !missing_target_validation.reachable_state,
+        "Counterspell was allowed on the stack without a spell "
+        "target");
+
+    DecisionProbe generic_target = fizzle;
+    generic_target.state.stack.back().target =
+        old_school::Target::player_target(0);
+    const Validation generic_target_validation =
+        old_school::probes::validate_probe(generic_target);
+    expect(
+        !generic_target_validation.reachable_state,
+        "Counterspell was allowed to carry a generic target");
+
+    DecisionProbe zero_target = fizzle;
+    zero_target.state.stack.back().spell_target = 0;
+    const Validation zero_validation =
+        old_school::probes::validate_probe(zero_target);
+    expect(
+        !zero_validation.reachable_state,
+        "Counterspell was allowed to target stack ID zero");
+
+    DecisionProbe self_target = fizzle;
+    self_target.state.stack.back().spell_target =
+        self_target.state.stack.back().id;
+    const Validation self_validation =
+        old_school::probes::validate_probe(self_target);
+    expect(
+        !self_validation.reachable_state,
+        "Counterspell was allowed to target its own stack ID");
+
+    DecisionProbe future_target = fizzle;
+    future_target.state.stack.back().spell_target =
+        future_target.state.next_stack_object_id;
+    const Validation future_validation =
+        old_school::probes::validate_probe(future_target);
+    expect(
+        !future_validation.reachable_state,
+        "Counterspell was allowed to target a future stack ID");
+
+    DecisionProbe ability_target = fizzle;
+    ability_target.state.stack.insert(
+        ability_target.state.stack.begin(),
+        {
+            .kind =
+                old_school::StackObjectKind::ActivatedAbility,
+            .id = 1,
+            .card = CardId::Millstone,
+            .controller = 0,
+            .target = old_school::Target::player_target(1),
+        });
+    const Validation ability_validation =
+        old_school::probes::validate_probe(ability_target);
+    expect(
+        !ability_validation.reachable_state,
+        "Counterspell was allowed to target a lower activated "
+        "ability");
+
+    DecisionProbe reversed_stack = predecessor;
+    std::reverse(
+        reversed_stack.state.stack.begin(),
+        reversed_stack.state.stack.end());
+    const Validation reversed_validation =
+        old_school::probes::validate_probe(reversed_stack);
+    expect(
+        !reversed_validation.reachable_state &&
+            std::find(
+                reversed_validation.errors.begin(),
+                reversed_validation.errors.end(),
+                "stack object IDs must increase bottom-to-top") !=
+                reversed_validation.errors.end(),
+        "probe validator accepted a stack outside bottom-to-top "
+        "ID order");
+
+    DecisionProbe impossible_history = fizzle;
+    for (old_school::PlayerState& player :
+         impossible_history.state.players) {
+        player.library.insert(
+            player.library.end(), player.graveyard.begin(),
+            player.graveyard.end());
+        player.graveyard.clear();
+    }
+    const Validation impossible_validation =
+        old_school::probes::validate_probe(impossible_history);
+    expect(
+        impossible_validation.exact_card_conservation &&
+            !impossible_validation.reachable_state,
+        "absent older target passed without public counter-fizzle "
+        "history");
+
+    DecisionProbe force_spike_predecessor = predecessor;
+    force_spike_predecessor.state.stack.back().card =
+        CardId::ForceSpike;
+    old_school::PlayerState& force_spike_controller =
+        force_spike_predecessor.state.players[1];
+    auto hidden_force_spike = std::find(
+        force_spike_controller.hand.begin(),
+        force_spike_controller.hand.end(),
+        CardId::ForceSpike);
+    if (hidden_force_spike != force_spike_controller.hand.end()) {
+        *hidden_force_spike = CardId::Counterspell;
+    } else {
+        hidden_force_spike = std::find(
+            force_spike_controller.library.begin(),
+            force_spike_controller.library.end(),
+            CardId::ForceSpike);
+        expect(
+            hidden_force_spike !=
+                force_spike_controller.library.end(),
+            "counter-war fixture has no hidden Force Spike to "
+            "exchange");
+        *hidden_force_spike = CardId::Counterspell;
+    }
+    const DecisionProbe force_spike_fizzle =
+        finish_fizzle(force_spike_predecessor);
+    const Validation force_spike_validation =
+        old_school::probes::validate_probe(
+            force_spike_fizzle);
+    expect(
+        force_spike_validation.ok() &&
+            force_spike_fizzle.state.stack.back().card ==
+                CardId::ForceSpike,
+        "legal Force Spike fizzle was rejected: " +
+            validation_errors(force_spike_validation));
 }
 
 void test_force_spike_probe_is_a_live_mana_advantage_counter() {
@@ -3951,6 +4188,9 @@ int main() {
                test_public_mana_supports_deployed_creatures);
     runner.run("Counterspell stack targets",
                test_counter_war_lists_every_legal_spell_target);
+    runner.run(
+        "Counterspell historical fizzle target",
+        test_counter_fizzle_accepts_only_absent_older_target);
     runner.run("Force Spike live counter",
                test_force_spike_probe_is_a_live_mana_advantage_counter);
     runner.run("Force Spike policy controls",

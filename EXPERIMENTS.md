@@ -10151,3 +10151,55 @@ with exact source provenance; rerun all focused/probe gates; then retry the same
 fixed DVR2 command. Reusing the declared source seeds is allowed only for this
 mechanical retry because attempt 1 exposed no selection, score, outcome
 filter, or reference result from which the fix could be tuned.
+
+#### DVR2 attempt-1 mechanical repair and retry clearance
+
+Recorded 2026-07-26 after rereading `REVIEW.md` through its newest 18:40 PDT
+entry. This is a rules/infrastructure repair, not a bot-strength experiment
+and not a change to DVR2 root selection, reference scoring, quotas, seeds, or
+license gates.
+
+The validator now distinguishes a legal stranded counter from a malformed
+stack object. Stack-object IDs must increase bottom-to-top. Every on-stack
+Counterspell or Force Spike must carry a nonzero older `spell_target` and no
+generic creature/player target. A target still on the stack must be a lower
+Spell object. An absent historical target is accepted only when the public
+graveyards contain the engine-necessary evidence of a resolved counter and a
+removed nonland spell. This evidence condition is necessary rather than a
+claim of reconstructing complete game history.
+
+The regression reaches the exact state through engine actions: from the
+existing two-spell counter-war fixture, it casts stack object 3 at object 1,
+passes priority twice, resolves object 3, and leaves object 2 stranded while
+still targeting departed object 1. It validates both Counterspell and Force
+Spike forms and resolves the stranded Counterspell to prove an exact no-effect
+fizzle with no increment to `spells_countered`. Reject cases cover a missing
+spell target, an extraneous generic target, zero/self/future IDs, a present
+activated-ability target, reversed stack order, and absent-target history with
+no public counter/removal evidence. DVR2 validation failures now include the
+public source seed base, schedule index, game seed, owner seat, and trace
+ordinal.
+
+Exact verification:
+
+```sh
+make -j4 test-probes
+make -j4 test-dvr2-harvest
+git diff --check
+```
+
+Results: 53/53 probe tests, 11/11 probe-metric tests, 32/32 probe-runner
+tests, 12/12 DVR2 tests, and the one-shot wrapper contract passed under the
+`-Werror` build; `git diff --check` is clean. An independent protocol review
+found no P0/P1 retry blocker and reproduced the same gates. A repository-wide
+search found no earlier recorded rejection with the old exact validator error;
+attempt 1 is the only known excluded fizzle root.
+
+The same-seed retry remains scientifically valid: attempt 1 published no
+bundle and exposed no selected root, reference score, classification, outcome
+filter, or license result. The next action remains exactly:
+
+```sh
+sh tools/run_dvr2_once.sh \
+  "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
+```

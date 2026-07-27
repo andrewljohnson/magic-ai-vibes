@@ -1691,7 +1691,15 @@ PreparedRoot prepare_root(
             probes::validate_probe(probe);
         if (!validation.ok()) {
             std::ostringstream detail;
-            detail << "DVR2 source probe validation failed";
+            detail
+                << "DVR2 source probe validation failed"
+                << " [seed_base=" << source.seed_base
+                << ", schedule_index="
+                << source.schedule_index
+                << ", game_seed=" << source.game_seed
+                << ", owner_seat=" << source.owner_seat
+                << ", trace_ordinal="
+                << source.trace_ordinal << "]";
             for (const std::string& error :
                  validation.errors) {
                 detail << "; " << error;

@@ -1725,13 +1725,40 @@ bool reachable_state(const DecisionProbe& probe,
             }
         }
 
-        for (const StackObject& object : probe.state.stack) {
+        std::size_t public_graveyard_counters = 0;
+        std::size_t public_graveyard_nonlands = 0;
+        for (const PlayerState& player : probe.state.players) {
+            for (const CardId card : player.graveyard) {
+                if (card == CardId::Counterspell ||
+                    card == CardId::ForceSpike) {
+                    ++public_graveyard_counters;
+                }
+                if (card_definition(card).type != CardType::Land) {
+                    ++public_graveyard_nonlands;
+                }
+            }
+        }
+        const bool public_counter_fizzle_history =
+            public_graveyard_counters >= 1 &&
+            public_graveyard_nonlands >= 2;
+
+        StackObjectId previous_stack_id = 0;
+        for (auto object_it = probe.state.stack.begin();
+             object_it != probe.state.stack.end(); ++object_it) {
+            const StackObject& object = *object_it;
             if (object.controller >= kPlayerCount || object.id == 0 ||
                 !stack_ids.insert(object.id).second) {
                 errors.push_back(
                     "stack object has an invalid controller or ID");
                 valid = false;
             }
+            if (object_it != probe.state.stack.begin() &&
+                object.id <= previous_stack_id) {
+                errors.push_back(
+                    "stack object IDs must increase bottom-to-top");
+                valid = false;
+            }
+            previous_stack_id = object.id;
             const bool x_spell =
                 object.kind == StackObjectKind::Spell &&
                 (object.card == CardId::Disintegrate ||
@@ -1749,6 +1776,18 @@ bool reachable_state(const DecisionProbe& probe,
                 errors.push_back("a land cannot be a stack spell");
                 valid = false;
             }
+            const bool counter_spell =
+                object.kind == StackObjectKind::Spell &&
+                (object.card == CardId::Counterspell ||
+                 object.card == CardId::ForceSpike);
+            if (counter_spell &&
+                (!object.spell_target.has_value() ||
+                 object.target.has_value())) {
+                errors.push_back(
+                    "counter must have a spell target and no "
+                    "generic target");
+                valid = false;
+            }
             if (object.target.has_value()) {
                 const Target& target = *object.target;
                 if (target.player >= kPlayerCount ||
@@ -1761,17 +1800,32 @@ bool reachable_state(const DecisionProbe& probe,
                 }
             }
             if (object.spell_target.has_value()) {
-                const bool target_below = std::any_of(
+                const auto target = std::find_if(
                     probe.state.stack.begin(), probe.state.stack.end(),
                     [&](const StackObject& candidate) {
-                        return candidate.id == *object.spell_target &&
-                               candidate.id != object.id &&
-                               candidate.kind ==
-                                   StackObjectKind::Spell;
+                        return candidate.id == *object.spell_target;
                     });
-                if (!target_below) {
+                const bool older_nonzero_target =
+                    *object.spell_target != 0 &&
+                    *object.spell_target < object.id;
+                const bool present_target_is_lower_spell =
+                    target != probe.state.stack.end() &&
+                    target < object_it &&
+                    target->kind == StackObjectKind::Spell;
+                const bool absent_target_has_public_history =
+                    target == probe.state.stack.end() &&
+                    public_counter_fizzle_history;
+                // A legally cast counter may outlive its target when another
+                // counter removes that spell first. In that case both the
+                // resolving counter and the removed nonland spell remain in
+                // public graveyards, while the stranded counter retains the
+                // older target ID and will resolve without effect.
+                if (!counter_spell || !older_nonzero_target ||
+                    (!present_target_is_lower_spell &&
+                     !absent_target_has_public_history)) {
                     errors.push_back(
-                        "counterspell has no valid spell target");
+                        "counter has no valid current or historical "
+                        "spell target");
                     valid = false;
                 }
             }
