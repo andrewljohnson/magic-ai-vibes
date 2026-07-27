@@ -10427,6 +10427,82 @@ every deck sign is `wins > losses`. Report quartet-clustered uncertainty,
 all deck-by-policy-seat-by-play/draw cells, schedule hashes, before/after
 artifact snapshots, and reject any missing, duplicated, or imbalanced task.
 
+#### OC1 fit and untouched holdout result: calibration gate passed
+
+Executed 2026-07-26 from committed and pushed runner `05363ad`, after
+rereading `REVIEW.md` through its newest 20:19 PDT entry. The destination was
+confirmed absent before execution. Exact command:
+
+```sh
+./build/old-school-output-calibration
+```
+
+The command exited `0`. It verified the exact 3,111,437-byte C16 parent
+artifact (`53aeb904...f944ca`, model `68126afc...3e2f`), ran fit seed
+`202607261927`/generation 17 and holdout seed `202607261928`/generation 18,
+and did not open any conditional action or gameplay seed.
+
+Fit comprised the declared 320 physical games, 640 perspectives, and 128
+perspectives for each of all five decks. It retained 17,258 chronological
+records with exactly 640 total actor-game mass. Independent reconstruction
+matched bit-for-bit. The two 17-parameter Newton fits converged in three
+iterations:
+
+```text
+mean leaf BCE: 0.59444153086117058 -> 0.59103972118627701
+maximum permitted parameter delta: 0.19579633709345168
+fit schedule: 3dc633b05c8c4c250b7fa5464956ffd1203b870846c688ab2169a731fccdda4d
+optimizer input: 741c236be33a3dccc914509dd56a8a1a0da7ef5ec9ad68b0d32ee5b0876c7bc3
+hidden-refit parameters (both): 56f92ba6c6196df0a4f93891c54e37c078c508b44681ffcee54e1ff98dee7f8e
+```
+
+The atomic no-overwrite artifact is
+`build/model-cache/old-school-value-output-calibration-v1-c16-t800-p424242-f202607261927.bin`,
+4,756 bytes, SHA-256
+`77d02729e4effd4762daefdcbe28ef4f1a081c87f707739f3d243123f4c17e3c`,
+with candidate fingerprint
+`64851236ddb8907057ec16d8fe0db9ab1b1966dfff55a3d3a62bde933e94ce0d`.
+Reload reconstructed all 34 fitted parameters bit-exactly while every frozen
+trunk, direct path, policy tensor, and parent/artifact snapshot remained
+unchanged.
+
+The untouched holdout comprised 320 physical games, 640 perspectives, 128
+perspectives per deck, 17,272 records, and exactly 640 mass. Aggregate and
+per-deck results are candidate-minus-C16:
+
+| Scope | Brier C16 -> OC1 | Brier delta (95% CR1 CI) | Log loss C16 -> OC1 | Log-loss delta (95% CR1 CI) | Bias C16 -> OC1 |
+| --- | --- | --- | --- | --- | --- |
+| Pooled | 0.0845724 -> 0.0830826 | -0.0014898 [-0.0023548, -0.0006249] | 0.5812489 -> 0.5782521 | -0.0029968 [-0.0048113, -0.0011823] | -0.0154619 -> -0.0030655 |
+| Green | 0.0893121 -> 0.0870142 | -0.0022979 [-0.0032082, -0.0013876] | 0.5930522 -> 0.5882598 | -0.0047924 [-0.0066518, -0.0029330] | +0.0090935 -> +0.0013367 |
+| Red | 0.1027478 -> 0.1030231 | +0.0002753 [-0.0012236, +0.0017741] | 0.6082064 -> 0.6086365 | +0.0004300 [-0.0027490, +0.0036091] | +0.0051984 -> +0.0134200 |
+| Blue | 0.0773838 -> 0.0740798 | -0.0033040 [-0.0057631, -0.0008450] | 0.5498681 -> 0.5427693 | -0.0070987 [-0.0125010, -0.0016964] | -0.0612632 -> -0.0384812 |
+| White | 0.0561404 -> 0.0542706 | -0.0018698 [-0.0047874, +0.0010478] | 0.5541867 -> 0.5511940 | -0.0029927 [-0.0090749, +0.0030896] | -0.0186509 -> +0.0159912 |
+| RU Aggro | 0.0972779 -> 0.0970252 | -0.0002527 [-0.0013646, +0.0008591] | 0.6009312 -> 0.6004008 | -0.0005303 [-0.0029226, +0.0018619] | -0.0116874 -> -0.0075940 |
+
+Both pooled loss upper bounds are below zero. Red's small point worsening is
+well inside the declared `0.002` per-deck guard. Blue absolute bias shrank
+from `0.0613` to `0.0385`; Green also shrank. Red's absolute-bias increase is
+`0.00822`, below the `0.010` guard, while White and RU absolute bias shrank.
+No new material same-sign bias was created and neither model saturated any
+holdout record.
+
+All schedule, seat/start, target, mass, finite-value, component-isolation,
+artifact, and determinism checks passed. Hidden exchanges were nonvacuous in
+every deck (fit changed 16,812/17,258 rows; holdout changed
+16,844/17,272). Original and exchanged observations, features, leaf and
+ensemble predictions, refit parameters, and complete scientific reports were
+bit-identical; the two scientific-report hashes were both
+`5f3e046dffdb6d0b5159850b27e09a85da9525d1e1bd5a55c0dd3ded77d92dc4`.
+
+**Decision:** accept the narrow OC1 mechanism at its preregistered offline
+calibration gate. This is calibration evidence, not playing-strength
+evidence; C16 remains champion. It licenses only a separately preregistered
+action-regression protocol. Seeds `202607261929` through `202607261931`
+remain unopened. Next: freeze the exact action corpus/reference/cache
+identities and required Counterspell, Force Spike, duplicate-counter,
+nonlethal-X=0, Giant Growth, and DVR2 coverage before scoring OC1 on any
+fixture or opening a gameplay seed.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
