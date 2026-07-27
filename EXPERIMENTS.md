@@ -10108,6 +10108,121 @@ sh tools/run_dvr2_once.sh \
   "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
 ```
 
+#### DVR2 execution attempt 3: valid negative; RS1 not licensed
+
+Executed once on 2026-07-26 from pushed mechanical-repair commit `aa7f4b2`,
+after rereading `REVIEW.md` through its then-newest 19:02 PDT cycle. The
+command and both previously frozen source seed bases were unchanged:
+
+```sh
+sh tools/run_dvr2_once.sh \
+  "$PWD/data/old-school-dvr2-c16-mirror-v1.dvr2"
+```
+
+The process completed all 80 physical frozen-C16 mirror games, published the
+checksummed evidence bundle, and exited `1`: a valid negative or underpowered
+result under the preregistered wrapper contract.
+
+```text
+DVR2: loading exact frozen Environment-v3 C16...
+DVR2: completed source seed base 4242 (40/80 games)
+DVR2: completed source seed base 7801 (80/80 games)
+DVR2 frozen-C16 Learned-mirror harvest
+model fingerprint: 68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+source games / owner perspectives / priority roots: 80 / 160 / 3219
+selected / disagreements / agreements / unstable: 52 / 4 / 43 / 5
+Blue opponent-top divergences / high-cost: 2 / 0
+reference evaluations: 51200 / 131072
+coverage / controls / valid / RS1: MISS / PASS / PASS / NOT-LICENSED
+```
+
+Published artifact:
+
+```text
+path: data/old-school-dvr2-c16-mirror-v1.dvr2
+bytes: 221079
+file SHA-256: c6b5c199133b931de85386506ace16ff823407599362637e2000b743d9529804
+payload bytes: 220944
+payload SHA-256: 82f6b27fdead69c9273e72e96770f1ebcf29ae4a7d44cc74f621c77c6470690c
+model artifact SHA-256: 53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca
+source schedule SHA-256: 876ac6ce9c89fa3a33b52c1650d46653eb0db9d06c98251b00aaa9733872fd13
+```
+
+The strict manifest accounted for every source root: 2,889 were below the
+action floor and 330 entered coverage accounting. All 330 were eligible; 52
+were selected, 185 were skipped by the per-owner-game cap, and 93 by a
+stratum quota. There were zero duplicate, action-cap, evaluation-budget,
+invariance, or validation skips and zero recorded errors. The 51,200
+reference evaluations split exactly into 20,230 terminal and 30,970
+bootstrapped evaluations.
+
+Coverage was:
+
+| Stratum | Selected / required | Stable agreement | Stable disagreement | Unstable |
+| --- | ---: | ---: | ---: | ---: |
+| Blue, opponent controls top | 32 / 32 | 29 | 2 | 1 |
+| Blue, owner controls top | 4 / 8 | 4 | 0 | 0 |
+| non-Blue, opponent controls top | 8 / 16 | 5 | 0 | 3 |
+| non-Blue, owner controls top | 8 / 8 | 5 | 2 | 1 |
+
+Thus the overall `52/64` coverage gate missed because of the Blue-own-top and
+non-Blue-opponent-top cells, but the primary Blue-opponent-top hypothesis was
+fully sampled at exactly eight roots per opponent deck. There were no
+evaluation-budget skips. Per owner deck, the selected records were Blue
+`33/2/1`, Green `5/0/0`, Red `2/1/3`, White `2/0/1`, and RU Aggro `1/1/0`
+for agreement/disagreement/unstable respectively. All five all-deck agreement
+controls were retained and no control was underpowered.
+
+The four stable disagreements were:
+
+| Stable root | Public state class | Production -> confirmed reference | Regret / paired SE / lower 95% |
+| --- | --- | --- | ---: |
+| `dvr2.s0.g29.p0.r63.k6af43f6ef6b90e1c` | Blue vs White, opponent-top Moat, turn 7 second main | Force Spike -> Pass | `0.0066805964 / 0.0028350016 / +0.0011239933` |
+| `dvr2.s1.g28.p0.r69.k0c4f5b13903b8e4b` | Blue vs White, opponent-top Moat, turn 8 first main | Force Spike -> Pass | `0.0014306370 / 0.0033815993 / -0.0051972976` |
+| `dvr2.s0.g2.p0.r114.k330a025bc74cc0bc` | Red vs Green, own Gray Ogre on top | Bolt opposing creature -> Pass | `0.0017043698 / 0.0017043698 / -0.0016361951` |
+| `dvr2.s0.g15.p0.r127.kd7d0db3716665337` | RU vs Green, own Hill Giant on top | Bolt opponent -> Pass | `0.0463723737 / 0.0374425328 / -0.0270150` |
+
+Every confirmed reference best set was singleton Pass. Only the first
+disagreement had a positive lower bound, and its regret was `0.0067`, far
+below the preregistered `0.05` high-cost threshold. The largest point regret
+had a wide interval spanning zero. The two own-top disagreements may also be
+timing deferrals rather than lost strategic opportunities: Pass can first
+resolve the pending creature and preserve the same instant for the next
+priority window. Conversely, this result does **not** justify a generic Pass
+preference: 27 of the 29 stable Blue-opponent-top agreements and 35 of all 43
+stable agreements retained a non-Pass production action.
+
+Independent verification after publication used a strict byte-cursor parser:
+the outer bundle had exactly three frames and no trailing bytes; the payload
+contained 4,019 unique fields with no duplicates or trailing data; stored and
+computed payload hashes matched; and every source, coverage, classification,
+reference-accounting, control, and gate cross-sum reproduced. A separate
+review rehydrated all four embedded DVR1 records and re-scored them against the
+frozen C16 model with their recorded seeds and configuration. Every action
+mean, best set, regret, standard error, confidence bound, evaluation count,
+and fingerprint matched bit-for-bit. `REVIEW.md` was reread again through its
+newest 19:15 PDT entry before this conclusion; its independent 19:14
+countersign agrees with the valid-negative disposition.
+
+Decision: **reject the DVR2 Blue high-cost-divergence hypothesis and do not
+implement RS1**. The exact license required at least four Blue-opponent-top
+divergences and at least one regret of `0.05` whose lower 95% bound exceeded
+zero; the fully sampled primary stratum produced `2` and `0`. C16 remains the
+champion. Do not reopen blanket stack-H8, add a pass bias, or fit a policy
+residual from these four roots.
+
+The reviewer's stronger claim that action selection is completely exonerated
+is directionally useful but not logically established by this corpus: the
+K64/H8 reference shares C16's critic and Learned-mirror continuation, and the
+harvest excludes empty-stack development decisions. What DVR2 does establish
+is that a stack-only selector treatment is not the next evidence-led move.
+The next experiment will be separately preregistered on a genuinely new,
+card-agnostic critic-calibration axis, using all five decks and terminal
+outcome evidence rather than treating C16's own bootstrapped Q values as
+ground truth. If the smallest credible critic experiment requires replayable
+agreement states, first extend the serializer or collect a fresh balanced
+corpus; do not relabel the four disagreement records into a training set.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
