@@ -9905,3 +9905,96 @@ and no bot-strength claim is made. The next research action may now be a
 separately preregistered, simulation-guarded, hard-bounded DVR2 harvest over
 frozen C16, with Blue-owned opponent-stack response roots first and explicit
 coverage/skipped-stratum reporting.
+
+### DVR2 frozen-C16 Learned-mirror stack-response harvest (declared)
+
+Declared 2026-07-26 after rereading `REVIEW.md` through its newest 17:47 PDT
+entry and after DVR1-R passed focused, independent, and forced full-build
+review. OSC-4's sealed 48.4% rejection and the unchanged five-deck lift table
+leave real Blue stack-response divergences—not assumed combat mistakes—as the
+only evidence-backed next mechanism source. This is an eval-only harvest. It
+does not fit, mutate, or deploy a model and cannot make a strength claim.
+
+Hypothesis: the fixed source distribution contains at least four stable
+Blue-owned, opponent-top stack roots where production C16 is outside both the
+K64/H8 scout and confirmation best sets, and at least one has confirmation
+regret `>= 0.05` with a paired 95% lower bound above zero. Fewer than four
+stable divergences may be retained diagnostically but cannot license RS1.
+
+#### Frozen source protocol
+
+- Load only the immutable Environment-v3 C16 artifact
+  `old-school-value-challenger-v3-c16-t800-s424242.bin`; require fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+- Run exact production C16 (`K=8`, `H=4`, shallow blend on, zero epsilon,
+  residual, pass filter, and alternate continuation controller) in both
+  seats. No Handcoded trajectory, outcome filter, or card-name predicate is
+  permitted.
+- Use `learned_iteration::balanced_schedule` once for each root seed base
+  `4242` and `7801`, generation namespace `0x44565232` (`DVR2`), block zero,
+  and a fixed 128-turn source cap.
+- This is exactly 80 physical games: all ten distinct five-deck pairs, both
+  seat orientations, and both starters for each base seed. Treating both seats
+  as decision owners gives 160 owner-game perspectives, 32 per owner deck and
+  eight per ordered distinct deck matchup, balanced 4/4 by physical seat and
+  4/4 by play/draw.
+
+The review suggested including the games behind the lift table. DVR2 uses
+their two seed bases but deliberately replaces the Handcoded seat with frozen
+C16: Handcoded-sourced roots would become a per-step tuning oracle and violate
+Learned isolation. Relevance instead comes from the exact five-deck reachable
+C16 policy distribution.
+
+#### Root selection and coverage
+
+Selection happens before reference scoring and ignores game outcome. Eligible
+roots are complete Priority decisions with a nonempty public stack and 2–32
+legal actions. Deduplicate by owner information/action fingerprint, select at
+most two roots per owner-game perspective, and use a deterministic round robin
+over opponent deck, source-seed base, physical seat, play/draw, then source
+provenance. Never truncate an action set or backfill one stratum from another.
+
+The maximum 64 primary roots have fixed quotas:
+
+- 32 Blue owner / opponent-controlled stack top: target eight per opponent;
+- 8 Blue owner / own-controlled stack top: target two per opponent;
+- 16 non-Blue owner / opponent-controlled top: four per owner deck; and
+- 8 non-Blue owner / own-controlled top: two per owner deck.
+
+The manifest must cross-sum eligible, selected, duplicate-skipped,
+per-owner-game-skipped, action-cap-skipped, quota-skipped, and budget-skipped
+counts by stratum and owner deck. Missing quotas remain visible and make the
+corresponding coverage gate fail.
+
+#### Reference, controls, and bounds
+
+Every selected root uses the exact frozen-model, unblended Learned-mirror
+reference already bound by DVR1: independently derived K64 scout and K64
+confirmation worlds, H8, one rollout per world, four threads, canonical action
+descriptors, and a bit-identical opponent-hidden repartition clone. Exact
+accounting is `256 * legal_action_count` rollout evaluations per ordinary
+score. The total, including repeat controls, is capped at 131,072 evaluations.
+
+Classify every scored root exactly once as stable disagreement, stable
+agreement, unstable best set, or invalid/invariance failure. Retain the first
+stable agreement for each of the five owner decks as a negative control.
+Re-score each retained control with reversed candidate input and one thread;
+require equal semantic scores/best sets, hidden-repartition identity, and a
+`ReferenceAgreement` DVR1 disposition with no divergence record. Controls are
+stored by exact source locator plus information/action fingerprint and must
+regenerate identically before later use; every disagreement stores full
+replayable DVR1 bytes and must decode and re-score identically before
+publication.
+
+A standalone `old-school-dvr2-harvest` process, never called from `Game` or a
+search continuation, prevents evaluator recursion. Fixed constants are not CLI
+dials; only a new output path is accepted. A 15-minute watchdog, model mismatch,
+missing all-five agreement controls, broken quota/accounting/invariance,
+decode/re-score mismatch, or total-budget breach invalidates the run and
+publishes no evidence. The deterministic length-framed bundle is SHA-256
+checksummed, written atomically, and never overwrites an existing path.
+
+Exit `0` means a valid run meeting the four-divergence/one-high-cost RS1
+license, `1` means a valid negative or underpowered result, and `2` means an
+invalid/infrastructure run. No 200-game screen or strength seed is licensed by
+DVR2 itself.
