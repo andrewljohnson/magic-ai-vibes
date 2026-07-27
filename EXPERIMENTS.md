@@ -11978,6 +11978,18 @@ next-boundary dominance audit is conjunctive:
   less, and at least one inequality is strict. No card name or assigned card
   weight participates.
 
+Pre-implementation protocol clarification (2026-07-26, before opening any
+scientific seed): the forced path chooses an unavoidable cleanup discard by
+`(CardId numeric value, then original hand index)`. Its settlement also
+records `unresolved_transient_choice_effect`. That flag is set when a
+branch-local non-resource public or continuous effect still exists while a
+relevant discretionary combat choice remains; any comparison with the flag
+set is incomparable. This prevents the neutral no-attack policy from erasing
+the legitimate option value of a begin-combat Giant Growth and then falsely
+calling the spell dominated. Second-main Growth on a summoning-sick Bear,
+where no combat remains, does not set the flag. Ambiguous effect lifetime,
+cost restoration, or boundary classification fails closed as incomparable.
+
 Resource costs use the existing PD0 component definitions and accumulation
 order across the forced root action, priority passes, and stack resolution:
 per-card hand-consumption counts, color-separated mana depletion,
