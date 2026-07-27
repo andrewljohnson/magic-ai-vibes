@@ -1184,7 +1184,7 @@ void rebind_report_witnesses(
                         std::to_string(group_index);
                     const std::string group_digest =
                         audit::binding::
-                            successor_bank_pair_payload_sha256(
+                            successor_operator_bank_pair_payload_sha256(
                                 group.bank_a, group.bank_b,
                                 group.cross_fit);
                     group.hidden_repartition_witness =
@@ -1242,7 +1242,7 @@ void rebind_report_witnesses(
                 std::to_string(scope_index);
             const std::string digest =
                 audit::binding::
-                    successor_bank_pair_payload_sha256(
+                    successor_operator_bank_pair_payload_sha256(
                         scope.bank_a, scope.bank_b,
                         recomputed_cross_fit(
                             scope.bank_a, scope.bank_b));
@@ -1668,6 +1668,320 @@ audit::EvidenceBundle minimal_bound_bundle(
         bundle.bytes,
         {"complete_sha256", bundle.complete_sha256});
     return bundle;
+}
+
+void test_successor_operator_v2_omits_only_consequence() {
+    const std::string root_stable_id =
+        "test.successor-operator-v2";
+    const std::string successor_fingerprint =
+        integrity::sha256_string(
+            "test-successor-operator-information");
+    const audit::GroupBankEvidence bank_a =
+        group_bank(
+            root_stable_id, successor_fingerprint,
+            audit::ScopeKind::FullK64, 0,
+            "A", 0.25, 0.75);
+    const audit::GroupBankEvidence bank_b =
+        group_bank(
+            root_stable_id, successor_fingerprint,
+            audit::ScopeKind::FullK64, 0,
+            "B", 0.5, 1.0);
+    const auto cross_fit =
+        recomputed_cross_fit(bank_a, bank_b);
+    const auto operator_digest =
+        [&](const audit::GroupBankEvidence& first,
+            const audit::GroupBankEvidence& second,
+            const old_school::fq0_bellman::CrossFitValue&
+                fit) {
+            return audit::binding::
+                successor_operator_bank_pair_payload_sha256(
+                    first, second, fit);
+        };
+    const std::string baseline =
+        operator_digest(bank_a, bank_b, cross_fit);
+    const std::string canonical_pair_v1 =
+        audit::binding::
+            successor_bank_pair_payload_sha256(
+                bank_a, bank_b, cross_fit);
+
+    audit::SuccessorGroupEvidence full_group{
+        .information_set_fingerprint =
+            successor_fingerprint,
+        .successor_owner = 0,
+        .relation =
+            old_school::fq0_bellman::OwnerRelation::
+                SameOwner,
+        .root_world_indices = {0},
+        .representative_root_world = 0,
+        .representative_root_action_descriptor =
+            "root-action",
+        .bank_a = bank_a,
+        .bank_b = bank_b,
+        .cross_fit = cross_fit,
+    };
+    const auto full_digest =
+        [&](const audit::SuccessorGroupEvidence& group) {
+            return audit::binding::
+                group_bank_pair_payload_sha256(
+                    root_stable_id, "root-action",
+                    audit::ScopeKind::FullK64, 0, group);
+        };
+    const std::string full_v1 = full_digest(full_group);
+
+    audit::GroupBankEvidence consequence_a = bank_a;
+    consequence_a.actions.front()
+        .canonical_consequence_fingerprint += "-local";
+    expect(
+        operator_digest(
+            consequence_a, bank_b, cross_fit) ==
+            baseline,
+        "operator v2 bound representative-local "
+        "consequence metadata");
+    expect(
+        audit::binding::
+                successor_bank_pair_payload_sha256(
+                    consequence_a, bank_b, cross_fit) !=
+            canonical_pair_v1,
+        "successor-bank v1 stopped binding canonical "
+        "consequence metadata");
+    audit::SuccessorGroupEvidence consequence_group =
+        full_group;
+    consequence_group.bank_a = consequence_a;
+    expect(
+        full_digest(consequence_group) != full_v1,
+        "full v1 payload stopped binding canonical "
+        "consequence metadata");
+
+    audit::GroupBankEvidence consequence_b = bank_b;
+    consequence_b.actions.back()
+        .canonical_consequence_fingerprint += "-local";
+    expect(
+        operator_digest(
+            bank_a, consequence_b, cross_fit) ==
+            baseline,
+        "operator v2 bound bank-B consequence metadata");
+
+    const auto expect_bank_change =
+        [&](std::string_view field,
+            const std::function<void(
+                audit::GroupBankEvidence&)>& mutate) {
+            audit::GroupBankEvidence changed = bank_a;
+            mutate(changed);
+            expect(
+                operator_digest(
+                    changed, bank_b, cross_fit) !=
+                    baseline,
+                std::string(
+                    "operator v2 omitted ") +
+                    std::string(field));
+        };
+    expect_bank_change(
+        "bank name",
+        [](auto& bank) { bank.bank += "-changed"; });
+    expect_bank_change(
+        "stream key",
+        [](auto& bank) {
+            bank.stream_key += "-changed";
+        });
+    expect_bank_change(
+        "action descriptor",
+        [](auto& bank) {
+            bank.actions.front().descriptor += "-changed";
+        });
+    expect_bank_change(
+        "stable typed action",
+        [](auto& bank) {
+            bank.actions.front().action =
+                old_school::PriorityAction::play_land(
+                    old_school::CardId::Forest);
+        });
+    expect_bank_change(
+        "feature row",
+        [](auto& bank) {
+            bank.actions.front().feature_row_id +=
+                "-changed";
+        });
+    expect_bank_change(
+        "policy feature bits",
+        [](auto& bank) {
+            bank.actions.front().policy_features.front() =
+                99.0;
+        });
+    expect_bank_change(
+        "action census",
+        [](auto& bank) { bank.actions.pop_back(); });
+    expect_bank_change(
+        "sample census",
+        [](auto& bank) {
+            bank.actions.front().samples.pop_back();
+        });
+    expect_bank_change(
+        "sample world",
+        [](auto& bank) {
+            ++bank.actions.front()
+                  .samples.front()
+                  .world_index;
+        });
+    expect_bank_change(
+        "determinization seed",
+        [](auto& bank) {
+            ++bank.actions.front()
+                  .samples.front()
+                  .determinization_seed;
+        });
+    expect_bank_change(
+        "macro seed",
+        [](auto& bank) {
+            ++bank.actions.front()
+                  .samples.front()
+                  .macro_seed;
+        });
+    expect_bank_change(
+        "score bits",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .score_bits =
+                std::bit_cast<std::uint64_t>(0.125);
+        });
+    expect_bank_change(
+        "contextual score bits",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .contextual_score_bits =
+                std::bit_cast<std::uint64_t>(0.125);
+        });
+    expect_bank_change(
+        "legacy score bits",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .legacy_score_bits =
+                std::bit_cast<std::uint64_t>(0.125);
+        });
+    expect_bank_change(
+        "redacted leaf hash",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .redacted_leaf_hash += "-changed";
+        });
+    expect_bank_change(
+        "terminal flag",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .terminal = true;
+        });
+    expect_bank_change(
+        "critic flag",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .critic_evaluated = false;
+        });
+    expect_bank_change(
+        "forced-action flag",
+        [](auto& bank) {
+            bank.actions.front()
+                .samples.front()
+                .forced_action_applied = false;
+        });
+    expect_bank_change(
+        "actions-applied counter",
+        [](auto& bank) {
+            ++bank.actions.front()
+                  .samples.front()
+                  .actions_applied;
+        });
+    expect_bank_change(
+        "priority-actions counter",
+        [](auto& bank) {
+            ++bank.actions.front()
+                  .samples.front()
+                  .priority_actions_applied;
+        });
+    expect_bank_change(
+        "phase-transition counter",
+        [](auto& bank) {
+            ++bank.actions.front()
+                  .samples.front()
+                  .phase_transitions;
+        });
+    expect_bank_change(
+        "turn-advance counter",
+        [](auto& bank) {
+            ++bank.actions.front()
+                  .samples.front()
+                  .turn_advances;
+        });
+
+    const auto expect_cross_fit_change =
+        [&](std::string_view field,
+            const std::function<void(
+                old_school::fq0_bellman::
+                    CrossFitValue&)>& mutate) {
+            auto changed = cross_fit;
+            mutate(changed);
+            expect(
+                operator_digest(
+                    bank_a, bank_b, changed) != baseline,
+                std::string(
+                    "operator v2 omitted cross-fit ") +
+                    std::string(field));
+        };
+    expect_cross_fit_change(
+        "bank means",
+        [](auto& fit) {
+            fit.bank_a.front().value = 0.125;
+        });
+    expect_cross_fit_change(
+        "support",
+        [](auto& fit) {
+            fit.support_a.push_back("changed");
+        });
+    expect_cross_fit_change(
+        "A-selected-B value",
+        [](auto& fit) {
+            fit.a_selected_b_value = 0.125;
+        });
+    expect_cross_fit_change(
+        "B-selected-A value",
+        [](auto& fit) {
+            fit.b_selected_a_value = 0.125;
+        });
+    expect_cross_fit_change(
+        "symmetric value",
+        [](auto& fit) { fit.value = 0.125; });
+
+    audit::RunReport copied_bank = complete_report();
+    add_successor_group_to_first_root(copied_bank);
+    auto root = std::find_if(
+        copied_bank.scientific.roots.begin(),
+        copied_bank.scientific.roots.end(),
+        [](const audit::RootEvidence& candidate) {
+            return candidate.stable_id ==
+                   "green.develop-bears.v3";
+        });
+    expect(
+        root != copied_bank.scientific.roots.end() &&
+            !root->actions.front()
+                 .scopes.front()
+                 .groups.empty(),
+        "full-copy consequence fixture is missing");
+    root->actions.front()
+        .scopes.front()
+        .groups.front()
+        .bank_a.actions.front()
+        .canonical_consequence_fingerprint += "-changed";
+    rebind_report_witnesses(copied_bank);
+    copied_bank.gate = audit::evaluate_gate(
+        copied_bank.scientific, copied_bank.integrity);
+    expect_report_rejected(
+        std::move(copied_bank),
+        "full artifact accepted a consequence-mutated "
+        "empirical bank copy");
 }
 
 void test_gate_exit_codes_and_internal_consistency() {
@@ -2855,6 +3169,8 @@ int main() {
     const std::vector<
         std::pair<std::string, std::function<void()>>>
         tests = {
+            {"successor operator v2 field boundary",
+             test_successor_operator_v2_omits_only_consequence},
             {"gate and exit codes",
              test_gate_exit_codes_and_internal_consistency},
             {"canonical exact bundle",

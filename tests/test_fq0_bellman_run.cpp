@@ -533,7 +533,7 @@ void test_reconstruction_hashes_bind_raw_banks_and_coordinates() {
                             scope_index, group_index);
                     const std::string baseline =
                         audit::binding::
-                            successor_bank_pair_payload_sha256(
+                            successor_operator_bank_pair_payload_sha256(
                                 group.bank_a, group.bank_b,
                                 group.cross_fit);
                     expect(
@@ -604,7 +604,7 @@ void test_reconstruction_hashes_bind_raw_banks_and_coordinates() {
                 scope.bank_a, scope.bank_b);
             const std::string baseline =
                 audit::binding::
-                    successor_bank_pair_payload_sha256(
+                    successor_operator_bank_pair_payload_sha256(
                         scope.bank_a, scope.bank_b,
                         cross_fit);
             expect(
@@ -663,6 +663,119 @@ void test_reconstruction_hashes_bind_raw_banks_and_coordinates() {
         "witness domains");
     audit::testing::
         validate_reconstruction_bindings_for_test(evidence);
+}
+
+void test_operator_binding_omits_only_consequence() {
+    const auto first_group =
+        [](audit::ScientificEvidence& evidence)
+            -> audit::SuccessorGroupEvidence& {
+            for (audit::RootEvidence& root : evidence.roots) {
+                for (audit::RootActionEvidence& action :
+                     root.actions) {
+                    for (audit::ScopeEvidence& scope :
+                         action.scopes) {
+                        if (!scope.groups.empty()) {
+                            return scope.groups.front();
+                        }
+                    }
+                }
+            }
+            throw std::runtime_error(
+                "operator binding fixture has no group");
+        };
+
+    audit::ScientificEvidence consequence =
+        reconstruction_fixture().evidence;
+    audit::SuccessorGroupEvidence& consequence_group =
+        first_group(consequence);
+    const std::string operator_before =
+        audit::binding::
+            successor_operator_bank_pair_payload_sha256(
+                consequence_group.bank_a,
+                consequence_group.bank_b,
+                consequence_group.cross_fit);
+    const std::string full_before =
+        audit::binding::successor_bank_pair_payload_sha256(
+            consequence_group.bank_a,
+            consequence_group.bank_b,
+            consequence_group.cross_fit);
+    consequence_group.bank_a.actions.front()
+        .canonical_consequence_fingerprint += "-local";
+    expect(
+        audit::binding::
+                successor_operator_bank_pair_payload_sha256(
+                    consequence_group.bank_a,
+                    consequence_group.bank_b,
+                    consequence_group.cross_fit) ==
+                operator_before &&
+            audit::binding::
+                successor_bank_pair_payload_sha256(
+                    consequence_group.bank_a,
+                    consequence_group.bank_b,
+                    consequence_group.cross_fit) !=
+                full_before,
+        "runner did not separate operator v2 from full v1");
+    audit::testing::
+        validate_reconstruction_bindings_for_test(
+            consequence);
+
+    const auto expect_operator_rejects =
+        [&](std::string_view field,
+            const std::function<void(
+                audit::SuccessorGroupEvidence&)>& mutate) {
+            audit::ScientificEvidence changed =
+                reconstruction_fixture().evidence;
+            mutate(first_group(changed));
+            expect_runtime_error(
+                [&] {
+                    audit::testing::
+                        validate_reconstruction_bindings_for_test(
+                            changed);
+                },
+                std::string(
+                    "operator witness ignored ") +
+                    std::string(field));
+        };
+    expect_operator_rejects(
+        "descriptor",
+        [](auto& group) {
+            group.bank_a.actions.front().descriptor +=
+                "-changed";
+        });
+    expect_operator_rejects(
+        "leaf hash",
+        [](auto& group) {
+            group.bank_a.actions.front()
+                .samples.front()
+                .redacted_leaf_hash += "-changed";
+        });
+    expect_operator_rejects(
+        "score bits",
+        [](auto& group) {
+            group.bank_a.actions.front()
+                .samples.front()
+                .score_bits =
+                std::bit_cast<std::uint64_t>(0.125);
+        });
+    expect_operator_rejects(
+        "determinization seed",
+        [](auto& group) {
+            ++group.bank_a.actions.front()
+                  .samples.front()
+                  .determinization_seed;
+        });
+    expect_operator_rejects(
+        "transition counter",
+        [](auto& group) {
+            ++group.bank_a.actions.front()
+                  .samples.front()
+                  .actions_applied;
+        });
+    expect_operator_rejects(
+        "cross-fit",
+        [](auto& group) {
+            group.cross_fit.value = 0.125;
+        });
 }
 
 void test_comparison_hash_mutation_fails_binding() {
@@ -801,6 +914,8 @@ int main() {
              test_reconstruction_reuses_feature_scope_work},
             {"reconstruction raw-bank binding",
              test_reconstruction_hashes_bind_raw_banks_and_coordinates},
+            {"operator v2 field boundary",
+             test_operator_binding_omits_only_consequence},
             {"comparison mutation rejects",
              test_comparison_hash_mutation_fails_binding},
             {"hidden representative relabel rejects",

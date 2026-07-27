@@ -486,10 +486,16 @@ std::string hidden_repartition_coordinate(
 std::string manifest_payload_sha256(
     const ac1_teacher_audit::Manifest& manifest);
 std::string root_payload_sha256(const RootEvidence& root);
-// Exact digest used by fq0_bellman_science reconstruction witnesses. This
-// intentionally hashes only the raw successor A/B banks and their recomputed
-// cross-fit value under the science-layer domain.
+// Exact full v1 digest of the raw successor A/B banks and recomputed
+// cross-fit. This remains consequence-bound for canonical/copy integrity.
 std::string successor_bank_pair_payload_sha256(
+    const GroupBankEvidence& bank_a,
+    const GroupBankEvidence& bank_b,
+    const fq0_bellman::CrossFitValue& cross_fit);
+// Exact v2 operator digest used by fq0_bellman_science reconstruction
+// witnesses. It omits only the canonical representative's descriptive,
+// representative-local consequence fingerprint.
+std::string successor_operator_bank_pair_payload_sha256(
     const GroupBankEvidence& bank_a,
     const GroupBankEvidence& bank_b,
     const fq0_bellman::CrossFitValue& cross_fit);

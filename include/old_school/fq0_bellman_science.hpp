@@ -320,6 +320,21 @@ struct ReducedRecipe {
     std::size_t workers = 1;
 };
 
+struct SuccessorBankPairDigests {
+    std::string full_v1;
+    std::string operator_v2;
+
+    bool operator==(
+        const SuccessorBankPairDigests&) const = default;
+};
+
+// Exposes both independently domain-separated bank-pair identities so tests
+// can prove that v2 omits only representative-local descriptive consequence
+// metadata while v1 continues to bind the complete retained evidence.
+SuccessorBankPairDigests successor_bank_pair_digests(
+    const GroupBank& bank_a, const GroupBank& bank_b,
+    const fq0_bellman::CrossFitValue& cross_fit);
+
 Construction construct_reduced(
     const ac1_teacher_audit::Manifest& manifest,
     std::shared_ptr<const LearnedModel> model,

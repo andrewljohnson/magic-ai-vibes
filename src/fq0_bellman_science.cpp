@@ -1671,7 +1671,8 @@ void append_target(
 }
 
 void append_bank(
-    DigestWriter& writer, const GroupBank& bank) {
+    DigestWriter& writer, const GroupBank& bank,
+    bool include_canonical_consequence) {
     writer.text(bank.bank);
     writer.text(bank.stream_key);
     writer.integer(bank.actions.size());
@@ -1680,8 +1681,10 @@ void append_bank(
         append_action(writer, action.action);
         writer.text(action.feature_row_id);
         append_features(writer, action.policy_features);
-        writer.text(
-            action.canonical_consequence_fingerprint);
+        if (include_canonical_consequence) {
+            writer.text(
+                action.canonical_consequence_fingerprint);
+        }
         writer.integer(action.samples.size());
         for (const LeafSample& sample : action.samples) {
             writer.integer(sample.world_index);
@@ -1705,6 +1708,11 @@ void append_bank(
             writer.boolean(sample.forced_action_applied);
         }
     }
+}
+
+void append_bank(
+    DigestWriter& writer, const GroupBank& bank) {
+    append_bank(writer, bank, true);
 }
 
 void append_cross_fit(
@@ -1740,6 +1748,18 @@ std::string bank_pair_sha256(const BankPair& pair) {
         "old-school-fq0-successor-bank-pair-v1");
     append_bank(writer, pair.bank_a);
     append_bank(writer, pair.bank_b);
+    append_cross_fit(writer, pair.cross_fit);
+    return artifact_integrity::sha256_string(
+        writer.bytes());
+}
+
+std::string operator_bank_pair_sha256(
+    const BankPair& pair) {
+    DigestWriter writer;
+    writer.text(
+        "old-school-fq0-successor-operator-bank-pair-v2");
+    append_bank(writer, pair.bank_a, false);
+    append_bank(writer, pair.bank_b, false);
     append_cross_fit(writer, pair.cross_fit);
     return artifact_integrity::sha256_string(
         writer.bytes());
@@ -1824,7 +1844,7 @@ GroupReconstructionWitnesses reconstruct_group_impl(
         .cross_fit = group.cross_fit,
     };
     const std::string baseline_sha256 =
-        bank_pair_sha256(baseline);
+        operator_bank_pair_sha256(baseline);
 
     GroupReconstructionWitnesses result;
     IndexedExecutor executor(
@@ -1869,7 +1889,7 @@ GroupReconstructionWitnesses reconstruct_group_impl(
             .identity = {
                 .baseline_sha256 = baseline_sha256,
                 .comparison_sha256 =
-                    bank_pair_sha256(comparison),
+                    operator_bank_pair_sha256(comparison),
             },
         });
     }
@@ -1918,7 +1938,8 @@ GroupReconstructionWitnesses reconstruct_group_impl(
         .identity = {
             .baseline_sha256 = baseline_sha256,
             .comparison_sha256 =
-                bank_pair_sha256(hidden_comparison),
+                operator_bank_pair_sha256(
+                    hidden_comparison),
         },
     };
     result.hidden_repartition_bit_identical =
@@ -2046,7 +2067,7 @@ reconstruct_feature_scope_impl(
             action_samples(scope.bank_b)),
     };
     const std::string baseline_sha256 =
-        bank_pair_sha256(baseline);
+        operator_bank_pair_sha256(baseline);
 
     GroupReconstructionWitnesses result;
     IndexedExecutor executor(
@@ -2113,7 +2134,7 @@ reconstruct_feature_scope_impl(
             .identity = {
                 .baseline_sha256 = baseline_sha256,
                 .comparison_sha256 =
-                    bank_pair_sha256(comparison),
+                    operator_bank_pair_sha256(comparison),
             },
         });
     }
@@ -2177,7 +2198,8 @@ reconstruct_feature_scope_impl(
         .identity = {
             .baseline_sha256 = baseline_sha256,
             .comparison_sha256 =
-                bank_pair_sha256(hidden_comparison),
+                operator_bank_pair_sha256(
+                    hidden_comparison),
         },
     };
     result.hidden_repartition_bit_identical =
@@ -2245,7 +2267,7 @@ reconstruct_feature_scope_impl(
                     .baseline_sha256 =
                         baseline_sha256,
                     .comparison_sha256 =
-                        bank_pair_sha256(
+                        operator_bank_pair_sha256(
                             empirical_comparison),
                 },
             },
@@ -2905,7 +2927,6 @@ void validate_production_root_action_transitions(
 void validate_production_scope(
     const Recipe& recipe,
     const Root& root, const RootAction& action,
-    const ac1_teacher_audit::ManifestRoot& manifest_root,
     const Scope& scope, ScopeKind expected_kind,
     std::size_t expected_block) {
     if (scope.kind != expected_kind ||
@@ -3002,10 +3023,15 @@ void validate_production_scope(
                     "a foreign transition");
             }
         }
-        validate_production_bank_pair(
-            recipe, manifest_root, representative, fingerprint,
-            scope.kind, scope.block, group.bank_a,
-            group.bank_b, &group.cross_fit);
+        const bellman::CrossFitValue recomputed_cross_fit =
+            bellman::cross_fit_v0(
+                action_samples(group.bank_a),
+                action_samples(group.bank_b));
+        if (group.cross_fit != recomputed_cross_fit) {
+            throw std::invalid_argument(
+                "FQ0 production empirical-group cross-fit "
+                "is stale");
+        }
         bellman::SuccessorGroup backed{
             .fingerprint = fingerprint,
             .mass = members.size(),
@@ -3055,7 +3081,7 @@ void validate_production_root_action(
         const std::size_t block =
             scope_index == 0 ? 0 : scope_index - 1;
         validate_production_scope(
-            recipe, root, action, manifest_root,
+            recipe, root, action,
             action.scopes[scope_index], kind, block);
         const double expected_target =
             action.scopes[scope_index].target.value;
@@ -3653,8 +3679,12 @@ std::vector<FeatureCoordinate> validate_complete_preflight_impl(
                                 action_samples(
                                     canonical_scope.bank_b)),
                     };
-                    if (bank_pair_sha256(empirical) !=
-                        bank_pair_sha256(canonical)) {
+                    if (empirical.bank_a != canonical.bank_a ||
+                        empirical.bank_b != canonical.bank_b ||
+                        empirical.cross_fit !=
+                            canonical.cross_fit ||
+                        bank_pair_sha256(empirical) !=
+                            bank_pair_sha256(canonical)) {
                         throw std::invalid_argument(
                             "FQ0 repeated successor bank copy "
                             "is not bit-identical");
@@ -3941,6 +3971,21 @@ HiddenRepartitionDiagnostic hidden_repartition(
 }
 
 namespace testing {
+
+SuccessorBankPairDigests successor_bank_pair_digests(
+    const GroupBank& bank_a, const GroupBank& bank_b,
+    const bellman::CrossFitValue& cross_fit) {
+    const BankPair pair{
+        .bank_a = bank_a,
+        .bank_b = bank_b,
+        .cross_fit = cross_fit,
+    };
+    return {
+        .full_v1 = bank_pair_sha256(pair),
+        .operator_v2 =
+            operator_bank_pair_sha256(pair),
+    };
+}
 
 Construction construct_reduced(
     const ac1_teacher_audit::Manifest& manifest,

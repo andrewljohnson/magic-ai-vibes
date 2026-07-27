@@ -92,6 +92,32 @@ test_manifest(bool permute_observation_and_candidates) {
 }
 
 old_school::ac1_teacher_audit::Manifest
+braingeyser_hidden_draw_manifest() {
+    std::vector<old_school::probes::DecisionProbe> probes =
+        old_school::probes::
+            make_braingeyser_x_zero_control_v1();
+    expect(
+        probes.size() == 1,
+        "Braingeyser control fixture is missing");
+    const std::string information_action_fingerprint =
+        old_school::probes::
+            bsr_information_action_fingerprint(
+                probes.front());
+    old_school::ac1_teacher_audit::Manifest manifest;
+    manifest.roots.push_back({
+        .probe = std::move(probes.front()),
+        .information_action_fingerprint =
+            information_action_fingerprint,
+        .factory_contract_fingerprint =
+            "test-braingeyser-hidden-draw-contract",
+    });
+    manifest.physical_roots_by_deck[
+        static_cast<std::size_t>(
+            old_school::DeckId::Blue)] = 1;
+    return manifest;
+}
+
+old_school::ac1_teacher_audit::Manifest
 homogeneous_hidden_manifest() {
     using old_school::CardId;
     old_school::probes::DecisionProbe probe;
@@ -640,6 +666,274 @@ void test_physical_and_hidden_reconstruction_witnesses() {
         "indexed worker schedule");
 }
 
+void test_resolving_hidden_draw_uses_operator_identity() {
+    Fixture& data = fixture();
+    const auto manifest =
+        braingeyser_hidden_draw_manifest();
+    const science::testing::ReducedRecipe recipe{
+        .root_seed_base =
+            0xF00D00000000D101ULL,
+        .bank_a_seed_base =
+            0xF00D00000000D102ULL,
+        .bank_b_seed_base =
+            0xF00D00000000D103ULL,
+        .root_worlds = 64,
+        .successor_worlds = 1,
+        .workers = 2,
+    };
+    const science::Construction construction =
+        science::testing::construct_reduced(
+            manifest, data.model, recipe);
+    expect(
+        construction.roots.size() == 1,
+        "Braingeyser fixture did not produce one root");
+    const science::Root& root =
+        construction.roots.front();
+    const auto root_action = std::find_if(
+        root.actions.begin(), root.actions.end(),
+        [](const science::RootAction& action) {
+            return action.descriptor ==
+                   "braingeyser-x1-opponent";
+        });
+    expect(
+        root_action != root.actions.end(),
+        "Braingeyser fixture lacks the productive root action");
+
+    const science::Scope* selected_scope = nullptr;
+    const science::SuccessorGroup* selected_group = nullptr;
+    const science::RootTransition*
+        selected_physical_transition = nullptr;
+    const science::RootTransition*
+        selected_canonical_transition = nullptr;
+    old_school::PriorityAction selected_pass =
+        old_school::PriorityAction::pass();
+    std::string physical_consequence;
+    std::string canonical_consequence;
+    for (const science::Scope& scope :
+         root_action->scopes) {
+        for (const science::SuccessorGroup& group :
+             scope.groups) {
+            const auto evaluation = std::find_if(
+                construction
+                    .successor_feature_evaluations.begin(),
+                construction
+                    .successor_feature_evaluations.end(),
+                [&](const auto& candidate) {
+                    return candidate.root_stable_id ==
+                               root.stable_id &&
+                           candidate
+                                   .information_set_fingerprint ==
+                               group
+                                   .information_set_fingerprint;
+                });
+            expect(
+                evaluation !=
+                    construction
+                        .successor_feature_evaluations.end(),
+                "Braingeyser group lacks a canonical feature "
+                "evaluation");
+            if (group.representative_root_world ==
+                    evaluation
+                        ->representative_root_world &&
+                group
+                        .representative_root_action_descriptor ==
+                    evaluation
+                        ->representative_root_action_descriptor) {
+                continue;
+            }
+            const auto canonical_action = std::find_if(
+                root.actions.begin(), root.actions.end(),
+                [&](const science::RootAction& action) {
+                    return action.descriptor ==
+                           evaluation
+                               ->representative_root_action_descriptor;
+                });
+            expect(
+                canonical_action != root.actions.end(),
+                "Braingeyser canonical representative action "
+                "is missing");
+            const science::RootTransition& physical =
+                root_action->root_transitions.at(
+                    group.representative_root_world);
+            const science::RootTransition& canonical =
+                canonical_action->root_transitions.at(
+                    evaluation
+                        ->representative_root_world);
+            const auto pass = std::find(
+                physical.successor_legal_actions.begin(),
+                physical.successor_legal_actions.end(),
+                old_school::PriorityAction::pass());
+            if (pass ==
+                    physical.successor_legal_actions.end() ||
+                std::find(
+                    canonical.successor_legal_actions.begin(),
+                    canonical.successor_legal_actions.end(),
+                    *pass) ==
+                    canonical.successor_legal_actions.end()) {
+                continue;
+            }
+            const std::string physical_hash =
+                old_school::fq0_information_set::
+                    canonical_priority_consequence_sha256(
+                        physical.successor_state,
+                        physical.successor_owner,
+                        physical.successor_context, *pass);
+            const std::string canonical_hash =
+                old_school::fq0_information_set::
+                    canonical_priority_consequence_sha256(
+                        canonical.successor_state,
+                        canonical.successor_owner,
+                        canonical.successor_context, *pass);
+            if (physical_hash == canonical_hash) {
+                continue;
+            }
+            selected_scope = &scope;
+            selected_group = &group;
+            selected_physical_transition = &physical;
+            selected_canonical_transition = &canonical;
+            selected_pass = *pass;
+            physical_consequence = physical_hash;
+            canonical_consequence = canonical_hash;
+            break;
+        }
+        if (selected_group != nullptr) {
+            break;
+        }
+    }
+    expect(
+        selected_group != nullptr &&
+            selected_physical_transition != nullptr &&
+            selected_canonical_transition != nullptr,
+        "natural Braingeyser fixture did not expose the "
+        "representative-local resolving-draw divergence");
+    expect(
+        selected_physical_transition
+                    ->successor_context.consecutive_passes ==
+                1 &&
+            selected_canonical_transition
+                    ->successor_context.consecutive_passes ==
+                1 &&
+            !selected_physical_transition
+                 ->successor_state.stack.empty() &&
+            !selected_canonical_transition
+                 ->successor_state.stack.empty(),
+        "Braingeyser divergence is not at the resolving-Pass "
+        "priority boundary");
+    const old_school::StackObject& physical_spell =
+        selected_physical_transition
+            ->successor_state.stack.back();
+    const old_school::StackObject& canonical_spell =
+        selected_canonical_transition
+            ->successor_state.stack.back();
+    expect(
+        physical_spell.card ==
+                old_school::CardId::Braingeyser &&
+            physical_spell.x_value == 1 &&
+            physical_spell.target.has_value() &&
+            !physical_spell.target->creature.has_value() &&
+            canonical_spell == physical_spell &&
+            !selected_physical_transition
+                 ->successor_state
+                 .players[physical_spell.target->player]
+                 .library.empty() &&
+            !selected_canonical_transition
+                 ->successor_state
+                 .players[physical_spell.target->player]
+                 .library.empty() &&
+            selected_physical_transition
+                    ->successor_state
+                    .players[physical_spell.target->player]
+                    .library.back() !=
+                selected_canonical_transition
+                    ->successor_state
+                    .players[physical_spell.target->player]
+                    .library.back(),
+        "Braingeyser divergence does not come from the hidden "
+        "card drawn on resolution");
+
+    const auto physical_key =
+        old_school::fq0_information_set::
+            make_information_set_key(
+                selected_physical_transition
+                    ->successor_state,
+                selected_physical_transition
+                    ->successor_context,
+                selected_physical_transition
+                    ->successor_legal_actions);
+    const auto canonical_key =
+        old_school::fq0_information_set::
+            make_information_set_key(
+                selected_canonical_transition
+                    ->successor_state,
+                selected_canonical_transition
+                    ->successor_context,
+                selected_canonical_transition
+                    ->successor_legal_actions);
+    const auto physical_features =
+        old_school::learned_priority_policy_features(
+            selected_physical_transition
+                ->successor_state,
+            selected_physical_transition
+                ->successor_owner,
+            selected_pass,
+            selected_physical_transition
+                ->successor_context.sorcery_actions,
+            selected_physical_transition
+                ->successor_context.phase,
+            selected_physical_transition
+                ->successor_context.consecutive_passes);
+    const auto canonical_features =
+        old_school::learned_priority_policy_features(
+            selected_canonical_transition
+                ->successor_state,
+            selected_canonical_transition
+                ->successor_owner,
+            selected_pass,
+            selected_canonical_transition
+                ->successor_context.sorcery_actions,
+            selected_canonical_transition
+                ->successor_context.phase,
+            selected_canonical_transition
+                ->successor_context.consecutive_passes);
+    expect(
+        old_school::fq0_information_set::
+                information_set_sha256(physical_key) ==
+                selected_group
+                    ->information_set_fingerprint &&
+            physical_key == canonical_key &&
+            physical_features == canonical_features &&
+            physical_consequence !=
+                canonical_consequence,
+        "Braingeyser resolving draw did not isolate raw "
+        "consequence from current information/features");
+
+    science::testing::validate_complete_preflight(
+        construction, manifest, data.model, recipe);
+    const science::GroupReconstructionWitnesses witnesses =
+        science::testing::reconstruct_group(
+            manifest.roots.front(), *root_action,
+            *selected_scope, *selected_group,
+            data.model, recipe);
+    const auto physical_witness = std::find_if(
+        witnesses.representatives.begin(),
+        witnesses.representatives.end(),
+        [&](const auto& witness) {
+            return witness.root_action_descriptor ==
+                       root_action->descriptor &&
+                   witness.root_world ==
+                       selected_group
+                           ->representative_root_world;
+        });
+    expect(
+        physical_witness !=
+                witnesses.representatives.end() &&
+            physical_witness->identity.bit_identical() &&
+            witnesses
+                .every_representative_bit_identical,
+        "operator v2 did not reconstruct the natural "
+        "Braingeyser physical representative");
+}
+
 void test_all_feature_scopes_reconstruct_full_catalog() {
     Fixture& data = fixture();
     const science::Root& root =
@@ -1137,30 +1431,131 @@ void test_complete_preflight_rejects_coherent_tampering() {
                 message);
         };
 
-    science::Construction repeated_bank =
-        data.single_worker;
-    bool changed_bank = false;
-    for (science::RootAction& action :
-         repeated_bank.roots.front().actions) {
-        for (science::Scope& scope : action.scopes) {
-            if (scope.groups.empty()) {
-                continue;
+    const auto first_group =
+        [](science::Construction& construction)
+            -> science::SuccessorGroup* {
+        for (science::Root& root : construction.roots) {
+            for (science::RootAction& action :
+                 root.actions) {
+                for (science::Scope& scope :
+                     action.scopes) {
+                    if (!scope.groups.empty()) {
+                        return &scope.groups.front();
+                    }
+                }
             }
-            scope.groups.front()
-                .bank_a.actions.front()
-                .samples.front()
-                .redacted_leaf_hash += "-tampered";
-            changed_bank = true;
-            break;
         }
-        if (changed_bank) {
-            break;
-        }
-    }
-    expect(changed_bank, "preflight fixture lacks a group bank");
-    expect_preflight_rejects(
-        std::move(repeated_bank),
-        "coherently rehashed repeated bank drift was accepted");
+        return nullptr;
+    };
+    science::Construction canonical =
+        data.single_worker;
+    science::SuccessorGroup* canonical_group =
+        first_group(canonical);
+    expect(
+        canonical_group != nullptr &&
+            !canonical_group->bank_a.actions.empty() &&
+            !canonical_group->bank_a.actions.front()
+                 .samples.empty(),
+        "preflight fixture lacks a complete group bank");
+    const auto canonical_digests =
+        science::testing::successor_bank_pair_digests(
+            canonical_group->bank_a,
+            canonical_group->bank_b,
+            canonical_group->cross_fit);
+    const auto expect_bank_mutation =
+        [&](auto mutate, bool changes_operator_v2,
+            std::string_view message) {
+        science::Construction changed =
+            data.single_worker;
+        science::SuccessorGroup* group =
+            first_group(changed);
+        expect(
+            group != nullptr,
+            "bank mutation fixture lost its group");
+        mutate(*group);
+        const auto changed_digests =
+            science::testing::
+                successor_bank_pair_digests(
+                    group->bank_a, group->bank_b,
+                    group->cross_fit);
+        expect(
+            changed_digests.full_v1 !=
+                    canonical_digests.full_v1 &&
+                ((changed_digests.operator_v2 !=
+                  canonical_digests.operator_v2) ==
+                 changes_operator_v2),
+            message);
+        expect_preflight_rejects(
+            std::move(changed), message);
+    };
+
+    expect_bank_mutation(
+        [](science::SuccessorGroup& group) {
+            group.bank_a.actions.front()
+                .canonical_consequence_fingerprint +=
+                "-tampered";
+        },
+        false,
+        "consequence-only mutation did not separate full "
+        "v1 from operator v2 or escaped copy validation");
+    expect_bank_mutation(
+        [](science::SuccessorGroup& group) {
+            group.bank_a.actions.front().descriptor +=
+                "-tampered";
+        },
+        true,
+        "descriptor mutation escaped operator v2 or "
+        "preflight");
+    expect_bank_mutation(
+        [](science::SuccessorGroup& group) {
+            group.bank_a.actions.front()
+                .samples.front().redacted_leaf_hash +=
+                "-tampered";
+        },
+        true,
+        "sampled leaf mutation escaped operator v2 or "
+        "preflight");
+    expect_bank_mutation(
+        [](science::SuccessorGroup& group) {
+            science::LeafSample& sample =
+                group.bank_a.actions.front()
+                    .samples.front();
+            sample.score =
+                sample.score == 0.0
+                    ? 0.25
+                    : sample.score / 2.0;
+        },
+        true,
+        "sample score mutation escaped operator v2 or "
+        "preflight");
+    expect_bank_mutation(
+        [](science::SuccessorGroup& group) {
+            ++group.bank_a.actions.front()
+                  .samples.front()
+                  .determinization_seed;
+        },
+        true,
+        "sample seed mutation escaped operator v2 or "
+        "preflight");
+    expect_bank_mutation(
+        [](science::SuccessorGroup& group) {
+            ++group.bank_a.actions.front()
+                  .samples.front()
+                  .actions_applied;
+        },
+        true,
+        "sample counter mutation escaped operator v2 or "
+        "preflight");
+    expect_bank_mutation(
+        [](science::SuccessorGroup& group) {
+            group.cross_fit.value =
+                group.cross_fit.value == 0.0
+                    ? 0.25
+                    : group.cross_fit.value / 2.0;
+        },
+        true,
+        "cross-fit mutation escaped operator v2 or "
+        "preflight");
 
     science::Construction stale_support =
         data.single_worker;
@@ -1307,6 +1702,8 @@ int main() {
              test_feature_only_banks_and_symmetric_targets},
             {"physical and hidden bank reconstruction",
              test_physical_and_hidden_reconstruction_witnesses},
+            {"resolving hidden draw operator identity",
+             test_resolving_hidden_draw_uses_operator_identity},
             {"all feature scopes reconstruct full catalog",
              test_all_feature_scopes_reconstruct_full_catalog},
             {"nonvacuous hidden repartition eligibility",

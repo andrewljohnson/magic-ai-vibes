@@ -1930,7 +1930,8 @@ void attach_reconstruction_proofs(
         group.hidden_repartition_invariant = true;
         group.complete = true;
         const std::string baseline =
-            binding::successor_bank_pair_payload_sha256(
+            binding::
+                successor_operator_bank_pair_payload_sha256(
                 group.bank_a, group.bank_b,
                 group.cross_fit);
         group.representative_reconstruction_witnesses
@@ -2046,7 +2047,8 @@ void attach_reconstruction_proofs(
             recompute_cross_fit(
                 scope.bank_a, scope.bank_b);
         const std::string baseline =
-            binding::successor_bank_pair_payload_sha256(
+            binding::
+                successor_operator_bank_pair_payload_sha256(
                 scope.bank_a, scope.bank_b, cross_fit);
         scope.representative_reconstruction_witnesses
             .reserve(proof.representatives.size());
@@ -2134,7 +2136,7 @@ void validate_reconstruction_bindings(
                             scope_index, group_index);
                     const std::string baseline =
                         binding::
-                            successor_bank_pair_payload_sha256(
+                            successor_operator_bank_pair_payload_sha256(
                                 group.bank_a,
                                 group.bank_b,
                                 group.cross_fit);
@@ -2196,7 +2198,7 @@ void validate_reconstruction_bindings(
                 std::to_string(scope_index);
             const std::string baseline =
                 binding::
-                    successor_bank_pair_payload_sha256(
+                    successor_operator_bank_pair_payload_sha256(
                         scope.bank_a, scope.bank_b,
                         recompute_cross_fit(
                             scope.bank_a,

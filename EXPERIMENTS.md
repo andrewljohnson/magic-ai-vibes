@@ -12128,6 +12128,279 @@ and review, will be:
 ./build/old-school-fq0-bellman-audit
 ```
 
+#### FQ0-T0 first registered execution: infrastructure failure
+
+Run 2026-07-27 02:35-02:40 PDT from pushed freeze commit `479cccd`, after
+the final post-commit independent GO and after rereading `REVIEW.md` through
+the 02:31 PDT cycle.
+
+Exact command:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
+
+Frozen seed bases were the preregistered root `202607262351`, successor bank A
+`202607262352`, and successor bank B `202607262353`. The process completed the
+immutable C16/manifest check and K64/K8 Bellman construction, entered complete
+successor-information-set reconstruction, then exited `2` with:
+
+```text
+FQ0-T0 infrastructure failure: FQ0 production bank action provenance is invalid
+```
+
+The registered evidence target and temporary remained absent. Therefore this
+run has no scientific interpretation: it neither accepts nor rejects FQ0,
+does not license FQ1, and does not retire or replace C16. The hypothesis
+remains unresolved. Because the preregistration retires seed bases only after
+a completed exit-0/exit-1 result, this incomplete execution permits a rerun
+only after the provenance defect is diagnosed, covered by a failing-then-
+passing regression, committed, and independently reviewed. No gate, recipe,
+seed, sample size, or scientific statistic may change during that repair.
+
+Next action: localize which retained successor bank action field differs from
+the authoritative reconstruction (`descriptor`, typed action, feature-row ID,
+neutral features, consequence hash, or sample census), reproduce it without
+opening a new scientific coordinate, and make the smallest provenance-only
+fix.
+
+#### FQ0-T0 mechanical-retry repair declaration
+
+Declared 2026-07-27 02:53 PDT after rereading `REVIEW.md` through its 02:47
+PDT void disposition and after three independent source diagnoses. A
+quarantined full-manifest diagnostic at nonregistered seed bases
+`0xF00D00000000D101`, `0xF00D00000000D102`, and
+`0xF00D00000000D103`, Kroot=64/Ksuccessor=1, reproduced the exact failure at
+`control.blue.braingeyser-x0.v1`, root action
+`braingeyser-x1-opponent`, empirical world 21, successor action Pass. The
+descriptor, typed action, feature-row ID, neutral features, and sample census
+were exact; only `canonical_consequence_fingerprint` differed.
+
+Falsifiable infrastructure hypothesis: the exit-2 failure is caused by
+treating a representative-local post-action observation as current
+information-set identity. At consecutive-passes=1, Pass may resolve
+Braingeyser, Ancestral Recall, or Millstone, revealing a card from a hidden
+library. Two states with the same current owner information set can therefore
+have different raw post-action consequence hashes. If action metadata is
+instead computed from one deterministic common belief particle, every physical
+representative will retain the same metadata while all sampled values and
+Bellman targets remain bit-identical.
+
+The repair is frozen prospectively:
+
+1. For successor-bank action metadata only, determinize the representative
+   with the already-existing bank-A/full/world-0 successor determinization
+   coordinate. Use that one common state for neutral policy features and the
+   immediate consequence fingerprint in bank A, bank B, Full, and all eight
+   block scopes. This creates no seed or RNG role and changes no rollout.
+2. Keep validating every empirical group against its exact membership,
+   fingerprint, owner, copied canonical banks, recomputed cross-fit, target,
+   and particle partition. The canonical feature bank remains fully validated
+   against its canonical representative.
+3. Bump the FQ0 redacted terminal-leaf consequence schema and omit
+   `PlayerGameStats`. Those counters are reporting-only, absent from
+   `InformationSetKey`, preserved by determinization, and irrelevant to rules,
+   critic value, or terminal outcome. Winner, reason, turns, starting player,
+   and ending life remain bound. Nonterminal hashes are unchanged.
+4. Do not change a scientific seed, world count, bank, macro recipe, target,
+   cross-fit, gate, contrast, dominance rule, model, artifact path, or sample
+   score. C16 remains champion.
+
+Pre-retry acceptance requires all of:
+
+- a focused resolving draw/mill fixture proves equal current information-set
+  hashes and policy features, different raw physical consequence hashes, and
+  identical common-particle metadata;
+- a terminal fixture proves reporting-stat changes no longer change the
+  redacted terminal consequence while outcome changes still do;
+- the nonregistered K64/K1 full-manifest reproduction completes full preflight
+  and every physical/hidden reconstruction, with no difference in score bits,
+  critic bits, seeds, counters, supports, cross-fits, or targets;
+- mutation of any copied bank, descriptor, sampled leaf, score, seed, or
+  cross-fit still rejects;
+- all focused/full strict and sanitizer tests pass, followed by a new
+  commit-and-review freeze.
+
+If any operator/sample field other than the two declared provenance-only
+hashes changes, or the K64/K1 reproduction exposes another
+information-set-unsafe field, reject this repair and do not reopen the
+registered seeds. If all gates pass, the only licensed scientific action is a
+mechanical retry of the same exact no-argument command and registered seed
+bases.
+
+##### Diagnostic narrowing amendment
+
+Recorded 2026-07-27 02:56 PDT, before accepting or committing any repair.
+The full nonregistered diagnostic completed after the declaration and
+materially narrowed it. Temporary source was outside the repository at
+`/tmp/fq0_operator_diag.cpp`, 595 lines, SHA-256
+`073e380d5f8708fb2dffea65c002b799d50b93536705d775e5f98a686fb9276d`.
+It directly included `src/fq0_bellman_science.cpp`; the exact build and run
+were:
+
+```sh
+c++ -Iinclude -std=c++20 -O3 -Wall -Wextra -Wpedantic -Werror \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/probe_eval.cpp src/probe_runner.cpp \
+  src/audit_common.cpp src/artifact_integrity.cpp \
+  src/output_calibration.cpp src/output_calibration_artifact.cpp \
+  src/oc1_action_scoring.cpp src/ac1_teacher_audit.cpp \
+  src/fq0_information_set.cpp src/fq0_bellman.cpp \
+  /tmp/fq0_operator_diag.cpp -o /tmp/fq0_operator_diag_full
+/tmp/fq0_operator_diag_full
+```
+
+The binary SHA-256 was
+`b581402efd725e08cea270fbb5dfce8a9baba018694e8f5614a590ddaab25d5f`.
+Configuration was the full 26-root AC1 manifest, Kroot=64, Ksuccessor=1,
+workers=4, the three safe seeds above, and a one-game model with seed
+`0xF00D00000000D1A6`.
+
+The harness compared 26,820 feature scopes, 43,749 physical-member
+reconstructions, 87,498 banks, and 318,078 action/sample rows. All 318,078
+sample rows were IEEE-bit exact in world/determinization/macro seeds, score,
+contextual and legacy critic bits, redacted leaf hash, terminal/critic flags,
+action/priority/phase/turn counters, and forced-action flag. This included
+6,553 terminal and 311,525 nonterminal rows; terminal-only and
+nonterminal-only hash divergences were both zero. Cross-fit values and
+supports were exact. All 43,749 representatives were exact after ignoring
+only the immediate consequence fingerprint. The sole drift was 252 copied
+action-bank consequence fields across 126 representatives, all in the
+Braingeyser coordinate identified above.
+
+This evidence rejects the declaration's speculative terminal-stat repair:
+there is no such mismatch in the full K64/K1 corpus, so
+`redacted_leaf_consequence_sha256` and every sampled leaf hash remain
+unchanged. It also favors a narrower operator-identity repair over replacing
+the frozen canonical consequence statistic with a common-particle outcome.
+Changing that raw statistic could change the harmful-collision gate after the
+registered seeds were opened. Therefore items 1 and 3 above are superseded,
+not silently erased:
+
+- retain the canonical representative consequence in raw evidence, feature
+  rows, collision analysis, semantic hashes, and the existing full
+  canonical/copy-integrity domain
+  `old-school-fq0-successor-bank-pair-v1`;
+- empirical groups do not rebind that representative-local descriptive field
+  to another physical state. They are validated by exact membership,
+  fingerprint, owner, cross-fit/target/partition rederivation, and exact full
+  bank-copy equality to the separately validated canonical feature bank;
+- add one reconstruction-only domain,
+  `old-school-fq0-successor-operator-bank-pair-v2`, whose preimage is the
+  existing full successor bank pair minus only
+  `canonical_consequence_fingerprint`. It retains typed stable action,
+  features, every raw sample/leaf hash/seed/flag/counter, and cross-fit.
+  Science and artifact binding must independently derive the same bytes.
+
+Acceptance additionally requires a consequence-only mutation to leave the v2
+operator digest unchanged while changing/rejecting the full v1 canonical-copy
+identity, and mutations to a descriptor, sampled leaf hash, score, seed,
+counter, or cross-fit to change/reject v2. No other declared condition changes.
+
+##### Narrow repair result and pre-retry freeze
+
+Recorded 2026-07-27 03:20 PDT after rereading `REVIEW.md` through its 03:10
+PDT cycle. Accept the narrowly amended infrastructure repair; this is not a
+scientific FQ0 verdict and C16 remains champion.
+
+The implementation leaves every retained bank row unchanged. It preserves the
+full consequence-bound `old-school-fq0-successor-bank-pair-v1` identity and
+adds the reconstruction-only
+`old-school-fq0-successor-operator-bank-pair-v2` identity, which omits only
+`canonical_consequence_fingerprint`. Only reconstruction witness assembly and
+validation use v2. Full science semantic hashes, feature/collision evidence,
+artifact raw/group/feature payloads, and canonical-to-empirical exact-copy
+validation remain consequence-sensitive. Empirical scope preflight now
+recomputes its cross-fit and target/partition, then the complete preflight
+requires its banks and cross-fit to equal the separately rederived and fully
+validated canonical feature bank before any reconstruction begins. Exact typed
+`PriorityAction` validation is unchanged.
+
+The focused natural regression uses the nonregistered seed bases
+`0xF00D00000000D101`, `0xF00D00000000D102`, and
+`0xF00D00000000D103`, Kroot=64, Ksuccessor=1. It finds a real
+`braingeyser-x1-opponent` successor boundary with consecutive-passes=1 and an
+X=1 Braingeyser on the stack. The physical and canonical states have equal
+exact information-set keys, Pass policy features, and public stack objects,
+but different hidden target-library top cards and therefore different raw
+Pass consequence hashes. Complete preflight and every v2 reconstruction pass.
+Mutation tests prove:
+
+- changing only canonical consequence changes full v1, leaves operator v2
+  unchanged, and is still rejected as a mutated empirical copy;
+- changing a bank/stream/action census, stable typed action, descriptor,
+  feature row or features, any sampled leaf field, either seed, any transition
+  counter/flag, or any cross-fit component changes v2;
+- stale reconstruction witnesses, relabeled coordinates, and full artifact
+  semantic forgeries still reject.
+
+Exact focused/full strict commands and results:
+
+```sh
+make -j4 test-fq0
+# 66/66 total:
+# information-set 13/13, Bellman 8/8, dominance 10/10,
+# dominance-transition 4/4, science 10/10, artifact 13/13,
+# runner 8/8
+
+make -j4 test
+# engine 168/168, learned iteration 27/27, probes 57/57,
+# probe metrics 11/11, probe runner 33/33, every audit/orchestration
+# suite including FQ0 66/66, web bridge 18/18, web 106/106,
+# certification 48/48, CLI/capture/clean contracts and simulator smoke
+# all passed
+```
+
+Fresh AddressSanitizer/UndefinedBehaviorSanitizer binaries used
+`-O1 -g -Wall -Wextra -Wpedantic -Werror
+-fsanitize=address,undefined -fno-omit-frame-pointer`. Their exact runs were:
+
+```sh
+ASAN_OPTIONS=detect_leaks=0 \
+  ./build/old-school-fq0-bellman-science-tests-narrow-sanitized
+# 10/10, real 9.38 s
+
+ASAN_OPTIONS=detect_leaks=0 \
+  /tmp/old-school-fq0-bellman-audit-tests-v2-sanitized
+# 13/13
+
+ASAN_OPTIONS=detect_leaks=0 \
+  /tmp/old-school-fq0-bellman-run-tests-v2-sanitized
+# 8/8
+```
+
+The full nonregistered K64/K1 all-26-root diagnostic was then extended to
+invoke complete preflight followed by every physical, canonical hidden, and
+distinct empirical hidden reconstruction before its exhaustive raw-field
+comparison. The extended temporary source SHA-256 is
+`49a31b16f4d5b3d6a25d9f2468b8e6527c17a919f024c2331e52e431790ff584`;
+the binary SHA-256 is
+`3286566a024884a053ae93c0452d48fed29fbb03f8aefcd0158ec58b36cc989d`.
+It used the same exact compile command recorded in the 02:56 amendment, with
+output changed to `/tmp/fq0_operator_diag_full_preflight`, followed by:
+
+```sh
+/usr/bin/time -p /tmp/fq0_operator_diag_full_preflight
+```
+
+It exited 0 in 131.25 s. Complete preflight covered 26,820 feature scopes;
+all 43,749 physical and 33,976 hidden reconstructions were v2-bit-identical.
+The independent raw comparison again covered 87,498 banks and 318,078 action
+sample rows: every score, seed, critic bit, leaf hash, terminal/forced flag,
+counter, support, cross-fit, and target was exact. The only raw descriptive
+drift remained the preregistered 252 consequence fields across 126
+Braingeyser representatives. Thus the amended falsifiable repair hypothesis
+passed with no newly exempted field.
+
+Independent review gave GO after inspecting the final field boundary,
+preflight ordering, science/artifact byte agreement, natural regression,
+strict tests, and sanitizer results. The frozen C16 artifact remains
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+Next action is commit/push this exact repair, obtain a post-commit independent
+freeze check, confirm the evidence and temporary targets are absent, then and
+only then mechanically rerun the original exact no-argument FQ0 command with
+the same registered seed bases.
+
 Exit `0` means complete evidence and every scientific/structural gate passes.
 It licenses only a separately preregistered FQ1: one fitted scalar
 Priority-Q generation with a frozen parent/target, all-action labels,

@@ -232,6 +232,46 @@ void digest_science_group_bank(
     }
 }
 
+void digest_operator_group_bank(
+    DigestWriter& output,
+    const GroupBankEvidence& bank) {
+    output.text(bank.bank);
+    output.text(bank.stream_key);
+    output.integer(bank.actions.size());
+    for (const GroupActionEvidence& action : bank.actions) {
+        output.text(action.descriptor);
+        output.text(
+            probes::stable_priority_action_descriptor(
+                action.action));
+        output.text(action.feature_row_id);
+        output.integer(action.policy_features.size());
+        for (const double feature :
+             action.policy_features) {
+            output.real(feature);
+        }
+        output.integer(action.samples.size());
+        for (const LeafSampleEvidence& sample :
+             action.samples) {
+            output.integer(sample.world_index);
+            output.integer(sample.determinization_seed);
+            output.integer(sample.macro_seed);
+            output.integer(sample.score_bits);
+            output.integer(sample.contextual_score_bits);
+            output.integer(sample.legacy_score_bits);
+            output.text(sample.redacted_leaf_hash);
+            output.boolean(sample.terminal);
+            output.boolean(sample.critic_evaluated);
+            output.boolean(sample.critic_evaluated);
+            output.integer(sample.actions_applied);
+            output.integer(
+                sample.priority_actions_applied);
+            output.integer(sample.phase_transitions);
+            output.integer(sample.turn_advances);
+            output.boolean(sample.forced_action_applied);
+        }
+    }
+}
+
 void digest_cross_fit(
     DigestWriter& output,
     const fq0_bellman::CrossFitValue& value) {
@@ -761,6 +801,19 @@ std::string successor_bank_pair_payload_sha256_impl(
         "old-school-fq0-successor-bank-pair-v1");
     digest_science_group_bank(output, bank_a);
     digest_science_group_bank(output, bank_b);
+    digest_cross_fit(output, cross_fit);
+    return output.sha256();
+}
+
+std::string successor_operator_bank_pair_payload_sha256_impl(
+    const GroupBankEvidence& bank_a,
+    const GroupBankEvidence& bank_b,
+    const fq0_bellman::CrossFitValue& cross_fit) {
+    DigestWriter output;
+    output.text(
+        "old-school-fq0-successor-operator-bank-pair-v2");
+    digest_operator_group_bank(output, bank_a);
+    digest_operator_group_bank(output, bank_b);
     digest_cross_fit(output, cross_fit);
     return output.sha256();
 }
@@ -1779,7 +1832,7 @@ void validate_scope(
             group_coordinate +
                 ": cross-fit aggregate does not match raw bits");
         const std::string group_baseline =
-            successor_bank_pair_payload_sha256_impl(
+            successor_operator_bank_pair_payload_sha256_impl(
                 group.bank_a, group.bank_b, recomputed);
         validate_bound_witness(
             group.hidden_repartition_witness,
@@ -2116,7 +2169,7 @@ void validate_successor_feature_evaluations(
                     feature_information_set, scope.kind,
                     scope.block, census, coordinate);
             const std::string scope_baseline =
-                successor_bank_pair_payload_sha256_impl(
+                successor_operator_bank_pair_payload_sha256_impl(
                     scope.bank_a, scope.bank_b, recomputed);
             for (std::size_t member = 0;
                  member <
@@ -5065,6 +5118,15 @@ std::string successor_bank_pair_payload_sha256(
     const fq0_bellman::CrossFitValue& cross_fit) {
     return successor_bank_pair_payload_sha256_impl(
         bank_a, bank_b, cross_fit);
+}
+
+std::string successor_operator_bank_pair_payload_sha256(
+    const GroupBankEvidence& bank_a,
+    const GroupBankEvidence& bank_b,
+    const fq0_bellman::CrossFitValue& cross_fit) {
+    return
+        successor_operator_bank_pair_payload_sha256_impl(
+            bank_a, bank_b, cross_fit);
 }
 
 std::string group_bank_pair_payload_sha256(
