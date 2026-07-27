@@ -10718,6 +10718,94 @@ passed, `1` means scientific rejection/inconclusive, and `2` means
 artifact/integrity/infrastructure failure. Its exact command, output, hashes,
 and decision will be recorded before any gameplay seed is opened.
 
+#### Prospective protocol correction after adversarial review
+
+Recorded before any OC1 action score or reference rollout. An independent
+adversarial review of commit `3a6bcd6` found one implementability
+contradiction and several ambiguities. The following corrections supersede
+the conflicting clauses above without changing the candidate, corpus, or
+reserved gameplay seeds.
+
+1. The frozen Actor cache is grandfathered evidence, not reconstructible
+   evidence. It contains the exact 64 common-world Q rows per action and
+   metadata, but it does not contain hidden-clone samples or
+   terminal/bootstrap source counts, and no loadable exact Actor artifact is
+   frozen. AR1 therefore snapshots and loads the cache twice, requires exact
+   SHA/metadata/information-set identity, 20 roots, four roots per deck, 64
+   finite rows per action, and original-versus-repartitioned observation and
+   complete-action identity. It does **not** claim a fresh Actor rollout,
+   hidden-sample, or terminal/bootstrap reconstruction. Fresh sample,
+   accounting, and hidden-repartition equality apply to the cache-free C16
+   references and C16/OC1 deployment paths. “Every reference” and “repeated
+   full construction” above are narrowed accordingly.
+2. The independent Actor cache alone owns the pooled mean-regret,
+   pooled-top-one, and per-deck `+0.010` point gates. The C16 Value-mirror
+   cross-reference corroborates joint robust-best sets and material
+   regressions only. Requiring OC1 to minimize regret under its own biased
+   C16 parent critic would be circular and could reject the exact calibration
+   improvement under test. The falsifiable pooled hypothesis above is
+   correspondingly “no worse under the independent Actor reference,” not
+   under both references.
+3. For one label set, top-one expected agreement is exactly
+   `|deployed support intersect label reference_best_set| /
+   |deployed support|`, matching `probe_eval`. The Actor and C16 label best
+   sets remain separate. The jointly robust-best set is used only for the
+   stable-loss and material-regression gates; no implementation may silently
+   substitute simple best-set intersection for the declared entire-support
+   subset rule.
+4. A focused scout/confirmation reference is stable only if both panels have
+   the same exact best set **and**, in each panel, every best-versus-outside
+   paired gap is at least `0.03` with its lower 95% bound above zero.
+   Identical tiny-gap argmax sets are descriptive/inconclusive, not stable.
+5. Material regression is defined for arbitrary complete supports, not just
+   singleton changes. In each common world, average Q uniformly over C16's
+   exact support and separately over OC1's exact support. Reject when the
+   paired C16-support-minus-OC1-support mean is at least `0.03` and its lower
+   95% bound is above zero under both balanced references. The word
+   “singleton” above is removed.
+6. Two C16 panels reduce Monte Carlo error but do not remove
+   continuation-policy bias. Focused C16 labels therefore support only
+   parent-relative regression evidence. Mechanically proved dominance and
+   explicit user-behavior contracts may still be hard gates; no focused C16
+   result will be described as continuation-robust.
+7. The DVR2 “loses no C16 stable-best agreement” clause is vacuous for its
+   four source disagreements and is removed. The runner must perform an
+   ephemeral common-world rescore so arbitrary deployment supports have
+   paired confirmation values. DVR2 rejects if total confirmation regret is
+   worse than C16, or if any root has a paired C16-support-minus-OC1-support
+   mean at least `0.03` with lower 95% bound above zero. The ephemeral matrix
+   is report-only and never becomes training data or a relabeled bundle.
+8. The X=0 gate excludes **every** selected Disintegrate X=0 action, not only
+   the opponent-player target. Because interactive play also exposed
+   Braingeyser for zero, the mechanical-freeze phase adds a typed
+   `control.blue.braingeyser-x0.v1` root with Pass, both X=0 targets, and at
+   least one positive-X action. OC1 must select no Braingeyser X=0 action.
+   Literal Pass is not required when another productive action is selected.
+9. Existing `score_field_regressions_v1` cannot be reused unchanged because
+   its treatment is deliberately PD0-on/PublicStackPassV1. AR1 will use a
+   generic Legacy/PD0-off parent/candidate scorer or the lower-level
+   engine-authoritative seams. The seven combat/Growth choices are explicitly
+   user-authored behavior contracts, separate from reference-based scientific
+   claims. They can reject OC1 but cannot count as evidence of improvement.
+10. Unique Pass in the redundant-counter root is licensed only if the
+    mechanical addendum proves every non-Pass action Pass-dominated. Otherwise
+    the hard gate is narrowed to excluding every proved redundant action plus
+    retaining the complete legal set. The intervening-counter root remains
+    the mandatory anti-overgeneralization control.
+11. AR1 requires a custom, tested evaluator for joint robust sets, entire
+    support values, and paired material regression. Existing
+    `probe_eval` metrics may be reused only where their exact individual-label
+    semantics match item 3.
+12. The DVR2 seam is a strict typed, load-only parser; a boolean envelope
+    verifier or an ad hoc untyped substring extractor is insufficient.
+
+The mechanical-freeze addendum will pin the exact counter and Braingeyser
+fixture fingerprints, candidate descriptors, consequence hashes, corpus tags,
+the literal scout/confirmation seed tags passed to
+`reference_seed_for_probe`, and evaluation thread counts. Until that addendum
+is committed and independently reviewed, the candidate remains unscored and
+seed `202607261929` remains unopened.
+
 #### DVR2 execution attempt 2: own-top eligibility infrastructure void
 
 Executed 2026-07-26 from committed and pushed repair `09bb9a0`, after
