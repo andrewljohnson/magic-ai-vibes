@@ -35,6 +35,21 @@ reconstruct_reduced_information_sets_for_test(
 void validate_reconstruction_bindings_for_test(
     const ScientificEvidence& evidence);
 
+std::pair<DominanceWorldEvidence, DominanceWorldEvidence>
+dominance_hidden_worlds_for_test(
+    const probes::DecisionProbe& probe,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::uint64_t determinization_seed);
+
+void bind_dominance_hidden_witness_for_test(
+    std::string_view root_stable_id,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::size_t root_actor,
+    DominanceWorldEvidence& world,
+    const DominanceWorldEvidence& hidden_world);
+
 bool dominance_pair_passes_for_test(
     GateRole role, std::size_t matching_worlds,
     bool monotonic, bool all_settlements_valid);
@@ -902,6 +917,185 @@ void test_hidden_witness_cannot_be_reused_for_distinct_rep() {
         "for a distinct action/world representative");
 }
 
+void test_dominance_hidden_operator_witness_on_natural_fixtures() {
+    const auto find_probe =
+        [](std::vector<old_school::probes::DecisionProbe>
+               probes,
+           std::string_view stable_id) {
+            const auto found = std::find_if(
+                probes.begin(), probes.end(),
+                [&](const old_school::probes::DecisionProbe&
+                        probe) {
+                    return probe.stable_id == stable_id;
+                });
+            if (found == probes.end()) {
+                throw std::runtime_error(
+                    "natural dominance fixture is missing");
+            }
+            return *found;
+        };
+
+    const old_school::probes::DecisionProbe white =
+        find_probe(
+            old_school::probes::make_probe_dev_v3(),
+            "white.mill-before-draw.v3");
+    auto [white_world, white_hidden] =
+        audit::testing::
+            dominance_hidden_worlds_for_test(
+                white, "mill-opponent-before-draw",
+                "mill-self",
+                0xF00D0000D0110001ULL);
+    const std::string white_full =
+        audit::binding::
+            dominance_comparison_payload_sha256(
+                white.stable_id,
+                "mill-opponent-before-draw",
+                "mill-self", white_world);
+    const std::string white_hidden_full =
+        audit::binding::
+            dominance_comparison_payload_sha256(
+                white.stable_id,
+                "mill-opponent-before-draw",
+                "mill-self", white_hidden);
+    const std::string white_operator =
+        audit::binding::
+            dominance_operator_payload_sha256(
+                white.stable_id,
+                "mill-opponent-before-draw",
+                "mill-self", white.root_player,
+                white_world);
+    const std::string white_hidden_operator =
+        audit::binding::
+            dominance_operator_payload_sha256(
+                white.stable_id,
+                "mill-opponent-before-draw",
+                "mill-self", white.root_player,
+                white_hidden);
+    const auto& white_comparison =
+        white_world.comparison;
+    const auto& hidden_comparison =
+        white_hidden.comparison;
+    auto consequence_normalized = white_comparison;
+    consequence_normalized.first
+        .owner_observable_consequence =
+        hidden_comparison.first
+            .owner_observable_consequence;
+    expect(
+        white_full != white_hidden_full &&
+            white_operator == white_hidden_operator &&
+            white_comparison.first
+                    .owner_observable_consequence !=
+                hidden_comparison.first
+                    .owner_observable_consequence &&
+            white_comparison.second
+                    .owner_observable_consequence ==
+                hidden_comparison.second
+                    .owner_observable_consequence &&
+            consequence_normalized ==
+                hidden_comparison &&
+            white_comparison.root_information_equal &&
+            white_comparison.first_normalized &&
+            white_comparison.second_normalized &&
+            white_comparison.first.valid &&
+            white_comparison.second.valid &&
+            !white_comparison.consequences_equal &&
+            white_world.orientation ==
+                old_school::fq0_dominance::Orientation::
+                    Incomparable &&
+            white_world.hidden_repartition_bit_identical &&
+            white_world.hidden_repartition_witness.domain ==
+                "dominance-hidden" &&
+            white_world.hidden_repartition_witness
+                    .baseline_sha256 ==
+                white_operator &&
+            white_world.hidden_repartition_witness
+                    .comparison_sha256 ==
+                white_hidden_operator,
+        "White Millstone reveal did not isolate raw "
+        "consequence identity from dominance semantics");
+    audit::DominanceWorldEvidence mutated_world =
+        white_world;
+    audit::DominanceWorldEvidence mutated_hidden =
+        white_hidden;
+    ++mutated_hidden.comparison.first
+          .costs[white.root_player]
+          .mana_depleted.generic;
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                bind_dominance_hidden_witness_for_test(
+                    white.stable_id,
+                    "mill-opponent-before-draw",
+                    "mill-self", white.root_player,
+                    mutated_world, mutated_hidden);
+        },
+        "runner accepted a retained hidden dominance "
+        "field mutation");
+
+    const old_school::probes::DecisionProbe green =
+        find_probe(
+            old_school::probes::
+                make_field_regressions_v1(),
+            "field.green.second-main-sick-bear-growth.v1");
+    auto [green_world, green_hidden] =
+        audit::testing::
+            dominance_hidden_worlds_for_test(
+                green,
+                "growth-own-summoning-sick-grizzly-bears",
+                "pass",
+                0xF00D0000D0110002ULL);
+    const std::string green_full =
+        audit::binding::
+            dominance_comparison_payload_sha256(
+                green.stable_id,
+                "growth-own-summoning-sick-grizzly-bears",
+                "pass", green_world);
+    const std::string green_hidden_full =
+        audit::binding::
+            dominance_comparison_payload_sha256(
+                green.stable_id,
+                "growth-own-summoning-sick-grizzly-bears",
+                "pass", green_hidden);
+    const std::string green_operator =
+        audit::binding::
+            dominance_operator_payload_sha256(
+                green.stable_id,
+                "growth-own-summoning-sick-grizzly-bears",
+                "pass", green.root_player,
+                green_world);
+    const std::string green_hidden_operator =
+        audit::binding::
+            dominance_operator_payload_sha256(
+                green.stable_id,
+                "growth-own-summoning-sick-grizzly-bears",
+                "pass", green.root_player,
+                green_hidden);
+    expect(
+        green_world.comparison ==
+                green_hidden.comparison &&
+            green_world.comparison
+                .root_information_equal &&
+            green_world.comparison.first_normalized &&
+            green_world.comparison.second_normalized &&
+            green_world.comparison.first.valid &&
+            green_world.comparison.second.valid &&
+            green_world.comparison.consequences_equal &&
+            green_world.orientation ==
+                old_school::fq0_dominance::Orientation::
+                    SecondDominatesFirst &&
+            green_full == green_hidden_full &&
+            green_operator == green_hidden_operator &&
+            green_world.hidden_repartition_bit_identical &&
+            green_world.hidden_repartition_witness
+                    .baseline_sha256 ==
+                green_operator &&
+            green_world.hidden_repartition_witness
+                    .comparison_sha256 ==
+                green_hidden_operator,
+        "Green non-reveal lost full or operator hidden "
+        "identity");
+}
+
 void test_invalid_gated_dominance_is_scientific_failure() {
     expect(
         !audit::testing::
@@ -940,6 +1134,8 @@ int main() {
              test_comparison_hash_mutation_fails_binding},
             {"hidden representative relabel rejects",
              test_hidden_witness_cannot_be_reused_for_distinct_rep},
+            {"dominance hidden operator natural fixtures",
+             test_dominance_hidden_operator_witness_on_natural_fixtures},
             {"invalid gated dominance rejects",
              test_invalid_gated_dominance_is_scientific_failure},
         };

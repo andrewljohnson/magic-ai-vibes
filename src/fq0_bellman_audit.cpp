@@ -372,6 +372,28 @@ void digest_comparison(
     append_settlement(comparison.second);
 }
 
+void digest_dominance_operator(
+    DigestWriter& output,
+    const fq0_dominance::Comparison& comparison) {
+    output.integer(
+        static_cast<std::uint64_t>(
+            comparison.orientation));
+    output.boolean(comparison.root_information_equal);
+    output.boolean(comparison.first_normalized);
+    output.boolean(comparison.second_normalized);
+    output.boolean(comparison.consequences_equal);
+    const auto append_settlement =
+        [&](const fq0_dominance::CanonicalSettlement&
+                settlement) {
+            output.boolean(settlement.valid);
+            for (const auto& cost : settlement.costs) {
+                digest_canonical_cost(output, cost);
+            }
+        };
+    append_settlement(comparison.first);
+    append_settlement(comparison.second);
+}
+
 void append_row(
     std::string& output,
     std::initializer_list<std::string> fields) {
@@ -907,6 +929,29 @@ std::string dominance_payload_sha256_impl(
     output.integer(world.determinization_seed);
     output.text(world.common_world_key);
     digest_comparison(output, world.comparison);
+    output.integer(
+        static_cast<std::uint64_t>(world.orientation));
+    return output.sha256();
+}
+
+std::string dominance_operator_payload_sha256_impl(
+    std::string_view root_stable_id,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::size_t actor,
+    const DominanceWorldEvidence& world) {
+    DigestWriter output;
+    output.text(
+        "old-school-fq0-dominance-operator-payload-v2");
+    output.text(root_stable_id);
+    output.text(first_descriptor);
+    output.text(second_descriptor);
+    output.integer(actor);
+    output.integer(world.world_index);
+    output.integer(world.determinization_seed);
+    output.text(world.common_world_key);
+    digest_dominance_operator(
+        output, world.comparison);
     output.integer(
         static_cast<std::uint64_t>(world.orientation));
     return output.sha256();
@@ -3329,10 +3374,11 @@ void validate_report(const RunReport& report) {
             validate_bound_witness(
                 world.hidden_repartition_witness,
                 "dominance-hidden", world_coordinate,
-                dominance_payload_sha256_impl(
+                dominance_operator_payload_sha256_impl(
                     pair.stable_id,
                     pair.first_descriptor,
-                    pair.second_descriptor, world));
+                    pair.second_descriptor,
+                    dominance_root.root_player, world));
         }
 
         const bool first_is_pass =
@@ -5188,6 +5234,17 @@ std::string dominance_comparison_payload_sha256(
     return dominance_payload_sha256_impl(
         root_stable_id, first_descriptor,
         second_descriptor, world);
+}
+
+std::string dominance_operator_payload_sha256(
+    std::string_view root_stable_id,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::size_t actor,
+    const DominanceWorldEvidence& world) {
+    return dominance_operator_payload_sha256_impl(
+        root_stable_id, first_descriptor,
+        second_descriptor, actor, world);
 }
 
 std::string scientific_core_payload_sha256(

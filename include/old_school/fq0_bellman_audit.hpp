@@ -525,6 +525,16 @@ std::string dominance_comparison_payload_sha256(
     std::string_view first_descriptor,
     std::string_view second_descriptor,
     const DominanceWorldEvidence& world);
+// Hidden-repartition witness digest over exactly the fields consumed or
+// produced by the dominance operator. Unlike the full v1 comparison payload,
+// this omits only the two absolute owner-observable consequence byte strings;
+// their equality relation remains bound.
+std::string dominance_operator_payload_sha256(
+    std::string_view root_stable_id,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::size_t actor,
+    const DominanceWorldEvidence& world);
 std::string scientific_core_payload_sha256(
     const ScientificEvidence& scientific);
 std::array<std::string, 2> critic_stream_payload_sha256(

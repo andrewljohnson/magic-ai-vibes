@@ -12529,6 +12529,44 @@ commit receives a fresh post-commit review. `git diff --check` is clean, the
 frozen C16 SHA remains `53aeb904...f944ca`, and the evidence target and
 temporary remain absent.
 
+##### FQ0-T0 mechanical retry attempt 2: dominance infrastructure void
+
+Run 2026-07-27 09:53-10:06 PDT from pushed commit `93e51e1`, after three
+independent post-commit GO reviews and after rereading `REVIEW.md` through its
+10:01 PDT cycle.
+
+Exact command:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
+
+The process verified immutable C16/manifest state, constructed the K64/K8
+Bellman core, completed every successor-information-set reconstruction, and
+entered exhaustive cached next-boundary dominance. It then exited `2` with:
+
+```text
+FQ0-T0 infrastructure failure:
+white.mill-before-draw.v3/mill-opponent-before-draw/mill-self/0:
+dominance comparison changed under hidden repartition
+```
+
+The registered evidence destination and temporary remained absent. Therefore
+this is another infrastructure void, not a completed scientific result: it
+does not accept or reject FQ0, license FQ1, retire C16, or alter any scientific
+gate. The same registered seed bases remain eligible only for a mechanical
+retry after this dominance-invariance defect is reproduced on quarantined
+nonregistered coordinates, prospectively repaired without changing any
+scientific statistic, tested, committed, and independently reviewed.
+
+Next action: decompose the named comparison into its exact public-object
+identity, native dominance relation, next-boundary settlement,
+owner-observable consequence, terminal/eligibility/change flags, and redacted
+result hash under the canonical and hidden-repartition states. Determine
+whether the invariant is incorrectly requiring a physical hidden outcome to
+match, or whether the dominance operator itself consumes hidden information.
+Do not change or rerun registered coordinates while diagnosing.
+
 Exit `0` means complete evidence and every scientific/structural gate passes.
 It licenses only a separately preregistered FQ1: one fitted scalar
 Priority-Q generation with a frozen parent/target, all-action labels,
@@ -12540,6 +12578,238 @@ representation failure redirects to a neutral public-stack/action encoding
 repair. Exit `2` means infrastructure or incomplete evidence and has no
 scientific interpretation. Any completed result retires all three diagnostic
 seed bases. C16 remains champion in every case.
+
+##### FQ0-T0 dominance hidden-witness repair declaration
+
+Preregistered 2026-07-27 10:14 PDT after rereading `REVIEW.md` through its
+10:11 PDT cycle and before changing production or test code. Registered retry
+attempt 2 remains an infrastructure void. The evidence destination and
+temporary are absent, no scientific statistic was emitted, and C16 remains
+champion.
+
+The exact named failure was reproduced without opening another registered
+coordinate. A direct White fixture diagnostic:
+
+```sh
+/tmp/fq0_mill_dominance_diag
+```
+
+used source SHA-256
+`bc57b7736c01e04dc9756db29c2029ea92094dc060cbaabf451de09a7210115a`
+and binary SHA-256
+`1e3311a3689843d494d121f30c62ac99943e2226d8dfb957e14a37351073e4d6`.
+It reproduced the canonical and hidden-repartition worlds with identical
+observer information, comparison orientation `Incomparable`,
+`root_information_equal=true`, both normalized/valid flags true,
+`consequences_equal=false`, both exact cost arrays equal, and the `mill-self`
+consequence equal. Only the `mill-opponent-before-draw` raw
+`owner_observable_consequence` changed. Two independent quarantined
+nonregistered science coordinates, root seeds
+`0xF00D0000D0110001` and `0xF00D0000D0110002`, localized the same single-field
+change.
+
+Mechanism: the hidden clone swaps one opponent hand identity with
+`library[0]`. Millstone then moves both library cards into the public
+graveyard. A different owner-observable consequence is therefore the correct
+physical result, not hidden-information leakage. The native dominance
+operator consumes only whether the two consequences are equal, plus the
+normalization/validity flags, exact resource costs, and orientations. Its
+decision was invariant.
+
+Falsifiable hypothesis: a separately domain-separated hidden-semantic digest
+that omits only the two absolute consequence byte strings, while retaining
+their `consequences_equal` relation and every other comparison input and
+result, will be identical for the natural White Millstone hidden clone and
+will remain sensitive to every field that can alter the dominance decision.
+A non-revealing Green control must remain identical under both the existing
+full digest and the new hidden-semantic digest.
+
+The repair is mechanically frozen to this scope:
+
+1. Preserve `dominance_comparison_payload_sha256`, its
+   `fq0-dominance-comparison-payload-v1` domain, the full raw consequence
+   evidence, existing serialization, and all semantic validation unchanged.
+2. Add a separate digest with exact domain
+   `old-school-fq0-dominance-operator-payload-v2`. It binds the root/action
+   descriptors, root actor, world index, determinization seed,
+   common-world key, comparison orientation, root-information flag, both
+   normalized and valid flags, `consequences_equal`, every exact
+   resource-cost field, and world orientation. It omits only each branch's
+   absolute
+   `owner_observable_consequence` byte string.
+3. Use v2 only for the runner's canonical-versus-hidden dominance witness and
+   the artifact validator's independent rederivation of its canonical binding.
+   Do not alter transitions, comparison logic, evidence rows, scientific
+   statistics, gates, roles, seeds, model, or output paths.
+4. Add deterministic regressions using natural production fixture factories:
+   White Millstone must have different full v1 digests but equal v2 digests;
+   Green non-reveal must have both digests equal. The White test must also
+   prove exactly which raw branch changed and that costs, flags, equality
+   relation, and orientations did not.
+5. Add a mutation boundary: changing only an absolute consequence changes v1
+   but not v2; changing any cost, validity/normalization/root-information
+   flag, `consequences_equal`, comparison orientation, world orientation,
+   descriptor, root actor, world index, seed, or common-world key changes
+   v2. An
+   unequal-to-equal consequence relation must flip `consequences_equal` and
+   change v2. A stale or wrong-domain witness must reject.
+6. Preserve the existing tests that reject raw consequence mutation and
+   rederive `consequences_equal` and comparison orientation from the full raw
+   evidence.
+
+Prospective amendment 2026-07-27 10:19 PDT, before a complete implementation
+or any test run: independent adversarial review traced `compare()` and noted
+that the root actor is a direct operator input because it selects observer
+projection and cost-direction seats. Root/manifest validation binds the
+canonical actor but cannot by itself prove that canonical and hidden calls
+used the same actor when their outputs happen to coincide. Therefore actor is
+explicitly added to the v2 preimage and mutation boundary above. This
+strengthens the declared invariant without changing its omission, domain,
+scientific scope, or retry eligibility.
+
+Prospective clarification 2026-07-27 10:23 PDT after the focused tests but
+before any commit or registered retry: the retained witness carries the
+runner-computed canonical and hidden v2 hashes, while the artifact contains
+only the canonical comparison object. Consequently the artifact validator
+can independently rederive the canonical v2 binding and require the carried
+hidden hash to equal it, but cannot reconstruct the hidden transition from
+the artifact alone. This is the pre-existing witness schema, not a new claim
+of artifact-only hidden execution proof. The runner must therefore retain
+the actual hidden digest (never synthesize a self-equality), and a negative
+test must prove that changing a retained hidden operator field makes its
+binder reject. Retaining an entire second hidden comparison or reconstructing
+all hidden worlds would expand the evidence schema and remains outside this
+mechanical repair.
+
+Acceptance for this mechanical repair requires the focused fixture and
+mutation tests, all FQ0 suites, full `make -j4 test`, fresh artifact and runner
+ASan/UBSan passes, immutable C16 SHA
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+absent registered outputs, a pushed commit, and fresh independent
+post-commit review. Until all conditions pass, the no-argument registered
+audit is forbidden. If they pass, exactly one unchanged mechanical retry with
+the already registered seeds is allowed:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
+
+##### FQ0-T0 dominance hidden-witness repair result: precommit GO
+
+Recorded 2026-07-27 10:34 PDT after rereading `REVIEW.md` through its
+10:31 PDT cycle. Accept the prospectively declared mechanical repair for a
+commit-and-review freeze. This is not an FQ0 scientific verdict and does not
+license FQ1, replace C16, retire any registered seed, or permit a registered
+retry before the pushed commit receives fresh post-commit review.
+
+Implementation:
+
+- the existing full `fq0-dominance-comparison-payload-v1` digest and raw
+  comparison evidence are unchanged;
+- the new actor-bound
+  `old-school-fq0-dominance-operator-payload-v2` digest omits only the two
+  absolute owner-observable consequence strings and retains both orientations,
+  every comparison flag, both branches' two-player exact cost ledgers, root
+  actor, descriptors, world/seed, and common-world key;
+- only the canonical-versus-hidden runner witness and its artifact-side
+  canonical binding use v2;
+- the runner computes and carries the actual hidden digest. Artifact-only
+  validation cannot reconstruct the unretained hidden transition, as
+  prospectively clarified; a negative shared-binder regression proves a
+  retained hidden cost mutation rejects rather than becoming a synthesized
+  self-equality.
+
+The natural quarantined fixtures use root determinization before hidden
+repartition. White `white.mill-before-draw.v3` at
+`0xF00D0000D0110001` proves the full v1 digest changes, v2 remains equal, only
+the opponent-mill consequence changes, and all decision fields remain
+`Incomparable`/valid/normalized/cost-identical/consequence-unequal. Green
+`field.green.second-main-sick-bear-growth.v1` at
+`0xF00D0000D0110002` is nonvacuous: full v1 and v2 both remain equal,
+consequences are equal, both settlements are valid/normalized, and Pass
+strictly dominates sick-Bear Growth as `SecondDominatesFirst`.
+
+Mutation coverage changes every card-indexed hand, newly tapped land, and
+newly tapped artifact cost slot across both branches and players; all five
+mana fields and land entitlement; every comparison flag and orientation;
+world orientation; root actor; descriptors; world index/seed/key. Every such
+change alters v2. Either absolute consequence alone alters v1 but not v2;
+changing unequal consequences to equal and flipping `consequences_equal`
+alters v2. Rebound stale equality, stale v1 witnesses, and wrong
+domain/coordinate witnesses reject.
+
+Exact strict commands and results:
+
+```sh
+make -j4 test-fq0-bellman-audit test-fq0-bellman-run
+# artifact 15/15; runner 9/9
+
+make -j4 test-fq0
+# information-set 13/13; Bellman 8/8; dominance 10/10;
+# dominance-transition 4/4; science 10/10; artifact 15/15;
+# runner 9/9: 69/69 total
+
+make -j4 test
+# engine 168/168; learned iteration 27/27; probes 57/57;
+# probe metrics 11/11; probe runner 33/33; all audit and
+# orchestration suites; FQ0 69/69; web bridge 18/18;
+# web 106/106; certification 48/48; CLI/capture/clean/smoke green
+```
+
+Fresh artifact ASan/UBSan:
+
+```sh
+c++ -Iinclude -std=c++20 -O1 -g \
+  -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/probe_eval.cpp src/probe_runner.cpp \
+  src/audit_common.cpp src/artifact_integrity.cpp \
+  src/output_calibration.cpp src/output_calibration_artifact.cpp \
+  src/oc1_action_scoring.cpp src/ac1_teacher_audit.cpp \
+  src/fq0_information_set.cpp src/fq0_bellman.cpp \
+  src/fq0_dominance.cpp src/fq0_bellman_audit.cpp \
+  tests/test_fq0_bellman_audit.cpp \
+  -o /tmp/old-school-fq0-bellman-audit-tests-dominance-v2-sanitized
+
+ASAN_OPTIONS=detect_leaks=0 \
+  /tmp/old-school-fq0-bellman-audit-tests-dominance-v2-sanitized
+# 15/15
+```
+
+Fresh runner ASan/UBSan:
+
+```sh
+c++ -Iinclude -std=c++20 -O1 -g \
+  -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/probe_eval.cpp src/probe_runner.cpp \
+  src/audit_common.cpp src/artifact_integrity.cpp \
+  src/output_calibration.cpp src/output_calibration_artifact.cpp \
+  src/oc1_action_scoring.cpp src/ac1_teacher_audit.cpp \
+  src/fq0_information_set.cpp src/fq0_bellman.cpp \
+  src/fq0_dominance.cpp src/fq0_dominance_transition.cpp \
+  src/fq0_bellman_science.cpp src/fq0_bellman_audit.cpp \
+  src/fq0_bellman_run.cpp tests/test_fq0_bellman_run.cpp \
+  -o /tmp/old-school-fq0-bellman-run-tests-dominance-v2-sanitized
+
+ASAN_OPTIONS=detect_leaks=0 \
+  /tmp/old-school-fq0-bellman-run-tests-dominance-v2-sanitized
+# 9/9
+```
+
+Three disjoint reviews agree on the mechanism and final scope; one independent
+adversarial pass enumerated every v2 preimage field and found no remaining
+blocking gap after the actor, real-determinization, strict Green, exhaustive
+mutation, negative-binder, and artifact-only limitation fixes. `git diff
+--check` is clean. Frozen C16 remains exactly
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`;
+the registered evidence destination and temporary remain absent.
+
+Next action: commit and push exactly this mechanical repair and notebook,
+excluding `REVIEW.md`; obtain fresh post-commit source/test GO. Only then may
+the unchanged no-argument registered audit be retried once.
 
 #### FQ0-T0 implementation-freeze addendum
 

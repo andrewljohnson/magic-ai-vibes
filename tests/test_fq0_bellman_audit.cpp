@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1279,6 +1280,17 @@ void rebind_report_witnesses(
     }
     for (audit::DominancePairEvidence& pair :
          report.scientific.dominance_pairs) {
+        const auto root = std::find_if(
+            report.scientific.roots.begin(),
+            report.scientific.roots.end(),
+            [&](const audit::RootEvidence& candidate) {
+                return candidate.stable_id ==
+                       pair.stable_id;
+            });
+        if (root == report.scientific.roots.end()) {
+            throw std::runtime_error(
+                "dominance witness root is missing");
+        }
         for (audit::DominanceWorldEvidence& world :
              pair.worlds) {
             const std::string coordinate =
@@ -1288,10 +1300,11 @@ void rebind_report_witnesses(
                 std::to_string(world.world_index);
             const std::string digest =
                 audit::binding::
-                    dominance_comparison_payload_sha256(
+                    dominance_operator_payload_sha256(
                         pair.stable_id,
                         pair.first_descriptor,
-                        pair.second_descriptor, world);
+                        pair.second_descriptor,
+                        root->root_player, world);
             world.hidden_repartition_witness =
                 bound_identity(
                     "dominance-hidden", coordinate,
@@ -2133,6 +2146,503 @@ void test_successor_operator_v2_omits_only_consequence() {
         std::move(terminal_identity),
         "full artifact accepted a true terminal "
         "contextual/legacy critic identity");
+}
+
+void test_dominance_operator_v2_omits_only_absolute_consequences() {
+    const audit::RunReport report = complete_report();
+    const auto actor_for =
+        [&](std::string_view stable_id) {
+            const auto root = std::find_if(
+                report.scientific.roots.begin(),
+                report.scientific.roots.end(),
+                [&](const audit::RootEvidence& candidate) {
+                    return candidate.stable_id ==
+                           stable_id;
+                });
+            if (root == report.scientific.roots.end()) {
+                throw std::runtime_error(
+                    "natural dominance actor fixture is "
+                    "missing");
+            }
+            return root->root_player;
+        };
+    const auto find_pair =
+        [&](std::string_view stable_id,
+            std::string_view first_descriptor,
+            std::string_view second_descriptor)
+        -> const audit::DominancePairEvidence& {
+            const auto pair = std::find_if(
+                report.scientific.dominance_pairs.begin(),
+                report.scientific.dominance_pairs.end(),
+                [&](const audit::DominancePairEvidence&
+                        candidate) {
+                    return candidate.stable_id == stable_id &&
+                           candidate.first_descriptor ==
+                               first_descriptor &&
+                           candidate.second_descriptor ==
+                               second_descriptor;
+                });
+            if (pair ==
+                report.scientific.dominance_pairs.end()) {
+                throw std::runtime_error(
+                    "natural dominance digest fixture is "
+                    "missing");
+            }
+            return *pair;
+        };
+    const audit::DominancePairEvidence& white =
+        find_pair(
+            "white.mill-before-draw.v3",
+            "mill-opponent-before-draw", "mill-self");
+    expect(
+        !white.worlds.empty(),
+        "White Millstone dominance fixture has no worlds");
+    const audit::DominanceWorldEvidence& canonical =
+        white.worlds.front();
+    const std::size_t white_actor =
+        actor_for(white.stable_id);
+    const auto full_digest =
+        [&](const audit::DominanceWorldEvidence& world) {
+            return audit::binding::
+                dominance_comparison_payload_sha256(
+                    white.stable_id,
+                    white.first_descriptor,
+                    white.second_descriptor, world);
+        };
+    const auto operator_digest =
+        [&](const audit::DominanceWorldEvidence& world) {
+            return audit::binding::
+                dominance_operator_payload_sha256(
+                    white.stable_id,
+                    white.first_descriptor,
+                    white.second_descriptor,
+                    white_actor, world);
+        };
+    const std::string canonical_v1 =
+        full_digest(canonical);
+    const std::string canonical_v2 =
+        operator_digest(canonical);
+    expect(
+        canonical_v1 != canonical_v2,
+        "dominance operator v2 is not domain-separated "
+        "from full v1");
+
+    audit::DominanceWorldEvidence hidden = canonical;
+    hidden.comparison.first
+        .owner_observable_consequence +=
+        "-public-milled-card-changed";
+    expect(
+        hidden.comparison.first
+                    .owner_observable_consequence !=
+                canonical.comparison.first
+                    .owner_observable_consequence &&
+            hidden.comparison.second
+                    .owner_observable_consequence ==
+                canonical.comparison.second
+                    .owner_observable_consequence &&
+            hidden.comparison.orientation ==
+                canonical.comparison.orientation &&
+            hidden.comparison.root_information_equal ==
+                canonical.comparison
+                    .root_information_equal &&
+            hidden.comparison.first_normalized ==
+                canonical.comparison.first_normalized &&
+            hidden.comparison.second_normalized ==
+                canonical.comparison.second_normalized &&
+            hidden.comparison.consequences_equal ==
+                canonical.comparison.consequences_equal &&
+            hidden.comparison.first.valid ==
+                canonical.comparison.first.valid &&
+            hidden.comparison.second.valid ==
+                canonical.comparison.second.valid &&
+            hidden.comparison.first.costs ==
+                canonical.comparison.first.costs &&
+            hidden.comparison.second.costs ==
+                canonical.comparison.second.costs &&
+            hidden.orientation == canonical.orientation,
+        "White hidden fixture changed more than the "
+        "mill-opponent absolute consequence");
+    expect(
+        full_digest(hidden) != canonical_v1 &&
+            operator_digest(hidden) == canonical_v2,
+        "dominance operator v2 did not omit exactly the "
+        "White revealed consequence bytes");
+
+    audit::DominanceWorldEvidence second_consequence =
+        canonical;
+    second_consequence.comparison.second
+        .owner_observable_consequence +=
+        "-absolute-only";
+    expect(
+        full_digest(second_consequence) != canonical_v1 &&
+            operator_digest(second_consequence) ==
+                canonical_v2,
+        "dominance operator v2 retained a branch's "
+        "absolute consequence");
+
+    const audit::DominancePairEvidence& green =
+        find_pair(
+            "field.green.second-main-sick-bear-growth.v1",
+            "growth-own-summoning-sick-grizzly-bears",
+            "pass");
+    expect(
+        !green.worlds.empty(),
+        "Green non-reveal dominance fixture has no worlds");
+    const audit::DominanceWorldEvidence green_hidden =
+        green.worlds.front();
+    const std::size_t green_actor =
+        actor_for(green.stable_id);
+    expect(
+        audit::binding::
+                dominance_comparison_payload_sha256(
+                    green.stable_id,
+                    green.first_descriptor,
+                    green.second_descriptor,
+                    green.worlds.front()) ==
+            audit::binding::
+                dominance_comparison_payload_sha256(
+                    green.stable_id,
+                    green.first_descriptor,
+                    green.second_descriptor,
+                    green_hidden) &&
+            audit::binding::
+                dominance_operator_payload_sha256(
+                    green.stable_id,
+                    green.first_descriptor,
+                    green.second_descriptor,
+                    green_actor,
+                    green.worlds.front()) ==
+            audit::binding::
+                dominance_operator_payload_sha256(
+                    green.stable_id,
+                    green.first_descriptor,
+                    green.second_descriptor,
+                    green_actor,
+                    green_hidden),
+        "non-revealing Green control was not identical "
+        "under both dominance digest domains");
+
+    const auto expect_world_change =
+        [&](std::string_view field,
+            const std::function<void(
+                audit::DominanceWorldEvidence&)>& mutate) {
+            audit::DominanceWorldEvidence changed =
+                canonical;
+            mutate(changed);
+            expect(
+                operator_digest(changed) != canonical_v2,
+                std::string(
+                    "dominance operator v2 omitted ") +
+                    std::string(field));
+        };
+    expect_world_change(
+        "comparison orientation",
+        [](auto& world) {
+            world.comparison.orientation =
+                old_school::fq0_dominance::Orientation::
+                    FirstDominatesSecond;
+        });
+    expect_world_change(
+        "root-information flag",
+        [](auto& world) {
+            world.comparison.root_information_equal =
+                false;
+        });
+    expect_world_change(
+        "first-normalized flag",
+        [](auto& world) {
+            world.comparison.first_normalized = false;
+        });
+    expect_world_change(
+        "second-normalized flag",
+        [](auto& world) {
+            world.comparison.second_normalized = false;
+        });
+    expect_world_change(
+        "consequences-equal relation",
+        [](auto& world) {
+            world.comparison.consequences_equal = true;
+        });
+    expect_world_change(
+        "first-valid flag",
+        [](auto& world) {
+            world.comparison.first.valid = false;
+        });
+    expect_world_change(
+        "second-valid flag",
+        [](auto& world) {
+            world.comparison.second.valid = false;
+        });
+    expect_world_change(
+        "world orientation",
+        [](auto& world) {
+            world.orientation =
+                old_school::fq0_dominance::Orientation::
+                    FirstDominatesSecond;
+        });
+    expect_world_change(
+        "world index",
+        [](auto& world) { ++world.world_index; });
+    expect_world_change(
+        "determinization seed",
+        [](auto& world) {
+            ++world.determinization_seed;
+        });
+    expect_world_change(
+        "common-world key",
+        [](auto& world) {
+            world.common_world_key += "-changed";
+        });
+    expect(
+        audit::binding::
+                dominance_operator_payload_sha256(
+                    "changed-root", white.first_descriptor,
+                    white.second_descriptor, white_actor,
+                    canonical) !=
+            canonical_v2 &&
+            audit::binding::
+                dominance_operator_payload_sha256(
+                    white.stable_id, "changed-first",
+                    white.second_descriptor, white_actor,
+                    canonical) !=
+            canonical_v2 &&
+            audit::binding::
+                dominance_operator_payload_sha256(
+                    white.stable_id,
+                    white.first_descriptor,
+                    "changed-second", white_actor,
+                    canonical) !=
+            canonical_v2,
+        "dominance operator v2 omitted a root/action "
+        "descriptor");
+    expect(
+        audit::binding::
+                dominance_operator_payload_sha256(
+                    white.stable_id,
+                    white.first_descriptor,
+                    white.second_descriptor,
+                    1 - white_actor, canonical) !=
+            canonical_v2,
+        "dominance operator v2 omitted the root actor");
+
+    const auto expect_cost_change =
+        [&](std::string_view field, std::size_t branch,
+            std::size_t player,
+            const std::function<void(
+                old_school::fq0_dominance::
+                    CanonicalPlayerResourceCost&)>&
+                mutate) {
+            expect_world_change(
+                std::string(field) + " branch " +
+                    std::to_string(branch) + " player " +
+                    std::to_string(player),
+                [&](auto& world) {
+                    auto& settlement =
+                        branch == 0
+                            ? world.comparison.first
+                            : world.comparison.second;
+                    mutate(settlement.costs[player]);
+                });
+        };
+    for (std::size_t branch = 0; branch < 2;
+         ++branch) {
+        for (std::size_t player = 0; player < 2;
+             ++player) {
+            for (std::size_t card = 0;
+                 card < old_school::kCardCount; ++card) {
+                expect_cost_change(
+                    "hand-card cost " +
+                        std::to_string(card),
+                    branch, player,
+                    [card](auto& cost) {
+                        ++cost.hand_cards_consumed[card];
+                    });
+                expect_cost_change(
+                    "land-source cost " +
+                        std::to_string(card),
+                    branch, player,
+                    [card](auto& cost) {
+                        ++cost.lands_newly_tapped[card];
+                    });
+                expect_cost_change(
+                    "artifact-source cost " +
+                        std::to_string(card),
+                    branch, player,
+                    [card](auto& cost) {
+                        ++cost
+                              .artifacts_newly_tapped[card];
+                    });
+            }
+            expect_cost_change(
+                "generic mana cost", branch, player,
+                [](auto& cost) {
+                    ++cost.mana_depleted.generic;
+                });
+            expect_cost_change(
+                "green mana cost", branch, player,
+                [](auto& cost) {
+                    ++cost.mana_depleted.green;
+                });
+            expect_cost_change(
+                "red mana cost", branch, player,
+                [](auto& cost) {
+                    ++cost.mana_depleted.red;
+                });
+            expect_cost_change(
+                "blue mana cost", branch, player,
+                [](auto& cost) {
+                    ++cost.mana_depleted.blue;
+                });
+            expect_cost_change(
+                "white mana cost", branch, player,
+                [](auto& cost) {
+                    ++cost.mana_depleted.white;
+                });
+            expect_cost_change(
+                "land-play entitlement", branch, player,
+                [](auto& cost) {
+                    cost.land_play_entitlement_consumed =
+                        !cost
+                             .land_play_entitlement_consumed;
+                });
+        }
+    }
+
+    audit::DominanceWorldEvidence equal_relation =
+        canonical;
+    equal_relation.comparison.second
+        .owner_observable_consequence =
+        equal_relation.comparison.first
+            .owner_observable_consequence;
+    equal_relation.comparison.consequences_equal = true;
+    expect(
+        equal_relation.comparison.first
+                    .owner_observable_consequence ==
+                equal_relation.comparison.second
+                    .owner_observable_consequence &&
+            operator_digest(equal_relation) != canonical_v2,
+        "unequal-to-equal consequence relation did not "
+        "change dominance operator v2");
+}
+
+void test_dominance_operator_v2_witness_domain_is_enforced() {
+    const auto actor_for =
+        [](const audit::RunReport& report,
+           const audit::DominancePairEvidence& pair) {
+            const auto root = std::find_if(
+                report.scientific.roots.begin(),
+                report.scientific.roots.end(),
+                [&](const audit::RootEvidence& candidate) {
+                    return candidate.stable_id ==
+                           pair.stable_id;
+                });
+            if (root == report.scientific.roots.end()) {
+                throw std::runtime_error(
+                    "dominance witness actor is missing");
+            }
+            return root->root_player;
+        };
+    const auto first_dominance_world =
+        [](audit::RunReport& report)
+        -> std::tuple<
+            audit::DominancePairEvidence&,
+            audit::DominanceWorldEvidence&> {
+            if (report.scientific.dominance_pairs.empty() ||
+                report.scientific.dominance_pairs.front()
+                    .worlds.empty()) {
+                throw std::runtime_error(
+                    "dominance witness fixture is missing");
+            }
+            auto& pair =
+                report.scientific.dominance_pairs.front();
+            return {pair, pair.worlds.front()};
+        };
+
+    audit::RunReport stale_v1 = complete_report();
+    auto [stale_pair, stale_world] =
+        first_dominance_world(stale_v1);
+    const std::string stale_digest =
+        audit::binding::
+            dominance_comparison_payload_sha256(
+                stale_pair.stable_id,
+                stale_pair.first_descriptor,
+                stale_pair.second_descriptor, stale_world);
+    const std::string expected_v2 =
+        audit::binding::
+            dominance_operator_payload_sha256(
+                stale_pair.stable_id,
+                stale_pair.first_descriptor,
+                stale_pair.second_descriptor,
+                actor_for(stale_v1, stale_pair),
+                stale_world);
+    expect(
+        stale_digest != expected_v2,
+        "stale full-v1 dominance witness was not "
+        "domain-separated");
+    stale_world.hidden_repartition_witness =
+        audit::binding::make_witness(
+            "dominance-hidden",
+            stale_world.hidden_repartition_witness.coordinate,
+            stale_digest, stale_digest);
+    expect_report_rejected(
+        std::move(stale_v1),
+        "stale full-v1 dominance hidden witness was "
+        "accepted as operator v2");
+
+    audit::RunReport wrong_domain = complete_report();
+    auto [wrong_pair, wrong_world] =
+        first_dominance_world(wrong_domain);
+    static_cast<void>(wrong_pair);
+    wrong_world.hidden_repartition_witness.domain =
+        "old-school-fq0-dominance-operator-payload-v2";
+    expect_report_rejected(
+        std::move(wrong_domain),
+        "wrong-domain dominance hidden witness was "
+        "accepted");
+
+    audit::RunReport wrong_coordinate =
+        complete_report();
+    auto [coordinate_pair, coordinate_world] =
+        first_dominance_world(wrong_coordinate);
+    static_cast<void>(coordinate_pair);
+    coordinate_world.hidden_repartition_witness.coordinate =
+        "wrong-root/wrong-first/wrong-second/999";
+    expect_report_rejected(
+        std::move(wrong_coordinate),
+        "wrong-coordinate dominance hidden witness was "
+        "accepted");
+
+    audit::RunReport stale_equality = complete_report();
+    const auto white_pair = std::find_if(
+        stale_equality.scientific.dominance_pairs.begin(),
+        stale_equality.scientific.dominance_pairs.end(),
+        [](const audit::DominancePairEvidence& pair) {
+            return pair.stable_id ==
+                       "white.mill-before-draw.v3" &&
+                   pair.first_descriptor ==
+                       "mill-opponent-before-draw" &&
+                   pair.second_descriptor == "mill-self";
+        });
+    expect(
+        white_pair !=
+                stale_equality.scientific
+                    .dominance_pairs.end() &&
+            !white_pair->worlds.empty(),
+        "stale consequence-equality fixture is missing");
+    auto& stale_comparison =
+        white_pair->worlds.front().comparison;
+    expect(
+        !stale_comparison.consequences_equal,
+        "stale consequence-equality fixture starts equal");
+    stale_comparison.second
+        .owner_observable_consequence =
+        stale_comparison.first
+            .owner_observable_consequence;
+    rebind_report_witnesses(stale_equality);
+    expect_report_rejected(
+        std::move(stale_equality),
+        "stale consequences-equal flag was accepted after "
+        "raw consequences became equal");
 }
 
 void test_gate_exit_codes_and_internal_consistency() {
@@ -3322,6 +3832,10 @@ int main() {
         tests = {
             {"successor operator v2 field boundary",
              test_successor_operator_v2_omits_only_consequence},
+            {"dominance operator v2 field boundary",
+             test_dominance_operator_v2_omits_only_absolute_consequences},
+            {"dominance operator v2 witness domain",
+             test_dominance_operator_v2_witness_domain_is_enforced},
             {"gate and exit codes",
              test_gate_exit_codes_and_internal_consistency},
             {"canonical exact bundle",

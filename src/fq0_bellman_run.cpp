@@ -989,6 +989,39 @@ bool dominance_pair_passed(
             all_settlements_valid);
 }
 
+void bind_dominance_hidden_witness(
+    std::string_view root_stable_id,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::size_t root_actor,
+    DominanceWorldEvidence& world,
+    const DominanceWorldEvidence& hidden_world) {
+    const std::string baseline =
+        binding::dominance_operator_payload_sha256(
+            root_stable_id, first_descriptor,
+            second_descriptor, root_actor, world);
+    const std::string comparison =
+        binding::dominance_operator_payload_sha256(
+            root_stable_id, first_descriptor,
+            second_descriptor, root_actor, hidden_world);
+    const std::string coordinate =
+        std::string(root_stable_id) + "/" +
+        std::string(first_descriptor) + "/" +
+        std::string(second_descriptor) + "/" +
+        std::to_string(world.world_index);
+    world.hidden_repartition_witness =
+        binding::make_witness(
+            "dominance-hidden", coordinate,
+            baseline, comparison);
+    world.hidden_repartition_bit_identical =
+        baseline == comparison;
+    require(
+        world.hidden_repartition_bit_identical,
+        coordinate +
+            ": dominance operator changed under hidden "
+            "repartition");
+}
+
 std::vector<DominancePairEvidence>
 build_exhaustive_dominance(
     const science::Construction& construction,
@@ -1117,35 +1150,11 @@ build_exhaustive_dominance(
                         root.root_player);
                 hidden_world.orientation =
                     hidden_world.comparison.orientation;
-                const std::string baseline =
-                    binding::
-                        dominance_comparison_payload_sha256(
-                            root.stable_id,
-                            first.descriptor,
-                            second.descriptor, world);
-                const std::string comparison =
-                    binding::
-                        dominance_comparison_payload_sha256(
-                            root.stable_id,
-                            first.descriptor,
-                            second.descriptor,
-                            hidden_world);
-                const std::string coordinate =
-                    root.stable_id + "/" +
-                    first.descriptor + "/" +
-                    second.descriptor + "/" +
-                    std::to_string(world_index);
-                world.hidden_repartition_witness =
-                    binding::make_witness(
-                        "dominance-hidden", coordinate,
-                        baseline, comparison);
-                world.hidden_repartition_bit_identical =
-                    baseline == comparison;
-                require(
-                    world.hidden_repartition_bit_identical,
-                    coordinate +
-                        ": dominance comparison changed "
-                        "under hidden repartition");
+                bind_dominance_hidden_witness(
+                    root.stable_id, first.descriptor,
+                    second.descriptor, root.root_player,
+                    world,
+                    hidden_world);
                 pair.evidence.worlds.push_back(
                     std::move(world));
             }
@@ -2761,6 +2770,115 @@ reconstruct_reduced_information_sets_for_test(
 void validate_reconstruction_bindings_for_test(
     const ScientificEvidence& evidence) {
     validate_reconstruction_bindings(evidence);
+}
+
+std::pair<DominanceWorldEvidence, DominanceWorldEvidence>
+dominance_hidden_worlds_for_test(
+    const probes::DecisionProbe& probe,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::uint64_t determinization_seed) {
+    require(
+        probe.decision_kind ==
+                probes::DecisionKind::Priority &&
+            first_descriptor != second_descriptor,
+        "dominance hidden test requires two Priority "
+        "actions");
+    const auto candidate_index =
+        [&](std::string_view descriptor) {
+            const auto found = std::find_if(
+                probe.candidates.begin(),
+                probe.candidates.end(),
+                [&](const probes::Candidate& candidate) {
+                    return candidate.descriptor ==
+                               descriptor &&
+                           std::holds_alternative<
+                               PriorityAction>(
+                               candidate.action);
+                });
+            require(
+                found != probe.candidates.end(),
+                probe.stable_id +
+                    ": dominance hidden test action is "
+                    "missing");
+            return static_cast<std::size_t>(
+                std::distance(
+                    probe.candidates.begin(), found));
+        };
+    const std::size_t first =
+        candidate_index(first_descriptor);
+    const std::size_t second =
+        candidate_index(second_descriptor);
+    const GameState sampled = sample_determinization(
+        probe.state, probe.original_decks,
+        probe.root_player, determinization_seed);
+    const science::HiddenRepartitionDiagnostic hidden =
+        science::hidden_repartition(
+            sampled, probe.root_player);
+    require(
+        hidden.eligible && hidden.changed,
+        probe.stable_id +
+            ": dominance hidden test fixture is "
+            "ineligible");
+    const std::string information_fingerprint =
+        probes::bsr_information_action_fingerprint(probe);
+    const auto comparison_for =
+        [&](const GameState& state) {
+            const fq0_dominance::Settlement
+                first_settlement =
+                    fq0_dominance_transition::
+                        advance_to_next_first_main(
+                            probe, state, first,
+                            information_fingerprint);
+            const fq0_dominance::Settlement
+                second_settlement =
+                    fq0_dominance_transition::
+                        advance_to_next_first_main(
+                            probe, state, second,
+                            information_fingerprint);
+            return fq0_dominance::compare(
+                first_settlement, second_settlement,
+                probe.root_player);
+        };
+    const std::string common_world_key =
+        binding::dominance_common_world_key(
+            probe.stable_id, information_fingerprint, 0);
+    DominanceWorldEvidence world{
+        .world_index = 0,
+        .determinization_seed =
+            determinization_seed,
+        .common_world_key = common_world_key,
+        .comparison = comparison_for(sampled),
+    };
+    world.orientation = world.comparison.orientation;
+    DominanceWorldEvidence hidden_world{
+        .world_index = 0,
+        .determinization_seed =
+            determinization_seed,
+        .common_world_key = common_world_key,
+        .comparison = comparison_for(hidden.state),
+    };
+    hidden_world.orientation =
+        hidden_world.comparison.orientation;
+    bind_dominance_hidden_witness(
+        probe.stable_id, first_descriptor,
+        second_descriptor, probe.root_player,
+        world, hidden_world);
+    return {
+        std::move(world), std::move(hidden_world)};
+}
+
+void bind_dominance_hidden_witness_for_test(
+    std::string_view root_stable_id,
+    std::string_view first_descriptor,
+    std::string_view second_descriptor,
+    std::size_t root_actor,
+    DominanceWorldEvidence& world,
+    const DominanceWorldEvidence& hidden_world) {
+    bind_dominance_hidden_witness(
+        root_stable_id, first_descriptor,
+        second_descriptor, root_actor,
+        world, hidden_world);
 }
 
 bool dominance_pair_passes_for_test(
