@@ -20,6 +20,12 @@ const INTERACTION_BRIDGE = path.join(
   "fixtures",
   "interaction-bridge.mjs",
 );
+const EVOLUTION_BRIDGE = path.join(
+  TEST_DIRECTORY,
+  "..",
+  "fixtures",
+  "fake-evolution-bridge.mjs",
+);
 const REAL_ENGINE_BRIDGE = path.resolve(
   TEST_DIRECTORY,
   "..",
@@ -89,6 +95,24 @@ async function startForcedEmptyBlockersFixture() {
   assert.ok(
     typeof address === "object" && address !== null,
     "empty-blockers fixture server must expose a TCP address",
+  );
+  return {
+    server,
+    url: `http://127.0.0.1:${address.port}`,
+  };
+}
+
+async function startEvolutionFixture() {
+  const server = await startServer({
+    port: 0,
+    host: "127.0.0.1",
+    bridgePath: process.execPath,
+    bridgeArgsPrefix: [EVOLUTION_BRIDGE],
+  });
+  const address = server.address();
+  assert.ok(
+    typeof address === "object" && address !== null,
+    "evolution fixture server must expose a TCP address",
   );
   return {
     server,
@@ -559,6 +583,177 @@ test(
     );
   },
 );
+
+for (const viewport of VIEWPORTS) {
+  test(
+    `evolves, saves, and selects an ephemeral deck at ${viewport.width}x${viewport.height}`,
+    { timeout: 60_000 },
+    async (t) => {
+      const { server, url } = await startEvolutionFixture();
+      t.after(() => closeServer(server));
+      const browser = await launchBrowser();
+      t.after(() => browser.close());
+      const context = await browser.newContext({ viewport });
+      t.after(() => context.close());
+      const page = await context.newPage();
+
+      await page.goto(url, { waitUntil: "networkidle" });
+      const initialSetup = page.getByRole("dialog", {
+        name: "Set the table",
+      });
+      await initialSetup
+        .getByRole("button", { name: "Close", exact: true })
+        .click();
+      await initialSetup.waitFor({ state: "hidden" });
+      await page.getByRole("button", { name: "Evolve deck" }).click();
+
+      const evolution = page.getByRole("dialog", {
+        name: "Evolve a deck",
+      });
+      await evolution.waitFor();
+      await evolution.getByLabel("Evolution seed").fill("4294967295");
+      await evolution.getByLabel("Generations").fill("2");
+      await evolution.getByLabel("Population").fill("5");
+      await evolution.getByLabel("Paired repetitions").fill("1");
+      await evolution.getByLabel("Pilot").selectOption("handcrafted");
+
+      const evolutionResponsePromise = page.waitForResponse((response) => {
+        const requestUrl = new URL(response.url());
+        return (
+          response.request().method() === "POST" &&
+          requestUrl.pathname === "/api/evolutions"
+        );
+      });
+      await evolution
+        .getByRole("button", { name: "Generate deck" })
+        .click();
+      const evolutionResponse = await evolutionResponsePromise;
+      assert.equal(evolutionResponse.status(), 201);
+      const evolutionBody = await evolutionResponse.json();
+      const evolutionId = evolutionBody.evolution.id;
+
+      assert.equal(
+        await evolution.getByRole("heading", {
+          name: "40-card evolved deck",
+        }).count(),
+        1,
+      );
+      assert.match(await evolution.innerText(), /Aggregate fitness[\s\S]*50\.0%/);
+      assert.match(await evolution.innerText(), /×20[\s\S]*Forest/);
+      assert.match(await evolution.innerText(), /×20[\s\S]*Grizzly Bears/);
+      assert.deepEqual(
+        await evolution
+          .locator(".evolution-trace li > strong")
+          .allTextContents(),
+        ["50.0%", "51.0%"],
+      );
+      assert.equal(
+        await evolution.locator(".evolution-metagame tbody tr").count(),
+        5,
+      );
+
+      const savedName = `Rendered Bears ${viewport.width}`;
+      await evolution.getByLabel("Deck name").fill(savedName);
+      const saveResponsePromise = page.waitForResponse((response) => {
+        const requestUrl = new URL(response.url());
+        return (
+          response.request().method() === "POST" &&
+          requestUrl.pathname ===
+            `/api/evolutions/${encodeURIComponent(evolutionId)}/save`
+        );
+      });
+      await evolution
+        .getByRole("button", { name: "Save for this session" })
+        .click();
+      const saveResponse = await saveResponsePromise;
+      assert.equal(saveResponse.status(), 201);
+      const saveBody = await saveResponse.json();
+      const savedDeckId = saveBody.deck.id;
+      assert.equal(saveBody.deck.ephemeral, true);
+      assert.equal(
+        await evolution.getByRole("button", {
+          name: "Saved for this session",
+        }).count(),
+        1,
+      );
+      assert.match(
+        await evolution.locator(".saved-evolution-decks").innerText(),
+        new RegExp(`${savedName}[\\s\\S]*40 cards`),
+      );
+      assert.match(
+        await evolution.locator(".evolution-save").innerText(),
+        /disappears when the Node server restarts/,
+      );
+
+      const dialogGeometry = await evolution.evaluate((element) => {
+        const bounds = element
+          .querySelector(".evolution-dialog")
+          ?.getBoundingClientRect();
+        return {
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+          },
+          documentWidth: document.documentElement.scrollWidth,
+          bodyWidth: document.body.scrollWidth,
+          dialog: bounds
+            ? {
+                left: bounds.left,
+                top: bounds.top,
+                right: bounds.right,
+                bottom: bounds.bottom,
+                width: bounds.width,
+                height: bounds.height,
+              }
+            : null,
+        };
+      });
+      assert.equal(dialogGeometry.documentWidth, viewport.width);
+      assert.equal(dialogGeometry.bodyWidth, viewport.width);
+      assertVisibleRectangle(
+        dialogGeometry.dialog,
+        dialogGeometry.viewport,
+        "deck evolution dialog",
+      );
+
+      await evolution
+        .getByRole("button", { name: "Close", exact: true })
+        .click();
+      await evolution.waitFor({ state: "hidden" });
+      await page.getByRole("button", { name: "New match" }).click();
+      const setup = page.getByRole("dialog", { name: "Set the table" });
+      await setup.waitFor();
+      for (const seat of [".seat-0", ".seat-1"]) {
+        const section = setup.locator(seat);
+        const deckSelect = section.locator("select").nth(0);
+        assert.equal(
+          await deckSelect.locator(`option[value="${savedDeckId}"]`).count(),
+          1,
+        );
+        await deckSelect.selectOption(savedDeckId);
+        assert.match(
+          await section.locator(".deck-manifest").innerText(),
+          new RegExp(`${savedName}[\\s\\S]*Forest[\\s\\S]*Grizzly Bears`),
+        );
+      }
+
+      const setupWidths = await page.evaluate(() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+        body: document.body.scrollWidth,
+      }));
+      assert.equal(setupWidths.viewport, viewport.width);
+      assert.equal(setupWidths.document, viewport.width);
+      assert.equal(setupWidths.body, viewport.width);
+
+      t.diagnostic(
+        `${viewport.width}x${viewport.height}: generated the exact 40-card ` +
+          "manifest, saved it in server memory, and selected its opaque ID " +
+          "for both match seats without horizontal overflow",
+      );
+    },
+  );
+}
 
 for (const viewport of VIEWPORTS) {
   test(

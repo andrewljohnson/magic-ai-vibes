@@ -330,9 +330,9 @@ without discarding any public history.
 
 ### P3 — Model inspection and reproducibility
 
-Status: **explicit Learned-model identity, acceptance criteria, and public-log
-privacy boundary complete; broader model inspection remains a future
-enhancement**
+Status: **explicit Learned-model identity, acceptance criteria, public-log
+privacy boundary, and ephemeral deck evolution complete; broader model
+inspection remains a future enhancement**
 
 Acceptance criteria:
 
@@ -1521,3 +1521,34 @@ For each web issue:
   usage limit, and the existing in-app browser policy explicitly rejected
   port 4173. No alternate browser or port was used. The visual milestone
   remains open until that exact rendered check can run.
+- 2026-07-26 — Completed the preregistered ephemeral deck-evolution menu
+  slice. The separate `Evolve deck` dialog submits only bounded
+  generations/population/repetitions/seed/pilot settings to a no-shell child
+  running the existing C++ `evolve_deck` loop. Its versioned one-line result
+  carries the exact 40 numeric card IDs plus a checked compact manifest,
+  aggregate and five-opponent W-L-D/fitness, and generation trace. Handcoded
+  Policy and load-only frozen C16 are the only pilots. Node validates every
+  parameter, card identity/count, result total, percent, opponent row, and
+  request/result identity; limits output/runtime, permits one child at a time,
+  and retains completed results and saved decks only in process memory.
+  Timeout/oversize teardown now keeps the concurrency gate closed through
+  actual child exit, using bounded SIGTERM-to-SIGKILL escalation. Saved deck
+  IDs are opaque, client-authored manifests are rejected, and the exact
+  engine-produced vector—not a browser reconstruction—is forwarded to either
+  match seat. The C++ boundary also serializes seeds as decimal strings so no
+  JSON-number rounding can corrupt identity.
+
+  Focused and integrated gates passed: 18/18 C++ bridge tests,
+  `make test-web-ui` 87/87, and `make test-web` 105/105 Node/UI tests,
+  including 10 evolution server lifecycle/protocol cases. The first rendered
+  invocation failed only because the sandbox denied every ephemeral localhost
+  listener with `EPERM`; the permitted identical rerun passed 10/10 real
+  Chromium journeys. At both 1280 × 720 and 1440 × 900 it generated a
+  two-generation 40-card result, rendered both manifest rows, both trace rows,
+  and all five opponent rows, saved it with the explicit restart-lifetime
+  notice, reopened `New match`, and selected the returned opaque deck ID for
+  both seats with document/body width equal to the viewport. A final
+  production-server/real-bridge smoke evolved a 75% candidate at seed 42,
+  saved all 40 cards into dynamic metadata, and started a game with that
+  opaque deck at a live `priority` decision. No filesystem, database, cookie,
+  localStorage, or sessionStorage persistence was introduced.
