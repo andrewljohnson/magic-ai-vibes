@@ -17076,6 +17076,67 @@ multi-action Priority call. The next-boundary primary above is the only
 declared WORK0 mechanism; a true bounded-H4 work instrument would require a
 separate declaration.
 
+##### FQ4-WORK0 cache construction/codec implementation qualification
+
+Recorded 2026-07-28 before any production cache construction, parent census,
+challenger load, or gameplay coordinate was opened. This is an
+implementation-only qualification of the frozen WORK0 cache seam, not a
+scientific result and not an accept/reject decision about C16 or a challenger.
+
+The implementation now provides a bounded, canonical binary codec and a
+one-time exact-source builder for the declared 512 roots and 2,018 options.
+It preserves the raw engine action order and descriptor-canonical order with
+an exact bijection; stores only owner-visible public state, owner hand, and
+hidden-zone counts; reconstructs hidden worlds through the production seed
+domains; and proves feature/action invariance over the canonical root, a
+distinct eligible hidden repartition, and all eight production worlds. Exact
+DEV1 and DEV5 bytes and SHA-256 identities are authenticated before source
+row joins. The builder groups selected roots by source game and captures only
+the requested trace ordinals. The simulator and web binaries do not link the
+cache or its producer, and ordinary cache tests use only synthetic fixtures.
+
+Exact verification:
+
+- `make -j4 test-fq4-work0-cache test-fq4-work0-firewall
+  test-fq4-priority-collection test-fq4-dev-generator`: cache 4/4,
+  priority collection 11/11, and generator 8/8 passed; the build-graph
+  firewall passed.
+- `make -j4 test`: engine 172/172, learned iteration 27/27, probes 57/57,
+  probe metrics 11/11, probe runner 33/33, all research suites including the
+  focused WORK0 suites, web bridge 18/18, web UI 106/106, and certification
+  48/48 passed. Representative simulator, capture, clean-build, and
+  incremental-build contracts also passed.
+- `make -j4
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror
+  -fsanitize=address,undefined -fno-omit-frame-pointer'
+  test-fq4-work0-cache test-fq4-priority-collection`: the sanitizer-enabled
+  cache 4/4 and priority-collection 11/11 suites passed.
+- `git diff --check`: clean.
+
+Two independent read-only reviews found no blocker in the current
+construction/codec seam. They independently identified the same mandatory
+pre-publication dependency: exact next-object counters can contain legitimate
+historical gaps, so they cannot be normalized or derived from live object
+IDs. Raw `decode()` and structural `validate()` are therefore explicitly not
+evaluator authorization. Before the one production construction or any
+evaluator consumption, a separately frozen sole `load_published()` path must
+authenticate the trusted producer identity and the whole-cache SHA-256,
+including those counters. That is a P1 publication requirement, not license
+to mutate the counters or duplicate engine semantics in the structural
+codec.
+
+Implementation decision: **GO for a commit-and-review freeze of the
+construction/codec seam only**. No source game, cache artifact, candidate,
+fit, or gameplay seed was opened, so WORK0's infrastructure hypothesis and
+all parent-census facts remain unobserved. Next: commit and independently
+verify this seam; then preregister and implement the fixed no-argument
+publisher plus authenticated sole loader before the one cache construction.
+Only after publication passes may the parent-only C16 census begin.
+
+`REVIEW.md` was reread through its newest 13:44 PDT cycle before this record.
+It reported the same uncommitted WORK0 implementation and no running census;
+there is no conflicting result.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after

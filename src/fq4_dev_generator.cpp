@@ -1,6 +1,7 @@
 #include "old_school/fq4_dev_generator.hpp"
 
 #include "old_school/artifact_integrity.hpp"
+#include "old_school/fq0_information_set.hpp"
 #include "old_school/fq4_neutral_supplement.hpp"
 #include "old_school/fq4_priority_math.hpp"
 #include "old_school/oc1_action_scoring.hpp"
@@ -29,11 +30,13 @@ namespace old_school::fq4_dev_generator {
 namespace {
 
 namespace bundle = fq4_dev_bundle;
+namespace cache = fq4_work0_cache;
 namespace collection = fq4_priority_collection;
 namespace coverage = fq4_dev_coverage_census;
 namespace integrity = artifact_integrity;
 namespace math = fq4_priority_math;
 namespace neutral = fq4_neutral_supplement;
+namespace information = fq0_information_set;
 namespace schedule_data = fq4_dev_schedule;
 namespace scoring = oc1_action_scoring;
 
@@ -1770,6 +1773,290 @@ neutral::NeutralRow score_neutral_root(
         captured.locator, retained, selected);
 }
 
+struct Work0Target {
+    cache::SourceFamily family =
+        cache::SourceFamily::Dev1Selected;
+    bundle::Split split = bundle::Split::Fit;
+    std::size_t artifact_index = 0;
+    std::uint32_t source_row = 0;
+    std::uint8_t source_roles = 0;
+    std::uint64_t production_seed = 0;
+    collection::RootLocator locator;
+    std::uint8_t owner_deck = 0;
+    std::uint8_t opponent_deck = 0;
+    bundle::Hash256 stable_root_id{};
+    bundle::Hash256 physical_game_sha256{};
+    bundle::Hash256 information_action_sha256{};
+    bundle::Hash256 descriptor_set_sha256{};
+    std::size_t action_count = 0;
+    std::size_t pass_index = 0;
+    bool has_neutral_locator = false;
+    neutral::RankedLocator neutral_locator;
+};
+
+struct Work0RootBuild {
+    cache::Root root;
+    bool normalized_state_exact = false;
+    bool hidden_clone_eligible = false;
+    bool hidden_clone_distinct = false;
+    bool hidden_feature_exact = false;
+};
+
+cache::NeutralLocator work0_neutral_locator(
+    const neutral::RankedLocator& locator) {
+    const neutral::EligibleRoot& root =
+        locator.root;
+    return {
+        .split = root.rank.split,
+        .owner_deck = root.rank.owner_deck,
+        .schedule_block =
+            root.rank.schedule_block,
+        .physical_game_sha256 =
+            root.rank.physical_game_sha256,
+        .stable_root_id =
+            root.rank.stable_root_id,
+        .schedule_index = root.schedule_index,
+        .owner_seat = root.owner_seat,
+        .owner_on_play = root.owner_on_play,
+        .opponent_deck = root.opponent_deck,
+        .trace_ordinal = root.trace_ordinal,
+        .legal_action_count =
+            root.legal_action_count,
+        .retained_nontrivial =
+            root.retained_nontrivial,
+        .public_stack_size =
+            root.public_stack_size,
+        .dominance_positive =
+            root.dominance_positive,
+        .existing_selected_roles =
+            root.existing_selected_roles,
+        .representative_rank =
+            locator.representative_rank,
+        .game_rank = locator.game_rank,
+    };
+}
+
+std::array<std::uint8_t, kCardCount>
+work0_deck_composition(const std::vector<CardId>& deck) {
+    std::array<std::uint8_t, kCardCount> result{};
+    for (const CardId card : deck) {
+        std::uint8_t& count =
+            result[static_cast<std::size_t>(card)];
+        if (count ==
+            std::numeric_limits<std::uint8_t>::max()) {
+            fail("WORK0 deck composition overflows");
+        }
+        ++count;
+    }
+    return result;
+}
+
+cache::OwnerVisibleState work0_owner_state(
+    const GameState& state, std::size_t observer) {
+    const PlayerObservation observation =
+        observe_game_state(state, observer);
+    if (observation.revealed_opponent_hand.has_value()) {
+        fail("WORK0 owner observation revealed opponent hand");
+    }
+    return {
+        .observer = observation.observer,
+        .players = observation.players,
+        .owner_hand = observation.hand,
+        .stack = observation.stack,
+        .extra_turns_pending =
+            observation.extra_turns_pending,
+        .active_player = observation.active_player,
+        .starting_player =
+            observation.starting_player,
+        .turn_number = observation.turn_number,
+        .failed_draw = state.failed_draw,
+        .next_permanent_id =
+            state.next_permanent_id,
+        .next_stack_object_id =
+            state.next_stack_object_id,
+    };
+}
+
+Work0RootBuild make_work0_root(
+    const Work0Target& target,
+    const collection::CanonicalRoot& canonical) {
+    const collection::ReplayRootManifest& manifest =
+        canonical.manifest;
+    const probes::DecisionProbe& probe =
+        canonical.probe;
+    const PlayerGameStats zero_stats{};
+    if (manifest.locator != target.locator ||
+        manifest.owner_deck !=
+            static_cast<DeckId>(target.owner_deck) ||
+        manifest.opponent_deck !=
+            static_cast<DeckId>(
+                target.opponent_deck) ||
+        bundle::parse_sha256(manifest.stable_id) !=
+            target.stable_root_id ||
+        bundle::parse_sha256(
+            manifest.information_action_fingerprint) !=
+            target.information_action_sha256 ||
+        bundle::sha256(
+            collection::block_bound_physical_game_id(
+                manifest.locator)) !=
+            target.physical_game_sha256 ||
+        bundle::descriptor_set_sha256(
+            manifest.canonical_descriptors) !=
+            target.descriptor_set_sha256 ||
+        probe.state.stats[0] != zero_stats ||
+        probe.state.stats[1] != zero_stats ||
+        probe.root_player !=
+            target.locator.owner_seat ||
+        probe.candidates.size() !=
+            target.action_count ||
+        manifest.pass_index != target.pass_index) {
+        fail("WORK0 canonical root disagrees with source row");
+    }
+
+    const LearnedDecisionContext context{
+        .valid = true,
+        .phase = probe.phase,
+        .decision_player = probe.root_player,
+        .consecutive_passes =
+            probe.consecutive_passes,
+        .sorcery_actions =
+            sorcery_actions_for(probe.phase),
+    };
+    const std::vector<PriorityAction> raw =
+        legal_priority_actions(
+            probe.state, probe.root_player,
+            context.sorcery_actions);
+    const information::InformationSetKey key =
+        information::make_information_set_key(
+            probe.state, context, raw);
+    const auto canonical_rows =
+        information::descriptor_canonical_action_rows(key);
+    if (canonical_rows.size() !=
+        probe.candidates.size()) {
+        fail("WORK0 canonical action count drifted");
+    }
+
+    std::vector<PriorityAction> canonical_typed;
+    canonical_typed.reserve(canonical_rows.size());
+    for (std::size_t index = 0;
+         index < canonical_rows.size(); ++index) {
+        const auto* stored =
+            std::get_if<PriorityAction>(
+                &probe.candidates[index].action);
+        if (stored == nullptr ||
+            probe.candidates[index].descriptor !=
+                canonical_rows[index].descriptor ||
+            *stored != canonical_rows[index].action) {
+            fail("WORK0 canonical/raw action join drifted");
+        }
+        canonical_typed.push_back(*stored);
+    }
+    std::vector<cache::CanonicalAction> actions =
+        cache::bind_canonical_actions(
+            raw, canonical_typed);
+
+    cache::Root result{
+        .source = target.family,
+        .split = target.split,
+        .source_row = target.source_row,
+        .source_roles = target.source_roles,
+        .production_seed =
+            target.production_seed,
+        .locator = target.locator,
+        .owner_deck = target.owner_deck,
+        .opponent_deck = target.opponent_deck,
+        .stable_root_id = target.stable_root_id,
+        .physical_game_sha256 =
+            target.physical_game_sha256,
+        .information_action_sha256 =
+            target.information_action_sha256,
+        .descriptor_set_sha256 =
+            target.descriptor_set_sha256,
+        .has_neutral_locator =
+            target.has_neutral_locator,
+        .neutral_locator =
+            target.has_neutral_locator
+                ? work0_neutral_locator(
+                      target.neutral_locator)
+                : cache::NeutralLocator{},
+        .state =
+            work0_owner_state(
+                probe.state, probe.root_player),
+        .context = context,
+        .raw_actions = raw,
+        .canonical_actions = std::move(actions),
+        .pass_index =
+            static_cast<std::uint8_t>(
+                manifest.pass_index),
+    };
+    for (std::size_t player = 0; player < 2; ++player) {
+        result.deck_compositions[player] =
+            work0_deck_composition(
+                probe.original_decks[player]);
+    }
+    result.raw_actions_sha256 =
+        cache::raw_actions_sha256(
+            result.raw_actions);
+    result.canonical_actions_sha256 =
+        cache::canonical_actions_sha256(
+            result.canonical_actions);
+
+    const collection::HiddenClone hidden =
+        collection::make_hidden_clone(canonical);
+    const bool normalized_state_exact =
+        cache::sample_world(
+            result,
+            collection::owner_safe_normalization_seed(
+                target.locator,
+                collection_spec())) ==
+        probe.state;
+    const bool hidden_feature_exact =
+        collection::priority_feature_bits_identical(
+            canonical.probe, hidden.probe);
+    if (!normalized_state_exact ||
+        !hidden.eligible ||
+        !hidden.distinct ||
+        !hidden_feature_exact) {
+        fail(
+            "WORK0 canonical normalization or hidden-clone "
+            "proof failed");
+    }
+    for (std::size_t world = 0;
+         world < scoring::kProductionWorlds;
+         ++world) {
+        const std::uint64_t seed =
+            learned_search_world_seed(
+                target.production_seed, world);
+        const GameState expected =
+            sample_determinization(
+                probe.state, probe.original_decks,
+                probe.root_player, seed);
+        const GameState hidden_expected =
+            sample_determinization(
+                hidden.probe.state,
+                hidden.probe.original_decks,
+                hidden.probe.root_player, seed);
+        if (expected != hidden_expected ||
+            cache::sample_world(result, seed) !=
+                expected) {
+            fail(
+                "WORK0 owner-visible rehydration changed "
+                "an information-set world");
+        }
+    }
+    return {
+        .root = std::move(result),
+        .normalized_state_exact =
+            normalized_state_exact,
+        .hidden_clone_eligible =
+            hidden.eligible,
+        .hidden_clone_distinct =
+            hidden.distinct,
+        .hidden_feature_exact =
+            hidden_feature_exact,
+    };
+}
+
 } // namespace
 
 const collection::CollectionSpec& collection_spec() {
@@ -2555,6 +2842,442 @@ bool CoverageReconstruction::exact() const {
         fits == 0 &&
         candidate_rollout_evaluations == 0 &&
         gameplay_evaluation_seeds == 0;
+}
+
+bool Work0Reconstruction::exact() const {
+    return
+        referenced_source_games != 0 &&
+        source_games_replayed ==
+            referenced_source_games &&
+        requested_roots == cache::kRootCount &&
+        artifact.roots.size() == requested_roots &&
+        reconstructed_options ==
+            cache::kOptionCount &&
+        normalized_state_exact_roots ==
+            requested_roots &&
+        hidden_clone_eligible_roots ==
+            requested_roots &&
+        hidden_clone_distinct_roots ==
+            requested_roots &&
+        hidden_feature_exact_roots ==
+            requested_roots &&
+        source_rows_exact &&
+        codec_round_trip_exact &&
+        encoding_bit_identical &&
+        inputs_immutable;
+}
+
+Work0Reconstruction
+reconstruct_work0_selected_roots_once() {
+    const auto fit_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Fit);
+    const auto check_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Check);
+    const SchedulePreflight preflight =
+        preflight_schedules(
+            fit_schedule, check_schedule);
+    if (!preflight.exact ||
+        feature_contract_sha256() !=
+            bundle::parse_sha256(
+                bundle::kFeatureContractSha256) ||
+        collection_spec_contract_sha256() !=
+            bundle::parse_sha256(
+                bundle::kCollectionSpecSha256)) {
+        fail("WORK0 scientific preflight drifted");
+    }
+
+    const std::filesystem::path parent_path(
+        kParentArtifactPath);
+    const std::filesystem::path bundle_path(
+        bundle::kArtifactPath);
+    const std::filesystem::path neutral_path =
+        neutral::production_artifact_path();
+    const integrity::RegularFileSnapshot parent_before =
+        integrity::snapshot_regular_file(parent_path);
+    const integrity::RegularFileSnapshot bundle_before =
+        integrity::snapshot_regular_file(bundle_path);
+    const integrity::RegularFileSnapshot neutral_before =
+        integrity::snapshot_regular_file(neutral_path);
+    if (parent_before.byte_size !=
+            cache::kParentArtifactBytes ||
+        parent_before.sha256 !=
+            cache::kParentArtifactSha256 ||
+        bundle_before.byte_size !=
+            cache::kDev1ArtifactBytes ||
+        bundle_before.sha256 !=
+            cache::kDev1ArtifactSha256 ||
+        neutral_before.byte_size !=
+            cache::kNeutralArtifactBytes ||
+        neutral_before.sha256 !=
+            cache::kNeutralArtifactSha256) {
+        fail("WORK0 immutable input identity drifted");
+    }
+
+    const bundle::Bundle dev1 =
+        bundle::load_published();
+    if (!published_scientific_manifest_exact(
+            dev1.manifest)) {
+        fail("WORK0 DEV1 manifest drifted");
+    }
+    const auto capacity =
+        neutral::accepted_dev4_capacity();
+    const neutral::Artifact neutral_artifact =
+        neutral::load_published(
+            neutral::make_contract(
+                dev1.manifest, capacity),
+            {
+                .bytes = cache::kNeutralArtifactBytes,
+                .sha256 =
+                    std::string(
+                        cache::kNeutralArtifactSha256),
+            });
+
+    const auto parent =
+        load_learned_value_challenger_artifact(
+            std::string(kParentArtifactPath),
+            kParentTrainingGames,
+            kParentTrainingSeed,
+            kParentGenerations)
+            .model();
+    require_parent_identity(parent);
+
+    std::vector<Work0Target> targets;
+    targets.reserve(cache::kRootCount);
+    const auto append_dev1 =
+        [&](bundle::Split split,
+            const std::vector<bundle::SelectedRow>& rows) {
+            const auto& source_schedule =
+                split == bundle::Split::Fit
+                    ? fit_schedule
+                    : check_schedule;
+            for (const bundle::SelectedRow& row : rows) {
+                const bundle::CensusRow& census =
+                    row.census;
+                if (census.schedule_index >=
+                    source_schedule.size()) {
+                    fail(
+                        "WORK0 DEV1 source index is invalid");
+                }
+                const schedule_data::SourceGame& source =
+                    source_schedule[census.schedule_index];
+                targets.push_back({
+                    .family =
+                        cache::SourceFamily::
+                            Dev1Selected,
+                    .split = split,
+                    .artifact_index = targets.size(),
+                    .source_row =
+                        narrow_u32(
+                            targets.size(),
+                            "WORK0 DEV1 row"),
+                    .source_roles = row.roles,
+                    .production_seed =
+                        row.production_seed,
+                    .locator = {
+                        .source_block =
+                            source.schedule_block,
+                        .source_seed_base =
+                            source.source_seed_base,
+                        .schedule_index =
+                            source.schedule_index,
+                        .game_seed = source.game_seed,
+                        .owner_seat =
+                            census.owner_seat,
+                        .trace_ordinal =
+                            census.trace_ordinal,
+                    },
+                    .owner_deck = census.owner_deck,
+                    .opponent_deck =
+                        census.opponent_deck,
+                    .stable_root_id =
+                        census.stable_root_id,
+                    .physical_game_sha256 =
+                        census.physical_game_sha256,
+                    .information_action_sha256 =
+                        census.information_action_sha256,
+                    .descriptor_set_sha256 =
+                        census.descriptor_set_sha256,
+                    .action_count = row.actions.size(),
+                    .pass_index = census.pass_index,
+                });
+            }
+        };
+    append_dev1(bundle::Split::Fit, dev1.fit_rows);
+    append_dev1(
+        bundle::Split::Check, dev1.check_rows);
+    if (targets.size() != cache::kDev1RootCount) {
+        fail("WORK0 DEV1 target count drifted");
+    }
+
+    for (std::size_t index = 0;
+         index < neutral_artifact.rows.size(); ++index) {
+        const neutral::NeutralRow& row =
+            neutral_artifact.rows[index];
+        const neutral::EligibleRoot& eligible =
+            row.locator.root;
+        const auto& source_schedule =
+            eligible.rank.split == bundle::Split::Fit
+                ? fit_schedule
+                : check_schedule;
+        if (eligible.schedule_index >=
+            source_schedule.size()) {
+            fail(
+                "WORK0 neutral source index is invalid");
+        }
+        const schedule_data::SourceGame& source =
+            source_schedule[eligible.schedule_index];
+        targets.push_back({
+            .family =
+                cache::SourceFamily::Dev5Neutral,
+            .split = eligible.rank.split,
+            .artifact_index = targets.size(),
+            .source_row =
+                narrow_u32(
+                    index, "WORK0 neutral row"),
+            .source_roles = 0,
+            .production_seed =
+                row.production_seed,
+            .locator = {
+                .source_block =
+                    source.schedule_block,
+                .source_seed_base =
+                    source.source_seed_base,
+                .schedule_index =
+                    source.schedule_index,
+                .game_seed = source.game_seed,
+                .owner_seat = eligible.owner_seat,
+                .trace_ordinal =
+                    eligible.trace_ordinal,
+            },
+            .owner_deck =
+                eligible.rank.owner_deck,
+            .opponent_deck =
+                eligible.opponent_deck,
+            .stable_root_id =
+                eligible.rank.stable_root_id,
+            .physical_game_sha256 =
+                eligible.rank
+                    .physical_game_sha256,
+            .information_action_sha256 =
+                row.information_action_sha256,
+            .descriptor_set_sha256 =
+                row.descriptor_set_sha256,
+            .action_count = row.actions.size(),
+            .pass_index = row.pass_index,
+            .has_neutral_locator = true,
+            .neutral_locator = row.locator,
+        });
+    }
+    if (targets.size() != cache::kRootCount) {
+        fail("WORK0 target count drifted");
+    }
+
+    using GameKey = std::pair<std::uint8_t, std::size_t>;
+    std::map<GameKey, std::vector<std::size_t>>
+        targets_by_game;
+    for (std::size_t index = 0;
+         index < targets.size(); ++index) {
+        const Work0Target& target = targets[index];
+        targets_by_game[
+            {static_cast<std::uint8_t>(
+                 target.split),
+             target.locator.schedule_index}]
+            .push_back(index);
+    }
+    std::vector<std::optional<Work0RootBuild>> captured(
+        targets.size());
+    std::size_t games_replayed = 0;
+    for (const auto& [key, indices] :
+         targets_by_game) {
+        const bundle::Split split =
+            static_cast<bundle::Split>(key.first);
+        const auto& source_schedule =
+            split == bundle::Split::Fit
+                ? fit_schedule
+                : check_schedule;
+        if (key.second >= source_schedule.size()) {
+            fail("WORK0 grouped source index is invalid");
+        }
+        const schedule_data::SourceGame& source =
+            source_schedule[key.second];
+        const GameConfig config =
+            source_game_config(
+                parent, source.starting_player);
+        if (!source_config_exact(
+                config, parent,
+                source.starting_player)) {
+            fail("WORK0 source recipe drifted");
+        }
+        std::vector<LearnedDecisionTracePoint> trace;
+        const auto decks = original_decks(source);
+        Game game(
+            decks[0], decks[1],
+            source.game_seed, config);
+        static_cast<void>(
+            game.run_with_priority_root_trace(trace));
+        ++games_replayed;
+
+        const collection::SourceGame common_source =
+            collection_source(source);
+        for (const std::size_t target_index :
+             indices) {
+            const Work0Target& target =
+                targets[target_index];
+            if (target.locator.trace_ordinal >=
+                    trace.size() ||
+                captured[target.artifact_index]
+                    .has_value()) {
+                fail(
+                    "WORK0 trace ordinal is missing or duplicated");
+            }
+            const LearnedDecisionTracePoint& point =
+                trace[target.locator.trace_ordinal];
+            if (point.context.decision_player !=
+                target.locator.owner_seat) {
+                fail(
+                    "WORK0 trace owner disagrees with locator");
+            }
+            const collection::RootBuildResult built =
+                collection::build_canonical_root(
+                    point, common_source,
+                    target.locator.owner_seat,
+                    target.locator.trace_ordinal,
+                    collection_spec());
+            if (built.disposition !=
+                    collection::RootDisposition::
+                        RetentionCandidate ||
+                !built.root.has_value()) {
+                fail(
+                    "WORK0 requested root was not canonical");
+            }
+            captured[target.artifact_index] =
+                make_work0_root(
+                    target, *built.root);
+        }
+    }
+
+    cache::Artifact artifact;
+    artifact.manifest = {
+        .schema = std::string(cache::kSchema),
+        .environment =
+            std::string(cache::kEnvironment),
+        .sources = {
+            .parent_artifact = {
+                .bytes = parent_before.byte_size,
+                .sha256 =
+                    bundle::parse_sha256(
+                        parent_before.sha256),
+            },
+            .parent_model_fingerprint =
+                bundle::parse_sha256(
+                    cache::kParentModelFingerprint),
+            .dev1_artifact = {
+                .bytes = bundle_before.byte_size,
+                .sha256 =
+                    bundle::parse_sha256(
+                        bundle_before.sha256),
+            },
+            .dev1_fit_selection_sha256 =
+                dev1.manifest.fit.selection_sha256,
+            .dev1_fit_scored_sha256 =
+                dev1.manifest.fit.scored_sha256,
+            .dev1_check_selection_sha256 =
+                dev1.manifest.check.selection_sha256,
+            .dev1_check_scored_sha256 =
+                dev1.manifest.check.scored_sha256,
+            .neutral_artifact = {
+                .bytes = neutral_before.byte_size,
+                .sha256 =
+                    bundle::parse_sha256(
+                        neutral_before.sha256),
+            },
+            .neutral_selected_order_sha256 =
+                neutral_artifact.manifest
+                    .selected_order_sha256,
+        },
+        .dev1_options =
+            cache::kDev1OptionCount,
+        .neutral_options =
+            cache::kNeutralOptionCount,
+    };
+    artifact.roots.reserve(captured.size());
+    std::size_t options = 0;
+    std::size_t normalized_state_exact_roots = 0;
+    std::size_t hidden_clone_eligible_roots = 0;
+    std::size_t hidden_clone_distinct_roots = 0;
+    std::size_t hidden_feature_exact_roots = 0;
+    for (std::optional<Work0RootBuild>& built :
+         captured) {
+        if (!built.has_value()) {
+            fail("WORK0 targeted replay omitted a root");
+        }
+        options += built->root.raw_actions.size();
+        normalized_state_exact_roots +=
+            built->normalized_state_exact ? 1U : 0U;
+        hidden_clone_eligible_roots +=
+            built->hidden_clone_eligible ? 1U : 0U;
+        hidden_clone_distinct_roots +=
+            built->hidden_clone_distinct ? 1U : 0U;
+        hidden_feature_exact_roots +=
+            built->hidden_feature_exact ? 1U : 0U;
+        artifact.roots.push_back(
+            std::move(built->root));
+    }
+    artifact.manifest.root_order_sha256 =
+        cache::root_order_sha256(artifact.roots);
+    cache::validate_against_sources(
+        artifact, dev1, neutral_artifact);
+    const std::string first_encoding =
+        cache::encode(artifact);
+    const std::string second_encoding =
+        cache::encode(artifact);
+    const bool encoding_bit_identical =
+        first_encoding == second_encoding;
+    const bool codec_round_trip_exact =
+        cache::decode(first_encoding) == artifact;
+    if (!encoding_bit_identical ||
+        !codec_round_trip_exact) {
+        fail("WORK0 cache codec gate failed");
+    }
+    require_parent_identity(parent);
+
+    const integrity::RegularFileSnapshot parent_after =
+        integrity::snapshot_regular_file(parent_path);
+    const integrity::RegularFileSnapshot bundle_after =
+        integrity::snapshot_regular_file(bundle_path);
+    const integrity::RegularFileSnapshot neutral_after =
+        integrity::snapshot_regular_file(neutral_path);
+    Work0Reconstruction result{
+        .artifact = std::move(artifact),
+        .referenced_source_games =
+            targets_by_game.size(),
+        .source_games_replayed = games_replayed,
+        .requested_roots = targets.size(),
+        .reconstructed_options = options,
+        .normalized_state_exact_roots =
+            normalized_state_exact_roots,
+        .hidden_clone_eligible_roots =
+            hidden_clone_eligible_roots,
+        .hidden_clone_distinct_roots =
+            hidden_clone_distinct_roots,
+        .hidden_feature_exact_roots =
+            hidden_feature_exact_roots,
+        .source_rows_exact = true,
+        .codec_round_trip_exact =
+            codec_round_trip_exact,
+        .encoding_bit_identical =
+            encoding_bit_identical,
+        .inputs_immutable =
+            parent_after == parent_before &&
+            bundle_after == bundle_before &&
+            neutral_after == neutral_before,
+    };
+    if (!result.exact()) {
+        fail("WORK0 targeted reconstruction is not exact");
+    }
+    return result;
 }
 
 CoverageReconstruction reconstruct_published_coverage_once() {

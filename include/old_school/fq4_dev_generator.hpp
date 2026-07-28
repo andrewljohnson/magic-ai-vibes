@@ -2,6 +2,7 @@
 
 #include "old_school/fq4_dev_bundle.hpp"
 #include "old_school/fq4_dev_schedule.hpp"
+#include "old_school/fq4_work0_cache.hpp"
 #include "old_school/fq4_priority_collection.hpp"
 #include "old_school/game.hpp"
 
@@ -280,6 +281,33 @@ struct CoverageReconstruction {
 // only the immutable published bundle and C16 parent, then fails closed unless
 // all reconstructed scientific sections equal the published sections.
 CoverageReconstruction reconstruct_published_coverage_once();
+
+// Research-only targeted replay for the immutable WORK0 cache seam. It joins
+// the exact 192 DEV1 and 320 DEV5 source-row locators first, replays each
+// referenced frozen physical game once, and materializes CanonicalRoot only
+// for requested trace ordinals. It performs no dominance evaluation, parent
+// score call, fit, candidate rollout, gameplay evaluation, publication, or
+// replacement selection.
+struct Work0Reconstruction {
+    fq4_work0_cache::Artifact artifact;
+    std::size_t referenced_source_games = 0;
+    std::size_t source_games_replayed = 0;
+    std::size_t requested_roots = 0;
+    std::size_t reconstructed_options = 0;
+    std::size_t normalized_state_exact_roots = 0;
+    std::size_t hidden_clone_eligible_roots = 0;
+    std::size_t hidden_clone_distinct_roots = 0;
+    std::size_t hidden_feature_exact_roots = 0;
+    bool source_rows_exact = false;
+    bool codec_round_trip_exact = false;
+    bool encoding_bit_identical = false;
+    bool inputs_immutable = false;
+
+    bool exact() const;
+};
+
+Work0Reconstruction
+reconstruct_work0_selected_roots_once();
 
 // Reconstructs each frozen DEV1 split exactly once, freezes the complete
 // neutral selection before its first neutral score call, and returns the

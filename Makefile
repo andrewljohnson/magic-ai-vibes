@@ -94,6 +94,7 @@ FQ4_DEV5_GAMEPLAY_SOURCE := src/fq4_dev5_gameplay.cpp
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE := src/fq4_dev_background_diagnostic.cpp
 FQ4_DEV_COVERAGE_CENSUS_SOURCE := src/fq4_dev_coverage_census.cpp
 FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
+FQ4_WORK0_CACHE_SOURCE := src/fq4_work0_cache.cpp
 FQ4_NEUTRAL_PUBLISHER_SOURCE := src/fq4_neutral_publisher.cpp
 FQ4_NEUTRAL_EVALUATOR_SOURCE := src/fq4_neutral_evaluator.cpp
 FQ4_NEUTRAL_EVALUATOR_RUNNER_SOURCE := src/fq4_neutral_evaluator_runner.cpp
@@ -152,6 +153,7 @@ FQ0_CAUSAL_QUOTIENT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-causal-quotient-t
 FQ0_CAUSAL_QUOTIENT := $(BUILD_DIR)/old-school-fq0-causal-quotient
 FQ4_PRIORITY_MATH_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-priority-math-tests
 FQ4_PRIORITY_COLLECTION_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-priority-collection-tests
+FQ4_WORK0_CACHE_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-work0-cache-tests
 FQ4_DEV_BUNDLE_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev-bundle-tests
 FQ4_DEV_GENERATOR_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev-generator-tests
 FQ4_DEV_GENERATOR := $(BUILD_DIR)/old-school-fq4-priority-dev-generate
@@ -207,6 +209,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT := $(OBJ_DIR)/src/fq4_neutral_candid
 FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT:.o=.d)
 
 .PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-dev-candidate-artifact test-fq4-dev-candidate-publisher fq4-dev-candidate-publish test-fq4-dev1-gameplay test-fq4-dev5-gameplay fq4-dev5-gameplay-smoke test-fq4-dev-background-diagnostic fq4-dev-background-diagnostic test-fq4-dev-coverage-census fq4-dev-coverage-census test-fq4-neutral-candidate-publisher fq4-neutral-candidate-publish test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: test-fq4-work0-cache test-fq4-work0-firewall
 
 all: $(SIMULATOR)
 
@@ -239,7 +242,9 @@ $(1): $(call source_objects,$(2)) $(call program_config_relink,$(1),$(call sourc
 	mv -f -- "$$$$temporary" "$$@.compile-config.mk"
 endef
 
-$(eval $(call link_program,$(SIMULATOR),$(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp))
+SIMULATOR_LINK_SOURCES := $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp
+
+$(eval $(call link_program,$(SIMULATOR),$(SIMULATOR_LINK_SOURCES)))
 
 $(eval $(call link_program,$(TEST_RUNNER),$(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp))
 
@@ -319,7 +324,8 @@ FQ0_SEQUENCE_PROJECTION_LINK_SOURCES := $(FQ0_INFORMATION_SET_LINK_SOURCES) $(FQ
 FQ0_CAUSAL_QUOTIENT_LINK_SOURCES := $(FQ0_SEQUENCE_PROJECTION_LINK_SOURCES) $(FQ0_CAUSAL_QUOTIENT_SOURCE)
 FQ4_PRIORITY_COLLECTION_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE)
 FQ4_DEV_BUNDLE_LINK_SOURCES := $(ARTIFACT_INTEGRITY_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE)
-FQ4_DEV_GENERATOR_LINK_SOURCES := $(FQ4_PRIORITY_COLLECTION_LINK_SOURCES) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE) $(FQ4_DEV_GENERATOR_SOURCE) $(FQ4_DEV_COVERAGE_CENSUS_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE)
+FQ4_WORK0_CACHE_LINK_SOURCES := $(FQ4_PRIORITY_COLLECTION_LINK_SOURCES) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE) $(FQ4_WORK0_CACHE_SOURCE)
+FQ4_DEV_GENERATOR_LINK_SOURCES := $(FQ4_PRIORITY_COLLECTION_LINK_SOURCES) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE) $(FQ4_DEV_GENERATOR_SOURCE) $(FQ4_DEV_COVERAGE_CENSUS_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE) $(FQ4_WORK0_CACHE_SOURCE)
 FQ4_DEV_EVALUATOR_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE) $(FQ4_DEV_EVALUATOR_SOURCE)
 FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE)
 FQ4_DEV_CANDIDATE_PUBLISHER_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE) $(FQ4_DEV_CANDIDATE_PUBLISHER_SOURCE)
@@ -365,6 +371,8 @@ $(eval $(call link_program,$(FQ0_CAUSAL_QUOTIENT),$(FQ0_CAUSAL_QUOTIENT_LINK_SOU
 $(eval $(call link_program,$(FQ4_PRIORITY_MATH_TEST_RUNNER),$(FQ4_PRIORITY_MATH_SOURCE) tests/test_fq4_priority_math.cpp))
 
 $(eval $(call link_program,$(FQ4_PRIORITY_COLLECTION_TEST_RUNNER),$(FQ4_PRIORITY_COLLECTION_LINK_SOURCES) tests/test_fq4_priority_collection.cpp))
+
+$(eval $(call link_program,$(FQ4_WORK0_CACHE_TEST_RUNNER),$(FQ4_WORK0_CACHE_LINK_SOURCES) tests/test_fq4_work0_cache.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_BUNDLE_TEST_RUNNER),$(FQ4_DEV_BUNDLE_LINK_SOURCES) tests/test_fq4_dev_bundle.cpp))
 
@@ -492,9 +500,12 @@ $(eval $(call link_program,$(FQ4_DEV_SCHEDULE_TEST_RUNNER),$(LEARNED_ITERATION_S
 
 $(eval $(call link_program,$(FQ4_DEV_SCHEDULE),$(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ4_DEV_SCHEDULE_SOURCE) src/fq4_dev_schedule_main.cpp))
 
-$(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp))
+WEB_BRIDGE_CORE_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE)
+WEB_BRIDGE_LINK_SOURCES := $(WEB_BRIDGE_CORE_SOURCES) src/web_bridge_main.cpp
 
-$(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp))
+$(eval $(call link_program,$(WEB_BRIDGE),$(WEB_BRIDGE_LINK_SOURCES)))
+
+$(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(WEB_BRIDGE_CORE_SOURCES) tests/test_web_bridge.cpp))
 
 -include $(DEPFILES) $(FQ4_DEV_GENERATOR_MAIN_DEPFILE) $(FQ4_NEUTRAL_PUBLISHER_MAIN_DEPFILE) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE)
 
@@ -502,6 +513,8 @@ $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
 test: $(FQ4_DEV5_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV5_GAMEPLAY)
+test: $(FQ4_WORK0_CACHE_TEST_RUNNER)
+test: test-fq4-work0-firewall
 
 test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(FQ4_PRIORITY_MATH_TEST_RUNNER) $(FQ4_PRIORITY_COLLECTION_TEST_RUNNER) $(FQ4_DEV_BUNDLE_TEST_RUNNER) $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR) $(FQ4_DEV_EVALUATOR_TEST_RUNNER) $(FQ4_DEV_EVALUATOR) $(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER) $(FQ4_DEV1_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV1_GAMEPLAY) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC) $(FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER) $(FQ4_DEV_COVERAGE_CENSUS) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER) $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT) $(FQ4_PRIORITY_FIT_D0B) $(FQ4_D1_FIELD_GATE_TEST_RUNNER) $(FQ4_D1_CENSUS) $(FQ4_D1_TREATMENT_TEST_RUNNER) $(FQ4_D1_TREATMENT) $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
@@ -543,6 +556,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER)
 	./$(FQ4_PRIORITY_MATH_TEST_RUNNER)
 	./$(FQ4_PRIORITY_COLLECTION_TEST_RUNNER)
+	./$(FQ4_WORK0_CACHE_TEST_RUNNER)
 	./$(FQ4_DEV_BUNDLE_TEST_RUNNER)
 	./$(FQ4_DEV_GENERATOR_TEST_RUNNER)
 	./$(FQ4_DEV_EVALUATOR_TEST_RUNNER)
@@ -1004,6 +1018,36 @@ test-fq4-priority-math: $(FQ4_PRIORITY_MATH_TEST_RUNNER)
 
 test-fq4-priority-collection: $(FQ4_PRIORITY_COLLECTION_TEST_RUNNER)
 	./$(FQ4_PRIORITY_COLLECTION_TEST_RUNNER)
+
+test-fq4-work0-cache: $(FQ4_WORK0_CACHE_TEST_RUNNER)
+	./$(FQ4_WORK0_CACHE_TEST_RUNNER)
+
+FQ4_WORK0_FORBIDDEN_LINK_SOURCES := $(FQ4_DEV_GENERATOR_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE) $(FQ4_DEV_CANDIDATE_PUBLISHER_SOURCE) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_SOURCE) $(FQ4_DEV1_GAMEPLAY_SOURCE) $(FQ4_DEV5_GAMEPLAY_SOURCE)
+
+test-fq4-work0-firewall:
+	@if test -n "$(filter $(FQ4_WORK0_CACHE_SOURCE) $(FQ4_DEV_GENERATOR_SOURCE),$(SIMULATOR_LINK_SOURCES))"; then \
+		printf 'FQ4 WORK0 research source leaked into simulator link graph\n' >&2; \
+		exit 1; \
+	fi
+	@if test -n "$(filter $(FQ4_WORK0_CACHE_SOURCE) $(FQ4_DEV_GENERATOR_SOURCE),$(WEB_BRIDGE_LINK_SOURCES))"; then \
+		printf 'FQ4 WORK0 research source leaked into web link graph\n' >&2; \
+		exit 1; \
+	fi
+	@if test -n "$(filter $(FQ4_WORK0_FORBIDDEN_LINK_SOURCES),$(FQ4_WORK0_CACHE_LINK_SOURCES))"; then \
+		printf 'FQ4 WORK0 cache test graph gained a research producer/scorer\n' >&2; \
+		exit 1; \
+	fi
+	@if rg -n 'fq4_dev_generator' \
+		include/old_school/fq4_work0_cache.hpp \
+		src/fq4_work0_cache.cpp; then \
+		printf 'FQ4 WORK0 cache source includes its producer\n' >&2; \
+		exit 1; \
+	fi
+	@if rg -n '(publish_atomic|generate_and_publish|write_cache|save_cache)[[:space:]]*\(' \
+		include/old_school/fq4_work0_cache.hpp; then \
+		printf 'FQ4 WORK0 cache seam exposes publication/write authority\n' >&2; \
+		exit 1; \
+	fi
 
 test-fq4-dev-bundle: $(FQ4_DEV_BUNDLE_TEST_RUNNER)
 	./$(FQ4_DEV_BUNDLE_TEST_RUNNER)

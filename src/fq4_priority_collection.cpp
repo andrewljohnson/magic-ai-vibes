@@ -208,17 +208,17 @@ void append_priority_action(
 }
 
 std::string owner_information_action_bytes(
-    const GameState& state,
+    const PlayerObservation& observation,
     const LearnedDecisionContext& context,
-    const std::vector<PriorityAction>& legal_actions,
+    std::span<const PriorityAction> legal_actions,
     std::string_view schema) {
     if (schema.empty() || !context.valid ||
-        context.decision_player >= kPlayerCount) {
+        context.decision_player >= kPlayerCount ||
+        observation.observer !=
+            context.decision_player) {
         throw std::invalid_argument(
             "invalid owner-safe information/action context");
     }
-    const PlayerObservation observation =
-        observe_game_state(state, context.decision_player);
     if (observation.revealed_opponent_hand.has_value()) {
         throw std::logic_error(
             "owner-safe observation exposed opponent hand");
@@ -275,6 +275,17 @@ std::string owner_information_action_bytes(
             append_priority_action(output, action);
         });
     return writer.take();
+}
+
+std::string owner_information_action_bytes(
+    const GameState& state,
+    const LearnedDecisionContext& context,
+    std::span<const PriorityAction> legal_actions,
+    std::string_view schema) {
+    return owner_information_action_bytes(
+        observe_game_state(
+            state, context.decision_player),
+        context, legal_actions, schema);
 }
 
 bool sorcery_actions_for(TurnPhase phase) {
@@ -384,6 +395,57 @@ bool CollectionSpec::valid() const {
                std::numeric_limits<std::uint16_t>::max() &&
            maximum_roots_per_owner_game > 0 &&
            dominance_worlds >= 2;
+}
+
+std::uint64_t owner_safe_normalization_seed(
+    const RootLocator& locator,
+    const CollectionSpec& spec) {
+    if (!spec.valid() ||
+        locator.owner_seat >= kPlayerCount) {
+        throw std::invalid_argument(
+            "owner-safe normalization coordinate is invalid");
+    }
+    return hidden_seed(locator, spec);
+}
+
+std::string owner_information_action_fingerprint(
+    const PlayerObservation& observation,
+    const LearnedDecisionContext& context,
+    std::span<const PriorityAction> canonical_actions,
+    std::string_view owner_information_schema) {
+    if (canonical_actions.size() < 2 ||
+        canonical_actions.size() >
+            kMaximumLegalActions) {
+        throw std::invalid_argument(
+            "owner-safe canonical action count is invalid");
+    }
+    std::string prior;
+    std::size_t pass_count = 0;
+    for (std::size_t index = 0;
+         index < canonical_actions.size(); ++index) {
+        const PriorityAction& action =
+            canonical_actions[index];
+        const std::string descriptor =
+            probe_data::stable_priority_action_descriptor(
+                action);
+        if (descriptor.empty() ||
+            (index != 0 && !(prior < descriptor))) {
+            throw std::invalid_argument(
+                "owner-safe actions are not descriptor-canonical");
+        }
+        prior = descriptor;
+        if (action.kind == PriorityActionKind::Pass) {
+            ++pass_count;
+        }
+    }
+    if (pass_count != 1) {
+        throw std::invalid_argument(
+            "owner-safe actions lack exactly one Pass");
+    }
+    return integrity::sha256_string(
+        owner_information_action_bytes(
+            observation, context, canonical_actions,
+            owner_information_schema));
 }
 
 std::string physical_game_id(
@@ -666,7 +728,8 @@ RootBuildResult build_canonical_root(
     try {
         safe = sample_determinization(
             point.state, decks, owner_seat,
-            hidden_seed(locator, spec));
+            owner_safe_normalization_seed(
+                locator, spec));
         safe.stats = {};
         if (safe.players[owner_seat].hand !=
             point.state.players[owner_seat].hand) {

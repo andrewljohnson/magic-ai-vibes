@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -75,6 +76,13 @@ std::string block_bound_stable_root_id(
     const RootLocator& locator,
     std::string_view information_action_fingerprint,
     std::string_view stable_root_schema);
+
+// Exact owner-safe determinization coordinate used when a source trace root
+// becomes a CanonicalRoot. Cache rehydration reuses this public pure seam to
+// prove that its privacy-safe projection reconstructs the canonical state.
+std::uint64_t owner_safe_normalization_seed(
+    const RootLocator& locator,
+    const CollectionSpec& spec);
 
 struct RetentionCandidate {
     std::size_t trace_ordinal = 0;
@@ -160,6 +168,17 @@ RootBuildResult build_canonical_root(
     const LearnedDecisionTracePoint& point,
     const SourceGame& source, std::size_t owner_seat,
     std::size_t trace_ordinal, const CollectionSpec& spec);
+
+// Pure owner-information fingerprint used by the collector and strict
+// research-cache validation. `observation` must not reveal the opponent hand,
+// and `canonical_actions` must be the complete descriptor-canonical legal
+// Priority set. No selected action, source outcome, or opponent-hidden
+// identity has an input path.
+std::string owner_information_action_fingerprint(
+    const PlayerObservation& observation,
+    const LearnedDecisionContext& context,
+    std::span<const PriorityAction> canonical_actions,
+    std::string_view owner_information_schema);
 
 struct HiddenClone {
     probes::DecisionProbe probe;

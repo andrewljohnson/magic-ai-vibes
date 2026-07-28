@@ -894,6 +894,102 @@ void test_canonical_hidden_boundary_and_dispositions() {
         "singleton Pass was not classified trivial");
 }
 
+void test_owner_safe_fingerprint_and_normalization_seams() {
+    const PriorityFixture fixture = priority_fixture();
+    const collection::RootBuildResult built =
+        collection::build_canonical_root(
+            fixture.point, fixture.source,
+            fixture.owner, 7, spec());
+    expect(
+        built.disposition ==
+                collection::RootDisposition::
+                    RetentionCandidate &&
+            built.root.has_value(),
+        "owner-safe seam fixture was not canonical");
+    const collection::CanonicalRoot& root =
+        *built.root;
+
+    std::vector<old_school::PriorityAction> actions;
+    actions.reserve(root.probe.candidates.size());
+    for (const old_school::probes::Candidate& candidate :
+         root.probe.candidates) {
+        const auto* action =
+            std::get_if<old_school::PriorityAction>(
+                &candidate.action);
+        expect(action != nullptr,
+               "canonical candidate was not Priority");
+        actions.push_back(*action);
+    }
+    const old_school::PlayerObservation observation =
+        old_school::observe_game_state(
+            root.probe.state, fixture.owner);
+    const std::string fingerprint =
+        collection::owner_information_action_fingerprint(
+            observation, fixture.point.context,
+            actions, kOwnerSchema);
+    expect(
+        fingerprint ==
+            root.manifest
+                .information_action_fingerprint,
+        "public owner-safe fingerprint differs from collection");
+
+    const collection::HiddenClone hidden =
+        collection::make_hidden_clone(root);
+    expect(
+        hidden.eligible && hidden.distinct &&
+            collection::owner_information_action_fingerprint(
+                old_school::observe_game_state(
+                    hidden.probe.state, fixture.owner),
+                fixture.point.context,
+                actions, kOwnerSchema) ==
+                fingerprint,
+        "hidden repartition changed owner-safe fingerprint");
+
+    const std::uint64_t seed =
+        collection::owner_safe_normalization_seed(
+            root.manifest.locator, spec());
+    expect(
+        seed ==
+                collection::owner_safe_normalization_seed(
+                    root.manifest.locator, spec()) &&
+            old_school::sample_determinization(
+                fixture.point.state,
+                root.probe.original_decks,
+                fixture.owner, seed) ==
+                root.probe.state,
+        "public normalization seed did not reconstruct canonical state");
+
+    auto revealed = observation;
+    revealed.revealed_opponent_hand =
+        std::vector<old_school::CardId>{
+            old_school::CardId::Mountain,
+        };
+    bool rejected_reveal = false;
+    try {
+        static_cast<void>(
+            collection::owner_information_action_fingerprint(
+                revealed, fixture.point.context,
+                actions, kOwnerSchema));
+    } catch (const std::exception&) {
+        rejected_reveal = true;
+    }
+    expect(rejected_reveal,
+           "owner-safe fingerprint accepted opponent hand IDs");
+
+    std::reverse(actions.begin(), actions.end());
+    bool rejected_order = false;
+    try {
+        static_cast<void>(
+            collection::owner_information_action_fingerprint(
+                observation, fixture.point.context,
+                actions, kOwnerSchema));
+    } catch (const std::invalid_argument&) {
+        rejected_order = true;
+    }
+    expect(rejected_order,
+           "owner-safe fingerprint accepted noncanonical actions");
+}
+
 } // namespace
 
 int main() {
@@ -939,6 +1035,10 @@ int main() {
             {
                 "canonical hidden boundary",
                 test_canonical_hidden_boundary_and_dispositions,
+            },
+            {
+                "owner-safe fingerprint and normalization",
+                test_owner_safe_fingerprint_and_normalization_seams,
             },
         };
     std::size_t passed = 0;
