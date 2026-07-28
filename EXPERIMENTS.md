@@ -17442,6 +17442,112 @@ game where decking is a win condition. Suppressing it would be a strategic
 heuristic that can erase valid decking lines. Keep equality-only PD0 as the
 mechanical proof and let learned action evaluation choose the target.
 
+EXPLORE-7 result, completed 2026-07-28: **width and horizon cannot repair the
+captured decision because the continuation return is terminally saturated;
+the frozen critic itself has the right ordering after the chosen effect
+resolves**. The exact one-off reproducer was
+`/private/tmp/ancestral_pd0.cpp`; it loaded the immutable C16 artifact and
+used the declared seed and common-world matrix. The nine unique cells took
+`.119081` seconds after root reconstruction:
+
+| K | H | Pass shallow / continuation / blended | Self shallow / continuation / blended | Opponent shallow / continuation / blended | terminal / bootstrap |
+| ---: | ---: | --- | --- | --- | ---: |
+| 8 | 4 | .888662 / 1 / .987629 | .869253 / 1 / .985473 | .898729 / 1 / .988748 | 24 / 0 |
+| 32 | 4 | .888662 / 1 / .996626 | .869253 / 1 / .996038 | .898729 / 1 / .996931 | 96 / 0 |
+| 64 | 4 | .888662 / 1 / .998287 | .869253 / 1 / .997989 | .898729 / 1 / .998442 | 192 / 0 |
+| 256 | 4 | .888662 / 1 / .999567 | .869253 / .998452 / .997949 | .898729 / .998384 / .997997 | 766 / 2 |
+| 64 | 0 | .888662 / 1 / .998287 | .869253 / 1 / .997989 | .898729 / 1 / .998442 | 192 / 0 |
+| 64 | 1 | .888662 / 1 / .998287 | .869253 / 1 / .997989 | .898729 / 1 / .998442 | 192 / 0 |
+| 64 | 8 | .888662 / 1 / .998287 | .869253 / 1 / .997989 | .898729 / 1 / .998442 | 192 / 0 |
+| 64 | 12 | .888662 / 1 / .998287 | .869253 / 1 / .997989 | .898729 / 1 / .998442 | 192 / 0 |
+| 64 | 20 | .888662 / 1 / .998287 | .869253 / 1 / .997989 | .898729 / 1 / .998442 | 192 / 0 |
+
+Every blended cell selects opponent-target. H0 through H20 at K64 are
+bit-identical because all three branches win while completing the current
+turn, before the requested future horizon begins. K256 produces only a tiny
+unblended self-over-opponent margin (`.00006744`), but Pass remains the
+unblended winner and the one shallow observation still selects
+opponent-target after the exact deployed aggregation. More MCTS simulations
+using this terminal return and unresolved prior would make the same tie more
+confident rather than add foresight.
+
+The already declared settled-value decomposition then forced each candidate
+and no responses only until its immediate root effect resolved, before any
+further policy action. Across the same 64 information-set worlds:
+
+| Boundary | C16 critic mean | Actor hand/library | Opponent hand/library |
+| --- | ---: | ---: | ---: |
+| self-target draw | .912386 | 5 / 24 | 5 / 27 |
+| Pass | .888662 | 3 / 27 | 5 / 27 |
+| opponent-target draw | .872225 | 2 / 27 | 8 / 24 |
+
+Thus neither missing card identity nor critic capacity is the immediate cause.
+The deployed shallow prior evaluates a cast spell while it is unresolved on
+the stack; the same frozen critic orders the actual public/own consequences
+correctly once the rules engine resolves that effect. EXPLORE-7 selects a
+general action-evaluation-boundary treatment before a new network or tree.
+
+##### FQ4-EXPLORE-8 resolved-consequence shallow-prior declaration
+
+Declared 2026-07-28 before changing bot logic or opening gameplay seed
+`202607281702`; repository and Git-history search found that seed unused.
+This is a rapid general-search treatment, not an Ancestral rule and not an
+MCTS claim.
+
+Falsifiable hypothesis: replacing C16's unresolved-action shallow observation
+with a rules-engine-settled immediate-consequence observation will preserve
+its broad gameplay strength while correcting target/action distinctions that
+are otherwise erased by terminally saturated continuations.
+
+Add one default-off Learned Value configuration bit. For a candidate root
+action, clone the already sampled information-set world and:
+
+1. apply the exact legal action;
+2. assume no intervening responses only for this shallow observation;
+3. for an action that creates a stack object, pass priority until that new
+   top object resolves; for Pass with a nonempty stack, pass until the current
+   top object resolves; for an empty-stack action, retain its immediate
+   applied state;
+4. return an exact terminal score if resolution ends the game, otherwise
+   evaluate the unchanged frozen critic at that resulting rules state.
+
+The real continuation remains the existing four-turn Learned mirror and still
+models alternating priority and responses. Only the one shallow prior
+observation changes. No card name, target heuristic, material weight,
+Handcrafted label, hidden opponent identity, model weight, combat evaluator,
+or terminal reward changes.
+
+Engineering gates:
+
+1. default-off configuration is bit-identical and benchmark policy identity
+   distinguishes the treatment;
+2. the exact captured target root changes from opponent-target to self-target
+   under the treatment, with the three settled values above reproduced;
+3. hidden opponent hand/library repartitions leave every treatment score and
+   selected action bit-identical;
+4. legal actions, common-world seeds, continuation samples, rollout
+   accounting, and the actual continuation policy are unchanged;
+5. generic regressions cover a spell resolving to a public/own consequence,
+   Pass over a nonempty stack, a non-stack action, terminal resolution, and a
+   real counter-war without filtering any action; and
+6. strict unit/integration tests and sanitizers remain green.
+
+After those gates, run treatment-first on fresh seed `202607281702` against
+ordinary C16 for exactly one balanced repetition: 60 games total, 12 per
+challenger deck, exact K8/H4/R1, identical frozen C16 model, no PD0,
+AdversarialBlocks, Priority residual, continuation controller, or exploration
+on either arm. Strictly more than 30 treatment wins advances it to a clearly
+labeled web pilot for owner play-testing; 30 or fewer stops it. Report all
+five deck rows, runtime, decisions, and rollouts. This is a candidate selector,
+not a strength or Learned-is-king claim. Do not compose it with EXPLORE-6 in
+this experiment.
+
+`REVIEW.md` was reread through its newest 16:29 entry after EXPLORE-7 and
+before this declaration. Its proposed Pareto filter is superseded by the
+stronger observed localization: the unchanged critic already represents the
+right consequence ordering, so fix where the generic action prior observes
+the rules transition rather than asserting a hand-authored resource order.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
