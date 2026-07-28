@@ -336,7 +336,9 @@ int run_pd0_exploration(
         << " E0_repetitions=" << kPd0StageE0Repetitions
         << " E1_seed=" << kPd0StageE1Seed
         << " E1_repetitions=" << kPd0StageE1Repetitions
-        << " baseline=C16 pass_dominance=on"
+        << " baseline=C16"
+        << " challenger_pass_dominance=on"
+        << " baseline_pass_dominance=off"
         << " runtime=descriptive\n";
     output.flush();
 

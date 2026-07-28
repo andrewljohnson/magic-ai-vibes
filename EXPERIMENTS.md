@@ -17003,6 +17003,75 @@ tests. It must reuse exact endpoint loading and in-memory construction, leave
 the engine and existing fixed candidates unchanged, and perform no artifact
 publication.
 
+EXPLORE-2 result, completed 2026-07-28 14:28 PDT: **rejected quickly; Pass
+dominance did not improve aggregate gameplay**. Exact command:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-blend-explore --pd0
+# winner mode=PD0 stage=E1 variant=C16+PD0 alpha=0
+# wins=116 losses=124 draws=0
+# real 97.82
+# user 820.94
+# sys 2.32
+```
+
+E0 ranked the two new policy configurations:
+
+| Candidate | Aggregate | Green | Red | Blue | White | RU Aggro | Seconds | Decisions | Rollouts |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C16+PD0 | 32-28 | 3-9 | 6-6 | 9-3 | 6-6 | 8-4 | 13.469 | 2,547 | 58,536 |
+| alpha0.50+PD0 | 31-29 | 4-8 | 7-5 | 8-4 | 6-6 | 6-6 | 21.514 | 3,297 | 84,152 |
+
+C16+PD0 therefore advanced. Its E1 result was 116-124 (48.3333%):
+Green 16-32, Red 22-26, Blue 32-16, White 24-24, and RU Aggro 22-26;
+62.764 seconds, 11,189 decisions, and 268,648 rollouts. The policy showed
+the expected Blue strength but lost too much elsewhere, especially Green.
+The hypothesis is rejected and the family stops without tuning.
+
+The committed `d922a63` runner printed the ambiguous plan fragment
+`baseline=C16 pass_dominance=on`. Independent source review during E0 found
+that the actual baseline configuration was correctly ordinary C16 with PD0
+off at both stages; only the label was wrong. The source was immediately
+corrected to print separate challenger-on/baseline-off fields, focused tests
+remained 7/7, and the result is valid. This display correction changes no
+game, model, configuration, seed, or ranking. `REVIEW.md` was reread through
+its newest 14:21 entry before this conclusion.
+
+##### FQ4-EXPLORE-3 adversarial-block attack evaluation declaration
+
+Declared immediately after EXPLORE-2 and before changing engine policy logic
+or opening either seed. This is a new card-agnostic attack-selection
+mechanism. The current Learned attack evaluator averages attacker-perspective
+value over sampled legal defender block sets. That can reward an attack
+because cooperative or absurd blocks offset the defender's best response.
+The treatment instead scores each attack set by the minimum
+attacker-perspective value over the same legal block candidates, then chooses
+the attack with the maximum such worst-case value. It changes no legal move,
+card rule, feature, hidden information, model parameter, Priority decision,
+block choice, or noncombat decision.
+
+Falsifiable exploratory hypothesis: defender-best-response attack scoring
+will reduce strategically bad attacks and improve at least one of exact C16
+or the alpha-0.50 model enough that the best treatment exceeds 50% against
+ordinary C16 in the follow-up screen.
+
+1. Add one default-off bot configuration switch for this scoring aggregation.
+   Default-off behavior and deterministic RNG consumption must remain exact.
+   Add a focused unit fixture proving the treatment chooses the higher
+   worst-case attack when mean and minimum rank two synthetic attack sets
+   differently. No card-specific condition is permitted.
+2. E0 uses fresh seed `202607280805`, one repetition / 60 balanced games each
+   for `C16+AdversarialBlocks` and `alpha0.50+AdversarialBlocks` against
+   ordinary C16. Rank by total wins; an exact tie prefers the simpler C16
+   treatment.
+3. E1 uses fresh seed `202607280806`, four repetitions / 240 balanced games
+   for the E0 winner only. Report aggregate, all five deck rows, runtime,
+   decisions, and rollouts. More than 50% advances to web human play-testing;
+   otherwise stop this family and test a different mechanism.
+
+This is exploration, not a strength claim. Reuse the fast runner and avoid
+artifact publication or a general-purpose audit framework.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
