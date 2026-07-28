@@ -16784,6 +16784,99 @@ run. Next: commit and push the exact harness plus this record, rebuild and
 obtain post-commit GO, then run exactly
 `/usr/bin/time -p ./build/old-school-fq4-dev5-gameplay --smoke`.
 
+DEV5 GP0 result, completed 2026-07-28 12:36 PDT:
+**infrastructure PASS; candidate REJECTED by the preregistered runtime gate;
+no 2,040-game gate is licensed**. Commit and `origin/main` were both
+`7741f55fe7621adce1b71f7df18f14d24f3f91b0`. Two independent post-commit
+preflights forced a strict rebuild, reproduced 9/9 tests plus all source,
+link, object, CLI, and symbol firewalls, and returned explicit GO for the
+sole reserved command. One also reproduced 9/9 under
+AddressSanitizer/UndefinedBehaviorSanitizer and removed its exact temporary
+build. The production gameplay binary was 1,430,032 bytes with SHA-256
+`65f86f3684588f3265bffe562686af026efa8dc80ebc1f3f81de65de4ff010c5`.
+The full repository gate passed after commit. C16 and the anchored artifact
+remained exact at 3,111,437 bytes / `53aeb904...944ca` and 237,496 bytes /
+`8252646b...f5fc`.
+
+Exact command:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev5-gameplay --smoke
+# result=REJECT
+# real 165.43
+# user 1230.68
+# sys 4.88
+```
+
+The exact C16/C16 control on evaluation seed `202607280701` completed all 240
+games, four repetitions over the 15 pairings, at 120-120-0. Its wall time
+was 59.033563 seconds, with 10,506 decisions, 255,088 rollouts, 4,846 turns,
+184 life-total finishes, 56 empty-library finishes, and zero turn-limit
+draws. Its descriptive challenger deck rows were Green 15-33, Red 23-25,
+Blue 31-17, White 28-20, and RU Aggro 23-25; exact policy identity makes
+only the aggregate 120-120 control score inferential.
+
+The anchored candidate completed all 240 anchored/C16 games at 112-128-0,
+46.6667% with Wilson 95% interval 40.4572%-52.9812%. It therefore passed the
+frozen 40.0% large-regression strength floor. The all-five-deck descriptive
+rows, shown as anchored challenger then C16 baseline, were:
+
+| Deck | Anchored | C16 |
+| --- | ---: | ---: |
+| Green | 17-31 | 21-27 |
+| Red | 25-23 | 26-22 |
+| Blue | 31-17 | 28-20 |
+| White | 21-27 | 31-17 |
+| RU Aggro | 18-30 | 22-26 |
+
+All fixed-identity, artifact-immutability, model-immutability, accounting,
+control, and aggregate-floor fields were one. The sole failed gate was
+runtime: candidate wall time 106.277636292 seconds divided by control
+59.033563 seconds is 1.800291747, above the frozen 1.25 limit. The candidate
+made 14,666 decisions, ran 408,808 rollouts, and took 5,158 turns. Relative
+to control, decisions were 1.395964211 times, rollouts 1.602615568 times,
+turns 1.064382996 times, and seconds per rollout 1.123345975 times. Thus most
+of the slowdown is genuine policy-induced search work rather than harness
+loading or fitting overhead: the Priority change reaches trajectories with
+many more decision/action branches, with a smaller additional increase in
+per-rollout state cost. At fixed K8, searched legal actions per decision rose
+from `255088 / (8 * 10506) = 3.035027603` to
+`408808 / (8 * 14666) = 3.484317469`, adding 19,215 searched action slots.
+The printed `runtime_ratio=0` is the false boolean gate field; the controlling
+numeric ratio is 1.800291747 above.
+
+Decision: reject anchored model `22834a95...b2171` as a gameplay challenger
+and preserve C16 as champion. The 112-128 score alone is deliberately not
+treated as proof of a small strength regression at only 240 games; its
+interval crosses 50%. The predeclared hard runtime failure is nevertheless
+sufficient to stop it, and the White, Green, and RU rows are adverse
+descriptive evidence rather than per-deck acceptance tests. No 2,040-game
+seed was declared or opened.
+
+Next: do not tune against this one gameplay seed and do not use a static
+same-root legal-action census as a proxy for the slowdown. Both heads see the
+same legal actions and pay the same K8 work before selecting an action at a
+shared root; the differential cost arises at later states. Preregister an
+instrumentation-only replay of the already-open coordinate, excluded from
+strength and timing evidence, that must exactly reproduce both outcome rows
+and aggregate work counts before its new fields are valid. Partition
+nontrivial decisions and searched legal-action slots by policy, owner deck,
+phase, public stack empty/active, action-width histogram, and selected Pass
+versus non-Pass. Measure those immutable descriptive counts first, then
+preregister the next exact census and treatment rather than guessing quotas.
+If replay instrumentation cannot reproduce the original coordinate exactly,
+reject the diagnostic. A valid offline alternative must be
+successor/trajectory-sensitive: paired common-world application of each
+head's selected action through the next nontrivial priority boundary, not
+static root scoring.
+
+`REVIEW.md` was reread through its newest 12:29 cycle after the run and before
+this conclusion. That entry still reported the then-correct pre-commit idle
+state, explicitly said commit plus countersign would open the smoke, and
+contained no conflicting result. Independent post-result review countersigned
+the rejection and required the trajectory-sensitive correction above before
+selecting the exact next diagnostic implementation.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
