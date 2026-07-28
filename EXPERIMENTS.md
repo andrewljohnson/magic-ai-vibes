@@ -15535,6 +15535,25 @@ fail-closed. No publisher or reserved gameplay seed has run. The simulator
 process noted in `REVIEW.md` at 06:29 was the full gate's ordinary
 `--games 5 --seed 1` CLI smoke, not GP0 or its reserved seed.
 
+Candidate publication completed and was accepted 2026-07-28 06:31 PDT:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev1-candidate-publish
+# schema=old-school-fq4-dev1-priority-candidate-v1 result=PUBLISHED
+# artifact_bytes=237282
+# artifact_sha256=aca8ba9c337a5b41d0cf624f7ec46ab652c7bebc1b5c2c29fa844b900c467f63
+# candidate_model=712600783152e89ff1a53394149764db227e55289a656530342226b7e1ee6151
+# real 0.99
+```
+
+The publisher fitted the fixed candidate twice, required bit-identical
+parameters/fingerprints/accounting, published through its atomic no-replace
+path, and reloaded the exact candidate from C16. Independent `shasum` and
+`wc -c` checks reproduced the reported SHA-256 and 237,282-byte size; the
+deterministic temporary was absent afterward. This accepts only the immutable
+artifact publication, not gameplay strength. The gameplay consumer is now
+pinned to this exact byte identity. No reserved gameplay seed has run.
+
 The control uses exact C16 with this same recipe. The treatment changes only
 the outer Priority tensors to `71260078...6151`. In particular, residual
 weight zero is forbidden because it would make the treatment inert. Every

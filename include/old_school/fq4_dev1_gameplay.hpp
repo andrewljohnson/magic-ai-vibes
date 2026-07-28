@@ -28,10 +28,11 @@ inline constexpr std::string_view kParentModelFingerprint =
     "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
 inline constexpr std::string_view kCandidateModelFingerprint =
     "712600783152e89ff1a53394149764db227e55289a656530342226b7e1ee6151";
-// Patched exactly once after the no-replace publisher creates the canonical
-// artifact. A zero/empty identity makes every production mode fail closed.
-inline constexpr std::size_t kCandidateArtifactBytes = 0;
-inline constexpr std::string_view kCandidateArtifactSha256 = "";
+// Pinned from the first and only no-replace publication of the canonical
+// artifact.
+inline constexpr std::size_t kCandidateArtifactBytes = 237'282;
+inline constexpr std::string_view kCandidateArtifactSha256 =
+    "aca8ba9c337a5b41d0cf624f7ec46ab652c7bebc1b5c2c29fa844b900c467f63";
 inline constexpr std::size_t kTrainingGames = 800;
 inline constexpr std::uint64_t kTrainingSeed = 424242;
 inline constexpr std::size_t kParentGenerations = 16;
