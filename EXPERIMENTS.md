@@ -16931,6 +16931,78 @@ frozen evaluation. Exact commands, model fingerprints, aggregate and
 five-deck rows, runtimes, and the stop/advance decision will be recorded after
 the run.
 
+EXPLORE-1 result, completed 2026-07-28 14:22 PDT: **the partial-delta
+hypothesis showed useful signal, but the family did not clear the fast
+traction gate and stops**. The committed runner was `d21035e`; focused
+release and AddressSanitizer/UndefinedBehaviorSanitizer tests each passed
+5/5. Exact command:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-blend-explore
+# winner stage=E1 alpha=0.5 wins=120 losses=120 draws=0
+# real 287.19
+# user 1915.48
+# sys 15.66
+```
+
+The exact in-memory model fingerprints were alpha 0.25
+`12cf7455...f65cd7`, alpha 0.50 `c058566a...1f58e7`, alpha 0.75
+`004372dd...06afb`, and alpha 1.00 exact DEV5 `22834a95...b2171`.
+The E0 C16/C16 control was exactly 30-30. E0 candidate results were:
+
+| Alpha | Aggregate | Green | Red | Blue | White | RU Aggro | Seconds |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.25 | 28-32 | 3-9 | 5-7 | 9-3 | 6-6 | 5-7 | 18.733 |
+| 0.50 | 31-29 | 3-9 | 5-7 | 10-2 | 6-6 | 7-5 | 21.409 |
+| 0.75 | 31-29 | 2-10 | 6-6 | 9-3 | 6-6 | 8-4 | 24.428 |
+| 1.00 | 28-32 | 2-10 | 5-7 | 9-3 | 5-7 | 7-5 | 28.430 |
+
+Thus both middle blends beat full DEV5 descriptively on the same 60-game
+coordinate, satisfying the hypothesis's first clause. The declared
+smaller-alpha tie break advanced 0.50 and 0.75. Their E1 results were:
+
+| Alpha | Aggregate | Green | Red | Blue | White | RU Aggro | Seconds | Decisions | Rollouts |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.50 | 120-120 | 17-31 | 29-19 | 30-18 | 24-24 | 20-28 | 96.332 | 13,422 | 348,704 |
+| 0.75 | 119-121 | 19-29 | 29-19 | 28-20 | 22-26 | 21-27 | 81.161 | 14,042 | 363,272 |
+
+Alpha 0.50 moved the full DEV5 regression to exact aggregate parity and
+retained strong Red/Blue rows, but it did not exceed 50%; its Green and RU
+rows remained poor. This is not a strength claim at 240 games. Per the frozen
+stop rule, do not deploy it to the web, do not scan more alphas, and do not
+power this family. `REVIEW.md` was reread through its newest 14:21
+cross-tree verification before this conclusion.
+
+##### FQ4-EXPLORE-2 Pass-dominance composition declaration
+
+Declared immediately after EXPLORE-1 and before changing the fast runner or
+opening either new seed. This is a genuinely different policy intervention,
+not another alpha scan. It uses the existing card-agnostic,
+hidden-information-safe `value_pass_dominance` mechanism, which rejects a
+non-Pass action only when the engine's public settlement/resource comparison
+proves it strictly worse than passing. This directly targets observed X=0,
+self/redundant counter, and resource-waste choices without naming a card.
+
+Falsifiable exploratory hypothesis: Pass dominance will add useful action
+hygiene to at least one of exact C16 or the EXPLORE-1 alpha-0.50 model, and
+the best composition will exceed 50% against ordinary C16 in the follow-up
+screen.
+
+1. E0 uses fresh seed `202607280803`, one repetition / 60 balanced games per
+   candidate, testing exactly `C16+PD0` and `alpha0.50+PD0` against ordinary
+   C16. Rank by total wins; an exact tie prefers the simpler `C16+PD0`.
+2. E1 runs only the E0 winner on fresh seed `202607280804`, four repetitions /
+   240 balanced games. Report aggregate and all five deck rows. Runtime,
+   decisions, and rollouts are descriptive only.
+3. More than 50% in E1 advances the winner to the web client for human
+   strategic testing. Otherwise stop this family and move directly to the
+   separately isolated adversarial-block attack evaluator; do not tune PD0.
+
+The runner may gain one explicit `--pd0` exploratory mode and focused contract
+tests. It must reuse exact endpoint loading and in-memory construction, leave
+the engine and existing fixed candidates unchanged, and perform no artifact
+publication.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
