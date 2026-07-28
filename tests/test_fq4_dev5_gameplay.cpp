@@ -747,6 +747,7 @@ void test_fixed_recipe_and_call_order() {
             bot.value_continuation_epsilon == 0.0 &&
             bot.value_priority_residual_weight == 0.10 &&
             !bot.value_pass_dominance &&
+            !bot.value_adversarial_blocks &&
             bot.value_continuation_controller ==
                 old_school::
                     LearnedContinuationController::Legacy &&
@@ -870,6 +871,15 @@ void test_all_five_deck_accounting_and_mutations() {
             gameplay::kCandidateModelFingerprint,
             gameplay::kParentModelFingerprint),
         "valid unequal-policy accounting was rejected");
+    auto policy_drift = summary;
+    policy_drift.challenger.value_adversarial_blocks = true;
+    expect(
+        !gameplay::testing::benchmark_accounting_exact(
+            policy_drift, expected_challenger,
+            expected_baseline,
+            gameplay::kCandidateModelFingerprint,
+            gameplay::kParentModelFingerprint),
+        "adversarial-block policy drift was accepted");
 
     auto broken_row = summary;
     bool row_swapped = false;

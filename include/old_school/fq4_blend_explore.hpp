@@ -27,6 +27,15 @@ inline constexpr std::uint64_t kPd0StageE1Seed =
     202607280804ULL;
 inline constexpr std::size_t kPd0StageE1Repetitions = 4;
 inline constexpr double kPd0BlendAlpha = 0.50;
+inline constexpr std::uint64_t
+    kAdversarialBlocksStageE0Seed = 202607280805ULL;
+inline constexpr std::size_t
+    kAdversarialBlocksStageE0Repetitions = 1;
+inline constexpr std::uint64_t
+    kAdversarialBlocksStageE1Seed = 202607280806ULL;
+inline constexpr std::size_t
+    kAdversarialBlocksStageE1Repetitions = 4;
+inline constexpr double kAdversarialBlocksBlendAlpha = 0.50;
 
 struct CandidateScore {
     double alpha = 0.0;
@@ -52,11 +61,15 @@ std::array<double, 2> select_top_two_alphas(
 double select_pd0_winner_alpha(
     const std::array<CandidateScore, 2>& scores);
 
+double select_adversarial_blocks_winner_alpha(
+    const std::array<CandidateScore, 2>& scores);
+
 // Returns the exact K8/H4/R1 C16 deployment recipe with only the explicit
-// Pass-dominance switch selected by the caller.
+// exploratory switches selected by the caller.
 BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
-    bool pass_dominance);
+    bool pass_dominance,
+    bool adversarial_blocks = false);
 
 int run_cli(
     int argc, char* argv[], std::ostream& output,

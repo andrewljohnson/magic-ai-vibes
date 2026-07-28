@@ -671,6 +671,7 @@ void test_exact_recipe_builders() {
             learned.value_continuation_epsilon == 0.0 &&
             learned.value_priority_residual_weight == 0.10 &&
             !learned.value_pass_dominance &&
+            !learned.value_adversarial_blocks &&
             learned.value_continuation_controller ==
                 old_school::LearnedContinuationController::
                     Legacy &&
@@ -928,6 +929,12 @@ void test_accounting_accepts_unequal_production_summary() {
         gameplay::testing::benchmark_accounting_exact(
             production, spec, handcrafted, random, {}, {}),
         "valid unequal-policy production accounting was rejected");
+    auto policy_drift = production;
+    policy_drift.challenger.value_adversarial_blocks = true;
+    expect(
+        !gameplay::testing::benchmark_accounting_exact(
+            policy_drift, spec, handcrafted, random, {}, {}),
+        "adversarial-block policy drift was accepted");
 
     const auto row_totals =
         [](const old_school::BotBenchmarkSummary& value,

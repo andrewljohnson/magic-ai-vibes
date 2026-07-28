@@ -193,14 +193,16 @@ TimedResult run_one(
     std::shared_ptr<const LearnedModel> baseline_model,
     std::size_t repetitions, std::uint64_t seed,
     bool identical_control,
-    bool challenger_pass_dominance = false) {
+    bool challenger_pass_dominance = false,
+    bool challenger_adversarial_blocks = false) {
     const BotConfig challenger =
         make_exploratory_bot(
             std::move(challenger_model),
-            challenger_pass_dominance);
+            challenger_pass_dominance,
+            challenger_adversarial_blocks);
     const BotConfig baseline =
         make_exploratory_bot(
-            std::move(baseline_model), false);
+            std::move(baseline_model), false, false);
     const auto started = std::chrono::steady_clock::now();
     BotBenchmarkSummary summary = run_bot_benchmark(
         repetitions, seed, challenger, baseline,
@@ -406,6 +408,132 @@ int run_pd0_exploration(
     return 0;
 }
 
+int run_adversarial_blocks_exploration(
+    const gameplay::FixedDeployment& deployment,
+    std::ostream& output) {
+    struct AdversarialBlocksVariant {
+        std::string_view name;
+        double alpha = 0.0;
+        std::shared_ptr<const LearnedModel> model;
+        std::string fingerprint;
+    };
+
+    auto half_blend = blend_priority_heads(
+        deployment.parent, deployment.candidate,
+        kAdversarialBlocksBlendAlpha);
+    std::array<AdversarialBlocksVariant, 2> variants{{
+        {
+            .name = "C16+AdversarialBlocks",
+            .alpha = 0.0,
+            .model = deployment.parent,
+            .fingerprint =
+                deployment.parent_model_fingerprint,
+        },
+        {
+            .name = "alpha0.50+AdversarialBlocks",
+            .alpha = kAdversarialBlocksBlendAlpha,
+            .model = std::move(half_blend),
+            .fingerprint = {},
+        },
+    }};
+    variants[1].fingerprint =
+        learned_model_fingerprint(variants[1].model);
+
+    output
+        << "FQ4 Adversarial-block composition exploration"
+        << " parent="
+        << deployment.parent_model_fingerprint
+        << " alpha0.50=" << variants[1].fingerprint
+        << '\n'
+        << "plan mode=AdversarialBlocks E0_seed="
+        << kAdversarialBlocksStageE0Seed
+        << " E0_repetitions="
+        << kAdversarialBlocksStageE0Repetitions
+        << " E1_seed=" << kAdversarialBlocksStageE1Seed
+        << " E1_repetitions="
+        << kAdversarialBlocksStageE1Repetitions
+        << " baseline=C16"
+        << " challenger_adversarial_blocks=on"
+        << " baseline_adversarial_blocks=off"
+        << " runtime=descriptive\n";
+    output.flush();
+
+    std::array<CandidateScore, 2> stage_e0_scores;
+    for (std::size_t index = 0; index < variants.size();
+         ++index) {
+        const auto& variant = variants[index];
+        output
+            << "running mode=AdversarialBlocks stage=E0"
+            << " variant=" << variant.name
+            << " alpha=" << variant.alpha
+            << " model=" << variant.fingerprint << '\n';
+        output.flush();
+        const TimedResult result = run_one(
+            variant.model, deployment.parent,
+            kAdversarialBlocksStageE0Repetitions,
+            kAdversarialBlocksStageE0Seed,
+            false, false, true);
+        print_result(
+            output, "E0", variant.name,
+            variant.alpha, result);
+        stage_e0_scores[index] = {
+            .alpha = variant.alpha,
+            .wins = result.summary.challenger_stats.wins,
+            .losses =
+                result.summary.challenger_stats.losses,
+            .draws = result.summary.challenger_stats.draws,
+        };
+    }
+
+    const double winner_alpha =
+        select_adversarial_blocks_winner_alpha(
+            stage_e0_scores);
+    const auto winner = std::find_if(
+        variants.begin(), variants.end(),
+        [winner_alpha](
+            const AdversarialBlocksVariant& variant) {
+            return variant.alpha == winner_alpha;
+        });
+    if (winner == variants.end()) {
+        throw std::logic_error(
+            "AdversarialBlocks winner has no model");
+    }
+    output
+        << "selection mode=AdversarialBlocks stage=E1"
+        << " variant=" << winner->name
+        << " alpha=" << winner->alpha
+        << " tie_break=C16+AdversarialBlocks\n";
+    output.flush();
+
+    output
+        << "running mode=AdversarialBlocks stage=E1"
+        << " variant=" << winner->name
+        << " alpha=" << winner->alpha
+        << " model=" << winner->fingerprint << '\n';
+    output.flush();
+    const TimedResult stage_e1 = run_one(
+        winner->model, deployment.parent,
+        kAdversarialBlocksStageE1Repetitions,
+        kAdversarialBlocksStageE1Seed,
+        false, false, true);
+    print_result(
+        output, "E1", winner->name,
+        winner->alpha, stage_e1);
+    output
+        << "winner mode=AdversarialBlocks stage=E1"
+        << " variant=" << winner->name
+        << " alpha=" << winner->alpha
+        << " wins="
+        << stage_e1.summary.challenger_stats.wins
+        << " losses="
+        << stage_e1.summary.challenger_stats.losses
+        << " draws="
+        << stage_e1.summary.challenger_stats.draws
+        << '\n';
+    output.flush();
+    return 0;
+}
+
 } // namespace
 
 std::shared_ptr<const LearnedModel> blend_priority_heads(
@@ -528,9 +656,40 @@ double select_pd0_winner_alpha(
                : scores[0].alpha;
 }
 
+double select_adversarial_blocks_winner_alpha(
+    const std::array<CandidateScore, 2>& scores) {
+    const auto is_expected_alpha =
+        [](double alpha) {
+            return alpha == 0.0 ||
+                   alpha == kAdversarialBlocksBlendAlpha;
+        };
+    if (!is_expected_alpha(scores[0].alpha) ||
+        !is_expected_alpha(scores[1].alpha) ||
+        scores[0].alpha == scores[1].alpha) {
+        throw std::invalid_argument(
+            "AdversarialBlocks ranking requires C16 and "
+            "alpha 0.50");
+    }
+    const std::size_t first_games =
+        scores[0].wins + scores[0].losses +
+        scores[0].draws;
+    const std::size_t second_games =
+        scores[1].wins + scores[1].losses +
+        scores[1].draws;
+    if (first_games == 0 || first_games != second_games) {
+        throw std::invalid_argument(
+            "AdversarialBlocks ranking requires equal "
+            "nonempty game counts");
+    }
+    return score_precedes(scores[1], scores[0])
+               ? scores[1].alpha
+               : scores[0].alpha;
+}
+
 BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
-    bool pass_dominance) {
+    bool pass_dominance,
+    bool adversarial_blocks) {
     if (!model) {
         throw std::invalid_argument(
             "exploratory bot requires a frozen model");
@@ -539,6 +698,7 @@ BotConfig make_exploratory_bot(
         gameplay::testing::make_learned_bot(
             std::move(model));
     bot.value_pass_dominance = pass_dominance;
+    bot.value_adversarial_blocks = adversarial_blocks;
     return bot;
 }
 
@@ -546,12 +706,15 @@ int run_cli(
     int argc, char* argv[], std::ostream& output,
     std::ostream& error) {
     constexpr std::string_view kUsage =
-        "Usage: old-school-fq4-blend-explore [--pd0]\n";
+        "Usage: old-school-fq4-blend-explore"
+        " [--pd0|--adversarial-blocks]\n";
     const bool valid_arguments =
         argv != nullptr && argv[0] != nullptr &&
         (argc == 1 ||
          (argc == 2 && argv[1] != nullptr &&
-          std::string_view(argv[1]) == "--pd0"));
+          (std::string_view(argv[1]) == "--pd0" ||
+           std::string_view(argv[1]) ==
+               "--adversarial-blocks")));
     if (!valid_arguments) {
         error << kUsage;
         return 2;
@@ -560,7 +723,11 @@ int run_cli(
         const gameplay::FixedDeployment deployment =
             load_exact_deployment();
         if (argc == 2) {
-            return run_pd0_exploration(
+            if (std::string_view(argv[1]) == "--pd0") {
+                return run_pd0_exploration(
+                    deployment, output);
+            }
+            return run_adversarial_blocks_exploration(
                 deployment, output);
         }
         const std::vector<Variant> variants =

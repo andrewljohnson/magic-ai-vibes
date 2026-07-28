@@ -581,6 +581,10 @@ struct BotConfig {
     // choices. It changes neither legal actions nor any other policy. False
     // preserves the historical selector and RNG stream bit-for-bit.
     bool value_pass_dominance = false;
+    // Value-only attack-set aggregation. False averages over the existing
+    // sampled legal block sets. True instead uses their minimum
+    // attacker-perspective value, without changing which blocks are sampled.
+    bool value_adversarial_blocks = false;
     // Versioned, continuation-only controller for Learned Value. Legacy is
     // the exact historical behavior. PublicStackPassV1 is applied only in
     // depth-zero Value-mirror continuations, never at a real root.
@@ -898,14 +902,25 @@ struct LearnedValueBinaryBlockScores {
     std::size_t selected_candidate = 0;
 };
 
+// Pure aggregation seam used by the deployed attack-set scorer. Outer rows
+// are attack candidates and inner rows are the already-generated
+// attacker-perspective legal-block scores. False preserves the historical
+// mean; true uses the defender's best response (the minimum).
+LearnedValueAttackSetScores
+aggregate_learned_value_attack_block_scores(
+    const std::vector<std::vector<double>>& block_scores,
+    bool adversarial_blocks);
+
 // Evaluation-only view of the deployed Value attack-set selector. `seed`
 // initializes the RNG exactly at the block-candidate enumeration boundary;
 // candidates are scored in caller order with the unchanged deployed
-// block-sampling distribution.
+// block-sampling distribution. The optional treatment changes only the
+// aggregation of the already-generated per-block scores.
 LearnedValueAttackSetScores learned_value_attack_set_scores(
     const GameState& state, std::size_t attacking_player,
     const std::vector<std::vector<PermanentId>>& candidates,
-    std::shared_ptr<const LearnedModel> model, std::uint64_t seed);
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed,
+    bool adversarial_blocks = false);
 
 // Evaluation-only exact immediate view of the deployed Value block selector
 // for one attacker and blocker. It scores the two post-combat states without

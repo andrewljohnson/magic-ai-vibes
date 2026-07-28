@@ -1438,6 +1438,7 @@ TEST(learned_defaults_to_value_search_champion) {
           old_school::LearnedVariant::ValueSearchChampion);
     CHECK(learned.value_continuation_epsilon == 0.0);
     CHECK(learned.value_priority_residual_weight == 0.0);
+    CHECK(!learned.value_adversarial_blocks);
     CHECK(learned.value_continuation_controller ==
           old_school::LearnedContinuationController::Legacy);
     CHECK(old_school::LearnedSearchConfig{}
@@ -8120,6 +8121,13 @@ TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
             old_school::learned_value_attack_set_scores(
                 fixture.state, 0, candidates,
                 small_value_model(), seed);
+        const auto explicit_default =
+            old_school::learned_value_attack_set_scores(
+                fixture.state, 0, candidates,
+                small_value_model(), seed, false);
+        CHECK(explicit_default.scores == scored.scores);
+        CHECK(explicit_default.selected_candidate ==
+              scored.selected_candidate);
         CHECK(scored.scores.size() == candidates.size());
         CHECK(std::all_of(
             scored.scores.begin(), scored.scores.end(),
@@ -8158,6 +8166,30 @@ TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
         rejected_actor = true;
     }
     CHECK(rejected_actor);
+}
+
+TEST(adversarial_block_aggregation_uses_defender_best_response) {
+    const std::vector<std::vector<double>> block_scores = {
+        {1.0, 1.0, 1.0, 0.0},
+        {0.5, 0.5, 0.5, 0.5},
+    };
+    const auto historical =
+        old_school::aggregate_learned_value_attack_block_scores(
+            block_scores, false);
+    const auto adversarial =
+        old_school::aggregate_learned_value_attack_block_scores(
+            block_scores, true);
+    CHECK(historical.scores ==
+          std::vector<double>({0.75, 0.5}));
+    CHECK(historical.selected_candidate == 0);
+    CHECK(adversarial.scores ==
+          std::vector<double>({0.0, 0.5}));
+    CHECK(adversarial.selected_candidate == 1);
+
+    const auto tied =
+        old_school::aggregate_learned_value_attack_block_scores(
+            {{0.25}, {0.25}}, true);
+    CHECK(tied.selected_candidate == 0);
 }
 
 TEST(handcrafted_diagnostic_scores_match_deployed_preferences) {
@@ -11132,6 +11164,29 @@ TEST(benchmark_policy_identity_includes_value_pass_dominance) {
     CHECK(!result.baseline.value_pass_dominance);
 }
 
+TEST(benchmark_policy_identity_includes_value_adversarial_blocks) {
+    const auto model = small_value_model();
+    const old_school::BotConfig control = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .training_games = 1,
+        .learned_model = model,
+    };
+    old_school::BotConfig treatment = control;
+    treatment.value_adversarial_blocks = true;
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+    bounded.learned_model = model;
+
+    const auto result = old_school::run_bot_benchmark(
+        1, 0xADB10C5ULL, treatment, control, bounded);
+    CHECK(result.total_games == 60);
+    CHECK(result.challenger.value_adversarial_blocks);
+    CHECK(!result.baseline.value_adversarial_blocks);
+}
+
 TEST(benchmark_policy_identity_includes_value_continuation_controller) {
     const auto model = small_value_model();
     const old_school::BotConfig control = {
@@ -11270,6 +11325,37 @@ TEST(value_pass_dominance_rejects_non_value_bots) {
         try {
             static_cast<void>(old_school::run_bot_benchmark(
                 1, 0xBAD504430ULL, challenger, baseline));
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        CHECK(rejected);
+    }
+}
+
+TEST(value_adversarial_blocks_rejects_non_value_bots) {
+    const std::array<old_school::BotConfig, 2> invalid = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Random,
+            .rollouts_per_action = 1,
+            .value_adversarial_blocks = true,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .value_adversarial_blocks = true,
+        },
+    };
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::Handcrafted,
+        .rollouts_per_action = 1,
+    };
+    for (const auto& challenger : invalid) {
+        bool rejected = false;
+        try {
+            static_cast<void>(old_school::run_bot_benchmark(
+                1, 0xBADADB10CULL, challenger, baseline));
         } catch (const std::invalid_argument&) {
             rejected = true;
         }

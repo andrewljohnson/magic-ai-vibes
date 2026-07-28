@@ -111,6 +111,17 @@ void test_frozen_schedule() {
             explore::kPd0StageE1Repetitions == 4 &&
             explore::kPd0BlendAlpha == 0.50,
         "PD0 exploration schedule drifted");
+    expect(
+        explore::kAdversarialBlocksStageE0Seed ==
+                202607280805ULL &&
+            explore::kAdversarialBlocksStageE0Repetitions ==
+                1 &&
+            explore::kAdversarialBlocksStageE1Seed ==
+                202607280806ULL &&
+            explore::kAdversarialBlocksStageE1Repetitions ==
+                4 &&
+            explore::kAdversarialBlocksBlendAlpha == 0.50,
+        "AdversarialBlocks exploration schedule drifted");
 }
 
 void test_blend_endpoints_and_isolation() {
@@ -290,6 +301,7 @@ void test_pd0_config_changes_only_pass_dominance() {
             ordinary.value_continuation_epsilon == 0.0 &&
             ordinary.value_priority_residual_weight == 0.10 &&
             !ordinary.value_pass_dominance &&
+            !ordinary.value_adversarial_blocks &&
             ordinary.value_continuation_controller ==
                 old_school::LearnedContinuationController::
                     Legacy &&
@@ -309,6 +321,7 @@ void test_pd0_config_changes_only_pass_dominance() {
             pd0.value_priority_residual_weight ==
                 ordinary.value_priority_residual_weight &&
             pd0.value_pass_dominance &&
+            !pd0.value_adversarial_blocks &&
             pd0.value_continuation_controller ==
                 ordinary.value_continuation_controller &&
             pd0.training_games == ordinary.training_games &&
@@ -321,6 +334,115 @@ void test_pd0_config_changes_only_pass_dominance() {
                     nullptr, true));
         },
         "PD0 accepted a missing frozen model");
+}
+
+void test_adversarial_blocks_ranking_and_tie_break() {
+    std::array<explore::CandidateScore, 2> scores{{
+        {.alpha = 0.50, .wins = 31, .losses = 29},
+        {.alpha = 0.00, .wins = 31, .losses = 29},
+    }};
+    expect(
+        explore::select_adversarial_blocks_winner_alpha(
+            scores) == 0.0,
+        "AdversarialBlocks tie did not prefer exact C16");
+    scores[0] = {
+        .alpha = 0.50, .wins = 32, .losses = 28,
+    };
+    expect(
+        explore::select_adversarial_blocks_winner_alpha(
+            scores) == 0.50,
+        "AdversarialBlocks ranking did not prefer more wins");
+
+    auto malformed = scores;
+    malformed[1].alpha = 0.50;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::
+                    select_adversarial_blocks_winner_alpha(
+                        malformed));
+        },
+        "AdversarialBlocks ranking accepted duplicate "
+        "candidates");
+    malformed = scores;
+    malformed[1] = {
+        .alpha = 0.0, .wins = 30, .losses = 29,
+    };
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::
+                    select_adversarial_blocks_winner_alpha(
+                        malformed));
+        },
+        "AdversarialBlocks ranking accepted unequal game "
+        "counts");
+}
+
+void test_adversarial_blocks_config_changes_only_aggregation() {
+    const auto model = parent_model();
+    const auto ordinary =
+        explore::make_exploratory_bot(model, false, false);
+    const auto treatment =
+        explore::make_exploratory_bot(model, false, true);
+    expect(
+        treatment.kind == ordinary.kind &&
+            treatment.learned_variant ==
+                ordinary.learned_variant &&
+            treatment.rollouts_per_action ==
+                ordinary.rollouts_per_action &&
+            treatment.exploration_rate ==
+                ordinary.exploration_rate &&
+            treatment.value_continuation_epsilon ==
+                ordinary.value_continuation_epsilon &&
+            treatment.value_priority_residual_weight ==
+                ordinary.value_priority_residual_weight &&
+            treatment.value_pass_dominance ==
+                ordinary.value_pass_dominance &&
+            treatment.value_adversarial_blocks &&
+            !ordinary.value_adversarial_blocks &&
+            treatment.value_continuation_controller ==
+                ordinary.value_continuation_controller &&
+            treatment.training_games ==
+                ordinary.training_games &&
+            treatment.learned_model ==
+                ordinary.learned_model,
+        "AdversarialBlocks changed more than attack "
+        "aggregation");
+}
+
+void test_adversarial_block_aggregation_changes_ranking() {
+    const std::vector<std::vector<double>> block_scores{
+        {1.0, 1.0, 1.0, 0.0},
+        {0.5, 0.5, 0.5, 0.5},
+    };
+    const auto historical =
+        old_school::
+            aggregate_learned_value_attack_block_scores(
+                block_scores, false);
+    const auto adversarial =
+        old_school::
+            aggregate_learned_value_attack_block_scores(
+                block_scores, true);
+    expect(
+        historical.scores ==
+                std::vector<double>{0.75, 0.5} &&
+            historical.selected_candidate == 0,
+        "historical mean aggregation recipe drifted");
+    expect(
+        adversarial.scores ==
+                std::vector<double>{0.0, 0.5} &&
+            adversarial.selected_candidate == 1,
+        "defender-best-response minimum did not change "
+        "the synthetic ranking");
+    const auto tied =
+        old_school::
+            aggregate_learned_value_attack_block_scores(
+                {{0.25}, {0.25}}, true);
+    expect(
+        tied.selected_candidate == 0,
+        "adversarial aggregation changed first-candidate "
+        "tie behavior");
 }
 
 void test_cli_rejects_arguments_without_loading_models() {
@@ -337,7 +459,7 @@ void test_cli_rejects_arguments_without_loading_models() {
         output.str().empty() &&
             error.str() ==
                 "Usage: old-school-fq4-blend-explore"
-                " [--pd0]\n",
+                " [--pd0|--adversarial-blocks]\n",
         "CLI argument rejection was not concise");
 }
 
@@ -361,6 +483,15 @@ int main() {
     runner.run(
         "PD0 config isolation",
         test_pd0_config_changes_only_pass_dominance);
+    runner.run(
+        "AdversarialBlocks ranking and tie break",
+        test_adversarial_blocks_ranking_and_tie_break);
+    runner.run(
+        "AdversarialBlocks config isolation",
+        test_adversarial_blocks_config_changes_only_aggregation);
+    runner.run(
+        "AdversarialBlocks synthetic aggregation",
+        test_adversarial_block_aggregation_changes_ranking);
     runner.run(
         "CLI argument rejection",
         test_cli_rejects_arguments_without_loading_models);

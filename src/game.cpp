@@ -291,6 +291,13 @@ void validate_bot_research_config(const BotConfig& bot) {
         throw std::invalid_argument(
             "Value Pass dominance requires Learned Value");
     }
+    if (bot.value_adversarial_blocks &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion)) {
+        throw std::invalid_argument(
+            "Value adversarial blocks requires Learned Value");
+    }
     if (bot.value_continuation_controller !=
             LearnedContinuationController::Legacy &&
         (bot.kind != BotKind::Learned ||
@@ -9316,7 +9323,7 @@ LearnedValueAttackSetScores score_learned_value_attack_sets(
     const GameState& state, std::size_t attacking_player,
     const std::vector<std::vector<PermanentId>>& candidates,
     const std::shared_ptr<const LearnedModel>& model,
-    std::mt19937_64& random) {
+    std::mt19937_64& random, bool adversarial_blocks) {
     if (attacking_player >= state.players.size()) {
         throw std::out_of_range(
             "Learned Value attacking player must be 0 or 1");
@@ -9358,10 +9365,8 @@ LearnedValueAttackSetScores score_learned_value_attack_sets(
         }
     }
 
-    LearnedValueAttackSetScores result;
-    result.scores.reserve(candidates.size());
-    double best_score =
-        -std::numeric_limits<double>::infinity();
+    std::vector<std::vector<double>> block_scores;
+    block_scores.reserve(candidates.size());
     for (std::size_t candidate_index = 0;
          candidate_index < candidates.size();
          ++candidate_index) {
@@ -9373,7 +9378,8 @@ LearnedValueAttackSetScores score_learned_value_attack_sets(
             learned_value_block_candidates(
                 state, attacking_player, candidate,
                 available_blockers, random, 64, 48);
-        double total_score = 0.0;
+        std::vector<double> candidate_scores;
+        candidate_scores.reserve(block_candidates.size());
         for (const auto& sampled_blocks : block_candidates) {
             GameState successor = state;
             if (!resolve_combat(
@@ -9401,18 +9407,12 @@ LearnedValueAttackSetScores score_learned_value_attack_sets(
                             .sorcery_actions = false,
                         });
             }
-            total_score += sample_score;
+            candidate_scores.push_back(sample_score);
         }
-        const double expected_score =
-            total_score /
-            static_cast<double>(block_candidates.size());
-        result.scores.push_back(expected_score);
-        if (expected_score > best_score) {
-            best_score = expected_score;
-            result.selected_candidate = candidate_index;
-        }
+        block_scores.push_back(std::move(candidate_scores));
     }
-    return result;
+    return aggregate_learned_value_attack_block_scores(
+        block_scores, adversarial_blocks);
 }
 
 enum class LearnedPolicyVerb : std::uint8_t {
@@ -13859,6 +13859,8 @@ double Game::learned_value_search_action_score(
                     .value_priority_residual_weight,
             .value_pass_dominance =
                 config_.bots[player].value_pass_dominance,
+            .value_adversarial_blocks =
+                config_.bots[player].value_adversarial_blocks,
             .value_continuation_controller =
                 config_.bots[player]
                     .value_continuation_controller,
@@ -13877,6 +13879,8 @@ double Game::learned_value_search_action_score(
                     .value_priority_residual_weight,
             .value_pass_dominance =
                 config_.bots[player].value_pass_dominance,
+            .value_adversarial_blocks =
+                config_.bots[player].value_adversarial_blocks,
             .value_continuation_controller =
                 config_.bots[player]
                     .value_continuation_controller,
@@ -14494,7 +14498,9 @@ std::optional<GameResult> Game::play_combat_after_beginning() {
         const auto evaluation =
             score_learned_value_attack_sets(
                 state_, state_.active_player, candidates, model,
-                random_);
+                random_,
+                config_.bots[state_.active_player]
+                    .value_adversarial_blocks);
         attackers =
             candidates[evaluation.selected_candidate];
     } else if (learned_actor_attacker) {
@@ -16759,13 +16765,60 @@ double learned_contextual_critic_value(
             context, perspective));
 }
 
+LearnedValueAttackSetScores
+aggregate_learned_value_attack_block_scores(
+    const std::vector<std::vector<double>>& block_scores,
+    bool adversarial_blocks) {
+    if (block_scores.empty()) {
+        throw std::invalid_argument(
+            "Learned Value attack aggregation requires candidates");
+    }
+    LearnedValueAttackSetScores result;
+    result.scores.reserve(block_scores.size());
+    double best_score =
+        -std::numeric_limits<double>::infinity();
+    for (std::size_t candidate = 0;
+         candidate < block_scores.size(); ++candidate) {
+        const auto& samples = block_scores[candidate];
+        if (samples.empty() ||
+            !std::all_of(
+                samples.begin(), samples.end(),
+                [](double score) {
+                    return std::isfinite(score);
+                })) {
+            throw std::invalid_argument(
+                "Learned Value attack aggregation requires "
+                "nonempty finite block scores");
+        }
+        double score = 0.0;
+        if (adversarial_blocks) {
+            score =
+                *std::min_element(
+                    samples.begin(), samples.end());
+        } else {
+            for (const double sample : samples) {
+                score += sample;
+            }
+            score /= static_cast<double>(samples.size());
+        }
+        result.scores.push_back(score);
+        if (score > best_score) {
+            best_score = score;
+            result.selected_candidate = candidate;
+        }
+    }
+    return result;
+}
+
 LearnedValueAttackSetScores learned_value_attack_set_scores(
     const GameState& state, std::size_t attacking_player,
     const std::vector<std::vector<PermanentId>>& candidates,
-    std::shared_ptr<const LearnedModel> model, std::uint64_t seed) {
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed,
+    bool adversarial_blocks) {
     std::mt19937_64 random(seed);
     return score_learned_value_attack_sets(
-        state, attacking_player, candidates, model, random);
+        state, attacking_player, candidates, model, random,
+        adversarial_blocks);
 }
 
 LearnedValueBinaryBlockScores
@@ -22220,7 +22273,10 @@ LearnedActionSamples learned_binary_attack_samples(
                         score_learned_value_attack_sets(
                             simulation.state_, attacking_player,
                             attack_candidates, model,
-                            simulation.random_);
+                            simulation.random_,
+                            simulation.config_
+                                .bots[attacking_player]
+                                .value_adversarial_blocks);
                     attackers = attack_candidates[
                         evaluation.selected_candidate];
                 }
@@ -23232,6 +23288,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
               baseline.value_priority_residual_weight &&
           challenger.value_pass_dominance ==
               baseline.value_pass_dominance &&
+          challenger.value_adversarial_blocks ==
+              baseline.value_adversarial_blocks &&
           challenger.value_continuation_controller ==
               baseline.value_continuation_controller &&
           !distinct_explicit_models));

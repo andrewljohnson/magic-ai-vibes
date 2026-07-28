@@ -201,6 +201,8 @@ bool same_bot(const BotConfig& left, const BotConfig& right) {
                right.value_priority_residual_weight &&
            left.value_pass_dominance ==
                right.value_pass_dominance &&
+           left.value_adversarial_blocks ==
+               right.value_adversarial_blocks &&
            left.value_continuation_controller ==
                right.value_continuation_controller &&
            left.training_games == right.training_games &&
