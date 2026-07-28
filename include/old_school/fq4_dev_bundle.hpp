@@ -11,9 +11,9 @@
 namespace old_school::fq4_dev_bundle {
 
 inline constexpr std::string_view kBundleSchema =
-    "old-school-fq4-priority-dev-bundle-v1";
+    "old-school-fq4-priority-dev-bundle-v2";
 inline constexpr std::string_view kArtifactPath =
-    "data/old-school-fq4-priority-dev-v1.fq4dev";
+    "data/old-school-fq4-priority-dev-v2.fq4dev";
 inline constexpr std::string_view kPurpose =
     "adaptive-development-only";
 inline constexpr std::string_view kProductionRecipe =
@@ -24,11 +24,11 @@ inline constexpr std::string_view kProductionRecipe =
 inline constexpr std::string_view kFeatureSchema =
     "learned-priority-policy-features-v1";
 inline constexpr std::string_view kStableRootSchema =
-    "old-school-fq4-priority-dev-stable-root-v1";
+    "old-school-fq4-priority-dev-stable-root-v2";
 inline constexpr std::string_view kFeatureContractSha256 =
     "240c91d19bb55279d7cbc58e64f4fddaef8da4248a089de8bc6e4cf96708a4f4";
 inline constexpr std::string_view kCollectionSpecSha256 =
-    "581c23222e6e0abe84c3c8bb2733ab5ecf0ea8e580f3698511eb8ab33682ff3a";
+    "550ddeda6cc7397eccc51a5af774f15664e665936969e0002ebece51cc1aa8f6";
 inline constexpr std::string_view kParentArtifactSha256 =
     "53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca";
 inline constexpr std::string_view kParentModelFingerprint =
@@ -47,25 +47,27 @@ inline constexpr std::size_t kSectionCount = 5;
 inline constexpr std::size_t kDeckCount = 5;
 inline constexpr std::size_t kWorldCount = 8;
 inline constexpr std::size_t kFeatureCount = 893;
-inline constexpr std::size_t kMaximumCensusRowsPerSplit = 1280;
+inline constexpr std::size_t kMaximumCensusRowsPerSplit = 5120;
 inline constexpr std::size_t
     kMaximumCensusRowsPerOwnerPerspective = 16;
-inline constexpr std::size_t kMaximumCensusRowsPerDeck = 256;
-inline constexpr std::size_t kMaximumSelectedRowsPerSplit = 80;
-inline constexpr std::size_t kMaximumRowsPerDeckAndSplit = 16;
+inline constexpr std::size_t kMaximumCensusRowsPerDeck = 1024;
+inline constexpr std::size_t kMaximumSelectedRowsPerSplit = 160;
+inline constexpr std::size_t kMaximumRowsPerDeckAndSplit = 32;
 inline constexpr std::size_t kMaximumActions = 32;
 inline constexpr std::size_t kMaximumFeaturesPerAction =
     kFeatureCount;
 inline constexpr std::size_t kMaximumArtifactBytes =
     128U * 1024U * 1024U;
-inline constexpr std::uint64_t kFitSeedBase = 202607280210ULL;
-inline constexpr std::uint64_t kCheckSeedBase = 202607280211ULL;
+inline constexpr std::uint64_t kFitSeedBase =
+    14991670039259730681ULL;
+inline constexpr std::uint64_t kCheckSeedBase =
+    2769767503634781211ULL;
 inline constexpr std::uint64_t kGenerationNamespace =
-    0x46513444455631ULL;
+    0x465134445632474eULL;
 inline constexpr std::uint64_t kHiddenNamespace =
-    0x4651344456484944ULL;
+    0x4651344456324849ULL;
 inline constexpr std::uint64_t kDominanceNamespace =
-    0x4651344456444f4dULL;
+    0x465134445632444fULL;
 
 using Hash256 = std::array<std::uint8_t, 32>;
 
@@ -144,6 +146,7 @@ struct DominanceCount {
 };
 
 struct CensusRow {
+    std::uint8_t schedule_block = 0;
     std::uint16_t schedule_index = 0;
     std::uint8_t owner_seat = 0;
     std::uint32_t trace_ordinal = 0;
@@ -226,9 +229,11 @@ std::string format_sha256(const Hash256& digest);
 Hash256 parse_sha256(std::string_view hexadecimal);
 Hash256 sha256(std::string_view bytes);
 Hash256 expected_physical_game_sha256(
-    Split split, std::uint16_t schedule_index);
+    Split split, std::uint8_t schedule_block,
+    std::uint16_t schedule_index);
 Hash256 expected_stable_root_sha256(
-    Split split, std::uint16_t schedule_index,
+    Split split, std::uint8_t schedule_block,
+    std::uint16_t schedule_index,
     std::uint8_t owner_seat,
     std::uint32_t trace_ordinal,
     const Hash256& information_action_sha256);
@@ -239,6 +244,13 @@ Hash256 descriptor_set_sha256(
 std::string encode(const Bundle& bundle);
 Bundle decode(std::string_view bytes);
 void validate(const Bundle& bundle);
+
+// Applies every strict structural, identity, ordering, arithmetic,
+// hidden-information, selection, and accounting rule while allowing the two
+// prospective scientific support floors to miss. The generator uses this to
+// distinguish a valid NOT_PUBLISHED result from infrastructure corruption.
+void validate_prepublication_construction(
+    const Bundle& bundle);
 
 // Production loading is deliberately fixed to kArtifactPath. The final byte
 // count and outer SHA-256 are supplied by the caller only after publication

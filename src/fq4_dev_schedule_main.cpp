@@ -15,6 +15,7 @@ int main(int argc, char* argv[]) {
         return 2;
     }
     try {
+        bool all_exact = true;
         for (const schedule::Split split :
              {schedule::Split::Fit,
               schedule::Split::Check}) {
@@ -29,28 +30,34 @@ int main(int argc, char* argv[]) {
             const std::string sha256 =
                 schedule::
                     source_schedule_sha256(split);
-            if (!balance.exact ||
-                bytes.size() !=
+            const bool exact =
+                balance.exact &&
+                bytes.size() ==
                     schedule::
-                        expected_schedule_bytes(split) ||
-                sha256 !=
+                        expected_schedule_bytes(split) &&
+                sha256 ==
                     schedule::
-                        expected_schedule_sha256(split)) {
-                throw std::runtime_error(
-                    "frozen schedule contract failed");
-            }
+                        expected_schedule_sha256(split);
+            all_exact = all_exact && exact;
             std::cout
                 << "split="
                 << schedule::split_name(split)
                 << " seed_base="
                 << schedule::seed_base(split)
+                << " blocks="
+                << schedule::kScheduleBlocks
                 << " games=" << games.size()
                 << " perspectives="
                 << balance.owner_perspectives
                 << " bytes=" << bytes.size()
                 << " sha256="
                 << sha256
-                << " exact=1\n";
+                << " exact=" << (exact ? 1 : 0)
+                << '\n';
+        }
+        if (!all_exact) {
+            throw std::runtime_error(
+                "frozen schedule contract failed");
         }
         return 0;
     } catch (const std::exception& error) {

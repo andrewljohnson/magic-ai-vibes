@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,17 +18,17 @@
 namespace old_school::fq4_dev_generator {
 
 inline constexpr std::string_view kGeneratorSchema =
-    "old-school-fq4-priority-dev-generator-v1";
+    "old-school-fq4-priority-dev-generator-v2";
 inline constexpr std::string_view kOwnerInformationSchema =
-    "old-school-fq4-priority-dev-owner-information-action-v1";
+    "old-school-fq4-priority-dev-owner-information-action-v2";
 inline constexpr std::string_view kStableRootSchema =
     fq4_dev_bundle::kStableRootSchema;
 inline constexpr std::string_view kReplayManifestSchema =
-    "old-school-fq4-priority-dev-retained-manifest-v1";
+    "old-school-fq4-priority-dev-retained-manifest-v2";
 inline constexpr std::string_view kHiddenSeedScope =
-    "old-school-fq4-priority-dev-hidden-v1";
+    "old-school-fq4-priority-dev-hidden-v2";
 inline constexpr std::string_view kDominanceSeedScope =
-    "old-school-fq4-priority-dev-dominance-v1";
+    "old-school-fq4-priority-dev-dominance-v2";
 
 inline constexpr std::string_view kParentArtifactPath =
     "build/model-cache/"
@@ -41,8 +42,13 @@ inline constexpr double kParentPriorityResidualWeight = 0.10;
 // These held-out coordinates are duplicated literally rather than imported:
 // linking a D1/P0 header or implementation into the development generator is
 // a structural firewall violation.
-inline constexpr std::array<std::uint64_t, 2>
-    kForbiddenHeldOutSeedBases{790, 791};
+inline constexpr std::array<std::uint64_t, 4>
+    kForbiddenSourceSeedBases{
+        790,
+        791,
+        202607280210ULL,
+        202607280211ULL,
+    };
 inline constexpr std::string_view kForbiddenHeldOutScheduleSha256 =
     "33f3826615e9c66b6c5c0c137e6c17bc0b53fbe967804e7b39dc8a53143fb28a";
 inline constexpr std::uint64_t kForbiddenHeldOutGenerationNamespace =
@@ -55,6 +61,9 @@ inline constexpr std::uint64_t kForbiddenHeldOutDominanceNamespace =
 inline constexpr std::size_t kMinimumHighConfidenceRoots = 5;
 inline constexpr std::size_t kMinimumHighConfidenceGames = 5;
 inline constexpr std::size_t kMinimumHighConfidenceDecks = 2;
+inline constexpr std::size_t kCompleteConstructions = 2;
+inline constexpr std::size_t kGenerationSplitCount = 2;
+inline constexpr std::size_t kWatchdogSeconds = 1200;
 
 struct SchedulePreflight {
     std::string fit_sha256;
@@ -104,6 +113,11 @@ struct ParentWitness {
     bool operator==(const ParentWitness&) const = default;
 };
 
+inline constexpr std::uint8_t kCoverageGateFailed =
+    1U << 0U;
+inline constexpr std::uint8_t kParentErrorGateFailed =
+    1U << 1U;
+
 struct SplitSupport {
     std::array<std::size_t, kDeckCount> census_by_deck{};
     std::array<std::size_t, kDeckCount> selected_by_deck{};
@@ -114,6 +128,9 @@ struct SplitSupport {
     std::size_t high_confidence_decks = 0;
     bool coverage_met = false;
     bool parent_error_floor_met = false;
+    std::uint8_t failed_gate_mask =
+        kCoverageGateFailed |
+        kParentErrorGateFailed;
 
     bool publishable() const {
         return coverage_met && parent_error_floor_met;
@@ -122,6 +139,12 @@ struct SplitSupport {
     bool operator==(const SplitSupport&) const = default;
 };
 
+// Canonical count-only report. It intentionally cannot receive roots,
+// descriptors, states, scores, outcomes, or source choices.
+std::string format_support_report(
+    const SplitSupport& fit,
+    const SplitSupport& check);
+
 SplitSupport summarize_support(
     const std::vector<fq4_dev_bundle::CensusRow>& census,
     const std::vector<fq4_dev_bundle::SelectedRow>& selected,
@@ -129,6 +152,57 @@ SplitSupport summarize_support(
 
 bool complete_constructions_byte_identical(
     std::string_view first, std::string_view second);
+
+// May live in MAP_SHARED anonymous memory in the one-shot executable. The
+// supervisor reads it only after the worker has exited or been killed.
+struct GenerationProgress {
+    std::array<
+        std::array<std::uint64_t, kGenerationSplitCount>,
+        kCompleteConstructions>
+        source_games_completed{};
+    std::uint64_t candidate_rollout_evaluations = 0;
+
+    bool operator==(const GenerationProgress&) const = default;
+};
+
+struct FailureScopeReport {
+    std::string executable_after_sha256;
+    std::string parent_after_sha256;
+    bool executable_snapshot_ok = false;
+    bool parent_snapshot_ok = false;
+    bool artifact_status_known = false;
+    bool artifact_present = false;
+    bool temporary_status_known = false;
+    bool temporary_absent = false;
+    GenerationProgress progress;
+
+    bool operator==(const FailureScopeReport&) const = default;
+};
+
+// Read-only, best-effort post-run scope inspection. It never throws.
+FailureScopeReport inspect_failure_scope(
+    const std::filesystem::path& executable_path,
+    const GenerationProgress& progress) noexcept;
+std::string format_failure_scope_report(
+    const FailureScopeReport& report);
+std::string format_support_rejection_output(
+    const SplitSupport& fit,
+    const SplitSupport& check,
+    const FailureScopeReport& scope);
+
+class GenerationFailure final : public std::runtime_error {
+  public:
+    GenerationFailure(
+        std::string message,
+        FailureScopeReport scope);
+
+    const FailureScopeReport& scope() const noexcept {
+        return scope_;
+    }
+
+  private:
+    FailureScopeReport scope_;
+};
 
 struct GenerationReport {
     std::size_t artifact_bytes = 0;
@@ -142,6 +216,7 @@ struct GenerationReport {
     std::size_t candidate_rollout_evaluations = 0;
     bool repeated_construction_bit_identical = false;
     bool published = false;
+    FailureScopeReport scope;
 };
 
 // Production-only fixed-path operation. The executable and commit identities
@@ -150,6 +225,7 @@ struct GenerationReport {
 // only after exact byte identity and both frozen support floors hold.
 GenerationReport generate_and_publish(
     const std::filesystem::path& executable_path,
-    std::string_view producer_commit);
+    std::string_view producer_commit,
+    GenerationProgress* progress = nullptr);
 
 } // namespace old_school::fq4_dev_generator

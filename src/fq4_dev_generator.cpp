@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -44,6 +45,15 @@ constexpr std::size_t kPolicyCardPlaneCount = 6;
 constexpr std::size_t kPolicyScalarCount = 44;
 
 static_assert(kCardCount == kExpectedCardCount);
+static_assert(
+    schedule_data::kFitSeedBase ==
+    bundle::kFitSeedBase);
+static_assert(
+    schedule_data::kCheckSeedBase ==
+    bundle::kCheckSeedBase);
+static_assert(
+    schedule_data::kGenerationNamespace ==
+    bundle::kGenerationNamespace);
 static_assert(
     kStateScalarFeatureCount +
         kStateCardPlaneCount * kExpectedCardCount +
@@ -170,16 +180,16 @@ bool canonical_lower_hex(
 
 bool forbidden_seed(std::uint64_t seed) {
     return std::find(
-               kForbiddenHeldOutSeedBases.begin(),
-               kForbiddenHeldOutSeedBases.end(),
+               kForbiddenSourceSeedBases.begin(),
+               kForbiddenSourceSeedBases.end(),
                seed) !=
-           kForbiddenHeldOutSeedBases.end();
+           kForbiddenSourceSeedBases.end();
 }
 
 collection::SourceGame collection_source(
     const schedule_data::SourceGame& source) {
     return {
-        .source_block = schedule_data::kScheduleBlock,
+        .source_block = source.schedule_block,
         .source_seed_base = source.source_seed_base,
         .schedule_index = source.schedule_index,
         .pairing_index = source.pairing_index,
@@ -215,8 +225,8 @@ bool root_matches_frozen_schedule(
     const collection::ReplayRootManifest& root) {
     const collection::RootLocator& locator =
         root.locator;
-    if (locator.source_block !=
-            schedule_data::kScheduleBlock ||
+    if (locator.source_block >=
+            schedule_data::kScheduleBlocks ||
         locator.schedule_index >=
             schedule_data::kPhysicalGamesPerSplit ||
         locator.owner_seat >= kPlayerCount) {
@@ -230,6 +240,8 @@ bool root_matches_frozen_schedule(
         const auto& source =
             schedule.at(locator.schedule_index);
         return
+            source.schedule_block ==
+                locator.source_block &&
             source.source_seed_base ==
                 locator.source_seed_base &&
             source.schedule_index ==
@@ -439,6 +451,7 @@ struct CompleteBuild {
 void append_census_digest(
     CanonicalBytes& output,
     const bundle::CensusRow& row) {
+    output.u64(row.schedule_block);
     output.u64(row.schedule_index);
     output.u64(row.owner_seat);
     output.u64(row.trace_ordinal);
@@ -700,7 +713,8 @@ bundle::Split split_for(
 SplitBuild construct_split(
     schedule_data::Split split,
     const std::vector<schedule_data::SourceGame>& schedule,
-    const std::shared_ptr<const LearnedModel>& parent) {
+    const std::shared_ptr<const LearnedModel>& parent,
+    std::uint64_t& completed_source_games) {
     const bundle::Split bundle_split =
         split_for(split);
     CanonicalBytes trajectory;
@@ -746,6 +760,7 @@ SplitBuild construct_split(
                 " threw: " + error.what());
         }
 
+        trajectory.u64(source.schedule_block);
         trajectory.u64(source.schedule_index);
         trajectory.u64(trace.size());
         for (std::size_t owner = 0;
@@ -898,18 +913,24 @@ SplitBuild construct_split(
                 });
             }
         }
+        std::atomic_ref<std::uint64_t>(
+            completed_source_games)
+            .fetch_add(
+                1, std::memory_order_relaxed);
     }
 
     if (!collection::validate_replay_manifest(
             replay_manifest, kStableRootSchema,
-            collection::kMaximumLegalActions)) {
+            collection::kMaximumLegalActions,
+            true)) {
         fail("complete retained replay manifest is invalid");
     }
     const std::string retained_hash =
         collection::replay_manifest_sha256(
             replay_manifest, kReplayManifestSchema,
             kStableRootSchema,
-            collection::kMaximumLegalActions);
+            collection::kMaximumLegalActions,
+            true);
 
     // Phase boundary: every retained root exists before the first
     // rules-owned dominance transition begins.
@@ -950,6 +971,10 @@ SplitBuild construct_split(
         blind_inputs.push_back({
             .stable_id =
                 row.root.manifest.stable_id,
+            .physical_game_sha256 =
+                bundle::format_sha256(
+                    row.census
+                        .physical_game_sha256),
             .owner_deck =
                 row.root.manifest.owner_deck,
             .dominance_positive =
@@ -1002,15 +1027,6 @@ SplitBuild construct_split(
         summarize_support(
             result.census, result.selected,
             result.witnesses);
-    if (!result.support.publishable()) {
-        fail(
-            std::string(
-                split == schedule_data::Split::Fit
-                    ? "FIT"
-                    : "CHECK") +
-            " split misses frozen coverage or parent-error "
-            "support");
-    }
 
     CanonicalBytes scored_digest;
     scored_digest.text(kGeneratorSchema);
@@ -1167,17 +1183,28 @@ CompleteBuild construct_complete(
     const std::vector<schedule_data::SourceGame>& check_schedule,
     const std::shared_ptr<const LearnedModel>& parent,
     const integrity::RegularFileSnapshot& executable,
-    std::string_view producer_commit) {
+    std::string_view producer_commit,
+    std::size_t construction_index,
+    GenerationProgress& progress) {
+    if (construction_index >= kCompleteConstructions) {
+        fail("complete-construction index is out of range");
+    }
     require_parent_identity(parent);
     SplitBuild fit =
         construct_split(
             schedule_data::Split::Fit,
-            fit_schedule, parent);
+            fit_schedule, parent,
+            progress
+                .source_games_completed[
+                    construction_index][0]);
     require_parent_identity(parent);
     SplitBuild check =
         construct_split(
             schedule_data::Split::Check,
-            check_schedule, parent);
+            check_schedule, parent,
+            progress
+                .source_games_completed[
+                    construction_index][1]);
     require_parent_identity(parent);
 
     CompleteBuild result;
@@ -1195,9 +1222,16 @@ CompleteBuild construct_complete(
         std::move(check.selected);
     result.fit = fit.support;
     result.check = check.support;
-    // Full semantic validation happens before returning a construction.
-    static_cast<void>(
-        bundle::encode(result.bundle));
+    bundle::validate_prepublication_construction(
+        result.bundle);
+    // The strict artifact validator requires publishable support. A valid
+    // count-only support miss still returns both split constructions so the
+    // caller can compare and report them before rejecting publication.
+    if (result.fit.publishable() &&
+        result.check.publishable()) {
+        static_cast<void>(
+            bundle::encode(result.bundle));
+    }
     return result;
 }
 
@@ -1208,6 +1242,7 @@ const collection::CollectionSpec& collection_spec() {
         .owner_information_schema =
             kOwnerInformationSchema,
         .stable_root_schema = kStableRootSchema,
+        .block_bound_ids = true,
         .hidden_seed_namespace =
             bundle::kHiddenNamespace,
         .hidden_seed_scope = kHiddenSeedScope,
@@ -1229,11 +1264,14 @@ std::string collection_spec_contract_bytes() {
     const collection::CollectionSpec& spec =
         collection_spec();
     return
-        "old-school-fq4-priority-dev-collection-spec-v1\n"
+        "old-school-fq4-priority-dev-collection-spec-v2\n"
         "owner-information-schema=" +
         std::string(spec.owner_information_schema) + "\n" +
         "stable-root-schema=" +
         std::string(spec.stable_root_schema) + "\n" +
+        "block-bound-ids=" +
+        std::to_string(
+            spec.block_bound_ids ? 1 : 0) + "\n" +
         "replay-manifest-schema=" +
         std::string(kReplayManifestSchema) + "\n" +
         "hidden-seed-namespace=" +
@@ -1440,7 +1478,7 @@ bundle::CensusRow make_census_row(
         root.probe.root_player !=
             manifest.locator.owner_seat ||
         manifest.stable_id !=
-            collection::stable_root_id(
+            collection::block_bound_stable_root_id(
                 manifest.locator,
                 manifest
                     .information_action_fingerprint,
@@ -1457,6 +1495,10 @@ bundle::CensusRow make_census_row(
         }
     }
     bundle::CensusRow result{
+        .schedule_block =
+            narrow_u8(
+                manifest.locator.source_block,
+                "schedule block"),
         .schedule_index =
             narrow_u16(
                 manifest.locator.schedule_index,
@@ -1482,7 +1524,7 @@ bundle::CensusRow make_census_row(
                 manifest.stable_id),
         .physical_game_sha256 =
             bundle::sha256(
-                collection::physical_game_id(
+                collection::block_bound_physical_game_id(
                     manifest.locator)),
         .information_action_sha256 =
             bundle::parse_sha256(
@@ -1528,10 +1570,12 @@ bundle::CensusRow make_census_row(
                     .source_seed_base));
     if (result.physical_game_sha256 !=
             bundle::expected_physical_game_sha256(
-                split, result.schedule_index) ||
+                split, result.schedule_block,
+                result.schedule_index) ||
         result.stable_root_id !=
             bundle::expected_stable_root_sha256(
-                split, result.schedule_index,
+                split, result.schedule_block,
+                result.schedule_index,
                 result.owner_seat,
                 result.trace_ordinal,
                 result
@@ -1691,7 +1735,73 @@ SplitSupport summarize_support(
             kMinimumHighConfidenceGames &&
         result.high_confidence_decks >=
             kMinimumHighConfidenceDecks;
+    result.failed_gate_mask =
+        static_cast<std::uint8_t>(
+            (result.coverage_met
+                 ? 0U
+                 : kCoverageGateFailed) |
+            (result.parent_error_floor_met
+                 ? 0U
+                 : kParentErrorGateFailed));
     return result;
+}
+
+std::string format_support_report(
+    const SplitSupport& fit,
+    const SplitSupport& check) {
+    std::string output;
+    const auto append =
+        [&](std::string_view split,
+            const SplitSupport& support) {
+            for (std::size_t deck = 0;
+                 deck < kDeckCount; ++deck) {
+                output +=
+                    "support split=" +
+                    std::string(split) +
+                    " deck=" +
+                    std::to_string(deck) +
+                    " census=" +
+                    std::to_string(
+                        support.census_by_deck[deck]) +
+                    " selected=" +
+                    std::to_string(
+                        support.selected_by_deck[deck]) +
+                    " positive=" +
+                    std::to_string(
+                        support.positive_by_deck[deck]) +
+                    " background=" +
+                    std::to_string(
+                        support.background_by_deck[deck]) +
+                    "\n";
+            }
+            output +=
+                "support split=" +
+                std::string(split) +
+                " scope=pooled high_confidence_roots=" +
+                std::to_string(
+                    support.high_confidence_roots) +
+                " high_confidence_games=" +
+                std::to_string(
+                    support.high_confidence_games) +
+                " high_confidence_decks=" +
+                std::to_string(
+                    support.high_confidence_decks) +
+                " coverage_met=" +
+                std::to_string(
+                    support.coverage_met ? 1 : 0) +
+                " parent_error_floor_met=" +
+                std::to_string(
+                    support.parent_error_floor_met
+                        ? 1
+                        : 0) +
+                " failed_gate_mask=" +
+                std::to_string(
+                    support.failed_gate_mask) +
+                "\n";
+        };
+    append("fit", fit);
+    append("check", check);
+    return output;
 }
 
 bool complete_constructions_byte_identical(
@@ -1700,9 +1810,185 @@ bool complete_constructions_byte_identical(
     return first == second;
 }
 
+FailureScopeReport inspect_failure_scope(
+    const std::filesystem::path& executable_path,
+    const GenerationProgress& progress) noexcept {
+    FailureScopeReport result{
+        .progress = progress,
+    };
+    try {
+        const integrity::RegularFileSnapshot executable =
+            integrity::snapshot_regular_file(
+                executable_path);
+        result.executable_after_sha256 =
+            executable.sha256;
+        result.executable_snapshot_ok = true;
+    } catch (const std::exception&) {
+    }
+    try {
+        const integrity::RegularFileSnapshot parent =
+            integrity::snapshot_regular_file(
+                std::filesystem::path(
+                    kParentArtifactPath));
+        result.parent_after_sha256 =
+            parent.sha256;
+        result.parent_snapshot_ok = true;
+    } catch (const std::exception&) {
+    }
+
+    const std::filesystem::path artifact(
+        bundle::kArtifactPath);
+    std::error_code artifact_error;
+    const std::filesystem::file_status artifact_status =
+        std::filesystem::symlink_status(
+            artifact, artifact_error);
+    if (!artifact_error) {
+        result.artifact_status_known = true;
+        result.artifact_present =
+            std::filesystem::exists(
+                artifact_status);
+    } else if (artifact_error ==
+               std::errc::no_such_file_or_directory) {
+        result.artifact_status_known = true;
+        result.artifact_present = false;
+    }
+
+    const std::filesystem::path parent_directory =
+        artifact.has_parent_path()
+            ? artifact.parent_path()
+            : std::filesystem::path(".");
+    const std::string temporary_prefix =
+        "." + artifact.filename().string() +
+        ".tmp.";
+    bool temporary_present = false;
+    std::error_code directory_error;
+    std::filesystem::directory_iterator iterator(
+        parent_directory, directory_error);
+    if (!directory_error) {
+        const std::filesystem::directory_iterator end;
+        while (iterator != end) {
+            const std::string filename =
+                iterator->path().filename().string();
+            if (filename.starts_with(
+                    temporary_prefix)) {
+                temporary_present = true;
+            }
+            iterator.increment(directory_error);
+            if (directory_error) {
+                break;
+            }
+        }
+        if (!directory_error) {
+            result.temporary_status_known = true;
+            result.temporary_absent =
+                !temporary_present;
+        }
+    } else if (directory_error ==
+               std::errc::no_such_file_or_directory) {
+        result.temporary_status_known = true;
+        result.temporary_absent = true;
+    }
+    return result;
+}
+
+std::string format_failure_scope_report(
+    const FailureScopeReport& report) {
+    const auto digest_or_unavailable =
+        [](bool available,
+           const std::string& digest) {
+            return available
+                       ? digest
+                       : std::string("unavailable");
+        };
+    std::string output =
+        "postcondition executable_after_sha256=" +
+        digest_or_unavailable(
+            report.executable_snapshot_ok,
+            report.executable_after_sha256) +
+        " parent_after_sha256=" +
+        digest_or_unavailable(
+            report.parent_snapshot_ok,
+            report.parent_after_sha256) +
+        " executable_snapshot_ok=" +
+        std::to_string(
+            report.executable_snapshot_ok ? 1 : 0) +
+        " parent_snapshot_ok=" +
+        std::to_string(
+            report.parent_snapshot_ok ? 1 : 0) +
+        " artifact_status_known=" +
+        std::to_string(
+            report.artifact_status_known ? 1 : 0) +
+        " artifact_present=" +
+        std::to_string(
+            report.artifact_present ? 1 : 0) +
+        " temporary_status_known=" +
+        std::to_string(
+            report.temporary_status_known ? 1 : 0) +
+        " temporary_absent=" +
+        std::to_string(
+            report.temporary_absent ? 1 : 0) +
+        " candidate_rollout_evaluations=" +
+        std::to_string(
+            report.progress
+                .candidate_rollout_evaluations) +
+        "\n";
+    constexpr std::array<std::string_view, 2>
+        split_names{"fit", "check"};
+    for (std::size_t construction = 0;
+         construction < kCompleteConstructions;
+         ++construction) {
+        for (std::size_t split = 0;
+             split < kGenerationSplitCount;
+             ++split) {
+            output +=
+                "postcondition construction=" +
+                std::to_string(construction) +
+                " split=" +
+                std::string(split_names[split]) +
+                " source_games_completed=" +
+                std::to_string(
+                    report.progress
+                        .source_games_completed[
+                            construction][split]) +
+                "\n";
+        }
+    }
+    return output;
+}
+
+std::string format_support_rejection_output(
+    const SplitSupport& fit,
+    const SplitSupport& check,
+    const FailureScopeReport& scope) {
+    return
+        format_support_report(fit, check) +
+        format_failure_scope_report(scope) +
+        "result=NOT_PUBLISHED"
+        " reason=support_gate_failed"
+        " failed_gate_mask_fit=" +
+        std::to_string(fit.failed_gate_mask) +
+        " failed_gate_mask_check=" +
+        std::to_string(check.failed_gate_mask) +
+        "\n";
+}
+
+GenerationFailure::GenerationFailure(
+    std::string message,
+    FailureScopeReport scope)
+    : std::runtime_error(std::move(message)),
+      scope_(std::move(scope)) {}
+
 GenerationReport generate_and_publish(
     const std::filesystem::path& executable_path,
-    std::string_view producer_commit) {
+    std::string_view producer_commit,
+    GenerationProgress* progress) {
+    GenerationProgress local_progress;
+    GenerationProgress& active_progress =
+        progress == nullptr
+            ? local_progress
+            : *progress;
+    active_progress = GenerationProgress{};
+    try {
     if (!canonical_lower_hex(producer_commit, 40) &&
         !canonical_lower_hex(producer_commit, 64)) {
         throw std::invalid_argument(
@@ -1781,18 +2067,15 @@ GenerationReport generate_and_publish(
         construct_complete(
             fit_schedule, check_schedule,
             parent, executable_before,
-            producer_commit);
-    const std::string first_bytes =
-        bundle::encode(first.bundle);
+            producer_commit, 0,
+            active_progress);
     CompleteBuild second =
         construct_complete(
             fit_schedule, check_schedule,
             parent, executable_before,
-            producer_commit);
-    const std::string second_bytes =
-        bundle::encode(second.bundle);
-    if (!complete_constructions_byte_identical(
-            first_bytes, second_bytes) ||
+            producer_commit, 1,
+            active_progress);
+    if (first.bundle != second.bundle ||
         first.fit != second.fit ||
         first.check != second.check) {
         fail(
@@ -1814,26 +2097,7 @@ GenerationReport generate_and_publish(
     }
     require_parent_identity(parent);
 
-    // The bundle implementation writes a same-directory temporary, fsyncs
-    // it, and links it into the sole fixed target without replacement.
-    bundle::publish_atomic_no_replace(first.bundle);
-    const integrity::RegularFileSnapshot published =
-        integrity::snapshot_regular_file(
-            std::filesystem::path(
-                bundle::kArtifactPath));
-    if (published.byte_size !=
-            first_bytes.size() ||
-        published.sha256 !=
-            integrity::sha256_string(
-                first_bytes)) {
-        fail("published artifact identity drifted");
-    }
-
-    return {
-        .artifact_bytes = first_bytes.size(),
-        .artifact_sha256 =
-            integrity::sha256_string(
-                first_bytes),
+    GenerationReport report{
         .fit = first.fit,
         .check = first.check,
         .source_games_per_construction =
@@ -1849,8 +2113,59 @@ GenerationReport generate_and_publish(
         .candidate_rollout_evaluations = 0,
         .repeated_construction_bit_identical =
             true,
-        .published = true,
     };
+    if (!first.fit.publishable() ||
+        !first.check.publishable()) {
+        report.scope =
+            inspect_failure_scope(
+                executable_path,
+                active_progress);
+        return report;
+    }
+
+    const std::string first_bytes =
+        bundle::encode(first.bundle);
+    const std::string second_bytes =
+        bundle::encode(second.bundle);
+    if (!complete_constructions_byte_identical(
+            first_bytes, second_bytes)) {
+        fail(
+            "two publishable artifact encodings are not byte identical");
+    }
+
+    // The bundle implementation writes a same-directory temporary, fsyncs
+    // it, and links it into the sole fixed target without replacement.
+    bundle::publish_atomic_no_replace(first.bundle);
+    const integrity::RegularFileSnapshot published =
+        integrity::snapshot_regular_file(
+            std::filesystem::path(
+                bundle::kArtifactPath));
+    if (published.byte_size !=
+            first_bytes.size() ||
+        published.sha256 !=
+            integrity::sha256_string(
+                first_bytes)) {
+        fail("published artifact identity drifted");
+    }
+
+    report.artifact_bytes = first_bytes.size();
+    report.artifact_sha256 =
+        integrity::sha256_string(first_bytes);
+    report.published = true;
+    report.scope =
+        inspect_failure_scope(
+            executable_path,
+            active_progress);
+    return report;
+    } catch (const GenerationFailure&) {
+        throw;
+    } catch (const std::exception& error) {
+        throw GenerationFailure(
+            error.what(),
+            inspect_failure_scope(
+                executable_path,
+                active_progress));
+    }
 }
 
 } // namespace old_school::fq4_dev_generator

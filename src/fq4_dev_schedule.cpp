@@ -18,6 +18,10 @@ namespace {
 
 constexpr std::size_t kPlayerCount = 2;
 
+static_assert(
+    kPhysicalGamesPerBlock ==
+    learned_iteration::kBalancedScheduleGames);
+
 std::size_t deck_index(DeckId deck) {
     const std::size_t result =
         static_cast<std::size_t>(deck);
@@ -60,6 +64,30 @@ std::uint64_t seed_base(Split split) {
         "invalid FQ4 development split");
 }
 
+std::size_t schedule_block_for_index(
+    std::size_t global_schedule_index) {
+    if (global_schedule_index >=
+        kPhysicalGamesPerSplit) {
+        throw std::out_of_range(
+            "FQ4 global schedule index is out of range");
+    }
+    return
+        global_schedule_index /
+        kPhysicalGamesPerBlock;
+}
+
+std::size_t local_schedule_index(
+    std::size_t global_schedule_index) {
+    if (global_schedule_index >=
+        kPhysicalGamesPerSplit) {
+        throw std::out_of_range(
+            "FQ4 global schedule index is out of range");
+    }
+    return
+        global_schedule_index %
+        kPhysicalGamesPerBlock;
+}
+
 std::size_t expected_schedule_bytes(Split split) {
     switch (split) {
     case Split::Fit:
@@ -85,22 +113,28 @@ std::string_view expected_schedule_sha256(
 
 std::vector<SourceGame> source_schedule(Split split) {
     const std::uint64_t split_seed = seed_base(split);
-    const auto balanced =
-        learned_iteration::balanced_schedule(
-            split_seed, kGenerationNamespace,
-            kScheduleBlock);
     std::vector<SourceGame> result;
-    result.reserve(balanced.size());
-    for (const auto& game : balanced) {
-        result.push_back({
-            .split = split,
-            .source_seed_base = split_seed,
-            .schedule_index = game.schedule_index,
-            .pairing_index = game.pairing_index,
-            .seat_decks = game.seat_decks,
-            .starting_player = game.starting_player,
-            .game_seed = game.seed,
-        });
+    result.reserve(kPhysicalGamesPerSplit);
+    for (std::size_t block = 0;
+         block < kScheduleBlocks; ++block) {
+        const auto balanced =
+            learned_iteration::balanced_schedule(
+                split_seed, kGenerationNamespace,
+                block);
+        for (const auto& game : balanced) {
+            result.push_back({
+                .split = split,
+                .source_seed_base = split_seed,
+                .schedule_block = block,
+                .schedule_index =
+                    block * kPhysicalGamesPerBlock +
+                    game.schedule_index,
+                .pairing_index = game.pairing_index,
+                .seat_decks = game.seat_decks,
+                .starting_player = game.starting_player,
+                .game_seed = game.seed,
+            });
+        }
     }
     if (result.size() != kPhysicalGamesPerSplit) {
         throw std::logic_error(
@@ -111,19 +145,28 @@ std::vector<SourceGame> source_schedule(Split split) {
 
 std::string serialize_source_schedule(
     const std::vector<SourceGame>& schedule) {
+    if (!audit_schedule_balance(schedule).exact) {
+        throw std::invalid_argument(
+            "cannot serialize malformed FQ4 development schedule");
+    }
     std::string output;
     output.append(kScheduleSchema);
     output.push_back('\n');
     for (const SourceGame& game : schedule) {
-        // Frozen ten-field contract: split, seed base, generation namespace,
-        // balanced block, schedule index, pairing index, game seed, starting
-        // player, seat-zero deck, and seat-one deck.
+        // Frozen eleven-field contract: split, seed base, generation
+        // namespace, explicit balanced block, block-local schedule index,
+        // global schedule index, pairing index, game seed, starting player,
+        // seat-zero deck, and seat-one deck.
         append_tab_field(
             output,
             static_cast<std::uint64_t>(game.split));
         append_tab_field(output, game.source_seed_base);
         append_tab_field(output, kGenerationNamespace);
-        append_tab_field(output, kScheduleBlock);
+        append_tab_field(output, game.schedule_block);
+        append_tab_field(
+            output,
+            local_schedule_index(
+                game.schedule_index));
         append_tab_field(output, game.schedule_index);
         append_tab_field(output, game.pairing_index);
         append_tab_field(output, game.game_seed);
@@ -159,21 +202,45 @@ ScheduleBalance audit_schedule_balance(
     }
 
     const Split expected_split = schedule.front().split;
-    const std::uint64_t expected_seed =
-        seed_base(expected_split);
+    std::uint64_t expected_seed = 0;
+    try {
+        expected_seed = seed_base(expected_split);
+    } catch (const std::exception&) {
+        return result;
+    }
     bool rows_valid = true;
     std::set<std::size_t> schedule_indices;
     std::set<std::uint64_t> game_seeds;
-    for (const SourceGame& game : schedule) {
+    for (std::size_t index = 0;
+         index < schedule.size(); ++index) {
+        const SourceGame& game = schedule[index];
+        const std::size_t expected_block =
+            index / kPhysicalGamesPerBlock;
+        const std::size_t expected_local =
+            index % kPhysicalGamesPerBlock;
+        if (expected_block >= kScheduleBlocks) {
+            rows_valid = false;
+            continue;
+        }
+        const auto expected_games =
+            learned_iteration::balanced_schedule(
+                expected_seed, kGenerationNamespace,
+                expected_block);
+        const auto& expected_game =
+            expected_games[expected_local];
         rows_valid =
             rows_valid &&
             game.split == expected_split &&
             game.source_seed_base == expected_seed &&
-            game.schedule_index <
-                learned_iteration::
-                    kBalancedScheduleGames &&
-            game.pairing_index <
-                learned_iteration::kBalancedPairings &&
+            game.schedule_block == expected_block &&
+            game.schedule_index == index &&
+            game.pairing_index ==
+                expected_game.pairing_index &&
+            game.seat_decks ==
+                expected_game.seat_decks &&
+            game.starting_player ==
+                expected_game.starting_player &&
+            game.game_seed == expected_game.seed &&
             game.starting_player < kPlayerCount &&
             game.seat_decks[0] !=
                 game.seat_decks[1] &&
@@ -181,10 +248,20 @@ ScheduleBalance audit_schedule_balance(
                 .insert(game.schedule_index)
                 .second &&
             game_seeds.insert(game.game_seed).second;
+        ++result
+              .physical_games_by_block[
+                  expected_block];
         for (std::size_t seat = 0;
              seat < kPlayerCount; ++seat) {
-            const std::size_t deck =
-                deck_index(game.seat_decks[seat]);
+            std::size_t deck = 0;
+            try {
+                deck =
+                    deck_index(
+                        game.seat_decks[seat]);
+            } catch (const std::exception&) {
+                rows_valid = false;
+                continue;
+            }
             const std::size_t on_play =
                 seat == game.starting_player ? 1 : 0;
             ++result.perspectives_by_deck[deck];
@@ -206,6 +283,13 @@ ScheduleBalance audit_schedule_balance(
             kPhysicalGamesPerSplit &&
         result.owner_perspectives ==
             kOwnerPerspectivesPerSplit &&
+        std::all_of(
+            result.physical_games_by_block.begin(),
+            result.physical_games_by_block.end(),
+            [](std::size_t count) {
+                return count ==
+                    kPhysicalGamesPerBlock;
+            }) &&
         std::all_of(
             result.perspectives_by_deck.begin(),
             result.perspectives_by_deck.end(),

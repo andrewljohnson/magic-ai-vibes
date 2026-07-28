@@ -24,6 +24,7 @@ inline constexpr std::size_t kDominanceWorlds = 8;
 struct CollectionSpec {
     std::string_view owner_information_schema;
     std::string_view stable_root_schema;
+    bool block_bound_ids = false;
     std::uint64_t hidden_seed_namespace = 0;
     std::string_view hidden_seed_scope;
     std::uint64_t dominance_seed_namespace = 0;
@@ -68,6 +69,12 @@ std::string stable_root_id(
     const RootLocator& locator,
     std::string_view information_action_fingerprint,
     std::string_view stable_root_schema);
+std::string block_bound_physical_game_id(
+    const RootLocator& locator);
+std::string block_bound_stable_root_id(
+    const RootLocator& locator,
+    std::string_view information_action_fingerprint,
+    std::string_view stable_root_schema);
 
 struct RetentionCandidate {
     std::size_t trace_ordinal = 0;
@@ -108,19 +115,22 @@ bool validate_replay_manifest(
     const std::vector<ReplayRootManifest>& roots,
     std::string_view stable_root_schema,
     std::size_t maximum_legal_actions =
-        kMaximumLegalActions);
+        kMaximumLegalActions,
+    bool block_bound_ids = false);
 std::string serialize_replay_manifest(
     const std::vector<ReplayRootManifest>& roots,
     std::string_view manifest_schema,
     std::string_view stable_root_schema,
     std::size_t maximum_legal_actions =
-        kMaximumLegalActions);
+        kMaximumLegalActions,
+    bool block_bound_ids = false);
 std::string replay_manifest_sha256(
     const std::vector<ReplayRootManifest>& roots,
     std::string_view manifest_schema,
     std::string_view stable_root_schema,
     std::size_t maximum_legal_actions =
-        kMaximumLegalActions);
+        kMaximumLegalActions,
+    bool block_bound_ids = false);
 
 enum class RootDisposition : std::uint8_t {
     Malformed,
@@ -319,6 +329,9 @@ enum DevelopmentRole : std::uint8_t {
 
 struct BlindSelectionInput {
     std::string stable_id;
+    // Opaque digest only. It is used to retain the first positive row from
+    // each physical game before spacing the development sample.
+    std::string physical_game_sha256;
     DeckId owner_deck = DeckId::Green;
     bool dominance_positive = false;
 
@@ -341,10 +354,16 @@ struct BlindSelection {
     bool operator==(const BlindSelection&) const = default;
 };
 
-// Reserves the first retained root of each deck as background, then selects
-// at most fifteen evenly spaced positives from the remaining chronological
-// positive stratum. The input deliberately has no score, outcome, selected
-// action, card, or candidate-model field.
+inline constexpr std::size_t kMaximumDevelopmentRowsPerDeck = 32;
+inline constexpr std::size_t
+    kMaximumDevelopmentPositiveRowsExcludingBackground = 31;
+
+// Reserves the first retained root of each deck as background. From the
+// remaining chronological positive stratum it keeps only the first row per
+// distinct opaque physical-game digest, then selects at most thirty-one
+// evenly spaced rows. A positive background also reserves its physical game.
+// The input deliberately has no score, outcome, selected action, card, or
+// candidate-model field.
 BlindSelection select_development_rows(
     const std::vector<BlindSelectionInput>& chronological_rows);
 

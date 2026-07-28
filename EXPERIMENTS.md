@@ -14861,6 +14861,11 @@ unselected-row classification. If either split fails, DEV1 is unusable:
 publish nothing, append no block or seed, do not retry, and do not salvage
 the other split.
 
+Pre-data disclosure clarification: `census`, `selected`, `positive`, and
+`background` are the only per-deck fields. High-confidence roots, physical
+games, and represented decks are pooled split-level counts only; no
+per-deck parent-class counts may be emitted.
+
 The wire and artifact become v2:
 `old-school-fq4-priority-dev-bundle-v2` at
 `data/old-school-fq4-priority-dev-v2.fq4dev`. Because no v1 artifact exists,
@@ -14892,7 +14897,7 @@ with the exact producer identity; reread a timestamped post-DEV0
 `REVIEW.md`; and obtain a fresh independent execution GO. Only then may the
 fixed no-argument DEV1 generator run exactly once.
 
-FQ4-DEV1 mechanical seed derivation, completed 2026-07-28 04:20 PDT
+FQ4-DEV1 mechanical seed derivation, completed 2026-07-28 04:19 PDT
 without constructing a schedule or game:
 
 ```text
@@ -14915,6 +14920,126 @@ two parent-error-bearing deck strata, 31 game-diverse positive rows and a
 conditional high-confidence prevalence of at least 15% give 95.895%
 probability of at least five errors pooled with both decks represented. The
 fixed gates, not these planning assumptions, decide publication.
+
+`REVIEW.md` was reread through its timestamped 04:14 post-result cycle before
+any DEV1 schedule serialization. It independently countersigns DEV0's
+support rejection and handling, estimates that P0b's sparse Green/White
+high-confidence rates require at least 80 physical games per split, and
+endorses count-only failure diagnostics. DEV1's prospectively frozen 160
+games per split is twice that review-derived floor and does not conflict with
+the critique.
+
+FQ4-DEV1 game-free schedule preflight, completed 2026-07-28 04:22 PDT
+without constructing a game:
+
+```sh
+make -j4 test-fq4-dev-schedule
+./build/old-school-fq4-priority-dev-schedule
+```
+
+The focused suite passed **4/4**, covering the literal hash-based seed
+derivation, namespace bytes, deterministic four-block reconstruction, every
+balance cross-sum, split disjointness, block/global locators, exact byte/hash
+goldens, and malformed duplicate/mixed/block/index/seed/order/truncation
+rejection. Exact CLI output was:
+
+```text
+split=fit seed_base=14991670039259730681 blocks=4 games=160 perspectives=320 bytes=12747 sha256=c1f1e7cb4f8f9619ba951d1a1c9c199b8e2e01850b9b0987c9169c0b8bffab0b exact=1
+split=check seed_base=2769767503634781211 blocks=4 games=160 perspectives=320 bytes=12592 sha256=f5e021c32287aba9286e5f32250ac4f8980e2b91c4a9033679fb21ce1b9f739b exact=1
+```
+
+An independent Node/BigInt implementation reproduced both seed derivations,
+all 160 resolved game seeds per split with no duplicate or cross-split
+overlap, the exact schedule bytes/hashes, and 64/32/32/16 per-deck
+perspective/seat/play/quadrant cross-sums. The same focused suite passed
+**4/4** under AddressSanitizer/UndefinedBehaviorSanitizer. Decision: freeze
+these schedule identities. This licenses only v2 source integration and
+synthetic testing; no source game or no-argument generator is licensed yet.
+
+FQ4-DEV1 v2 implementation freeze, completed 2026-07-28 04:49 PDT:
+**implementation GO; pre-commit executable remains unlicensed for
+no-argument generation**. No DEV1 source game was opened and the fixed v2
+artifact and temporary remain absent.
+
+The final implementation:
+
+- concatenates the four exact balanced schedule blocks and binds the explicit
+  block into every v2 locator, physical-game identity, stable-root identity,
+  retained manifest, census wire row, and collection contract while
+  preserving the frozen v1 P0/D1 identity helpers byte-for-byte;
+- reduces each deck's positive stratum to its first row per distinct opaque
+  physical-game digest before blind evenly spaced selection, including
+  exclusion of a later positive from the background row's physical game;
+- constructs both complete splits twice before applying the support
+  conjunction, validates a support-missing construction structurally without
+  pretending it is publishable, and publishes only two byte-identical,
+  fully support-valid constructions;
+- emits only the preregistered per-deck census/selected/positive/background
+  counts plus pooled high-confidence roots/games/decks, in exact
+  FIT-then-CHECK order before the categorical verdict;
+- snapshots executable, parent, target, temporary, construction progress,
+  and zero candidate-rollout accounting on success, support rejection,
+  exception, signal, wait failure, and the fixed 1,200-second watchdog; the
+  foreground supervisor and worker remain in one process group so terminal
+  cancellation cannot orphan a hidden generator; and
+- explicitly forbids both D1 seed bases and both consumed DEV0 source bases,
+  while exact v2 schedule literals/hashes enforce the new coordinate.
+
+Independent review found and rejected seven intermediate seams before any
+source game opened: an ambiguous v2 block field label; undeclared per-deck
+parent-class disclosure; a test that did not include the actual rejection
+verdict; no positive-background same-game boundary case; accidental mutation
+of the shared frozen v1 P0/D1 identity; a detached worker that could survive
+Ctrl-C; and raw exception text that could disclose source/action detail.
+Each was fixed and regression-tested. Final static review reported no
+remaining P0/P1 correctness or disclosure finding.
+
+Frozen portable identities are:
+
+```text
+collection-contract bytes=561
+collection-contract sha256=550ddeda6cc7397eccc51a5af774f15664e665936969e0002ebece51cc1aa8f6
+feature-contract sha256=240c91d19bb55279d7cbc58e64f4fddaef8da4248a089de8bc6e4cf96708a4f4
+synthetic-v2-wire sha256=fcccd0d3ea91c9a2734bfdcb180a0c5c68ee6f33c2a9fab15bdc1791aaa5591d
+```
+
+Focused release suites passed: schedule **4/4**, collection **10/10**,
+bundle **9/9**, generator **8/8**, frozen D1 field gate **11/11**, and frozen
+D1 treatment **9/9**. The same counts passed independently under
+AddressSanitizer/UndefinedBehaviorSanitizer. The independent audit also
+reproduced the exact schedule hashes, collection-contract hash, parent
+artifact identity, zero overlap between all 320 DEV1 and 80 consumed DEV0
+resolved game seeds, v1 stable-root golden, separate block-bound v2 golden,
+privacy scans, held-out source/link/symbol firewalls, and artifact/temporary
+absence.
+
+Exact repository gate:
+
+```sh
+/usr/bin/time -p make -j4 test
+# all suites passed
+# real 260.63 user 518.39 sys 9.35
+```
+
+This includes engine **169/169**, learned iteration **27/27**, probes
+**57/57**, probe metrics **11/11**, probe runner **33/33**, every historical
+audit and FQ0/FQ4 suite, web bridge **18/18**, web **106/106**,
+certification **48/48**, CLI/capture/clean/incremental contracts, and the
+representative simulator smoke. `make test-build-graph` and
+`git diff --check` also passed.
+
+Decision: accept this source for a commit-and-review freeze only; it supplies
+no speed or strength evidence. After committing the complete
+Makefile/include/src/tests/notebook closure, rebuild the release generator so
+its embedded producer commit matches that clean HEAD; rerun focused,
+provenance, firewall, parent-hash, v2-artifact/temporary-absence, and
+sanitizer checks; reread `REVIEW.md`; and obtain an independent post-commit
+execution GO before the sole no-argument DEV1 invocation.
+
+`REVIEW.md` was reread through its newest 04:44 cycle before this freeze. Its
+04:29 cycle endorses the DEV1 preregistration and its 04:44 cycle observes
+only authorized source integration with no source game opened; neither
+conflicts with this result.
 
 ##### Shared-object build graph result (iteration-speed infrastructure)
 

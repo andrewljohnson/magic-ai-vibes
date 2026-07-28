@@ -395,19 +395,32 @@ std::string physical_game_id(
            "\n";
 }
 
-std::string stable_root_id(
+std::string block_bound_physical_game_id(
+    const RootLocator& locator) {
+    return "source_block=" +
+           std::to_string(locator.source_block) +
+           "\n" + physical_game_id(locator);
+}
+
+namespace {
+
+std::string stable_root_id_with_block_field(
     const RootLocator& locator,
     std::string_view information_action_fingerprint,
-    std::string_view stable_root_schema) {
+    std::string_view stable_root_schema,
+    std::string_view block_field) {
     if (locator.owner_seat >= kPlayerCount ||
         information_action_fingerprint.empty() ||
-        stable_root_schema.empty()) {
+        stable_root_schema.empty() ||
+        block_field.empty()) {
         throw std::invalid_argument(
             "invalid FQ4 stable-root coordinate");
     }
     std::string key(stable_root_schema);
     key.push_back('\n');
-    key += "source_seed_base_index=" +
+    key.append(block_field);
+    key.push_back('=');
+    key +=
            std::to_string(locator.source_block) + "\n";
     key += "source_seed_base=" +
            std::to_string(locator.source_seed_base) + "\n";
@@ -423,6 +436,27 @@ std::string stable_root_id(
     key.append(information_action_fingerprint);
     key.push_back('\n');
     return integrity::sha256_string(key);
+}
+
+} // namespace
+
+std::string stable_root_id(
+    const RootLocator& locator,
+    std::string_view information_action_fingerprint,
+    std::string_view stable_root_schema) {
+    return stable_root_id_with_block_field(
+        locator, information_action_fingerprint,
+        stable_root_schema,
+        "source_seed_base_index");
+}
+
+std::string block_bound_stable_root_id(
+    const RootLocator& locator,
+    std::string_view information_action_fingerprint,
+    std::string_view stable_root_schema) {
+    return stable_root_id_with_block_field(
+        locator, information_action_fingerprint,
+        stable_root_schema, "schedule_block");
 }
 
 RetentionResult retain_owner_game_roots(
@@ -487,7 +521,8 @@ RetentionResult retain_owner_game_roots(
 bool validate_replay_manifest(
     const std::vector<ReplayRootManifest>& roots,
     std::string_view stable_root_schema,
-    std::size_t maximum_legal_actions) {
+    std::size_t maximum_legal_actions,
+    bool block_bound_ids) {
     if (stable_root_schema.empty() ||
         maximum_legal_actions < 2) {
         return false;
@@ -515,10 +550,16 @@ bool validate_replay_manifest(
                 root.canonical_descriptors.begin(),
                 root.canonical_descriptors.end()) !=
                 root.canonical_descriptors.end() ||
-            root.stable_id != stable_root_id(
-                root.locator,
-                root.information_action_fingerprint,
-                stable_root_schema) ||
+            root.stable_id !=
+                (block_bound_ids
+                     ? block_bound_stable_root_id(
+                           root.locator,
+                           root.information_action_fingerprint,
+                           stable_root_schema)
+                     : stable_root_id(
+                           root.locator,
+                           root.information_action_fingerprint,
+                           stable_root_schema)) ||
             !stable_ids.insert(root.stable_id).second) {
             return false;
         }
@@ -530,11 +571,13 @@ std::string serialize_replay_manifest(
     const std::vector<ReplayRootManifest>& roots,
     std::string_view manifest_schema,
     std::string_view stable_root_schema,
-    std::size_t maximum_legal_actions) {
+    std::size_t maximum_legal_actions,
+    bool block_bound_ids) {
     if (manifest_schema.empty() ||
         !validate_replay_manifest(
             roots, stable_root_schema,
-            maximum_legal_actions)) {
+            maximum_legal_actions,
+            block_bound_ids)) {
         throw std::invalid_argument(
             "invalid FQ4 replay manifest");
     }
@@ -572,11 +615,13 @@ std::string replay_manifest_sha256(
     const std::vector<ReplayRootManifest>& roots,
     std::string_view manifest_schema,
     std::string_view stable_root_schema,
-    std::size_t maximum_legal_actions) {
+    std::size_t maximum_legal_actions,
+    bool block_bound_ids) {
     return integrity::sha256_string(
         serialize_replay_manifest(
             roots, manifest_schema, stable_root_schema,
-            maximum_legal_actions));
+            maximum_legal_actions,
+            block_bound_ids));
 }
 
 RootBuildResult build_canonical_root(
@@ -765,10 +810,15 @@ RootBuildResult build_canonical_root(
     }
 
     const std::string root_id =
-        stable_root_id(
-            locator,
-            result.information_action_fingerprint,
-            spec.stable_root_schema);
+        spec.block_bound_ids
+            ? block_bound_stable_root_id(
+                  locator,
+                  result.information_action_fingerprint,
+                  spec.stable_root_schema)
+            : stable_root_id(
+                  locator,
+                  result.information_action_fingerprint,
+                  spec.stable_root_schema);
     probe.stable_id = root_id;
     result.root = CanonicalRoot{
         .probe = std::move(probe),
@@ -1402,6 +1452,7 @@ BlindSelection select_development_rows(
         const std::size_t deck =
             static_cast<std::size_t>(row.owner_deck);
         if (deck >= kDeckCount || row.stable_id.empty() ||
+            row.physical_game_sha256.empty() ||
             !stable_ids.insert(row.stable_id).second) {
             return result;
         }
@@ -1415,17 +1466,29 @@ BlindSelection select_development_rows(
         }
         const std::size_t background = by_deck[deck].front();
         std::vector<std::size_t> positive_candidates;
+        std::set<std::string> positive_games;
+        if (chronological_rows[background]
+                .dominance_positive) {
+            positive_games.insert(
+                chronological_rows[background]
+                    .physical_game_sha256);
+        }
         for (const std::size_t index : by_deck[deck]) {
             if (index != background &&
                 chronological_rows[index]
-                    .dominance_positive) {
+                    .dominance_positive &&
+                positive_games.insert(
+                    chronological_rows[index]
+                        .physical_game_sha256)
+                    .second) {
                 positive_candidates.push_back(index);
             }
         }
         const auto retained_positions =
             learned_iteration::
                 evenly_spaced_retained_indices(
-                    positive_candidates.size(), 15);
+                    positive_candidates.size(),
+                    kMaximumDevelopmentPositiveRowsExcludingBackground);
         std::vector<BlindSelectionRow> deck_rows;
         deck_rows.reserve(1 + retained_positions.size());
         deck_rows.push_back({
@@ -1453,7 +1516,7 @@ BlindSelection select_development_rows(
                        second.input_index;
             });
         if (deck_rows.size() >
-            kMaximumRootsPerOwnerGame) {
+            kMaximumDevelopmentRowsPerDeck) {
             return result;
         }
         result.rows_by_deck[deck] =
@@ -1472,7 +1535,8 @@ BlindSelection select_development_rows(
     }
     result.valid =
         result.rows.size() <=
-            kDeckCount * kMaximumRootsPerOwnerGame &&
+            kDeckCount *
+                kMaximumDevelopmentRowsPerDeck &&
         std::is_sorted(
             result.rows.begin(), result.rows.end(),
             [&](const BlindSelectionRow& first,

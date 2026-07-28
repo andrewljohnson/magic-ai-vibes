@@ -429,6 +429,7 @@ Manifest decode_manifest(std::string_view payload) {
 
 void write_census_row(
     Writer& output, const CensusRow& row) {
+    output.u8(row.schedule_block);
     output.u16(row.schedule_index);
     output.u8(row.owner_seat);
     output.u32(row.trace_ordinal);
@@ -454,6 +455,8 @@ void write_census_row(
 
 CensusRow read_census_row(Reader& input) {
     CensusRow result;
+    result.schedule_block =
+        input.u8("census schedule block");
     result.schedule_index =
         input.u16("census schedule index");
     result.owner_seat = input.u8("census owner seat");
@@ -813,6 +816,7 @@ Bundle decode_wire(std::string_view bytes) {
 
 auto census_key(const CensusRow& row) {
     return std::tuple{
+        row.schedule_block,
         row.schedule_index,
         row.owner_seat,
         row.trace_ordinal,
@@ -823,6 +827,7 @@ auto census_key(const CensusRow& row) {
 auto selected_key(const SelectedRow& row) {
     return std::tuple{
         row.census.owner_deck,
+        row.census.schedule_block,
         row.census.schedule_index,
         row.census.owner_seat,
         row.census.trace_ordinal,
@@ -921,7 +926,7 @@ bool high_confidence_parent_error(
 
 // Reproduce learned_iteration::evenly_spaced_retained_indices locally so
 // the strict codec remains a small, game-free binary. This is the same
-// overflow-safe floor-boundary algorithm frozen by the DEV0 declaration.
+// overflow-safe floor-boundary algorithm frozen by the DEV1 declaration.
 std::vector<std::size_t> evenly_spaced_indices(
     std::size_t total, std::size_t cap) {
     if (cap == 0) {
@@ -975,7 +980,8 @@ std::uint64_t fixed_seed_base(Split split) {
 }
 
 std::uint64_t source_game_seed(
-    Split split, std::uint16_t schedule_index) {
+    Split split, std::uint8_t schedule_block,
+    std::uint16_t schedule_index) {
     constexpr std::uint64_t kSelfPlayGameDomain =
         0x53454c46504c4159ULL;
     std::uint64_t seed = mix_seed(
@@ -989,13 +995,17 @@ std::uint64_t source_game_seed(
     seed = mix_seed(
         seed ^
         mix_seed(
-            std::uint64_t{0} ^
+            static_cast<std::uint64_t>(
+                schedule_block) ^
             0x94d049bb133111ebULL));
+    const std::uint64_t local_index =
+        static_cast<std::uint64_t>(
+            schedule_index %
+            fq4_dev_schedule::kPhysicalGamesPerBlock);
     return mix_seed(
         seed ^
         mix_seed(
-            static_cast<std::uint64_t>(
-                schedule_index) ^
+            local_index ^
             0xbf58476d1ce4e5b9ULL));
 }
 
@@ -1014,12 +1024,16 @@ std::array<std::uint8_t, 2> expected_seat_decks(
             {2, 4},
             {3, 4},
         }};
-    if (schedule_index >= 40) {
+    if (schedule_index >=
+        fq4_dev_schedule::kPhysicalGamesPerSplit) {
         fail("census schedule index is out of range");
     }
-    const std::size_t pairing = schedule_index / 4;
+    const std::size_t local_index =
+        schedule_index %
+        fq4_dev_schedule::kPhysicalGamesPerBlock;
+    const std::size_t pairing = local_index / 4;
     const std::size_t orientation =
-        (schedule_index % 4) / 2;
+        (local_index % 4) / 2;
     return orientation == 0
                ? pairings[pairing]
                : std::array<std::uint8_t, 2>{
@@ -1029,7 +1043,13 @@ std::array<std::uint8_t, 2> expected_seat_decks(
 }
 
 void validate_census_row(const CensusRow& row) {
-    if (row.schedule_index >= 40) {
+    if (row.schedule_block >=
+            fq4_dev_schedule::kScheduleBlocks ||
+        row.schedule_index >=
+            fq4_dev_schedule::kPhysicalGamesPerSplit ||
+        row.schedule_index /
+                fq4_dev_schedule::kPhysicalGamesPerBlock !=
+            row.schedule_block) {
         fail("census schedule index is out of range");
     }
     if (row.owner_seat >= 2) {
@@ -1088,8 +1108,11 @@ SplitStatistics validate_split(
     const std::vector<SelectedRow>& selected,
     std::set<Hash256>& global_roots,
     std::set<Hash256>& global_selected,
-    std::map<Hash256, std::pair<Split, std::uint16_t>>&
-        physical_games) {
+    std::map<
+        Hash256,
+        std::tuple<Split, std::uint8_t, std::uint16_t>>&
+        physical_games,
+    bool require_publication_support) {
     if (census.empty() ||
         census.size() > kMaximumCensusRowsPerSplit) {
         fail("split census size is invalid");
@@ -1102,10 +1125,17 @@ SplitStatistics validate_split(
 
     SplitStatistics statistics;
     std::map<Hash256, const CensusRow*> census_by_id;
-    std::set<std::tuple<std::uint16_t, std::uint8_t, std::uint32_t>>
+    std::set<std::tuple<
+        std::uint8_t, std::uint16_t,
+        std::uint8_t, std::uint32_t>>
         public_locators;
-    std::map<std::uint16_t, Hash256> game_ids_by_schedule;
-    std::map<std::pair<std::uint16_t, std::uint8_t>, std::size_t>
+    std::map<
+        std::pair<std::uint8_t, std::uint16_t>,
+        Hash256>
+        game_ids_by_schedule;
+    std::map<
+        std::tuple<std::uint8_t, std::uint16_t, std::uint8_t>,
+        std::size_t>
         owner_perspective_counts;
     std::array<const CensusRow*, kDeckCount> first_by_deck{};
     std::array<std::vector<const CensusRow*>, kDeckCount>
@@ -1116,10 +1146,12 @@ SplitStatistics validate_split(
         validate_census_row(row);
         if (row.physical_game_sha256 !=
                 expected_physical_game_sha256(
-                    split, row.schedule_index) ||
+                    split, row.schedule_block,
+                    row.schedule_index) ||
             row.stable_root_id !=
                 expected_stable_root_sha256(
-                    split, row.schedule_index,
+                    split, row.schedule_block,
+                    row.schedule_index,
                     row.owner_seat,
                     row.trace_ordinal,
                     row.information_action_sha256)) {
@@ -1138,6 +1170,7 @@ SplitStatistics validate_split(
         }
         if (!public_locators
                  .emplace(
+                     row.schedule_block,
                      row.schedule_index, row.owner_seat,
                      row.trace_ordinal)
                  .second) {
@@ -1145,14 +1178,19 @@ SplitStatistics validate_split(
         }
         const std::size_t perspective_count =
             ++owner_perspective_counts[
-                {row.schedule_index, row.owner_seat}];
+                {row.schedule_block,
+                 row.schedule_index,
+                 row.owner_seat}];
         if (perspective_count >
             kMaximumCensusRowsPerOwnerPerspective) {
             fail("owner perspective exceeds its retained-root cap");
         }
         const auto [schedule_game, schedule_inserted] =
             game_ids_by_schedule.emplace(
-                row.schedule_index, row.physical_game_sha256);
+                std::pair{
+                    row.schedule_block,
+                    row.schedule_index},
+                row.physical_game_sha256);
         if (!schedule_inserted &&
             schedule_game->second !=
                 row.physical_game_sha256) {
@@ -1161,10 +1199,14 @@ SplitStatistics validate_split(
         const auto [game, inserted] =
             physical_games.emplace(
                 row.physical_game_sha256,
-                std::pair{split, row.schedule_index});
+                std::tuple{
+                    split, row.schedule_block,
+                    row.schedule_index});
         if (!inserted &&
             game->second !=
-                std::pair{split, row.schedule_index}) {
+                std::tuple{
+                    split, row.schedule_block,
+                    row.schedule_index}) {
             fail("physical game ID crosses source games");
         }
         const std::size_t deck = row.owner_deck;
@@ -1204,15 +1246,23 @@ SplitStatistics validate_split(
             background_roles);
 
         std::vector<const CensusRow*> positives;
+        std::set<Hash256> positive_games;
+        if (dominance_positive(*background)) {
+            positive_games.insert(
+                background->physical_game_sha256);
+        }
         for (std::size_t index = 1;
              index < rows.size(); ++index) {
-            if (dominance_positive(*rows[index])) {
+            if (dominance_positive(*rows[index]) &&
+                positive_games.insert(
+                    rows[index]->physical_game_sha256)
+                    .second) {
                 positives.push_back(rows[index]);
             }
         }
         for (const std::size_t position :
              evenly_spaced_indices(
-                 positives.size(), 15)) {
+                 positives.size(), 31)) {
             expected_roles.emplace(
                 positives[position]->stable_root_id,
                 static_cast<std::uint8_t>(
@@ -1470,9 +1520,10 @@ SplitStatistics validate_split(
         expected_roles.size()) {
         fail("frozen blind selection omitted a required row");
     }
-    if (high_confidence_roots < 5 ||
-        high_confidence_games.size() < 5 ||
-        high_confidence_decks.size() < 2) {
+    if (require_publication_support &&
+        (high_confidence_roots < 5 ||
+         high_confidence_games.size() < 5 ||
+         high_confidence_decks.size() < 2)) {
         fail("split misses the 5/5/2 parent-error support floor");
     }
 
@@ -1480,13 +1531,14 @@ SplitStatistics validate_split(
          deck < kDeckCount; ++deck) {
         if (statistics.census[deck] == 0 ||
             statistics.selected[deck] == 0 ||
-            statistics.positive[deck] == 0 ||
             statistics.background[deck] != 1 ||
             statistics.selected[deck] >
                 kMaximumRowsPerDeckAndSplit ||
             statistics.positive[deck] >
                 kMaximumRowsPerDeckAndSplit ||
-            nonbackground_positive[deck] > 15) {
+            nonbackground_positive[deck] > 31 ||
+            (require_publication_support &&
+             statistics.positive[deck] == 0)) {
             fail("per-deck split coverage or row cap is invalid");
         }
     }
@@ -1798,11 +1850,23 @@ Hash256 sha256(std::string_view bytes) {
 }
 
 Hash256 expected_physical_game_sha256(
-    Split split, std::uint16_t schedule_index) {
+    Split split, std::uint8_t schedule_block,
+    std::uint16_t schedule_index) {
+    if (schedule_block >=
+            fq4_dev_schedule::kScheduleBlocks ||
+        schedule_index >=
+            fq4_dev_schedule::kPhysicalGamesPerSplit ||
+        schedule_index /
+                fq4_dev_schedule::kPhysicalGamesPerBlock !=
+            schedule_block) {
+        fail("physical-game schedule locator is out of range");
+    }
     const std::uint64_t seed_base =
         fixed_seed_base(split);
     return sha256(
-        "source_seed_base=" +
+        "source_block=" +
+        std::to_string(schedule_block) +
+        "\nsource_seed_base=" +
         std::to_string(seed_base) +
         "\nschedule_index=" +
         std::to_string(schedule_index) +
@@ -1810,15 +1874,27 @@ Hash256 expected_physical_game_sha256(
 }
 
 Hash256 expected_stable_root_sha256(
-    Split split, std::uint16_t schedule_index,
+    Split split, std::uint8_t schedule_block,
+    std::uint16_t schedule_index,
     std::uint8_t owner_seat,
     std::uint32_t trace_ordinal,
     const Hash256& information_action_sha256) {
+    if (schedule_block >=
+            fq4_dev_schedule::kScheduleBlocks ||
+        schedule_index >=
+            fq4_dev_schedule::kPhysicalGamesPerSplit ||
+        schedule_index /
+                fq4_dev_schedule::kPhysicalGamesPerBlock !=
+            schedule_block ||
+        owner_seat >= 2) {
+        fail("stable-root public locator is out of range");
+    }
     const std::uint64_t seed_base =
         fixed_seed_base(split);
     std::string key(kStableRootSchema);
     key +=
-        "\nsource_seed_base_index=0"
+        "\nschedule_block=" +
+        std::to_string(schedule_block) +
         "\nsource_seed_base=" +
         std::to_string(seed_base) +
         "\nschedule_index=" +
@@ -1826,7 +1902,8 @@ Hash256 expected_stable_root_sha256(
         "\ngame_seed=" +
         std::to_string(
             source_game_seed(
-                split, schedule_index)) +
+                split, schedule_block,
+                schedule_index)) +
         "\nowner=" +
         std::to_string(owner_seat) +
         "\ntrace=" +
@@ -1852,7 +1929,9 @@ Hash256 descriptor_set_sha256(
     return sha256(canonical.bytes());
 }
 
-void validate(const Bundle& bundle) {
+void validate_impl(
+    const Bundle& bundle,
+    bool require_publication_support) {
     const Manifest& manifest = bundle.manifest;
     if (manifest.purpose != kPurpose ||
         manifest.production_recipe != kProductionRecipe ||
@@ -1923,18 +2002,21 @@ void validate(const Bundle& bundle) {
     std::set<Hash256> global_roots;
     std::set<Hash256> global_selected;
     std::map<
-        Hash256, std::pair<Split, std::uint16_t>>
+        Hash256,
+        std::tuple<Split, std::uint8_t, std::uint16_t>>
         physical_games;
     const SplitStatistics fit =
         validate_split(
             Split::Fit, bundle.fit_census,
             bundle.fit_rows, global_roots,
-            global_selected, physical_games);
+            global_selected, physical_games,
+            require_publication_support);
     const SplitStatistics check =
         validate_split(
             Split::Check, bundle.check_census,
             bundle.check_rows, global_roots,
-            global_selected, physical_games);
+            global_selected, physical_games,
+            require_publication_support);
     require_split_manifest(
         manifest.fit, fit,
         bundle.fit_census.size(),
@@ -1943,6 +2025,15 @@ void validate(const Bundle& bundle) {
         manifest.check, check,
         bundle.check_census.size(),
         bundle.check_rows.size(), Split::Check);
+}
+
+void validate(const Bundle& bundle) {
+    validate_impl(bundle, true);
+}
+
+void validate_prepublication_construction(
+    const Bundle& bundle) {
+    validate_impl(bundle, false);
 }
 
 std::string encode(const Bundle& bundle) {

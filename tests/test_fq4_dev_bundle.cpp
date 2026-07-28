@@ -124,8 +124,12 @@ std::array<std::uint8_t, 2> seat_decks(
             {2, 4},
             {3, 4},
         }};
-    const auto pairing = pairings[schedule_index / 4];
-    return (schedule_index % 4) / 2 == 0
+    const std::size_t local_index =
+        schedule_index %
+        old_school::fq4_dev_schedule::
+            kPhysicalGamesPerBlock;
+    const auto pairing = pairings[local_index / 4];
+    return (local_index % 4) / 2 == 0
                ? pairing
                : std::array<std::uint8_t, 2>{
                      pairing[1], pairing[0]};
@@ -145,6 +149,10 @@ bundle::CensusRow make_census_row(
         "kind-01-action",
     };
     bundle::CensusRow result{
+        .schedule_block = static_cast<std::uint8_t>(
+            schedule_index /
+            old_school::fq4_dev_schedule::
+                kPhysicalGamesPerBlock),
         .schedule_index = schedule_index,
         .owner_seat = 0,
         .trace_ordinal = trace_ordinal,
@@ -163,10 +171,12 @@ bundle::CensusRow make_census_row(
     };
     result.physical_game_sha256 =
         bundle::expected_physical_game_sha256(
-            split, schedule_index);
+            split, result.schedule_block,
+            schedule_index);
     result.stable_root_id =
         bundle::expected_stable_root_sha256(
-            split, schedule_index,
+            split, result.schedule_block,
+            schedule_index,
             result.owner_seat,
             trace_ordinal,
             result.information_action_sha256);
@@ -448,7 +458,7 @@ void test_round_trip_is_deterministic() {
         old_school::artifact_integrity::
             sha256_string(first);
     if (synthetic_sha256 !=
-        "6d955fc5262bb290e37eaa13518b744dae70ef1177ddc2fb8e8243baf8324aa3") {
+        "fcccd0d3ea91c9a2734bfdcb180a0c5c68ee6f33c2a9fab15bdc1791aaa5591d") {
         throw std::runtime_error(
             "synthetic bundle wire golden drifted: " +
             synthetic_sha256);
@@ -703,6 +713,32 @@ void test_census_identity_and_selection_consistency() {
         "multiple physical IDs for one schedule row passed");
 
     changed = make_bundle();
+    changed.fit_census[0].schedule_block = 1;
+    changed.fit_rows[0].census =
+        changed.fit_census[0];
+    expect_rejected(
+        [&] { decode_coherently_rehashed(changed); },
+        "schedule-block/index disagreement passed");
+
+    changed = make_bundle();
+    changed.fit_census[0].schedule_block = 1;
+    changed.fit_census[0].schedule_index = 40;
+    changed.fit_rows[0].census =
+        changed.fit_census[0];
+    expect_rejected(
+        [&] { decode_coherently_rehashed(changed); },
+        "coherent block/index mutation with stale identities passed");
+
+    changed = make_bundle();
+    changed.fit_census[0].physical_game_sha256[0] ^=
+        1U;
+    changed.fit_rows[0].census =
+        changed.fit_census[0];
+    expect_rejected(
+        [&] { decode_coherently_rehashed(changed); },
+        "one-bit physical-game digest mutation passed");
+
+    changed = make_bundle();
     std::swap(
         changed.fit_census[0],
         changed.fit_census[1]);
@@ -939,7 +975,7 @@ void test_roles_caps_background_and_accounting() {
 
     changed = make_bundle();
     for (auto* rows :
-        {&changed.fit_rows, &changed.check_rows}) {
+         {&changed.fit_rows, &changed.check_rows}) {
         for (auto& row : *rows) {
             fill_score_trace(
                 row.actions[0], 0.90, 0.90);
@@ -951,14 +987,34 @@ void test_roles_caps_background_and_accounting() {
                 bits(0.0);
         }
     }
+    bundle::validate_prepublication_construction(
+        changed);
     expect_rejected(
         [&] { decode_coherently_rehashed(changed); },
         "zero parent-error support passed publication validation");
 
     changed = make_bundle();
+    changed.fit_census[0].dominance[1] = {
+        .complete = 8,
+        .strict = 7,
+    };
+    changed.fit_rows[0].census =
+        changed.fit_census[0];
+    changed.fit_rows[0].roles =
+        bundle::Role::BackgroundControl;
+    changed.fit_rows[0].actions[1].dominance =
+        changed.fit_census[0].dominance[1];
+    refresh_counts(changed);
+    bundle::validate_prepublication_construction(
+        changed);
+    expect_rejected(
+        [&] { bundle::validate(changed); },
+        "zero-positive deck passed publication validation");
+
+    changed = make_bundle();
     changed.fit_census.push_back(
         make_census_row(
-            bundle::Split::Fit, 0, 0, 500));
+            bundle::Split::Fit, 0, 40, 500));
     std::sort(
         changed.fit_census.begin(),
         changed.fit_census.end(),

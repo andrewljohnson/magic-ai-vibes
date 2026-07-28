@@ -77,7 +77,7 @@ collection::CanonicalRoot synthetic_root() {
             schedule_data::Split::Fit);
     const collection::RootLocator locator{
         .source_block =
-            schedule_data::kScheduleBlock,
+            0,
         .source_seed_base =
             schedule_data::kFitSeedBase,
         .schedule_index = 0,
@@ -90,7 +90,7 @@ collection::CanonicalRoot synthetic_root() {
         bundle::format_sha256(
             bundle::sha256("information"));
     const std::string stable =
-        collection::stable_root_id(
+        collection::block_bound_stable_root_id(
             locator, information,
             generator::kStableRootSchema);
     const std::vector<std::string> descriptors{
@@ -186,7 +186,7 @@ collection::CanonicalRoot synthetic_transition_root() {
         .opponent_deck =
             fixture->opponent_deck,
         .stable_id =
-            collection::stable_root_id(
+            collection::block_bound_stable_root_id(
                 locator, information,
                 generator::kStableRootSchema),
         .information_action_fingerprint =
@@ -278,34 +278,54 @@ void test_collection_firewall() {
                     kForbiddenHeldOutGenerationNamespace,
         "held-out namespace crossed the structural firewall");
     expect(
+        generator::kForbiddenSourceSeedBases ==
+            std::array<std::uint64_t, 4>{
+                790,
+                791,
+                202607280210ULL,
+                202607280211ULL,
+            } &&
         schedule_data::kFitSeedBase !=
                 generator::
-                    kForbiddenHeldOutSeedBases[0] &&
+                    kForbiddenSourceSeedBases[0] &&
             schedule_data::kFitSeedBase !=
                 generator::
-                    kForbiddenHeldOutSeedBases[1] &&
+                    kForbiddenSourceSeedBases[1] &&
             schedule_data::kCheckSeedBase !=
                 generator::
-                    kForbiddenHeldOutSeedBases[0] &&
+                    kForbiddenSourceSeedBases[0] &&
             schedule_data::kCheckSeedBase !=
                 generator::
-                    kForbiddenHeldOutSeedBases[1],
+                    kForbiddenSourceSeedBases[1] &&
+            schedule_data::kFitSeedBase !=
+                generator::
+                    kForbiddenSourceSeedBases[2] &&
+            schedule_data::kFitSeedBase !=
+                generator::
+                    kForbiddenSourceSeedBases[3] &&
+            schedule_data::kCheckSeedBase !=
+                generator::
+                    kForbiddenSourceSeedBases[2] &&
+            schedule_data::kCheckSeedBase !=
+                generator::
+                    kForbiddenSourceSeedBases[3],
         "held-out source seed crossed the firewall");
 
     const std::string expected_contract =
-        "old-school-fq4-priority-dev-collection-spec-v1\n"
+        "old-school-fq4-priority-dev-collection-spec-v2\n"
         "owner-information-schema="
-        "old-school-fq4-priority-dev-owner-information-action-v1\n"
+        "old-school-fq4-priority-dev-owner-information-action-v2\n"
         "stable-root-schema="
-        "old-school-fq4-priority-dev-stable-root-v1\n"
+        "old-school-fq4-priority-dev-stable-root-v2\n"
+        "block-bound-ids=1\n"
         "replay-manifest-schema="
-        "old-school-fq4-priority-dev-retained-manifest-v1\n"
-        "hidden-seed-namespace=5066888523878517060\n"
+        "old-school-fq4-priority-dev-retained-manifest-v2\n"
+        "hidden-seed-namespace=5066888523877075017\n"
         "hidden-seed-scope="
-        "old-school-fq4-priority-dev-hidden-v1\n"
-        "dominance-seed-namespace=5066888523878256461\n"
+        "old-school-fq4-priority-dev-hidden-v2\n"
+        "dominance-seed-namespace=5066888523877073999\n"
         "dominance-seed-scope="
-        "old-school-fq4-priority-dev-dominance-v1\n"
+        "old-school-fq4-priority-dev-dominance-v2\n"
         "maximum-legal-actions=32\n"
         "maximum-roots-per-owner-game=16\n"
         "dominance-worlds=8\n";
@@ -401,17 +421,19 @@ void test_census_adapter() {
             row.stable_root_id ==
                 bundle::expected_stable_root_sha256(
                     bundle::Split::Fit,
+                    row.schedule_block,
                     row.schedule_index,
                     row.owner_seat,
                     row.trace_ordinal,
                     row.information_action_sha256) &&
             row.physical_game_sha256 ==
                 bundle::sha256(
-                    collection::physical_game_id(
+                    collection::block_bound_physical_game_id(
                         root.manifest.locator)) &&
             row.physical_game_sha256 ==
                 bundle::expected_physical_game_sha256(
                     bundle::Split::Fit,
+                    row.schedule_block,
                     row.schedule_index) &&
             row.information_action_sha256 ==
                 bundle::parse_sha256(
@@ -454,7 +476,7 @@ void test_census_adapter() {
     auto wrong_game = root;
     wrong_game.manifest.locator.game_seed ^= 1U;
     wrong_game.manifest.stable_id =
-        collection::stable_root_id(
+        collection::block_bound_stable_root_id(
             wrong_game.manifest.locator,
             wrong_game.manifest
                 .information_action_fingerprint,
@@ -471,9 +493,9 @@ void test_census_adapter() {
 
     auto held_out = root;
     held_out.manifest.locator.source_seed_base =
-        generator::kForbiddenHeldOutSeedBases[0];
+        generator::kForbiddenSourceSeedBases[0];
     held_out.manifest.stable_id =
-        collection::stable_root_id(
+        collection::block_bound_stable_root_id(
             held_out.manifest.locator,
             held_out.manifest
                 .information_action_fingerprint,
@@ -545,6 +567,7 @@ void test_support_floor() {
             census, selected, witnesses);
     expect(
         complete.publishable() &&
+            complete.failed_gate_mask == 0 &&
             complete.high_confidence_roots == 5 &&
             complete.high_confidence_games == 5 &&
             complete.high_confidence_decks == 5,
@@ -558,19 +581,40 @@ void test_support_floor() {
             census, selected, weak);
     expect(
         underpowered.coverage_met &&
-            !underpowered.parent_error_floor_met,
+            !underpowered.parent_error_floor_met &&
+            underpowered.failed_gate_mask ==
+                generator::kParentErrorGateFailed,
         "underpowered parent-error split was publishable");
 
-    auto missing = selected;
-    missing.back().roles =
+    auto coverage_only_rows = selected;
+    coverage_only_rows.back().roles =
+        bundle::Role::DominancePositive;
+    const auto coverage_only =
+        generator::summarize_support(
+            census, coverage_only_rows, witnesses);
+    expect(
+        !coverage_only.coverage_met &&
+            coverage_only.parent_error_floor_met &&
+            coverage_only.failed_gate_mask ==
+                generator::kCoverageGateFailed,
+        "coverage-only failure did not preserve parent support");
+
+    auto both_rows = selected;
+    both_rows.back().roles =
         static_cast<std::uint8_t>(
             bundle::Role::BackgroundControl);
-    const auto uncovered =
+    auto both_witnesses = witnesses;
+    both_witnesses.pop_back();
+    const auto both_failed =
         generator::summarize_support(
-            census, missing, witnesses);
+            census, both_rows, both_witnesses);
     expect(
-        !uncovered.coverage_met,
-        "zero-positive deck passed coverage");
+        !both_failed.coverage_met &&
+            !both_failed.parent_error_floor_met &&
+            both_failed.failed_gate_mask ==
+                (generator::kCoverageGateFailed |
+                 generator::kParentErrorGateFailed),
+        "two-gate failure did not preserve both failure bits");
 
     auto alien = witnesses;
     alien.front().stable_root_id =
@@ -581,6 +625,137 @@ void test_support_floor() {
     expect(
         !inconsistent.publishable(),
         "witness outside selected positives was accepted");
+
+    const std::string report =
+        generator::format_support_report(
+            coverage_only, underpowered);
+    const std::size_t fit_start =
+        report.find("support split=fit deck=0");
+    const std::size_t fit_pooled =
+        report.find("support split=fit scope=pooled");
+    const std::size_t check_start =
+        report.find("support split=check deck=0");
+    const std::size_t check_pooled =
+        report.find("support split=check scope=pooled");
+    const auto count_field =
+        [&report](std::string_view field) {
+            std::size_t count = 0;
+            std::size_t position = 0;
+            while ((position =
+                        report.find(field, position)) !=
+                   std::string::npos) {
+                ++count;
+                position += field.size();
+            }
+            return count;
+        };
+    expect(
+        fit_start == 0 &&
+            fit_pooled != std::string::npos &&
+            check_start != std::string::npos &&
+            check_pooled != std::string::npos &&
+            fit_pooled < check_start &&
+            check_start < check_pooled &&
+            report.find("failed_gate_mask=1") !=
+                std::string::npos &&
+            report.find(
+                "failed_gate_mask=2",
+                check_start) !=
+                std::string::npos &&
+            count_field(
+                "high_confidence_roots=") == 2 &&
+            count_field(
+                "high_confidence_games=") == 2 &&
+            static_cast<std::size_t>(
+                std::count(
+                    report.begin(),
+                    report.end(), '\n')) == 12,
+        "count-only report did not emit complete FIT then CHECK "
+        "reports before a conjunctive decision");
+    expect(
+        report.find("root-") == std::string::npos &&
+            report.find("game-") == std::string::npos &&
+            report.find("score") == std::string::npos &&
+            report.find("action") == std::string::npos &&
+            report.find("outcome") == std::string::npos,
+        "count-only report leaked an unlicensed row field");
+
+    auto changed_count = coverage_only;
+    ++changed_count.census_by_deck[0];
+    expect(
+        generator::format_support_report(
+            changed_count, underpowered) !=
+            report,
+        "count-only report ignored a count mutation");
+    auto changed_bit = coverage_only;
+    changed_bit.failed_gate_mask ^=
+        generator::kParentErrorGateFailed;
+    expect(
+        generator::format_support_report(
+            changed_bit, underpowered) !=
+            report,
+        "count-only report ignored a gate-bit mutation");
+
+    const generator::FailureScopeReport rejection_scope{
+        .executable_after_sha256 =
+            std::string(64, 'a'),
+        .parent_after_sha256 =
+            std::string(64, 'b'),
+        .executable_snapshot_ok = true,
+        .parent_snapshot_ok = true,
+        .artifact_status_known = true,
+        .artifact_present = false,
+        .temporary_status_known = true,
+        .temporary_absent = true,
+    };
+    const std::string rejection =
+        generator::format_support_rejection_output(
+            coverage_only, underpowered,
+            rejection_scope);
+    const std::size_t rejection_fit =
+        rejection.find(
+            "support split=fit deck=0");
+    const std::size_t rejection_check =
+        rejection.find(
+            "support split=check deck=0");
+    const std::size_t rejection_postcondition =
+        rejection.find(
+            "postcondition executable_after_sha256=");
+    const std::size_t rejection_verdict =
+        rejection.find("result=NOT_PUBLISHED");
+    expect(
+        rejection_fit == 0 &&
+            rejection_check != std::string::npos &&
+            rejection_postcondition !=
+                std::string::npos &&
+            rejection_verdict !=
+                std::string::npos &&
+            rejection_fit < rejection_check &&
+            rejection_check <
+                rejection_postcondition &&
+            rejection_postcondition <
+                rejection_verdict &&
+            rejection.ends_with(
+                "result=NOT_PUBLISHED"
+                " reason=support_gate_failed"
+                " failed_gate_mask_fit=1"
+                " failed_gate_mask_check=2\n") &&
+            rejection.find(
+                "result=NOT_PUBLISHED",
+                rejection_verdict + 1) ==
+                std::string::npos &&
+            rejection.find("root-") ==
+                std::string::npos &&
+            rejection.find("game-") ==
+                std::string::npos &&
+            rejection.find("action") ==
+                std::string::npos &&
+            rejection.find("outcome") ==
+                std::string::npos &&
+            rejection.find("score") ==
+                std::string::npos,
+        "support rejection output did not preserve report, "
+        "postcondition, verdict order and privacy");
 }
 
 void test_repeat_identity_helper() {
@@ -597,6 +772,69 @@ void test_repeat_identity_helper() {
              complete_constructions_byte_identical(
                  bytes, changed),
         "one-bit bundle drift was accepted");
+}
+
+void test_failure_scope_report() {
+    generator::FailureScopeReport scope{
+        .executable_after_sha256 =
+            std::string(64, 'a'),
+        .parent_after_sha256 =
+            std::string(64, 'b'),
+        .executable_snapshot_ok = true,
+        .parent_snapshot_ok = true,
+        .artifact_status_known = true,
+        .artifact_present = false,
+        .temporary_status_known = true,
+        .temporary_absent = true,
+    };
+    scope.progress.source_games_completed = {{
+        {{160, 80}},
+        {{40, 0}},
+    }};
+    const std::string report =
+        generator::format_failure_scope_report(scope);
+    const std::size_t c0_fit =
+        report.find(
+            "postcondition construction=0 split=fit "
+            "source_games_completed=160");
+    const std::size_t c0_check =
+        report.find(
+            "postcondition construction=0 split=check "
+            "source_games_completed=80");
+    const std::size_t c1_fit =
+        report.find(
+            "postcondition construction=1 split=fit "
+            "source_games_completed=40");
+    const std::size_t c1_check =
+        report.find(
+            "postcondition construction=1 split=check "
+            "source_games_completed=0");
+    expect(
+        report.starts_with(
+            "postcondition executable_after_sha256=") &&
+            report.find("artifact_present=0") !=
+                std::string::npos &&
+            report.find("temporary_absent=1") !=
+                std::string::npos &&
+            report.find(
+                "candidate_rollout_evaluations=0") !=
+                std::string::npos &&
+            c0_fit != std::string::npos &&
+            c0_check != std::string::npos &&
+            c1_fit != std::string::npos &&
+            c1_check != std::string::npos &&
+            c0_fit < c0_check &&
+            c0_check < c1_fit &&
+            c1_fit < c1_check,
+        "failure scope omitted or reordered a postcondition");
+
+    const generator::GenerationFailure failure(
+        "synthetic failure", scope);
+    expect(
+        std::string_view(failure.what()) ==
+                "synthetic failure" &&
+            failure.scope() == scope,
+        "generation failure did not retain its scope report");
 }
 
 void test_direct_robust_dominance_evaluation() {
@@ -674,6 +912,9 @@ int main() {
     runner.run(
         "complete-construction byte identity",
         test_repeat_identity_helper);
+    runner.run(
+        "failure-scope count-only report",
+        test_failure_scope_report);
     runner.run(
         "direct robust-dominance evaluation",
         test_direct_robust_dominance_evaluation);

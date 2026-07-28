@@ -408,10 +408,20 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	@set +e; output=`./$(FQ4_DEV_GENERATOR) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
-		printf 'FQ4-DEV0 generator CLI accepted an argument\n' >&2; \
+		printf 'FQ4-DEV1 generator CLI accepted an argument\n' >&2; \
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+	@if rg -n 'setpgid|killpg|::kill\(-' \
+		src/fq4_dev_generator_main.cpp >/dev/null; then \
+		printf 'FQ4-DEV1 watchdog detached or group-signaled its worker\n' >&2; \
+		exit 1; \
+	fi
+	@if rg -n 'error=|\.what\(\)' \
+		src/fq4_dev_generator_main.cpp >/dev/null; then \
+		printf 'FQ4-DEV1 production CLI can disclose exception details\n' >&2; \
+		exit 1; \
+	fi
 	@set +e; output=`./$(FQ4_PRIORITY_FIT_D0B) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
@@ -471,7 +481,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	@set +e; output=`./$(FQ4_DEV_SCHEDULE) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
-		printf 'FQ4-DEV0 schedule CLI accepted an argument\n' >&2; \
+		printf 'FQ4-DEV1 schedule CLI accepted an argument\n' >&2; \
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
@@ -730,18 +740,18 @@ test-fq4-dev-generator: $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR)
 	@set +e; output=`./$(FQ4_DEV_GENERATOR) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
-		printf 'FQ4-DEV0 generator CLI accepted an argument\n' >&2; \
+		printf 'FQ4-DEV1 generator CLI accepted an argument\n' >&2; \
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
 	@if ! /usr/bin/strings -a "$(FQ4_DEV_GENERATOR)" | \
 		grep -Fx "$(FQ4_DEV_PRODUCER_COMMIT)" >/dev/null; then \
-		printf 'FQ4-DEV0 generator lost its exact producer commit\n' >&2; \
+		printf 'FQ4-DEV1 generator lost its exact producer commit\n' >&2; \
 		exit 1; \
 	fi
 	@if /usr/bin/strings -a "$(FQ4_DEV_GENERATOR)" | \
 		grep -F 'built without OLD_SCHOOL_FQ4_PRODUCER_COMMIT' >/dev/null; then \
-		printf 'FQ4-DEV0 generator retained the unconfigured fallback\n' >&2; \
+		printf 'FQ4-DEV1 generator retained the unconfigured fallback\n' >&2; \
 		exit 1; \
 	fi
 	@case " $(FQ4_DEV_GENERATOR_LINK_SOURCES) " in \
@@ -750,7 +760,7 @@ test-fq4-dev-generator: $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR)
 		*" src/fq4_d1_treatment_production.cpp "*|\
 		*" src/fq4_priority_fit.cpp "*|\
 		*" src/fq4_d1_census_main.cpp "*) \
-			printf 'FQ4-DEV0 generator link graph crossed a held-out firewall\n' >&2; \
+			printf 'FQ4-DEV1 generator link graph crossed a held-out firewall\n' >&2; \
 			exit 1;; \
 	esac
 	@if rg -n \
@@ -758,12 +768,22 @@ test-fq4-dev-generator: $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR)
 		include/old_school/fq4_dev_generator.hpp \
 		src/fq4_dev_generator.cpp \
 		src/fq4_dev_generator_main.cpp >/dev/null; then \
-		printf 'FQ4-DEV0 generator included a held-out/treatment module\n' >&2; \
+		printf 'FQ4-DEV1 generator included a held-out/treatment module\n' >&2; \
 		exit 1; \
 	fi
 	@if nm "$(FQ4_DEV_GENERATOR)" | \
 		grep -E 'run_parent_census|fq4_d1_(field_gate|treatment)|fq4_priority_fit' >/dev/null; then \
-		printf 'FQ4-DEV0 generator binary crossed a held-out symbol firewall\n' >&2; \
+		printf 'FQ4-DEV1 generator binary crossed a held-out symbol firewall\n' >&2; \
+		exit 1; \
+	fi
+	@if rg -n 'setpgid|killpg|::kill\(-' \
+		src/fq4_dev_generator_main.cpp >/dev/null; then \
+		printf 'FQ4-DEV1 watchdog detached or group-signaled its worker\n' >&2; \
+		exit 1; \
+	fi
+	@if rg -n 'error=|\.what\(\)' \
+		src/fq4_dev_generator_main.cpp >/dev/null; then \
+		printf 'FQ4-DEV1 production CLI can disclose exception details\n' >&2; \
 		exit 1; \
 	fi
 
@@ -860,7 +880,7 @@ test-fq4-dev-schedule: $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE)
 	@set +e; output=`./$(FQ4_DEV_SCHEDULE) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
-		printf 'FQ4-DEV0 schedule CLI accepted an argument\n' >&2; \
+		printf 'FQ4-DEV1 schedule CLI accepted an argument\n' >&2; \
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null

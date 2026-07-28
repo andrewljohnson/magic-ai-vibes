@@ -210,9 +210,16 @@ void test_domains_and_ids_are_seed_agnostic() {
     const std::string first = collection::stable_root_id(
         locator, fingerprint, kStableSchema);
     expect(
-        first == collection::stable_root_id(
+        first ==
+                "9006983d6621961f3ce515d02241acd23cd2f9881b3d12e02554a5c68d51166e" &&
+            first == collection::stable_root_id(
                      locator, fingerprint, kStableSchema),
-        "stable root ID was nondeterministic");
+        "legacy stable root ID preimage drifted");
+    expect(
+        collection::block_bound_stable_root_id(
+            locator, fingerprint, kStableSchema) ==
+            "f9f0cab3d62c8a7f2ece1568f71f4ef79d16d4a81ea63618d09970b89b7039b4",
+        "block-bound stable root ID preimage drifted");
     expect(
         first != collection::stable_root_id(
                      locator, fingerprint,
@@ -220,8 +227,12 @@ void test_domains_and_ids_are_seed_agnostic() {
         "stable root ID ignored its caller-owned domain");
     expect(
         collection::physical_game_id(locator) ==
-            "source_seed_base=100\nschedule_index=7\n",
-        "physical game ID serialization drifted");
+            "source_seed_base=100\nschedule_index=7\n" &&
+            collection::block_bound_physical_game_id(
+                locator) ==
+                "source_block=2\nsource_seed_base=100\n"
+                "schedule_index=7\n",
+        "legacy or block-bound physical game ID drifted");
 }
 
 void test_retention_is_deterministic_and_fail_closed() {
@@ -345,6 +356,66 @@ void test_manifest_is_bound_and_mutation_sensitive() {
             mutated, kManifestSchema, kStableSchema) !=
             digest,
         "manifest digest ignored an action mutation");
+}
+
+void test_block_bound_manifest_path_is_end_to_end() {
+    const PriorityFixture fixture = priority_fixture();
+    auto block_spec = spec();
+    block_spec.block_bound_ids = true;
+    auto block_source = fixture.source;
+    block_source.source_block = 3;
+    const auto built =
+        collection::build_canonical_root(
+            fixture.point, block_source,
+            fixture.owner, 7, block_spec);
+    expect(
+        built.disposition ==
+                collection::RootDisposition::
+                    RetentionCandidate &&
+            built.root.has_value(),
+        "block-bound canonical root did not materialize");
+
+    const std::vector<collection::ReplayRootManifest> roots{
+        built.root->manifest,
+    };
+    expect(
+        roots.front().stable_id ==
+                collection::block_bound_stable_root_id(
+                    roots.front().locator,
+                    roots.front()
+                        .information_action_fingerprint,
+                    kStableSchema) &&
+            collection::validate_replay_manifest(
+                roots, kStableSchema,
+                collection::kMaximumLegalActions, true) &&
+            !collection::validate_replay_manifest(
+                roots, kStableSchema,
+                collection::kMaximumLegalActions, false),
+        "block-bound canonical root did not select the v2 ID path");
+
+    const std::string bytes =
+        collection::serialize_replay_manifest(
+            roots, kManifestSchema, kStableSchema,
+            collection::kMaximumLegalActions, true);
+    expect(
+        bytes ==
+                collection::serialize_replay_manifest(
+                    roots, kManifestSchema, kStableSchema,
+                    collection::kMaximumLegalActions, true) &&
+            collection::replay_manifest_sha256(
+                roots, kManifestSchema, kStableSchema,
+                collection::kMaximumLegalActions, true) ==
+                old_school::artifact_integrity::
+                    sha256_string(bytes),
+        "block-bound replay manifest was nondeterministic");
+
+    auto mutated = roots;
+    ++mutated.front().locator.source_block;
+    expect(
+        !collection::validate_replay_manifest(
+            mutated, kStableSchema,
+            collection::kMaximumLegalActions, true),
+        "block-bound replay manifest accepted a block mutation");
 }
 
 void test_robust_dominance_is_complete_and_fail_closed() {
@@ -591,11 +662,14 @@ void test_blind_selection_is_balanced_and_deterministic() {
     std::vector<collection::BlindSelectionInput> input;
     for (std::size_t deck = 0;
          deck < old_school::kDeckCount; ++deck) {
-        for (std::size_t row = 0; row < 25; ++row) {
+        for (std::size_t row = 0; row < 50; ++row) {
             input.push_back({
                 .stable_id =
                     "deck-" + std::to_string(deck) +
                     "-root-" + std::to_string(row),
+                .physical_game_sha256 =
+                    "deck-" + std::to_string(deck) +
+                    "-game-" + std::to_string(row),
                 .owner_deck =
                     static_cast<old_school::DeckId>(deck),
                 .dominance_positive =
@@ -611,11 +685,11 @@ void test_blind_selection_is_balanced_and_deterministic() {
         exact_expected;
     const auto retained_positive_positions =
         old_school::learned_iteration::
-            evenly_spaced_retained_indices(24, 15);
+            evenly_spaced_retained_indices(49, 31);
     for (std::size_t deck = 0;
          deck < old_school::kDeckCount; ++deck) {
         exact_expected.push_back({
-            .input_index = deck * 25,
+            .input_index = deck * 50,
             .roles = static_cast<std::uint8_t>(
                 collection::DevelopmentRoleBackground |
                 (deck == 0
@@ -627,7 +701,7 @@ void test_blind_selection_is_balanced_and_deterministic() {
              retained_positive_positions) {
             exact_expected.push_back({
                 .input_index =
-                    deck * 25 + 1 + position,
+                    deck * 50 + 1 + position,
                 .roles =
                     collection::DevelopmentRolePositive,
             });
@@ -636,23 +710,23 @@ void test_blind_selection_is_balanced_and_deterministic() {
     expect(
         first == repeated && first.valid &&
             first.rows.size() ==
-                old_school::kDeckCount * 16,
+                old_school::kDeckCount * 32,
         "blind selection was not deterministic and bounded");
     expect(
         first.rows == exact_expected,
         "blind selection did not use the exact reserved-background "
-        "plus evenly-spaced-15 rule");
+        "plus evenly-spaced-31 rule");
     for (std::size_t deck = 0;
          deck < old_school::kDeckCount; ++deck) {
         expect(
-            first.rows_by_deck[deck] == 16 &&
+            first.rows_by_deck[deck] == 32 &&
                 first.positives_by_deck[deck] ==
-                    (deck == 0 ? 15 : 16),
+                    (deck == 0 ? 31 : 32),
             "blind selection deck counts drifted");
         const auto found = std::find_if(
             first.rows.begin(), first.rows.end(),
             [deck](const collection::BlindSelectionRow& row) {
-                return row.input_index == deck * 25;
+                return row.input_index == deck * 50;
             });
         expect(
             found != first.rows.end() &&
@@ -693,6 +767,62 @@ void test_blind_selection_is_balanced_and_deterministic() {
         !collection::select_development_rows(missing_deck)
              .valid,
         "blind selection accepted missing deck coverage");
+
+    auto duplicate_game = input;
+    duplicate_game[2].physical_game_sha256 =
+        duplicate_game[1].physical_game_sha256;
+    const auto game_diverse =
+        collection::select_development_rows(
+            duplicate_game);
+    expect(
+        game_diverse.valid &&
+            std::none_of(
+                game_diverse.rows.begin(),
+                game_diverse.rows.end(),
+                [](const collection::BlindSelectionRow& row) {
+                    return row.input_index == 2;
+                }),
+        "blind selection did not retain only the first positive "
+        "root from a physical game");
+
+    auto positive_background = input;
+    positive_background.front().dominance_positive =
+        true;
+    positive_background[1].physical_game_sha256 =
+        positive_background.front()
+            .physical_game_sha256;
+    const auto reserved_background_game =
+        collection::select_development_rows(
+            positive_background);
+    const auto background_row =
+        std::find_if(
+            reserved_background_game.rows.begin(),
+            reserved_background_game.rows.end(),
+            [](const collection::BlindSelectionRow& row) {
+                return row.input_index == 0;
+            });
+    expect(
+        reserved_background_game.valid &&
+            background_row !=
+                reserved_background_game.rows.end() &&
+            background_row->roles ==
+                (collection::DevelopmentRoleBackground |
+                 collection::DevelopmentRolePositive) &&
+            std::none_of(
+                reserved_background_game.rows.begin(),
+                reserved_background_game.rows.end(),
+                [](const collection::BlindSelectionRow& row) {
+                    return row.input_index == 1;
+                }),
+        "positive background did not reserve its physical game "
+        "against the later positive stratum");
+
+    auto missing_game = input;
+    missing_game.front().physical_game_sha256.clear();
+    expect(
+        !collection::select_development_rows(missing_game)
+             .valid,
+        "blind selection accepted an empty physical-game digest");
 }
 
 void test_canonical_hidden_boundary_and_dispositions() {
@@ -781,6 +911,10 @@ int main() {
             {
                 "manifest binding",
                 test_manifest_is_bound_and_mutation_sensitive,
+            },
+            {
+                "block-bound manifest path",
+                test_block_bound_manifest_path_is_end_to_end,
             },
             {
                 "robust dominance",
