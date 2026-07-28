@@ -21467,17 +21467,16 @@ std::vector<LearnedEvaluationWorld> sample_evaluation_worlds(
         LearnedEvaluationWorld sampled{
             .state = sample_determinization(
                 state, original_decks, observer,
-                indexed_search_seed(
-                    config.seed, 0x574F524C44ULL, world)),
+                learned_search_world_seed(
+                    config.seed, world)),
         };
         sampled.continuation_seeds.reserve(
             config.rollouts_per_world);
         for (std::size_t rollout = 0;
              rollout < config.rollouts_per_world; ++rollout) {
             sampled.continuation_seeds.push_back(
-                indexed_search_seed(
-                    config.seed, 0x434F4E54494E5545ULL,
-                    world, rollout));
+                learned_search_continuation_seed(
+                    config.seed, world, rollout));
         }
         worlds.push_back(std::move(sampled));
     }
@@ -21553,6 +21552,20 @@ double blend_evaluation_score(
 }
 
 } // namespace
+
+std::uint64_t learned_search_world_seed(
+    std::uint64_t root_seed, std::size_t world) {
+    return indexed_search_seed(
+        root_seed, 0x574F524C44ULL, world);
+}
+
+std::uint64_t learned_search_continuation_seed(
+    std::uint64_t root_seed, std::size_t world,
+    std::size_t rollout) {
+    return indexed_search_seed(
+        root_seed, 0x434F4E54494E5545ULL,
+        world, rollout);
+}
 
 LearnedPriorityMacroTransition
 advance_learned_priority_macro_transition(

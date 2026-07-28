@@ -206,6 +206,15 @@ GameState sample_determinization(
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t observer, std::uint64_t seed);
 
+// Exact domain-separated seeds used by Learned search. These public pure
+// seams keep offline trajectory diagnostics on the same world and
+// continuation coordinates as the production sampler.
+std::uint64_t learned_search_world_seed(
+    std::uint64_t root_seed, std::size_t world);
+std::uint64_t learned_search_continuation_seed(
+    std::uint64_t root_seed, std::size_t world,
+    std::size_t rollout);
+
 enum class PriorityActionKind : std::uint8_t {
     Pass,
     PlayLand,

@@ -865,6 +865,58 @@ TEST(determinization_is_reproducible_and_preserves_observer_hand) {
           fixture.state.players[0].hand.size());
 }
 
+TEST(learned_search_seed_domains_are_stable) {
+    struct SeedAnchor {
+        std::uint64_t root;
+        std::size_t world;
+        std::uint64_t world_seed;
+        std::uint64_t continuation_zero;
+        std::uint64_t continuation_three;
+    };
+    constexpr std::array<SeedAnchor, 4> anchors{{
+        {
+            0,
+            0,
+            0x5cf7ccc2fc86ea16ULL,
+            0xf62870961178f3beULL,
+            0x23b2b09d8535c736ULL,
+        },
+        {
+            0,
+            7,
+            0xf51aebf2552c966bULL,
+            0x0180cd04745f0b4eULL,
+            0xea037ebedbe02897ULL,
+        },
+        {
+            1,
+            1,
+            0x64189955455f43b0ULL,
+            0xe742d5eb9d1136a1ULL,
+            0x084d1cd8e86ff007ULL,
+        },
+        {
+            0x0123456789abcdefULL,
+            7,
+            0x3e1e735800096f8cULL,
+            0x76f51d23816d7291ULL,
+            0x06d5687c8766f53dULL,
+        },
+    }};
+    for (const SeedAnchor& anchor : anchors) {
+        CHECK(old_school::learned_search_world_seed(
+                  anchor.root, anchor.world) ==
+              anchor.world_seed);
+        CHECK(old_school::learned_search_continuation_seed(
+                  anchor.root, anchor.world, 0) ==
+              anchor.continuation_zero);
+        CHECK(old_school::learned_search_continuation_seed(
+                  anchor.root, anchor.world, 3) ==
+              anchor.continuation_three);
+        CHECK(anchor.world_seed != anchor.continuation_zero);
+    }
+}
+
 TEST(determinization_does_not_consult_hidden_cards) {
     const auto fixture = determinization_fixture();
     auto altered = fixture.state;
