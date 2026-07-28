@@ -15446,6 +15446,107 @@ with no finding. `REVIEW.md` was reread through the newest 05:49 verification
 addendum before recording this result; it names this exact link-list
 invalidation repair as priority one and contains no conflicting feedback.
 
+##### FQ4-DEV1 frozen candidate publication and GP0 gameplay declaration
+
+Declared 2026-07-28 05:56 PDT before implementing a candidate artifact,
+opening a gameplay seed, or observing any candidate game. The only candidate
+is the already-fixed DEV1 fit above: C16 parent
+`68126afc...3e2f`, committed corpus `0911fc2e...859df`, FIT input
+`586b121c...393a1`, optimizer seed `202607280212`, and resulting model
+`71260078...6151`. This declaration changes no fit parameter and permits no
+further tuning from gameplay. C16 remains champion.
+
+Falsifiable hypothesis: the card-agnostic outer-Priority repair that moved
+all 94 CHECK roots Safe with zero severity regressions will avoid a large
+gameplay regression when deployed on its actual production surface, and will
+then beat its exact C16 parent under a powered all-five-deck comparison. The
+240-game GP0 smoke tests only the first clause. It cannot establish a small
+strength gain.
+
+The publication boundary is a new artifact family, never the existing C16
+challenger schema:
+
+- export and apply all five outer Priority tensors exactly: input-to-hidden,
+  hidden bias, hidden-to-output, direct path, and output bias;
+- store only those tensors plus fixed provenance and the deployment recipe;
+  do not store corpus rows, CHECK identities, CHECK metrics, or a second
+  model;
+- bind the exact 3,111,437-byte C16 artifact SHA-256
+  `53aeb904...f944ca`, parent model and component fingerprints, 2,250,909-byte
+  DEV1 corpus SHA-256 `0911fc2e...859df`, FIT-input SHA-256
+  `586b121c...393a1`, 88 FIT roots / 548 options, zero CHECK and background
+  examples at the update boundary, one optimizer call, the complete fixed
+  optimizer, and candidate/model component fingerprints;
+- reconstruct the candidate only by applying those tensors to the supplied
+  exact C16 parent, then require model `71260078...6151`, Priority changed,
+  and critic/Attack/Block/DamageOrder bit-identical;
+- publish through atomic no-replace semantics, reload, and pin the resulting
+  artifact byte size and SHA-256 before gameplay;
+- make the publisher no-argument and deterministic: fit twice from the fixed
+  committed corpus, require identical parameters/fingerprints/accounting,
+  and never replace an existing destination;
+- keep the simulator/gameplay consumer load-only. Its link graph may contain
+  the small artifact loader but no DEV evaluator, bundle, D1, dominance,
+  generator, or Priority-fit source.
+
+The complete treatment/control deployment is frozen, because model identity
+alone is not behavior identity:
+
+```text
+variant=ValueSearchChampion training_games=800
+worlds_per_action=8 rollouts_per_world=1 horizon_turns=4
+shallow_prior=on root_exploration=0 continuation_epsilon=0
+priority_residual_weight=0.10 pass_dominance=off
+continuation_controller=Legacy max_turns=500
+```
+
+The control uses exact C16 with this same recipe. The treatment changes only
+the outer Priority tensors to `71260078...6151`. In particular, residual
+weight zero is forbidden because it would make the treatment inert. Every
+report must print artifact SHA-256, both model and Priority fingerprints, K,
+H, residual weight, controller, PD0 state, seed, repetitions, total games,
+aggregate Wilson interval, all five challenger-deck results, and the full
+deck/policy-seat/play-draw quadrant accounting.
+
+Only after strict artifact/seam/firewall tests, focused sanitizers, the full
+repository suite, immutable preflight snapshots, and an independent read-only
+review may one fixed executor open GP0 seed `202607280601`. It runs, in order,
+the same-seed exact C16/C16 deployment control and then candidate/C16:
+
+```text
+repetitions_per_pairing=4
+pairings=15 quartets_per_pairing=4
+total_games_per_comparison=240
+games_per_challenger_deck=48
+```
+
+The C16/C16 control must be exactly 120-120 with complete balance. GP0 passes
+only if the candidate comparison completes all 240 games, every quadrant is
+present and balanced, aggregate candidate win rate is at least 40%, and wall
+time is at most 1.25 times the fixed-work control. Per-deck 48-game slices are
+descriptive only. A near-50% GP0 result means merely “no large regression”;
+it neither accepts nor rejects a few-point effect.
+
+If and only if GP0 passes, seed `202607280602` is reserved for 34 balanced
+repetitions, 2,040 candidate/C16 games, 408 per challenger deck. This sample
+has roughly a 3.1-point 80%-power minimum detectable lift near 50%. The
+candidate advances only with more than 50% aggregate wins, a Wilson 95% lower
+bound above 50%, and strictly more wins than losses on Green, Red, Blue,
+White, and RU Aggro. Failure stops this candidate without opening the next
+seed.
+
+Only after that control gate, seed `202607280603` is reserved for the same
+2,040-game candidate-versus-Handcrafted gate with the same
+aggregate/Wilson/all-five requirements. Passing it would still not make the
+candidate champion: the fixed `101,202,303,404,505,606,707,808` panel,
+all-five mixed-field lift gate, complete tests, and sanitizers remain
+required. No benchmark may refit or regenerate either model, and evaluation
+seeds never enter training.
+
+`REVIEW.md` was reread through its newest 05:49 verification addendum before
+this declaration. It explicitly places the build-graph repair first and this
+candidate-to-gameplay step next; there is no conflicting feedback.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
