@@ -16258,6 +16258,67 @@ closes this fixed anchor coordinate before any gameplay. Implementation may
 add strict artifact/ranking/evaluator tests and sanitizers, but tests may not
 run the no-argument publisher or inspect a stochastic result.
 
+Pre-implementation adversarial review returned **NO-GO on protocol
+completeness**, not on the hypothesis. No implementation edit, row selection,
+neutral score, artifact, or fit had occurred. The target and `P[d]/32`
+weighting were accepted, but ordering, control, metric, and accounting details
+below were under-specified. This prospective addendum closes those holes
+before work resumes:
+
+1. Canonical encodings are FIT byte `0`, CHECK byte `1`; deck bytes are
+   Green `0`, Red `1`, Blue `2`, White `3`, RU Aggro `4`; schedule-block
+   bytes are `0..3`. All digest comparisons are lexicographic comparisons of
+   unsigned bytes. Artifact rows are serialized and consumed in exact
+   `(split, deck, block, game-rank digest)` order, with selected game ranks
+   ascending within a cell. Equal ranks or locator duplication fail closed.
+   Selected-order SHA-256 uses literal domain
+   `old-school-fq4-dev5-neutral-selected-order-v1`, framed as little-endian
+   u64 domain-byte length, exact domain bytes, little-endian u64 row count,
+   then for each ordered row: split/deck/block bytes followed by raw 32-byte
+   game-rank, representative-rank, physical-game, and stable-root digests.
+   This exact digest and row order bind the artifact and downstream training.
+2. The control **omits neutral rows entirely** through the extended pipeline;
+   it does not pass zero weights or insert rows that can perturb shuffle,
+   batches, or Adam. The omitted-neutral path must reproduce legacy
+   training-input SHA `586b121c...393a1` and candidate
+   `71260078...6151`. Positive rows remain first in existing bundle order;
+   when enabled, neutral FIT rows follow in the artifact order above. Weight
+   validation remains strictly positive. `P[d]/32` gives 88 total neutral
+   loss mass versus 88 positive mass and exact 1:1 mass within each deck; it
+   is deliberately not equal-deck loss weighting.
+3. The stored target is the exact C16 **evaluator/training behavior
+   distribution**, not a claim that greedy gameplay samples this
+   distribution. Compute it with the existing `stable_softmax` at temperature
+   `0.10`, followed by the existing `0.90/0.10` behavior mixture. Neutral
+   drift uses the existing forward KL. Accumulate rows in artifact order in
+   binary64, divide each deck sum by exactly 32, then accumulate decks in byte
+   order and divide by five. Exact support is the existing bitwise
+   exact-maximum combined-score support set; a support change means unequal
+   sets between C16 and the candidate. No epsilon, confidence tolerance, or
+   tie relaxation is allowed. Both positive-only baseline equal-deck KL and
+   pooled baseline support changes must be finite and strictly nonzero.
+   Per-deck nonworsening uses direct `<=` on mean KL and integer support
+   counts. The pooled gates are literal binary64
+   `2 * anchored_equal_deck_KL <= baseline_equal_deck_KL` and integer
+   `2 * anchored_support_changes <= baseline_support_changes`.
+4. Selection and its ordered digest are phase-frozen before the first neutral
+   score call. Bind producer commit and executable SHA-256. The publisher
+   reports three separate ledgers: the known reconstruction ledger
+   `320 games / 9728 roots / 29108 options / 192 score calls / 1141 actions /
+   1536 worlds / 9128 rollouts / 1787 terminal / 7341 bootstrap`; one visible
+   canonical neutral ledger with exactly 320 score calls; and one
+   hidden-clone control ledger with exactly 320 score calls. Canonical and
+   hidden ledgers must be identical in action/world/rollout/terminal/bootstrap
+   counts and bit-identical per action. Each has worlds equal to
+   `320 * 8`, rollouts equal to scored actions times eight, and terminal plus
+   bootstrap equal to rollouts. Publisher accounting remains zero fits,
+   candidate rollouts, and gameplay seeds.
+
+With these corrections the adversarial review's objections are adopted in
+full and implementation is licensed. `REVIEW.md` was reread through its
+newest 08:19 verification addendum before this addendum; it independently
+marks commit `3863dec` green and contains no conflicting post-census result.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
