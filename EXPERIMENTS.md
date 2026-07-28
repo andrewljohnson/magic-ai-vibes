@@ -15415,6 +15415,37 @@ A simulated `game.cpp` edit plus the focused FR0 gate took 14.50 seconds, and
 the unchanged final focused gate took 0.12 seconds. This is execution
 infrastructure only and supplies no bot-strength evidence.
 
+Build-graph invalidation repair, completed 2026-07-28 05:50 PDT after the
+stale evaluator catch above: each program sidecar now records both its
+compiler configuration and its exact ordered link-object list. A missing or
+different object list forces that program alone to relink. The focused
+regression changes the action-evaluator's order while reusing the same cached
+objects and proves exactly one relink, zero recompiles, zero sibling relinks,
+a warm no-op on repetition, and exactly one relink when the original order is
+restored:
+
+```sh
+make test-build-graph
+# shared-object incremental build tests passed
+
+make -j4 test
+# engine 169/169, learned iteration 27/27, probes 57/57,
+# probe metrics 11/11, probe runner 33/33, all historical audit/FQ0/FQ4
+# suites including FQ4 DEV evaluator 9/9 and bundle 9/9,
+# web bridge 18/18, web 106/106, certification 48/48
+
+make -n
+# make: Nothing to be done for `all`.
+```
+
+`git diff --check` passed. This repairs build trust only and changes no
+scientific result or bot behavior. An independent read-only review checked
+ordered equality, missing/legacy sidecars, the generic and custom-generator
+rules, and reran the focused regression under GNU Make 3.81; it returned GO
+with no finding. `REVIEW.md` was reread through the newest 05:49 verification
+addendum before recording this result; it names this exact link-list
+invalidation repair as priority one and contains no conflicting feedback.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after

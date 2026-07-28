@@ -27,11 +27,23 @@ endif
 OBJ_DIR := $(BUILD_DIR)/obj/$(BUILD_CONFIG_ID)
 program_config_sidecar = $(1).compile-config.mk
 program_config_variable = OLD_SCHOOL_PROGRAM_CONFIG_$(1)
+program_link_objects_variable = OLD_SCHOOL_PROGRAM_LINK_OBJECTS_$(1)
 PROGRAM_CONFIG_SIDECARS := $(wildcard $(BUILD_DIR)/*.compile-config.mk)
 -include $(PROGRAM_CONFIG_SIDECARS)
 recorded_program_config = $($(call program_config_variable,$(1)))
+# Every program has at least one link object. Mutual substring containment is
+# therefore an exact, order-sensitive equality check without a parse-time
+# hashing subprocess.
+same_link_objects = $(and \
+	$(findstring $(strip $(1)),$(strip $(2))),\
+	$(findstring $(strip $(2)),$(strip $(1))))
+recorded_program_link_objects = $($(call program_link_objects_variable,$(1)))
 program_config_relink = $(if \
-	$(filter $(BUILD_CONFIG_ID),$(call recorded_program_config,$(1))),,FORCE)
+	$(and \
+		$(filter $(BUILD_CONFIG_ID),$(call recorded_program_config,$(1))),\
+		$(call same_link_objects,$(2),\
+			$(call recorded_program_link_objects,$(1)))),\
+	,FORCE)
 ENGINE_SOURCE := src/game.cpp
 INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
@@ -176,16 +188,19 @@ $(OBJ_DIR)/%.o: %.cpp
 # Keep each program's exact ordered translation-unit list at its declaration.
 # The same source/configuration maps to the same object, so parallel builds
 # compile it once and every consumer waits on that shared prerequisite. Each
-# stable program path records its own configuration only after a successful
-# link; a mismatched or missing sidecar adds FORCE for that program alone.
+# stable program path records its own configuration and ordered link objects
+# only after a successful link; a mismatched or missing sidecar adds FORCE for
+# that program alone.
 define link_program
-$(1): $(call source_objects,$(2)) $(call program_config_relink,$(1)) | $(BUILD_DIR)
+$(1): $(call source_objects,$(2)) $(call program_config_relink,$(1),$(call source_objects,$(2))) | $(BUILD_DIR)
 	@rm -f -- "$$@.compile-config.mk"
 	$$(CXX) $$(CPPFLAGS) $$(CXXFLAGS) $(call source_objects,$(2)) -o $$@
 	@temporary="$$@.compile-config.mk.tmp.$$$$$$$$"; \
-	printf '%s := %s\n' \
+	printf '%s := %s\n%s := %s\n' \
 		"$(call program_config_variable,$(1))" \
-		"$(BUILD_CONFIG_ID)" >"$$$$temporary" && \
+		"$(BUILD_CONFIG_ID)" \
+		"$(call program_link_objects_variable,$(1))" \
+		"$(call source_objects,$(2))" >"$$$$temporary" && \
 	mv -f -- "$$$$temporary" "$$@.compile-config.mk"
 endef
 
@@ -247,7 +262,9 @@ $(eval $(call link_program,$(OUTPUT_CALIBRATION),$(ENGINE_SOURCE) $(LEARNED_ITER
 
 $(eval $(call link_program,$(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) tests/test_output_calibration_runner.cpp))
 
-$(eval $(call link_program,$(OC1_ACTION_EVAL_TEST_RUNNER),$(PROBE_EVAL_SOURCE) $(OC1_ACTION_EVAL_SOURCE) tests/test_oc1_action_eval.cpp))
+OC1_ACTION_EVAL_LINK_SOURCES := $(PROBE_EVAL_SOURCE) $(OC1_ACTION_EVAL_SOURCE)
+
+$(eval $(call link_program,$(OC1_ACTION_EVAL_TEST_RUNNER),$(OC1_ACTION_EVAL_LINK_SOURCES) tests/test_oc1_action_eval.cpp))
 
 $(eval $(call link_program,$(OC1_ACTION_SCORING_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(OC1_ACTION_SCORING_SOURCE) tests/test_oc1_action_scoring.cpp))
 
@@ -318,15 +335,19 @@ $(FQ4_DEV_GENERATOR_MAIN_OBJECT): src/fq4_dev_generator_main.cpp
 		-MMD -MP -MF "$(FQ4_DEV_GENERATOR_MAIN_DEPFILE)" \
 		-MT "$@" -c "$<" -o "$@"
 
-$(FQ4_DEV_GENERATOR): $(call source_objects,$(FQ4_DEV_GENERATOR_LINK_SOURCES)) $(FQ4_DEV_GENERATOR_MAIN_OBJECT) $(call program_config_relink,$(FQ4_DEV_GENERATOR)) | $(BUILD_DIR)
+FQ4_DEV_GENERATOR_LINK_OBJECTS := $(call source_objects,$(FQ4_DEV_GENERATOR_LINK_SOURCES)) $(FQ4_DEV_GENERATOR_MAIN_OBJECT)
+
+$(FQ4_DEV_GENERATOR): $(FQ4_DEV_GENERATOR_LINK_OBJECTS) $(call program_config_relink,$(FQ4_DEV_GENERATOR),$(FQ4_DEV_GENERATOR_LINK_OBJECTS)) | $(BUILD_DIR)
 	@rm -f -- "$@.compile-config.mk"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) \
 		$(call source_objects,$(FQ4_DEV_GENERATOR_LINK_SOURCES)) \
 		$(FQ4_DEV_GENERATOR_MAIN_OBJECT) -o "$@"
 	@temporary="$@.compile-config.mk.tmp.$$$$$$$$"; \
-	printf '%s := %s\n' \
+	printf '%s := %s\n%s := %s\n' \
 		"$(call program_config_variable,$(FQ4_DEV_GENERATOR))" \
-		"$(BUILD_CONFIG_ID)" >"$$temporary" && \
+		"$(BUILD_CONFIG_ID)" \
+		"$(call program_link_objects_variable,$(FQ4_DEV_GENERATOR))" \
+		"$(FQ4_DEV_GENERATOR_LINK_OBJECTS)" >"$$temporary" && \
 	mv -f -- "$$temporary" "$@.compile-config.mk"
 
 $(eval $(call link_program,$(FQ4_PRIORITY_FIT_TEST_RUNNER),$(FQ4_PRIORITY_FIT_LINK_SOURCES) tests/test_fq4_priority_fit.cpp))

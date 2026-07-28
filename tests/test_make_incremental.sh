@@ -89,6 +89,33 @@ require_count 0 ' -c "' "$noop_log"
 require_count 0 "-o $probe_eval_target" "$noop_log"
 require_count 0 "-o $action_eval_target" "$noop_log"
 
+# Changing one program's ordered link-source list in the Makefile must relink
+# that program even when the source set, objects, and compiler configuration
+# are unchanged. It must neither rebuild shared objects nor disturb a sibling.
+link_order_log=$test_directory/link-order.log
+reordered_action_sources='src/oc1_action_eval.cpp src/probe_eval.cpp'
+run_build \
+    "$link_order_log" "$base_cxx" "$base_cppflags" "$base_cxxflags" \
+    "OC1_ACTION_EVAL_LINK_SOURCES=$reordered_action_sources"
+require_count 0 ' -c "' "$link_order_log"
+require_count 0 "-o $probe_eval_target" "$link_order_log"
+require_count 1 "-o $action_eval_target" "$link_order_log"
+
+link_order_noop_log=$test_directory/link-order-noop.log
+run_build \
+    "$link_order_noop_log" "$base_cxx" "$base_cppflags" "$base_cxxflags" \
+    "OC1_ACTION_EVAL_LINK_SOURCES=$reordered_action_sources"
+require_count 0 ' -c "' "$link_order_noop_log"
+require_count 0 "-o $probe_eval_target" "$link_order_noop_log"
+require_count 0 "-o $action_eval_target" "$link_order_noop_log"
+
+link_order_restore_log=$test_directory/link-order-restore.log
+run_build \
+    "$link_order_restore_log" "$base_cxx" "$base_cppflags" "$base_cxxflags"
+require_count 0 ' -c "' "$link_order_restore_log"
+require_count 0 "-o $probe_eval_target" "$link_order_restore_log"
+require_count 1 "-o $action_eval_target" "$link_order_restore_log"
+
 cxxflags_log=$test_directory/cxxflags.log
 changed_cxxflags="$base_cxxflags -DOLD_SCHOOL_CXXFLAGS_CONFIG=1"
 run_build \
