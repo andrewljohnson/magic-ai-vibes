@@ -17328,6 +17328,66 @@ schedule, configuration-isolation, short-circuit, and selection tests. Reuse
 the exact alpha blend and existing treatment bits. Do not add policy logic,
 scan another alpha or seed, or build an evaluation framework.
 
+EXPLORE-6 result, completed 2026-07-28: **the triple composition passed its
+declared fast gameplay selector, but web exposure is held by a newer human
+strategic failure in the shared PD0 mechanism**. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-blend-explore --learned-stack-combat
+# advance mode=LearnedStackCombat
+# treatment_wins=36 treatment_losses=24
+# comparator_wins=35 comparator_losses=25
+# real 664.25
+```
+
+Both arms used evaluation seed `202607280810`, exact alpha-0.50 Priority,
+one balanced repetition / 60 games / 12 per challenger deck, and ordinary
+C16 as baseline:
+
+| Candidate | Aggregate | Green | Red | Blue | White | RU Aggro | Seconds | Decisions | Rollouts |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| alpha0.50+AdversarialBlocks+PD0 | 36-24 | 8-4 | 8-4 | 10-2 | 7-5 | 3-9 | 344.994 | 3,835 | 95,696 |
+| alpha0.50+AdversarialBlocks | 35-25 | 7-5 | 9-3 | 7-5 | 7-5 | 5-7 | 319.189 | 3,744 | 95,024 |
+
+The treatment strict-won against C16 and had one more win than its same-seed
+comparator, so EXPLORE-6's exact pilot-selection gate passes. This remains a
+small descriptive screen; RU Aggro's 3-9 row is a warning, not a powered
+deck-level conclusion.
+
+Before exposing the passed composition, the owner confirmed that the live
+`Learned C16 · Stack Discipline` pilot cast Ancestral Recall targeting the
+human opponent. That pilot and the EXPLORE-6 treatment share the same PD0
+logic. Current PD0 requires the opponent-resource observation to be equal
+before Pass can dominate a candidate. Giving the opponent cards therefore
+changes the observation and is conservatively retained even though the
+change benefits the opponent. The passed composition inherits this strategic
+blind spot, so do not deploy it yet or call it the strongest pilot.
+
+The first proposed follow-up was to generalize PD0 from equal-opponent-resource
+redundancy to a hidden-safe public-resource Pareto comparison. The owner then
+challenged the direction directly: the research bot must improve from a
+general learned representation, policy/value architecture, and honest search,
+not accumulate separate stack/combat/target safeguards. That challenge is
+accepted. A Pareto fixture may still document the field failure, but do not
+compose another such filter into the research candidate yet.
+
+The next experiment is a bounded mechanism diagnosis on the reproduced
+opponent-target draw decision: hold the frozen model and information boundary
+fixed, then compare width and horizon/terminal continuation variants. If
+longer honest continuations repair the ranking, search is the next general
+axis; if they do not, change the learned critic/policy targets or
+representation before building a tree. The intended subsequent search is
+information-set/belief MCTS rather than ordinary perfect-information
+AlphaZero MCTS: nodes must not condition future choices on hidden cards the
+acting player has not observed. Do not deploy the EXPLORE-6 composition while
+this diagnosis is open.
+
+`REVIEW.md` was reread through its newest 16:19 entry after the run. That
+entry endorses EXPLORE-6 before seeing its result. The owner's later
+Ancestral-target field report is the controlling new evidence for holding
+deployment.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
