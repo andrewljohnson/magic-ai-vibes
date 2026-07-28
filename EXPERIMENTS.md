@@ -14256,6 +14256,182 @@ not as scientific evidence. C16 remains champion. After the frozen commit is
 independently checked, the only licensed scientific action is the one exact
 D1 command declared above.
 
+##### FQ4-D1 sole held-out treatment result: PASS
+
+Run 2026-07-28 02:56 PDT, exactly once, from frozen implementation commit
+`565159a36636b678f8679023d6e822ddf59d7c5f`, after its independent
+post-commit GO and with local `main`, `origin/main`, and GitHub `main`
+identical:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit-d1
+```
+
+The supervised process exited `0` with `verdict=PASS`. Its complete buffered
+scientific report was published only after all reconstruction, treatment,
+repeat, hidden-repartition, order, accounting, digest, and aggregate gates
+passed. External elapsed time was `real 166.37`, `user 164.67`, `sys 0.73`.
+The report's phase times in seconds were:
+
+| Parent reconstruction | D0b fit | Tensor evaluation | Total |
+| ---: | ---: | ---: | ---: |
+| 162.282348458 | 3.625157125 | 0.374000709 | 166.296300625 |
+
+The immutable parent artifact remained 3,111,437 bytes with SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+The parent and candidate model fingerprints were respectively
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+and
+`81ad05d2c32bea9b17ca4c89cbbf7a9be105ad130897f79fa4d8a29a5ea1105e`.
+The report's exact component fingerprints show that only Priority changed:
+
+| Component | Parent | Candidate |
+| --- | --- | --- |
+| Critic | `2982b155a02a4a2a3ce8442ae28f6d8cf7829103e538c60f0625b3332502e568` | `2982b155a02a4a2a3ce8442ae28f6d8cf7829103e538c60f0625b3332502e568` |
+| Priority | `32dc6688a5c970e3eda4325bea5ee419077027e160697899e3b00c963fa1bb22` | `c971c6612423c039387f6d163fb6c8d4bfa4f13b4ea0e9ea6acd1cc6591147b7` |
+| Attack | `dfd3aaa16755bee5d0c2c40956851b94ef5676a271a602eb23a57719f7358b01` | `dfd3aaa16755bee5d0c2c40956851b94ef5676a271a602eb23a57719f7358b01` |
+| Block | `d64e40796bd1587958b7386996e6a1e5660778d40ec7b40b0ee6324b8e39adbb` | `d64e40796bd1587958b7386996e6a1e5660778d40ec7b40b0ee6324b8e39adbb` |
+| Damage order | `f0a84ed549bbf95197dd00c13ab04c0a4f6b1771f14bdb30a7dca937d2d79c76` | `f0a84ed549bbf95197dd00c13ab04c0a4f6b1771f14bdb30a7dca937d2d79c76` |
+
+The new D1 treatment identities were:
+
+```text
+treatment_input_sha256  a10c68975b1421def361853b776f065c3e9d3fd142f25fff94ebc2f8cf8746f7
+evidence_sha256         921e5fff2d9ef1f855fabde260690ec34f24fe38981f4fb2500920ffd3e3945f
+```
+
+The parent reconstruction reproduced all six preregistered P0b identities
+exactly:
+
+```text
+schedule_sha256          33f3826615e9c66b6c5c0c137e6c17bc0b53fbe967804e7b39dc8a53143fb28a
+trajectory_sha256        dee75b047182fd6463a7751e6344ccaba67dca1e76661c64aab58f22f4edbacd
+retained_corpus_sha256   f3ae55a1b972c1d1adad101f5a54af210d3e8b5edd646738538aa839fa3f9883
+dominance_corpus_sha256  100296df1e0cba1023320b06f925437af35ef15a561c6861a993be80e8110605
+scored_corpus_sha256     5e063d1e577a1809f40e2ef2af992e79bba0339989054f7a94b31495ab047627
+audit_scores_sha256      47095c7722d65b8a349f77effe960892f1c9fc0061f12d3ae873771ebb6ca991
+```
+
+It also reproduced the complete declared census: 80 games, 160 owner
+perspectives, 2,408 retained roots, 114 scored roots, parent Class-2 sigma
+mass `3417447620267002`, high-confidence support in 24 games and four decks,
+and 59,048 dominance transitions. Production-search accounting was exactly
+129 calls, 907 actions, 1,032 worlds, and 7,256 evaluations =
+1,910 terminal + 5,346 bootstrap.
+
+The D0b production reconstruction retained the declared 256 anchor epochs,
+512 treatment epochs, five constraints, and five candidate margins at gate.
+Anchor KL was `0.00027854071000789408`; treatment KL was
+`0.00012948965023361627`. The training-input SHA-256 was
+`aecb2cf4001ac95f161ca199a81eeaa770e2c9d144d4a96035813188159e66ae`
+and the anchor fingerprint was
+`7079f8f306f90d54df21fedcf81213cc6ad5df6c5c1df46e9b3456ccd550c312`.
+All qualification controls passed. The five exact parent-to-candidate
+treatment margins were:
+
+| Constraint | Parent | Candidate |
+| ---: | ---: | ---: |
+| 0 | 0.0015905226588542876 | 0.01000224999763677 |
+| 1 | -0.025792761630538674 | 0.0068970506199778625 |
+| 2 | 0.013765926145874907 | 0.035169192404206295 |
+| 3 | 0.0076095101199110671 | 0.014768176633115693 |
+| 4 | -0.0011687056448367317 | 0.0083241869525066958 |
+
+The held-out class census changed as follows:
+
+| Deck | Parent Safe/C1/C2/C3 | Candidate Safe/C1/C2/C3 | Parent H/unsafe | Candidate H/unsafe |
+| --- | ---: | ---: | ---: | ---: |
+| Green | 6/1/4/2 | 12/0/0/1 | 5/7 | 0/1 |
+| Red | 8/0/0/0 | 8/0/0/0 | 0/0 | 0/0 |
+| Blue | 32/1/8/3 | 41/0/2/1 | 9/12 | 2/3 |
+| White | 0/6/0/0 | 4/2/0/0 | 6/6 | 2/2 |
+| RU Aggro | 35/2/5/1 | 43/0/0/0 | 7/8 | 0/0 |
+| **Pooled** | **81/10/17/6** | **108/2/2/2** | **27/33** | **4/6** |
+
+The exact per-deck transition matrices below use parent
+`[Safe,C1,C2,C3]` as rows and candidate `[Safe,C1,C2,C3]` as columns:
+
+```text
+Green
+  [6,0,0,0]
+  [1,0,0,0]
+  [4,0,0,0]
+  [1,0,0,1]
+
+Red
+  [8,0,0,0]
+  [0,0,0,0]
+  [0,0,0,0]
+  [0,0,0,0]
+
+Blue
+  [32,0,0,0]
+  [1,0,0,0]
+  [6,0,2,0]
+  [2,0,0,1]
+
+White
+  [0,0,0,0]
+  [4,2,0,0]
+  [0,0,0,0]
+  [0,0,0,0]
+
+RU Aggro
+  [35,0,0,0]
+  [2,0,0,0]
+  [5,0,0,0]
+  [1,0,0,0]
+
+Pooled
+  [81,0,0,0]
+  [8,2,0,0]
+  [15,0,2,0]
+  [4,0,0,2]
+```
+
+There were 23 full Class-1/2-to-Safe repairs in 21 distinct physical games
+and four affected decks: Green 5, Blue 7, White 4, RU Aggro 7, with Red
+unchanged as the preregistered protection deck. All 81 parent-Safe roots
+remained Safe and no root increased in severity. Candidate Class-2 sigma
+mass was `7.3671708985193796`. Thus the repair-root, repair-game,
+repair-deck, zero-regression, every per-deck guard, Red protection, pooled
+`H`, pooled unsafe, pooled Class-1, sigma-mass, and strict-improvement gates
+all passed.
+
+The D1-specific controls all passed: exact parent reproduction,
+Priority-head-only mutation, visible/hidden tensor identity, reverse-order
+identity, repeat identity, and structurally zero treatment rollout
+accounting. Parent reconstruction used 119 primary score calls, 5 hidden
+control calls, and 5 reverse-order control calls; its repeated construction
+used 129 score calls. The complete parent production accounting covered 907
+actions and 1,032 sampled worlds. In contrast, treatment search calls,
+newly sampled worlds, rollout evaluations, terminal leaves, bootstrap leaves,
+and dominance transitions were all exactly zero.
+
+Decision: **accept FQ4-D1 as a decisive held-out offline mechanism PASS**.
+The fitted information-set Bellman Priority treatment repaired 23 of 27
+high-confidence parent errors while introducing no severity regression. This
+supports the treatment mechanism and licenses only its already-separated
+gameplay rung; it is not a gameplay-strength claim. C16 remains the deployed
+champion until a candidate passes the all-five-deck promotion gates. The 114
+D1 rows and their root-level outputs remain sealed and may not be used for
+adaptive tuning.
+
+`REVIEW.md` was reread through its newest 03:04 countersign after the run and
+before this conclusion. That entry independently reproduced the frozen
+implementation's complete repository gate and gave the final invocation GO,
+but had not yet observed the scientific result; it raised no conflicting
+critique. Next experiment:
+complete the preregistered, separately seeded FQ4-DEV0 fast development
+bundle, then use its FIT/CHECK loop to choose a candidate before declaring a
+fresh all-five-deck gameplay screen. The 0.374-second tensor-evaluation phase
+supports the speed mechanism, but FQ4-DEV0's separately declared warm-process
+and end-to-end timing gates still must be measured rather than inferred.
+Two independent read-only post-result audits returned GO: one recomputed all
+transition arithmetic, repairs, aggregate gates, accounting cross-sums, and
+timing coherence; the other checked the notebook requirements and scope.
+Neither reran the one-shot treatment.
+
 ###### FQ4-DEV0 separate fast development-bundle declaration
 
 Declared 2026-07-28 02:02 PDT before opening D1 treatment stdout and before
