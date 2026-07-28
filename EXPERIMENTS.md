@@ -16583,15 +16583,24 @@ The licensed publication coordinate is now frozen before implementation.
 Reuse the existing Priority-tensor delta wire schema at new no-replace path
 `data/old-school-fq4-dev5-neutral-anchored-candidate-v1.fq4candidate`.
 Its contract family is `FQ4-DEV5-NEUTRAL-ANCHORED`; its environment string
-must bind both exact DEV1 `0911fc2e...859df` and neutral
-`47d94823...aa105` identities. Bind exact C16 parent/components, DEV1 in the
-structured corpus field, training input `a13c2bca...68fef`, 248 examples /
-987 options, zero CHECK/background rows, one call and the unchanged optimizer,
-candidate `22834a95...b2171`, all Priority tensor dimensions, and the exact
-existing K8/H4/R1/shallow-on/root-depth-one deployment recipe. Run the full
-evaluator twice, require bit-identical anchored models/accounting/gates,
-publish atomically without replacement, reload exactly, and record artifact
-bytes/SHA before gameplay. The fixed publisher may link the game-free
+must be the following exact 238-byte ASCII literal (within the reused
+schema's 256-byte bound), binding both source artifact sizes and identities:
+`old-school-environment-v3-cleanup-discard;dev1-bytes=2250909;dev1-sha256=0911fc2eb8b14ddc9165543eb1e4c4edb0b058256a58dedf61f6c4ea4ca859df;neutral-bytes=661475;neutral-sha256=47d94823f043971f6f9f0aa5f552bfae210af9615d8f6dc7392e52dad3eaa105`.
+Consumers exact-match this literal and never parse it as trusted provenance.
+Bind exact C16 parent/components, DEV1 in the structured corpus field,
+training input `a13c2bca...68fef`, 248 examples / 987 options, zero
+CHECK/background rows, one call and the unchanged optimizer, candidate
+`22834a95...b2171`, all Priority tensor dimensions, and the exact existing
+K8/H4/R1/shallow-on/root-depth-one deployment recipe. Run the full evaluator
+twice and require bit-identical anchored Priority parameters, model and
+component fingerprints, omitted-control and anchored-batch accounting
+(including 88/548 positive plus 160/439 neutral rows/options and all five
+neutral loss masses), every scientific metric and gate/failure field. Publish
+atomically without replacement, reload exactly, and record artifact bytes/SHA
+before gameplay. The reused v1 wire has no embedded producer-commit field;
+retain the established external boundary of a HEAD-stamped publisher
+executable, before/after executable snapshots, committed-tree review, and a
+notebook-pinned binary SHA. The fixed publisher may link the game-free
 evaluator but no collection/generator/coverage/gameplay/held-out source.
 
 Only after publication tests, sanitizer, full suite, immutable preflight, and
