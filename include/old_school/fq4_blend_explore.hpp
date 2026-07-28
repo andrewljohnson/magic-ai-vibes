@@ -45,6 +45,9 @@ inline constexpr std::uint64_t
 inline constexpr std::size_t
     kAdversarialCompositionStageE1Repetitions = 4;
 inline constexpr double kAdversarialCompositionBlendAlpha = 0.50;
+inline constexpr std::uint64_t kStackDisciplineSeed =
+    202607280809ULL;
+inline constexpr std::size_t kStackDisciplineRepetitions = 1;
 
 struct CandidateScore {
     double alpha = 0.0;
@@ -84,6 +87,18 @@ bool adversarial_composition_advances(
 std::array<BotConfig, 2> make_adversarial_composition_bots(
     std::shared_ptr<const LearnedModel> challenger_model,
     std::shared_ptr<const LearnedModel> baseline_model);
+
+// EXPLORE-5 advances the PD0 composition only when it has a strict winning
+// record and at least as many wins as attack-only on the common coordinate.
+// Equal arm win counts favor PD0.
+bool stack_discipline_advances(
+    const CandidateScore& attack_only,
+    const CandidateScore& pass_dominance);
+
+// Returns attack-only, attack+PD0, and ordinary-C16 recipes in that order.
+// All three share the same exact frozen model and deployment configuration.
+std::array<BotConfig, 3> make_stack_discipline_bots(
+    std::shared_ptr<const LearnedModel> model);
 
 // Returns the exact K8/H4/R1 C16 deployment recipe with only the explicit
 // exploratory switches selected by the caller.

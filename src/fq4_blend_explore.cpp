@@ -652,6 +652,98 @@ int run_adversarial_composition_exploration(
     return 0;
 }
 
+int run_stack_discipline_exploration(
+    const gameplay::FixedDeployment& deployment,
+    std::ostream& output) {
+    const auto bots =
+        make_stack_discipline_bots(deployment.parent);
+    output
+        << "FQ4 general stack-discipline composition exploration"
+        << " parent="
+        << deployment.parent_model_fingerprint
+        << '\n'
+        << "plan mode=StackDiscipline seed="
+        << kStackDisciplineSeed
+        << " repetitions=" << kStackDisciplineRepetitions
+        << " first=C16+AdversarialBlocks"
+        << " second=C16+AdversarialBlocks+PD0"
+        << " baseline=ordinary-C16"
+        << " common_seed=on"
+        << " advance=PD0_strict_win_and_not_fewer_wins"
+        << " tie_break=PD0"
+        << " runtime=descriptive\n";
+    output.flush();
+
+    output
+        << "running mode=StackDiscipline"
+        << " variant=C16+AdversarialBlocks"
+        << " model="
+        << deployment.parent_model_fingerprint
+        << " pass_dominance=off"
+        << " adversarial_blocks=on\n";
+    output.flush();
+    const TimedResult attack_only = run_one(
+        bots[0], bots[2],
+        kStackDisciplineRepetitions,
+        kStackDisciplineSeed, false);
+    print_result(
+        output, "E0", "C16+AdversarialBlocks",
+        0.0, attack_only);
+    const CandidateScore attack_only_score{
+        .alpha = 0.0,
+        .wins = attack_only.summary.challenger_stats.wins,
+        .losses =
+            attack_only.summary.challenger_stats.losses,
+        .draws = attack_only.summary.challenger_stats.draws,
+    };
+
+    output
+        << "running mode=StackDiscipline"
+        << " variant=C16+AdversarialBlocks+PD0"
+        << " model="
+        << deployment.parent_model_fingerprint
+        << " pass_dominance=on"
+        << " adversarial_blocks=on\n";
+    output.flush();
+    const TimedResult pass_dominance = run_one(
+        bots[1], bots[2],
+        kStackDisciplineRepetitions,
+        kStackDisciplineSeed, false);
+    print_result(
+        output, "E0", "C16+AdversarialBlocks+PD0",
+        0.0, pass_dominance);
+    const CandidateScore pass_dominance_score{
+        .alpha = 0.0,
+        .wins =
+            pass_dominance.summary.challenger_stats.wins,
+        .losses =
+            pass_dominance.summary.challenger_stats.losses,
+        .draws =
+            pass_dominance.summary.challenger_stats.draws,
+    };
+
+    const bool advances = stack_discipline_advances(
+        attack_only_score, pass_dominance_score);
+    output
+        << (advances ? "advance" : "stop")
+        << " mode=StackDiscipline"
+        << " variant=C16+AdversarialBlocks+PD0"
+        << " attack_only_wins=" << attack_only_score.wins
+        << " attack_only_losses="
+        << attack_only_score.losses
+        << " attack_only_draws=" << attack_only_score.draws
+        << " PD0_wins=" << pass_dominance_score.wins
+        << " PD0_losses=" << pass_dominance_score.losses
+        << " PD0_draws=" << pass_dominance_score.draws;
+    if (!advances) {
+        output
+            << " reason=PD0_not_strict_win_or_fewer_wins";
+    }
+    output << '\n';
+    output.flush();
+    return 0;
+}
+
 } // namespace
 
 std::shared_ptr<const LearnedModel> blend_priority_heads(
@@ -820,6 +912,38 @@ std::array<BotConfig, 2> make_adversarial_composition_bots(
     };
 }
 
+bool stack_discipline_advances(
+    const CandidateScore& attack_only,
+    const CandidateScore& pass_dominance) {
+    const std::size_t attack_only_games =
+        attack_only.wins + attack_only.losses +
+        attack_only.draws;
+    const std::size_t pass_dominance_games =
+        pass_dominance.wins + pass_dominance.losses +
+        pass_dominance.draws;
+    if (attack_only_games == 0 ||
+        attack_only_games != pass_dominance_games) {
+        throw std::invalid_argument(
+            "StackDiscipline selection requires equal "
+            "nonempty game counts");
+    }
+    return pass_dominance.wins > pass_dominance.losses &&
+           pass_dominance.wins >= attack_only.wins;
+}
+
+std::array<BotConfig, 3> make_stack_discipline_bots(
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model) {
+        throw std::invalid_argument(
+            "StackDiscipline requires a frozen model");
+    }
+    return {
+        make_exploratory_bot(model, false, true),
+        make_exploratory_bot(model, true, true),
+        make_exploratory_bot(std::move(model), false, false),
+    };
+}
+
 BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
     bool pass_dominance,
@@ -842,7 +966,7 @@ int run_cli(
     constexpr std::string_view kUsage =
         "Usage: old-school-fq4-blend-explore"
         " [--pd0|--adversarial-blocks|"
-        "--adversarial-composition]\n";
+        "--adversarial-composition|--stack-discipline]\n";
     const bool valid_arguments =
         argv != nullptr && argv[0] != nullptr &&
         (argc == 1 ||
@@ -851,7 +975,9 @@ int run_cli(
            std::string_view(argv[1]) ==
                "--adversarial-blocks" ||
            std::string_view(argv[1]) ==
-               "--adversarial-composition")));
+               "--adversarial-composition" ||
+           std::string_view(argv[1]) ==
+               "--stack-discipline")));
     if (!valid_arguments) {
         error << kUsage;
         return 2;
@@ -867,6 +993,11 @@ int run_cli(
             if (std::string_view(argv[1]) ==
                 "--adversarial-composition") {
                 return run_adversarial_composition_exploration(
+                    deployment, output);
+            }
+            if (std::string_view(argv[1]) ==
+                "--stack-discipline") {
+                return run_stack_discipline_exploration(
                     deployment, output);
             }
             return run_adversarial_blocks_exploration(

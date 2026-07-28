@@ -133,6 +133,10 @@ void test_frozen_schedule() {
                 4 &&
             explore::kAdversarialCompositionBlendAlpha == 0.50,
         "AdversarialComposition exploration schedule drifted");
+    expect(
+        explore::kStackDisciplineSeed == 202607280809ULL &&
+            explore::kStackDisciplineRepetitions == 1,
+        "StackDiscipline exploration schedule drifted");
 }
 
 void test_blend_endpoints_and_isolation() {
@@ -483,6 +487,98 @@ void test_adversarial_composition_matchup_isolation() {
         "the frozen Priority model");
 }
 
+void test_stack_discipline_selection() {
+    const explore::CandidateScore attack_only{
+        .wins = 31,
+        .losses = 29,
+    };
+    expect(
+        explore::stack_discipline_advances(
+            attack_only,
+            {.wins = 31, .losses = 29}),
+        "StackDiscipline did not favor PD0 on an arm tie");
+    expect(
+        explore::stack_discipline_advances(
+            attack_only,
+            {.wins = 32, .losses = 28}),
+        "StackDiscipline rejected a superior winning PD0 arm");
+    expect(
+        !explore::stack_discipline_advances(
+            {.wins = 33, .losses = 27},
+            {.wins = 32, .losses = 28}),
+        "StackDiscipline advanced PD0 with fewer wins");
+    expect(
+        !explore::stack_discipline_advances(
+            {.wins = 29, .losses = 31},
+            {.wins = 30, .losses = 30}),
+        "StackDiscipline advanced a non-winning PD0 arm");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::stack_discipline_advances(
+                    {.wins = 31, .losses = 29},
+                    {.wins = 31, .losses = 28}));
+        },
+        "StackDiscipline accepted unequal game counts");
+}
+
+void test_stack_discipline_config_isolation() {
+    const auto model = parent_model();
+    const auto bots =
+        explore::make_stack_discipline_bots(model);
+    const auto& attack_only = bots[0];
+    const auto& pass_dominance = bots[1];
+    const auto& baseline = bots[2];
+    expect(
+        attack_only.kind == baseline.kind &&
+            pass_dominance.kind == baseline.kind &&
+            attack_only.learned_variant ==
+                baseline.learned_variant &&
+            pass_dominance.learned_variant ==
+                baseline.learned_variant &&
+            attack_only.rollouts_per_action ==
+                baseline.rollouts_per_action &&
+            pass_dominance.rollouts_per_action ==
+                baseline.rollouts_per_action &&
+            attack_only.exploration_rate ==
+                baseline.exploration_rate &&
+            pass_dominance.exploration_rate ==
+                baseline.exploration_rate &&
+            attack_only.value_continuation_epsilon ==
+                baseline.value_continuation_epsilon &&
+            pass_dominance.value_continuation_epsilon ==
+                baseline.value_continuation_epsilon &&
+            attack_only.value_priority_residual_weight ==
+                baseline.value_priority_residual_weight &&
+            pass_dominance.value_priority_residual_weight ==
+                baseline.value_priority_residual_weight &&
+            !attack_only.value_pass_dominance &&
+            pass_dominance.value_pass_dominance &&
+            !baseline.value_pass_dominance &&
+            attack_only.value_adversarial_blocks &&
+            pass_dominance.value_adversarial_blocks &&
+            !baseline.value_adversarial_blocks &&
+            attack_only.value_continuation_controller ==
+                baseline.value_continuation_controller &&
+            pass_dominance.value_continuation_controller ==
+                baseline.value_continuation_controller &&
+            attack_only.training_games ==
+                baseline.training_games &&
+            pass_dominance.training_games ==
+                baseline.training_games &&
+            attack_only.learned_model == model &&
+            pass_dominance.learned_model == model &&
+            baseline.learned_model == model,
+        "StackDiscipline arms changed more than their "
+        "printed treatment bits");
+    expect_rejected(
+        [] {
+            static_cast<void>(
+                explore::make_stack_discipline_bots(nullptr));
+        },
+        "StackDiscipline accepted a missing frozen model");
+}
+
 void test_adversarial_block_aggregation_changes_ranking() {
     const std::vector<std::vector<double>> block_scores{
         {1.0, 1.0, 1.0, 0.0},
@@ -532,7 +628,8 @@ void test_cli_rejects_arguments_without_loading_models() {
             error.str() ==
                 "Usage: old-school-fq4-blend-explore"
                 " [--pd0|--adversarial-blocks|"
-                "--adversarial-composition]\n",
+                "--adversarial-composition|"
+                "--stack-discipline]\n",
         "CLI argument rejection was not concise");
 }
 
@@ -568,6 +665,12 @@ int main() {
     runner.run(
         "AdversarialComposition matchup isolation",
         test_adversarial_composition_matchup_isolation);
+    runner.run(
+        "StackDiscipline selection",
+        test_stack_discipline_selection);
+    runner.run(
+        "StackDiscipline config isolation",
+        test_stack_discipline_config_isolation);
     runner.run(
         "AdversarialBlocks synthetic aggregation",
         test_adversarial_block_aggregation_changes_ranking);
