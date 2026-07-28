@@ -15203,6 +15203,82 @@ Severity must use an explicit `Safe=0, Class3=1, Class2=2, Class1=3` mapping
 because enum ordinal order differs. These clarify implementation of the
 already frozen formulas and do not change a metric.
 
+FQ4-DEV1 evaluator implementation freeze, completed 2026-07-28 05:33 PDT
+before the first production parent evaluation or FIT:
+**implementation GO; timing and candidate results remain unopened**.
+
+The fixed evaluator now:
+
+- strictly loads only the published 2,250,909-byte DEV1 artifact with
+  SHA-256 `0911fc2eb8b14ddc9165543eb1e4c4edb0b058256a58dedf61f6c4ea4ca859df`
+  and the immutable C16 parent artifact/model/component identities;
+- expands the 893-feature sparse rows, reproduces every FIT and CHECK parent
+  residual anchor bit-exactly, and requires dominance-positive coverage for
+  Green, Red, Blue, White, and RU Aggro in both splits;
+- sends only dominance-positive FIT rows, in stored order, across the single
+  fixed 16-epoch update boundary; CHECK and background-only rows are never
+  training examples;
+- computes the prospectively frozen reverse-KL target, behavior mixture,
+  forward KL, equal-root/equal-deck margins, binary64-exact support,
+  K8 class transitions, repairs, and the explicit nonordinal severity
+  regressions;
+- verifies parent immutability and bit-identical Critic, Attack, Block, and
+  DamageOrder components around the Priority-only update; and
+- exposes only fixed aggregate modes with static exception suppression and
+  structurally zero game, determinization, search, sampled-world, rollout,
+  terminal-leaf, bootstrap-leaf, and dominance-transition accounting.
+
+Exact focused release verification:
+
+```sh
+make -j4 test-fq4-dev-evaluator test-fq4-dev-bundle
+# evaluator 9/9; bundle 9/9
+```
+
+The evaluator cases cover all five decks in FIT and CHECK, exact sparse
+expansion, the FIT-only boundary, C1-to-Safe repair, Safe-to-C3 and
+C3-to-C2 regressions, C2-to-Safe repair, parent anchors, malformed shapes and
+nonfinite values, `+0.0/-0.0` support, constraint census, zero accounting,
+aggregate-only formatting, and formatter fail-closed guards.
+
+Fresh AddressSanitizer/UndefinedBehaviorSanitizer verification used:
+
+```sh
+make -j4 BUILD_DIR=/private/tmp/old-school-fq4-evaluator-asan \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer' \
+  /private/tmp/old-school-fq4-evaluator-asan/old-school-fq4-dev-evaluator-tests
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  /private/tmp/old-school-fq4-evaluator-asan/old-school-fq4-dev-evaluator-tests
+# 9/9; no sanitizer diagnostic
+```
+
+The exact complete repository gate was:
+
+```sh
+make -j4 test
+# engine 169/169, learned iteration 27/27, probes 57/57,
+# probe metrics 11/11, probe runner 33/33, evaluator 9/9,
+# bundle 9/9, every historical audit/FQ0/FQ4 suite,
+# web bridge 18/18, web 106/106, certification 48/48
+```
+
+`git diff --check` passed. An independent final read-only review reran the
+focused suites, checked the frozen formulas and every isolation/privacy
+boundary, inspected the object imports and final binary for forbidden
+game/search/D1/FQ4-fit dependencies, and returned GO with no remaining
+finding.
+
+Decision: freeze and commit this implementation before opening timing or
+candidate output. After rebuilding from that commit and reconfirming artifact,
+parent, and executable identities, run exactly the declared unmeasured parent
+warmup, ten externally timed parent processes, and one externally timed FIT
+process. This entry makes no speed or strength claim.
+
+`REVIEW.md` was reread through its newest 05:29 cycle after the full gate and
+before this conclusion. It observes the implementation in progress and keeps
+the frozen timing measurement as the next event; there is no conflicting
+critique.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation

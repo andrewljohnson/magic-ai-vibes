@@ -58,6 +58,9 @@ inline constexpr std::size_t kMaximumFeaturesPerAction =
     kFeatureCount;
 inline constexpr std::size_t kMaximumArtifactBytes =
     128U * 1024U * 1024U;
+inline constexpr std::size_t kPublishedArtifactBytes = 2250909;
+inline constexpr std::string_view kPublishedArtifactSha256 =
+    "0911fc2eb8b14ddc9165543eb1e4c4edb0b058256a58dedf61f6c4ea4ca859df";
 inline constexpr std::uint64_t kFitSeedBase =
     14991670039259730681ULL;
 inline constexpr std::uint64_t kCheckSeedBase =
@@ -220,11 +223,6 @@ struct Bundle {
     bool operator==(const Bundle&) const = default;
 };
 
-struct PublishedArtifactExpectation {
-    std::size_t byte_size = 0;
-    std::string sha256;
-};
-
 std::string format_sha256(const Hash256& digest);
 Hash256 parse_sha256(std::string_view hexadecimal);
 Hash256 sha256(std::string_view bytes);
@@ -252,17 +250,20 @@ void validate(const Bundle& bundle);
 void validate_prepublication_construction(
     const Bundle& bundle);
 
-// Production loading is deliberately fixed to kArtifactPath. The final byte
-// count and outer SHA-256 are supplied by the caller only after publication
-// freezes them; there is no unfrozen production-load overload.
-Bundle load_published(
-    const PublishedArtifactExpectation& expectation);
+// Production loading has no caller-supplied path or identity. It accepts only
+// the one immutable artifact published by FQ4-DEV1.
+Bundle load_published();
 
 // Writes the encoded bundle through a same-directory temporary file and a
 // no-replace atomic link. It never overwrites kArtifactPath.
 void publish_atomic_no_replace(const Bundle& bundle);
 
 namespace testing {
+
+struct PublishedArtifactExpectation {
+    std::size_t byte_size = 0;
+    std::string sha256;
+};
 
 // Emits canonical checksums around the supplied wire values without running
 // semantic validation. Focused tests use this to prove that coherently

@@ -1181,13 +1181,21 @@ void test_roles_caps_background_and_accounting() {
 }
 
 void test_fixed_loader_and_atomic_no_replace() {
+    expect(
+        bundle::kPublishedArtifactBytes == 2250909,
+        "published byte count drifted");
+    expect(
+        bundle::kPublishedArtifactSha256 ==
+            "0911fc2eb8b14ddc9165543eb1e4c4edb0b058256a58dedf61f6c4ea4ca859df",
+        "published artifact hash drifted");
+
     TemporaryDirectory temporary;
     const std::filesystem::path direct =
         temporary.path() / "direct.fq4dev";
     const bundle::Bundle original = make_bundle();
     const std::string bytes = bundle::encode(original);
     write_file(direct, bytes);
-    const bundle::PublishedArtifactExpectation expected{
+    const bundle::testing::PublishedArtifactExpectation expected{
         .byte_size = bytes.size(),
         .sha256 =
             old_school::artifact_integrity::

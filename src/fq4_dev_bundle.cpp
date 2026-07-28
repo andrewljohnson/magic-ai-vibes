@@ -1622,7 +1622,7 @@ std::string read_exact_file(
 
 Bundle load_from_impl(
     const std::filesystem::path& path,
-    const PublishedArtifactExpectation& expectation) {
+    const testing::PublishedArtifactExpectation& expectation) {
     if (expectation.byte_size == 0 ||
         expectation.byte_size > kMaximumArtifactBytes ||
         format_sha256(parse_sha256(expectation.sha256)) !=
@@ -2047,11 +2047,14 @@ Bundle decode(std::string_view bytes) {
     return result;
 }
 
-Bundle load_published(
-    const PublishedArtifactExpectation& expectation) {
+Bundle load_published() {
     return load_from_impl(
         std::filesystem::path(kArtifactPath),
-        expectation);
+        {
+            .byte_size = kPublishedArtifactBytes,
+            .sha256 =
+                std::string(kPublishedArtifactSha256),
+        });
 }
 
 void publish_atomic_no_replace(const Bundle& bundle) {
