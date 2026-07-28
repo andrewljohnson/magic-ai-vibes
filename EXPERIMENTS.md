@@ -14486,6 +14486,23 @@ control; overlaps use role bits rather than duplicate rows. Selection is
 candidate-, parent-score-, outcome-, and action-choice-blind and caps the
 complete scored corpus at 160 rows.
 
+Prospective selection clarification, 2026-07-28 03:06 PDT, before either
+development schedule was serialized and before any development game was
+opened: an independent source review noticed that 16 positive rows plus a
+nonoverlapping background row could otherwise contradict the 160-row cap.
+The cap applies to the **union** within each split/deck. Let `b` be the first
+retained background row. If `b` is dominance-positive, select up to 16
+positive rows by `evenly_spaced_retained_indices`; its positive and
+background role bits overlap on the one row. If `b` is not
+dominance-positive, reserve it and select up to 15 positive rows by the same
+function. Thus every split/deck has at most 16 physical rows, every selected
+positive remains evenly spaced over the complete chronological positive
+stratum, and the full two-split corpus has at most 160 rows. This resolves
+the internal ambiguity without seeing schedules, roots, counts, parent
+scores, actions, or outcomes; all other selection and support rules are
+unchanged. `REVIEW.md` was reread through its newest 03:04 countersign and
+contained no conflicting DEV0 critique.
+
 Publication is forbidden unless both complete constructions are byte
 identical, both schedules/cross-sums are exact, no malformed root exists,
 every split has at least one positive row for each of the five decks, and
