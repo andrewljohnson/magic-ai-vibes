@@ -17137,6 +17137,147 @@ Only after publication passes may the parent-only C16 census begin.
 It reported the same uncommitted WORK0 implementation and no running census;
 there is no conflicting result.
 
+##### FQ4-WORK0 P0 authenticated publication and loader declaration
+
+Declared 2026-07-28 after commit `f7d1af4`, before changing the cache wire or
+publication code, building a publisher, reconstructing a source game, or
+creating either fixed cache coordinate. The final path
+`data/old-school-fq4-work0-trajectory-root-cache-v1.fq4work0` and deterministic
+same-directory temporary
+`data/.old-school-fq4-work0-trajectory-root-cache-v1.fq4work0.publishing.tmp`
+are both absent. C16 remains champion. This phase authenticates diagnostic
+infrastructure; it is not a candidate, strength result, or parent census.
+
+Falsifiable hypothesis: one fixed no-argument publisher can invoke the frozen
+WORK0 builder exactly once, bind its complete canonical bytes to the exact
+publisher executable and existing C16/DEV1/DEV5 sources, and atomically expose
+one immutable 512-root/2,018-option cache which a later no-argument loader
+accepts only under an external full-file identity. Any second reconstruction,
+source/executable drift, hidden-information leak, replacement, caller-supplied
+production path/identity, or failure to authenticate an in-range next-object
+counter rejects this infrastructure.
+
+The full-cache byte count and SHA-256 cannot be known before the sole permitted
+construction. The following two-stage bootstrap is therefore frozen:
+
+1. Stage P0a adds and reviews the producer-provenance wire, runtime-exact
+   artifact I/O, fixed publisher, and a production loader core whose external
+   cache identity is deliberately unpinned and therefore fail-closed. The
+   publisher is committed and pushed first. Its dedicated main object embeds
+   that exact 40-hex `HEAD`; the publisher/core/builder link graph must not
+   include the later published-identity header or production loader.
+2. With `HEAD == origin/main`, no staged change, and no dirty producer source
+   (reviewer-owned `REVIEW.md` may be the sole dirty file), build the named
+   release executable `build/old-school-fq4-work0-publish` and run exactly:
+
+   ```sh
+   make fq4-work0-publish
+   ```
+
+   The command must require repository-root CWD and accept no argument. It may
+   call `reconstruct_work0_selected_roots_once` exactly once. Two encodings of
+   that one in-memory reconstruction remain required; a second source-game
+   reconstruction is forbidden.
+3. Independently countersign the occupied file with regular-file metadata,
+   `wc`, and `shasum`; strict-reload it under the observed runtime identity and
+   exact DEV1/DEV5 objects without replaying a game; reproduce all canonical
+   joins/counts; prove the temporary absent and every source unchanged. A
+   failed countersign quarantines the occupied coordinate. It does not license
+   deletion, overwrite, or another reconstruction.
+4. Stage P0b tracks the immutable cache and changes only the external published
+   identity/provenance pins plus notebook/build evidence. Those compile-time
+   pins live outside the artifact and include cache byte count/SHA-256,
+   producer commit, and producer executable byte count/SHA-256. Only after
+   that pin commit is reviewed may no-argument `load_published()` return an
+   authenticated wrapper and the parent-only C16 census begin. No evaluator
+   runs in the publication-to-pin interval.
+
+No v1 cache has ever existed, so adding mandatory producer fields completes
+the unpublished v1 wire rather than creating a compatibility migration. Its
+manifest will contain canonical lowercase 40-hex producer commit plus
+publisher executable `{byte_count, SHA-256}`. The canonical rows plus strict
+validator continue to bind split, deck, source-role, row, and option counts by
+code-fixed recomputation rather than duplicating mutable manifest counters:
+DEV1 FIT/CHECK 93/99, DEV5 FIT/CHECK 160/160, roles
+positive/background/neutral 182/10/320, owner decks
+Green/Red/Blue/White/RU `97/75/128/86/126`, and 512/2,018 total.
+
+The frozen preconstruction sources are:
+
+- C16 `3,111,437` bytes,
+  `53aeb904...f944ca`, model `68126afc...13e2f`;
+- DEV1 `2,250,909` bytes, `0911fc2e...a859df`, including its complete
+  FIT/CHECK manifests and selected rows; and
+- DEV5 `661,475` bytes, `47d94823...3eaa105`, including selected-order digest
+  `c0925e70...f61b7b`.
+
+Before reconstruction, immediately before the publication link, and after
+publication verification, the publisher must require identical regular-file
+snapshots of itself, C16, DEV1, and DEV5. The materialized manifest provenance
+must equal the preconstruction executable snapshot and embedded commit.
+DEV1/DEV5 reads by the loader are authentication dependencies only: they may
+decode and re-encode the already-published source artifacts and run
+`validate_against_sources`, but execute zero source games, score calls, fits,
+candidate rollouts, or gameplay evaluation seeds. C16 is identity-snapshotted
+here; the parent census later loads the model exactly once.
+
+Publication uses a verified non-symlink `data` directory, descriptor-relative
+`openat`/`linkat`/`unlinkat`, `O_EXCL|O_NOFOLLOW|O_CLOEXEC`, complete retrying
+writes, file `fsync`, close, and a strict observed-identity reload of the
+temporary before the precommit callback. Destination and temporary must be
+absent before any source work and immediately before the hard link. The hard
+link is the irreversible no-replace commit point. Every prelink failure leaves
+the destination absent and cleans only this run's temporary. After link
+success, cleanup and directory sync are best effort and no exception may
+misreport the artifact as unpublished; any postcommit problem is reported as
+published-but-unverified, never triggers deletion, replacement, or automatic
+reconstruction. After any signal, timeout, or nonzero exit both fixed
+coordinates must be inspected before interpreting the run.
+
+The production loader takes no path, identity, source object, environment
+override, or CLI input. It reads only the repository-root-relative fixed path;
+checks external byte count/full SHA via snapshot, exact-length read, second
+snapshot, and byte hash before decode; requires exact manifest producer
+provenance; loads exact fixed DEV1/DEV5; calls `validate_against_sources`; and
+returns only an authenticated wrapper. Parent-census/evaluator source and link
+firewalls must forbid authorizing raw `decode()` or `validate()` output.
+This accepts the repository's documented non-hostile-local-process snapshot
+threat model while hardening the commit operation descriptor-relatively.
+
+P0a qualification requires strict and ASan/UBSan tests for provenance codec
+mutation, exact read size/hash/truncation/extension/final symlink/directory
+failure, destination and temporary preexistence including symlinks, no
+replacement, concurrent destination creation, write/fsync/close/precommit
+failure cleanup, source/executable drift, one builder call, exact precommit
+reload, postlink failure classification, second-invocation rejection,
+no-argument/generic-error/aggregate-only CLI output, and simulator/web/source
+graph firewalls. Ordinary `make test` may use only synthetic/injected scratch
+fixtures and the publisher's extra-argument path; it must never invoke the
+no-argument publisher, production loader, source reconstruction, or either
+fixed cache coordinate.
+
+P0b adds the decisive trust-boundary regression: an in-range
+`next_permanent_id` or `next_stack_object_id` mutation with every internal
+checksum recomputed may remain structurally decodable, but the no-argument
+loader must reject it at the externally pinned full-file SHA. A separate
+manual post-pin gate must load the real file and reproduce source joins and
+all counts without a source-game execution.
+
+Publication evidence will record the exact command and runtime, producer
+commit/executable bytes/SHA, all source snapshots, artifact bytes/full SHA,
+internal payload SHA, root-order SHA, 512/2,018 and every split/deck/role
+counter, referenced/replayed source games, all normalization/hidden-control
+counts, builder-call count one, source-row/codec/encoding gates, and explicit
+zero fit/candidate-rollout/gameplay-seed counts. No hand, hidden card,
+descriptor, root state, or per-row record may be printed.
+
+`REVIEW.md` was reread through its newest 13:59 PDT cycle before this
+declaration. It acknowledges `f7d1af4`, C16, sealed seeds, and no running
+census. Two independent prospective reviews returned NO-GO until the
+whole-cache bootstrap and producer provenance were frozen; this declaration
+adopts both requirements. No production source game or cache coordinate has
+been opened.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
