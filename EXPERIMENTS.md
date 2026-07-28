@@ -17388,6 +17388,60 @@ entry endorses EXPLORE-6 before seeing its result. The owner's later
 Ancestral-target field report is the controlling new evidence for holding
 deployment.
 
+##### FQ4-EXPLORE-7 general search-versus-teacher target-choice diagnosis
+
+Declared 2026-07-28 after the owner rejected further stack/combat/target
+patch composition and before observing any width/horizon cell below.
+Repository and Git-history search found diagnostic seed `202607281701`
+unused. This is a read-only localization on one already observed frozen-parent
+decision, not a strength screen or a selectable candidate.
+
+The immutable parent was first reproduced without tuning. Exact Environment-v3
+C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+with K8/H4, PD0, and AdversarialBlocks, played Blue seat zero against Random
+Red in engine game seed `24`, maximum 40 turns, starting player zero. At turn
+13 First Main, Blue had life 15, hand three, library 27; Red had life four,
+hand five, library 27. Blue's known hand was Island, Ancestral Recall, and
+Time Walk. The live policy cast Ancestral Recall targeting Red. Re-scoring the
+captured root reproduced the wrong target ordering both in the unresolved
+shallow critic (self `.869253`, opponent `.898729`) and deployed K8/H4
+(self `.985473`, opponent `.988748`). PD0 settled both target actions and
+retained both. A reduced no-board control had the same wrong shallow ordering
+but K8/H4 reversed it correctly, proving that the failure depends on state
+context rather than only the card/action identity.
+
+Falsifiable diagnosis: if substantially wider or longer honest C16-mirror
+continuations reverse the exact captured root to self-target, bounded
+information-set tree search is the next general axis. If none reverse it,
+search built on the same critic/continuation teacher is unlikely to repair the
+error; change the learned representation or all-action policy/value targets
+before building a tree.
+
+Using common information-set worlds, one rollout per world, Value-mirror
+continuations, epsilon zero, and no PD0 action filtering at the explicitly
+enumerated root:
+
+1. At H4, score K `8,32,64,256`.
+2. At K64, score H `0,1,4,8,12,20`.
+3. For every cell report Pass, self-target, and opponent-target continuation
+   means plus the exact deployed shallow blend; also report the unblended
+   ordering and runtime.
+4. Use only diagnostic seed `202607281701` with the exact captured physical
+   root and Blue/Red original decks. Do not search another state, seed,
+   horizon, or width after observing the matrix.
+
+No cell can promote a bot. This census only selects between the already stated
+general next axes.
+
+`REVIEW.md` was reread through its newest 16:29 entry before this declaration.
+That entry endorses a public-resource Pareto extension. We disagree with that
+specific next step: ordinary opponent draw exchanges a larger opposing hand
+for a smaller opposing library, so it is not strict Pareto dominance in a
+game where decking is a win condition. Suppressing it would be a strategic
+heuristic that can erase valid decking lines. Keep equality-only PD0 as the
+mechanical proof and let learned action evaluation choose the target.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
