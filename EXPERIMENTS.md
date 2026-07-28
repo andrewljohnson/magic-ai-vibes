@@ -17237,6 +17237,49 @@ schedule/config/selection tests. Reuse the existing Pass-dominance engine and
 its counter-war regressions; add no card-specific policy logic or evaluation
 framework.
 
+EXPLORE-5 result, completed 2026-07-28: **the performance-advance gate
+failed by one game; preserve the negative, but expose the behavior repair as
+an explicitly non-advancing diagnostic pilot for the owner's requested manual
+test**. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-blend-explore --stack-discipline
+# stop mode=StackDiscipline
+# attack_only_wins=31 attack_only_losses=29
+# PD0_wins=30 PD0_losses=30
+# real 177.10
+```
+
+Both arms used evaluation seed `202607280809`, one balanced repetition,
+60 games, exact C16 K8/H4/R1, and ordinary C16 as baseline:
+
+| Candidate | Aggregate | Green | Red | Blue | White | RU Aggro | Seconds | Decisions | Rollouts |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C16+AdversarialBlocks | 31-29 | 4-8 | 4-8 | 9-3 | 9-3 | 5-7 | 87.736 | 3,028 | 72,376 |
+| C16+AdversarialBlocks+PD0 | 30-30 | 4-8 | 4-8 | 8-4 | 9-3 | 5-7 | 89.303 | 2,949 | 69,520 |
+
+The PD0 composition neither won outright nor matched attack-only's 31 wins,
+so the preregistered performance advancement fails. Do not call this a
+stronger policy, replace the attack-only pilot, or spend a powered gameplay
+gate on it. The one-game difference is also far below the screen's resolution
+and does not demonstrate a real regression.
+
+The owner explicitly asked for a general change that could prevent the
+observed duplicate Counterspell and uses manual web play as the next
+qualitative gate. PD0 already deterministically removes that exact action in
+the frozen hidden-invariant fixture while preserving an intervening
+counter-war response. Therefore expose `C16+AdversarialBlocks+PD0` as a
+separate **behavior-diagnostic** web pilot, with its 30-30 result and failed
+performance gate stated in the UI. This is not EXPLORE-5 advancement; it is a
+transparent way for the owner to verify the general mechanism's actual play
+without adding another policy feature or tuning on a one-game difference.
+Keep the 31-29 attack-only pilot separately selectable.
+
+`REVIEW.md` was reread through its newest 15:44 cycle after the run and before
+this conclusion. That entry still observed the earlier EXPLORE-4 job in
+progress and contained no EXPLORE-5 result or contrary analysis.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
