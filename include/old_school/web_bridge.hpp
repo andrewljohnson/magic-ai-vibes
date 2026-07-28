@@ -16,6 +16,7 @@ namespace old_school::web {
 inline constexpr std::size_t kFrozenWebC16TrainingGames = 800;
 inline constexpr std::uint64_t kFrozenWebC16TrainingSeed = 424242;
 inline constexpr std::size_t kFrozenWebC16Generations = 16;
+inline constexpr std::size_t kFrozenWebC16SearchWorlds = 8;
 inline constexpr std::string_view kFrozenWebC16Fingerprint =
     "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
 
@@ -30,7 +31,7 @@ struct BridgeConfig {
     std::uint64_t game_seed = 42;
     std::size_t monte_carlo_rollouts = 2;
     std::size_t deep_monte_carlo_rollouts = 8;
-    std::size_t learned_rollouts = 8;
+    std::size_t learned_rollouts = kFrozenWebC16SearchWorlds;
     std::size_t learned_generations = kFrozenWebC16Generations;
     std::size_t training_games = kFrozenWebC16TrainingGames;
     std::uint64_t training_seed = kDefaultLearnedTrainingSeed;
@@ -38,6 +39,7 @@ struct BridgeConfig {
     bool reveal_opponent_hand = false;
     bool bluff_mode = false;
     bool value_adversarial_blocks = false;
+    bool value_pass_dominance = false;
 
     bool operator==(const BridgeConfig&) const = default;
 };
@@ -63,7 +65,8 @@ DeckId parse_deck_id(std::string_view value);
 BotKind parse_opponent_bot(std::string_view value,
                            LearnedVariant& learned_variant,
                            std::size_t& learned_generations,
-                           bool& value_adversarial_blocks);
+                           bool& value_adversarial_blocks,
+                           bool& value_pass_dominance);
 EvolutionPilot parse_evolution_pilot(std::string_view value);
 
 // Parses the bridge's transport-only representation of an exact custom deck.
@@ -77,8 +80,8 @@ std::shared_ptr<const LearnedModel>
 load_frozen_learned_value_c16(const std::string& path);
 
 // Pure translation from the web policy configuration into the engine policy.
-// The defender-best-response attack challenger differs from canonical C16
-// only through `value_adversarial_blocks`.
+// The web's frozen C16 research pilots differ only through the explicit
+// default-off policy-treatment flags.
 BotConfig make_opponent_bot_config(
     const BridgeConfig& config,
     std::shared_ptr<const LearnedModel> learned_model);

@@ -232,6 +232,7 @@ async function configureFrozenC16Match(page) {
     [
       "learned-value-c16",
       "learned-value-c16-adversarial-blocks",
+      "learned-value-c16-stack-discipline",
       "learned-value-g0",
     ],
   );
@@ -493,7 +494,7 @@ function assertStackControllerCues(cues, expected) {
 }
 
 test(
-  "setup dates and distinguishes all four Learned policy lineages",
+  "setup dates and distinguishes all five Learned policy lineages",
   { timeout: 60_000 },
   async (t) => {
     const { server, url } = await startFixture();
@@ -528,6 +529,26 @@ test(
     assert.match(await description.innerText(), /defender-best-response minimum/);
     assert.match(await provenance.innerText(), /Exploratory challenger/);
     assert.match(await provenance.innerText(), /127–113 fast screen/);
+    assert.match(await provenance.innerText(), /awaiting human play-test/);
+    assert.match(await provenance.innerText(), /not promoted/);
+    assert.match(await provenance.innerText(), /Fast screen run Jul 28, 2026/);
+    assert.equal(
+      await provenance.locator("time").getAttribute("datetime"),
+      "2026-07-28",
+    );
+    assert.equal(await numberInputs.nth(1).inputValue(), "800");
+    assert.equal(await numberInputs.nth(2).inputValue(), "424242");
+    assert.equal(await numberInputs.nth(1).isEditable(), false);
+    assert.equal(await numberInputs.nth(2).isEditable(), false);
+
+    await policy.selectOption("learned-value-c16-stack-discipline");
+    assert.match(await description.innerText(), /rules-only marginal-effect filter/);
+    assert.match(await description.innerText(), /same public outcome/);
+    assert.match(await description.innerText(), /strictly fewer resources/);
+    assert.doesNotMatch(await description.innerText(), /never double-counter/i);
+    assert.match(await provenance.innerText(), /Behavior diagnostic/);
+    assert.match(await provenance.innerText(), /30–30 fast screen/);
+    assert.match(await provenance.innerText(), /performance gate not passed/);
     assert.match(await provenance.innerText(), /awaiting human play-test/);
     assert.match(await provenance.innerText(), /not promoted/);
     assert.match(await provenance.innerText(), /Fast screen run Jul 28, 2026/);

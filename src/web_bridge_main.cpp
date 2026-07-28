@@ -58,6 +58,7 @@ void print_help(std::ostream& output) {
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
            "handcrafted|learned-value-c16|"
            "learned-value-c16-adversarial-blocks|"
+           "learned-value-c16-stack-discipline|"
            "learned-value-g0|learned-actor\n"
         << "  --seed N --train-games N --train-seed N\n"
         << "  --rollouts N --deep-rollouts N --learned-rollouts N\n"
@@ -193,7 +194,8 @@ int main(int argc, char** argv) {
                     old_school::web::parse_opponent_bot(
                         value, config.learned_variant,
                         config.learned_generations,
-                        config.value_adversarial_blocks);
+                        config.value_adversarial_blocks,
+                        config.value_pass_dominance);
             } else if (option == "--seed") {
                 config.game_seed = parse_u64(option, value);
             } else if (option == "--train-games") {

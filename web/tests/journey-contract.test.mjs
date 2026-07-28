@@ -170,6 +170,7 @@ async function runFullJourney(harness, config) {
       [
         "learned-value-c16",
         "learned-value-c16-adversarial-blocks",
+        "learned-value-c16-stack-discipline",
       ].includes(config.players[1].policyId)
         ? 16
         : 0,
@@ -280,6 +281,7 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
       "handcrafted",
       "learned-value-c16",
       "learned-value-c16-adversarial-blocks",
+      "learned-value-c16-stack-discipline",
       "learned-value-g0",
       "learned-actor",
     ],

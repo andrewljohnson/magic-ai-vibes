@@ -1469,29 +1469,42 @@ BotKind parse_opponent_bot(
     std::string_view value,
     LearnedVariant& learned_variant,
     std::size_t& learned_generations,
-    bool& value_adversarial_blocks) {
+    bool& value_adversarial_blocks,
+    bool& value_pass_dominance) {
     if (value == "random") {
         value_adversarial_blocks = false;
+        value_pass_dominance = false;
         return BotKind::Random;
     }
     if (value == "monte-carlo" || value == "mc") {
         value_adversarial_blocks = false;
+        value_pass_dominance = false;
         return BotKind::MonteCarlo;
     }
     if (value == "deep-monte-carlo" || value == "deep-mc") {
         value_adversarial_blocks = false;
+        value_pass_dominance = false;
         return BotKind::DeepMonteCarlo;
     }
     if (value == "handcrafted" ||
         value == "handcoded-policy") {
         value_adversarial_blocks = false;
+        value_pass_dominance = false;
         return BotKind::Handcrafted;
+    }
+    if (value == "learned-value-c16-stack-discipline") {
+        learned_variant = LearnedVariant::ValueSearchChampion;
+        learned_generations = kFrozenWebC16Generations;
+        value_adversarial_blocks = true;
+        value_pass_dominance = true;
+        return BotKind::Learned;
     }
     if (value ==
         "learned-value-c16-adversarial-blocks") {
         learned_variant = LearnedVariant::ValueSearchChampion;
         learned_generations = kFrozenWebC16Generations;
         value_adversarial_blocks = true;
+        value_pass_dominance = false;
         return BotKind::Learned;
     }
     if (value == "learned-value-c16" ||
@@ -1499,18 +1512,21 @@ BotKind parse_opponent_bot(
         learned_variant = LearnedVariant::ValueSearchChampion;
         learned_generations = kFrozenWebC16Generations;
         value_adversarial_blocks = false;
+        value_pass_dominance = false;
         return BotKind::Learned;
     }
     if (value == "learned-value-g0") {
         learned_variant = LearnedVariant::ValueSearchChampion;
         learned_generations = 0;
         value_adversarial_blocks = false;
+        value_pass_dominance = false;
         return BotKind::Learned;
     }
     if (value == "learned-actor" || value == "actor") {
         learned_variant = LearnedVariant::UnifiedActor;
         learned_generations = 0;
         value_adversarial_blocks = false;
+        value_pass_dominance = false;
         return BotKind::Learned;
     }
     throw std::invalid_argument(
@@ -1531,6 +1547,8 @@ BotConfig make_opponent_bot_config(
                       : config.opponent_bot == BotKind::Learned
                             ? config.learned_rollouts
                             : 1,
+        .value_pass_dominance =
+            config.value_pass_dominance,
         .value_adversarial_blocks =
             config.value_adversarial_blocks,
         .training_games = config.training_games,
@@ -1587,6 +1605,27 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         throw std::invalid_argument(
             "defender-best-response attacks require frozen "
             "Learned Value C16");
+    }
+    if (config.value_pass_dominance &&
+        (config.opponent_bot != BotKind::Learned ||
+         config.learned_variant !=
+             LearnedVariant::ValueSearchChampion ||
+         config.learned_generations !=
+             kFrozenWebC16Generations)) {
+        throw std::invalid_argument(
+            "stack discipline requires frozen Learned Value C16");
+    }
+    if (config.value_pass_dominance &&
+        !config.value_adversarial_blocks) {
+        throw std::invalid_argument(
+            "stack discipline requires defender-best-response "
+            "attacks");
+    }
+    if (config.value_pass_dominance &&
+        config.learned_rollouts !=
+            kFrozenWebC16SearchWorlds) {
+        throw std::invalid_argument(
+            "stack discipline requires frozen C16 K8/H4 search");
     }
     const std::vector<CardId> human_cards =
         configured_deck_cards(

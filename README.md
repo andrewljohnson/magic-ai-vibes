@@ -85,16 +85,20 @@ make web
 
 Open <http://127.0.0.1:4173>. The setup drawer offers all five decks and
 Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned Value C16,
-Learned C16 · Best-Response Attacks, Learned Value G0, and Learned Actor
-opponents, plus deterministic game/training seeds. C16 is the default Learned
-opponent: it loads the exact frozen T800/S424242/C16 artifact at K=8/H=4 and
-fails closed if that artifact is missing, stale, or has the wrong fingerprint.
-The exploratory Best-Response Attacks pilot reuses that exact model and changes
-only attack-set aggregation so human play-testing can compare its combat
-choices. G0 remains an explicit trainable choice; select it before lowering
-`train games` for a faster smoke match. The in-game `REPRO` panel shows the
-actual policy ID, generation, K/H, and complete model fingerprint so manual
-behavior reports identify the policy that played.
+Learned C16 · Best-Response Attacks, Learned C16 · Stack Discipline, Learned
+Value G0, and Learned Actor opponents, plus deterministic game/training seeds.
+C16 is the default Learned opponent: it loads the exact frozen
+T800/S424242/C16 artifact at K=8/H=4 and fails closed if that artifact is
+missing, stale, or has the wrong fingerprint. The exploratory Best-Response
+Attacks pilot reuses that exact model and changes only attack-set aggregation
+so human play-testing can compare its combat choices. Stack Discipline is a
+separate behavior diagnostic that adds a rules-only marginal-effect filter:
+it rejects an action when Pass reaches the same public outcome with strictly
+fewer resources. Its 30–30 fast screen did not pass the performance gate. G0
+remains an explicit trainable choice; select it before lowering `train games`
+for a faster smoke match. The in-game `REPRO` panel shows the actual policy ID,
+generation, K/H, and complete model fingerprint so manual behavior reports
+identify the policy that played.
 
 Use the separate `Evolve deck` menu to run the engine's deck-evolution loop
 against the five-deck metagame. It can use either Handcoded Policy or the

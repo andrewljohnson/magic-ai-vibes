@@ -126,40 +126,57 @@ void test_names_parse_strictly() {
         LearnedVariant::UnifiedActor;
     std::size_t generations = 0;
     bool adversarial_blocks = true;
+    bool pass_dominance = true;
     expect(parse_opponent_bot(
                "learned-value-c16", variant, generations,
-               adversarial_blocks) ==
+               adversarial_blocks, pass_dominance) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
-               !adversarial_blocks,
+               !adversarial_blocks &&
+               !pass_dominance,
            "Learned Value C16 did not parse");
     expect(parse_opponent_bot(
-               "learned-value-c16-adversarial-blocks",
-               variant, generations, adversarial_blocks) ==
+               "learned-value-c16-stack-discipline",
+               variant, generations, adversarial_blocks,
+               pass_dominance) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
-               adversarial_blocks,
+               adversarial_blocks &&
+               pass_dominance,
+           "stack-discipline diagnostic did not parse");
+    expect(parse_opponent_bot(
+               "learned-value-c16-adversarial-blocks",
+               variant, generations, adversarial_blocks,
+               pass_dominance) ==
+               BotKind::Learned &&
+               variant ==
+                   LearnedVariant::ValueSearchChampion &&
+               generations == 16 &&
+               adversarial_blocks &&
+               !pass_dominance,
            "best-response attack challenger did not parse");
     expect(parse_opponent_bot(
                "learned-value-g0", variant, generations,
-               adversarial_blocks) ==
+               adversarial_blocks, pass_dominance) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 0 &&
-               !adversarial_blocks,
+               !adversarial_blocks &&
+               !pass_dominance,
            "Learned Value G0 did not parse");
     expect(parse_opponent_bot(
                "learned-actor", variant, generations,
-               adversarial_blocks) ==
+               adversarial_blocks, pass_dominance) ==
                BotKind::Learned &&
                variant == LearnedVariant::UnifiedActor &&
                generations == 0 &&
-               !adversarial_blocks,
+               !adversarial_blocks &&
+               !pass_dominance,
            "Learned Actor did not parse");
 
     bool bad_deck = false;
@@ -340,6 +357,36 @@ void test_adversarial_challenger_maps_only_the_attack_flag() {
         "best-response challenger changed more than the attack "
         "aggregation flag");
 
+    challenger.value_adversarial_blocks = true;
+    challenger.value_pass_dominance = true;
+    const auto stack_discipline_bot =
+        old_school::web::make_opponent_bot_config(
+            challenger, nullptr);
+    expect(
+        stack_discipline_bot.kind == challenger_bot.kind &&
+            stack_discipline_bot.learned_variant ==
+                challenger_bot.learned_variant &&
+            stack_discipline_bot.rollouts_per_action ==
+                challenger_bot.rollouts_per_action &&
+            stack_discipline_bot.exploration_rate ==
+                challenger_bot.exploration_rate &&
+            stack_discipline_bot.value_continuation_epsilon ==
+                challenger_bot.value_continuation_epsilon &&
+            stack_discipline_bot.value_priority_residual_weight ==
+                challenger_bot.value_priority_residual_weight &&
+            stack_discipline_bot.value_adversarial_blocks ==
+                challenger_bot.value_adversarial_blocks &&
+            stack_discipline_bot.value_continuation_controller ==
+                challenger_bot.value_continuation_controller &&
+            stack_discipline_bot.training_games ==
+                challenger_bot.training_games &&
+            stack_discipline_bot.learned_model ==
+                challenger_bot.learned_model &&
+            stack_discipline_bot.value_pass_dominance &&
+            !challenger_bot.value_pass_dominance,
+        "stack-discipline diagnostic changed more than Pass "
+        "dominance relative to the attack-only pilot");
+
     auto invalid = fast_config();
     invalid.value_adversarial_blocks = true;
     std::istringstream input(passive_responses(1));
@@ -358,6 +405,70 @@ void test_adversarial_challenger_maps_only_the_attack_flag() {
     expect(
         rejected && output.str().empty(),
         "non-C16 web policy accepted the challenger attack flag");
+
+    invalid.value_adversarial_blocks = false;
+    invalid.value_pass_dominance = true;
+    std::istringstream pass_input(passive_responses(1));
+    std::ostringstream pass_output;
+    rejected = false;
+    try {
+        static_cast<void>(
+            old_school::web::run_bridge_session(
+                pass_input, pass_output, invalid));
+    } catch (const std::invalid_argument& error) {
+        rejected =
+            std::string_view(error.what()).find(
+                "stack discipline requires frozen "
+                "Learned Value C16") !=
+            std::string_view::npos;
+    }
+    expect(
+        rejected && pass_output.str().empty(),
+        "non-C16 web policy accepted Pass dominance");
+
+    invalid.opponent_bot = old_school::BotKind::Learned;
+    invalid.learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    invalid.learned_generations = 16;
+    invalid.training_games = 800;
+    invalid.training_seed = 424242;
+    invalid.learned_rollouts = 8;
+    std::istringstream composition_input(passive_responses(1));
+    std::ostringstream composition_output;
+    rejected = false;
+    try {
+        static_cast<void>(
+            old_school::web::run_bridge_session(
+                composition_input, composition_output, invalid));
+    } catch (const std::invalid_argument& error) {
+        rejected =
+            std::string_view(error.what()).find(
+                "stack discipline requires "
+                "defender-best-response attacks") !=
+            std::string_view::npos;
+    }
+    expect(
+        rejected && composition_output.str().empty(),
+        "Pass-dominance-only C16 web policy was accepted");
+
+    invalid.value_adversarial_blocks = true;
+    invalid.learned_rollouts = 7;
+    std::istringstream search_input(passive_responses(1));
+    std::ostringstream search_output;
+    rejected = false;
+    try {
+        static_cast<void>(
+            old_school::web::run_bridge_session(
+                search_input, search_output, invalid));
+    } catch (const std::invalid_argument& error) {
+        rejected =
+            std::string_view(error.what()).find(
+                "requires frozen C16 K8/H4 search") !=
+            std::string_view::npos;
+    }
+    expect(
+        rejected && search_output.str().empty(),
+        "stack-discipline web policy accepted non-K8 search");
 }
 
 void test_g0_status_exposes_actual_model_identity() {

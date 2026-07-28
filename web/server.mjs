@@ -181,6 +181,17 @@ export const POLICIES = Object.freeze([
       "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
   },
   {
+    id: "learned-value-c16-stack-discipline",
+    label: "Learned C16 · Stack Discipline",
+    name: "Learned C16 · Stack Discipline",
+    description:
+      "Exact frozen C16 critic with K8/H4 Best-Response Attacks plus a rules-only marginal-effect filter that rejects an action when Pass reaches the same public outcome with strictly fewer resources.",
+    versionDate: "2026-07-28",
+    versionDateLabel: "Fast screen run",
+    lifecycle:
+      "Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted",
+  },
+  {
     id: "learned-value-g0",
     label: "Learned Value G0",
     name: "Learned Value G0",
@@ -207,6 +218,7 @@ const POLICY_IDS = new Set(POLICIES.map(({ id }) => id));
 const FROZEN_C16_POLICY_IDS = new Set([
   "learned-value-c16",
   "learned-value-c16-adversarial-blocks",
+  "learned-value-c16-stack-discipline",
 ]);
 
 function isFrozenC16Policy(policyId) {
@@ -512,6 +524,12 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
     "trainSeed",
     DEFAULT_CONFIG.trainSeed,
   );
+  const learnedRollouts = positiveBoundedInteger(
+    body.learnedRollouts,
+    "learnedRollouts",
+    LIMITS.learnedRollouts,
+    DEFAULT_CONFIG.learnedRollouts,
+  );
   const expectedLearnedGenerations =
     isFrozenC16Policy(normalizedOpponentPolicy)
       ? FROZEN_C16_GENERATIONS
@@ -538,6 +556,17 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
       400,
       "invalid_config",
       "Frozen C16 policies require trainGames=800 and trainSeed=424242; select Learned Value G0 for custom match training",
+    );
+  }
+  if (
+    normalizedOpponentPolicy ===
+      "learned-value-c16-stack-discipline" &&
+    learnedRollouts !== 8
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_config",
+      "learned-value-c16-stack-discipline requires learnedRollouts=8",
     );
   }
 
@@ -579,12 +608,7 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
       LIMITS.deepRollouts,
       DEFAULT_CONFIG.deepRollouts,
     ),
-    learnedRollouts: positiveBoundedInteger(
-      body.learnedRollouts,
-      "learnedRollouts",
-      LIMITS.learnedRollouts,
-      DEFAULT_CONFIG.learnedRollouts,
-    ),
+    learnedRollouts,
     learnedGenerations,
   };
 }

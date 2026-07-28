@@ -632,6 +632,10 @@ test("landing metadata includes and advertises every bot policy", async () => {
     app,
     /id:\s*"learned-value-c16-adversarial-blocks"/,
   );
+  assert.match(
+    app,
+    /id:\s*"learned-value-c16-stack-discipline"/,
+  );
   assert.match(app, /id:\s*"learned-value-g0"/);
   assert.match(app, /id:\s*"learned-actor"/);
   assert.match(
@@ -648,7 +652,16 @@ test("landing metadata includes and advertises every bot policy", async () => {
   );
   assert.match(
     app,
-    /const FROZEN_C16_POLICY_IDS[\s\S]+?learned-value-c16-adversarial-blocks[\s\S]+?function isFrozenC16Policy/,
+    /rules-only marginal-effect filter[\s\S]+?same public outcome[\s\S]+?strictly fewer resources/,
+  );
+  assert.match(
+    app,
+    /Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted/,
+  );
+  assert.doesNotMatch(app, /never double-counter/i);
+  assert.match(
+    app,
+    /const FROZEN_C16_POLICY_IDS[\s\S]+?learned-value-c16-adversarial-blocks[\s\S]+?learned-value-c16-stack-discipline[\s\S]+?function isFrozenC16Policy/,
   );
   assert.match(app, /if \(isFrozenC16Policy\(value\)\)/);
   assert.equal(

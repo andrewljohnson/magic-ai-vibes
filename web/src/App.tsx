@@ -107,6 +107,16 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
       "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
   },
   {
+    id: "learned-value-c16-stack-discipline",
+    name: "Learned C16 · Stack Discipline",
+    description:
+      "Exact frozen C16 critic with K8/H4 Best-Response Attacks plus a rules-only marginal-effect filter that rejects an action when Pass reaches the same public outcome with strictly fewer resources.",
+    versionDate: "2026-07-28",
+    versionDateLabel: "Fast screen run",
+    lifecycle:
+      "Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted",
+  },
+  {
     id: "learned-value-g0",
     name: "Learned Value G0",
     description:
@@ -129,6 +139,7 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
 const FROZEN_C16_POLICY_IDS = new Set([
   "learned-value-c16",
   "learned-value-c16-adversarial-blocks",
+  "learned-value-c16-stack-discipline",
 ]);
 
 function isFrozenC16Policy(policyId: string): boolean {

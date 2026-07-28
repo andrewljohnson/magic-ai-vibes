@@ -47,9 +47,9 @@ horizontal fit are also green**
 
 Acceptance criteria:
 
-- Setup exposes all five decks and all eight opponent policies, including
-  explicit Learned Value C16, its best-response-attacks challenger, and G0
-  identities.
+- Setup exposes all five decks and all nine opponent policies, including
+  explicit Learned Value C16, its best-response-attacks challenger, the
+  stack-discipline diagnostic, and G0 identities.
 - The current player, phase, priority holder, and required choice are obvious.
 - Land play, spell cast, priority pass, stack resolution, attackers, blockers,
   damage order, game over, and rematch can each be completed without guessing.
@@ -257,6 +257,52 @@ smoke complete; human strategic play-test in progress**
   the challenger, displayed its July 28 provenance and non-promotion status,
   kept T800/S424242 read-only, and started an RU Aggro mirror at turn 1 with
   `Learned C16 · Best-Response Attacks` visibly identified as the opponent.
+
+#### Preregistered stack-discipline diagnostic exposure slice
+
+Hypothesis: exposing the already screened Pass-dominance composition as a
+separate behavior diagnostic will let the owner test its marginal-effect
+filter in real play without replacing the stronger attack-only pilot or
+overstating a tied 60-game screen.
+
+Status: **implementation, contract gates, live-server restart, and rendered
+smoke complete; human behavior play-test in progress**
+
+- The separate stable ID is `learned-value-c16-stack-discipline`, displayed as
+  `Learned C16 · Stack Discipline`.
+- It loads the exact canonical C16 artifact at K8/H4 and enables both existing
+  rules-only treatments: defender-best-response attack aggregation and
+  Pass-dominance filtering. No rules or policy logic changes in this slice.
+- Its description says narrowly that the marginal-effect filter rejects an
+  action when Pass reaches the same public outcome with strictly fewer
+  resources. It does not promise that every redundant-looking counter is
+  removed.
+- Metadata dates the pilot `2026-07-28` and says explicitly:
+  behavior diagnostic, 30–30 fast screen, performance gate not passed,
+  awaiting human play-test, and not promoted. The attack-only pilot remains a
+  separate selection.
+- The Node boundary treats it exactly like frozen C16 for generation,
+  training-game, and training-seed identity. The C++ boundary sets both
+  `value_adversarial_blocks=true` and `value_pass_dominance=true` only for
+  this ID; every other web policy resets the Pass-dominance bit to `false`.
+  Both boundaries also reject a non-K8 search, and the bridge rejects
+  Pass-dominance without defender-best-response attacks before emitting
+  session output.
+- Acceptance requires focused C++ parser/config tests, Node normalization and
+  bridge-argument tests, client fallback/setup assertions, the complete
+  five-deck × nine-policy journey matrix, `make test-web-ui`, and
+  `make test-web`. This slice makes no broader rendered-layout claim.
+- Evidence on 2026-07-28: the focused bridge suite passed 19/19; focused
+  metadata, setup, and 45-case journey checks passed 81/81; `make test-web-ui`
+  passed 97/97 (including all 45 deck/policy journeys); and `make test-web`
+  passed the 19/19 C++ bridge suite plus 118/118 Node tests. The rebuilt live
+  server was then restarted. A real in-app-browser smoke at 1280 × 720 showed
+  all nine policies, selected Stack Discipline, displayed its exact
+  marginal-effect description plus the 30–30/failed-gate/non-promotion
+  provenance, retained the frozen T800/S424242 controls, and started an RU
+  Aggro mirror at turn 1 with `Learned C16 · Stack Discipline` visibly
+  identified as the opponent. Human behavior validation remains explicitly
+  open.
 
 Acceptance criteria:
 
@@ -810,10 +856,10 @@ The gate runs the full journey for every combination of:
 
 - Deck: Green, Red, Blue, White, RU Aggro
 - Opponent: Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned
-  Value C16, Learned C16 · Best-Response Attacks, Learned Value G0, Learned
-  Actor
+  Value C16, Learned C16 · Best-Response Attacks, Learned C16 · Stack
+  Discipline, Learned Value G0, Learned Actor
 
-The 40-case matrix proves that every advertised deck/policy selection survives
+The 45-case matrix proves that every advertised deck/policy selection survives
 normalization and session setup. It does **not** claim that the fixture ran the
 real deck or policy; real engine coverage is a separate gate below. Each matrix
 case must prove:
@@ -853,8 +899,8 @@ make web
 ```
 
 Open <http://127.0.0.1:4173> and use game seed `42`, training seed `424242`,
-and 800 training games. Verify these eight rotations so every deck and policy
-is seen without manually testing all 40 pairs:
+and 800 training games. Verify these nine rotations so every deck and policy
+is seen without manually testing all 45 pairs:
 
 | Human deck | Opponent deck | Opponent policy |
 | --- | --- | --- |
@@ -866,6 +912,7 @@ is seen without manually testing all 40 pairs:
 | Blue | RU Aggro | Learned Actor |
 | RU Aggro | Blue | Learned C16 · Best-Response Attacks |
 | White | Green | Learned Value G0 |
+| Blue | Blue | Learned C16 · Stack Discipline |
 
 For the first match, complete the full deterministic-journey checklist. For the
 remaining rotations, confirm setup, visible hand, one legal action, policy
@@ -1606,3 +1653,16 @@ For each web issue:
   T800/S424242 controls, and started an RU Aggro mirror at turn 1 with the
   correct opponent policy shown. Broader human strategic play-testing remains
   the purpose of this exposure.
+- 2026-07-28 — Exposed `Learned C16 · Stack Discipline` as a separate,
+  explicitly non-promoted behavior diagnostic. It reuses exact frozen C16
+  K8/H4 plus the attack treatment and enables the existing rules-only
+  Pass-dominance filter; attack-only remains separately selectable. Metadata
+  reports the exact 30–30 screen and failed performance gate. Parser/config
+  tests fail closed on non-C16, non-K8, or Pass-dominance-without-attack
+  combinations. `make test-web-ui` passed 97/97 including the complete
+  45-case five-deck × nine-policy journey matrix; `make test-web` passed
+  19/19 C++ bridge and 118/118 Node/client/session tests. After the live
+  restart, a real 1280 × 720 in-app-browser smoke selected the diagnostic,
+  verified its precise provenance and frozen controls, and started an RU
+  Aggro mirror at turn 1 with the correct opponent label. The owner's manual
+  counter-sequencing test is now the open gate.

@@ -131,6 +131,9 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   const bestResponse = body.policies.find(
     ({ id }) => id === "learned-value-c16-adversarial-blocks",
   );
+  const stackDiscipline = body.policies.find(
+    ({ id }) => id === "learned-value-c16-stack-discipline",
+  );
   const g0 = body.policies.find(({ id }) => id === "learned-value-g0");
   const actor = body.policies.find(({ id }) => id === "learned-actor");
   assert.deepEqual(
@@ -164,6 +167,25 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   assert.match(bestResponse?.description ?? "", /Exact frozen C16 critic/);
   assert.match(bestResponse?.description ?? "", /K8\/H4/);
   assert.match(bestResponse?.description ?? "", /defender-best-response minimum/);
+  assert.deepEqual(
+    {
+      name: stackDiscipline?.name,
+      versionDate: stackDiscipline?.versionDate,
+      versionDateLabel: stackDiscipline?.versionDateLabel,
+      lifecycle: stackDiscipline?.lifecycle,
+    },
+    {
+      name: "Learned C16 · Stack Discipline",
+      versionDate: "2026-07-28",
+      versionDateLabel: "Fast screen run",
+      lifecycle:
+        "Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted",
+    },
+  );
+  assert.match(stackDiscipline?.description ?? "", /rules-only marginal-effect filter/);
+  assert.match(stackDiscipline?.description ?? "", /same public outcome/);
+  assert.match(stackDiscipline?.description ?? "", /strictly fewer resources/);
+  assert.doesNotMatch(stackDiscipline?.description ?? "", /never double-counter/i);
   for (const policy of [g0, actor]) {
     assert.equal(policy?.versionDate, "2026-07-24");
     assert.equal(policy?.versionDateLabel, "Recipe introduced");
@@ -355,6 +377,44 @@ test("best-response attacks reuse exact frozen C16 identity", async (t) => {
         players: [
           { deckId: "ru-aggro", policyId: "human" },
           { deckId: "ru-aggro", policyId },
+        ],
+        seed: 42,
+        trainGames: 800,
+        trainSeed: 424242,
+        learnedRollouts: 8,
+        learnedGenerations: 16,
+      }),
+    }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(body.game.config.players[1].policyId, policyId);
+  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
+  assert.equal(body.game.snapshot.received.trainGames, "800");
+  assert.equal(body.game.snapshot.received.trainSeed, "424242");
+  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
+  assert.deepEqual(body.game.model, {
+    family: "learned-value",
+    generation: 16,
+    searchWorlds: 8,
+    horizonTurns: 4,
+    source: "frozen-artifact",
+    fingerprint:
+      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
+  });
+});
+
+test("stack discipline reuses exact frozen C16 identity", async (t) => {
+  const { request } = await startTestServer(t);
+  const policyId = "learned-value-c16-stack-discipline";
+  const { response, body } = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        players: [
+          { deckId: "blue", policyId: "human" },
+          { deckId: "blue", policyId },
         ],
         seed: 42,
         trainGames: 800,
@@ -586,6 +646,46 @@ test("rejects malformed config without spawning a game", async (t) => {
       players: [
         { deckId: "green", policyId: "human" },
         { deckId: "blue", policyId: "learned-value-c16" },
+      ],
+      learnedGenerations: 0,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-stack-discipline",
+        },
+      ],
+      learnedRollouts: 7,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-stack-discipline",
+        },
+      ],
+      trainGames: 799,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-stack-discipline",
+        },
+      ],
+      trainSeed: 424243,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-stack-discipline",
+        },
       ],
       learnedGenerations: 0,
     },
