@@ -1900,6 +1900,32 @@ struct LearnedValuePriorityTrainingExample {
     double weight = 1.0;
 };
 
+// Exact binary64 parameters for the outer (non-recursive) Priority policy
+// head. The input-hidden matrix is stored as hidden-unit rows. This seam is
+// intentionally tensor-only: it neither serializes nor changes the critic,
+// the other policy heads, or any ensemble members.
+struct LearnedPriorityHeadParameters {
+    std::vector<std::vector<double>> input_hidden;
+    std::vector<double> hidden_bias;
+    std::vector<double> hidden_output;
+    std::vector<double> direct;
+    double output_bias = 0.0;
+
+    bool operator==(
+        const LearnedPriorityHeadParameters&) const = default;
+};
+
+LearnedPriorityHeadParameters learned_priority_head_parameters(
+    std::shared_ptr<const LearnedModel> model);
+
+// Copies `parent`, replaces only its outer Priority head, and publishes the
+// copy as immutable. Every tensor must have the exact production dimensions
+// and contain only finite values.
+std::shared_ptr<const LearnedModel>
+with_learned_priority_head_parameters(
+    std::shared_ptr<const LearnedModel> parent,
+    const LearnedPriorityHeadParameters& parameters);
+
 // Deep-clones a frozen Value model and fits only its outer Priority policy
 // head with soft all-action targets. Critic tensors and the Attack, Block,
 // and DamageOrder heads are copied bit-for-bit and never updated.

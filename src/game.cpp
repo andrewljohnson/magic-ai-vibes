@@ -2101,6 +2101,13 @@ class LearnedModel {
     friend LearnedCriticTensorFingerprints
     learned_critic_tensor_fingerprints(
         std::shared_ptr<const LearnedModel> model);
+    friend LearnedPriorityHeadParameters
+    learned_priority_head_parameters(
+        std::shared_ptr<const LearnedModel> model);
+    friend std::shared_ptr<const LearnedModel>
+    with_learned_priority_head_parameters(
+        std::shared_ptr<const LearnedModel> parent,
+        const LearnedPriorityHeadParameters& parameters);
     friend LearnedOutputCalibrationParameters
     learned_output_calibration_parameters(
         std::shared_ptr<const LearnedModel> model);
@@ -7450,6 +7457,116 @@ update_learned_value_priority_head(
     auto candidate =
         parent->deep_clone_mutable(critic_leaves);
     candidate->train_priority_policy_adam(encoded, config);
+    return candidate;
+}
+
+LearnedPriorityHeadParameters learned_priority_head_parameters(
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model) {
+        throw std::invalid_argument(
+            "Learned Priority parameter export requires a model");
+    }
+
+    constexpr std::size_t decision_kind =
+        static_cast<std::size_t>(
+            LearnedPolicyDecisionKind::Priority);
+    LearnedPriorityHeadParameters parameters;
+    parameters.input_hidden.reserve(
+        LearnedModel::kPolicyHiddenCount);
+    for (const auto& row :
+         model->policy_input_weights_[decision_kind]) {
+        parameters.input_hidden.emplace_back(
+            row.begin(), row.end());
+    }
+    const auto& hidden_bias =
+        model->policy_hidden_biases_[decision_kind];
+    parameters.hidden_bias.assign(
+        hidden_bias.begin(), hidden_bias.end());
+    const auto& hidden_output =
+        model->policy_output_weights_[decision_kind];
+    parameters.hidden_output.assign(
+        hidden_output.begin(), hidden_output.end());
+    const auto& direct =
+        model->policy_direct_output_weights_[decision_kind];
+    parameters.direct.assign(
+        direct.begin(), direct.end());
+    parameters.output_bias =
+        model->policy_output_bias_[decision_kind];
+    return parameters;
+}
+
+std::shared_ptr<const LearnedModel>
+with_learned_priority_head_parameters(
+    std::shared_ptr<const LearnedModel> parent,
+    const LearnedPriorityHeadParameters& parameters) {
+    if (!parent) {
+        throw std::invalid_argument(
+            "Learned Priority parameter application requires "
+            "a parent model");
+    }
+
+    const auto finite = [](const auto& values) {
+        return std::all_of(
+            values.begin(), values.end(),
+            [](double value) {
+                return std::isfinite(value);
+            });
+    };
+    if (parameters.input_hidden.size() !=
+            LearnedModel::kPolicyHiddenCount ||
+        parameters.hidden_bias.size() !=
+            LearnedModel::kPolicyHiddenCount ||
+        parameters.hidden_output.size() !=
+            LearnedModel::kPolicyHiddenCount ||
+        parameters.direct.size() !=
+            LearnedModel::kPolicyFeatureCount ||
+        !finite(parameters.hidden_bias) ||
+        !finite(parameters.hidden_output) ||
+        !finite(parameters.direct) ||
+        !std::isfinite(parameters.output_bias)) {
+        throw std::invalid_argument(
+            "Learned Priority parameters have invalid "
+            "dimensions or non-finite values");
+    }
+    for (const auto& row : parameters.input_hidden) {
+        if (row.size() != LearnedModel::kPolicyFeatureCount ||
+            !finite(row)) {
+            throw std::invalid_argument(
+                "Learned Priority parameters have invalid "
+                "dimensions or non-finite values");
+        }
+    }
+
+    constexpr std::size_t decision_kind =
+        static_cast<std::size_t>(
+            LearnedPolicyDecisionKind::Priority);
+    auto candidate =
+        std::shared_ptr<LearnedModel>(
+            new LearnedModel(*parent));
+    for (std::size_t hidden = 0;
+         hidden < LearnedModel::kPolicyHiddenCount; ++hidden) {
+        std::copy(
+            parameters.input_hidden[hidden].begin(),
+            parameters.input_hidden[hidden].end(),
+            candidate
+                ->policy_input_weights_[decision_kind][hidden]
+                .begin());
+    }
+    std::copy(
+        parameters.hidden_bias.begin(),
+        parameters.hidden_bias.end(),
+        candidate->policy_hidden_biases_[decision_kind].begin());
+    std::copy(
+        parameters.hidden_output.begin(),
+        parameters.hidden_output.end(),
+        candidate->policy_output_weights_[decision_kind].begin());
+    std::copy(
+        parameters.direct.begin(), parameters.direct.end(),
+        candidate
+            ->policy_direct_output_weights_[decision_kind]
+            .begin());
+    candidate->policy_output_bias_[decision_kind] =
+        parameters.output_bias;
     return candidate;
 }
 

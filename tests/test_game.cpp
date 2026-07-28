@@ -2220,6 +2220,174 @@ TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
     CHECK(rejected_null);
 }
 
+TEST(learned_priority_head_parameters_round_trip_bit_exactly_and_isolate) {
+    const auto parent = small_value_model();
+    const std::string parent_fingerprint =
+        old_school::learned_model_fingerprint(parent);
+    const auto parent_components =
+        old_school::learned_model_component_fingerprints(parent);
+    const auto parameters =
+        old_school::learned_priority_head_parameters(parent);
+
+    CHECK(!parameters.input_hidden.empty());
+    CHECK(parameters.input_hidden.size() ==
+          parameters.hidden_bias.size());
+    CHECK(parameters.input_hidden.size() ==
+          parameters.hidden_output.size());
+    CHECK(!parameters.direct.empty());
+    CHECK(std::all_of(
+        parameters.input_hidden.begin(),
+        parameters.input_hidden.end(),
+        [&](const auto& row) {
+            return row.size() == parameters.direct.size();
+        }));
+
+    const auto round_trip =
+        old_school::with_learned_priority_head_parameters(
+            parent, parameters);
+    CHECK(round_trip.get() != parent.get());
+    CHECK(old_school::learned_model_fingerprint(round_trip) ==
+          parent_fingerprint);
+    CHECK(old_school::learned_model_component_fingerprints(
+              round_trip) == parent_components);
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+
+    auto changed_parameters = parameters;
+    changed_parameters.input_hidden[0][0] =
+        std::bit_cast<double>(UINT64_C(0x3fd123456789abcd));
+    changed_parameters.hidden_bias[0] =
+        std::bit_cast<double>(UINT64_C(0xbfc23456789abcde));
+    changed_parameters.hidden_output[0] =
+        std::bit_cast<double>(UINT64_C(0x0010000000000001));
+    changed_parameters.direct[0] =
+        std::bit_cast<double>(UINT64_C(0x8000000000000000));
+    changed_parameters.output_bias =
+        std::bit_cast<double>(UINT64_C(0x3fe3456789abcdef));
+
+    const auto changed =
+        old_school::with_learned_priority_head_parameters(
+            parent, changed_parameters);
+    const auto exported_changed =
+        old_school::learned_priority_head_parameters(changed);
+    const auto same_bits = [](double left, double right) {
+        return std::bit_cast<std::uint64_t>(left) ==
+               std::bit_cast<std::uint64_t>(right);
+    };
+    CHECK(same_bits(
+        exported_changed.input_hidden[0][0],
+        changed_parameters.input_hidden[0][0]));
+    CHECK(same_bits(
+        exported_changed.hidden_bias[0],
+        changed_parameters.hidden_bias[0]));
+    CHECK(same_bits(
+        exported_changed.hidden_output[0],
+        changed_parameters.hidden_output[0]));
+    CHECK(same_bits(
+        exported_changed.direct[0],
+        changed_parameters.direct[0]));
+    CHECK(same_bits(
+        exported_changed.output_bias,
+        changed_parameters.output_bias));
+
+    const auto changed_components =
+        old_school::learned_model_component_fingerprints(changed);
+    CHECK(old_school::learned_model_fingerprint(changed) !=
+          parent_fingerprint);
+    CHECK(changed_components.priority !=
+          parent_components.priority);
+    CHECK(changed_components.critic ==
+          parent_components.critic);
+    CHECK(changed_components.attack ==
+          parent_components.attack);
+    CHECK(changed_components.block ==
+          parent_components.block);
+    CHECK(changed_components.damage_order ==
+          parent_components.damage_order);
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+    CHECK(old_school::learned_model_component_fingerprints(parent) ==
+          parent_components);
+}
+
+TEST(learned_priority_head_parameters_reject_malformed_or_nonfinite_input) {
+    const auto parent = small_value_model();
+    const std::string parent_fingerprint =
+        old_school::learned_model_fingerprint(parent);
+    const auto valid =
+        old_school::learned_priority_head_parameters(parent);
+    const auto rejected =
+        [&](old_school::LearnedPriorityHeadParameters parameters) {
+            try {
+                static_cast<void>(
+                    old_school::
+                        with_learned_priority_head_parameters(
+                            parent, parameters));
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+
+    auto malformed = valid;
+    malformed.input_hidden.pop_back();
+    CHECK(rejected(malformed));
+    malformed = valid;
+    malformed.input_hidden[0].pop_back();
+    CHECK(rejected(malformed));
+    malformed = valid;
+    malformed.hidden_bias.push_back(0.0);
+    CHECK(rejected(malformed));
+    malformed = valid;
+    malformed.hidden_output.pop_back();
+    CHECK(rejected(malformed));
+    malformed = valid;
+    malformed.direct.push_back(0.0);
+    CHECK(rejected(malformed));
+
+    auto nonfinite = valid;
+    nonfinite.input_hidden[0][0] =
+        std::numeric_limits<double>::quiet_NaN();
+    CHECK(rejected(nonfinite));
+    nonfinite = valid;
+    nonfinite.hidden_bias[0] =
+        std::numeric_limits<double>::infinity();
+    CHECK(rejected(nonfinite));
+    nonfinite = valid;
+    nonfinite.hidden_output[0] =
+        -std::numeric_limits<double>::infinity();
+    CHECK(rejected(nonfinite));
+    nonfinite = valid;
+    nonfinite.direct[0] =
+        std::numeric_limits<double>::quiet_NaN();
+    CHECK(rejected(nonfinite));
+    nonfinite = valid;
+    nonfinite.output_bias =
+        std::numeric_limits<double>::infinity();
+    CHECK(rejected(nonfinite));
+
+    bool rejected_null = false;
+    try {
+        static_cast<void>(
+            old_school::learned_priority_head_parameters(
+                nullptr));
+    } catch (const std::invalid_argument&) {
+        rejected_null = true;
+    }
+    CHECK(rejected_null);
+    rejected_null = false;
+    try {
+        static_cast<void>(
+            old_school::with_learned_priority_head_parameters(
+                nullptr, valid));
+    } catch (const std::invalid_argument&) {
+        rejected_null = true;
+    }
+    CHECK(rejected_null);
+    CHECK(old_school::learned_model_fingerprint(parent) ==
+          parent_fingerprint);
+}
+
 TEST(value_trainer_is_seeded_deterministic_in_the_old_school_schema) {
     const auto model =
         old_school::train_learned_value_champion(1, 424242);
