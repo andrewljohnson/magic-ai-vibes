@@ -656,6 +656,37 @@ void test_singleton_pass_root_is_trivial() {
         "missing singleton selected action was not malformed");
 }
 
+void test_neutral_tensor_repeat_uses_ieee_bits() {
+    gate::ScoredRoot first;
+    first.neutral_priority_options = {
+        {0.0, 1.0},
+    };
+    first.hidden_neutral_priority_options = {
+        {0.0, 1.0},
+    };
+    gate::ScoredRoot second = first;
+    expect(
+        gate::testing::neutral_tensor_bits_identical(
+            first, second),
+        "identical neutral tensors did not compare exact");
+
+    second.neutral_priority_options[0][0] = -0.0;
+    expect(
+        first == second,
+        "portable regression requires ordinary equality to alias zeros");
+    expect(
+        !gate::testing::neutral_tensor_bits_identical(
+            first, second),
+        "visible tensor repeat ignored signed-zero bit drift");
+
+    second = first;
+    second.hidden_neutral_priority_options[0][0] = -0.0;
+    expect(
+        !gate::testing::neutral_tensor_bits_identical(
+            first, second),
+        "hidden tensor repeat ignored signed-zero bit drift");
+}
+
 } // namespace
 
 int main() {
@@ -697,6 +728,10 @@ int main() {
             {
                 "singleton Pass is trivial",
                 test_singleton_pass_root_is_trivial,
+            },
+            {
+                "neutral tensors use IEEE repeat identity",
+                test_neutral_tensor_repeat_uses_ieee_bits,
             },
         };
     std::size_t passed = 0;

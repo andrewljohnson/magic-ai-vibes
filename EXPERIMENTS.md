@@ -14200,6 +14200,62 @@ the root-level result may not become an adaptive tuning set. In either case,
 the held-out P0/D1 rows are never serialized as a reusable development
 bundle. Future fast iteration uses separately sourced development data.
 
+Implementation preflight completed 2026-07-28 02:53 PDT without invoking
+either no-argument FQ4 binary or opening D1 scientific stdout. The final
+implementation uses a source-owning production adapter plus a separate
+tensor evaluator object. The adapter reconstructs and validates the complete
+P0b report before its sole D0b fit, strips the 114 roots to opaque rows, and
+then calls a strict two-phase evaluator: every parent visible/hidden/reverse
+rederivation must pass before the treatment-input digest is finalized or any
+candidate logit is evaluated. The input digest binds the D1-rederived parent
+logits and exact combined-score support. The evaluator object has no direct
+census, fit, rollout, determinization, or source-coordinate symbol, and its
+treatment accounting is structurally zero.
+
+The dedicated supervisor snapshots C16 before and after, privately buffers
+child stdout/stderr, suppresses scientific stdout on exit `2`, signal,
+timeout, stderr, malformed completion, or final sink failure, and publishes
+only a complete exit-`0`/`1` report. The report includes the canonical
+per-root parent logits and exact supports plus all declared roots, transition
+matrices, gates, identities, controls, hashes, accounting, and timings; it
+does not emit tensors, base samples, dominance masks, or source seeds.
+
+Implementation-only verification:
+
+- `make -j4 test-fq4-d1-treatment`: **9/9 passed**, including literal
+  input/evidence SHA-256 goldens
+  `2918653418797588e1294246e102693a8e573b132f75a0302f8bdaeca4510c86`
+  and
+  `245a299541c556b79c997bc74fcc1d043b562e588a3270487a83de65ea185153`,
+  one-bit/one-field mutations, malformed-row failure, all gate and severity
+  boundaries, candidate-selected-pair SE recomputation, the `5/5/2` floor,
+  Red protection, and a final-parent-row failure proving zero candidate
+  roots and no input digest.
+- `make -j4 test-fq4-d1-field-gate`: **10/10 passed**. P0 link, symbol, and
+  fingerprint firewalls passed; the tensor evaluator object's direct-symbol
+  firewall passed. The treatment CLI extra-argument path returned `2` with
+  zero stdout and usage-only stderr.
+- Focused AddressSanitizer/UndefinedBehaviorSanitizer treatment tests:
+  **9/9 passed** with `detect_leaks=0` and `halt_on_error=1`. An independent
+  reviewer also reproduced sanitized treatment **9/9** and field-gate
+  **10/10**.
+- `/usr/bin/time -p make -j4 test` on the exact final tree passed: engine
+  **168/168**, learned iteration **27/27**, probes **57/57**, probe metrics
+  **11/11**, probe runner **33/33**, every historical audit/FQ0/FQ4 suite,
+  web bridge **18/18**, web **106/106**, certification **48/48**, CLI,
+  capture, clean/incremental, and representative simulator smoke. Runtime
+  was `real 257.64`, `user 515.56`, `sys 9.28`.
+- `-Wall -Wextra -Wpedantic -Werror` and `git diff --check` passed. Two
+  independent final read-only reviews returned GO after requiring and then
+  verifying explicit stdout publication of parent logits and exact support.
+
+`REVIEW.md` was reread through its newest 02:44 cycle before this record; it
+reported no new committed state or invocation and raised no conflicting
+critique. Decision: accept the implementation for a commit-and-review freeze,
+not as scientific evidence. C16 remains champion. After the frozen commit is
+independently checked, the only licensed scientific action is the one exact
+D1 command declared above.
+
 ###### FQ4-DEV0 separate fast development-bundle declaration
 
 Declared 2026-07-28 02:02 PDT before opening D1 treatment stdout and before

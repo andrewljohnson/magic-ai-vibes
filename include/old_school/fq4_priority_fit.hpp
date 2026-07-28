@@ -32,6 +32,8 @@ inline constexpr std::size_t
     kD0bExpectedParentMarginsBelowGate = 3;
 inline constexpr std::string_view kD0bRequiredAnchorFingerprint =
     "7079f8f306f90d54df21fedcf81213cc6ad5df6c5c1df46e9b3456ccd550c312";
+inline constexpr std::string_view kD0bRequiredTreatmentFingerprint =
+    "81ad05d2c32bea9b17ca4c89cbbf7a9be105ad130897f79fa4d8a29a5ea1105e";
 inline constexpr std::array<std::uint64_t, 5>
     kD0bRequiredParentMarginBits{
         0x3f5a0f22b369b200ULL,

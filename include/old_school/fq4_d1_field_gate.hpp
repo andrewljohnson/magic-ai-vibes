@@ -288,6 +288,12 @@ struct ScoredRoot {
     oc1_action_scoring::DecisionScore base_score;
     std::vector<double> base_scores;
     std::vector<std::string> base_exact_support;
+    // Candidate-neutral, canonical Priority option tensors. P0 does not
+    // digest or consume these rows; D1 uses them to score an outer policy
+    // head without retaining GameState or invoking another rollout.
+    std::vector<std::vector<double>> neutral_priority_options;
+    std::vector<std::vector<double>>
+        hidden_neutral_priority_options;
     std::vector<double> residuals;
     std::vector<double> combined_scores;
     ParentClassResult parent_class;
@@ -371,6 +377,12 @@ CensusReport run_parent_census(
     std::shared_ptr<const LearnedModel> frozen_c16);
 
 namespace testing {
+
+// The production repeat comparison uses this exact IEEE-754 tensor check;
+// numeric vector equality alone would not distinguish positive/negative zero.
+bool neutral_tensor_bits_identical(
+    const ScoredRoot& first,
+    const ScoredRoot& second);
 
 enum class RootDisposition : std::uint8_t {
     Malformed,

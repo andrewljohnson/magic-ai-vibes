@@ -84,6 +84,22 @@ bool bit_identical(
     return true;
 }
 
+bool tensor_bits_identical(
+    const std::vector<std::vector<double>>& first,
+    const std::vector<std::vector<double>>& second) {
+    if (first.size() != second.size()) {
+        return false;
+    }
+    for (std::size_t action = 0;
+         action < first.size(); ++action) {
+        if (!bit_identical(
+                first[action], second[action])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void append_field(std::string& output, std::uint64_t value) {
     output += std::to_string(value);
 }
@@ -844,31 +860,33 @@ std::vector<PriorityAction> priority_actions(
     return result;
 }
 
+std::vector<std::vector<double>> priority_option_features(
+    const probe_data::DecisionProbe& probe) {
+    const auto actions = priority_actions(probe);
+    std::vector<std::vector<double>> result;
+    result.reserve(actions.size());
+    for (const PriorityAction& action : actions) {
+        result.push_back(
+            learned_priority_policy_features(
+                probe.state, probe.root_player, action,
+                sorcery_actions_for(probe.phase),
+                probe.phase,
+                probe.consecutive_passes));
+    }
+    return result;
+}
+
 bool priority_feature_bits_identical(
     const probe_data::DecisionProbe& visible,
     const probe_data::DecisionProbe& hidden) {
-    const auto visible_actions = priority_actions(visible);
-    const auto hidden_actions = priority_actions(hidden);
-    if (visible_actions != hidden_actions) {
+    const auto first = priority_option_features(visible);
+    const auto second = priority_option_features(hidden);
+    if (first.size() != second.size()) {
         return false;
     }
     for (std::size_t action = 0;
-         action < visible_actions.size(); ++action) {
-        const auto first =
-            learned_priority_policy_features(
-                visible.state, visible.root_player,
-                visible_actions[action],
-                sorcery_actions_for(visible.phase),
-                visible.phase,
-                visible.consecutive_passes);
-        const auto second =
-            learned_priority_policy_features(
-                hidden.state, hidden.root_player,
-                hidden_actions[action],
-                sorcery_actions_for(hidden.phase),
-                hidden.phase,
-                hidden.consecutive_passes);
-        if (!bit_identical(first, second)) {
+         action < first.size(); ++action) {
+        if (!bit_identical(first[action], second[action])) {
             return false;
         }
     }
@@ -1336,6 +1354,10 @@ std::size_t class_index(ParentClass value) {
 struct RetainedRoot {
     CanonicalRoot root;
     HiddenClone hidden;
+    std::vector<std::vector<double>>
+        neutral_priority_options;
+    std::vector<std::vector<double>>
+        hidden_neutral_priority_options;
     bool hidden_feature_bits_identical = false;
 };
 
@@ -1467,6 +1489,26 @@ GameConfig source_game_config(
 bool evidence_equal(
     const CensusReport& first,
     const CensusReport& second) {
+    bool scored_roots_equal =
+        first.scored_roots.size() ==
+        second.scored_roots.size();
+    for (std::size_t index = 0;
+         scored_roots_equal &&
+         index < first.scored_roots.size();
+         ++index) {
+        const ScoredRoot& left =
+            first.scored_roots[index];
+        const ScoredRoot& right =
+            second.scored_roots[index];
+        scored_roots_equal =
+            left == right &&
+            tensor_bits_identical(
+                left.neutral_priority_options,
+                right.neutral_priority_options) &&
+            tensor_bits_identical(
+                left.hidden_neutral_priority_options,
+                right.hidden_neutral_priority_options);
+    }
     return
         first.parent_fingerprint ==
             second.parent_fingerprint &&
@@ -1491,8 +1533,7 @@ bool evidence_equal(
         first.deck_game_coverage ==
             second.deck_game_coverage &&
         first.pooled == second.pooled &&
-        first.scored_roots ==
-            second.scored_roots &&
+        scored_roots_equal &&
         first.raw_base_dominated_support_by_deck ==
             second.raw_base_dominated_support_by_deck &&
         first.raw_base_mixed_tie_support_by_deck ==
@@ -1864,13 +1905,42 @@ Construction construct_once(
     // Phase two begins only after the complete retained/dominance corpus is
     // immutable. This owner-boundary control compares the neutral input
     // tensors directly and does not invoke the parent model.
-    for (RetainedRoot& retained_root : retained) {
+    for (std::size_t retained_index = 0;
+         retained_index < retained.size();
+         ++retained_index) {
+        RetainedRoot& retained_root =
+            retained[retained_index];
         bool feature_exact = false;
         try {
-            feature_exact =
-                priority_feature_bits_identical(
-                    retained_root.root.probe,
+            auto visible_options =
+                priority_option_features(
+                    retained_root.root.probe);
+            auto hidden_options =
+                priority_option_features(
                     retained_root.hidden.probe);
+            feature_exact =
+                visible_options.size() ==
+                    hidden_options.size();
+            for (std::size_t action = 0;
+                 feature_exact &&
+                 action <
+                     visible_options.size();
+                 ++action) {
+                feature_exact =
+                    bit_identical(
+                        visible_options[action],
+                        hidden_options[action]);
+            }
+            if (frozen_dominance[retained_index]
+                    .has_value() &&
+                frozen_dominance[retained_index]
+                    ->any_dominated()) {
+                retained_root.neutral_priority_options =
+                    std::move(visible_options);
+                retained_root
+                    .hidden_neutral_priority_options =
+                    std::move(hidden_options);
+            }
         } catch (const std::exception& error) {
             record_failure(
                 report,
@@ -2059,6 +2129,14 @@ Construction construct_once(
                 parent_score->base_scores,
             .base_exact_support =
                 parent_score->base.selected_support,
+            .neutral_priority_options =
+                std::move(
+                    retained_root
+                        .neutral_priority_options),
+            .hidden_neutral_priority_options =
+                std::move(
+                    retained_root
+                        .hidden_neutral_priority_options),
             .residuals =
                 parent_score->residuals,
             .combined_scores =
@@ -3039,6 +3117,18 @@ CensusReport run_parent_census(
 }
 
 namespace testing {
+
+bool neutral_tensor_bits_identical(
+    const ScoredRoot& first,
+    const ScoredRoot& second) {
+    return
+        tensor_bits_identical(
+            first.neutral_priority_options,
+            second.neutral_priority_options) &&
+        tensor_bits_identical(
+            first.hidden_neutral_priority_options,
+            second.hidden_neutral_priority_options);
+}
 
 RootDisposition diagnose_root_disposition(
     const LearnedDecisionTracePoint& point,
