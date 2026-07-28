@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace diagnostic =
@@ -303,6 +304,200 @@ std::size_t occurrence_count(
         offset += token.size();
     }
     return result;
+}
+
+bundle::SelectedRow make_stack_row(
+    bundle::Split split,
+    std::size_t deck,
+    bundle::Role role,
+    std::size_t options,
+    std::size_t stack_size,
+    bool explicit_zero = false) {
+    bundle::SelectedRow result{
+        .split = split,
+        .census = {
+            .trace_ordinal =
+                static_cast<std::uint32_t>(
+                    1000U + deck),
+            .owner_deck =
+                static_cast<std::uint8_t>(deck),
+            .opponent_deck =
+                static_cast<std::uint8_t>(
+                    (deck + 1U) %
+                    bundle::kDeckCount),
+            .pass_index = 0,
+            .dominance =
+                std::vector<bundle::DominanceCount>(
+                    options),
+        },
+        .roles =
+            static_cast<std::uint8_t>(role),
+        .production_seed =
+            0x57AC0000ULL + deck,
+    };
+    for (std::size_t option = 0;
+         option < options; ++option) {
+        bundle::ActionRow action{
+            .descriptor =
+                "PRIVATE_STACK_" +
+                std::to_string(deck) + "_" +
+                std::to_string(option),
+            .is_pass = option == 0,
+            .base_score_bits = bits(0.5),
+            .parent_residual_bits = bits(0.0),
+        };
+        if (stack_size != 0 || explicit_zero) {
+            action.features.push_back(
+                {
+                    .index =
+                        static_cast<std::uint16_t>(
+                            diagnostic::
+                                kStackSizeFeatureIndex),
+                    .value_bits =
+                        bits(
+                            static_cast<double>(
+                                stack_size) /
+                            static_cast<double>(
+                                diagnostic::
+                                    kStackSizeEncodingDenominator)),
+                });
+        }
+        result.actions.push_back(
+            std::move(action));
+    }
+    return result;
+}
+
+struct FrozenStackCell {
+    std::size_t empty_roots = 0;
+    std::size_t empty_options = 0;
+    std::size_t active_roots = 0;
+    std::size_t active_options = 0;
+};
+
+constexpr std::array<FrozenStackCell, bundle::kDeckCount>
+    kFitPositiveStack{{
+        {11, 35, 0, 0},
+        {4, 29, 0, 0},
+        {20, 103, 11, 39},
+        {6, 26, 7, 21},
+        {29, 295, 0, 0},
+    }};
+
+constexpr std::array<FrozenStackCell, bundle::kDeckCount>
+    kCheckPositiveStack{{
+        {20, 54, 0, 0},
+        {5, 33, 0, 0},
+        {20, 107, 11, 33},
+        {1, 4, 6, 18},
+        {31, 322, 0, 0},
+    }};
+
+constexpr std::array<std::size_t, bundle::kDeckCount>
+    kBackgroundOptions{{2, 2, 2, 2, 3}};
+
+void append_stack_rows(
+    std::vector<bundle::SelectedRow>& rows,
+    bundle::Split split,
+    std::size_t deck,
+    bundle::Role role,
+    std::size_t roots,
+    std::size_t options,
+    std::size_t stack_size) {
+    if ((roots == 0) != (options == 0) ||
+        (roots != 0 && options < roots)) {
+        throw std::runtime_error(
+            "invalid synthetic stack-cell shape");
+    }
+    if (roots == 0) {
+        return;
+    }
+    const std::size_t options_per_root =
+        options / roots;
+    const std::size_t remainder =
+        options % roots;
+    for (std::size_t root = 0;
+         root < roots; ++root) {
+        rows.push_back(
+            make_stack_row(
+                split, deck, role,
+                options_per_root +
+                    static_cast<std::size_t>(
+                        root < remainder),
+                stack_size));
+    }
+}
+
+std::pair<
+    std::vector<bundle::SelectedRow>,
+    std::vector<bundle::SelectedRow>>
+frozen_stack_rows() {
+    std::vector<bundle::SelectedRow> fit;
+    std::vector<bundle::SelectedRow> check;
+    for (std::size_t deck = 0;
+         deck < bundle::kDeckCount; ++deck) {
+        const FrozenStackCell fit_cell =
+            kFitPositiveStack[deck];
+        append_stack_rows(
+            fit, bundle::Split::Fit, deck,
+            bundle::Role::DominancePositive,
+            fit_cell.empty_roots,
+            fit_cell.empty_options, 0);
+        append_stack_rows(
+            fit, bundle::Split::Fit, deck,
+            bundle::Role::DominancePositive,
+            fit_cell.active_roots,
+            fit_cell.active_options, 1);
+        append_stack_rows(
+            fit, bundle::Split::Fit, deck,
+            bundle::Role::BackgroundControl,
+            1, kBackgroundOptions[deck], 0);
+
+        const FrozenStackCell check_cell =
+            kCheckPositiveStack[deck];
+        append_stack_rows(
+            check, bundle::Split::Check, deck,
+            bundle::Role::DominancePositive,
+            check_cell.empty_roots,
+            check_cell.empty_options, 0);
+        append_stack_rows(
+            check, bundle::Split::Check, deck,
+            bundle::Role::DominancePositive,
+            check_cell.active_roots,
+            check_cell.active_options, 1);
+        append_stack_rows(
+            check, bundle::Split::Check, deck,
+            bundle::Role::BackgroundControl,
+            1, kBackgroundOptions[deck], 0);
+    }
+    return {std::move(fit), std::move(check)};
+}
+
+diagnostic::StackCensusReport stack_report_for(
+    const diagnostic::StackCensus& census) {
+    return {
+        .bundle_schema =
+            std::string(bundle::kBundleSchema),
+        .bundle_bytes =
+            bundle::kPublishedArtifactBytes,
+        .bundle_sha256 =
+            std::string(
+                bundle::kPublishedArtifactSha256),
+        .feature_schema =
+            std::string(bundle::kFeatureSchema),
+        .feature_count =
+            bundle::kFeatureCount,
+        .feature_contract_sha256 =
+            std::string(
+                bundle::kFeatureContractSha256),
+        .stack_size_feature_index =
+            diagnostic::kStackSizeFeatureIndex,
+        .stack_size_encoding_denominator =
+            diagnostic::
+                kStackSizeEncodingDenominator,
+        .census = census,
+        .bundle_immutable = true,
+    };
 }
 
 old_school::LearnedModelComponentFingerprints
@@ -701,6 +896,321 @@ void test_format_is_aggregate_and_fail_closed() {
         "nonzero formatted parent control passed");
 }
 
+void test_stack_census_empty_active_and_encoding() {
+    std::vector<bundle::SelectedRow> fit;
+    fit.push_back(
+        make_stack_row(
+            bundle::Split::Fit, 0,
+            bundle::Role::DominancePositive,
+            2, 0));
+    fit.push_back(
+        make_stack_row(
+            bundle::Split::Fit, 2,
+            bundle::Role::DominancePositive,
+            3, 2));
+    std::vector<bundle::SelectedRow> check;
+    check.push_back(
+        make_stack_row(
+            bundle::Split::Check, 3,
+            bundle::Role::BackgroundControl,
+            2, 0));
+
+    const diagnostic::StackCensus measured =
+        diagnostic::measure_stack_census(
+            fit, check);
+    expect(
+        measured.selected_rows == 3 &&
+            measured.selected_options == 7 &&
+            measured.action_invariant_rows == 3 &&
+            measured.exact_stack_encoding_rows == 3 &&
+            measured.role_overlap_rows == 0,
+        "synthetic stack census accounting drifted");
+    expect(
+        measured.fit.positive.decks[0]
+                .empty ==
+            diagnostic::StackContextCount{
+                .roots = 1,
+                .options = 2,
+            } &&
+        measured.fit.positive.decks[2]
+                .active ==
+            diagnostic::StackContextCount{
+                .roots = 1,
+                .options = 3,
+            } &&
+        measured.check.background.decks[3]
+                .empty ==
+            diagnostic::StackContextCount{
+                .roots = 1,
+                .options = 2,
+            },
+        "empty/active stack cells were misclassified");
+}
+
+void test_stack_census_rejects_malformed_rows() {
+    const auto valid_row =
+        make_stack_row(
+            bundle::Split::Fit, 2,
+            bundle::Role::DominancePositive,
+            2, 1);
+
+    auto variant = valid_row;
+    variant.actions[1].features[0].value_bits =
+        bits(0.4);
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "action-varying stack feature passed");
+
+    variant = valid_row;
+    for (auto& action : variant.actions) {
+        action.features[0].value_bits =
+            bits(0.3);
+    }
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "fractional encoded stack size passed");
+
+    for (const double invalid :
+         {std::numeric_limits<double>::quiet_NaN(),
+          std::numeric_limits<double>::infinity(),
+          -0.2}) {
+        variant = valid_row;
+        for (auto& action : variant.actions) {
+            action.features[0].value_bits =
+                bits(invalid);
+        }
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    diagnostic::measure_stack_census(
+                        {variant}, {}));
+            },
+            "nonfinite or negative stack size passed");
+    }
+
+    variant = valid_row;
+    const double first_unrepresentable_size =
+        std::ldexp(
+            1.0,
+            std::numeric_limits<std::size_t>::digits);
+    const double overflow_feature =
+        first_unrepresentable_size /
+        static_cast<double>(
+            diagnostic::
+                kStackSizeEncodingDenominator);
+    expect(
+        std::isfinite(overflow_feature),
+        "overflow guard fixture is not finite");
+    for (auto& action : variant.actions) {
+        action.features[0].value_bits =
+            bits(overflow_feature);
+    }
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "finite size_t-overflow stack size passed");
+
+    variant = valid_row;
+    for (auto& action : variant.actions) {
+        action.features[0].value_bits =
+            bits(0.0);
+    }
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "explicit sparse positive zero passed");
+
+    variant = valid_row;
+    for (auto& action : variant.actions) {
+        action.features[0].value_bits =
+            bits(-0.0);
+    }
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "negative-zero stack feature passed");
+
+    variant = valid_row;
+    for (auto& action : variant.actions) {
+        action.features.push_back(
+            action.features.front());
+    }
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "duplicate stack feature passed");
+
+    variant = valid_row;
+    variant.roles =
+        static_cast<std::uint8_t>(
+            bundle::Role::DominancePositive) |
+        static_cast<std::uint8_t>(
+            bundle::Role::BackgroundControl);
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "overlapping selected-row roles passed");
+
+    variant = valid_row;
+    variant.split = bundle::Split::Check;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "wrong-split selected row passed");
+
+    variant = valid_row;
+    variant.census.owner_deck =
+        bundle::kDeckCount;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "out-of-range selected-row deck passed");
+
+    for (const std::uint8_t invalid_role :
+         {std::uint8_t{0},
+          std::uint8_t{1U << 7U}}) {
+        variant = valid_row;
+        variant.roles = invalid_role;
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    diagnostic::measure_stack_census(
+                        {variant}, {}));
+            },
+            "zero or unknown selected-row role passed");
+    }
+
+    variant = valid_row;
+    variant.actions.clear();
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::measure_stack_census(
+                    {variant}, {}));
+        },
+        "empty selected row passed");
+}
+
+void test_stack_census_format_is_exact_and_aggregate_only() {
+    auto [fit, check] = frozen_stack_rows();
+    const diagnostic::StackCensus measured =
+        diagnostic::measure_stack_census(
+            fit, check);
+    expect(
+        measured.selected_rows ==
+                diagnostic::kStackCensusSelectedRows &&
+            measured.selected_options ==
+                diagnostic::kStackCensusSelectedOptions,
+        "frozen synthetic stack totals drifted");
+    const diagnostic::StackCensusReport report =
+        stack_report_for(measured);
+    const std::string output =
+        diagnostic::format_stack_census_report(
+            report);
+    expect(
+        occurrence_count(
+            output,
+            "stack_census split=") == 24 &&
+            output.find(
+                "stack_census split=fit role=positive "
+                "aggregate=pooled empty_roots=70 "
+                "empty_options=488 active_roots=18 "
+                "active_options=60") !=
+                std::string::npos &&
+            output.find(
+                "stack_census split=check role=positive "
+                "aggregate=pooled empty_roots=77 "
+                "empty_options=520 active_roots=17 "
+                "active_options=51") !=
+                std::string::npos &&
+            output.find(
+                "stack_size_feature_index=20 "
+                "encoding=stack_size_over_5") !=
+                std::string::npos &&
+            output.find("models_loaded=0 fits=0 games=0") !=
+                std::string::npos &&
+            output.find("PRIVATE_STACK_") ==
+                std::string::npos &&
+            output.find("descriptor") ==
+                std::string::npos &&
+            output.find("production_seed") ==
+                std::string::npos &&
+            output.ends_with("result=PASS\n"),
+        "stack census report leaked rows or lost aggregates");
+
+    diagnostic::StackCensusReport malformed = report;
+    constexpr std::size_t kBlue =
+        static_cast<std::size_t>(
+            old_school::DeckId::Blue);
+    --malformed.census.fit.positive.decks[kBlue]
+          .active.roots;
+    malformed.census.fit.positive.decks[kBlue]
+        .active.options -= 3;
+    ++malformed.census.fit.positive.decks[kBlue]
+          .empty.roots;
+    malformed.census.fit.positive.decks[kBlue]
+        .empty.options += 3;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::
+                    format_stack_census_report(
+                        malformed));
+        },
+        "self-consistent frozen count drift passed");
+
+    malformed = report;
+    malformed.census.role_overlap_rows = 1;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::
+                    format_stack_census_report(
+                        malformed));
+        },
+        "nonzero role-overlap accounting passed");
+
+    malformed = report;
+    malformed.stack_size_feature_index = 21;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                diagnostic::
+                    format_stack_census_report(
+                        malformed));
+        },
+        "stack feature-contract index drift passed");
+}
+
 } // namespace
 
 int main() {
@@ -717,5 +1227,14 @@ int main() {
     runner.run(
         "aggregate-only format",
         test_format_is_aggregate_and_fail_closed);
+    runner.run(
+        "stack census empty active encoding",
+        test_stack_census_empty_active_and_encoding);
+    runner.run(
+        "stack census malformed rows",
+        test_stack_census_rejects_malformed_rows);
+    runner.run(
+        "stack census exact aggregate format",
+        test_stack_census_format_is_exact_and_aggregate_only);
     return runner.finish();
 }

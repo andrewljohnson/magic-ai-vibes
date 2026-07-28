@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace old_school::fq4_dev_background_diagnostic {
@@ -41,6 +42,239 @@ constexpr std::array<std::string_view, bundle::kDeckCount>
     throw std::runtime_error(
         "FQ4 DEV2 background diagnostic: " +
         std::string(message));
+}
+
+constexpr StackDeckCensus stack_deck(
+    std::size_t empty_roots,
+    std::size_t empty_options,
+    std::size_t active_roots,
+    std::size_t active_options) {
+    return {
+        .empty = {
+            .roots = empty_roots,
+            .options = empty_options,
+        },
+        .active = {
+            .roots = active_roots,
+            .options = active_options,
+        },
+    };
+}
+
+constexpr StackRoleCensus background_role() {
+    return {
+        .decks = {
+            stack_deck(1, 2, 0, 0),
+            stack_deck(1, 2, 0, 0),
+            stack_deck(1, 2, 0, 0),
+            stack_deck(1, 2, 0, 0),
+            stack_deck(1, 3, 0, 0),
+        },
+    };
+}
+
+constexpr StackCensus expected_stack_census() {
+    return {
+        .fit = {
+            .positive = {
+                .decks = {
+                    stack_deck(11, 35, 0, 0),
+                    stack_deck(4, 29, 0, 0),
+                    stack_deck(20, 103, 11, 39),
+                    stack_deck(6, 26, 7, 21),
+                    stack_deck(29, 295, 0, 0),
+                },
+            },
+            .background = background_role(),
+        },
+        .check = {
+            .positive = {
+                .decks = {
+                    stack_deck(20, 54, 0, 0),
+                    stack_deck(5, 33, 0, 0),
+                    stack_deck(20, 107, 11, 33),
+                    stack_deck(1, 4, 6, 18),
+                    stack_deck(31, 322, 0, 0),
+                },
+            },
+            .background = background_role(),
+        },
+        .selected_rows = kStackCensusSelectedRows,
+        .selected_options = kStackCensusSelectedOptions,
+        .action_invariant_rows = kStackCensusSelectedRows,
+        .exact_stack_encoding_rows = kStackCensusSelectedRows,
+        .role_overlap_rows = 0,
+    };
+}
+
+inline constexpr StackCensus kExpectedStackCensus =
+    expected_stack_census();
+
+struct StackFeature {
+    std::uint64_t value_bits = std::bit_cast<std::uint64_t>(0.0);
+    std::size_t stack_size = 0;
+};
+
+StackFeature stack_feature(
+    const bundle::ActionRow& action) {
+    StackFeature result;
+    bool found = false;
+    for (const bundle::SparseFeature& feature :
+         action.features) {
+        if (feature.index != kStackSizeFeatureIndex) {
+            continue;
+        }
+        if (found) {
+            fail("stack-size feature is duplicated");
+        }
+        found = true;
+        result.value_bits = feature.value_bits;
+    }
+    if (found && result.value_bits == 0) {
+        fail(
+            "positive-zero stack feature must be sparse-absent");
+    }
+    const double value =
+        std::bit_cast<double>(result.value_bits);
+    const double scaled =
+        value *
+        static_cast<double>(
+            kStackSizeEncodingDenominator);
+    double integer = 0.0;
+    if (!std::isfinite(value) ||
+        std::signbit(value) ||
+        !std::isfinite(scaled) ||
+        std::modf(scaled, &integer) != 0.0 ||
+        integer >=
+            static_cast<double>(
+                std::numeric_limits<std::size_t>::max())) {
+        fail("stack-size feature is not an exact nonnegative integer");
+    }
+    result.stack_size =
+        static_cast<std::size_t>(integer);
+    return result;
+}
+
+StackSplitCensus& split_census(
+    StackCensus& census, bundle::Split split) {
+    switch (split) {
+    case bundle::Split::Fit:
+        return census.fit;
+    case bundle::Split::Check:
+        return census.check;
+    }
+    fail("selected row has an invalid split");
+}
+
+void measure_stack_rows(
+    StackCensus& result,
+    const std::vector<bundle::SelectedRow>& rows,
+    bundle::Split expected_split) {
+    constexpr std::uint8_t kPositive =
+        static_cast<std::uint8_t>(
+            bundle::Role::DominancePositive);
+    constexpr std::uint8_t kBackground =
+        static_cast<std::uint8_t>(
+            bundle::Role::BackgroundControl);
+    constexpr std::uint8_t kKnownRoles =
+        kPositive | kBackground;
+    for (const bundle::SelectedRow& row : rows) {
+        if (row.split != expected_split) {
+            fail("selected row is in the wrong split");
+        }
+        if (row.census.owner_deck >=
+            bundle::kDeckCount) {
+            fail("selected row owner deck is out of range");
+        }
+        const bool positive =
+            (row.roles & kPositive) != 0;
+        const bool background =
+            (row.roles & kBackground) != 0;
+        if ((row.roles & ~kKnownRoles) != 0 ||
+            positive == background) {
+            fail(
+                positive && background
+                    ? "selected row has overlapping roles"
+                    : "selected row has an invalid role");
+        }
+        if (row.actions.empty()) {
+            fail("selected row has no actions");
+        }
+
+        const StackFeature first =
+            stack_feature(row.actions.front());
+        for (std::size_t action = 1;
+             action < row.actions.size(); ++action) {
+            const StackFeature current =
+                stack_feature(row.actions[action]);
+            if (current.value_bits !=
+                    first.value_bits ||
+                current.stack_size !=
+                    first.stack_size) {
+                fail(
+                    "stack-size feature is not action invariant");
+            }
+        }
+
+        StackSplitCensus& split =
+            split_census(result, expected_split);
+        StackRoleCensus& role =
+            positive
+                ? split.positive
+                : split.background;
+        StackDeckCensus& deck =
+            role.decks[row.census.owner_deck];
+        StackContextCount& context =
+            first.stack_size == 0
+                ? deck.empty
+                : deck.active;
+        ++context.roots;
+        context.options += row.actions.size();
+        ++result.selected_rows;
+        result.selected_options +=
+            row.actions.size();
+        ++result.action_invariant_rows;
+        ++result.exact_stack_encoding_rows;
+    }
+}
+
+std::pair<std::size_t, std::size_t> role_totals(
+    const StackRoleCensus& role) {
+    std::size_t roots = 0;
+    std::size_t options = 0;
+    for (const StackDeckCensus& deck : role.decks) {
+        roots +=
+            deck.empty.roots +
+            deck.active.roots;
+        options +=
+            deck.empty.options +
+            deck.active.options;
+    }
+    return {roots, options};
+}
+
+bool self_consistent_stack_census(
+    const StackCensus& census) {
+    std::size_t rows = 0;
+    std::size_t options = 0;
+    for (const StackSplitCensus* split :
+         {&census.fit, &census.check}) {
+        for (const StackRoleCensus* role :
+             {&split->positive, &split->background}) {
+            const auto [role_rows, role_options] =
+                role_totals(*role);
+            rows += role_rows;
+            options += role_options;
+        }
+    }
+    return
+        rows == census.selected_rows &&
+        options == census.selected_options &&
+        census.action_invariant_rows ==
+            census.selected_rows &&
+        census.exact_stack_encoding_rows ==
+            census.selected_rows &&
+        census.role_overlap_rows == 0;
 }
 
 bool background_control(const evaluator::PreparedRow& row) {
@@ -479,6 +713,47 @@ void write_split(
         << '\n';
 }
 
+void write_stack_role(
+    std::ostringstream& output,
+    std::string_view split_name,
+    std::string_view role_name,
+    const StackRoleCensus& role) {
+    for (std::size_t deck_index = 0;
+         deck_index < role.decks.size();
+         ++deck_index) {
+        const StackDeckCensus& deck =
+            role.decks[deck_index];
+        output
+            << "stack_census split=" << split_name
+            << " role=" << role_name
+            << " deck=" << kDeckNames[deck_index]
+            << " empty_roots=" << deck.empty.roots
+            << " empty_options=" << deck.empty.options
+            << " active_roots=" << deck.active.roots
+            << " active_options=" << deck.active.options
+            << '\n';
+    }
+    std::size_t empty_roots = 0;
+    std::size_t empty_options = 0;
+    std::size_t active_roots = 0;
+    std::size_t active_options = 0;
+    for (const StackDeckCensus& deck : role.decks) {
+        empty_roots += deck.empty.roots;
+        empty_options += deck.empty.options;
+        active_roots += deck.active.roots;
+        active_options += deck.active.options;
+    }
+    output
+        << "stack_census split=" << split_name
+        << " role=" << role_name
+        << " aggregate=pooled"
+        << " empty_roots=" << empty_roots
+        << " empty_options=" << empty_options
+        << " active_roots=" << active_roots
+        << " active_options=" << active_options
+        << '\n';
+}
+
 } // namespace
 
 Measurements measure(
@@ -527,6 +802,133 @@ Measurements measure(
         result.material_green_or_white &&
         result.green_white_exceeds_blue_ru;
     return result;
+}
+
+StackCensus measure_stack_census(
+    const std::vector<bundle::SelectedRow>& fit,
+    const std::vector<bundle::SelectedRow>& check) {
+    StackCensus result;
+    measure_stack_rows(
+        result, fit, bundle::Split::Fit);
+    measure_stack_rows(
+        result, check, bundle::Split::Check);
+    if (!self_consistent_stack_census(result)) {
+        fail("stack census accounting is inconsistent");
+    }
+    return result;
+}
+
+StackCensusReport run_stack_census() {
+    const integrity::RegularFileSnapshot before =
+        integrity::snapshot_regular_file(
+            std::string(bundle::kArtifactPath));
+    const bundle::Bundle artifact =
+        bundle::load_published();
+    const StackCensus census =
+        measure_stack_census(
+            artifact.fit_rows,
+            artifact.check_rows);
+    return {
+        .bundle_schema =
+            std::string(bundle::kBundleSchema),
+        .bundle_bytes =
+            bundle::kPublishedArtifactBytes,
+        .bundle_sha256 =
+            std::string(
+                bundle::kPublishedArtifactSha256),
+        .feature_schema =
+            artifact.manifest.feature_schema,
+        .feature_count =
+            artifact.manifest.feature_count,
+        .feature_contract_sha256 =
+            bundle::format_sha256(
+                artifact.manifest
+                    .feature_contract_sha256),
+        .stack_size_feature_index =
+            kStackSizeFeatureIndex,
+        .stack_size_encoding_denominator =
+            kStackSizeEncodingDenominator,
+        .census = census,
+        .bundle_immutable =
+            integrity::snapshot_regular_file(
+                std::string(bundle::kArtifactPath)) ==
+            before,
+    };
+}
+
+std::string format_stack_census_report(
+    const StackCensusReport& report) {
+    if (report.bundle_schema !=
+            bundle::kBundleSchema ||
+        report.bundle_bytes !=
+            bundle::kPublishedArtifactBytes ||
+        report.bundle_sha256 !=
+            bundle::kPublishedArtifactSha256 ||
+        report.feature_schema !=
+            bundle::kFeatureSchema ||
+        report.feature_count !=
+            bundle::kFeatureCount ||
+        report.feature_contract_sha256 !=
+            bundle::kFeatureContractSha256 ||
+        report.stack_size_feature_index !=
+            kStackSizeFeatureIndex ||
+        report.stack_size_encoding_denominator !=
+            kStackSizeEncodingDenominator ||
+        !report.bundle_immutable ||
+        !self_consistent_stack_census(
+            report.census) ||
+        report.census != kExpectedStackCensus) {
+        throw std::invalid_argument(
+            "invalid FQ4 DEV3 stack-census report");
+    }
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output
+        << "schema=" << kStackCensusSchema
+        << " bundle_schema="
+        << report.bundle_schema
+        << " bundle_bytes="
+        << report.bundle_bytes
+        << " bundle_sha256="
+        << report.bundle_sha256
+        << '\n'
+        << "feature_contract schema="
+        << report.feature_schema
+        << " feature_count="
+        << report.feature_count
+        << " feature_contract_sha256="
+        << report.feature_contract_sha256
+        << " stack_size_feature_index="
+        << report.stack_size_feature_index
+        << " encoding=stack_size_over_"
+        << report.stack_size_encoding_denominator
+        << " bundle_immutable=1\n";
+    write_stack_role(
+        output, "fit", "positive",
+        report.census.fit.positive);
+    write_stack_role(
+        output, "check", "positive",
+        report.census.check.positive);
+    write_stack_role(
+        output, "fit", "background",
+        report.census.fit.background);
+    write_stack_role(
+        output, "check", "background",
+        report.census.check.background);
+    output
+        << "accounting selected_rows="
+        << report.census.selected_rows
+        << " selected_options="
+        << report.census.selected_options
+        << " action_invariant_rows="
+        << report.census.action_invariant_rows
+        << " exact_stack_encoding_rows="
+        << report.census.exact_stack_encoding_rows
+        << " role_overlap_rows="
+        << report.census.role_overlap_rows
+        << " models_loaded=0 fits=0 games=0\n"
+        << "result=PASS\n";
+    return output.str();
 }
 
 Report run_fixed() {

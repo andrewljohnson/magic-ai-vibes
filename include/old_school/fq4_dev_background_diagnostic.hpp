@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace old_school::fq4_dev_background_diagnostic {
 
@@ -22,6 +23,15 @@ inline constexpr std::size_t kBackgroundOptions = 22;
 inline constexpr std::array<std::size_t, fq4_dev_bundle::kDeckCount>
     kBackgroundOptionsPerDeck{2, 2, 2, 2, 3};
 inline constexpr double kMaterialKl = 0.01;
+inline constexpr std::string_view kStackCensusSchema =
+    "old-school-fq4-dev3-stack-census-v1";
+// The frozen learned-priority-policy-features-v1 contract assigns the
+// shared public stack-size observation to feature 20 as stack.size() / 5.
+// The contract digest below is also pinned by the production formatter.
+inline constexpr std::size_t kStackSizeFeatureIndex = 20;
+inline constexpr std::size_t kStackSizeEncodingDenominator = 5;
+inline constexpr std::size_t kStackCensusSelectedRows = 192;
+inline constexpr std::size_t kStackCensusSelectedOptions = 1141;
 
 struct DeckMetrics {
     std::size_t roots = 0;
@@ -82,11 +92,72 @@ struct ParentControlReport {
     bool operator==(const ParentControlReport&) const = default;
 };
 
+struct StackContextCount {
+    std::size_t roots = 0;
+    std::size_t options = 0;
+
+    bool operator==(const StackContextCount&) const = default;
+};
+
+struct StackDeckCensus {
+    StackContextCount empty;
+    StackContextCount active;
+
+    bool operator==(const StackDeckCensus&) const = default;
+};
+
+struct StackRoleCensus {
+    std::array<StackDeckCensus, fq4_dev_bundle::kDeckCount>
+        decks;
+
+    bool operator==(const StackRoleCensus&) const = default;
+};
+
+struct StackSplitCensus {
+    StackRoleCensus positive;
+    StackRoleCensus background;
+
+    bool operator==(const StackSplitCensus&) const = default;
+};
+
+struct StackCensus {
+    StackSplitCensus fit;
+    StackSplitCensus check;
+    std::size_t selected_rows = 0;
+    std::size_t selected_options = 0;
+    std::size_t action_invariant_rows = 0;
+    std::size_t exact_stack_encoding_rows = 0;
+    std::size_t role_overlap_rows = 0;
+
+    bool operator==(const StackCensus&) const = default;
+};
+
+struct StackCensusReport {
+    std::string bundle_schema;
+    std::size_t bundle_bytes = 0;
+    std::string bundle_sha256;
+    std::string feature_schema;
+    std::size_t feature_count = 0;
+    std::string feature_contract_sha256;
+    std::size_t stack_size_feature_index = 0;
+    std::size_t stack_size_encoding_denominator = 0;
+    StackCensus census;
+    bool bundle_immutable = false;
+
+    bool operator==(const StackCensusReport&) const = default;
+};
+
 Measurements measure(
     const fq4_dev_evaluator::PreparedCorpus& corpus,
     const fq4_dev_evaluator::CorpusLogits& parent,
     const fq4_dev_evaluator::CorpusLogits& candidate);
 
+StackCensus measure_stack_census(
+    const std::vector<fq4_dev_bundle::SelectedRow>& fit,
+    const std::vector<fq4_dev_bundle::SelectedRow>& check);
+StackCensusReport run_stack_census();
+std::string format_stack_census_report(
+    const StackCensusReport& report);
 ParentControlReport run_parent_control();
 std::string format_parent_control_report(
     const ParentControlReport& report);

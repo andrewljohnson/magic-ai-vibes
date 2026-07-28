@@ -9,13 +9,32 @@ int main(int argc, char** argv) {
         argc == 2 &&
         std::string_view(argv[1]) ==
             "--parent-control";
-    if (argc != 1 && !parent_control) {
+    const bool stack_census =
+        argc == 2 &&
+        std::string_view(argv[1]) ==
+            "--stack-census";
+    if (argc != 1 &&
+        !parent_control &&
+        !stack_census) {
         std::cerr
             << "Usage: old-school-fq4-dev2-background-diagnostic "
-               "[--parent-control]\n";
+               "[--parent-control|--stack-census]\n";
         return 2;
     }
     try {
+        if (stack_census) {
+            const auto report =
+                old_school::
+                    fq4_dev_background_diagnostic::
+                        run_stack_census();
+            std::cout
+                << old_school::
+                       fq4_dev_background_diagnostic::
+                           format_stack_census_report(
+                               report);
+            std::cout.flush();
+            return std::cout.good() ? 0 : 2;
+        }
         if (parent_control) {
             const auto report =
                 old_school::

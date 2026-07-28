@@ -15850,6 +15850,109 @@ both exact runs and the split verdict, interprets the 8/10 tiny-margin support
 flips as further reason to prefer a public stack-active census over shrinkage,
 and contains no conflicting result.
 
+##### FQ4-DEV3 immutable stack-context census and confirmation declaration
+
+A read-only descriptive census was completed 2026-07-28 07:20 PDT before
+declaring or implementing any stack-gated model. It parsed sections 2 and 4
+of frozen bundle `0911fc2e...59df` (2,250,909 bytes) using the documented
+little-endian wire format, restored sparse public policy feature 20, and
+required its bits to be identical across every action in a row. In the frozen
+feature implementation, index 20 is `state.stack.size() / 5.0`; the shared
+state observation is copied unchanged into every action feature vector.
+Sparse absence is positive zero. Every nonzero value times five was required
+to be a nonnegative integer. No file, model, seed, or artifact was written.
+
+The immutable facts are:
+
+| Split / role | Stack empty | Stack active |
+| --- | ---: | ---: |
+| FIT positive | 70 roots / 488 options | 18 / 60 |
+| CHECK positive | 77 / 520 | 17 / 51 |
+| FIT background | 5 / 11 | 0 / 0 |
+| CHECK background | 5 / 11 | 0 / 0 |
+
+Positive-root deck census:
+
+| Split | Deck | Stack empty | Stack active |
+| --- | --- | ---: | ---: |
+| FIT | Green | 11 roots / 35 options | 0 / 0 |
+| FIT | Red | 4 / 29 | 0 / 0 |
+| FIT | Blue | 20 / 103 | 11 / 39 |
+| FIT | White | 6 / 26 | 7 / 21 |
+| FIT | RU Aggro | 29 / 295 | 0 / 0 |
+| CHECK | Green | 20 / 54 | 0 / 0 |
+| CHECK | Red | 5 / 33 | 0 / 0 |
+| CHECK | Blue | 20 / 107 | 11 / 33 |
+| CHECK | White | 1 / 4 | 6 / 18 |
+| CHECK | RU Aggro | 31 / 322 | 0 / 0 |
+
+Each split's background rows are one empty root per deck with option counts
+Green 2, Red 2, Blue 2, White 2, and RU Aggro 3; all active cells are zero.
+
+Only Blue and White contribute stack-active positives. Every Green, Red, and
+RU Aggro positive is stack-empty. The active-only gate would retain only
+18/88 FIT roots (20.45%) and 17/94 CHECK roots (18.09%), and only 60/548 FIT
+options (10.95%) and 51/571 CHECK options (8.93%). Falling back to C16 at
+stack-empty roots necessarily restores at least 13 FIT and 20 CHECK exact
+support violations from Green and RU Aggro alone. Across all 192 selected
+rows, no row changed feature 20 across actions and no row carried overlapping
+positive/background roles.
+
+Decision from this descriptive fact: **a stack-active-only candidate is not
+licensed**. It protects all ten sparse background controls but violates the
+preexisting condition that a gate preserve the fitted support; no fit,
+publication, or gameplay seed will be spent on it. The correct formula, if a
+future broader corpus reopens it, is
+`base + parent_residual + stack_nonempty * (candidate_residual -
+parent_residual)`, not zeroing C16's parent residual.
+
+Because the initial census used a one-off read-only parser rather than a
+durable repository command, predeclare one independent confirmation before
+closing this branch. Extend the evaluator-only DEV2 tool with
+`--stack-census`, using the existing C++ bundle loader. It must pin the bundle
+and feature-contract hashes, reproduce every split/role/deck count above,
+prove feature-20 action invariance, exact nonnegative stack-size encoding,
+192-row accounting, and zero role overlaps, and print aggregates only. Add
+synthetic empty/active and malformed-row tests. It must not load a model, fit
+a head, call gameplay, or expose descriptors/states. Any mismatch voids the
+descriptive read rather than being adjusted.
+
+After confirmation, the next research axis is broader stack-empty state
+coverage, not a gate or shrink knob: harvest neutral ordinary Priority roots
+from the already frozen development trajectories, then measure whether a
+support-aware update can retain positive repairs without arbitrary near-tie
+flips. Selected-root fractions are not gameplay-frequency estimates, and ten
+background controls remain too sparse to claim all stack-empty play is
+harmful. Gameplay seeds `202607280602/03` remain sealed. `REVIEW.md` was
+reread through its newest 07:14 cycle; its stated conditional for a
+stack-active gate is exactly what this census fails.
+
+Confirmation completed 2026-07-28 after independent implementation review
+returned GO and after rereading `REVIEW.md` through its then-newest 07:29
+cycle:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-dev2-background-diagnostic --stack-census
+```
+
+The durable C++ loader reproduced every preregistered cell exactly and
+reported `result=PASS` in 0.12 s (`user 0.12`, `sys 0.00`). Its accounting was
+192 selected rows, 1,141 options, 192 action-invariant rows, 192 exact
+stack-encoding rows, zero role overlaps, zero models loaded, zero fits, and
+zero games. Release and ASan+UBSan focused suites both passed 7/7, including
+malformed NaN, infinity, negative-nonzero, finite pre-cast `size_t` overflow,
+wrong-split, out-of-range-owner, missing/unknown-role, and empty-action
+fixtures. `git diff --check` passed. This independently confirms the
+descriptive census and closes the branch as **NOT LICENSED** without opening
+a fit or gameplay seed. The 07:29 review independently countersigns both the
+census and this disposition: ordinary stack-empty spend decisions need
+coverage; stack-active gating is not the fix. Before recording the final
+conclusion, `REVIEW.md` was reread through its newest 07:35 addendum. That
+entry independently verifies the preceding DEV2 and workload-report commits
+through the full repository gate, identifies this confirmation and the
+coverage harvest as the next events, and contains no conflicting result.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
