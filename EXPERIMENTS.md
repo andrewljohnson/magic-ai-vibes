@@ -13977,6 +13977,352 @@ cross-sum, support result, treatment separation, and the protection-only Red
 interpretation. No critique conflicts with the result. This freezes a
 reproducible parent-census checkpoint only; C16 remains champion.
 
+###### FQ4-D1-T0 final held-out treatment declaration
+
+Declared 2026-07-28 01:53 PDT from pushed parent-census checkpoint
+`731beacdefefba10c4e10e12c97b28158eea14d5`, after rereading
+`REVIEW.md` through its newest 01:44 P0b countersignature and receiving an
+independent commit-level GO, and before changing treatment code or
+reconstructing/scoring the D0b candidate on any D1 row. This declaration
+licenses implementation and synthetic tests only until a separate
+implementation review returns GO. C16 remains champion.
+
+Falsifiable hypothesis: the fixed D0b Priority-head candidate
+`81ad05d2c32bea9b17ca4c89cbbf7a9be105ad130897f79fa4d8a29a5ea1105e`
+will repair at least five of C16's high-confidence robust Pass-dominance
+support errors on the blind all-five P0b field corpus, spanning at least five
+physical games and two owner decks, while producing no root-level class
+regression and no per-deck aggregate regression. It must do this by changing
+only its card-agnostic Priority residual over the exact parent K8 samples;
+no treatment rollout, gameplay outcome, Handcrafted signal, card predicate,
+or hidden opponent identity may enter the comparison.
+
+The immutable parent artifact SHA-256 is
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`
+and its model fingerprint is
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+The treatment worker first reconstructs the complete P0b parent report,
+including both full constructions, without constructing the candidate. It
+must reproduce these exact corpus identities before D0b is called:
+
+```text
+schedule_sha256          33f3826615e9c66b6c5c0c137e6c17bc0b53fbe967804e7b39dc8a53143fb28a
+trajectory_sha256        dee75b047182fd6463a7751e6344ccaba67dca1e76661c64aab58f22f4edbacd
+retained_corpus_sha256   f3ae55a1b972c1d1adad101f5a54af210d3e8b5edd646738538aa839fa3f9883
+dominance_corpus_sha256  100296df1e0cba1023320b06f925437af35ef15a561c6861a993be80e8110605
+scored_corpus_sha256     5e063d1e577a1809f40e2ef2af992e79bba0339989054f7a94b31495ab047627
+audit_scores_sha256      47095c7722d65b8a349f77effe960892f1c9fc0061f12d3ae873771ebb6ca991
+```
+
+Every frozen balance, retention, hidden/reverse/repeat, recipe, accounting,
+and support control from P0b must pass. In particular, the report must contain
+80 physical games, 160 owner perspectives, 2,408 retained roots, 114 scored
+dominance-positive roots, 59,048 dominance transitions, and production
+accounting of 129 calls, 907 actions, 1,032 worlds, and 7,256 evaluations =
+1,910 terminal + 5,346 bootstrap. The exact measured class census is:
+
+| Deck | Safe | Class 1 | Class 2 | Class 3 | H = C1+C2 | Unsafe |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Green | 6 | 1 | 4 | 2 | 5 | 7 |
+| Red | 8 | 0 | 0 | 0 | 0 | 0 |
+| Blue | 32 | 1 | 8 | 3 | 9 | 12 |
+| White | 0 | 6 | 0 | 0 | 6 | 6 |
+| RU Aggro | 35 | 2 | 5 | 1 | 7 | 8 |
+| **Pooled** | **81** | **10** | **17** | **6** | **27** | **33** |
+
+The parent Class-2 sigma mass is exact binary64
+`0x4328484d0ee397f4`, whose exact integer-valued decimal representation is
+`3417447620267002`. The high-confidence support covers 24 physical games and
+four owner decks. Red's eight rows are all Safe and form a nonvacuous
+protection-only gate.
+
+Only after the complete parent report matches does the worker call
+`fit_d0b_production(parent)`. The full D0b report must pass, reproduce
+candidate fingerprint `81ad05d2…105e`, keep all non-Priority components
+bit-identical to C16, reproduce all five treatment margins at or above
+`+0.005`, all ten controls, the strict pooled KL improvement, immutable
+parent/base/accounting, repeated fit, hidden repartition, and action-order
+controls. No alternate epoch, checkpoint, artifact, or fallback is eligible.
+The worker constructs this D0b report and candidate exactly once. D1 repeat
+controls rescore that same frozen candidate from the immutable tensors; they
+must not refit it.
+
+The treatment adds two paired neutral, parent-only fields to each scored P0
+row: the visible and deterministic-hidden-repartition canonical matrices of
+`learned_priority_policy_features` option tensors. Both matrices are
+constructed from their already canonical owner-safe roots before candidate
+construction, retained independently, and required to be bit-identical. They
+participate in repeated-construction equality and a new treatment-input
+SHA-256, but do not retroactively change the frozen P0 scored-corpus digest.
+Before candidate scoring, evaluating C16's Priority head from either stored
+matrix must reproduce every stored parent residual, combined score, and class
+bit-for-bit. The recomputed parent combined-score exact support is canonical
+and bound into the new D1 input/evidence digest. Raw parent logits and parent
+combined support were not P0 `ScoredRoot` fields, so they are reported and
+bound as D1 rederivations rather than falsely treated as stored P0 anchors.
+Any mismatch is infrastructure failure.
+
+Treatment evaluation is a separate translation unit. A production adapter
+strips every frozen `ScoredRoot` into a D1-local `TreatmentRow` containing
+only opaque stable/physical-game IDs, owner deck, canonical descriptors,
+dominance mask, base scores/samples, parent residual/class, and the paired
+neutral tensor matrices. It drops `ReplayRootManifest`, `RootLocator`,
+`DecisionScore`, raw source coordinates, and every game/probe object. The
+scientific evaluator receives only these stripped rows and parent/candidate
+models—never `GameState`, a replay probe, source-seed API, or rollout API. For
+each candidate row in canonical descriptor order:
+
+```text
+logit[a]    = candidate Priority-head logit(option_tensor[a])
+mean        = left-to-right sum(logit) / legal_action_count
+residual[a] = 0.10 * tanh(logit[a] - mean)
+combined[a] = frozen_parent_base_score[a] + residual[a]
+```
+
+The evaluator must report exactly zero candidate search calls, sampled worlds,
+rollout evaluations, terminal leaves, bootstrap leaves, and dominance
+transitions. It must produce the same canonical result when given reversed
+descriptor/tensor input, and bit-identical candidate logits/residuals from the
+bit-identical hidden tensor matrix. A link/source test keeps the P0 census
+binary free of `fq4_priority_fit`, D1 treatment symbols, and the candidate
+fingerprint.
+
+The reverse control reverses complete labeled
+`{descriptor, visible_tensor, hidden_tensor}` option rows, then canonicalizes
+them against the immutable stored descriptor sequence before any logit sum.
+Duplicate, missing, or unknown descriptors fail closed. It does not reverse
+or relabel the already canonical base samples, scores, or dominance mask.
+
+Candidate classification reuses the frozen robust-dominance mask and the
+eight raw parent base samples. It independently selects the candidate's
+highest combined-score dominated action `d` and nondominated action `n`,
+using the P0 lexicographic exact-tie rule. It then recomputes the eight paired
+deltas and paired SE for that candidate-selected pair before applying the
+same Safe/Class-1/Class-2/Class-3 definition. The parent SE must **not** be
+blindly reused when `d` or `n` changes: a world-constant residual preserves
+SE only for a fixed pair. A synthetic index-change regression must enforce
+this distinction.
+
+All 114 treatment rows are traversed and emitted in the exact frozen P0
+`scored_roots` order bound by `scored_corpus_sha256`. Within each root,
+actions use stored canonical descriptor order. Candidate Class-2 sigma mass
+is initialized to positive zero and accumulated by plain left-to-right
+binary64 addition in that root order. Every 4x4 transition matrix uses parent
+classes as rows and candidate classes as columns, with both axes fixed as
+`[Safe, Class1, Class2, Class3]`. No candidate-dependent sorting or parallel
+reduction is permitted.
+
+Define severity `Safe=0`, `Class3=1`, `Class2=2`, and `Class1=3`. Every one of
+the 114 roots must satisfy
+`candidate_severity <= parent_severity`. Thus all 81 parent-Safe roots remain
+Safe, Class-3 cannot become high-confidence unsafe, and Class-2 cannot become
+Class-1. This class-aware rule does not gate within-Class-3 margin noise.
+
+A **full repair** is exactly parent Class-1 or Class-2 to candidate Safe.
+The conjunctive scientific gate is:
+
+- at least five full repairs in at least five distinct P0 physical games and
+  at least two owner decks;
+- zero root-level severity regressions;
+- per deck, candidate `unsafe`, `H`, and Class-1 counts no greater than the
+  exact table above; Red therefore remains `8/0/0/0`;
+- pooled candidate `H <= 22`, `unsafe <= 28`, and Class-1 `<= 10`;
+- candidate Class-2 sigma mass `<= 3417447620267002`; and
+- at least one of pooled Class-1 count or Class-2 sigma mass is strictly below
+  its parent value.
+
+The last disjunction deliberately permits either kind of registered
+high-confidence repair: requiring both strict would reject an otherwise valid
+candidate solely because all five repairs happened to come from the other
+predeclared class. The five full repairs already require a strict material
+field improvement.
+
+The digest domains are
+`old-school-fq4-d1-treatment-input-v1` and
+`old-school-fq4-d1-treatment-evidence-v1`. Their canonical framing uses
+length-prefixed strings and vectors, unsigned 64-bit integers in big-endian
+order, IEEE-754 binary64 bits encoded as big-endian unsigned 64-bit integers,
+and the exact root/action/field order declared above. Synthetic golden hashes
+and one-field/one-bit mutation tests must bind both serializers before
+production.
+
+Output must include one deterministic derived row for each of the 114 roots
+with stable and physical-game IDs, owner deck, parent/candidate classes,
+candidate-selected dominated/nondominated descriptors, margins, paired SEs,
+sigmas, transition, and repair/regression flags. It must also publish the
+per-deck and pooled 4x4 parent-to-candidate transition matrices, repair
+game/deck coverage, every aggregate gate, exact parent/candidate component
+identities, treatment-input/evidence SHA-256 values, parent reconstruction
+hashes, D0b controls, repeat identity, hidden/order identity, and explicit
+zero treatment-rollout accounting. Scientific stdout is withheld until the
+complete report and repeat controls exist. It must not print neutral tensors,
+raw base samples, complete dominance masks, source game seeds, or any
+input-bearing serialization. Both tensor matrices remain in memory only; no
+P0/D1 writer or loader may be added. The later adaptive-development
+generator/evaluator is link-tested to exclude all P0/D1 field and treatment
+entry points. Derived D1 stdout is one-shot held-out evidence and is never
+admissible as a tuning set.
+
+The dedicated no-knob executable is supervised by a parent process with a
+240-second monotonic wall-clock deadline covering the two parent
+constructions, exact P0 comparison, D0b reconstruction, tensor scoring,
+repeat checks, and buffered output. Timeout, signal, partial report, parent
+or corpus drift, feature/model/shape/order/nonfinite error, D0b failure, or
+accounting mismatch exits `2`. A structurally valid scientific gate miss exits
+`1`; a complete pass exits `0`. Ordinary `make test` may invoke only portable
+synthetic tests and each binary's extra-argument rejection path.
+`run_parent_census` retains its independently enforced internal 180-second
+completion requirement. The treatment report records parent reconstruction,
+D0b fit, tensor evaluation, and total phase times separately.
+
+Before the no-argument treatment is licensed, require:
+
+- portable tests for parent residual reproduction, changed-head isolation,
+  hidden/reverse canonicalization, candidate best-pair changes, every class
+  and severity boundary, the `5/5/2` repair floor, each aggregate boundary,
+  Red protection, repeat/digest mutation, and exit precedence;
+- mutation failures for descriptor/tensor/sample/mask/component/fingerprint
+  drift and nonfinite or malformed inputs;
+- `-Wall -Wextra -Wpedantic -Werror`, focused release and ASan/UBSan gates,
+  exact P0 census link/symbol/string firewalls, `git diff --check`, and an
+  independent source review.
+
+The sole eventual scientific command will be:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit-d1
+```
+
+It may run exactly once after those gates and an independent execution GO.
+If D1 passes, it licenses only the next separately declared gameplay rung;
+C16 remains champion. If D1 rejects, fingerprint `81ad05d2…105e` stops and
+the root-level result may not become an adaptive tuning set. In either case,
+the held-out P0/D1 rows are never serialized as a reusable development
+bundle. Future fast iteration uses separately sourced development data.
+
+###### FQ4-DEV0 separate fast development-bundle declaration
+
+Declared 2026-07-28 02:02 PDT before opening D1 treatment stdout and before
+constructing any development game. This freezes the future adaptive data
+source independently of the held-out result, so D1 root transitions cannot
+influence development seeds, strata, or selection. FQ4-DEV0 is
+development infrastructure, never promotion evidence; every candidate tuned
+on it still requires a fresh, separately declared holdout.
+
+Falsifiable speed hypothesis: a content-addressed bundle containing neutral
+Priority option tensors, rules-owned dominance labels, and immutable parent
+K8/H4 samples will remove games, determinizations, dominance transitions, and
+production rollouts from candidate iteration. Excluding compilation, ten
+warm-cache processes must show:
+
+- full load, strict hash/semantic validation, parent-anchor reproduction, and
+  one candidate evaluation with median under 2 seconds and maximum under
+  5 seconds; and
+- a representative deterministic 16-epoch FIT update followed by complete
+  FIT/CHECK evaluation under 15 seconds end to end.
+
+The two exact, previously unused source splits are:
+
+| Split | Source seed base | Role |
+| --- | ---: | --- |
+| FIT | `202607280210` | candidate fitting only |
+| CHECK | `202607280211` | repeatable adaptive comparison only |
+
+Each uses `balanced_schedule(seed_base, 0x46513444455631, 0)`
+(`FQ4DEV1`): one complete 40-game all-five schedule, 80 owner perspectives,
+16 per deck, 8/8 by seat and play/draw, and four in every seat-by-play
+quadrant. Before opening a game, the exact schedule bytes/counts/SHA-256 for
+both splits must be frozen and independently reproduced. Source play is the
+P0 configuration: exact C16, Value mirror K8/H4/R1, shallow prior on, source
+Priority residual zero, no exploration, PD0 off, Legacy continuation,
+128-turn cap, 16 retained roots per owner-game, and 32-action cap.
+
+Development-only hidden and dominance namespaces are respectively
+`0x4651344456484944` (`FQ4DVHID`) and
+`0x4651344456444f4d` (`FQ4DVDOM`). P0/D1 seeds `790/791`, namespaces,
+schedule/corpus hashes, roots, tensors, and outputs are forbidden. No source
+outcome, selected action, opponent-hand identity, raw hidden state,
+Handcrafted signal, card-name branch, or treatment result may enter
+selection or bundle rows.
+
+Within each split, complete chronological retention and eight-world robust
+Pass-dominance labeling occur before any model score. Then select at most 16
+dominance-positive roots per owner deck using
+`evenly_spaced_retained_indices` over that deck's chronological positive
+rows. Also mark the first retained root for each deck/split as a background
+control; overlaps use role bits rather than duplicate rows. Selection is
+candidate-, parent-score-, outcome-, and action-choice-blind and caps the
+complete scored corpus at 160 rows.
+
+Publication is forbidden unless both complete constructions are byte
+identical, both schedules/cross-sums are exact, no malformed root exists,
+every split has at least one positive row for each of the five decks, and
+each split independently has at least five Class-1/2 parent errors in five
+physical games and two owner decks. If either fixed split misses support,
+record FQ4-DEV0 as unusable; do not append another seed after observing it.
+
+The one no-replace artifact path is
+`data/old-school-fq4-priority-dev-v1.fq4dev`. Its strict little-endian binary
+schema is `old-school-fq4-priority-dev-bundle-v1` with five fixed sections:
+`manifest`, `fit-census`, `fit-rows`, `check-census`, and `check-rows`.
+Each section has a domain-separated SHA-256, followed by one payload
+SHA-256 and strict EOF. The loader freezes exact final byte count and
+artifact SHA-256; any semantic field change requires schema v2 and fresh
+prospectively declared source seeds.
+
+The manifest binds producer commit/executable SHA-256, purpose
+`adaptive-development-only`, exact C16 artifact/model/component identities,
+source/hidden/dominance specifications, production recipe, feature schema
+and count `893`, a portable feature-contract SHA-256, and each split's
+schedule, trajectory, retained, dominance, selection, and scored hashes plus
+per-deck counts.
+
+Each census row contains only public locator/deck IDs, opaque root and
+information/action digests, action/pass counts, descriptor-set digest, and
+per-action complete/strict dominance counts. Each selected full row contains
+split/role bits, those public IDs/digests, canonical descriptors and typed
+Pass index, complete/strict counts, exact K8 raw samples and base-score
+binary64 bits, stored C16 residual bits, resolved production seed/accounting,
+and neutral Priority features. Features use canonical sparse
+`(u16 feature_index, u64 binary64_bits)` pairs, sorted by index and omitting
+only positive zero. The loader rejects duplicate/out-of-range indices,
+explicit positive zero, nonfinite values, noncanonical order, count drift,
+truncation, trailing bytes, wrong version/endian, duplicate roots/sections,
+or coherently rehashed semantic inconsistencies.
+
+Only FIT rows may cross into
+`update_learned_value_priority_head`; tests instrument that boundary. CHECK
+may be examined repeatedly for development ranking but can never validate or
+promote a candidate. The fast evaluator expands tensors, calls
+`learned_policy_head_logits`, applies the shared centered-`tanh` residual,
+and combines it with frozen base scores. It reports per-split and
+deck-balanced KL, dominance margins, exact-support violations,
+Safe/Class-1/Class-2/Class-3 transitions, repairs, regressions, and per-deck
+counts. The representative optimizer seed is `202607280212`.
+
+Held-out firewalls are structural:
+
+- the generator and evaluator may share only seed-agnostic collector,
+  canonicalization, codec, and tensor-scoring primitives;
+- neither binary may include/link `fq4_d1_field_gate.hpp/.cpp`, the P0 census
+  main, the D1 treatment module, their schemas, or `run_parent_census`;
+- generator and production loader expose no seed/path knobs and reject any
+  overlap with `{790,791}`, the P0 schedule hash, a nondevelopment purpose,
+  or anything except the frozen development artifact;
+- FIT/CHECK nonmixing, hidden-repartition tensor identity, parent residual
+  reproduction, non-Priority component identity, and zero candidate rollout
+  accounting are mandatory.
+
+Implementation order is: freeze schedule hashes; mechanically extract only
+seed-agnostic collection primitives while preserving the committed P0
+wrapper; add the strict codec/loader and mutation tests; obtain independent
+source review; generate twice and require identical bytes; publish once;
+then add and benchmark the offline fit/evaluator. Ordinary tests may invoke
+synthetic codecs and bad-argument paths only. No FQ4-DEV0 no-argument
+generation is licensed until exact schedule hashes, release/ASan/UBSan/full
+tests, link firewalls, atomic no-overwrite tests, and an independent
+execution GO are recorded.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
