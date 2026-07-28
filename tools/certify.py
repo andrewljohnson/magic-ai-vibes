@@ -27,6 +27,7 @@ GENERATION = 16
 LEARNED_ROLLOUTS = 8
 MONTE_CARLO_ROLLOUTS = 2
 DEEP_MONTE_CARLO_ROLLOUTS = 8
+MAKE_TEST_JOBS = 4
 PRIMARY_REPETITIONS = 34
 PRIMARY_TOTAL_GAMES = 2040
 PRIMARY_EFFECT_OF_INTEREST_PERCENTAGE_POINTS = 3.0
@@ -404,6 +405,10 @@ def release_build_command(
         "-o",
         str(simulator),
     ]
+
+
+def make_test_command(make: Path) -> list[str]:
+    return [str(make), "-B", f"-j{MAKE_TEST_JOBS}", "test"]
 
 
 def sanitizer_build_command(
@@ -2010,10 +2015,10 @@ class CertificationRunner:
             )
         self.report["dependencies"] = {
             "web_install": (
-                "make -B test invokes offline npm ci --ignore-scripts from "
-                "the archived source tree; package-lock integrity selects "
-                "bytes and a preexisting content-addressed cache supplies "
-                "transport only"
+                f"make -B -j{MAKE_TEST_JOBS} test invokes offline npm ci "
+                "--ignore-scripts from the archived source tree; "
+                "package-lock integrity selects bytes and a preexisting "
+                "content-addressed cache supplies transport only"
             ),
             "package_lock": "web/package-lock.json",
             "package_lock_sha256": sha256_path(package_lock),
@@ -2367,10 +2372,11 @@ class CertificationRunner:
                 environment=parser_test_environment,
             )
             # -B prevents ignored, future-mtime test binaries from satisfying
-            # the test gate without being rebuilt from the clean source tree.
+            # the test gate without being rebuilt from the clean source tree;
+            # fixed parallelism keeps the recorded gate reproducible.
             self.run_source_stage(
                 "make-test",
-                [str(make_path), "-B", "test"],
+                make_test_command(make_path),
                 environment=make_test_environment,
             )
             simulator = self.runtime_dir / "old-school-sim"

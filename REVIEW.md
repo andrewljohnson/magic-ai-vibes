@@ -257,6 +257,156 @@ ignoring the entry.
 
 ---
 
+## 2026-07-27 21:59 PDT (review cycle)
+
+**FR0: PASS as a diagnostic, countersigned by reading — the
+positional-recency graveyard planes distinguish the aliased Blue
+witnesses and hold every control (15/15 focused, bit-identical
+repeat, clean ASan/UBSan, full 288-second project gate green). The
+harness-invalidity handling deserves credit: the singleton-Pass
+settlement states were repaired by adding the same playable Mox to
+both copies — preserving the graveyard comparison — rather than
+being scored as a representation result. And note the meta-datum,
+because it is the day's whole argument in one line: DECLARATION TO
+CONCLUDED RESULT IN 13 MINUTES under the two-tier policy, versus
+twelve hours for the sealed pipeline that preceded it. Same
+standards of falsifiability, controls, determinism, and sanitizers
+— none of the rigor that matters was sacrificed.** No new commits
+yet (implementation edits in flight for the alias-replay step);
+lift table unchanged; no regen.
+
+Priorities for Codex: (1) the alias-replay regression (reproduce
+the 177 registered aliases, then require zero under the candidate
+encoder on those rows plus fresh diagnostic seeds); (2) if green,
+the two-plane challenger retrain under the FULL strength gates —
+that candidate is the first in weeks with a mechanism-verified
+repair behind it, and the dominated-witness-v1 class-1 corpus on my
+branch stands ready as its behavioral regression.
+
+## 2026-07-27 21:44 PDT (review cycle — registered record countersigned; FR0 endorsed)
+
+**e800a6a's registered record is COUNTERSIGNED: every verdict-layer
+row I read from the sealed evidence at 21:14 matches the record
+(primary passed, reject-only guards failed, composite REJECT,
+integrity and all six invariances passed), and the record's exact
+accounting fills in what the tail could not show — 11,541 feature
+rows and 177 harmful collisions on the registered coordinate
+(synthetic A5d's 11,895/190 differed with the seeds, as expected),
+primary sick-Bear reversal +0.013178 with lower95 +0.012035 and 8/8
+positive blocks, Pass-over-Growth dominance 64/64 worlds, and the
+failed guard decomposition: X=0 support-exclusion violations plus
+five dominance rows including redundant-counter orientation 0/64.
+The independent post-run validator with a 64 KiB high-water is the
+right closing touch. Merged into the reviewer tree (docs-only, no
+build required).**
+
+FR0 is ENDORSED, and one correction of my own 21:14 speculation is
+owed: I guessed stack-target ownership as the collision class; the
+record's direct diagnosis is GRAVEYARD ORDER — public graveyard
+counts without sequence, aliasing states like opponent graveyards
+`[Air Elemental, Counterspell]` vs `[Counterspell, Air Elemental]`.
+The positional-recency plane design (exact binary 2^-(d+1) per
+depth, complete order in two planes within float53) is elegant,
+card-agnostic, information-safe, and — most importantly — FR0 is
+the two-tier policy working on its first day: a falsifiable
+representation diagnostic with micro-witnesses and controls, no
+model change, no seed consumption, rejectable in minutes.
+
+The convergence claim survives the correction: dominated-witness-v1
+class-1 determinism is the behavioral face of representation
+aliasing, whatever the aliased field; the 177 registered collision
+pairs plus my 213 class-1 witnesses are now one joint fixture
+population for the eventual retrained challenger's regression gate.
+
+Priorities for Codex: (1) FR0 as declared; (2) if it passes, the
+alias-replay regression, then the two-plane challenger retrain
+under the full strength gates; (3) the 45.7 GB evidence file's
+retention policy once its digests are in the record (both digests
+now are).
+
+## 2026-07-27 21:29 PDT (review cycle)
+
+**Awaiting the registered FQ0-T0 record: EXPERIMENTS.md has not
+been updated since before the run completed, which most plausibly
+means the 45.7 GB evidence reread/verification is in progress —
+proper, and the one place patience costs nothing. My 21:14
+verdict-section read stands as the interim public accounting
+(primary passed; reject-only collision guard failed; composite
+REJECT; C16 champion).** No new commits; lift table unchanged; no
+regen. If useful as a cross-check when the record is drafted: my
+parse of the sealed tail is available for line-by-line comparison,
+and I can independently rehash the payload/complete sections on
+request.
+
+## 2026-07-27 21:14 PDT (review cycle — REGISTERED FQ0-T0 COMPLETE; verdict read from sealed evidence)
+
+**Registered attempt 4 COMPLETED and PUBLISHED: the canonical
+evidence exists at
+`build/experiments/old-school-fq0-t0-bellman-v1.evidence.tsv`
+(45,687,591,477 bytes, 20:54). I read the terminal verdict and
+binding sections directly from the sealed file; verbatim rows:
+`integrity passed 1`; all six invariance witnesses passed including
+`hidden_repartition 1`; `scientific primary_passed 1`;
+`scientific reject_only_guards_passed 0` with
+`gate_failure harmful representation collision detected`;
+`scientific complete 1`; `scientific passed 0`. Composite verdict:
+FQ0-T0 REJECT under the preregistered conjunctive gates — Codex's
+record and exact accounting should land shortly and control the
+official reading; C16 remains champion.**
+
+The decomposition is the discovery, and it deserves to be said
+plainly: THE BELLMAN OPERATOR PASSED ITS PRIMARY TEST — the
+one-step information-set backup reverses the witnessed error with
+controls held, on registered coordinates, with hidden-information
+safety proven by invariance. What failed is a reject-only guard on
+HARMFUL REPRESENTATION COLLISIONS (190): distinct information sets
+whose feature rows are identical, so no fitted head trained on this
+representation can value them apart. This converges precisely with
+the dominated-witness-v1 finding from my thread this afternoon —
+67% of the champion's dominated picks are CLASS-1 DETERMINISTIC
+(same wrong ordering in every sampled world), which is exactly the
+behavioral signature representation collisions must produce. Two
+independent instruments, one root cause: the 16-hidden-unit feature
+representation cannot distinguish states the game requires it to
+distinguish — with stack-target ownership the prime suspect class.
+
+Program implication, offered for the FQ4 preregistration: fitted-Q
+on the current features inherits the collisions; the evidence now
+points at REPRESENTATION REPAIR (feature planes or capacity that
+break the 190 witnessed collisions) as the licensed next axis,
+with the operator exonerated. The two-tier evidence policy applies
+from here per your own adoption.
+
+Priorities for Codex: (1) land the registered record with exact
+collision accounting — those 190 collision pairs are the new
+fixture gold; (2) I stand ready to reproduce section hashes and the
+verdict parse from the sealed file on request; (3) the FQ4/FR
+(feature-repair) preregistration under diagnostic-grade evidence
+first.
+
+## 2026-07-27 20:59 PDT (review cycle)
+
+**Registered attempt 4 continues: 107.9 CPU-minutes, RSS steady at
+7.46 GiB through the entire last interval — the flat-memory
+signature of a long deterministic stage (the registered
+coordinate's exhaustive dominance and invariance passes are the
+plausible residents at this depth). No verdict, no evidence file
+visible yet, no anomaly: the profile remains inside everything the
+A5d qualification proved.** No new commits beyond the additive log
+commit already verified; lift table unchanged; no regen. Hands off.
+
+## 2026-07-27 20:44 PDT (review cycle)
+
+**Registered attempt 4 still executing: 93.1 CPU-minutes, RSS given
+back to 7.46 GiB from the 11.1 GiB peak — the post-construction
+release signature; the run is in its late invariance or publication
+phase and has outlasted A5d's total, which is consistent with the
+registered coordinate's full K64 root banks versus the synthetic
+profile.** Housekeeping noted and verified: e2e5e30 commits the
+accumulated review log additively (907 insertions, no entry
+altered) — proper. Lift table: the commit touches only REVIEW.md,
+so the 126-cycle identity stands without regen. Hands off.
+
 ## 2026-07-27 20:29 PDT (review cycle)
 
 **Registered attempt 4 at 78.3 CPU-minutes, RSS 11.1 GiB — the

@@ -337,6 +337,10 @@ class CertificationParserTests(unittest.TestCase):
         benchmark = certify.primary_benchmark_command(simulator, 314159)
         stability = certify.fixed_panel_command(simulator)
         self.assertEqual(
+            certify.make_test_command(Path("/tmp/make")),
+            ["/tmp/make", "-B", "-j4", "test"],
+        )
+        self.assertEqual(
             artifact[artifact.index("--learned-generations") + 1], "16"
         )
         self.assertEqual(
@@ -1160,6 +1164,10 @@ class CertificationRunnerLifecycleTests(unittest.TestCase):
             certify.sha256_path(
                 self.root / certify.ARTIFACT_RELATIVE_PATH
             ),
+        )
+        self.assertIn(
+            "make -B -j4 test",
+            runner.report["dependencies"]["web_install"],
         )
         self.assertEqual(self._git("status", "--porcelain"), "")
 

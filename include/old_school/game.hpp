@@ -2709,6 +2709,15 @@ LearnedValuePolicyFamilyResult train_learned_value_policy_family(
 // information, never the opponent's hidden card identities.
 std::vector<double>
 learned_observation(const GameState& state, std::size_t perspective);
+// Diagnostic-only candidate planes for public graveyard order. The deployed
+// C16 observation remains unchanged until a separately gated model-schema
+// experiment adopts them.
+inline constexpr std::size_t kLearnedGraveyardOrderFeatureCount =
+    2 * kCardCount;
+using LearnedGraveyardOrderFeatures =
+    std::array<double, kLearnedGraveyardOrderFeatureCount>;
+LearnedGraveyardOrderFeatures learned_graveyard_order_features(
+    const GameState& state, std::size_t perspective);
 // Evaluation/debug seam containing the unchanged state observation followed
 // by the fixed neutral context vector. It is not consumed by legacy policies.
 std::vector<double> learned_contextual_observation(

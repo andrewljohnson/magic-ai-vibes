@@ -3,6 +3,29 @@ CXXFLAGS ?= -std=c++20 -O3 -Wall -Wextra -Wpedantic -Werror
 CPPFLAGS ?= -Iinclude
 
 BUILD_DIR := build
+
+# Shell-quote an effective make value without evaluating its contents. The
+# resulting SHA keeps shared objects from crossing compiler/flag
+# configurations while retaining each configuration's warm cache.
+shell_quote = '$(subst ','"'"',$(1))'
+BUILD_CONFIG_ID := $(shell \
+	{ printf '%s\0' \
+		$(call shell_quote,$(CXX)) \
+		$(call shell_quote,$(CPPFLAGS)) \
+		$(call shell_quote,$(CXXFLAGS)); } | \
+	{ if command -v shasum >/dev/null 2>&1; then \
+		shasum -a 256 | awk '{ print $$1 }'; \
+	elif command -v sha256sum >/dev/null 2>&1; then \
+		sha256sum | awk '{ print $$1 }'; \
+	elif command -v openssl >/dev/null 2>&1; then \
+		openssl dgst -sha256 | awk '{ print $$NF }'; \
+	fi; })
+ifeq ($(strip $(BUILD_CONFIG_ID)),)
+$(error a SHA-256 implementation (shasum, sha256sum, or openssl) is required)
+endif
+
+OBJ_DIR := $(BUILD_DIR)/obj/$(BUILD_CONFIG_ID)
+BUILD_CONFIG_STAMP := $(BUILD_DIR)/.compile-config
 ENGINE_SOURCE := src/game.cpp
 INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
@@ -84,179 +107,149 @@ FQ0_BELLMAN_RUN_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-bellman-run-tests
 FQ0_BELLMAN_AUDIT := $(BUILD_DIR)/old-school-fq0-bellman-audit
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 WEB_BRIDGE_TEST_RUNNER := $(BUILD_DIR)/old-school-web-bridge-tests
-PROBE_HEADER_DEPENDENTS := \
-	$(SIMULATOR) \
-	$(PROBE_TEST_RUNNER) \
-	$(PROBE_RUNNER_TEST_RUNNER) \
-	$(ATTACK_REGRESSION) \
-	$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) \
-	$(JOINT_C17_EXECUTION_TEST_RUNNER) \
-	$(JOINT_C17_ORCHESTRATION_TEST_RUNNER) \
-	$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) \
-	$(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) \
-	$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) \
-	$(RB0_MECHANICAL_PREFLIGHT) \
-	$(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER)
 WEB_DEPENDENCIES := web/node_modules/.package-lock.json
 LEARNED_ROLLOUTS ?= 2
 LEARNED_GENERATIONS ?= 0
 CHALLENGER_GENERATIONS ?= 1
 
-.PHONY: all test test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+ALL_CPP := $(wildcard src/*.cpp tests/*.cpp)
+source_objects = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(1))
+DEPFILES := $(patsubst %.o,%.d,$(call source_objects,$(ALL_CPP)))
+
+.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(PROBE_HEADER_DEPENDENTS): include/old_school/dvr1_replay.hpp
+FORCE:
 
-$(SIMULATOR): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_execution.hpp include/old_school/joint_c17_training.hpp include/old_school/joint_c17_orchestration.hpp include/old_school/turn_alignment_audit.hpp include/old_school/target_factorial_audit.hpp include/old_school/replay_weight_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp -o $@
+# Unlike the configuration-specific object directory, program paths are
+# stable. This content-stable stamp forces a relink exactly when a caller
+# switches configurations, including when it switches back to a warm cache.
+$(BUILD_CONFIG_STAMP): FORCE | $(BUILD_DIR)
+	@temporary="$@.tmp.$$$$"; \
+	printf '%s\n' "$(BUILD_CONFIG_ID)" >"$$temporary"; \
+	if [ -r "$@" ] && cmp -s "$@" "$$temporary"; then \
+		rm -f -- "$$temporary"; \
+	else \
+		mv -f -- "$$temporary" "$@"; \
+	fi
 
-$(TEST_RUNNER): $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp include/old_school/game.hpp include/old_school/interactive.hpp include/old_school/learned_iteration.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp -o $@
+$(OBJ_DIR)/%.o: %.cpp
+	@mkdir -p "$(@D)"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP \
+		-MF "$(@:.o=.d)" -MT "$@" -c "$<" -o "$@"
 
-$(LEARNED_ITERATION_TEST_RUNNER): $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp -o $@
+# Keep each program's exact ordered translation-unit list at its declaration.
+# The same source always maps to the same object, so parallel builds compile it
+# once and every consumer waits on that shared prerequisite.
+define link_program
+$(1): $(call source_objects,$(2)) $(BUILD_CONFIG_STAMP) | $(BUILD_DIR)
+	$$(CXX) $$(CPPFLAGS) $$(CXXFLAGS) $(call source_objects,$(2)) -o $$@
+endef
 
-$(PROBE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp -o $@
+$(eval $(call link_program,$(SIMULATOR),$(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp))
 
-$(PROBE_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp include/old_school/game.hpp include/old_school/probe_eval.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp -o $@
+$(eval $(call link_program,$(TEST_RUNNER),$(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_game.cpp))
 
-$(PROBE_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp -o $@
+$(eval $(call link_program,$(LEARNED_ITERATION_TEST_RUNNER),$(LEARNED_ITERATION_SOURCE) tests/test_learned_iteration.cpp))
 
-$(ATTACK_REGRESSION): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/attack_regression_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/attack_regression_main.cpp -o $@
+$(eval $(call link_program,$(PROBE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) tests/test_probes.cpp))
 
-$(AUDIT_COMMON_TEST_RUNNER): $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp include/old_school/audit_common.hpp include/old_school/learned_iteration.hpp include/old_school/game.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp -o $@
+$(eval $(call link_program,$(PROBE_EVAL_TEST_RUNNER),$(PROBE_EVAL_SOURCE) tests/test_probe_eval.cpp))
 
-$(ARTIFACT_INTEGRITY_TEST_RUNNER): $(ARTIFACT_INTEGRITY_SOURCE) tests/test_artifact_integrity.cpp include/old_school/artifact_integrity.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ARTIFACT_INTEGRITY_SOURCE) tests/test_artifact_integrity.cpp -o $@
+$(eval $(call link_program,$(PROBE_RUNNER_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) tests/test_probe_runner.cpp))
 
-$(FQ0_RUSAGE_GUARD): $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_RUSAGE_GUARD_SOURCE) src/fq0_rusage_guard_main.cpp include/old_school/artifact_integrity.hpp include/old_school/fq0_rusage_guard.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_RUSAGE_GUARD_SOURCE) src/fq0_rusage_guard_main.cpp -o $@
+$(eval $(call link_program,$(ATTACK_REGRESSION),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) src/attack_regression_main.cpp))
 
-$(FQ0_RUSAGE_GUARD_TEST_RUNNER): $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_RUSAGE_GUARD_SOURCE) tests/test_fq0_rusage_guard.cpp include/old_school/artifact_integrity.hpp include/old_school/fq0_rusage_guard.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_RUSAGE_GUARD_SOURCE) tests/test_fq0_rusage_guard.cpp -o $@
+$(eval $(call link_program,$(AUDIT_COMMON_TEST_RUNNER),$(AUDIT_COMMON_SOURCE) tests/test_audit_common.cpp))
 
-$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) tests/test_terminal_weight_eval.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) tests/test_terminal_weight_eval.cpp -o $@
+$(eval $(call link_program,$(ARTIFACT_INTEGRITY_TEST_RUNNER),$(ARTIFACT_INTEGRITY_SOURCE) tests/test_artifact_integrity.cpp))
 
-$(JOINT_C17_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) tests/test_joint_c17_eval.cpp include/old_school/game.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) tests/test_joint_c17_eval.cpp -o $@
+$(eval $(call link_program,$(FQ0_RUSAGE_GUARD),$(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_RUSAGE_GUARD_SOURCE) src/fq0_rusage_guard_main.cpp))
 
-$(JOINT_C17_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) tests/test_joint_c17_runner.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) tests/test_joint_c17_runner.cpp -o $@
+$(eval $(call link_program,$(FQ0_RUSAGE_GUARD_TEST_RUNNER),$(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_RUSAGE_GUARD_SOURCE) tests/test_fq0_rusage_guard.cpp))
 
-$(JOINT_C17_EXECUTION_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) tests/test_joint_c17_execution.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_execution.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) tests/test_joint_c17_execution.cpp -o $@
+$(eval $(call link_program,$(TERMINAL_WEIGHT_EVAL_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) tests/test_terminal_weight_eval.cpp))
 
-$(JOINT_C17_TRAINING_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_TRAINING_SOURCE) tests/test_joint_c17_training.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_training.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_TRAINING_SOURCE) tests/test_joint_c17_training.cpp -o $@
+$(eval $(call link_program,$(JOINT_C17_EVAL_TEST_RUNNER),$(PROBE_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) tests/test_joint_c17_eval.cpp))
 
-$(JOINT_C17_ORCHESTRATION_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) tests/test_joint_c17_orchestration.cpp include/old_school/artifact_integrity.hpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/joint_c17_eval.hpp include/old_school/joint_c17_runner.hpp include/old_school/joint_c17_execution.hpp include/old_school/joint_c17_orchestration.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) tests/test_joint_c17_orchestration.cpp -o $@
+$(eval $(call link_program,$(JOINT_C17_RUNNER_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) tests/test_joint_c17_runner.cpp))
 
-$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) tests/test_turn_alignment_audit.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/turn_alignment_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) tests/test_turn_alignment_audit.cpp -o $@
+$(eval $(call link_program,$(JOINT_C17_EXECUTION_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) tests/test_joint_c17_execution.cpp))
 
-$(TARGET_FACTORIAL_AUDIT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) tests/test_target_factorial_audit.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/turn_alignment_audit.hpp include/old_school/target_factorial_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) tests/test_target_factorial_audit.cpp -o $@
+$(eval $(call link_program,$(JOINT_C17_TRAINING_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_EVAL_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_TRAINING_SOURCE) tests/test_joint_c17_training.cpp))
 
-$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) tests/test_replay_weight_audit.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/replay_weight_audit.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) tests/test_replay_weight_audit.cpp -o $@
+$(eval $(call link_program,$(JOINT_C17_ORCHESTRATION_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) tests/test_joint_c17_orchestration.cpp))
 
-$(RB0_MECHANICAL_PREFLIGHT): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) src/rb0_mechanical_preflight_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/replay_weight_audit.hpp include/old_school/rb0_mechanical_preflight.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) src/rb0_mechanical_preflight_main.cpp -o $@
+$(eval $(call link_program,$(TURN_ALIGNMENT_AUDIT_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) tests/test_turn_alignment_audit.cpp))
 
-$(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) tests/test_rb0_mechanical_preflight.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/terminal_weight_eval.hpp include/old_school/replay_weight_audit.hpp include/old_school/rb0_mechanical_preflight.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) tests/test_rb0_mechanical_preflight.cpp -o $@
+$(eval $(call link_program,$(TARGET_FACTORIAL_AUDIT_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) tests/test_target_factorial_audit.cpp))
 
-$(DVR2_HARVEST): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) src/dvr2_harvest_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp include/old_school/artifact_integrity.hpp include/old_school/dvr2_harvest.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) src/dvr2_harvest_main.cpp -o $@
+$(eval $(call link_program,$(REPLAY_WEIGHT_AUDIT_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) tests/test_replay_weight_audit.cpp))
 
-$(DVR2_HARVEST_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) tests/test_dvr2_harvest.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp include/old_school/artifact_integrity.hpp include/old_school/dvr2_harvest.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) tests/test_dvr2_harvest.cpp -o $@
+$(eval $(call link_program,$(RB0_MECHANICAL_PREFLIGHT),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) src/rb0_mechanical_preflight_main.cpp))
 
-$(DVR2_REPLAY_BUNDLE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_REPLAY_BUNDLE_SOURCE) tests/test_dvr2_replay_bundle.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp include/old_school/artifact_integrity.hpp include/old_school/dvr2_replay_bundle.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_REPLAY_BUNDLE_SOURCE) tests/test_dvr2_replay_bundle.cpp -o $@
+$(eval $(call link_program,$(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) $(RB0_MECHANICAL_PREFLIGHT_SOURCE) tests/test_rb0_mechanical_preflight.cpp))
 
-$(OUTPUT_CALIBRATION_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) tests/test_output_calibration.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/output_calibration.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) tests/test_output_calibration.cpp -o $@
+$(eval $(call link_program,$(DVR2_HARVEST),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) src/dvr2_harvest_main.cpp))
 
-$(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) tests/test_output_calibration_artifact.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) tests/test_output_calibration_artifact.cpp -o $@
+$(eval $(call link_program,$(DVR2_HARVEST_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_HARVEST_SOURCE) tests/test_dvr2_harvest.cpp))
 
-$(OUTPUT_CALIBRATION): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) src/output_calibration_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp include/old_school/output_calibration_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) src/output_calibration_main.cpp -o $@
+$(eval $(call link_program,$(DVR2_REPLAY_BUNDLE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_REPLAY_BUNDLE_SOURCE) tests/test_dvr2_replay_bundle.cpp))
 
-$(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) tests/test_output_calibration_runner.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp include/old_school/output_calibration_runner.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) tests/test_output_calibration_runner.cpp -o $@
+$(eval $(call link_program,$(OUTPUT_CALIBRATION_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) tests/test_output_calibration.cpp))
 
-$(OC1_ACTION_EVAL_TEST_RUNNER): $(PROBE_EVAL_SOURCE) $(OC1_ACTION_EVAL_SOURCE) tests/test_oc1_action_eval.cpp include/old_school/game.hpp include/old_school/probe_eval.hpp include/old_school/oc1_action_eval.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PROBE_EVAL_SOURCE) $(OC1_ACTION_EVAL_SOURCE) tests/test_oc1_action_eval.cpp -o $@
+$(eval $(call link_program,$(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) tests/test_output_calibration_artifact.cpp))
 
-$(OC1_ACTION_SCORING_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(OC1_ACTION_SCORING_SOURCE) tests/test_oc1_action_scoring.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/oc1_action_scoring.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(OC1_ACTION_SCORING_SOURCE) tests/test_oc1_action_scoring.cpp -o $@
+$(eval $(call link_program,$(OUTPUT_CALIBRATION),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) src/output_calibration_main.cpp))
+
+$(eval $(call link_program,$(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OUTPUT_CALIBRATION_RUNNER_SOURCE) tests/test_output_calibration_runner.cpp))
+
+$(eval $(call link_program,$(OC1_ACTION_EVAL_TEST_RUNNER),$(PROBE_EVAL_SOURCE) $(OC1_ACTION_EVAL_SOURCE) tests/test_oc1_action_eval.cpp))
+
+$(eval $(call link_program,$(OC1_ACTION_SCORING_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(OC1_ACTION_SCORING_SOURCE) tests/test_oc1_action_scoring.cpp))
 
 OC1_ACTION_REGRESSION_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DVR2_REPLAY_BUNDLE_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OC1_ACTION_EVAL_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(OC1_ACTION_REGRESSION_SOURCE)
-OC1_ACTION_REGRESSION_HEADERS := include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/dvr1_replay.hpp include/old_school/dvr2_replay_bundle.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp include/old_school/oc1_action_eval.hpp include/old_school/oc1_action_scoring.hpp include/old_school/oc1_action_regression.hpp
 
-$(OC1_ACTION_REGRESSION_TEST_RUNNER): $(OC1_ACTION_REGRESSION_LINK_SOURCES) tests/test_oc1_action_regression.cpp $(OC1_ACTION_REGRESSION_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(OC1_ACTION_REGRESSION_LINK_SOURCES) tests/test_oc1_action_regression.cpp -o $@
+$(eval $(call link_program,$(OC1_ACTION_REGRESSION_TEST_RUNNER),$(OC1_ACTION_REGRESSION_LINK_SOURCES) tests/test_oc1_action_regression.cpp))
 
-$(OC1_ACTION_REGRESSION): $(OC1_ACTION_REGRESSION_LINK_SOURCES) src/oc1_action_regression_main.cpp $(OC1_ACTION_REGRESSION_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(OC1_ACTION_REGRESSION_LINK_SOURCES) src/oc1_action_regression_main.cpp -o $@
+$(eval $(call link_program,$(OC1_ACTION_REGRESSION),$(OC1_ACTION_REGRESSION_LINK_SOURCES) src/oc1_action_regression_main.cpp))
 
 AC1_TEACHER_AUDIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(OUTPUT_CALIBRATION_SOURCE) $(OUTPUT_CALIBRATION_ARTIFACT_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(AC1_TEACHER_AUDIT_SOURCE)
-AC1_TEACHER_AUDIT_HEADERS := include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/probes.hpp include/old_school/dvr1_replay.hpp include/old_school/probe_eval.hpp include/old_school/probe_runner.hpp include/old_school/audit_common.hpp include/old_school/artifact_integrity.hpp include/old_school/output_calibration.hpp include/old_school/output_calibration_artifact.hpp include/old_school/oc1_action_scoring.hpp include/old_school/oc1_action_regression.hpp include/old_school/ac1_teacher_audit.hpp
 FQ0_INFORMATION_SET_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE)
 FQ0_DOMINANCE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE)
 FQ0_BELLMAN_SCIENCE_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(FQ0_BELLMAN_SCIENCE_SOURCE)
 FQ0_BELLMAN_AUDIT_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_BELLMAN_AUDIT_SOURCE)
 FQ0_BELLMAN_RUN_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(FQ0_BELLMAN_SCIENCE_SOURCE) $(FQ0_BELLMAN_AUDIT_SOURCE) $(FQ0_BELLMAN_RUN_SOURCE)
-FQ0_HEADERS := include/old_school/fq0_information_set.hpp include/old_school/fq0_bellman.hpp include/old_school/fq0_dominance.hpp include/old_school/fq0_dominance_transition.hpp include/old_school/fq0_bellman_science.hpp include/old_school/fq0_bellman_audit.hpp
 
-$(AC1_TEACHER_AUDIT_TEST_RUNNER): $(AC1_TEACHER_AUDIT_LINK_SOURCES) tests/test_ac1_teacher_audit.cpp $(AC1_TEACHER_AUDIT_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AC1_TEACHER_AUDIT_LINK_SOURCES) tests/test_ac1_teacher_audit.cpp -o $@
+$(eval $(call link_program,$(AC1_TEACHER_AUDIT_TEST_RUNNER),$(AC1_TEACHER_AUDIT_LINK_SOURCES) tests/test_ac1_teacher_audit.cpp))
 
-$(AC1_TEACHER_AUDIT): $(AC1_TEACHER_AUDIT_LINK_SOURCES) src/ac1_teacher_audit_main.cpp $(AC1_TEACHER_AUDIT_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AC1_TEACHER_AUDIT_LINK_SOURCES) src/ac1_teacher_audit_main.cpp -o $@
+$(eval $(call link_program,$(AC1_TEACHER_AUDIT),$(AC1_TEACHER_AUDIT_LINK_SOURCES) src/ac1_teacher_audit_main.cpp))
 
-$(FQ0_INFORMATION_SET_TEST_RUNNER): $(FQ0_INFORMATION_SET_LINK_SOURCES) tests/test_fq0_information_set.cpp include/old_school/fq0_information_set.hpp $(AC1_TEACHER_AUDIT_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_INFORMATION_SET_LINK_SOURCES) tests/test_fq0_information_set.cpp -o $@
+$(eval $(call link_program,$(FQ0_INFORMATION_SET_TEST_RUNNER),$(FQ0_INFORMATION_SET_LINK_SOURCES) tests/test_fq0_information_set.cpp))
 
-$(FQ0_BELLMAN_TEST_RUNNER): $(FQ0_BELLMAN_SOURCE) tests/test_fq0_bellman.cpp include/old_school/fq0_bellman.hpp include/old_school/game.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_BELLMAN_SOURCE) tests/test_fq0_bellman.cpp -o $@
+$(eval $(call link_program,$(FQ0_BELLMAN_TEST_RUNNER),$(FQ0_BELLMAN_SOURCE) tests/test_fq0_bellman.cpp))
 
-$(FQ0_DOMINANCE_TEST_RUNNER): $(FQ0_DOMINANCE_LINK_SOURCES) tests/test_fq0_dominance.cpp include/old_school/fq0_dominance.hpp include/old_school/fq0_dominance_transition.hpp $(AC1_TEACHER_AUDIT_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_DOMINANCE_LINK_SOURCES) tests/test_fq0_dominance.cpp -o $@
+$(eval $(call link_program,$(FQ0_DOMINANCE_TEST_RUNNER),$(FQ0_DOMINANCE_LINK_SOURCES) tests/test_fq0_dominance.cpp))
 
-$(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER): $(FQ0_DOMINANCE_LINK_SOURCES) tests/test_fq0_dominance_transition.cpp include/old_school/fq0_dominance.hpp include/old_school/fq0_dominance_transition.hpp $(AC1_TEACHER_AUDIT_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_DOMINANCE_LINK_SOURCES) tests/test_fq0_dominance_transition.cpp -o $@
+$(eval $(call link_program,$(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER),$(FQ0_DOMINANCE_LINK_SOURCES) tests/test_fq0_dominance_transition.cpp))
 
-$(FQ0_BELLMAN_SCIENCE_TEST_RUNNER): $(FQ0_BELLMAN_SCIENCE_LINK_SOURCES) tests/test_fq0_bellman_science.cpp $(AC1_TEACHER_AUDIT_HEADERS) $(FQ0_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_BELLMAN_SCIENCE_LINK_SOURCES) tests/test_fq0_bellman_science.cpp -o $@
+$(eval $(call link_program,$(FQ0_BELLMAN_SCIENCE_TEST_RUNNER),$(FQ0_BELLMAN_SCIENCE_LINK_SOURCES) tests/test_fq0_bellman_science.cpp))
 
-$(FQ0_BELLMAN_AUDIT_TEST_RUNNER): $(FQ0_BELLMAN_AUDIT_LINK_SOURCES) tests/test_fq0_bellman_audit.cpp $(AC1_TEACHER_AUDIT_HEADERS) $(FQ0_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_BELLMAN_AUDIT_LINK_SOURCES) tests/test_fq0_bellman_audit.cpp -o $@
+$(eval $(call link_program,$(FQ0_BELLMAN_AUDIT_TEST_RUNNER),$(FQ0_BELLMAN_AUDIT_LINK_SOURCES) tests/test_fq0_bellman_audit.cpp))
 
-$(FQ0_BELLMAN_RUN_TEST_RUNNER): $(FQ0_BELLMAN_RUN_LINK_SOURCES) tests/test_fq0_bellman_run.cpp $(AC1_TEACHER_AUDIT_HEADERS) $(FQ0_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_BELLMAN_RUN_LINK_SOURCES) tests/test_fq0_bellman_run.cpp -o $@
+$(eval $(call link_program,$(FQ0_BELLMAN_RUN_TEST_RUNNER),$(FQ0_BELLMAN_RUN_LINK_SOURCES) tests/test_fq0_bellman_run.cpp))
 
-$(FQ0_BELLMAN_AUDIT): $(FQ0_BELLMAN_RUN_LINK_SOURCES) src/fq0_bellman_audit_main.cpp $(AC1_TEACHER_AUDIT_HEADERS) $(FQ0_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(FQ0_BELLMAN_RUN_LINK_SOURCES) src/fq0_bellman_audit_main.cpp -o $@
+$(eval $(call link_program,$(FQ0_BELLMAN_AUDIT),$(FQ0_BELLMAN_RUN_LINK_SOURCES) src/fq0_bellman_audit_main.cpp))
 
-$(WEB_BRIDGE): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/web_bridge.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp -o $@
+$(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp))
 
-$(WEB_BRIDGE_TEST_RUNNER): $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp include/old_school/game.hpp include/old_school/learned_iteration.hpp include/old_school/web_bridge.hpp | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp -o $@
+$(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp))
+
+-include $(DEPFILES)
 
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
@@ -308,9 +301,13 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	sh tests/test_cli.sh ./$(SIMULATOR)
 	sh tests/test_capture_once.sh
 	sh tests/test_make_clean.sh
+	sh tests/test_make_incremental.sh
 	./$(SIMULATOR) --games 5 --seed 1 >/dev/null
 	npm --prefix web test
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_certify.py
+
+test-build-graph:
+	sh tests/test_make_incremental.sh
 
 test-certify:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_certify.py

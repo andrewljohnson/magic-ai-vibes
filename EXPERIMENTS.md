@@ -12227,7 +12227,7 @@ different public state. A top-card-only repair is insufficient because the
 swapped pair can be buried by later cards; a compact neutral candidate is one
 exact binary positional-recency plane per player's graveyard, with depth from
 the top encoded as `2^-(depth+1)` in the card's coordinate. Forty-card decks
-fit exactly within a binary64 mantissa, so two 24-card planes preserve the
+fit exactly within a binary64 mantissa, so two 26-card planes preserve the
 complete order without a card value, card-specific switch, or hidden input.
 The nine target-separation rows are not by themselves evidence that graveyard
 order has current strategic value: nine positives among 163 Blue comparisons
@@ -12265,6 +12265,130 @@ and Blue X=0 exact support so a feature repair is not mistaken for a
 target/operator repair. Only a representation repair that clears those fast
 gates and an independent X=0/dominance repair may advance to a newly declared
 full-scale fitted-Q experiment.
+
+##### FR0 ordered-graveyard representation micro-gate declaration
+
+Declared 2026-07-27 21:43 PDT, after the registered FQ0 result was committed
+and pushed and after rereading `REVIEW.md` through its newest 21:29 cycle.
+This is a diagnostic-only representation experiment. It trains no model,
+changes no deployed selector, opens no gameplay seed, and cannot promote a
+candidate.
+
+Falsifiable hypothesis: all directly diagnosed Blue and White representation
+aliases arise because the learned observation counts public graveyard cards
+but omits their order. Appending one generic positional-recency plane per
+relative player's graveyard will distinguish the aliased public states
+without revealing opponent-hidden information. For a card at depth `d` from
+the top of a graveyard, add exact binary value `2^-(d+1)` to that card's
+coordinate. The deck bound is 40, below binary64's 53-bit significand; the
+two 26-card planes therefore encode the complete ordered sequences exactly.
+No card name, card value, policy weight, or Handcoded label participates.
+
+The implementation must keep the current C16 feature vector byte-identical
+and expose the candidate planes separately; production model dimensions and
+artifact schemas are frozen in FR0. The direct micro-corpus is:
+
+1. The intervening-counter fixture's two productive settlements:
+   `counter-same-air-elemental` and `counter-opponent-counterspell`. Require
+   identical material/public fields except the opponent graveyard sequences
+   `[Air Elemental, Counterspell]` and
+   `[Counterspell, Air Elemental]`, identical current learned observations
+   and shared-action policy rows, distinct FQ0 information identities, and
+   distinct candidate planes.
+2. A Millstone-shaped pair with equal card counts and the swapped pair buried
+   below an identical later graveyard card. Require identical current learned
+   observations and every shared legal-action policy row, but distinct
+   candidate planes. This explicitly rejects a top-card-only encoding.
+3. Duplicate-card, empty-graveyard, observer-seat-swap, and opponent
+   hand/library repartition controls. Hidden repartition and physical-ID-only
+   changes must leave the candidate planes bit-identical.
+
+FR0 passes only if all direct witnesses and controls pass under strict
+`-Werror`, their deterministic result repeats bit-for-bit, focused
+AddressSanitizer/UndefinedBehaviorSanitizer is clean, the existing full test
+suite stays green, and the focused runtime is reported. Any failure rejects
+the positional-plane hypothesis before a model schema changes.
+
+If FR0 passes, the next declaration may build a small root-transition replay:
+first reproduce the registered 177 aliases as a regression without successor
+banks, then require zero aliases under the candidate encoder on both those
+fixed rows and fresh diagnostic seeds. That replay, not FR0 alone, is the
+minimum evidence for adding the two planes to a retrained challenger.
+
+##### FR0 result: pass as a diagnostic, no model promotion
+
+Concluded 2026-07-27 21:56 PDT after rereading `REVIEW.md` through its newest
+21:44 cycle, which endorsed the declared design and corrected its earlier
+stack-topology speculation to the same ordered-graveyard diagnosis.
+
+The first focused harness execution was invalid before reaching a scientific
+comparison: both settled Blue states exposed only the singleton Pass action,
+and the frozen FQ0 information-key constructor correctly rejects decision
+sets with fewer than two actions. This was not scored as a representation
+failure. The harness added the same playable `Mox Sapphire` to both copied
+post-settlement states, creating the required shared multi-action decision
+without changing either public graveyard, then reran the unchanged declared
+comparisons.
+
+Valid commands and results:
+
+```sh
+/usr/bin/time -p make -j4 test-fq0-information-set
+# 15/15 passed; first valid build+run: real 14.20 s
+
+/usr/bin/time -p ./build/old-school-fq0-information-set-tests
+/usr/bin/time -p ./build/old-school-fq0-information-set-tests
+# identical stdout both runs; real 0.06 s each
+
+c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/artifact_integrity.cpp \
+  src/fq0_information_set.cpp tests/test_fq0_information_set.cpp \
+  -o /private/tmp/old-school-fr0-sanitized
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  /private/tmp/old-school-fr0-sanitized
+# 15/15 passed; no sanitizer finding
+
+/usr/bin/time -p make -j4 test
+# complete project gate passed; real 288.48 s
+
+/usr/bin/time -p make -j4 test-fq0-information-set
+# warm focused edit loop: 15/15 passed; real 0.09 s
+```
+
+The direct Blue witness reproduces the engine's productive counter lines and
+their public opponent graveyards `[Air Elemental, Counterspell]` versus
+`[Counterspell, Air Elemental]`. The direct White witness swaps the same two
+cards below a shared top graveyard card, so a top-card-only feature would
+still alias it. In both pairs the current C16 observation and every shared
+policy row remain bit-identical while the FQ0 information identity and
+candidate positional planes differ. Duplicate cards, empty graveyards,
+observer-seat reversal, same-size opponent hidden repartition, physical-ID
+mutation, invalid perspective, and the binary64 exact-depth bound all pass.
+Production C16 features, model dimensions, artifacts, and selectors remain
+unchanged.
+
+Verdict: **FR0 passes its diagnostic gate.** This accepts only the claim that
+the neutral two-plane encoder distinguishes the directly diagnosed aliases
+safely and exactly. It does not establish that all registered 177 aliases
+vanish, improve a trained policy, or promote a challenger; C16 remains the
+champion. The next experiment remains the declared small root-transition
+alias replay, followed by a separately declared schema/retraining experiment
+only if that replay reaches zero collisions.
+
+##### Shared-object build graph result (iteration-speed infrastructure)
+
+The same verification pass replaced per-binary whole-program recompilation
+with shared per-source objects and compiler depfiles while preserving every
+binary's exact ordered translation-unit list. A static old/new graph
+comparison covered all 45 programs: 390 old source occurrences reduce to 82
+unique object compilations overall. The `make test` graph reduces from 369
+source compilations to 79 unique compilations plus the unchanged 42 links.
+The focused FR0 build exercised the new graph; the complete `make -j4 test`
+gate above passed. Certification now uses the fixed recorded command
+`make -B -j4 test`; `python3 -m unittest tests/test_certify.py` passed 48/48.
+This is execution infrastructure only and supplies no bot-strength evidence.
 
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 

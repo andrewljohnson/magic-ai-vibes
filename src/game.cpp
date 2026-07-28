@@ -15886,6 +15886,47 @@ learned_observation(const GameState& state, std::size_t perspective) {
     return {features.begin(), features.end()};
 }
 
+LearnedGraveyardOrderFeatures learned_graveyard_order_features(
+    const GameState& state, std::size_t perspective) {
+    if (perspective >= state.players.size()) {
+        throw std::out_of_range(
+            "Learned graveyard-order perspective must be 0 or 1");
+    }
+
+    // A binary64 significand has 53 bits. Current Old School decks contain
+    // 40 cards, so one exact binary fraction per card can retain every
+    // position at which that card appears. Fail closed if a future engine
+    // environment exceeds the representation's exact range.
+    constexpr std::size_t kExactDepthLimit =
+        std::numeric_limits<double>::digits;
+    LearnedGraveyardOrderFeatures features{};
+    for (std::size_t relative_player = 0;
+         relative_player < state.players.size();
+         ++relative_player) {
+        const std::size_t player =
+            relative_player == 0 ? perspective
+                                 : opponent_of(perspective);
+        const std::vector<CardId>& graveyard =
+            state.players[player].graveyard;
+        if (graveyard.size() > kExactDepthLimit) {
+            throw std::length_error(
+                "Learned graveyard-order feature depth exceeds "
+                "binary64 exactness");
+        }
+        for (std::size_t depth = 0; depth < graveyard.size();
+             ++depth) {
+            const CardId card =
+                graveyard[graveyard.size() - 1 - depth];
+            const std::size_t feature =
+                relative_player * kCardCount +
+                static_cast<std::size_t>(card);
+            features[feature] +=
+                std::ldexp(1.0, -static_cast<int>(depth + 1));
+        }
+    }
+    return features;
+}
+
 LearnedDecisionContextFeatures learned_decision_context_features(
     const LearnedDecisionContext& context,
     std::size_t perspective) {
