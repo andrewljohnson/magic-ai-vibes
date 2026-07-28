@@ -125,25 +125,41 @@ void test_names_parse_strictly() {
     LearnedVariant variant =
         LearnedVariant::UnifiedActor;
     std::size_t generations = 0;
+    bool adversarial_blocks = true;
     expect(parse_opponent_bot(
-               "learned-value-c16", variant, generations) ==
+               "learned-value-c16", variant, generations,
+               adversarial_blocks) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
-               generations == 16,
+               generations == 16 &&
+               !adversarial_blocks,
            "Learned Value C16 did not parse");
     expect(parse_opponent_bot(
-               "learned-value-g0", variant, generations) ==
+               "learned-value-c16-adversarial-blocks",
+               variant, generations, adversarial_blocks) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
-               generations == 0,
+               generations == 16 &&
+               adversarial_blocks,
+           "best-response attack challenger did not parse");
+    expect(parse_opponent_bot(
+               "learned-value-g0", variant, generations,
+               adversarial_blocks) ==
+               BotKind::Learned &&
+               variant ==
+                   LearnedVariant::ValueSearchChampion &&
+               generations == 0 &&
+               !adversarial_blocks,
            "Learned Value G0 did not parse");
     expect(parse_opponent_bot(
-               "learned-actor", variant, generations) ==
+               "learned-actor", variant, generations,
+               adversarial_blocks) ==
                BotKind::Learned &&
                variant == LearnedVariant::UnifiedActor &&
-               generations == 0,
+               generations == 0 &&
+               !adversarial_blocks,
            "Learned Actor did not parse");
 
     bool bad_deck = false;
@@ -268,6 +284,80 @@ void test_c16_rejects_noncanonical_training_identity() {
            "C16 accepted a noncanonical training identity");
     expect(output.str().empty(),
            "C16 emitted session output before identity validation");
+}
+
+void test_adversarial_challenger_maps_only_the_attack_flag() {
+    auto challenger = fast_config();
+    challenger.opponent_bot = old_school::BotKind::Learned;
+    challenger.learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    challenger.learned_generations = 16;
+    challenger.training_games = 800;
+    challenger.learned_rollouts = 8;
+    challenger.value_adversarial_blocks = true;
+
+    const auto challenger_bot =
+        old_school::web::make_opponent_bot_config(
+            challenger, nullptr);
+    expect(
+        challenger_bot.kind ==
+                old_school::BotKind::Learned &&
+            challenger_bot.learned_variant ==
+                old_school::LearnedVariant::
+                    ValueSearchChampion &&
+            challenger_bot.rollouts_per_action == 8 &&
+            challenger_bot.training_games == 800 &&
+            challenger_bot.value_adversarial_blocks,
+        "best-response challenger did not map to exact C16 "
+        "with only the attack aggregation flag enabled");
+
+    challenger.value_adversarial_blocks = false;
+    const auto canonical_bot =
+        old_school::web::make_opponent_bot_config(
+            challenger, nullptr);
+    expect(
+        challenger_bot.kind == canonical_bot.kind &&
+            challenger_bot.learned_variant ==
+                canonical_bot.learned_variant &&
+            challenger_bot.rollouts_per_action ==
+                canonical_bot.rollouts_per_action &&
+            challenger_bot.exploration_rate ==
+                canonical_bot.exploration_rate &&
+            challenger_bot.value_continuation_epsilon ==
+                canonical_bot.value_continuation_epsilon &&
+            challenger_bot.value_priority_residual_weight ==
+                canonical_bot.value_priority_residual_weight &&
+            challenger_bot.value_pass_dominance ==
+                canonical_bot.value_pass_dominance &&
+            challenger_bot.value_continuation_controller ==
+                canonical_bot.value_continuation_controller &&
+            challenger_bot.training_games ==
+                canonical_bot.training_games &&
+            challenger_bot.learned_model ==
+                canonical_bot.learned_model &&
+            challenger_bot.value_adversarial_blocks &&
+            !canonical_bot.value_adversarial_blocks,
+        "best-response challenger changed more than the attack "
+        "aggregation flag");
+
+    auto invalid = fast_config();
+    invalid.value_adversarial_blocks = true;
+    std::istringstream input(passive_responses(1));
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            old_school::web::run_bridge_session(
+                input, output, invalid));
+    } catch (const std::invalid_argument& error) {
+        rejected =
+            std::string_view(error.what()).find(
+                "require frozen Learned Value C16") !=
+            std::string_view::npos;
+    }
+    expect(
+        rejected && output.str().empty(),
+        "non-C16 web policy accepted the challenger attack flag");
 }
 
 void test_g0_status_exposes_actual_model_identity() {
@@ -751,6 +841,8 @@ int main() {
                test_frozen_c16_load_boundary_fails_actionably);
     runner.run("C16 training identity is canonical",
                test_c16_rejects_noncanonical_training_identity);
+    runner.run("adversarial challenger changes only attacks",
+               test_adversarial_challenger_maps_only_the_attack_flag);
     runner.run("G0 status exposes model identity",
                test_g0_status_exposes_actual_model_identity);
     runner.run("passive client reaches terminal result",

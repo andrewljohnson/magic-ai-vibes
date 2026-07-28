@@ -1468,38 +1468,74 @@ int run_evolution_json(
 BotKind parse_opponent_bot(
     std::string_view value,
     LearnedVariant& learned_variant,
-    std::size_t& learned_generations) {
+    std::size_t& learned_generations,
+    bool& value_adversarial_blocks) {
     if (value == "random") {
+        value_adversarial_blocks = false;
         return BotKind::Random;
     }
     if (value == "monte-carlo" || value == "mc") {
+        value_adversarial_blocks = false;
         return BotKind::MonteCarlo;
     }
     if (value == "deep-monte-carlo" || value == "deep-mc") {
+        value_adversarial_blocks = false;
         return BotKind::DeepMonteCarlo;
     }
     if (value == "handcrafted" ||
         value == "handcoded-policy") {
+        value_adversarial_blocks = false;
         return BotKind::Handcrafted;
+    }
+    if (value ==
+        "learned-value-c16-adversarial-blocks") {
+        learned_variant = LearnedVariant::ValueSearchChampion;
+        learned_generations = kFrozenWebC16Generations;
+        value_adversarial_blocks = true;
+        return BotKind::Learned;
     }
     if (value == "learned-value-c16" ||
         value == "learned-value" || value == "learned") {
         learned_variant = LearnedVariant::ValueSearchChampion;
         learned_generations = kFrozenWebC16Generations;
+        value_adversarial_blocks = false;
         return BotKind::Learned;
     }
     if (value == "learned-value-g0") {
         learned_variant = LearnedVariant::ValueSearchChampion;
         learned_generations = 0;
+        value_adversarial_blocks = false;
         return BotKind::Learned;
     }
     if (value == "learned-actor" || value == "actor") {
         learned_variant = LearnedVariant::UnifiedActor;
         learned_generations = 0;
+        value_adversarial_blocks = false;
         return BotKind::Learned;
     }
     throw std::invalid_argument(
         "unknown opponent policy: " + std::string(value));
+}
+
+BotConfig make_opponent_bot_config(
+    const BridgeConfig& config,
+    std::shared_ptr<const LearnedModel> learned_model) {
+    return {
+        .kind = config.opponent_bot,
+        .learned_variant = config.learned_variant,
+        .rollouts_per_action =
+            config.opponent_bot == BotKind::MonteCarlo
+                ? config.monte_carlo_rollouts
+                : config.opponent_bot == BotKind::DeepMonteCarlo
+                      ? config.deep_monte_carlo_rollouts
+                      : config.opponent_bot == BotKind::Learned
+                            ? config.learned_rollouts
+                            : 1,
+        .value_adversarial_blocks =
+            config.value_adversarial_blocks,
+        .training_games = config.training_games,
+        .learned_model = std::move(learned_model),
+    };
 }
 
 int run_bridge_session(std::istream& input, std::ostream& output,
@@ -1541,6 +1577,16 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             "Learned Value C16 requires exact --train-games 800 "
             "--train-seed 424242; select Learned Value G0 for "
             "custom match training");
+    }
+    if (config.value_adversarial_blocks &&
+        (config.opponent_bot != BotKind::Learned ||
+         config.learned_variant !=
+             LearnedVariant::ValueSearchChampion ||
+         config.learned_generations !=
+             kFrozenWebC16Generations)) {
+        throw std::invalid_argument(
+            "defender-best-response attacks require frozen "
+            "Learned Value C16");
     }
     const std::vector<CardId> human_cards =
         configured_deck_cards(
@@ -1607,20 +1653,8 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         .kind = BotKind::Random,
         .rollouts_per_action = 1,
     };
-    game_config.bots[1] = {
-        .kind = config.opponent_bot,
-        .learned_variant = config.learned_variant,
-        .rollouts_per_action =
-            config.opponent_bot == BotKind::MonteCarlo
-                ? config.monte_carlo_rollouts
-                : config.opponent_bot == BotKind::DeepMonteCarlo
-                      ? config.deep_monte_carlo_rollouts
-                      : config.opponent_bot == BotKind::Learned
-                            ? config.learned_rollouts
-                            : 1,
-        .training_games = config.training_games,
-        .learned_model = learned_model,
-    };
+    game_config.bots[1] =
+        make_opponent_bot_config(config, learned_model);
     game_config.learned_model = learned_model;
 
     JsonController controller(

@@ -47,8 +47,9 @@ horizontal fit are also green**
 
 Acceptance criteria:
 
-- Setup exposes all five decks and all seven opponent policies, including
-  explicit Learned Value C16 and G0 identities.
+- Setup exposes all five decks and all eight opponent policies, including
+  explicit Learned Value C16, its best-response-attacks challenger, and G0
+  identities.
 - The current player, phase, priority holder, and required choice are obvious.
 - Land play, spell cast, priority pass, stack resolution, attackers, blockers,
   damage order, game over, and rematch can each be completed without guessing.
@@ -224,6 +225,38 @@ open the user-blocked live port 4173**
   `make test-web-ui`, `make test-web`, and a rendered setup-drawer smoke at
   1280 × 720 proving the provenance text is readable without horizontal
   overflow.
+
+#### Preregistered defender-best-response challenger exposure slice
+
+Hypothesis: exposing the already frozen defender-best-response attack
+challenger as a separate pilot will let human play-testing distinguish its
+combat choices from canonical C16 without changing either model identity or
+silently promoting a 240-game screen.
+
+Status: **implementation, contract gates, live-server restart, and rendered
+smoke complete; human strategic play-test in progress**
+
+- The separate stable ID is `learned-value-c16-adversarial-blocks`, displayed
+  as `Learned C16 · Best-Response Attacks`.
+- It loads the exact canonical C16 artifact and retains K8/H4 Value search.
+  Its sole policy difference is attack-set aggregation: sampled legal blocks
+  use the defender's minimum-scoring best response rather than their mean.
+- Metadata dates the challenger `2026-07-28` and says explicitly that it is an
+  exploratory challenger: its 127–113 fast screen awaits human play-testing
+  and is not a promotion.
+- The Node boundary treats its generation, training-game, and training-seed
+  identity exactly like C16. The C++ boundary sets
+  `value_adversarial_blocks=true` only for this policy ID; all other web
+  policies retain the default `false`.
+- Acceptance requires focused C++ parser/config tests, Node normalization and
+  bridge-argument tests, client fallback/setup assertions, the complete
+  five-deck × eight-policy journey matrix, `make test-web-ui`, and
+  `make test-web`. This metadata/setup change makes no broader layout claim.
+- The rebuilt live server was restarted at `http://127.0.0.1:4173`. A real
+  in-app-browser smoke at 1280 × 720 showed all eight policy options, selected
+  the challenger, displayed its July 28 provenance and non-promotion status,
+  kept T800/S424242 read-only, and started an RU Aggro mirror at turn 1 with
+  `Learned C16 · Best-Response Attacks` visibly identified as the opponent.
 
 Acceptance criteria:
 
@@ -777,9 +810,10 @@ The gate runs the full journey for every combination of:
 
 - Deck: Green, Red, Blue, White, RU Aggro
 - Opponent: Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned
-  Value C16, Learned Value G0, Learned Actor
+  Value C16, Learned C16 · Best-Response Attacks, Learned Value G0, Learned
+  Actor
 
-The 35-case matrix proves that every advertised deck/policy selection survives
+The 40-case matrix proves that every advertised deck/policy selection survives
 normalization and session setup. It does **not** claim that the fixture ran the
 real deck or policy; real engine coverage is a separate gate below. Each matrix
 case must prove:
@@ -819,8 +853,8 @@ make web
 ```
 
 Open <http://127.0.0.1:4173> and use game seed `42`, training seed `424242`,
-and 800 training games. Verify these six rotations so every deck and policy is
-seen without manually testing all 30 pairs:
+and 800 training games. Verify these eight rotations so every deck and policy
+is seen without manually testing all 40 pairs:
 
 | Human deck | Opponent deck | Opponent policy |
 | --- | --- | --- |
@@ -830,6 +864,8 @@ seen without manually testing all 30 pairs:
 | Green | Blue | Monte Carlo |
 | Red | Green | Random |
 | Blue | RU Aggro | Learned Actor |
+| RU Aggro | Blue | Learned C16 · Best-Response Attacks |
+| White | Green | Learned Value G0 |
 
 For the first match, complete the full deterministic-journey checklist. For the
 remaining rotations, confirm setup, visible hand, one legal action, policy
@@ -1552,3 +1588,21 @@ For each web issue:
   saved all 40 cards into dynamic metadata, and started a game with that
   opaque deck at a live `priority` decision. No filesystem, database, cookie,
   localStorage, or sessionStorage persistence was introduced.
+- 2026-07-28 — Exposed the defender-best-response attack challenger under the
+  stable ID `learned-value-c16-adversarial-blocks` and visible name
+  `Learned C16 · Best-Response Attacks`. The C++ parser and pure policy
+  translation prove canonical C16 and the challenger are identical across
+  every `BotConfig` field except `value_adversarial_blocks`; incompatible
+  programmatic configurations fail before session output. Node pins both
+  frozen policies to T800/S424242/C16, forwards the distinct policy ID, and
+  preserves the same generation-16 K8/H4 model identity. Metadata records the
+  July 28 exploratory lifecycle, 127–113 fast screen, pending human
+  play-test, and non-promotion status. `make test-web-ui` passed the production
+  client build and 92/92 UI/contract tests, including the complete 40-case
+  five-deck × eight-policy journey matrix. `make test-web` passed 19/19 C++
+  bridge tests and 112/112 Node/client/session tests. The rebuilt live server
+  was then restarted and a real in-app-browser smoke at 1280 × 720 selected
+  the new pilot, verified its dated exploratory provenance and pinned
+  T800/S424242 controls, and started an RU Aggro mirror at turn 1 with the
+  correct opponent policy shown. Broader human strategic play-testing remains
+  the purpose of this exposure.

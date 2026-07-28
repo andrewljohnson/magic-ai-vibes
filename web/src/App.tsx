@@ -97,6 +97,16 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
     lifecycle: "Research control · not promoted over Handcoded Policy",
   },
   {
+    id: "learned-value-c16-adversarial-blocks",
+    name: "Learned C16 · Best-Response Attacks",
+    description:
+      "Exact frozen C16 critic with K8/H4 search; only attack-set aggregation changes, from mean legal blocks to the defender-best-response minimum.",
+    versionDate: "2026-07-28",
+    versionDateLabel: "Fast screen run",
+    lifecycle:
+      "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
+  },
+  {
     id: "learned-value-g0",
     name: "Learned Value G0",
     description:
@@ -115,6 +125,15 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
     lifecycle: "Experimental recipe · trained per match",
   },
 ];
+
+const FROZEN_C16_POLICY_IDS = new Set([
+  "learned-value-c16",
+  "learned-value-c16-adversarial-blocks",
+]);
+
+function isFrozenC16Policy(policyId: string): boolean {
+  return FROZEN_C16_POLICY_IDS.has(policyId);
+}
 
 const HUMAN_POLICY: PolicyMeta = {
   id: "human",
@@ -2054,7 +2073,7 @@ function SetupDrawer({
     const players = [...config.players] as GameConfig["players"];
     players[seat] = { ...players[seat], [field]: value };
     if (seat === 1 && field === "policyId") {
-      if (value === "learned-value-c16") {
+      if (isFrozenC16Policy(value)) {
         setConfig({
           ...config,
           players,
@@ -2267,10 +2286,10 @@ function SetupDrawer({
                   max="100000"
                   value={config.trainGames}
                   readOnly={
-                    config.players[1].policyId === "learned-value-c16"
+                    isFrozenC16Policy(config.players[1].policyId)
                   }
                   title={
-                    config.players[1].policyId === "learned-value-c16"
+                    isFrozenC16Policy(config.players[1].policyId)
                       ? "Frozen C16 is pinned to 800 initial training games"
                       : undefined
                   }
@@ -2290,10 +2309,10 @@ function SetupDrawer({
                   max="4294967295"
                   value={config.trainSeed}
                   readOnly={
-                    config.players[1].policyId === "learned-value-c16"
+                    isFrozenC16Policy(config.players[1].policyId)
                   }
                   title={
-                    config.players[1].policyId === "learned-value-c16"
+                    isFrozenC16Policy(config.players[1].policyId)
                       ? "Frozen C16 is pinned to training seed 424242"
                       : undefined
                   }

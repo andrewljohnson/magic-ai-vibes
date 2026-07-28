@@ -37,6 +37,7 @@ struct BridgeConfig {
     std::string frozen_c16_artifact_path;
     bool reveal_opponent_hand = false;
     bool bluff_mode = false;
+    bool value_adversarial_blocks = false;
 
     bool operator==(const BridgeConfig&) const = default;
 };
@@ -61,7 +62,8 @@ struct EvolutionJsonConfig {
 DeckId parse_deck_id(std::string_view value);
 BotKind parse_opponent_bot(std::string_view value,
                            LearnedVariant& learned_variant,
-                           std::size_t& learned_generations);
+                           std::size_t& learned_generations,
+                           bool& value_adversarial_blocks);
 EvolutionPilot parse_evolution_pilot(std::string_view value);
 
 // Parses the bridge's transport-only representation of an exact custom deck.
@@ -73,6 +75,13 @@ std::vector<CardId> parse_exact_deck_cards(std::string_view value);
 // model fingerprint; it never trains, refreshes, or substitutes a model.
 std::shared_ptr<const LearnedModel>
 load_frozen_learned_value_c16(const std::string& path);
+
+// Pure translation from the web policy configuration into the engine policy.
+// The defender-best-response attack challenger differs from canonical C16
+// only through `value_adversarial_blocks`.
+BotConfig make_opponent_bot_config(
+    const BridgeConfig& config,
+    std::shared_ptr<const LearnedModel> learned_model);
 
 // Pure serialization seam used by focused tests. The manifest is sorted by
 // numeric CardId and includes both the engine card name and exact count.

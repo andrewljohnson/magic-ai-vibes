@@ -167,7 +167,12 @@ async function runFullJourney(harness, config) {
     deepRollouts: 8,
     learnedRollouts: 8,
     learnedGenerations:
-      config.players[1].policyId === "learned-value-c16" ? 16 : 0,
+      [
+        "learned-value-c16",
+        "learned-value-c16-adversarial-blocks",
+      ].includes(config.players[1].policyId)
+        ? 16
+        : 0,
   });
   assert.equal(game.events.at(-1).kind, "turn_started");
 
@@ -274,6 +279,7 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
       "deep-monte-carlo",
       "handcrafted",
       "learned-value-c16",
+      "learned-value-c16-adversarial-blocks",
       "learned-value-g0",
       "learned-actor",
     ],

@@ -56,8 +56,9 @@ void print_help(std::ostream& output) {
         << "  --opponent-deck green|red|blue|white|ru-aggro\n"
         << "  --opponent-deck-cards ID,ID,... (exactly 40)\n"
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
-           "handcrafted|learned-value-c16|learned-value-g0|"
-           "learned-actor\n"
+           "handcrafted|learned-value-c16|"
+           "learned-value-c16-adversarial-blocks|"
+           "learned-value-g0|learned-actor\n"
         << "  --seed N --train-games N --train-seed N\n"
         << "  --rollouts N --deep-rollouts N --learned-rollouts N\n"
         << "  --learned-generations 0|16\n"
@@ -191,7 +192,8 @@ int main(int argc, char** argv) {
                 config.opponent_bot =
                     old_school::web::parse_opponent_bot(
                         value, config.learned_variant,
-                        config.learned_generations);
+                        config.learned_generations,
+                        config.value_adversarial_blocks);
             } else if (option == "--seed") {
                 config.game_seed = parse_u64(option, value);
             } else if (option == "--train-games") {

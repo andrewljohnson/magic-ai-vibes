@@ -170,6 +170,17 @@ export const POLICIES = Object.freeze([
     lifecycle: "Research control · not promoted over Handcoded Policy",
   },
   {
+    id: "learned-value-c16-adversarial-blocks",
+    label: "Learned C16 · Best-Response Attacks",
+    name: "Learned C16 · Best-Response Attacks",
+    description:
+      "Exact frozen C16 critic with K8/H4 search; only attack-set aggregation changes, from mean legal blocks to the defender-best-response minimum.",
+    versionDate: "2026-07-28",
+    versionDateLabel: "Fast screen run",
+    lifecycle:
+      "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
+  },
+  {
     id: "learned-value-g0",
     label: "Learned Value G0",
     name: "Learned Value G0",
@@ -193,6 +204,14 @@ export const POLICIES = Object.freeze([
 
 const DECK_IDS = new Set(DECKS.map(({ id }) => id));
 const POLICY_IDS = new Set(POLICIES.map(({ id }) => id));
+const FROZEN_C16_POLICY_IDS = new Set([
+  "learned-value-c16",
+  "learned-value-c16-adversarial-blocks",
+]);
+
+function isFrozenC16Policy(policyId) {
+  return FROZEN_C16_POLICY_IDS.has(policyId);
+}
 
 const DEFAULT_CONFIG = Object.freeze({
   players: [
@@ -494,7 +513,7 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
     DEFAULT_CONFIG.trainSeed,
   );
   const expectedLearnedGenerations =
-    normalizedOpponentPolicy === "learned-value-c16"
+    isFrozenC16Policy(normalizedOpponentPolicy)
       ? FROZEN_C16_GENERATIONS
       : 0;
   const learnedGenerations = boundedInteger(
@@ -511,14 +530,14 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
     );
   }
   if (
-    normalizedOpponentPolicy === "learned-value-c16" &&
+    isFrozenC16Policy(normalizedOpponentPolicy) &&
     (trainGames !== FROZEN_C16_TRAIN_GAMES ||
       trainSeed !== FROZEN_C16_TRAIN_SEED)
   ) {
     throw new ApiError(
       400,
       "invalid_config",
-      "Learned Value C16 requires trainGames=800 and trainSeed=424242; select Learned Value G0 for custom match training",
+      "Frozen C16 policies require trainGames=800 and trainSeed=424242; select Learned Value G0 for custom match training",
     );
   }
 

@@ -128,6 +128,9 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     /Force Spike/,
   );
   const c16 = body.policies.find(({ id }) => id === "learned-value-c16");
+  const bestResponse = body.policies.find(
+    ({ id }) => id === "learned-value-c16-adversarial-blocks",
+  );
   const g0 = body.policies.find(({ id }) => id === "learned-value-g0");
   const actor = body.policies.find(({ id }) => id === "learned-actor");
   assert.deepEqual(
@@ -143,6 +146,24 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     },
   );
   assert.match(c16?.description ?? "", /16 bootstrapped self-play generations/);
+  assert.deepEqual(
+    {
+      name: bestResponse?.name,
+      versionDate: bestResponse?.versionDate,
+      versionDateLabel: bestResponse?.versionDateLabel,
+      lifecycle: bestResponse?.lifecycle,
+    },
+    {
+      name: "Learned C16 · Best-Response Attacks",
+      versionDate: "2026-07-28",
+      versionDateLabel: "Fast screen run",
+      lifecycle:
+        "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
+    },
+  );
+  assert.match(bestResponse?.description ?? "", /Exact frozen C16 critic/);
+  assert.match(bestResponse?.description ?? "", /K8\/H4/);
+  assert.match(bestResponse?.description ?? "", /defender-best-response minimum/);
   for (const policy of [g0, actor]) {
     assert.equal(policy?.versionDate, "2026-07-24");
     assert.equal(policy?.versionDateLabel, "Recipe introduced");
@@ -311,6 +332,44 @@ test("C16 is explicit, canonical, and fingerprinted in match metadata", async (t
   assert.equal(response.status, 201);
   assert.equal(body.game.config.players[1].policyId, "learned-value-c16");
   assert.equal(body.game.snapshot.received.opponentPolicy, "learned-value-c16");
+  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
+  assert.deepEqual(body.game.model, {
+    family: "learned-value",
+    generation: 16,
+    searchWorlds: 8,
+    horizonTurns: 4,
+    source: "frozen-artifact",
+    fingerprint:
+      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
+  });
+});
+
+test("best-response attacks reuse exact frozen C16 identity", async (t) => {
+  const { request } = await startTestServer(t);
+  const policyId = "learned-value-c16-adversarial-blocks";
+  const { response, body } = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        players: [
+          { deckId: "ru-aggro", policyId: "human" },
+          { deckId: "ru-aggro", policyId },
+        ],
+        seed: 42,
+        trainGames: 800,
+        trainSeed: 424242,
+        learnedRollouts: 8,
+        learnedGenerations: 16,
+      }),
+    }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(body.game.config.players[1].policyId, policyId);
+  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
+  assert.equal(body.game.snapshot.received.trainGames, "800");
+  assert.equal(body.game.snapshot.received.trainSeed, "424242");
   assert.equal(body.game.snapshot.received.learnedGenerations, "16");
   assert.deepEqual(body.game.model, {
     family: "learned-value",
@@ -527,6 +586,36 @@ test("rejects malformed config without spawning a game", async (t) => {
       players: [
         { deckId: "green", policyId: "human" },
         { deckId: "blue", policyId: "learned-value-c16" },
+      ],
+      learnedGenerations: 0,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-adversarial-blocks",
+        },
+      ],
+      trainGames: 799,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-adversarial-blocks",
+        },
+      ],
+      trainSeed: 424243,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-adversarial-blocks",
+        },
       ],
       learnedGenerations: 0,
     },

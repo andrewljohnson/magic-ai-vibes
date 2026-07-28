@@ -628,6 +628,10 @@ test("landing metadata includes and advertises every bot policy", async () => {
     assert.match(app, new RegExp(policy));
   }
   assert.match(app, /id:\s*"learned-value-c16"/);
+  assert.match(
+    app,
+    /id:\s*"learned-value-c16-adversarial-blocks"/,
+  );
   assert.match(app, /id:\s*"learned-value-g0"/);
   assert.match(app, /id:\s*"learned-actor"/);
   assert.match(
@@ -637,6 +641,24 @@ test("landing metadata includes and advertises every bot policy", async () => {
   assert.match(
     app,
     /versionDate:\s*"2026-07-24"[\s\S]+?Recipe introduced[\s\S]+?trained per match/,
+  );
+  assert.match(
+    app,
+    /versionDate:\s*"2026-07-28"[\s\S]+?Fast screen run[\s\S]+?127–113 fast screen[\s\S]+?awaiting human play-test[\s\S]+?not promoted/,
+  );
+  assert.match(
+    app,
+    /const FROZEN_C16_POLICY_IDS[\s\S]+?learned-value-c16-adversarial-blocks[\s\S]+?function isFrozenC16Policy/,
+  );
+  assert.match(app, /if \(isFrozenC16Policy\(value\)\)/);
+  assert.equal(
+    [
+      ...app.matchAll(
+        /readOnly=\{\s*isFrozenC16Policy\(config\.players\[1\]\.policyId\)\s*\}/g,
+      ),
+    ].length,
+    2,
+    "both frozen training identity fields must use the shared C16 predicate",
   );
   assert.match(
     app,
