@@ -16104,6 +16104,160 @@ than a capacity result. `REVIEW.md` was reread through its newest 07:59 cycle
 before this qualification; it observes only the in-flight implementation and
 keeps this frozen reconstruction as the next event.
 
+FQ4-DEV4 production result, completed from frozen commit `3863dec`:
+**PASS; neutral-supplement capacity licensed.** The exact sole scientific
+command was:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev4-coverage-census
+```
+
+It exited zero in `real 300.62`, `user 295.29`, `sys 2.31` seconds. There was
+no new training or evaluation seed: the sample was exactly the already-frozen
+320 source games, 160 FIT plus 160 CHECK. Reconstruction matched bundle
+`0911fc2e...59df` at 2,250,909 bytes and parent
+`53aeb904...944ca`. All schedule, scientific-manifest, census, selected-row,
+split-manifest, and before/after immutability checks were exact. Accounting
+was 9,728 retained roots / 29,108 options, 192 selected rows
+(`182` positive plus `10` background), 192 parent score calls / 1,141
+actions / 1,536 worlds / 9,128 rollouts / 1,787 terminal leaves / 7,341
+bootstrap leaves, one parent model, and zero fits, candidate rollouts, or
+gameplay evaluation seeds. All 9,728 roots agreed on action-invariant feature
+20, exact public stack size, and one of the seven public phases.
+
+The descriptive coverage counts below are `roots/options/distinct games`.
+`Positive empty/active` is the complete robust-dominance census, not just the
+selected positive rows. `Eligible` is the preregistered unselected,
+stack-empty, dominance-negative stratum.
+
+| Split | Deck | Retained | Positive empty | Positive active | Eligible | Eligible main | Eligible other |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| FIT | Green | 921/2318/64 | 16/50/11 | 0/0/0 | 892/2232/64 | 887/2221/64 | 5/11/5 |
+| FIT | Red | 978/3166/64 | 10/65/4 | 0/0/0 | 948/3019/64 | 921/2878/64 | 27/141/11 |
+| FIT | Blue | 1002/2564/64 | 35/210/31 | 54/180/30 | 683/1616/64 | 683/1616/64 | 0/0/0 |
+| FIT | White | 1001/3155/64 | 6/26/6 | 7/21/7 | 906/2835/64 | 903/2826/64 | 3/9/1 |
+| FIT | RU Aggro | 969/3062/64 | 51/509/29 | 0/0/0 | 912/2527/64 | 902/2487/64 | 10/40/8 |
+| CHECK | Green | 942/2443/64 | 22/60/20 | 0/0/0 | 909/2350/64 | 899/2319/64 | 10/31/7 |
+| CHECK | Red | 977/3226/64 | 10/64/5 | 0/0/0 | 943/3033/64 | 915/2873/64 | 28/160/18 |
+| CHECK | Blue | 995/2517/64 | 32/213/30 | 46/146/24 | 688/1597/64 | 688/1597/64 | 0/0/0 |
+| CHECK | White | 993/3031/64 | 2/7/1 | 6/18/6 | 909/2751/64 | 908/2748/64 | 1/3/1 |
+| CHECK | RU Aggro | 950/3626/64 | 112/1250/42 | 0/0/0 | 832/2346/64 | 818/2282/64 | 14/64/9 |
+
+Each split/deck also had exactly one selected stack-empty background root
+(two options except RU Aggro's three) and none stack-active. More importantly,
+every one of the 40 split/deck/block cells retained eligible roots from all
+16 physical games. Every non-owner-opponent by owner-seat/play-draw cell was
+exactly one, so every 4-by-4 binary matrix admitted the required two-regular
+eight-game subset. All 40 block predicates passed; all ten split/deck
+capacity rows were `4/4` blocks and 32 licensed games; final
+`capacity_licensed=1`.
+
+Decision: accept the descriptive census and open the separately declared
+neutral-supplement artifact below. This is unusually strong capacity rather
+than a marginal quota pass: the chosen 32 per deck/split can remain balanced
+while drawing from all 64 physical games' eligible ordinary decisions. No
+quota, seed, or eligibility rule was changed after observing the counts.
+An independent committed-tree adversarial review reproduced focused coverage
+5/5 and generator 8/8, pinned the executed binary SHA-256 as
+`5cfbf69026b6361e1975dbb9248255b68b6c16585fb02f06d96e84242ff289a3`,
+and returned GO for both census validity and the capacity disposition.
+`REVIEW.md` was reread through its newest 08:14 cycle immediately before this
+conclusion. It observed the exact committed census executing, kept hands off
+the run, and contained no conflicting result.
+
+##### FQ4-DEV5 frozen neutral-supplement declaration
+
+Declared after the valid DEV4 capacity result and before selecting a root,
+implementing an artifact writer, rescoring a neutral root, fitting a model, or
+opening a gameplay seed. Falsifiable hypothesis: adding a broad,
+deck-balanced sample of the exact C16 behavior at ordinary stack-empty
+decisions will preserve DEV1's held-out positive repairs while reducing the
+positive-only candidate's arbitrary drift on unseen neutral decisions by at
+least half.
+
+Selection is fixed at 320 rows: 32 per deck in FIT and 32 per deck in CHECK,
+formed as eight games in each of the four frozen schedule blocks. Every
+block's subset must contain exactly two games against each non-owner opponent
+and exactly two games in each owner seat-by-play/draw quadrant. Eligibility
+is unchanged: retained and nontrivial under the frozen collector, public
+stack empty, robust-dominance negative, and outside the existing 192 selected
+roots.
+
+Use literal SHA-256 rank domains
+`old-school-fq4-dev5-neutral-representative-rank-v1` and
+`old-school-fq4-dev5-neutral-game-rank-v1`. Each rank preimage is framed as a
+little-endian 64-bit byte length plus the exact domain bytes, followed by
+one-byte split, owner deck, and schedule block, then the raw 32-byte
+physical-game digest and raw 32-byte stable-root digest. A duplicate preimage
+or digest collision fails closed. For each eligible physical game, retain
+the root with the lexicographically smallest representative-rank digest.
+Exhaustively enumerate the balanced eight-game subsets in a block and choose
+the subset whose sorted tuple of game-rank digests is lexicographically
+smallest. Selection is blind to phase, cards/descriptors, parent scores,
+outcomes, source actions, and every candidate.
+
+The only licensed production output is immutable schema
+`old-school-fq4-priority-neutral-supplement-v1` at fixed no-replace path
+`data/old-school-fq4-priority-neutral-supplement-v1.fq4neutral`. Bind the
+exact DEV1 bundle/parent/components, frozen schedules and scientific hashes,
+feature/collection/dominance contracts, DEV4 schema and aggregate capacity,
+both rank contracts, selected-root digest, and all per-cell counts. Store only
+public locators/digests, neutral features, complete dominance/accounting
+facts, K8 base traces, and the exact C16 Priority residuals needed to
+reconstruct deployed parent behavior. Never serialize a `GameState`, hidden
+opponent hand, outcome, or source-selected action. Reconstruct each split
+once, reproduce all DEV1 scientific sections again, require canonical and
+hidden-clone scoring identity, snapshot inputs before/after, publish
+atomically without replacement, and record byte count/SHA before any fit.
+Any reconstruction, balance, identity, privacy, or publication failure is
+VOID; there is no replacement seed, smaller quota, or fallback selector.
+
+Only after a valid artifact exists, extend the cached offline evaluator. The
+original 88 positive FIT rows retain their projected targets and unit row
+weights. The 160 neutral FIT rows target exact deployed C16 behavior:
+
+```text
+p = softmax((base_score + parent_priority_residual) / 0.10)
+target = 0.90 * p + 0.10 / legal_action_count
+```
+
+For deck `d`, each of its 32 neutral FIT rows has weight `P[d] / 32`, where
+the immutable positive FIT counts are
+`P = [11, 4, 31, 13, 29]` for Green, Red, Blue, White, and RU Aggro. Thus
+neutral and positive loss mass are exactly 1:1 within every deck rather than
+letting the uniform 32-row supplement drown Red or underweight Blue. Training
+order is the existing positive rows in bundle order followed by neutral rows
+in artifact order. CHECK positives and all 160 neutral CHECK rows remain
+strictly outside the update boundary. Preserve the existing 16-epoch
+optimizer and seed `202607280212`. A zero-neutral-weight control must
+reproduce positive-only candidate `71260078...6151`; only Priority may
+change.
+
+The anchored candidate passes the offline gate only if all clauses hold:
+
+1. Positive CHECK remains exactly 94/94 Safe, all 37 prior Class-1/2 errors
+   repaired, zero exact-support violations, zero severity regressions, and
+   every deck individually clean.
+2. Positive FIT has zero severity regressions and is no worse than the
+   positive-only candidate's 30 repairs / three support violations, including
+   per-deck violation ceilings Green 1, Red 0, Blue 2, White 0, RU Aggro 0.
+3. On the same 160 neutral CHECK rows, first score immutable C16 and exact
+   candidate `71260078...6151` as the preregistered spillover baseline. The
+   anchored candidate may not worsen any deck's mean
+   `KL(C16 behavior || candidate behavior)` or exact-support-change count
+   relative to that baseline. It must reduce equal-deck mean KL by at least
+   50% and pooled exact-support changes by at least 50%.
+4. Parent identity, hidden-repartition invariance, FIT/CHECK isolation,
+   finite probabilities, accounting, and every non-Priority component remain
+   exact.
+
+This gate is conjunctive. A pass licenses one fresh all-five-deck GP0 smoke
+against C16 using newly preregistered gameplay seeds; it does not reuse
+`202607280602/03` and does not promote a champion. A failure is retained and
+closes this fixed anchor coordinate before any gameplay. Implementation may
+add strict artifact/ranking/evaluator tests and sanitizers, but tests may not
+run the no-argument publisher or inspect a stochastic result.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
