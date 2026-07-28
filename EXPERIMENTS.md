@@ -16726,6 +16726,64 @@ seed has opened. Next: commit this exact artifact and record, obtain
 cross-tree verification, then implement the load-only GP0 consumer pinned to
 the new identity.
 
+DEV5 GP0 load-only consumer qualification, completed 2026-07-28 before
+opening gameplay seed `202607280701`: **GO for commit and post-commit
+identity review; the gameplay run remains closed until that review**. The
+new standalone consumer exact-loads C16 at 3,111,437 bytes /
+`53aeb904...944ca` and the anchored candidate at 237,496 bytes /
+`8252646b...f5fc`. It locally reconstructs and exact-matches the full
+`FQ4-DEV5-NEUTRAL-ANCHORED` contract, candidate/model/component/tensor
+fingerprints, and K8/H4/R1/shallow-on/root-depth-one deployment recipe. It
+does not call the old generic `production_contract`, evaluator, publisher,
+generator, collector, held-out treatment, or DEV1 gameplay runner.
+
+The only production CLI mode is literal `--smoke`. Invalid arguments return
+status 2 before the runner can be reached. The smoke runs the exact C16/C16
+control first on seed `202607280701`, four repetitions over the 15 balanced
+deck pairings, and hard-stops unless its complete 240-game accounting and
+120-120-0 result are exact. Only then may anchored/C16 run on the same seed
+and schedule. Its frozen gates are at least 40.0% wins and finite positive
+wall time at most 1.25 times control. Accounting independently reconciles
+all five 48-game challenger and baseline deck rows, all 40 twelve-game
+seat-by-play/draw quadrants, diagonal 16-game and off-diagonal eight-game
+matchups, challenger matrix rows, and reciprocal baseline columns. This
+specifically avoids the same-index complement bug found in DEV1 GP0.
+
+Exact pre-commit verification:
+
+```sh
+make -j4 test-fq4-dev5-gameplay
+# 9/9 passed; invalid-argument, source, link, and symbol firewalls passed
+
+make -j4 test-fq4-dev-candidate-artifact
+# 5/5 passed
+
+make -j4 test
+# complete repository gate passed, including the new 9/9 suite
+```
+
+An independent strict direct build also passed 9/9. A fresh
+AddressSanitizer/UndefinedBehaviorSanitizer build passed 9/9 under
+`-Wall -Wextra -Wpedantic -Werror`; its exact temporary build directory was
+removed. Tests cover contract and file-identity mutation, strict loader
+order, malformed deployment with zero benchmark calls, invalid control with
+exactly one call, the prior unequal-policy accounting trap plus row- and
+reciprocal-column-preserving mutations, all five decks, exact 40.0% and
+1.25-times boundaries, invalid timings, mid-run model/artifact mutation,
+CLI status classes, aggregate-only output, and redaction. `git diff --check`
+passed, and a dry run proved ordinary `make test` never invokes `--smoke`;
+only the explicit `fq4-dev5-gameplay-smoke` target can do so.
+
+The independent final review returned GO for committing this load-only
+harness and retained NO-GO on opening the reserved seed until commit/push,
+post-commit rebuild, exact binary/source identity review, and a fresh
+focused/full gate. `REVIEW.md` was reread through its newest available entry
+before and after qualification; it requests this consumer/review before GP0
+and contains no conflicting result. No gameplay command or reserved seed has
+run. Next: commit and push the exact harness plus this record, rebuild and
+obtain post-commit GO, then run exactly
+`/usr/bin/time -p ./build/old-school-fq4-dev5-gameplay --smoke`.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
