@@ -17122,6 +17122,48 @@ Priority refit comparing a 925-parameter frozen trunk with the full head,
 not another policy-rule switch. `REVIEW.md` was reread through its newest
 14:44 cycle before recording this conclusion.
 
+##### FQ4-EXPLORE-4 Priority-plus-attack composition declaration
+
+Declared 2026-07-28 before changing the fast runner or opening seeds
+`202607280807` or `202607280808`. `REVIEW.md` was reread through its newest
+14:50 PDT entry, which explicitly identifies this untested composition as the
+first follow-up after the owner's human play-test exposure. The web play-test
+of exact `C16+AdversarialBlocks` continues in parallel; this experiment does
+not delay it or promote either policy.
+
+Falsifiable exploratory hypothesis: the alpha-0.50 Priority direction that
+helped Blue in EXPLORE-1 will add strength to the defender-best-response
+attack repair without undoing that repair. The composed policy will therefore
+win more games than it loses in both a short screen and its follow-up against
+the exact currently exposed attack-only pilot.
+
+This is a direct paired comparison to isolate the composition:
+
+- challenger: the exact alpha-0.50 C16-to-DEV5 Priority blend with
+  `value_adversarial_blocks=true`;
+- baseline: exact C16 with `value_adversarial_blocks=true`;
+- both sides otherwise retain identical C16 critic, Attack, Block,
+  DamageOrder, K8/H4/R1 search, Learned-mirror continuation, hidden-safe
+  information, and all other configuration.
+
+The exact rapid ladder is:
+
+1. E0 uses fresh seed `202607280807`, one repetition of the balanced
+   five-deck benchmark: 60 games total and 12 per challenger deck. Strictly
+   more wins than losses advances; a tie or loss stops the composition.
+2. E1, only if licensed by E0, uses fresh seed `202607280808`, four
+   repetitions: 240 games total and 48 per challenger deck. Strictly more
+   wins than losses advances the composition as a separately named web pilot
+   for human strategic testing; otherwise the attack-only pilot remains the
+   sole exploratory deployment and this composition stops.
+3. Report aggregate, all five deck rows, runtime, decisions, and rollouts.
+   These samples select play-test candidates and do not certify strength or
+   replace C16.
+
+Implementation is limited to one explicit mode in the existing fast runner,
+with frozen schedule/config tests. Do not add a generalized evaluation
+framework, scan another alpha, or spend a 2,040-game gate.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
