@@ -13440,6 +13440,543 @@ The complete gate included 168 engine, 27 learned-iteration, 57 probe,
 representative five-game simulator smoke. The focused FQ4 binary also passed
 14/14 under ASan/UBSan in the implementer handoff.
 
+##### FQ4-D1-P0 held-out parent-census declaration
+
+Declared 2026-07-28 00:36 PDT from pushed checkpoint `e0709cc`, after the
+D0b PASS and after rereading `REVIEW.md` through its newest 00:29
+countersignature, and before opening source seed `790` or `791`. This is the
+measured-frozen-parent step required by `AGENTS.md`, not the treatment test.
+The D0b candidate must not be constructed, loaded, scored, or used for root
+selection anywhere in P0. C16 remains champion.
+
+Falsifiable support hypothesis: after an outcome- and model-score-blind
+bounded retention of real C16-mirror Priority states, the reserved all-five
+source contains at least five high-confidence robust Pass-dominance support
+errors in at least five distinct physical games and at least two owner decks.
+If not, the proposed D1 comparison is underpowered and stops without opening
+the treatment. No extra seed may be appended after seeing P0.
+
+Amended 2026-07-28 00:46 PDT, still before opening either source seed, after
+rereading the new 00:44 review cycle and receiving an independent
+implementation-contract review. The 00:44 review endorses the blinded
+measured-parent design. The stricter contract review correctly identified
+underspecified hidden canonicalization, retention arithmetic, common-world
+dominance seeds, class arithmetic, watchdog mechanics, and treatment
+separation. The exact amendments below close those implementation degrees of
+freedom without changing the source, support hypothesis, or scientific axis.
+They license implementation review only; source execution remains withheld.
+
+The two exact source blocks are:
+
+```text
+balanced_schedule(790, 0x4651344431, 0)
+balanced_schedule(791, 0x4651344431, 0)
+```
+
+Each 40-game block contains all ten unordered five-deck pairs in both seat
+orientations with each seat starting once. The complete source therefore has
+80 physical games, 160 owner-game perspectives, and exactly 32 perspectives
+per Green, Red, Blue, White, and RU Aggro deck, balanced 16/16 by seat and
+16/16 by play/draw. Before a source game is opened, a schedule-only preflight
+must serialize all immutable coordinates and freeze their SHA-256.
+
+That schedule-only preflight is now complete without constructing a `Game`.
+Canonical bytes are the ASCII header
+`old-school-fq4-d1-p0-schedule-v1\n`, followed by 80 rows sorted by source
+seed-base index and local schedule index, with no column header and a final
+LF. Each row has these ten decimal tab-separated fields in order:
+
+```text
+source_seed_base  source_seed_base_index  generation  block
+schedule_index  pairing_index  game_seed  starting_player
+seat0_deck_id  seat1_deck_id
+```
+
+The physical row uses generation decimal `302010090545`, block `0`, and deck
+IDs Green=`0`, Red=`1`, Blue=`2`, White=`3`, RU Aggro=`4`. The exact result is
+4,197 bytes and SHA-256
+`33f3826615e9c66b6c5c0c137e6c17bc0b53fbe967804e7b39dc8a53143fb28a`.
+There are 80/80 unique game seeds; every deck has 32 owner perspectives,
+16/16 by seat, 16/16 by play/draw, and eight in every seat-by-play quadrant.
+Every ordered matchup has eight owner perspectives and every unordered pair
+has eight physical games. The physical-game key is exactly
+`(source_seed_base, schedule_index)`. Independent Python and Node
+reimplementations reproduced these bytes and also reproduced DVR2's prior
+frozen schedule hash, cross-validating the schedule derivation.
+
+Both source seats use exact champion C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+with Value-mirror K8/H4/R1, shallow-prior blend on, Priority residual weight
+zero, no exploration, PD0 off, Legacy continuation, and a 128-turn cap.
+For every schedule row, `Game` receives decks in serialized seat order,
+`ScheduledGame::seed`, the serialized starting player, `max_turns=128`, and
+`learned_search_depth=1`; both `BotConfig`s load that same verified artifact
+and exact recipe. `Game::run_with_priority_root_trace` records the selected
+legal action only as a trajectory-integrity check. Neither outcome nor
+selected action may enter the retention key, ordering, or ranking, and raw
+hidden partitions and outcome are excluded from the trajectory digest.
+
+For each owner-game perspective:
+
+1. Before any fingerprint, call `sample_determinization` with base
+   `0x4651344431484944` (`FQ4D1HID`) and
+   `IndexedSeedCoordinates{RootDeterminization,
+   "old-school-fq4-d1-p0-hidden-v1", group, Root, 0, 0}`. `group` is the
+   exact final-LF ASCII text
+   `source_seed_base=<decimal source seed base>\nschedule=<decimal local index>\nowner=<0|1>\ntrace=<decimal full trace ordinal>\n`.
+   The sampler reconstructs **both** libraries and the opponent hand from
+   original deck composition and public zones/counts, while preserving the
+   owner's hand. Reporting statistics are then zeroed. The captured private
+   partition may not be hashed, labeled, or scored.
+2. Regenerate the complete engine-authoritative canonical legal descriptors
+   on that sampled root. Validate context, exactly one typed Pass, descriptor
+   uniqueness, and that the traced selected action occurs exactly once. A
+   thrown or invalid root is counted malformed and makes final status
+   infrastructure failure; it may not silently shrink the population.
+3. A valid root with fewer than two actions is trivial; one with more than 32
+   is over-cap. Valid roots with 2–32 actions are eligible.
+4. Serialize and retain the complete canonical owner-observation plus action
+   bytes, not merely a 64-bit fingerprint. Within one owner-game, exact byte
+   equality is deduplicated and the earliest trace ordinal survives. A digest
+   equality with unequal bytes is infrastructure failure.
+5. Collect all unique eligible roots in ascending original trace ordinal,
+   then, before any dominance label or model score exists, apply
+   `evenly_spaced_retained_indices(unique_count, 16)`. Retained roots remain
+   in chronological order.
+
+For an owner-game perspective, only trace rows whose
+`context.decision_player == owner_seat` enter `raw`; other-seat rows are not
+members and are not counted. On every member, context decision player,
+constructed probe `root_player`, information-set observer, transition actor,
+and scorer perspective are exactly that owner seat.
+
+This caps the source at 2,560 retained roots. Stable-root preimage bytes are
+the following final-LF ASCII serialization with every integer in unpadded
+decimal:
+
+```text
+old-school-fq4-d1-p0-stable-root-v1
+source_seed_base_index=<0|1>
+source_seed_base=<790|791>
+schedule_index=<0..39>
+game_seed=<uint64>
+owner=<0|1>
+trace=<full chronological trace ordinal>
+information_action_sha256=<64 lowercase hex>
+```
+
+`stable_root_id` is the lowercase SHA-256 of exactly those bytes. The
+information/action digest binds the complete canonical bytes retained beside
+it, with collisions rejected. The source/retained manifest and every
+replayable in-memory probe receive canonical SHA-256 digests.
+
+The terminal categories and cross-sums are ordered and exclusive:
+
+```text
+raw = malformed + trivial + over_cap + eligible
+eligible = duplicate + unique
+unique = retained + cap_dropped
+nontrivial = over_cap + eligible
+```
+
+These quantities are reported per owner deck and physical game. All raw trace
+points are consumed even after a malformed row or the support floor is
+observed.
+
+On each retained root, compare typed Pass against every other action with the
+same card-agnostic rules-owned operator as D0:
+`advance_to_next_first_main` followed by `fq0_dominance::compare`. Use eight
+fixed common owner-information-set worlds from namespace
+`0x4651344431444f4d` (`FQ4D1DOM`). The exact world seed is
+`derive_indexed_seed(FQ4D1DOM,
+{RootDeterminization, "old-school-fq4-d1-p0-dominance-v1",
+stable_root_id, Root, 0, world_index})`. Each world is sampled once and that
+identical state is reused for Pass and every candidate. Concretely, call
+`sample_determinization(retained_canonical_safe_root.state,
+serialized_seat_order_original_decks, observer=owner_seat, derived_seed)`,
+then call the transition with actor/root owner equal to that same owner seat.
+The raw captured state is never an input. Pass is settled once and each
+non-Pass once, without short-circuiting, so dominance transition count is
+exactly the sum over retained roots of `8 * legal_action_count(root)`.
+Incomplete settlement, unresolved transient effect, invalid normalization,
+or an incomparable orientation is ordinary nondominance for that action/world
+and is counted; a thrown action, state, or contract error is infrastructure
+failure. An action is robustly Pass-dominated only when Pass is
+`FirstDominatesSecond` in all 8/8 complete, normalized comparisons.
+
+Retention for all 80 games and all dominance labels/digests must be completed
+and frozen before the first C16 production score call. P0 then scores only
+roots having at least one robustly Pass-dominated action.
+
+For each scored root, compute the immutable production K8/H4/R1 base exactly
+once with `oc1_action_scoring::score_production` and C16. Add only C16's
+Priority residual at weight `0.10`; this is the exact D0 causal parent
+surface. The residual-off raw-base support is reported descriptively as a
+bridge to actual champion deployment but is not a second gate oracle.
+Complete base samples, recipe, accounting, descriptor order, parent component
+fingerprints, and residual arithmetic must be exact.
+
+Let `D` be robustly dominated actions and `N` be every other action, including
+Pass. Choose `d` and `n` by highest exact combined score within each set,
+breaking an exact within-side tie by lexicographically smallest canonical
+descriptor. For world `i=0..7`, define
+`delta_i=(base_sample[d][i]+residual[d]) -
+(base_sample[n][i]+residual[n])`, where each residual already includes the
+fixed `0.10` weight. Compute `mean` in a left-to-right first pass, then
+`sum((delta_i-mean)^2)` in a left-to-right second pass, and set paired
+`SE=sqrt(sum_squared_deviations/(8*7))`. With `margin` equal to the exact
+combined-score difference `d-n`, classify the causal parent in this ordered,
+exclusive sequence:
+
+```text
+Safe:    margin < 0
+Class 1: margin > 0 and paired SE == 0
+Class 2: margin > 0, paired SE > 0, and margin / SE >= 3
+Class 3: otherwise (margin == 0, including -0, or positive margin/SE < 3)
+```
+
+Any nonfinite input or result is infrastructure failure. Class-2 sigma mass is
+exactly the sum of `margin/SE` over Class-2 roots. Per-deck and pooled
+`Safe+Class1+Class2+Class3` must equal dominance-positive roots. These are
+robust Pass-dominance support classes, not a claimed reproduction of
+`dominated-witness-v1`'s card-predicate logger.
+
+P0 must report and freeze before a D1 treatment declaration:
+
+- schedule, trajectory, retained-corpus, and scored-corpus SHA-256 values;
+- physical games and exact all-five seat/play/draw balance;
+- raw/retained/dominance-positive roots and games per deck;
+- exact parent Safe/Class-1/Class-2/Class-3 counts per deck and pooled;
+- Class-2 sigma mass, production calls/evaluations, transition counts,
+  terminal/bootstrap accounting, and runtime;
+- distinct high-confidence unsafe physical games and owner decks.
+
+Every retained root receives a deterministic second hidden repartition after
+canonical sampling. Select the first pair with unequal card IDs in this order:
+opponent hand versus opponent library, two positions within opponent library,
+two positions within owner library, then two positions within opponent hand;
+within a case use ascending vector indices. Swap exactly that pair. This never
+crosses physical decks. When no such pair exists, record a separately counted
+vacuous hidden clone. Otherwise require a byte-distinct full hidden state.
+Both forms must preserve the complete owner-observation/action bytes and make
+the parent residual feature bits identical.
+
+The first retained root for each owner deck, whether dominance-positive or
+not, is additionally re-scored through the production scorer's hidden-clone
+and reversed-candidate paths. “First” is the minimum in source-seed-base
+index, schedule index, owner seat, then trace ordinal order. A deck with no
+retained root reports a missing first-root audit and is infrastructure exit
+`2`, rather than a vacuous control pass. Both scorer paths must be
+bit-identical after canonical mapping. Primary, hidden-audit, reverse-audit,
+and repeat score calls, evaluations, terminal leaves, and bootstrap leaves
+are separate accounting buckets with independently checkable sums.
+
+The census target performs two complete constructions. Each construction runs
+all 80 games and all 160 owner perspectives even if the support floor has
+already passed or failed. Digests, counts, classes, and exact floating-point
+fields must match before output is released. The census target must not link
+`fq4_priority_fit.cpp` or any D0b candidate API, contain a candidate-model
+pointer, load a candidate artifact, or accept model/epoch/source knobs. A
+build-graph/symbol test enforces this treatment firewall.
+
+Implementation preflight completed 2026-07-28 01:15 PDT, after rereading
+`REVIEW.md` through its newest 00:59 endorsement and without invoking the
+no-argument census. An independent source review initially found four real
+handoff defects: dominance labels lacked a frozen digest; scored-corpus bytes
+omitted raw samples/recipe/accounting; hidden controls scored every retained
+root instead of directly comparing neutral feature bits; and owner-game
+cross-sums/stdout accounting were too coarse. All were corrected before its
+final GO. The same review then independently compiled all three translation
+units `-Werror` clean, passed 8/8 portable tests, and found no D0b candidate
+symbol, artifact, or fingerprint.
+
+Integrated release command:
+
+```sh
+/usr/bin/time -p make -j4 test-fq4-d1-field-gate
+```
+
+It passed 8/8 portable tests, the exit-2 bad-argument path, exact 4,197-byte
+schedule hash, static link-source exclusion, `nm` treatment-symbol exclusion,
+and `strings` treatment-fingerprint exclusion in 4.01 seconds. The portable
+sanitizer command:
+
+```sh
+ASAN_OPTIONS=detect_leaks=0 /usr/bin/time -p make -j4 \
+  BUILD_DIR=build/fq4-d1-sanitized \
+  CXXFLAGS='-std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Werror' \
+  test-fq4-d1-field-gate
+```
+
+also passed 8/8 plus the same CLI/firewall checks in 29.28 seconds. A direct
+release bad-argument invocation returned `2` and printed only its usage line.
+Seeds `790`/`791`, the no-argument census, and the treatment remain unopened.
+The exact release census binary is
+`db8bc49a48bb45cb73fe9e3539a4c55c66091b32f9117964d7859c3ad9eb7e4d`;
+field-gate header/source/main/test hashes are respectively
+`af12fb64…819136`, `95c4871e…a6a75`, `052bf5ba…50b39`, and
+`58da0cd0…59f7`. The loaded C16 artifact remains
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+
+Iteration-speed caveat recorded before source execution: P0 retains replay
+roots only in memory and publishes hashes/counts, so it is a one-shot
+held-out judge, not yet a reusable computational cache. Current measured
+inner-loop times are 1.52 seconds for hardened D0, 3.56 seconds for D0b,
+0.12 seconds for an unchanged focused build, and 14.50 seconds for a
+`game.cpp` edit plus focused gate; full `make -j4 test` is 259.96 seconds.
+The proposed 5–15-second field iteration remains a target, not a result. The
+smallest next speed milestone is a separately sourced, sealed development
+bundle of neutral Priority option features, dominance masks, base samples,
+descriptors, and integrity hashes. Repeated tuning must use that development
+bundle; adaptively reusing held-out D1 would invalidate it.
+
+The dedicated no-argument command will be:
+
+```sh
+./build/old-school-fq4-priority-fit-d1-census
+```
+
+A supervising parent starts a monotonic 180-second deadline immediately after
+forking one worker, polls with `waitpid(..., WNOHANG)`, sends `SIGKILL` at the
+deadline, reaps the worker, and maps timeout to exit `2`. The deadline includes
+artifact load, schedule checks, both full constructions, comparison, and
+buffered report production. Scientific stdout is released only after repeat
+identity succeeds.
+
+Let `H = Class1 union Class2`. Exit `0` requires complete infrastructure plus
+`|H|>=5`, at least five distinct physical-game keys represented in `H`, and
+at least two distinct owner `DeckId`s represented in `H`. Exit `1` is an
+honest underpowered parent census. Exit precedence is infrastructure,
+determinism, or watchdog defect=`2`; otherwise support miss=`1`; otherwise
+`0`. A deck with zero dominance-positive rows is explicitly reported and
+cannot later satisfy a nonvacuous per-deck no-worse treatment gate.
+
+`make test` may run portable tests and the bad-argument path only; it must
+never open the no-argument census. A P0 pass licenses only a final D1
+declaration that copies the exact parent census and fixes treatment gates
+before constructing fingerprint `81ad05d2…`. It does not license a treatment
+run, gameplay, Handcrafted, promotion, or a Learned-is-king claim.
+
+P0 source result, completed 2026-07-28 01:20 PDT:
+**infrastructure void; the support hypothesis remains unresolved**. After
+final independent execution GO, exact release binary
+`db8bc49a…eb7e4d` was invoked once with:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit-d1-census
+```
+
+The worker returned infrastructure exit `2` after 1.79 seconds
+(`user 1.75`, `sys 0.00`) with the sole diagnostic
+`FQ0 information key actions are not the exact engine-authoritative legal
+set`. Scientific stdout was withheld: no schedule/trajectory/corpus digest,
+root count, class, support, outcome, or verdict row was emitted. The exact
+binary and C16 artifact hashes remained unchanged; the D0b treatment was not
+linked, loaded, constructed, or scored.
+
+This consumed the declared P0 invocation but revealed no scientific result.
+Do not reinterpret exit `2` as underpowered and do not rerun the source under
+this declaration. Diagnose the legal-action contract on synthetic roots,
+add a mutation-sensitive regression, and independently review any
+infrastructure-only repair. A same-source retry, if warranted, requires a
+separate P0b declaration explaining why the failed execution leaked no
+selection-relevant source fact and freezing the repaired binary before it is
+run.
+
+###### FQ4-D1-P0-R0 singleton-root infrastructure repair declaration
+
+Declared 2026-07-28 01:24 PDT after recording the P0 void and before changing
+the field-gate source. No source retry is licensed here.
+
+Falsifiable diagnosis: `build_safe_root` calls
+`make_information_set_key` before its trivial-root branch, while that FQ0 API
+deliberately rejects authoritative legal sets smaller than two. A valid
+Priority trace with singleton legal set `{Pass}` therefore throws the exact
+observed diagnostic instead of being counted `trivial`. If a portable
+singleton-Pass fixture does not reproduce that exception on the frozen
+pre-repair code, reject this diagnosis.
+
+The one-axis repair is to classify a singleton only after validating its
+trace context, owner-safe determinization, engine-authoritative legal set,
+selected action exactly once, and exactly one typed Pass, but before entering
+the multi-action FQ0 information-key API. Its owner-observation/action bytes,
+SHA-256, stable Pass descriptor, and trajectory category remain deterministic;
+it does not materialize a retention candidate. Empty, missing-selected,
+wrong-selected, non-Pass-singleton, or otherwise invalid roots remain
+malformed. Legal sets of size at least two retain the existing complete
+canonical-descriptor and collision checks; over-cap behavior is unchanged.
+
+Before considering P0b, require a mutation-sensitive portable regression that
+fails by throwing on the frozen implementation and passes only when the
+singleton is reported trivial without materialization, plus the existing
+8/8 suite, `-Werror`, ASan/UBSan, exact schedule hash, treatment firewall,
+and independent source review. This repair must not expose any source
+coordinate, count, action, outcome, or score.
+
+P0-R0 result, completed 2026-07-28 01:28 PDT: **diagnosis confirmed; accept
+the infrastructure-only repair**. Before changing the branch order, the new
+portable singleton fixture produced the exact source diagnostic and only that
+test failed: 8/9 passed. Static tracing proves the two legal vectors are the
+same deterministic `legal_priority_actions` call; FQ0's explicit `<2` guard,
+not equality drift, selected the shared message. Thus the only leaked source
+fact is that the run encountered at least one preregistered, retention-excluded
+singleton-Pass boundary.
+
+The D1-local repair validates selected Pass, serializes the owner-safe
+singleton bytes/fingerprint/descriptor, reports `trivial`, and returns before
+the multi-action information-key API. It leaves the root unmaterialized.
+Genuine multi-action key/descriptor exceptions are now caught and reported
+malformed so construction can finish before infrastructure exit `2`. The
+mutation-sensitive regression additionally proves nonmaterialization,
+missing-selected=`Malformed`, and direct FQ0 singleton-key rejection; FQ0
+itself was not weakened.
+
+Verification:
+
+```text
+pre-repair focused: 8/9, exact production diagnostic reproduced
+post-repair focused release: 9/9
+FQ0 information-set control: 15/15
+post-repair ASan/UBSan: 9/9
+bad-argument census: exit 2, usage only
+schedule/treatment link/symbol/fingerprint firewall: PASS
+git diff --check: PASS
+```
+
+No no-argument invocation occurred during diagnosis or repair. Exact repaired
+release binary SHA-256 is
+`38de49a178994aef824e0ab37dedaadc540cf707ef98b784cd20f9e8ec62fd1b`;
+header/source/main/test hashes are `54932bda…28943c`,
+`43dfb76f…9f7674`, `052bf5ba…50b39`, and `34643e71…61637`.
+C16 remains `53aeb904…f944ca`; treatment remains absent. P0-R0 licenses only
+an independently reviewed P0b declaration, not a retry by itself.
+
+###### FQ4-D1-P0b same-source infrastructure retry declaration
+
+Declared 2026-07-28 01:30 PDT after rereading `REVIEW.md` through 01:14,
+after two independent read-only diagnoses and final R0 GO, and before any
+second no-argument invocation. This is one retry of an output-free
+infrastructure void, not a new source choice or scientific mulligan.
+
+The falsifiable support hypothesis, source schedules `790`/`791`, C16
+artifact/configuration, owner perspectives, chronological retention, hidden
+and dominance seed coordinates, all-five balance, caps, exact support floor,
+class arithmetic, treatment firewall, two complete constructions, output
+schema, exit semantics, and 180-second parent watchdog remain byte-for-byte
+the P0 declaration above. The only implementation difference is exact
+P0-R0 repaired binary `38de49a1…2fd1b`.
+
+Same-source reuse is justified narrowly. P0 emitted no scientific stdout and
+revealed no coordinate, count, outcome, retained action, dominance label,
+parent score, class, or gate result. It revealed only that at least one
+singleton-Pass boundary exists. `trivial` was preregistered before the first
+attempt as an outcome- and score-blind terminal category excluded before
+retention, dominance, scoring, and support. That fact cannot select a root,
+model, threshold, seed, or treatment and is forbidden from changing any P0b
+choice. Attempt-one timing is discarded.
+
+The sole licensed command is again:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit-d1-census
+```
+
+Exit `0`/`1` may be interpreted only with complete declared stdout and all
+infrastructure controls. Any exit `2`, signal, timeout, missing repeat,
+partial output, binary/artifact drift, or new exception is another
+infrastructure void and licenses no further retry. P0b can at most freeze the
+parent census and license a later treatment declaration; it cannot construct
+or score D0b, run gameplay/Handcrafted, promote a model, or claim Learned is
+king.
+
+P0b result, completed 2026-07-28 01:36 PDT: **PASS; the measured parent
+supports a final D1 treatment declaration**. Exact binary
+`38de49a1…2fd1b` returned `0` after internal 161.821809417 seconds and
+external 161.84 seconds (`user 160.26`, `sys 0.67`), leaving 18.16 seconds
+under the frozen watchdog. Complete stdout is 47,737 bytes/184 lines with
+SHA-256 `3e30d9f391bcf43e5534de8ff1aaa641c1a2de9bc1e916bc014c8e6cebe001fa`;
+the three `/usr/bin/time` stderr rows are 33 bytes with SHA-256
+`91fb6a53d09822e4ae74071ca0b7c14633bda38f0d3c6c5cc32d4d1fae996d8`.
+
+Frozen identities:
+
+```text
+parent_fingerprint       68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+schedule_sha256          33f3826615e9c66b6c5c0c137e6c17bc0b53fbe967804e7b39dc8a53143fb28a
+trajectory_sha256        dee75b047182fd6463a7751e6344ccaba67dca1e76661c64aab58f22f4edbacd
+retained_corpus_sha256   f3ae55a1b972c1d1adad101f5a54af210d3e8b5edd646738538aa839fa3f9883
+dominance_corpus_sha256  100296df1e0cba1023320b06f925437af35ef15a561c6861a993be80e8110605
+scored_corpus_sha256     5e063d1e577a1809f40e2ef2af992e79bba0339989054f7a94b31495ab047627
+audit_scores_sha256      47095c7722d65b8a349f77effe960892f1c9fc0061f12d3ae873771ebb6ca991
+```
+
+Measured all-five parent census:
+
+| Deck | Raw | Retained | Dominance-positive | Safe / C1 / C2 / C3 | High-confidence |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Green | 3,534 | 463 | 13 | 6 / 1 / 4 / 2 | 5 |
+| Red | 3,598 | 484 | 8 | 8 / 0 / 0 / 0 | 0 |
+| Blue | 3,214 | 498 | 44 | 32 / 1 / 8 / 3 | 9 |
+| White | 4,401 | 487 | 6 | 0 / 6 / 0 / 0 | 6 |
+| RU Aggro | 3,379 | 476 | 43 | 35 / 2 / 5 / 1 | 7 |
+| **Pooled** | **18,126** | **2,408** | **114** | **81 / 10 / 17 / 6** | **27** |
+
+Pooled retention arithmetic is exact:
+`18,126 = 0 malformed + 14,605 trivial + 2 over-cap + 3,519 eligible`;
+`3,519 = 0 duplicate + 3,519 unique`; and
+`3,519 = 2,408 retained + 1,111 cap-dropped`. The support floor independently
+rederives as 27 Class-1/2 roots in 24 distinct physical games across Green,
+Blue, White, and RU Aggro: 27/24/4 versus required 5/5/2. Red has eight
+dominance-positive roots but all eight are already Safe, so it is an explicit
+protection-only deck in D1 rather than a vacuous row.
+
+All 2,408 retained roots had byte-exact owner replays and distinct hidden
+clones; zero clones were vacuous. Production accounting is 129 calls,
+907 actions, 1,032 worlds, and 7,256 evaluations =
+1,910 terminal + 5,346 bootstrap, plus 59,048 dominance transitions. Every
+primary/hidden/reverse/repeat bucket matched exactly. Replay, hidden feature
+bits, scorer hidden/reverse, recipe/accounting, cross-sums, and repeated
+construction controls were all `1`. There was no infrastructure or
+underpowered row; Class-2 sigma mass is exactly
+`3417447620267002`.
+
+An independent parser rederived all 160 unique owner rows, every
+owner-to-deck-to-pooled cross-sum, the complete schedule balance, support
+27/24/4, accounting, hashes, controls, runtime, and exit-0 interpretation.
+Decision: accept P0b as a support PASS. It proves only that the immutable
+parent makes enough robust Pass-dominance support errors to test the
+pre-fitted D0b Priority head. C16 remains champion. The next and only
+licensed scientific step is a final D1 declaration that copies these exact
+facts and freezes root-level treatment gates before reconstructing or scoring
+candidate `81ad05d2…`.
+
+P0b checkpoint verification, completed 2026-07-28 01:49 PDT without
+reopening the no-argument census or constructing the treatment:
+
+```sh
+/usr/bin/time -p make -j4 test-fq4-d1-field-gate
+# 9/9 plus the bad-argument CLI and treatment firewalls; real 0.11
+git diff --check
+# clean
+shasum -a 256 \
+  build/old-school-fq4-priority-fit-d1-census \
+  build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin
+# 38de49a178994aef824e0ab37dedaadc540cf707ef98b784cd20f9e8ec62fd1b
+# 53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca
+/usr/bin/time -p make -j4 test
+# exit 0; real 260.15, user 517.48, sys 9.21
+```
+
+The complete gate passed 168 engine, 27 learned-iteration, 57 probe,
+11 probe-metric, 33 probe-runner, all audit/FQ0/FQ4 suites, 18 web bridge,
+106 web, 48 certification, CLI/capture/clean/incremental contracts, and the
+representative simulator smoke. The no-argument D1 census was not part of
+either test target. `REVIEW.md` was reread through its new 01:44 cycle before
+this conclusion; that independent entry countersigns every P0b hash,
+cross-sum, support result, treatment separation, and the protection-only Red
+interpretation. No critique conflicts with the result. This freezes a
+reproducible parent-census checkpoint only; C16 remains champion.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
