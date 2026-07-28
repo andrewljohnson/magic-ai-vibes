@@ -25,6 +25,8 @@ acceptance gate. Every Learned-is-king verdict must include all five decks.
 
 1. Read `EXPERIMENTS.md` before changing bot logic.
 2. State a falsifiable hypothesis before a meaningful tuning experiment.
+   Measure descriptive facts of an immutable frozen parent first, then
+   preregister their exact census; do not guess counts that cannot be tuned.
 3. After every meaningful benchmark or stability run, update
    `EXPERIMENTS.md` with:
    - the code/configuration tested;

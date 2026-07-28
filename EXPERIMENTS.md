@@ -12924,6 +12924,522 @@ iteration, 57 probes, 11 probe metrics, 33 probe runner, every audit/FQ0
 suite, 18 web bridge, 106 web, 48 certification, CLI/capture/clean/build-graph
 contracts, and the representative five-game simulator smoke.
 
+##### FQ4-D0 production-surface Priority microfit declaration
+
+Declared 2026-07-27 23:25 PDT from pushed checkpoint `9a6c103`, after the FQ0'
+overlay and after rereading `REVIEW.md` through its newest 23:14 FR3
+countersignature. This is a bounded mechanism microfit, not full FQ4, a
+challenger promotion, or evidence that Learned is king. C16 remains frozen.
+No gameplay evaluation seed is opened in D0.
+
+Falsifiable hypothesis: a card-agnostic fit of only C16's outer Priority head
+can repair the four production K8/H4 ordering mistakes for which exact
+rules-owned settlement proves that keeping the card is strictly better, while
+preserving the surrounding productive actions and every non-Priority model
+component.
+
+The three fixed training roots are:
+
+1. `field.green.second-main-sick-bear-growth.v1`;
+2. `control.blue.braingeyser-x0.v1`;
+3. `validation.ru.disintegrate-hold-x0.v1`.
+
+The training code may not inspect card names, card values, `x_value`, target
+identity, or Handcrafted policy. At each root it enumerates every
+engine-authoritative legal Priority action and uses only the registered
+rules-owned Pass-dominance settlement. This must discover exactly five
+Pass-over-candidate inequalities: sick-Bear Growth, both Blue X=0 actions,
+and both validation-RU X=0 actions. Four are active corrections in C16
+(sick-Bear, Blue opponent, and both validation-RU targets); Blue self is an
+already-correct preservation inequality. The frozen registered 64-world
+dominance evidence is the mechanism source; D0 derives no label from C16,
+Handcrafted, card names, terminal outcomes, or audit-internal Tq0 values.
+
+For each complete legal set, obtain immutable parent base scores from the
+exact production K8/H4/R1 Value-mirror scorer: eight worlds, four-turn
+horizon, one rollout, shallow-prior blend on, seed tag
+`old-school-oc1-action-regression-v1.production`, base
+`5787775625948253273`. Combine those scores with the frozen parent's centered
+Priority residual at weight `0.10` and temperature `0.10`. On the latent
+softmax distribution `p`, compute the unique reverse-KL projection `q` subject
+to every discovered inequality
+
+```text
+q(Pass) >= exp(0.01 / 0.10) * q(dominated)
+```
+
+using deterministic joint active-set enumeration; multiple constraints at
+one root may not be projected sequentially. Unconstrained relative mass is
+left unchanged. If the parent already satisfies every inequality, the result
+must be bit-identical to the parent. The training target is the exact deployed
+behavior mixture `0.90*q + 0.10/N` over **all** legal actions.
+
+Pre-result notation clarification, recorded 2026-07-27 after independent
+implementation and review both noticed that “reverse-KL” has inconsistent
+orientation conventions: here it means the I-projection
+`argmin_q D_KL(q || p)`. This is the orientation already fixed by the declared
+requirement that unconstrained actions preserve their relative mass and by
+the preregistration preflight's joint active-set construction; it is not a
+post-result choice. The implementation and tests must name the orientation
+explicitly and compare it with an independent constrained numerical oracle.
+All legal actions and discovered inequalities are mapped through canonical
+stable descriptors before projection and fitting. The three complete legal
+sets, five Pass-dominance flags, and positive-X/control census must match the
+declaration exactly. Neutral policy inputs may contain the rules-level
+`x_value` and target relation permitted by `AGENTS.md`; only discovery and
+label construction are prohibited from inspecting them.
+
+Pre-result operator clarification, recorded at the same implementation review:
+the production current-window API `diagnose_value_pass_dominance` is **not**
+the registered 64-world operator and cannot discover sick-Bear Growth because
+its temporary bonus has not expired at that boundary. The D0 phrase
+“rules-owned Pass-dominance settlement” therefore means the already-public,
+registered generic pair
+`fq0_dominance_transition::advance_to_next_first_main` plus
+`fq0_dominance::compare`, applied uniformly to every canonical legal action
+against typed Pass. This is the exact next-First-Main operator that produced
+the frozen 64/64 sick-Bear proof and also proves the X=0 branches; flags are
+derived only from `Comparison::orientation`. The current-window PD0 API stays
+unchanged and remains a control rather than a label source. No fit, candidate,
+or scientific result existed when this mismatch was found.
+
+Pre-result control-census clarification: “useful Giant Growth” is the
+registered productive response root `green.bolt-on-bear-response.v3`
+(`pass`, `growth-own-grizzly-bears`), not
+`field.green.begin-combat-growth-tapped-air.v1`. Frozen OC1-AR1 evidence says
+C16 itself selects the latter root's bad opponent-Air target, so treating that
+normative fixture as an immutable-parent contract would misclassify a known
+scientific defect as infrastructure drift. The productive response must keep
+Growth over Pass and its exact parent support. The payable-Force-Spike row is
+descriptive and keeps/reports the parent's exact support; it is not silently
+relabeled as a normative Pass target. The redundant-counter control retains
+its registered exact Pass support. This fixes control identity and
+classification before scoring or fitting any candidate; it adds no training
+label.
+
+Fit three equal-weight examples with the existing
+`update_learned_value_priority_head` seam and:
+
+```text
+batch_size=3 epochs=256 learning_rate=0.001
+beta1=0.9 beta2=0.999 epsilon=1e-8 gradient_clip=5
+optimizer_seed=202607272321 residual_weight=0.10 temperature=0.10
+```
+
+The parent C16 fingerprint and critic/Attack/Block/DamageOrder component
+fingerprints must remain bit-identical; only Priority may change. A repeated
+fit with the same inputs and seed must be bit-identical.
+
+The exact D0 gate is conjunctive:
+
+- all three roots and all five dominance inequalities are discovered without
+  a card predicate, and the frozen 64-world source says Pass strictly
+  dominates in every world;
+- C16 has exactly four margins below `+0.005`; the candidate has all five
+  combined-score margins at least `+0.005`, so no dominated action remains in
+  exact-max support;
+- production base scores and accounting remain bit-identical between parent
+  and candidate;
+- live Force Spike, useful Giant Growth, all three productive Counterspells,
+  payable Force Spike, redundant same-target Counterspell support, the two
+  already-correct development-RU X=0 pairs, and productive positive-X
+  siblings retain their registered direction/support;
+- hidden opponent hand/library repartitions and legal-action input
+  permutations are bit-identical after canonical descriptor mapping;
+- strict tests, focused ASan/UBSan, and exact repeat pass.
+
+Exit 0 means only that D0's microfit and controls pass; exit 1 is a complete
+scientific rejection; setup, root/action, production recipe, component,
+accounting, or determinism drift is exit 2. A D0 pass licenses D1, not a
+gameplay screen: harvest a fresh replayable, all-five-deck held-out trace from
+reserved field seeds 790+ because `dominated-witness-v1` at commit `2c2bc8a`
+(319 rows, SHA-256
+`f24f9324d615cc03c3f3345dc0286dec5611d8ae0839c358e7788208fbc804f9`)
+contains useful class counts but not the complete state/action snapshots
+needed to score a new candidate. Only a candidate that improves that held-out
+behavioral gate may open the 200-pair large-regression smoke.
+
+##### FQ4-D0 result: parent-contract void; descriptive 4/5 near-miss
+
+Completed 2026-07-27 23:51 PDT after rereading `REVIEW.md` through its newest
+23:44 implementation-status entry. The production executable was built from
+the declared implementation with the exact frozen C16 artifact, optimizer
+seed `202607272321`, registered root-determinization base `202607262351`,
+three complete legal sets, 64 common worlds per root, and the exact
+production K8/H4/R1 base surface. No gameplay or D1 field seed was opened.
+The integrated reproduction was:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit
+```
+
+It exited `2` in 0.48 seconds:
+
+```text
+FQ4-D0 infrastructure failure: FQ4-D0 frozen parent contract drift: exact four parent margins below +0.005
+real 0.48
+user 0.47
+sys 0.00
+```
+
+The strict classification is correct: the declaration incorrectly required
+exactly four of five frozen-parent margins below `+0.005`. The exact C16
+production margins are:
+
+```text
+Green sick-Bear Growth                       +0.001590523
+Blue Braingeyser X=0 opponent                -0.025792762
+Blue Braingeyser X=0 self                    +0.013765926
+validation RU Disintegrate X=0 target 0      +0.007609510
+validation RU Disintegrate X=0 target 1      -0.001168706
+```
+
+Thus three, not four, are below the registered `+0.005` gate. Four are below
+the projection's separate `+0.010` target margin, which is the source of the
+predeclared census error. The operator itself discovered exactly `1+2+2`
+Pass-dominance inequalities, each strict in 64/64 common worlds, without a
+card predicate.
+
+A non-gating diagnostic evaluation of the already-created candidate is
+scientifically descriptive only because the parent contract had voided D0.
+Its fingerprint was
+`7079f8f306f90d54df21fedcf81213cc6ad5df6c5c1df46e9b3456ccd550c312`.
+The five candidate margins were:
+
+```text
+Green sick-Bear Growth                       +0.009998389
+Blue Braingeyser X=0 opponent                +0.004045749
+Blue Braingeyser X=0 self                    +0.033861779
+validation RU Disintegrate X=0 target 0      +0.015684169
+validation RU Disintegrate X=0 target 1      +0.009082451
+```
+
+It repaired four of five margins to at least `+0.005`; the sole miss was Blue
+Braingeyser X=0 opponent, only `0.000954251` below the gate. All five became
+positive and left exact-max support. Every registered collateral control
+passed, and the parent, production
+base/accounting, hidden repartition, action-order, repeat-fit, and
+non-Priority-component checks held. This cannot be converted into a pass by
+correcting the parent count after observing the result: even under that
+correction the declared 256-epoch candidate would be a valid 4/5 scientific
+rejection. D1 is not licensed and C16 remains champion.
+
+Implementation verification:
+
+```sh
+make -j4 test-fq4-priority-fit
+# 7 passed, 0 failed; clean build + run in 3.76s
+
+ASAN_OPTIONS=detect_leaks=0 \
+  /tmp/old-school-fq4-priority-fit-tests-sanitized
+# 7 passed, 0 failed; 3.5356s
+```
+
+The tests cover malformed projection inputs, bit-exact no-op, independent
+one-active analytic and two-active grid/KKT oracles, joint rather than
+sequential projection, exact portable 3-root/5-constraint/64-world census,
+exit classification, and the exact-production parent boundary.
+
+Decision: **D0 is an infrastructure void with a descriptive near-miss; reject
+the exact 256-epoch candidate and do not open D1.** The next experiment must
+be separately declared with the corrected frozen-parent census. Before
+choosing a fit change, inspect training convergence on the fixed three-root
+objective; a single prospective optimizer-budget change may test whether the
+remaining Blue margin is ordinary underfitting. It may not move the `+0.005`
+gate or use D1/gameplay outcomes for tuning.
+
+Post-result reporting/test hardening completed before D0b. It does not change
+the 256 optimizer, roots, labels, model, margins, controls, or exit-2 verdict.
+Frozen-parent behavioral mismatches now accumulate named infrastructure
+evidence rather than short-circuiting the rest of the report; malformed
+artifact/root/recipe state still fails closed. The report structurally
+requires all three named roots, the `1+2+2` constraints at 64/64, and all ten
+named controls. Hidden-clone validation now reruns discovery, projection,
+behavior targets, scoring, and the fit; a mixed active/inactive KL projection
+has an independent KKT/relative-mass/grid oracle.
+
+The hardened exact command reproduced the fingerprint and every margin above,
+then printed all ten controls `PASS`, every isolation bit as `1`, the one Blue
+scientific miss, the named parent-census infrastructure failure, and final
+`INFRASTRUCTURE_FAILURE`. It exited `2` in 1.52 seconds; the extra second over
+the original 0.48-second short-circuit is the now-complete hidden refit and
+collateral report.
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit
+# roots=3 constraints=5 parent_below_0.005=3 candidate_at_0.005=4
+# controls: 10/10 PASS
+# isolation parent_immutable=1 only_priority=1 repeat=1
+#           hidden=1 order=1 base_accounting=1
+# verdict=INFRASTRUCTURE_FAILURE
+# real 1.52
+
+/usr/bin/time -p make -j4 test-fq4-priority-fit
+# 10 passed, 0 failed
+# real 2.65
+```
+
+The rebuilt ASan/UBSan focused binary also passed 10/10. This closes every
+independent pre-freeze hardening finding without reinterpreting D0.
+
+##### FQ4-D0b fixed-budget convergence declaration
+
+Declared 2026-07-28 00:03 PDT after the D0 void, after rereading
+`REVIEW.md` through its 23:59 countersignature, and before constructing or
+scoring any 512-epoch candidate. The reviewer correctly notes that immutable
+parent facts should be measured before registering their census; D0b adopts
+that rule. C16 remains champion. No D1, gameplay, held-out, Handcrafted, or
+mixed-field result enters this declaration or may be opened by a D0b failure.
+
+Falsifiable hypothesis: D0's sole remaining Blue margin is ordinary
+optimization underfitting. With every root, rules-derived label, projected
+target, production score, optimizer field, and gate frozen, changing only one
+Adam call from 256 to **512 epochs** will lower the equal-weight three-root
+behavior-target KL relative to the exact 256 anchor and put all five
+Pass-minus-dominated production margins at or above `+0.005`, without
+regressing any collateral, isolation, determinism, or accounting control.
+
+The measured frozen-parent fingerprint and census are exact. The margin
+display below is the already observed nine-decimal descriptive readout; it
+is **not** an exact IEEE-754 anchor and must not be compared fuzzily or
+represented as exact:
+
+```text
+parent_fingerprint=68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+parent_below_0.005=3/5
+parent_margins=
+  +0.001590523 -0.025792762 +0.013765926 +0.007609510 -0.001168706
+```
+
+Before D0b may fit, mechanical hardening must make the report self-validating:
+bind all three training roots and all ten controls to their frozen
+information/action fingerprints and complete descriptor sets; reject missing
+root/control rows rather than trusting aggregate booleans; cover a
+mixed-active/inactive reverse-KL case with an independent oracle; and rerun
+dominance discovery, projected targets, and the fitted fingerprint through a
+hidden-repartition corpus. The old D0 no-argument command and 256 behavior
+remain preserved.
+
+D0b recreates the three immutable D0 inputs and exact rules-owned
+`1+2+2`, 64/64 dominance labels. It trains two measurement checkpoints
+directly from immutable C16 with the same optimizer seed; it never continues
+one fitted model or resets Adam moments mid-run:
+
+```text
+anchor:    epochs=256
+treatment: epochs=512
+
+batch_size=3 learning_rate=0.001 beta1=0.9 beta2=0.999
+epsilon=1e-8 gradient_clip=5 optimizer_seed=202607272321
+residual_weight=0.10 temperature=0.10
+```
+
+All optimizer fields except `epochs` must compare exactly equal. The
+256-anchor fingerprint must reproduce before the 512 result is eligible.
+The margin display below is likewise the already observed nine-decimal
+descriptive readout, not an exact numerical gate:
+
+```text
+fingerprint=7079f8f306f90d54df21fedcf81213cc6ad5df6c5c1df46e9b3456ccd550c312
+margins=
+  +0.009998389 +0.004045749 +0.033861779 +0.015684169 +0.009082451
+```
+
+The anchor is a reproduction control, not a candidate. Only the one fixed
+512-epoch model is eligible; there is no adaptive checkpoint selection and no
+384/768/1024 fallback.
+
+For checkpoint `c` and root `r`, independently reconstruct
+
+```text
+candidate_behavior(c,r) =
+  0.90 * softmax(candidate_combined_scores(c,r) / 0.10) + 0.10/N
+
+KL(c,r) =
+  D_KL(frozen_projected_behavior_target(r) ||
+       candidate_behavior(c,r))
+```
+
+and report all three root values plus their equal-weight arithmetic mean.
+Both distributions are complete over all legal actions. Require the mean
+`KL(512) < KL(256)`; per-root KL is descriptive and receives no post-result
+threshold.
+
+Before the first D0b production fit, the already-observed 256 command will
+be rerun only to serialize its parent and anchor margin bit patterns plus a
+higher-precision descriptive display. That immutable measurement will be
+appended to this declaration and bound exactly (or else the fingerprints plus
+root/recipe/base contracts will remain the authoritative exact anchors and
+the margins will remain descriptive). This premeasurement cannot select or
+alter the 512 treatment.
+
+Pre-treatment anchor measurement, completed 2026-07-28 00:22 PDT after the
+D0b source handoff and before building or running the D0b no-argument
+command:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit
+# expected historical D0 exit 2; real 1.81
+```
+
+It reproduced the exact parent and 256 candidate fingerprints, the corrected
+`3/5` parent census, the descriptive `4/5` candidate result, all ten controls,
+and every isolation bit. In canonical `1+2+2` constraint order, the
+fixed-17-place descriptive displays and exact IEEE-754 binary64 encodings are:
+
+```text
+parent
+  0.00159052265885429   0x3f5a0f22b369b200
+ -0.02579276163053867   0xbf9a696aeeb4ed80
+  0.01376592614587491   0x3f8c314f54c3f600
+  0.00760951011991107   0x3f7f2b2651a85780
+ -0.00116870564483673   0xbf5325e8217c8200
+anchor-256
+  0.00999838888064231   0x3f847a090a0a5700
+  0.00404574924427409   0x3f7092468b125340
+  0.03386177949051072   0x3fa15654c6fe01c0
+  0.01568416924019622   0x3f900f82c7ce68e0
+  0.00908245050923784   0x3f8299d1df3cdb40
+```
+
+These ten bit patterns are now exact pre-treatment reproduction anchors in
+addition to the model fingerprints and frozen root/recipe/base contracts.
+Any mismatch is infrastructure exit `2`; they are not toleranced numerical
+science gates.
+
+The 512 gate is conjunctive:
+
+- the exact parent fingerprint/census and 256-anchor
+  fingerprint/root/recipe/base contracts above reproduce;
+- all five candidate margins are at least `+0.005`, and no dominated action
+  is in exact-max support;
+- mean target KL strictly improves over 256;
+- all ten machine-bound controls preserve the D0 declaration's exact
+  direction/support semantics, including productive Growth, live Force Spike,
+  three productive Counterspells, descriptive payable-Force parent behavior,
+  redundant-counter Pass, development-RU X=0/positive-X behavior, and the two
+  training-root productive-sibling controls;
+- the parent and production base/accounting are bit-identical; only the
+  Priority component changes; direct and repeated 512 fits are bit-identical;
+  complete hidden-repartition and reversed-input fits are bit-identical;
+- strict focused tests and ASan/UBSan pass.
+
+The fixed scientific command will be:
+
+```sh
+./build/old-school-fq4-priority-fit-d0b
+```
+
+Exit `0` means only that this training-surface qualification passes and
+licenses the separately declared all-five D1 field gate. A structurally valid
+512 candidate missing any candidate/KL/control gate exits `1`. Artifact,
+parent/anchor, root/control census, label, recipe, component, accounting,
+hidden/order, or repeat drift exits `2`. If D0b rejects, do not try another
+epoch count opportunistically; declare a different bounded convergence or
+capacity study. D0b cannot itself license gameplay or a Learned-is-king
+claim.
+
+##### FQ4-D0b result: PASS; fixed 512 budget qualifies for D1
+
+Completed 2026-07-28 00:24 PDT after the exact old-D0 anchor capture,
+14/14 release and ASan/UBSan tests, a passing incremental-build-graph test,
+and independent source review with no P0/P1 finding. `REVIEW.md` was reread
+through its newest 00:14 endorsement immediately before the production
+result was recorded. No gameplay, D1, Handcrafted, or mixed-field seed was
+opened. C16 remains champion.
+
+The single preregistered command was:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-fit-d0b
+```
+
+It exited `0` in 3.56 seconds (`user 3.51`, `sys 0.01`) with:
+
+```text
+parent_fingerprint=68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+training_input_sha256=aecb2cf4001ac95f161ca199a81eeaa770e2c9d144d4a96035813188159e66ae
+parent_below_0.005=3
+anchor_epochs=256
+anchor_fingerprint=7079f8f306f90d54df21fedcf81213cc6ad5df6c5c1df46e9b3456ccd550c312
+treatment_epochs=512
+treatment_fingerprint=81ad05d2c32bea9b17ca4c89cbbf7a9be105ad130897f79fa4d8a29a5ea1105e
+treatment_at_0.005=5/5
+```
+
+The equal-root target-to-candidate forward KL decreased from
+`0.00027854071000789` to `0.00012948965023362` (a descriptive 53.5%
+reduction). Per-root anchor → treatment KL was:
+
+```text
+Green sick-Bear Growth       0.00000000002409313 -> 0.00000000005415908
+Blue Braingeyser X=0         0.00075511324728887 -> 0.00033780649846116
+RU Disintegrate X=0          0.00008050885864168 -> 0.00005066239808061
+```
+
+The Green per-root KL rose by about `3e-11`, descriptively negligible and
+not a registered per-root gate; the preregistered equal-root mean improved.
+All five parent → anchor-256 → treatment-512 production margins were:
+
+```text
+Green sick-Bear Growth
+  +0.00159052265885429 -> +0.00999838888064231 -> +0.01000224999763677
+Blue Braingeyser X=0 opponent
+  -0.02579276163053867 -> +0.00404574924427409 -> +0.00689705061997786
+Blue Braingeyser X=0 self
+  +0.01376592614587491 -> +0.03386177949051072 -> +0.03516919240420630
+validation RU Disintegrate X=0 target 0
+  +0.00760951011991107 -> +0.01568416924019622 -> +0.01476817663311569
+validation RU Disintegrate X=0 target 1
+  -0.00116870564483673 -> +0.00908245050923784 -> +0.00832418695250670
+```
+
+Thus the sole D0 miss, Blue-opponent, crossed the frozen `+0.005` gate while
+all four previously passing rows stayed above it. Every dominance label was
+strict in 64/64 worlds. All ten named collateral controls passed. Exact
+parent/anchor artifacts and ten binary64 margin anchors reproduced;
+optimizer-only-epochs, shared-input identity, pooled-KL improvement,
+parent immutability, only-Priority change, repeat fit, hidden repartition,
+action order, and base/accounting each reported `1`.
+
+Decision: **accept D0b as a PASS of the fixed 256→512 training-surface
+budget-response hypothesis and freeze fingerprint `81ad05d2…` for D1.**
+This is not evidence of general optimizer convergence, gameplay strength,
+promotion over C16, or Learned being king. It licenses only the separately
+preregistered all-five-deck D1 held-out replay gate. If D1 fails, the
+candidate stops before any 200-pair smoke or high-power gameplay benchmark.
+
+Next experiment: preregister D1 over fresh replayable roots from reserved
+field seeds `790` and `791`, balanced across Green, Red, Blue, White, and RU
+Aggro, comparing the frozen 512 candidate against C16 with class repairs,
+zero-regression, and per-deck no-worse gates. No D1 state has yet been
+harvested or scored.
+
+Post-result output-only hardening: independent reproduction correctly noted
+that the pre-treatment command's `fixed` precision of 17 places did not make
+the displayed decimals round-trip encodings for small values; the adjacent
+hexadecimal bit patterns were and remain exact. Both D0/D0b mains now use
+`max_digits10` significant digits for future human-readable output. No model,
+fit, gate, fingerprint, score, or recorded result changed, and the
+no-argument D0b scientific command was not reopened for this formatting edit.
+
+Checkpoint verification then passed:
+
+```sh
+make -j4 test-fq4-priority-fit-d0b
+# 14/14 plus bad-argument CLI
+make test-build-graph
+# shared-object incremental build tests passed
+/usr/bin/time -p make -j4 test
+# exit 0; real 259.96
+```
+
+The complete gate included 168 engine, 27 learned-iteration, 57 probe,
+11 probe-metric, 33 probe-runner, all audit/FQ0/FQ4 suites, 18 web bridge,
+106 web, 48 certification, CLI/capture/clean/incremental contracts, and the
+representative five-game simulator smoke. The focused FQ4 binary also passed
+14/14 under ASan/UBSan in the implementer handoff.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
