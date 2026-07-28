@@ -16314,10 +16314,26 @@ before work resumes:
    bootstrap equal to rollouts. Publisher accounting remains zero fits,
    candidate rollouts, and gameplay seeds.
 
+The existing hidden-clone contract permits `eligible=false, distinct=false`.
+DEV5 does not add hidden-clone distinctness to the already-frozen selector:
+all 320 selected roots receive a hidden-control score call, genuinely
+distinct clones must be bit-identical, and nondistinct clones must remain
+bit-identical trivially. Report distinct/nondistinct counts per split/deck,
+but do not use them as an after-the-fact capacity gate. In every case retain
+the existing invariant `eligible == distinct`.
+
+The 1:1 statement above is explicitly about summed example loss mass. The
+unchanged Adam implementation normalizes a minibatch by row cardinality, and
+adding 160 rows changes the number and composition of optimizer steps.
+Therefore this fixed 248-example treatment does not claim equal per-step
+gradient influence; that optimizer exposure is part of the one frozen
+candidate being tested, not a tunable correction.
+
 With these corrections the adversarial review's objections are adopted in
-full and implementation is licensed. `REVIEW.md` was reread through its
-newest 08:19 verification addendum before this addendum; it independently
-marks commit `3863dec` green and contains no conflicting post-census result.
+full. A rereview returned IMPLEMENTATION GO without opening evidence.
+`REVIEW.md` was reread through its newest 08:19 verification addendum before
+this addendum; it independently marks commit `3863dec` green and contains no
+conflicting post-census result.
 
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
