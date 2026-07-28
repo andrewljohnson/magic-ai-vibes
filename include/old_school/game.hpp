@@ -541,6 +541,10 @@ inline constexpr std::size_t kBotMatchupCount =
     kBotKindCount * (kBotKindCount - 1) / 2;
 inline constexpr std::size_t
     kLearnedValueSearchHorizonTurns = 4;
+inline constexpr std::size_t
+    kLearnedValueSearchRolloutsPerWorld = 1;
+inline constexpr bool
+    kLearnedValueSearchBlendsShallowPrior = true;
 
 class LearnedModel;
 class LearnedPolicyRecorder;

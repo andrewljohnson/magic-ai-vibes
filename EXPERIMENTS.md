@@ -15495,10 +15495,45 @@ alone is not behavior identity:
 ```text
 variant=ValueSearchChampion training_games=800
 worlds_per_action=8 rollouts_per_world=1 horizon_turns=4
+root_search_depth=1
 shallow_prior=on root_exploration=0 continuation_epsilon=0
 priority_residual_weight=0.10 pass_dominance=off
 continuation_controller=Legacy max_turns=500
 ```
+
+Clarified 2026-07-28 06:22 PDT, still before publishing the artifact or
+opening any gameplay seed: `root_search_depth=1` is part of both arms'
+behavior identity. This is the existing one-root-search production surface;
+the four-turn continuation disables nested root search. The fixed artifact,
+consumer, and report must bind and print this value rather than inheriting a
+default.
+
+Pre-publication implementation gate completed 2026-07-28 06:30 PDT. The
+artifact, fixed publisher, and load-only gameplay suites passed 5/5, 7/7,
+and 10/10 under both the release build and AddressSanitizer plus
+UndefinedBehaviorSanitizer:
+
+```sh
+make -j4 test-fq4-dev-candidate-artifact \
+  test-fq4-dev-candidate-publisher test-fq4-dev1-gameplay
+make -j4 BUILD_DIR=build-fq4-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -fno-omit-frame-pointer \
+  -fsanitize=address,undefined -Wall -Wextra -Wpedantic -Werror' \
+  test-fq4-dev-candidate-artifact \
+  test-fq4-dev-candidate-publisher test-fq4-dev1-gameplay
+make -j4 test
+```
+
+The full repository gate passed: engine 171/171, learned iteration 27/27,
+probe 57/57, probe metrics 11/11, probe runner 33/33, every frozen audit and
+FQ4 suite, web bridge 18/18, web client 106/106, and certification 48/48.
+Two independent read-only reviews returned GO after the consumer was changed
+to license only GP0, revalidate models and artifacts after the identical
+control, and bind R1/shallow-on/root-depth-one to the live engine. Publication
+coordinates remain absent and the pinned consumer remains intentionally
+fail-closed. No publisher or reserved gameplay seed has run. The simulator
+process noted in `REVIEW.md` at 06:29 was the full gate's ordinary
+`--games 5 --seed 1` CLI smoke, not GP0 or its reserved seed.
 
 The control uses exact C16 with this same recipe. The treatment changes only
 the outer Priority tensors to `71260078...6151`. In particular, residual

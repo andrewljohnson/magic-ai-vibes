@@ -11990,6 +11990,12 @@ class LearnedValuePriorityScoreAggregate {
     double score_ = 0.0;
 };
 
+// The deployed value-search path evaluates exactly one continuation for each
+// sampled determinization. A recipe that needs more samples per world must
+// use the explicit LearnedSearchConfig evaluator rather than silently
+// changing this production path.
+static_assert(kLearnedValueSearchRolloutsPerWorld == 1);
+
 } // namespace
 
 std::vector<PriorityAction>
@@ -13315,14 +13321,17 @@ PriorityAction Game::choose_priority_action(
             // complete continuations. This prior never force-resolves hidden
             // state: its mean is evaluated over the same common worlds.
             LearnedValuePriorityScoreAggregate aggregate;
-            for (const auto& world : worlds) {
-                aggregate.add_shallow(
-                    learned_value_shallow_action_score(
-                        actions[action_index], player, sorcery_actions,
-                        phase, consecutive_passes,
-                        world.state));
+            if constexpr (
+                kLearnedValueSearchBlendsShallowPrior) {
+                for (const auto& world : worlds) {
+                    aggregate.add_shallow(
+                        learned_value_shallow_action_score(
+                            actions[action_index], player,
+                            sorcery_actions, phase,
+                            consecutive_passes, world.state));
+                }
+                aggregate.average_shallow(worlds.size());
             }
-            aggregate.average_shallow(worlds.size());
             if (root_search) {
                 for (const auto& world : worlds) {
                     aggregate.add_continuation(
@@ -13334,7 +13343,8 @@ PriorityAction Game::choose_priority_action(
                             world.continuation_seed));
                 }
                 aggregate.average_continuations(
-                    worlds.size(), true);
+                    worlds.size(),
+                    kLearnedValueSearchBlendsShallowPrior);
             }
             scores[action_index] = aggregate.score();
         }
@@ -22876,15 +22886,18 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
          action_index < diagnostic.actions.size();
          ++action_index) {
         LearnedValuePriorityScoreAggregate aggregate;
-        for (const auto& world : worlds) {
-            aggregate.add_shallow(
-                evaluator.learned_value_shallow_action_score(
-                    diagnostic.actions[action_index], player,
-                    sorcery_actions, phase,
-                    consecutive_passes,
-                    world.state));
+        if constexpr (
+            kLearnedValueSearchBlendsShallowPrior) {
+            for (const auto& world : worlds) {
+                aggregate.add_shallow(
+                    evaluator.learned_value_shallow_action_score(
+                        diagnostic.actions[action_index], player,
+                        sorcery_actions, phase,
+                        consecutive_passes,
+                        world.state));
+            }
+            aggregate.average_shallow(worlds.size());
         }
-        aggregate.average_shallow(worlds.size());
         if (rollouts_per_action == 0) {
             diagnostic.base_scores[action_index] =
                 aggregate.score();
@@ -22898,7 +22911,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
                     world.state, world.continuation_seed));
         }
         aggregate.average_continuations(
-            worlds.size(), true);
+            worlds.size(),
+            kLearnedValueSearchBlendsShallowPrior);
         diagnostic.base_scores[action_index] =
             aggregate.score();
     }

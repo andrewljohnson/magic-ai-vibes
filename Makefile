@@ -86,6 +86,9 @@ FQ4_PRIORITY_COLLECTION_SOURCE := src/fq4_priority_collection.cpp
 FQ4_DEV_BUNDLE_SOURCE := src/fq4_dev_bundle.cpp
 FQ4_DEV_GENERATOR_SOURCE := src/fq4_dev_generator.cpp
 FQ4_DEV_EVALUATOR_SOURCE := src/fq4_dev_evaluator.cpp
+FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE := src/fq4_dev_candidate_artifact.cpp
+FQ4_DEV_CANDIDATE_PUBLISHER_SOURCE := src/fq4_dev_candidate_publisher.cpp
+FQ4_DEV1_GAMEPLAY_SOURCE := src/fq4_dev1_gameplay.cpp
 FQ4_PRIORITY_FIT_SOURCE := src/fq4_priority_fit.cpp
 FQ4_D1_FIELD_GATE_SOURCE := src/fq4_d1_field_gate.cpp
 FQ4_D1_TREATMENT_SOURCE := src/fq4_d1_treatment.cpp
@@ -145,6 +148,11 @@ FQ4_DEV_GENERATOR_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev-generator-tests
 FQ4_DEV_GENERATOR := $(BUILD_DIR)/old-school-fq4-priority-dev-generate
 FQ4_DEV_EVALUATOR_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev-evaluator-tests
 FQ4_DEV_EVALUATOR := $(BUILD_DIR)/old-school-fq4-priority-dev-evaluate
+FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev-candidate-artifact-tests
+FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev-candidate-publisher-tests
+FQ4_DEV_CANDIDATE_PUBLISHER := $(BUILD_DIR)/old-school-fq4-dev1-candidate-publish
+FQ4_DEV1_GAMEPLAY_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev1-gameplay-tests
+FQ4_DEV1_GAMEPLAY := $(BUILD_DIR)/old-school-fq4-dev1-gameplay
 FQ4_PRIORITY_FIT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-priority-fit-tests
 FQ4_PRIORITY_FIT := $(BUILD_DIR)/old-school-fq4-priority-fit
 FQ4_PRIORITY_FIT_D0B := $(BUILD_DIR)/old-school-fq4-priority-fit-d0b
@@ -171,7 +179,7 @@ endif
 FQ4_DEV_GENERATOR_MAIN_OBJECT := $(OBJ_DIR)/src/fq4_dev_generator_main.$(FQ4_DEV_PRODUCER_COMMIT).o
 FQ4_DEV_GENERATOR_MAIN_DEPFILE := $(FQ4_DEV_GENERATOR_MAIN_OBJECT:.o=.d)
 
-.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-dev-candidate-artifact test-fq4-dev-candidate-publisher fq4-dev-candidate-publish test-fq4-dev1-gameplay test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -286,6 +294,9 @@ FQ4_PRIORITY_COLLECTION_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOU
 FQ4_DEV_BUNDLE_LINK_SOURCES := $(ARTIFACT_INTEGRITY_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE)
 FQ4_DEV_GENERATOR_LINK_SOURCES := $(FQ4_PRIORITY_COLLECTION_LINK_SOURCES) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE) $(FQ4_DEV_GENERATOR_SOURCE)
 FQ4_DEV_EVALUATOR_LINK_SOURCES := $(FQ4_PRIORITY_COLLECTION_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_DEV_BUNDLE_SOURCE) $(FQ4_DEV_EVALUATOR_SOURCE)
+FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE)
+FQ4_DEV_CANDIDATE_PUBLISHER_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE) $(FQ4_DEV_CANDIDATE_PUBLISHER_SOURCE)
+FQ4_DEV1_GAMEPLAY_LINK_SOURCES := $(FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES) $(FQ4_DEV1_GAMEPLAY_SOURCE)
 FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
 FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
@@ -327,6 +338,16 @@ $(eval $(call link_program,$(FQ4_DEV_GENERATOR_TEST_RUNNER),$(FQ4_DEV_GENERATOR_
 $(eval $(call link_program,$(FQ4_DEV_EVALUATOR_TEST_RUNNER),$(FQ4_DEV_EVALUATOR_LINK_SOURCES) tests/test_fq4_dev_evaluator.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_EVALUATOR),$(FQ4_DEV_EVALUATOR_LINK_SOURCES) src/fq4_dev_evaluator_main.cpp))
+
+$(eval $(call link_program,$(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER),$(FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES) tests/test_fq4_dev_candidate_artifact.cpp))
+
+$(eval $(call link_program,$(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER),$(FQ4_DEV_CANDIDATE_PUBLISHER_LINK_SOURCES) tests/test_fq4_dev_candidate_publisher.cpp))
+
+$(eval $(call link_program,$(FQ4_DEV_CANDIDATE_PUBLISHER),$(FQ4_DEV_CANDIDATE_PUBLISHER_LINK_SOURCES) src/fq4_dev_candidate_publisher_main.cpp))
+
+$(eval $(call link_program,$(FQ4_DEV1_GAMEPLAY_TEST_RUNNER),$(FQ4_DEV1_GAMEPLAY_LINK_SOURCES) tests/test_fq4_dev1_gameplay.cpp))
+
+$(eval $(call link_program,$(FQ4_DEV1_GAMEPLAY),$(FQ4_DEV1_GAMEPLAY_LINK_SOURCES) src/fq4_dev1_gameplay_main.cpp))
 
 $(FQ4_DEV_GENERATOR_MAIN_OBJECT): src/fq4_dev_generator_main.cpp
 	@mkdir -p "$(@D)"
@@ -377,7 +398,7 @@ $(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(FQ4_PRIORITY_MATH_TEST_RUNNER) $(FQ4_PRIORITY_COLLECTION_TEST_RUNNER) $(FQ4_DEV_BUNDLE_TEST_RUNNER) $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR) $(FQ4_DEV_EVALUATOR_TEST_RUNNER) $(FQ4_DEV_EVALUATOR) $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT) $(FQ4_PRIORITY_FIT_D0B) $(FQ4_D1_FIELD_GATE_TEST_RUNNER) $(FQ4_D1_CENSUS) $(FQ4_D1_TREATMENT_TEST_RUNNER) $(FQ4_D1_TREATMENT) $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(FQ4_PRIORITY_MATH_TEST_RUNNER) $(FQ4_PRIORITY_COLLECTION_TEST_RUNNER) $(FQ4_DEV_BUNDLE_TEST_RUNNER) $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR) $(FQ4_DEV_EVALUATOR_TEST_RUNNER) $(FQ4_DEV_EVALUATOR) $(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER) $(FQ4_DEV1_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV1_GAMEPLAY) $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT) $(FQ4_PRIORITY_FIT_D0B) $(FQ4_D1_FIELD_GATE_TEST_RUNNER) $(FQ4_D1_CENSUS) $(FQ4_D1_TREATMENT_TEST_RUNNER) $(FQ4_D1_TREATMENT) $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
@@ -420,6 +441,9 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(FQ4_DEV_BUNDLE_TEST_RUNNER)
 	./$(FQ4_DEV_GENERATOR_TEST_RUNNER)
 	./$(FQ4_DEV_EVALUATOR_TEST_RUNNER)
+	./$(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER)
+	./$(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER)
+	./$(FQ4_DEV1_GAMEPLAY_TEST_RUNNER)
 	./$(FQ4_PRIORITY_FIT_TEST_RUNNER)
 	@set +e; output=`./$(FQ0_BELLMAN_AUDIT) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
@@ -480,6 +504,49 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	@if rg -n 'error=|\.what\(\)' \
 		src/fq4_dev_evaluator_main.cpp >/dev/null; then \
 		printf 'FQ4-DEV1 evaluator CLI can disclose exception details\n' >&2; \
+		exit 1; \
+	fi
+	@set +e; output=`./$(FQ4_DEV_CANDIDATE_PUBLISHER) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FQ4-DEV1 candidate publisher accepted an argument\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+	@set +e; output=`./$(FQ4_DEV1_GAMEPLAY) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FQ4-DEV1 gameplay accepted an arbitrary mode\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+	@case " $(FQ4_DEV1_GAMEPLAY_LINK_SOURCES) " in \
+		*" src/fq4_dev_bundle.cpp "*|\
+		*" src/fq4_dev_evaluator.cpp "*|\
+		*" src/fq4_dev_generator.cpp "*|\
+		*" src/fq4_priority_fit.cpp "*|\
+		*" src/fq4_d1_field_gate.cpp "*|\
+		*" src/fq4_d1_treatment.cpp "*|\
+		*" src/fq4_d1_treatment_production.cpp "*|\
+		*" src/fq0_information_set.cpp "*|\
+		*" src/fq0_dominance.cpp "*|\
+		*" src/fq0_dominance_transition.cpp "*) \
+			printf 'FQ4-DEV1 gameplay link graph crossed its load-only firewall\n' >&2; \
+			exit 1;; \
+	esac
+	@if rg -n \
+		'#include "old_school/(fq4_dev_bundle|fq4_dev_evaluator|fq4_dev_generator|fq4_priority_fit|fq4_d1_field_gate|fq4_d1_treatment|fq0_information_set|fq0_dominance|fq0_dominance_transition)\.hpp"' \
+		include/old_school/fq4_dev_candidate_artifact.hpp \
+		include/old_school/fq4_dev1_gameplay.hpp \
+		src/fq4_dev_candidate_artifact.cpp \
+		src/fq4_dev1_gameplay.cpp \
+		src/fq4_dev1_gameplay_main.cpp >/dev/null; then \
+		printf 'FQ4-DEV1 load-only source crossed a training/evaluator firewall\n' >&2; \
+		exit 1; \
+	fi
+	@if nm "$(FQ4_DEV1_GAMEPLAY)" | \
+		rg -q 'fq4_dev_(bundle|evaluator|generator)|fq4_priority_fit|fq4_d1_|fq0_(information_set|dominance)'; then \
+		printf 'FQ4-DEV1 gameplay binary contains forbidden research symbols\n' >&2; \
 		exit 1; \
 	fi
 	@set +e; output=`./$(FQ4_PRIORITY_FIT_D0B) unexpected 2>&1`; status=$$?; set -e; \
@@ -882,6 +949,51 @@ test-fq4-dev-evaluator: $(FQ4_DEV_EVALUATOR_TEST_RUNNER) $(FQ4_DEV_EVALUATOR)
 
 fq4-dev-evaluator: $(FQ4_DEV_EVALUATOR)
 	./$(FQ4_DEV_EVALUATOR) --evaluate-parent
+
+test-fq4-dev-candidate-artifact: $(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER)
+	./$(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER)
+
+test-fq4-dev-candidate-publisher: $(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER)
+	./$(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER)
+	@set +e; output=`./$(FQ4_DEV_CANDIDATE_PUBLISHER) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FQ4-DEV1 candidate publisher accepted an argument\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+
+fq4-dev-candidate-publish: $(FQ4_DEV_CANDIDATE_PUBLISHER)
+	./$(FQ4_DEV_CANDIDATE_PUBLISHER)
+
+test-fq4-dev1-gameplay: $(FQ4_DEV1_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV1_GAMEPLAY)
+	./$(FQ4_DEV1_GAMEPLAY_TEST_RUNNER)
+	@set +e; output=`./$(FQ4_DEV1_GAMEPLAY) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FQ4-DEV1 gameplay accepted an arbitrary mode\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+	@case " $(FQ4_DEV1_GAMEPLAY_LINK_SOURCES) " in \
+		*" src/fq4_dev_bundle.cpp "*|\
+		*" src/fq4_dev_evaluator.cpp "*|\
+		*" src/fq4_dev_generator.cpp "*|\
+		*" src/fq4_priority_fit.cpp "*|\
+		*" src/fq4_d1_field_gate.cpp "*|\
+		*" src/fq4_d1_treatment.cpp "*|\
+		*" src/fq4_d1_treatment_production.cpp "*|\
+		*" src/fq0_information_set.cpp "*|\
+		*" src/fq0_dominance.cpp "*|\
+		*" src/fq0_dominance_transition.cpp "*) \
+			printf 'FQ4-DEV1 gameplay link graph crossed its load-only firewall\n' >&2; \
+			exit 1;; \
+	esac
+	@if nm "$(FQ4_DEV1_GAMEPLAY)" | \
+		rg -q 'fq4_dev_(bundle|evaluator|generator)|fq4_priority_fit|fq4_d1_|fq0_(information_set|dominance)'; then \
+		printf 'FQ4-DEV1 gameplay binary contains forbidden research symbols\n' >&2; \
+		exit 1; \
+	fi
 
 test-fq4-priority-fit: $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT)
 	./$(FQ4_PRIORITY_FIT_TEST_RUNNER)
