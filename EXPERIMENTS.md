@@ -15279,6 +15279,122 @@ before this conclusion. It observes the implementation in progress and keeps
 the frozen timing measurement as the next event; there is no conflicting
 critique.
 
+FQ4-DEV1 warm-loop timing and representative fit result, completed
+2026-07-28 05:40 PDT from committed and pushed implementation
+`a7a36d34251fa691ffffa042bf8e74d1d7682f13`:
+**speed hypothesis PASS; the representative candidate descriptively improved
+the frozen offline metrics, with no gameplay-strength claim**.
+
+A post-commit audit first found that the release evaluator predated the final
+Makefile-only removal of `fq4_dev_schedule.cpp` from its link graph. The
+shared-object graph did not consider that Makefile-only link-list change a
+relink dependency, so the stale binary was rejected before any production
+mode ran. The exact committed graph was then force-rebuilt:
+
+```sh
+make -B -j4 test-fq4-dev-evaluator
+```
+
+The resulting 2,283,592-byte evaluator had SHA-256
+`56661ce8a482e8eea77dd635c58b91a071d3ab83918546658bc0eb64312e76b8`.
+It contained no generator, schedule, D1, parent-census, or FQ4-priority-fit
+symbols. Artifact and C16 identities remained
+`0911fc2e...859df` and `53aeb904...44ca`; the focused evaluator suite passed
+9/9. A fresh independent post-relink audit returned execution GO. The
+Makefile-only link-graph invalidation gap is a build-system follow-up; it did
+not affect the freshly relinked measured executable.
+
+The single unmeasured warmup process was:
+
+```sh
+./build/old-school-fq4-priority-dev-evaluate --evaluate-parent
+```
+
+It returned a complete 7,460-byte PASS report with SHA-256
+`3571ad5c896fd88f62e7b3a06cf4c8d172d91b9358c2ce255190787502081190`,
+192/1,141 exact parent row/action anchors, immutable C16, identical candidate
+and parent fingerprints, and zero offline accounting. Its surrounding zsh
+capture attempted to assign the shell's read-only `status` variable after the
+child completed, so that wrapper exited 1; the already completed evaluator
+output was intact and validated, and the warmup was not rerun.
+
+Ten separate measured processes then used:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-priority-dev-evaluate --evaluate-parent
+```
+
+External real times in run order were:
+
+```text
+0.32 0.27 0.27 0.27 0.27 0.28 0.27 0.27 0.27 0.27
+```
+
+All ten outputs were byte-identical to the warmup. Sorted positions five and
+six were both 0.27 seconds, so the preregistered median was **0.27 seconds**;
+maximum was **0.32 seconds**. This passes the `<2 s` median and `<5 s`
+maximum gates by wide margins.
+
+The one fixed representative fit used optimizer seed `202607280212`, 88 FIT
+positive roots / 548 options, 94 CHECK positive roots / 571 options, and:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-priority-dev-evaluate --fit
+```
+
+It returned exit 0 in **0.57 seconds** real / 0.55 user / 0.01 sys, passing
+the `<15 s` gate. CHECK examples and background-only examples were exactly
+zero at the update boundary; optimizer calls were exactly one. Training-input
+SHA-256 was
+`586b121c3c9bdb1a61305cac86882cd20b5d2ba332b4d5a54defc2c7756393a1`.
+The candidate fingerprint was
+`712600783152e89ff1a53394149764db227e55289a656530342226b7e1ee6151`;
+all non-Priority components were bit-identical to C16. Complete output was
+8,342 bytes with SHA-256
+`fdb3cab4fda71837dae796da3e075a4060f2ab77e44abc7d055fd6ecd4a5b2e4`.
+
+FIT metrics:
+
+| Deck | Roots | KL parent -> candidate | Mean margin parent -> candidate | Exact-support violations parent -> candidate | Repairs / regressions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Green | 11 | 0.0017776746819072029 -> 0.00062166515660411854 | 0.0015756077418903045 -> 0.012905355577129669 | 7/11 -> 1/11 | 5 / 0 |
+| Red | 4 | 0.00020222144495678134 -> 0.00019695514904138027 | 0.0029397693408457163 -> 0.012926263868056658 | 0/4 -> 0/4 | 0 / 0 |
+| Blue | 31 | 0.0050478632946339939 -> 0.0037048261044942228 | -0.00822717844949984 -> 0.0031302668152353367 | 11/31 -> 2/31 | 6 / 0 |
+| White | 13 | 0.00073197003519901338 -> 0.0000059525444139865438 | -0.0012126397013468421 -> 0.0094557269396616205 | 13/13 -> 0/13 | 13 / 0 |
+| RU Aggro | 29 | 0.00048984581006249357 -> 0.00026760584718583036 | 0.024373966956789176 -> 0.031938884870628369 | 6/29 -> 0/29 | 6 / 0 |
+| Equal-deck aggregate | 88 | 0.001649915053351897 -> 0.00095940096034790765 | 0.0038899051777357033 -> 0.01407129961414233 | 37/88 -> 3/88 | 30 / 0 |
+
+CHECK metrics:
+
+| Deck | Roots | KL parent -> candidate | Mean margin parent -> candidate | Exact-support violations parent -> candidate | Repairs / regressions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Green | 20 | 0.00096915653416585672 -> 0.00010291562497506007 | 0.0003094476758379407 -> 0.012107029267713749 | 12/20 -> 0/20 | 11 / 0 |
+| Red | 5 | 0.00016983866979056072 -> 0.00030392945006809958 | 0.089390099612102467 -> 0.099018160119248078 | 0/5 -> 0/5 | 0 / 0 |
+| Blue | 31 | 0.0034493655246294538 -> 0.0025934463399429177 | -0.0042536812413890811 -> 0.006631477662729088 | 11/31 -> 0/31 | 11 / 0 |
+| White | 7 | 0.00088251344632177611 -> 0.000020291173436261998 | -0.0015731653075393703 -> 0.009070276070898671 | 7/7 -> 0/7 | 7 / 0 |
+| RU Aggro | 31 | 0.00041779120633371865 -> 0.00026330999513683642 | 0.015091033329676734 -> 0.022709588757658765 | 8/31 -> 0/31 | 8 / 0 |
+| Equal-deck aggregate | 94 | 0.0011777330762482734 -> 0.00065677851671183511 | 0.01979274681373774 -> 0.029907306375649673 | 38/94 -> 0/94 | 37 / 0 |
+
+CHECK's only KL increase was Red, whose five roots were already all Safe with
+zero support violations; its mean margin increased and it stayed 5/5 Safe.
+Overall CHECK moved from class counts `56,14,23,1` to `94,0,0,0`, repaired
+all 37 Class-1/2 roots, introduced zero severity regressions, and performed no
+game, determinization, search, sampled-world, rollout, or leaf work.
+
+Decision: accept the DEV1 cached evaluator as the ordinary research loop.
+Iteration that previously paid minutes of gameplay collection now takes about
+**0.57 seconds for fit plus complete five-deck FIT/CHECK scoring** on this
+machine. Do not promote the representative candidate from these development
+metrics. The next experiment must expose this exact isolated Priority repair
+to the frozen gameplay harness, then run a fresh all-five-deck large-regression
+screen before any milestone gate.
+
+`REVIEW.md` was reread through its newest 05:29 cycle immediately before the
+fit and again before this conclusion. It explicitly named this timing
+measurement as the next event and contains no conflicting post-result entry.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
