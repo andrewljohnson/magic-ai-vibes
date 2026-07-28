@@ -15113,6 +15113,73 @@ unchanged executable/parent identities. It returned GO to accept the corpus
 as immutable development infrastructure, explicitly not as strength or
 warm-loop speed evidence.
 
+FQ4-DEV1 evaluator metric/timing clarification, declared 2026-07-28 05:10
+PDT after corpus publication but before fitting or evaluating any candidate.
+The original declaration froze the optimizer and named its diagnostics, but
+did not freeze every diagnostic formula. This clarification closes that
+interpretive degree of freedom without seeing a candidate result.
+
+Only rows carrying `DominancePositive` enter every metric below; a background
+row that also carries that bit enters once, and a background-only row is
+excluded. For each row:
+
+1. Reconstruct parent and candidate combined scores as frozen base score plus
+   the shared centered-`tanh` Priority residual at weight `0.10`.
+2. Define raw behavior as softmax of combined scores at temperature `0.10`,
+   then deployed training behavior as `0.90 * raw + 0.10 / N`.
+3. Construct the frozen target exactly as already declared: reverse-KL
+   I-project the parent's raw behavior so Pass is at least
+   `1.1051701859880913` times every robustly Pass-dominated action, then apply
+   the same `0.90 / 0.10` mixture.
+4. KL is `D_KL(target || behavior)`, reported for parent and candidate. Take
+   an equal arithmetic mean over roots within deck, then an equal arithmetic
+   mean over all five deck means. No action-, constraint-, or row-count
+   weighting may replace that deck-balanced value.
+5. Each robust constraint margin is
+   `candidate_combined_score[Pass] - candidate_combined_score[action]`.
+   Per root report the arithmetic mean and minimum over its constraints;
+   per-deck and pooled mean margins use the same equal-root then equal-deck
+   aggregation. Per-deck and pooled minimum margins are literal minima, not
+   averages.
+6. Exact argmax support contains every action whose combined-score binary64
+   bits equal the maximum action's bits. A root violates exact support iff
+   that support contains any robustly Pass-dominated action. Report
+   numerator/denominator and fraction per deck plus pooled counts; pooled
+   fraction is descriptive and does not replace deck-balanced metrics.
+7. Parent and candidate classes use the existing K8 paired classifier and
+   class order `Safe, Class1, Class2, Class3`. Report the complete 4x4
+   transition matrix per deck and pooled. A repair is parent Class1 or Class2
+   to candidate Safe. Severity is `Safe=0, Class3=1, Class2=2, Class1=3`; a
+   regression is any strict candidate severity increase.
+
+All outputs are aggregate counts/scalars only. No stable root, action,
+descriptor, hand, state, score vector, or per-root metric may be printed.
+CHECK is evaluated repeatedly but never passed to the update boundary. The
+representative candidate remains descriptive development evidence: its
+metrics cannot promote it or alter the already frozen optimizer.
+
+Before the first fit, report the artifact-only distribution of robust
+constraint counts per positive row and its maximum. The current exact
+reverse-KL solver must not execute if its worst-case work at that maximum is
+unbounded or impractical; replace it with an independently tested exact
+star-constraint solver first if necessary. This preflight may inspect the
+published development artifact but no candidate.
+
+Timing protocol: run one unmeasured fixed parent-evaluation process to warm
+the OS page cache, then ten separate identical fixed parent-evaluation
+processes. Measure complete process wall time including load, strict
+validation, parent load/reproduction, and evaluation. For ten values, median
+is the arithmetic mean of sorted positions five and six; require median below
+two seconds and maximum below five seconds. Then run one separate exact
+16-epoch FIT update plus complete parent/candidate FIT/CHECK evaluation and
+require process wall time below fifteen seconds. Internal phase timers are
+descriptive; external whole-process wall time controls the gates. Neither
+mode may construct a game, determinize a state, or perform a rollout.
+
+`REVIEW.md` was reread through its newest 05:04 cycle before this
+clarification; it reports the committed generator and full gate green and
+contains no conflicting metric or timing prescription.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
