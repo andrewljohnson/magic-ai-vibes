@@ -17072,6 +17072,56 @@ ordinary C16 in the follow-up screen.
 This is exploration, not a strength claim. Reuse the fast runner and avoid
 artifact publication or a general-purpose audit framework.
 
+EXPLORE-3 result, completed 2026-07-28 14:47 PDT: **fast traction gate
+passed; advance C16+AdversarialBlocks to web human play-testing**. Exact
+command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-blend-explore --adversarial-blocks
+# winner mode=AdversarialBlocks stage=E1
+# variant=C16+AdversarialBlocks alpha=0 wins=127 losses=113 draws=0
+# real 225.53
+# user 1288.58
+# sys 4.96
+```
+
+E0 produced an exact aggregate tie:
+
+| Candidate | Aggregate | Green | Red | Blue | White | RU Aggro | Seconds | Decisions | Rollouts |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C16+AdversarialBlocks | 31-29 | 4-8 | 7-5 | 9-3 | 6-6 | 5-7 | 41.511 | 2,539 | 59,952 |
+| alpha0.50+AdversarialBlocks | 31-29 | 4-8 | 8-4 | 9-3 | 4-8 | 6-6 | 29.163 | 3,313 | 94,248 |
+
+The declared simplicity tie break advanced exact C16 plus only the new attack
+aggregation. Its E1 result was 127-113 (52.9167%), clustered interval
+49.2168%-56.6165%: Green 23-25, Red 27-21, Blue 27-21, White 27-21, and RU
+Aggro 23-25; 154.783 seconds, 11,594 decisions, and 283,688 rollouts. This
+clears the deliberately cheap `>50%` traction rule and, unlike the Priority
+repair family, nearly eliminates the Green collapse while winning Red, Blue,
+and White. It is not statistically certified and does not replace C16.
+
+Post-run exhaustive review found that the newly added default-off
+`BotConfig::value_adversarial_blocks` field was missing from seven historical
+sealed exact-config guards. None is linked or called by the EXPLORE-3 runner;
+production live attack selection and production Learned-mirror continuations
+were verified to carry the intended bit, so the gameplay result is faithful.
+All seven guards were repaired mechanically and no eighth direct comparator
+was found. Focused DEV-generator, D1 field-gate, DVR2, joint-C17 evaluator,
+runner, and training suites passed after the repair. The generic
+`LearnedSearchConfig` evaluation API still cannot request the treatment; this
+does not affect production or the web play-test, but must be added before
+using generic offline search/probe claims about this policy.
+
+Decision: make this dated exploratory pilot selectable in the web client and
+ask the project owner to play it, focusing on the reported bad attacks and
+chump blocks. Do not spend the 2,040-game certification gate until that human
+test says the strategic behavior has real traction. If field behavior is
+still poor, the next queued learned-model experiment is a deck-balanced
+Priority refit comparing a 925-parameter frozen trunk with the full head,
+not another policy-rule switch. `REVIEW.md` was reread through its newest
+14:44 cycle before recording this conclusion.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

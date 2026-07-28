@@ -117,6 +117,7 @@ bool learned_bot_config_exact(
            bot.value_continuation_epsilon == 0.0 &&
            bot.value_priority_residual_weight == 0.0 &&
            bot.value_pass_dominance == pass_dominance &&
+           !bot.value_adversarial_blocks &&
            bot.value_continuation_controller == controller &&
            bot.training_games == kCanonicalTrainingGames;
 }

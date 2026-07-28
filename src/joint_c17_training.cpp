@@ -241,6 +241,7 @@ bool deployment_exact(
                0.0 &&
            deployment.bot.value_pass_dominance ==
                pass_dominance &&
+           !deployment.bot.value_adversarial_blocks &&
            deployment.bot.value_continuation_controller ==
                controller &&
            deployment.bot.training_games == training_games &&

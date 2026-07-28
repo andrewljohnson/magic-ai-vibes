@@ -1477,6 +1477,7 @@ bool source_config_exact(
                 bot.value_priority_residual_weight,
                 0.0) ||
             bot.value_pass_dominance ||
+            bot.value_adversarial_blocks ||
             bot.value_continuation_controller !=
                 LearnedContinuationController::Legacy ||
             bot.training_games !=
@@ -1501,6 +1502,7 @@ GameConfig source_game_config(
         .value_continuation_epsilon = 0.0,
         .value_priority_residual_weight = 0.0,
         .value_pass_dominance = false,
+        .value_adversarial_blocks = false,
         .value_continuation_controller =
             LearnedContinuationController::Legacy,
         .training_games = kParentTrainingGames,

@@ -762,6 +762,7 @@ bool learned_value_config_exact(
            bot.value_priority_residual_weight == 0.0 &&
            bot.value_pass_dominance ==
                value_pass_dominance &&
+           !bot.value_adversarial_blocks &&
            bot.value_continuation_controller == controller &&
            bot.training_games == 800;
 }
@@ -817,6 +818,7 @@ bool handcoded_identity_exact(
            bot.value_continuation_epsilon == 0.0 &&
            bot.value_priority_residual_weight == 0.0 &&
            !bot.value_pass_dominance &&
+           !bot.value_adversarial_blocks &&
            bot.value_continuation_controller ==
                LearnedContinuationController::Legacy &&
            bot.training_games == 800 &&
