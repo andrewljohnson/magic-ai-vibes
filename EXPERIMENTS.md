@@ -15180,6 +15180,29 @@ mode may construct a game, determinize a state, or perform a rollout.
 clarification; it reports the committed generator and full gate green and
 contains no conflicting metric or timing prescription.
 
+FQ4-DEV1 artifact-only constraint preflight, completed 2026-07-28 05:14 PDT
+before any fit or candidate evaluation:
+
+| Split | Positive rows | Robust constraints | Histogram (`constraints:rows`) | Maximum |
+| --- | ---: | ---: | --- | ---: |
+| FIT | 88 | 172 | 1:32, 2:40, 3:7, 4:7, 5:1, 6:1 | 6 |
+| CHECK | 94 | 193 | 1:37, 2:35, 3:10, 4:6, 5:4, 6:2 | 6 |
+| Pooled | 182 | 365 | 1:69, 2:75, 3:17, 4:13, 5:5, 6:3 | 6 |
+
+The existing exact active-set reverse-KL projection examines at most
+`2^6 - 1 = 63` subsets per root, or at most 11,466 subset cases over the
+complete corpus, with at most 32 actions. This is prospectively accepted as
+practical; no solver replacement is needed. The independent preflight
+strictly loaded the fixed artifact and ran no fit, candidate, game,
+determinization, or rollout.
+
+Implementation guardrails found in the same API review: exact support must
+compare combined-score binary64 bits explicitly, including a `+0.0/-0.0`
+regression, because numeric equality is broader than the frozen contract.
+Severity must use an explicit `Safe=0, Class3=1, Class2=2, Class1=3` mapping
+because enum ordinal order differs. These clarify implementation of the
+already frozen formulas and do not change a metric.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
