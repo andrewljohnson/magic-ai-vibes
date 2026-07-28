@@ -12128,6 +12128,144 @@ and review, will be:
 ./build/old-school-fq0-bellman-audit
 ```
 
+#### FQ0-T0 registered result: valid composite REJECT
+
+Completed 2026-07-27 20:54 PDT from the pushed freeze commit
+`f4d7f4a950cfe8557dc655edfece6d36db912c5b`, after its independent
+post-commit GO. The exact registered command was:
+
+```sh
+./build/old-school-fq0-bellman-audit
+```
+
+The 3,784,816-byte audit executable had SHA-256
+`f8a56e017aaf037e7b8f84dfe3f921985c5feb42589d2015d3dc4b1c23a3d366`.
+It used the preregistered root/bank-A/bank-B seed bases
+`202607262351`, `202607262352`, and `202607262353`, Kroot=64,
+Ksuccessor=64, eight independent K8 blocks, four workers, exact C16 model
+artifact `53aeb904...44ca`, all 26 roots, and all five decks. It completed
+with exit `1`:
+
+```text
+FQ0-T0 REJECT: complete frozen Bellman evidence
+  roots=26 feature_rows=11541 harmful_collisions=177
+  primary_delta64=0.013178 lower95=0.012035 positive_blocks=8/8
+```
+
+This is a valid scientific rejection, not an infrastructure failure. The
+canonical evidence is
+`build/experiments/old-school-fq0-t0-bellman-v1.evidence.tsv`, exactly
+45,687,591,477 bytes with outer SHA-256
+`16e11fb40451730e87f2b40a48b6d363d6c0f10661d9de57e164374bbcb461c8`.
+Its payload SHA-256 is
+`dddb616f2d7ca099d480634d3f617aa2a47ee76e32aaae476a571c3467e1e1cf`
+and complete SHA-256 is
+`f6989c41510b3987a3ceb08bc208ff71c5667a5e009763d191b7f5b9a336e53e`.
+The section hashes are metadata `0af71784...1de`, manifest
+`f8f310b0...a19`, roots `4a9b00ed...7ea`, contrasts
+`2d62ca2b...a0e`, dominance `cfff7dc1...cca`, collisions
+`b5e58adb...3a7`, integrity `32b563e7...ee9`, and invariance
+`cae94c1a...ef9`.
+
+A separately compiled, read-only post-run validator at
+`/private/tmp/fq0-registered-postrun-validator-20260727`, SHA-256
+`8eae3d45...5c60`, independently accepted the schema, exact C16 parent,
+all section hashes, payload and complete hashes, census, and bounded reread.
+Its input buffer and observed high-water were both exactly 65,536 bytes.
+There is no `.tmp` or `.partial` sibling. All six registered invariance
+witnesses passed, including hidden repartition, thread count, descriptor
+order, repeated construction, independent manifest, and contextual/legacy
+critic identity. Artifact integrity passed.
+
+The primary Bellman hypothesis passed. Pass over Giant Growth on the
+summoning-sick Bear scored `+0.013178487952742235` at K64, with block mean
+`+0.013172355166680055`, lower 95% bound
+`+0.012034571410719999`, and 8/8 positive blocks. The exact next-boundary
+dominance row also identified Pass over the Growth in 64/64 worlds. The live
+Force Spike, legal Growth target, all three productive Counterspell, and
+redundant-counter support controls passed.
+
+The conjunctive experiment nevertheless failed in two distinct layers:
+
+1. The reject-only contrast/dominance guards failed. Both Blue Braingeyser
+   X=0 contrast rows failed because C16's exact-max support included at least
+   one typed X=0 action. Pass minus X=0-opponent was
+   `-0.003654134736270298`; Pass minus X=0-self was
+   `+0.016325435177875214`, but the shared support-exclusion condition is
+   conjunctive. Five dominance rows also failed: Pass did not preserve the
+   required target monotonicity against Blue Braingeyser X=0-opponent;
+   both validation-RU Disintegrate X=0 targets were physically dominated by
+   Pass in 64/64 worlds but their backed targets preferred X=0 by
+   `0.005213008767249727`; redundant same-target Counterspell versus Pass
+   matched the required Pass-dominates orientation in 0/64 worlds; and the
+   named own-Counterspell-versus-Pass incomparable control matched its
+   orientation in 64/64 worlds but failed the required valid-settlement
+   condition. These are seven failed reject-only rows (two contrasts plus
+   five dominance pairs), although the two Blue contrasts report one shared
+   root-support violation. Thus `reject_only_guards_passed=0` independently
+   of the feature census.
+2. The current learned Priority representation had 177 harmful collision
+   classes among 11,541 rows. Every collision crossed information sets and
+   had a canonical consequence conflict; nine also had statistically
+   separated backed targets. Of these, 163 were in
+   `control.blue.counter-same-target-after-intervening-counter.v1` and 14
+   were in `white.mill-before-draw.v3`; Green, Red, and RU had none.
+
+Post-run collision anatomy localizes one shared missing public field rather
+than a stack-topology defect. The 163 Blue rows are 38 disjoint
+information-set pairs, always comparing the same action descriptor; at least
+37 pairs are at an empty-stack boundary. The two productive lines in the
+intervening-counter fixture put the opponent's cards into its graveyard as
+`[Air Elemental, Counterspell]` versus
+`[Counterspell, Air Elemental]`. Subsequent identical play can append the
+same cards and preserve that buried order difference. The 14 White rows are
+six information-set pairs generated by Millstone appending the same two
+public cards in opposite order. FQ0 correctly serializes graveyards as
+ordered public zones, while `learned_features` reduces each graveyard to
+per-card counts. That makes every shared action row bit-identical despite a
+different public state. A top-card-only repair is insufficient because the
+swapped pair can be buried by later cards; a compact neutral candidate is one
+exact binary positional-recency plane per player's graveyard, with depth from
+the top encoded as `2^-(depth+1)` in the card's coordinate. Forty-card decks
+fit exactly within a binary64 mantissa, so two 24-card planes preserve the
+complete order without a card value, card-specific switch, or hidden input.
+The nine target-separation rows are not by themselves evidence that graveyard
+order has current strategic value: nine positives among 163 Blue comparisons
+is compatible with the preregistered 5% pointwise false-positive rate.
+
+The collision-only extract has 178 rows (census plus 177 classes), SHA-256
+`fa5cfdfb...eb28`. The compact contrast/dominance extract has SHA-256
+`fd12d6a7...bb4`. They are retained outside the repository under
+`/private/tmp/fq0-registered-{collision,gate}-rows-20260727.tsv`.
+
+`REVIEW.md` was reread through its newest 21:29 cycle immediately before this
+record. Its central reading is accepted: the primary information-set Bellman
+operator worked and the present representation is insufficient. Two details
+are corrected from the interim 21:14 review using the registered artifact:
+the registered collision count is 177, not 190 (190 belongs to synthetic A5d
+and is scientifically ineligible), and representation collisions were not
+the only failed reject-only layer; the X=0 contrast/dominance rows above also
+failed. Consequently it is too strong to call the operator wholly
+"exonerated": the primary backup worked, while resource/no-effect consistency
+still needs a separate diagnosis.
+
+Decision: **reject FQ0-T0 under its preregistered conjunctive gates**. Do not
+license raw FQ1/FQ4 on the current representation, do not replace C16, and do
+not open gameplay promotion seeds. C16 remains champion.
+
+Next experiment: make the everyday representation gate millisecond-scale.
+First add direct Blue-counter and White-Millstone witnesses that differ only
+in ordered graveyards; require the old encoder to alias and the proposed
+positional encoder to distinguish every shared action while opponent-hidden
+repartition remains bit-identical. Then replay only the implicated root
+transitions, without K64 successor banks or 45.7 GB publication, and require
+the registered 177-row regression to fall to zero plus the same result on
+fresh diagnostic seeds. In parallel, trace the five failed dominance rows
+and Blue X=0 exact support so a feature repair is not mistaken for a
+target/operator repair. Only a representation repair that clears those fast
+gates and an independent X=0/dominance repair may advance to a newly declared
+full-scale fitted-Q experiment.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
