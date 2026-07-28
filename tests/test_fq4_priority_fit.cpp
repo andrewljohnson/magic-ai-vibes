@@ -477,6 +477,24 @@ void test_projection_rejects_malformed_inputs() {
         "non-star constraints were accepted");
 }
 
+void test_unqualified_projection_api_is_unambiguous() {
+    using namespace old_school::fq4_priority_fit;
+    const std::vector<double> probabilities{
+        0.5, 0.3, 0.2};
+    const std::vector<StarConstraint> constraints{
+        {
+            .pass_index = 0,
+            .dominated_index = 2,
+        },
+    };
+    const auto projected =
+        reverse_kl_i_projection(
+            probabilities, constraints, 2.0);
+    expect(
+        projected.probabilities == probabilities,
+        "legacy unqualified projection API drifted");
+}
+
 void test_noop_projection_is_bit_identical() {
     const std::vector<double> p{0.6, 0.2, 0.2};
     const auto no_constraints =
@@ -1161,6 +1179,9 @@ int main() {
     runner.run(
         "projection rejects malformed inputs",
         test_projection_rejects_malformed_inputs);
+    runner.run(
+        "unqualified projection API",
+        test_unqualified_projection_api_is_unambiguous);
     runner.run(
         "no-op projection is bit-identical",
         test_noop_projection_is_bit_identical);

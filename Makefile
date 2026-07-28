@@ -69,6 +69,7 @@ FQ0_BELLMAN_AUDIT_SOURCE := src/fq0_bellman_audit.cpp
 FQ0_BELLMAN_RUN_SOURCE := src/fq0_bellman_run.cpp
 FQ0_SEQUENCE_PROJECTION_SOURCE := src/fq0_sequence_projection.cpp
 FQ0_CAUSAL_QUOTIENT_SOURCE := src/fq0_causal_quotient.cpp
+FQ4_PRIORITY_MATH_SOURCE := src/fq4_priority_math.cpp
 FQ4_PRIORITY_FIT_SOURCE := src/fq4_priority_fit.cpp
 FQ4_D1_FIELD_GATE_SOURCE := src/fq4_d1_field_gate.cpp
 FQ4_D1_TREATMENT_SOURCE := src/fq4_d1_treatment.cpp
@@ -121,6 +122,7 @@ FQ0_BELLMAN_AUDIT := $(BUILD_DIR)/old-school-fq0-bellman-audit
 FQ0_SEQUENCE_PROJECTION_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-sequence-projection-tests
 FQ0_CAUSAL_QUOTIENT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-causal-quotient-tests
 FQ0_CAUSAL_QUOTIENT := $(BUILD_DIR)/old-school-fq0-causal-quotient
+FQ4_PRIORITY_MATH_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-priority-math-tests
 FQ4_PRIORITY_FIT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-priority-fit-tests
 FQ4_PRIORITY_FIT := $(BUILD_DIR)/old-school-fq4-priority-fit
 FQ4_PRIORITY_FIT_D0B := $(BUILD_DIR)/old-school-fq4-priority-fit-d0b
@@ -141,7 +143,7 @@ ALL_CPP := $(wildcard src/*.cpp tests/*.cpp)
 source_objects = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(1))
 DEPFILES := $(patsubst %.o,%.d,$(call source_objects,$(ALL_CPP)))
 
-.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -247,9 +249,9 @@ FQ0_BELLMAN_AUDIT_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORM
 FQ0_BELLMAN_RUN_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(FQ0_BELLMAN_SCIENCE_SOURCE) $(FQ0_BELLMAN_AUDIT_SOURCE) $(FQ0_BELLMAN_RUN_SOURCE)
 FQ0_SEQUENCE_PROJECTION_LINK_SOURCES := $(FQ0_INFORMATION_SET_LINK_SOURCES) $(FQ0_SEQUENCE_PROJECTION_SOURCE)
 FQ0_CAUSAL_QUOTIENT_LINK_SOURCES := $(FQ0_SEQUENCE_PROJECTION_LINK_SOURCES) $(FQ0_CAUSAL_QUOTIENT_SOURCE)
-FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
+FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
-FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
+FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
 
 $(eval $(call link_program,$(AC1_TEACHER_AUDIT_TEST_RUNNER),$(AC1_TEACHER_AUDIT_LINK_SOURCES) tests/test_ac1_teacher_audit.cpp))
 
@@ -276,6 +278,8 @@ $(eval $(call link_program,$(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER),$(FQ0_SEQUENCE
 $(eval $(call link_program,$(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER),$(FQ0_CAUSAL_QUOTIENT_LINK_SOURCES) tests/test_fq0_causal_quotient.cpp))
 
 $(eval $(call link_program,$(FQ0_CAUSAL_QUOTIENT),$(FQ0_CAUSAL_QUOTIENT_LINK_SOURCES) src/fq0_causal_quotient_main.cpp))
+
+$(eval $(call link_program,$(FQ4_PRIORITY_MATH_TEST_RUNNER),$(FQ4_PRIORITY_MATH_SOURCE) tests/test_fq4_priority_math.cpp))
 
 $(eval $(call link_program,$(FQ4_PRIORITY_FIT_TEST_RUNNER),$(FQ4_PRIORITY_FIT_LINK_SOURCES) tests/test_fq4_priority_fit.cpp))
 
@@ -304,7 +308,7 @@ $(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT) $(FQ4_PRIORITY_FIT_D0B) $(FQ4_D1_FIELD_GATE_TEST_RUNNER) $(FQ4_D1_CENSUS) $(FQ4_D1_TREATMENT_TEST_RUNNER) $(FQ4_D1_TREATMENT) $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(FQ4_PRIORITY_MATH_TEST_RUNNER) $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT) $(FQ4_PRIORITY_FIT_D0B) $(FQ4_D1_FIELD_GATE_TEST_RUNNER) $(FQ4_D1_CENSUS) $(FQ4_D1_TREATMENT_TEST_RUNNER) $(FQ4_D1_TREATMENT) $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
@@ -342,6 +346,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(FQ0_BELLMAN_RUN_TEST_RUNNER)
 	./$(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER)
 	./$(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER)
+	./$(FQ4_PRIORITY_MATH_TEST_RUNNER)
 	./$(FQ4_PRIORITY_FIT_TEST_RUNNER)
 	@set +e; output=`./$(FQ0_BELLMAN_AUDIT) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
@@ -660,6 +665,9 @@ test-fq0-causal-quotient-production: $(FQ0_CAUSAL_QUOTIENT)
 
 fq0-causal-quotient: $(FQ0_CAUSAL_QUOTIENT)
 	./$(FQ0_CAUSAL_QUOTIENT)
+
+test-fq4-priority-math: $(FQ4_PRIORITY_MATH_TEST_RUNNER)
+	./$(FQ4_PRIORITY_MATH_TEST_RUNNER)
 
 test-fq4-priority-fit: $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT)
 	./$(FQ4_PRIORITY_FIT_TEST_RUNNER)
