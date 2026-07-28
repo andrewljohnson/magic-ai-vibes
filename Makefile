@@ -91,6 +91,7 @@ FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE := src/fq4_dev_candidate_artifact.cpp
 FQ4_DEV_CANDIDATE_PUBLISHER_SOURCE := src/fq4_dev_candidate_publisher.cpp
 FQ4_DEV1_GAMEPLAY_SOURCE := src/fq4_dev1_gameplay.cpp
 FQ4_DEV5_GAMEPLAY_SOURCE := src/fq4_dev5_gameplay.cpp
+FQ4_BLEND_EXPLORE_SOURCE := src/fq4_blend_explore.cpp
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE := src/fq4_dev_background_diagnostic.cpp
 FQ4_DEV_COVERAGE_CENSUS_SOURCE := src/fq4_dev_coverage_census.cpp
 FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
@@ -166,6 +167,8 @@ FQ4_DEV1_GAMEPLAY_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev1-gameplay-tests
 FQ4_DEV1_GAMEPLAY := $(BUILD_DIR)/old-school-fq4-dev1-gameplay
 FQ4_DEV5_GAMEPLAY_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev5-gameplay-tests
 FQ4_DEV5_GAMEPLAY := $(BUILD_DIR)/old-school-fq4-dev5-gameplay
+FQ4_BLEND_EXPLORE_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-blend-explore-tests
+FQ4_BLEND_EXPLORE := $(BUILD_DIR)/old-school-fq4-blend-explore
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic-tests
 FQ4_DEV_BACKGROUND_DIAGNOSTIC := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic
 FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev4-coverage-census-tests
@@ -208,7 +211,7 @@ FQ4_NEUTRAL_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_PUBLISHER_MAIN_OBJECT:.o=.d)
 FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT := $(OBJ_DIR)/src/fq4_neutral_candidate_publisher_main.$(FQ4_DEV_PRODUCER_COMMIT).o
 FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT:.o=.d)
 
-.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-dev-candidate-artifact test-fq4-dev-candidate-publisher fq4-dev-candidate-publish test-fq4-dev1-gameplay test-fq4-dev5-gameplay fq4-dev5-gameplay-smoke test-fq4-dev-background-diagnostic fq4-dev-background-diagnostic test-fq4-dev-coverage-census fq4-dev-coverage-census test-fq4-neutral-candidate-publisher fq4-neutral-candidate-publish test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-dev-candidate-artifact test-fq4-dev-candidate-publisher fq4-dev-candidate-publish test-fq4-dev1-gameplay test-fq4-dev5-gameplay fq4-dev5-gameplay-smoke test-fq4-blend-explore fq4-blend-explore test-fq4-dev-background-diagnostic fq4-dev-background-diagnostic test-fq4-dev-coverage-census fq4-dev-coverage-census test-fq4-neutral-candidate-publisher fq4-neutral-candidate-publish test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 .PHONY: test-fq4-work0-cache test-fq4-work0-firewall
 
 all: $(SIMULATOR)
@@ -331,6 +334,7 @@ FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_
 FQ4_DEV_CANDIDATE_PUBLISHER_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE) $(FQ4_DEV_CANDIDATE_PUBLISHER_SOURCE)
 FQ4_DEV1_GAMEPLAY_LINK_SOURCES := $(FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES) $(FQ4_DEV1_GAMEPLAY_SOURCE)
 FQ4_DEV5_GAMEPLAY_LINK_SOURCES := $(FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES) $(FQ4_DEV5_GAMEPLAY_SOURCE)
+FQ4_BLEND_EXPLORE_LINK_SOURCES := $(FQ4_DEV5_GAMEPLAY_LINK_SOURCES) $(FQ4_BLEND_EXPLORE_SOURCE)
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE)
 FQ4_DEV_COVERAGE_CENSUS_LINK_SOURCES := $(FQ4_DEV_GENERATOR_LINK_SOURCES)
 FQ4_NEUTRAL_SUPPLEMENT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(FQ4_DEV_BUNDLE_LINK_SOURCES) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE)
@@ -395,6 +399,10 @@ $(eval $(call link_program,$(FQ4_DEV1_GAMEPLAY),$(FQ4_DEV1_GAMEPLAY_LINK_SOURCES
 $(eval $(call link_program,$(FQ4_DEV5_GAMEPLAY_TEST_RUNNER),$(FQ4_DEV5_GAMEPLAY_LINK_SOURCES) tests/test_fq4_dev5_gameplay.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV5_GAMEPLAY),$(FQ4_DEV5_GAMEPLAY_LINK_SOURCES) src/fq4_dev5_gameplay_main.cpp))
+
+$(eval $(call link_program,$(FQ4_BLEND_EXPLORE_TEST_RUNNER),$(FQ4_BLEND_EXPLORE_LINK_SOURCES) tests/test_fq4_blend_explore.cpp))
+
+$(eval $(call link_program,$(FQ4_BLEND_EXPLORE),$(FQ4_BLEND_EXPLORE_LINK_SOURCES) src/fq4_blend_explore_main.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER),$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES) tests/test_fq4_dev_background_diagnostic.cpp))
 
@@ -513,6 +521,7 @@ $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
 test: $(FQ4_DEV5_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV5_GAMEPLAY)
+test: $(FQ4_BLEND_EXPLORE_TEST_RUNNER) $(FQ4_BLEND_EXPLORE)
 test: $(FQ4_WORK0_CACHE_TEST_RUNNER)
 test: test-fq4-work0-firewall
 
@@ -564,6 +573,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER)
 	./$(FQ4_DEV1_GAMEPLAY_TEST_RUNNER)
 	./$(FQ4_DEV5_GAMEPLAY_TEST_RUNNER)
+	./$(FQ4_BLEND_EXPLORE_TEST_RUNNER)
 	@set +e; output=`./$(FQ4_DEV5_GAMEPLAY) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
@@ -1237,6 +1247,19 @@ test-fq4-dev5-gameplay: $(FQ4_DEV5_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV5_GAMEPLAY)
 
 fq4-dev5-gameplay-smoke: $(FQ4_DEV5_GAMEPLAY)
 	./$(FQ4_DEV5_GAMEPLAY) --smoke
+
+test-fq4-blend-explore: $(FQ4_BLEND_EXPLORE_TEST_RUNNER) $(FQ4_BLEND_EXPLORE)
+	./$(FQ4_BLEND_EXPLORE_TEST_RUNNER)
+	@set +e; output=`./$(FQ4_BLEND_EXPLORE) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FQ4 blend explorer accepted an argument\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage: old-school-fq4-blend-explore' >/dev/null
+
+fq4-blend-explore: $(FQ4_BLEND_EXPLORE)
+	./$(FQ4_BLEND_EXPLORE)
 
 test-fq4-dev-background-diagnostic: $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC)
 	./$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER)
