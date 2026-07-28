@@ -71,6 +71,20 @@ void expect_rejected(Function function, std::string_view message) {
     throw std::runtime_error(std::string(message));
 }
 
+template <typename Function>
+void expect_logic_error(Function function, std::string_view message) {
+    try {
+        function();
+    } catch (const std::logic_error&) {
+        return;
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            std::string(message) +
+            ": wrong exception type: " + error.what());
+    }
+    throw std::runtime_error(std::string(message));
+}
+
 class TemporaryDirectory {
   public:
     TemporaryDirectory() {
@@ -153,6 +167,142 @@ void test_standard_sha256_vectors() {
         "cdc76e5c9914fb9281a1c7e284d73e67"
         "f1809a48a497200e046d39ccc7112cd0",
         "million-byte SHA-256 vector");
+
+    integrity::Sha256Accumulator incremental;
+    incremental.update(std::string_view("a"));
+    incremental.update(std::as_bytes(
+        std::span(std::string_view("b"))));
+    incremental.update(std::string_view("c"));
+    expect_equal(
+        incremental.finish(),
+        "ba7816bf8f01cfea414140de5dae2223"
+        "b00361a396177a9cb410ff61f20015ad",
+        "incremental abc SHA-256 vector");
+}
+
+std::string patterned_bytes(std::size_t size) {
+    std::string result;
+    result.reserve(size);
+    for (std::size_t index = 0; index < size; ++index) {
+        result.push_back(static_cast<char>(
+            (index * 131U + 29U) & 0xffU));
+    }
+    return result;
+}
+
+void test_incremental_sha256_chunk_boundaries() {
+    constexpr std::array<std::size_t, 7> kLengths = {
+        0, 1, 55, 56, 63, 64, 65,
+    };
+    constexpr std::array<std::string_view, 7> kDigests = {
+        "e3b0c44298fc1c149afbf4c8996fb924"
+        "27ae41e4649b934ca495991b7852b855",
+        "1f18d650d205d71d934c3646ff5fac1c"
+        "096ba52eba4cf758b865364f4167d3cd",
+        "709aad8263c2d9fbe616ce57a05b8d5a"
+        "4453f4773e1342b42ccfd7d8fb7102b4",
+        "30d4c8102c9227a009e4fc08c046d866"
+        "8f3958e67966cfce00c7bc84a99294c6",
+        "e4fa263c22359a1255662cc4ff4f7576"
+        "005d7078f2316a60280cc367d845148c",
+        "64c09fddb170cfc9c7c504fd15bb1a48"
+        "9fabe9d0c3c081f791ee22a34bfb160f",
+        "f880abc4f16efcdf8f9a55e1676cef74"
+        "c08fcf6cb4d18efe5bf315a64381bae2",
+    };
+    constexpr std::array<std::size_t, 7> kIrregularChunks = {
+        7, 1, 19, 2, 31, 3, 11,
+    };
+
+    for (std::size_t case_index = 0;
+         case_index < kLengths.size(); ++case_index) {
+        const std::size_t length = kLengths[case_index];
+        const std::string input = patterned_bytes(length);
+        const std::string_view expected = kDigests[case_index];
+        expect_equal(
+            integrity::sha256_string(input), expected,
+            "one-shot boundary digest");
+
+        integrity::Sha256Accumulator whole_bytes;
+        whole_bytes.update(std::as_bytes(std::span(input)));
+        expect_equal(
+            whole_bytes.finish(), expected,
+            "whole byte-span incremental digest");
+
+        integrity::Sha256Accumulator one_byte;
+        for (std::size_t offset = 0;
+             offset < input.size(); ++offset) {
+            one_byte.update(std::string_view(input).substr(offset, 1));
+        }
+        expect_equal(
+            one_byte.finish(), expected,
+            "one-byte incremental digest");
+
+        integrity::Sha256Accumulator irregular;
+        std::size_t offset = 0;
+        std::size_t chunk_index = 0;
+        while (offset < input.size()) {
+            const std::size_t count = std::min(
+                kIrregularChunks[
+                    chunk_index % kIrregularChunks.size()],
+                input.size() - offset);
+            const std::string_view chunk(input.data() + offset, count);
+            if (chunk_index % 2 == 0) {
+                irregular.update(chunk);
+            } else {
+                irregular.update(
+                    std::as_bytes(std::span(chunk)));
+            }
+            offset += count;
+            ++chunk_index;
+        }
+        expect_equal(
+            irregular.finish(), expected,
+            "irregular incremental digest");
+    }
+}
+
+void test_incremental_sha256_embedded_nul() {
+    static constexpr std::array<char, 3> kInput = {'a', '\0', 'b'};
+    constexpr std::string_view input(kInput.data(), kInput.size());
+
+    integrity::Sha256Accumulator accumulator;
+    accumulator.update(input.substr(0, 2));
+    accumulator.update(std::as_bytes(
+        std::span(input.substr(2))));
+    expect_equal(
+        accumulator.finish(),
+        "59b271ae1bbcb1d31d41929817f4b16f"
+        "b439eb4f31520b5ad1d5ce98920a7138",
+        "embedded-NUL incremental digest");
+    expect_equal(
+        integrity::sha256_string(input),
+        "59b271ae1bbcb1d31d41929817f4b16f"
+        "b439eb4f31520b5ad1d5ce98920a7138",
+        "embedded-NUL one-shot digest");
+}
+
+void test_incremental_sha256_lifecycle_rejection() {
+    integrity::Sha256Accumulator accumulator;
+    accumulator.update(std::string_view{});
+    accumulator.update(std::span<const std::byte>{});
+    accumulator.update(std::string_view("abc"));
+    const std::string digest = accumulator.finish();
+    expect_equal(
+        digest,
+        integrity::sha256_string("abc"),
+        "finished accumulator digest");
+
+    expect_logic_error(
+        [&] { accumulator.update(std::string_view{}); },
+        "string update after finish was accepted");
+    const std::array<std::byte, 1> byte = {std::byte{0x01}};
+    expect_logic_error(
+        [&] { accumulator.update(std::span(byte)); },
+        "byte update after finish was accepted");
+    expect_logic_error(
+        [&] { static_cast<void>(accumulator.finish()); },
+        "second finish was accepted");
 }
 
 void test_deterministic_file_snapshot() {
@@ -339,6 +489,15 @@ int main() {
     runner.run(
         "standard SHA-256 vectors",
         test_standard_sha256_vectors);
+    runner.run(
+        "incremental SHA-256 chunk boundaries",
+        test_incremental_sha256_chunk_boundaries);
+    runner.run(
+        "incremental SHA-256 embedded NUL",
+        test_incremental_sha256_embedded_nul);
+    runner.run(
+        "incremental SHA-256 lifecycle rejection",
+        test_incremental_sha256_lifecycle_rejection);
     runner.run(
         "deterministic regular-file snapshot",
         test_deterministic_file_snapshot);

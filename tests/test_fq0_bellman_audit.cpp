@@ -37,6 +37,42 @@ void expect(bool condition, std::string_view message) {
     }
 }
 
+void append_little_endian_u64(
+    std::string& bytes, std::uint64_t value) {
+    for (std::size_t byte = 0; byte < sizeof(value);
+         ++byte) {
+        bytes.push_back(static_cast<char>(
+            static_cast<unsigned char>(
+                value >> (byte * 8U))));
+    }
+}
+
+void test_streaming_digest_writer_preserves_audit_framing() {
+    static constexpr std::array<char, 5> kText = {
+        'F', '\0', 'Q', '0', '\n',
+    };
+    std::string buffered_reference;
+    append_little_endian_u64(
+        buffered_reference, kText.size());
+    buffered_reference.append(kText.data(), kText.size());
+    append_little_endian_u64(
+        buffered_reference, 0x0123456789abcdefULL);
+    buffered_reference.push_back('\0');
+    buffered_reference.push_back('\1');
+    append_little_endian_u64(
+        buffered_reference,
+        std::bit_cast<std::uint64_t>(-0.0));
+    append_little_endian_u64(
+        buffered_reference,
+        std::bit_cast<std::uint64_t>(1.5));
+
+    expect(
+        audit::testing::
+                digest_writer_framing_fixture_sha256() ==
+            integrity::sha256_string(buffered_reference),
+        "streaming audit digest changed fixed-width framing");
+}
+
 template <typename Exception = std::exception,
           typename Function>
 void expect_throws(
@@ -1600,8 +1636,17 @@ void append_row(
     bytes.push_back('\n');
 }
 
+enum class BoundBundleMutation {
+    None,
+    MissingModelFingerprint,
+    DuplicateIntegrityPassed,
+    ConflictingVerdict,
+};
+
 audit::EvidenceBundle minimal_bound_bundle(
-    const integrity::RegularFileSnapshot& model) {
+    const integrity::RegularFileSnapshot& model,
+    BoundBundleMutation mutation =
+        BoundBundleMutation::None) {
     static constexpr std::array<std::string_view, 8>
         sections = {
             "metadata",
@@ -1621,13 +1666,23 @@ audit::EvidenceBundle minimal_bound_bundle(
         bundle.section_names.emplace_back(name);
         std::string content;
         if (name == "metadata") {
-            append_row(
-                content,
-                {"identity", "model_fingerprint",
-                 audit::kModelFingerprint});
+            if (mutation !=
+                BoundBundleMutation::
+                    MissingModelFingerprint) {
+                append_row(
+                    content,
+                    {"identity", "model_fingerprint",
+                     audit::kModelFingerprint});
+            }
             append_row(
                 content,
                 {"verdict", "exit_code", "0"});
+            if (mutation ==
+                BoundBundleMutation::ConflictingVerdict) {
+                append_row(
+                    content,
+                    {"verdict", "exit_code", "1"});
+            }
         }
         if (name == "integrity") {
             const std::string size =
@@ -1656,6 +1711,13 @@ audit::EvidenceBundle minimal_bound_bundle(
             append_row(
                 content,
                 {"integrity", "passed", "1"});
+            if (mutation ==
+                BoundBundleMutation::
+                    DuplicateIntegrityPassed) {
+                append_row(
+                    content,
+                    {"integrity", "passed", "1"});
+            }
         }
         if (name == "invariance") {
             append_row(
@@ -2743,6 +2805,199 @@ void test_bundle_is_canonical_exact_and_tree_independent() {
         "forged scientific summary was serializable");
 }
 
+struct LegacyEvidenceOracle {
+    std::uintmax_t byte_size;
+    std::string_view sha256;
+    std::string_view payload_sha256;
+    std::string_view complete_sha256;
+    std::array<std::string_view, 8> section_sha256;
+};
+
+constexpr std::array<std::string_view, 8>
+    kEvidenceSectionNames = {
+        "metadata", "manifest", "roots", "contrasts",
+        "dominance", "collisions", "integrity",
+        "invariance",
+    };
+
+constexpr LegacyEvidenceOracle kCompleteLegacyOracle = {
+    .byte_size = 14147035,
+    .sha256 =
+        "0e0c75f71dcb63609d301be3c6fddeda"
+        "000a7a2abae1cb3befffbbd4b394c5da",
+    .payload_sha256 =
+        "9847afd9d44ed2c89e348f67ec577f7a"
+        "84e598975392c3d73505937bd9bbf445",
+    .complete_sha256 =
+        "7ec55140775011678197fe6a972f38453"
+        "076b8385b31f72843ce82a474288b63",
+    .section_sha256 = {
+        "3b188aab0319388564c3d6e9f52399a0"
+        "ee7ffbdd1013daa87ee473c2daa088e6",
+        "f8f310b02c017c3ded6917ab3120084d7"
+        "b1867c88f7850f96130b9921b8eba19",
+        "f8f03f2beaea82295b465b4c43066781b"
+        "adb3f7d1255424c314faeb6d549fce7",
+        "095586283ba7398c4758e03a7dc105d34"
+        "efddf5c853f5b811e0531651e17d942",
+        "1139b48ac63efc872844bbaefb81b7f9d"
+        "478237ef58a8bdda400187e38712734",
+        "0680502cc2b21156832a4fac2599483343"
+        "b0dfbc06fc5b885d8a6d667c5f9245",
+        "dfac834fa796dec4e9ccb102fc8d064744"
+        "f6e4f49e400e7c3d13c4c0faee1dd0",
+        "6f5772b25f4bf2e0ccbb2f92e627f2ff"
+        "bea9123ac280d8e6cd6d8a6a4e5fcaa1",
+    },
+};
+
+constexpr LegacyEvidenceOracle kLeafHeavyLegacyOracle = {
+    .byte_size = 15859759,
+    .sha256 =
+        "920c8e4a7f91b8eb03b47d9104ee717d"
+        "d3237935185583b0edb3f52f78b72b18",
+    .payload_sha256 =
+        "c1baf8e1d4ec4f6f76bffc344f83dd1d"
+        "8592b3d219c0aca616f29a90831db837",
+    .complete_sha256 =
+        "f3b7557813ca023b28b22791b5bee6271"
+        "a945539ade4306091b8a6c60b558061",
+    .section_sha256 = {
+        "99d3b832ef07b16e153112a6f8df5fb29"
+        "96f48f487e948853a86627b749ba448",
+        "f8f310b02c017c3ded6917ab3120084d7"
+        "b1867c88f7850f96130b9921b8eba19",
+        "0be2a2575b6fab4c1bd5c96fdfd25e12"
+        "7d7ec7641e8f7b11db76fe66db8aa2b6",
+        "095586283ba7398c4758e03a7dc105d34"
+        "efddf5c853f5b811e0531651e17d942",
+        "1139b48ac63efc872844bbaefb81b7f9d"
+        "478237ef58a8bdda400187e38712734",
+        "609cbd2ce9256c4a72463d01f9cc66ff3"
+        "b2ac34c77dd6e8aed0c65e0458298dd",
+        "dfac834fa796dec4e9ccb102fc8d064744"
+        "f6e4f49e400e7c3d13c4c0faee1dd0",
+        "51afc7cbb22e6793c4ef4fe2fabf92173"
+        "e21751bbc1fe70f754ea2dae087f4e4",
+    },
+};
+
+void verify_streamed_legacy_oracle(
+    const std::filesystem::path& target,
+    bool leaf_heavy,
+    const LegacyEvidenceOracle& oracle) {
+    audit::RunReport report = complete_report();
+    if (leaf_heavy) {
+        add_successor_group_to_first_root(report);
+    }
+    const audit::EvidenceBundle buffered =
+        audit::testing::serialize_evidence_bundle(report);
+    expect(
+        buffered.bytes.size() == oracle.byte_size &&
+            integrity::sha256_string(buffered.bytes) ==
+                oracle.sha256 &&
+            buffered.payload_sha256 ==
+                oracle.payload_sha256 &&
+            buffered.complete_sha256 ==
+                oracle.complete_sha256,
+        "buffered evidence drifted from its frozen legacy "
+        "oracle");
+    expect(
+        buffered.section_names.size() ==
+                kEvidenceSectionNames.size() &&
+            buffered.section_sha256.size() ==
+                oracle.section_sha256.size(),
+        "buffered evidence section census drifted");
+    for (std::size_t index = 0;
+         index < kEvidenceSectionNames.size(); ++index) {
+        expect(
+            buffered.section_names[index] ==
+                    kEvidenceSectionNames[index] &&
+                buffered.section_sha256[index] ==
+                    oracle.section_sha256[index],
+            "buffered evidence section digest drifted from "
+            "its frozen legacy oracle");
+    }
+
+    const integrity::RegularFileSnapshot frozen_model =
+        integrity::snapshot_regular_file(
+            report.integrity.model_after.path);
+    audit::testing::StreamingPublicationMetrics metrics;
+    const audit::EvidencePublication publication =
+        audit::testing::
+            publish_evidence_streaming_for_parent(
+                target.string(), report, frozen_model,
+                audit::kModelFingerprint,
+                report.scientific.model_fingerprint,
+                audit::testing::StreamingFailureStage::None,
+                &metrics);
+    const audit::testing::StreamedEvidenceSummary validated =
+        audit::testing::
+            validate_streamed_evidence_for_parent(
+                target.string(), frozen_model,
+                audit::kModelFingerprint,
+                report.scientific.model_fingerprint,
+                &metrics);
+    const std::string streamed = read_file(target);
+    expect(
+        streamed == buffered.bytes &&
+            publication.published &&
+            publication.atomic_no_replace &&
+            publication.byte_size == oracle.byte_size &&
+            publication.sha256 == oracle.sha256 &&
+            publication.payload_sha256 ==
+                oracle.payload_sha256 &&
+            validated.byte_size == oracle.byte_size &&
+            validated.sha256 == oracle.sha256 &&
+            validated.payload_sha256 ==
+                oracle.payload_sha256 &&
+            validated.complete_sha256 ==
+                oracle.complete_sha256,
+        "streamed evidence differs from the literal legacy "
+        "bytes or digests");
+    expect(
+        validated.section_names ==
+                buffered.section_names &&
+            validated.section_sha256 ==
+                buffered.section_sha256,
+        "streamed evidence section summary differs from the "
+        "legacy serializer");
+
+    constexpr std::size_t kPendingLimit = 1024 * 1024;
+    expect(
+        metrics.emitter_buffer_capacity == 64 * 1024 &&
+            metrics.reread_buffer_capacity == 64 * 1024 &&
+            metrics.emitter_pending_high_water <=
+                metrics.emitter_buffer_capacity &&
+            metrics.reread_pending_high_water <=
+                metrics.reread_buffer_capacity &&
+            metrics.emitter_buffer_capacity +
+                    metrics.reread_buffer_capacity <=
+                kPendingLimit,
+        "streamed evidence exceeded its declared bounded "
+        "pending storage");
+    if (leaf_heavy) {
+        expect(
+            oracle.byte_size > 2 * 64 * 1024 &&
+                metrics.emitter_pending_high_water ==
+                    metrics.emitter_buffer_capacity &&
+                metrics.reread_pending_high_water ==
+                    metrics.reread_buffer_capacity,
+            "leaf-heavy evidence did not cross multiple "
+            "streaming buffers");
+    }
+}
+
+void test_streamed_evidence_matches_frozen_legacy_oracles() {
+    TemporaryDirectory temporary;
+    verify_streamed_legacy_oracle(
+        temporary.path() / "complete.tsv", false,
+        kCompleteLegacyOracle);
+    verify_streamed_legacy_oracle(
+        temporary.path() / "leaf-heavy.tsv", true,
+        kLeafHeavyLegacyOracle);
+}
+
 void test_bundle_rejects_corruption_and_trailing_data() {
     const audit::EvidenceBundle bundle =
         audit::testing::serialize_evidence_bundle(
@@ -2801,6 +3056,220 @@ void test_bundle_rejects_corruption_and_trailing_data() {
                     bundle.bytes + "trailing\n"));
         },
         "trailing evidence bytes were accepted");
+}
+
+void flip_byte_after(
+    std::string& bytes, std::string_view marker) {
+    const std::size_t position = bytes.find(marker);
+    expect(
+        position != std::string::npos &&
+            position + marker.size() < bytes.size(),
+        "streaming mutation marker is missing");
+    char& value = bytes[position + marker.size()];
+    value = value == '0' ? '1' : '0';
+}
+
+void test_streaming_validator_rejects_mutations() {
+    TemporaryDirectory temporary;
+    const integrity::RegularFileSnapshot frozen_model =
+        integrity::snapshot_regular_file(
+            std::filesystem::path(
+                audit::kModelArtifactPath));
+    const audit::EvidenceBundle baseline =
+        minimal_bound_bundle(frozen_model);
+    const auto baseline_path =
+        temporary.path() / "baseline.tsv";
+    write_file(baseline_path, baseline.bytes);
+    const audit::testing::StreamedEvidenceSummary summary =
+        audit::testing::
+            validate_streamed_evidence_for_parent(
+                baseline_path.string(), frozen_model,
+                audit::kModelFingerprint,
+                audit::kModelFingerprint);
+    expect(
+        summary.byte_size == baseline.bytes.size() &&
+            summary.sha256 ==
+                integrity::sha256_string(baseline.bytes) &&
+            summary.payload_sha256 ==
+                baseline.payload_sha256 &&
+            summary.complete_sha256 ==
+                baseline.complete_sha256,
+        "bounded validator rejected or changed its valid "
+        "baseline");
+
+    struct Mutation {
+        std::string_view name;
+        std::function<void(std::string&)> apply;
+    };
+    const std::vector<Mutation> mutations = {
+        {
+            "section-content",
+            [](std::string& bytes) {
+                flip_byte_after(
+                    bytes,
+                    "identity\tmodel_fingerprint\t");
+            },
+        },
+        {
+            "section-footer",
+            [](std::string& bytes) {
+                flip_byte_after(
+                    bytes,
+                    "section_sha256\tmetadata\t");
+            },
+        },
+        {
+            "payload-footer",
+            [](std::string& bytes) {
+                flip_byte_after(
+                    bytes, "payload_sha256\t");
+            },
+        },
+        {
+            "complete-footer",
+            [](std::string& bytes) {
+                flip_byte_after(
+                    bytes, "complete_sha256\t");
+            },
+        },
+        {
+            "truncation",
+            [](std::string& bytes) {
+                expect(
+                    !bytes.empty(),
+                    "truncation fixture is empty");
+                bytes.pop_back();
+            },
+        },
+        {
+            "trailing",
+            [](std::string& bytes) {
+                bytes += "trailing\n";
+            },
+        },
+        {
+            "section-order",
+            [](std::string& bytes) {
+                constexpr std::string_view from =
+                    "section_begin\tmetadata\n";
+                constexpr std::string_view to =
+                    "section_begin\tmanifest\n";
+                const std::size_t position =
+                    bytes.find(from);
+                expect(
+                    position != std::string::npos,
+                    "section-order fixture is missing");
+                bytes.replace(
+                    position, from.size(), to);
+            },
+        },
+        {
+            "carriage-return",
+            [](std::string& bytes) {
+                const std::size_t position =
+                    bytes.find(
+                        "identity\tmodel_fingerprint\t");
+                expect(
+                    position != std::string::npos,
+                    "control-byte fixture is missing");
+                bytes[position] = '\r';
+            },
+        },
+        {
+            "nul",
+            [](std::string& bytes) {
+                const std::size_t position =
+                    bytes.find(
+                        "identity\tmodel_fingerprint\t");
+                expect(
+                    position != std::string::npos,
+                    "control-byte fixture is missing");
+                bytes[position] = '\0';
+            },
+        },
+        {
+            "overlong-line",
+            [](std::string& bytes) {
+                bytes.assign(64 * 1024 + 1, 'x');
+            },
+        },
+    };
+    for (std::size_t index = 0;
+         index < mutations.size(); ++index) {
+        std::string bytes = baseline.bytes;
+        mutations[index].apply(bytes);
+        const auto path =
+            temporary.path() /
+            ("mutation-" + std::to_string(index) +
+             ".tsv");
+        write_file(path, bytes);
+        expect_throws<std::runtime_error>(
+            [&] {
+                static_cast<void>(
+                    audit::testing::
+                        validate_streamed_evidence_for_parent(
+                            path.string(), frozen_model,
+                            audit::kModelFingerprint,
+                            audit::kModelFingerprint));
+            },
+            std::string("bounded validator accepted ") +
+                std::string(mutations[index].name));
+    }
+}
+
+void test_streaming_binding_cardinality_is_exact() {
+    TemporaryDirectory temporary;
+    const integrity::RegularFileSnapshot frozen_model =
+        integrity::snapshot_regular_file(
+            std::filesystem::path(
+                audit::kModelArtifactPath));
+    const std::array<
+        std::pair<std::string_view, BoundBundleMutation>,
+        3>
+        mutations = {{
+            {
+                "missing model fingerprint",
+                BoundBundleMutation::
+                    MissingModelFingerprint,
+            },
+            {
+                "duplicate integrity verdict",
+                BoundBundleMutation::
+                    DuplicateIntegrityPassed,
+            },
+            {
+                "both scientific exit codes",
+                BoundBundleMutation::
+                    ConflictingVerdict,
+            },
+        }};
+    for (std::size_t index = 0;
+         index < mutations.size(); ++index) {
+        const audit::EvidenceBundle bundle =
+            minimal_bound_bundle(
+                frozen_model, mutations[index].second);
+        expect(
+            audit::testing::validate_evidence_bundle(
+                bundle.bytes) == bundle,
+            "binding-cardinality fixture is not a "
+            "cryptographically coherent bundle");
+        const auto path =
+            temporary.path() /
+            ("binding-" + std::to_string(index) +
+             ".tsv");
+        write_file(path, bundle.bytes);
+        expect_throws<std::runtime_error>(
+            [&] {
+                static_cast<void>(
+                    audit::testing::
+                        validate_streamed_evidence_for_parent(
+                            path.string(), frozen_model,
+                            audit::kModelFingerprint,
+                            audit::kModelFingerprint));
+            },
+            std::string("bounded validator accepted ") +
+                std::string(mutations[index].first));
+    }
 }
 
 void test_group_rows_are_raw_and_recomputed() {
@@ -3751,6 +4220,174 @@ void test_atomic_writer_refuses_replace_and_symlinks() {
         "verified parent creation did not publish");
 }
 
+void test_streaming_publication_failure_cleanup() {
+    TemporaryDirectory temporary;
+    const audit::RunReport report = complete_report();
+    const integrity::RegularFileSnapshot frozen_model =
+        integrity::snapshot_regular_file(
+            report.integrity.model_after.path);
+    const auto publish =
+        [&](const std::filesystem::path& target,
+            const integrity::RegularFileSnapshot& model,
+            audit::testing::StreamingFailureStage stage =
+                audit::testing::
+                    StreamingFailureStage::None) {
+            return audit::testing::
+                publish_evidence_streaming_for_parent(
+                    target.string(), report, model,
+                    audit::kModelFingerprint,
+                    report.scientific.model_fingerprint,
+                    stage);
+        };
+    const std::array<
+        std::pair<
+            std::string_view,
+            audit::testing::StreamingFailureStage>,
+        3>
+        failures = {{
+            {
+                "write",
+                audit::testing::StreamingFailureStage::Write,
+            },
+            {
+                "reread",
+                audit::testing::StreamingFailureStage::Reread,
+            },
+            {
+                "precommit",
+                audit::testing::StreamingFailureStage::
+                    Precommit,
+            },
+        }};
+    for (std::size_t index = 0;
+         index < failures.size(); ++index) {
+        const auto target =
+            temporary.path() /
+            ("failure-" + std::to_string(index) + ".tsv");
+        expect_throws<std::runtime_error>(
+            [&] {
+                static_cast<void>(publish(
+                    target, frozen_model,
+                    failures[index].second));
+            },
+            std::string("injected streaming ") +
+                std::string(failures[index].first) +
+                " failure did not fail");
+        expect(
+            !std::filesystem::exists(target) &&
+                !std::filesystem::exists(
+                    target.string() + ".tmp"),
+            std::string("injected streaming ") +
+                std::string(failures[index].first) +
+                " failure left publication state");
+    }
+
+    const auto occupied_target =
+        temporary.path() / "occupied-target.tsv";
+    write_file(occupied_target, "sentinel\n");
+    expect_throws<std::runtime_error>(
+        [&] {
+            static_cast<void>(
+                publish(occupied_target, frozen_model));
+        },
+        "streaming publisher replaced an occupied target");
+    expect(
+        read_file(occupied_target) == "sentinel\n" &&
+            !std::filesystem::exists(
+                occupied_target.string() + ".tmp"),
+        "streaming occupied-target rejection mutated state");
+
+    const auto occupied_temporary =
+        temporary.path() / "occupied-temporary.tsv";
+    write_file(
+        occupied_temporary.string() + ".tmp",
+        "temporary sentinel\n");
+    expect_throws<std::runtime_error>(
+        [&] {
+            static_cast<void>(
+                publish(occupied_temporary, frozen_model));
+        },
+        "streaming publisher accepted an occupied temporary");
+    expect(
+        !std::filesystem::exists(occupied_temporary) &&
+            read_file(
+                occupied_temporary.string() + ".tmp") ==
+                "temporary sentinel\n",
+        "streaming occupied-temporary rejection mutated "
+        "state");
+
+    const auto referent =
+        temporary.path() / "streaming-private";
+    write_file(referent, "private\n");
+    const auto final_link =
+        temporary.path() / "streaming-final-link.tsv";
+    std::filesystem::create_symlink(
+        referent, final_link);
+    expect_throws<std::runtime_error>(
+        [&] {
+            static_cast<void>(
+                publish(final_link, frozen_model));
+        },
+        "streaming publisher followed a final symlink");
+    expect(
+        read_file(referent) == "private\n" &&
+            !std::filesystem::exists(
+                final_link.string() + ".tmp"),
+        "streaming final-symlink rejection mutated state");
+
+    const auto real_parent =
+        temporary.path() / "streaming-real-parent";
+    std::filesystem::create_directory(real_parent);
+    const auto parent_link =
+        temporary.path() / "streaming-parent-link";
+    std::filesystem::create_directory_symlink(
+        real_parent, parent_link);
+    const auto linked_target =
+        parent_link / "evidence.tsv";
+    expect_throws<std::runtime_error>(
+        [&] {
+            static_cast<void>(
+                publish(linked_target, frozen_model));
+        },
+        "streaming publisher followed a parent symlink");
+    expect(
+        !std::filesystem::exists(
+            real_parent / "evidence.tsv") &&
+            !std::filesystem::exists(
+                real_parent / "evidence.tsv.tmp"),
+        "streaming parent-symlink rejection published "
+        "state");
+
+    const auto stale_model_path =
+        temporary.path() / "stale-model.bin";
+    write_file(
+        stale_model_path, read_file(frozen_model.path));
+    const integrity::RegularFileSnapshot stale_model =
+        integrity::snapshot_regular_file(
+            stale_model_path);
+    expect(
+        stale_model.byte_size == frozen_model.byte_size &&
+            stale_model.sha256 == frozen_model.sha256,
+        "streaming stale-model fixture did not copy C16 "
+        "exactly");
+    write_file(stale_model_path, "mutated model bytes");
+    const auto stale_target =
+        temporary.path() / "stale-model.tsv";
+    expect_throws<std::runtime_error>(
+        [&] {
+            static_cast<void>(
+                publish(stale_target, stale_model));
+        },
+        "streaming publisher accepted a stale model "
+        "snapshot");
+    expect(
+        !std::filesystem::exists(stale_target) &&
+            !std::filesystem::exists(
+                stale_target.string() + ".tmp"),
+        "streaming stale-model rejection left publication "
+        "state");
+}
+
 void test_publication_binds_fresh_parent_and_fingerprint() {
     TemporaryDirectory temporary;
     const auto model = temporary.path() / "model.bin";
@@ -3830,6 +4467,8 @@ int main() {
     const std::vector<
         std::pair<std::string, std::function<void()>>>
         tests = {
+            {"streaming digest preserves audit framing",
+             test_streaming_digest_writer_preserves_audit_framing},
             {"successor operator v2 field boundary",
              test_successor_operator_v2_omits_only_consequence},
             {"dominance operator v2 field boundary",
@@ -3840,8 +4479,14 @@ int main() {
              test_gate_exit_codes_and_internal_consistency},
             {"canonical exact bundle",
              test_bundle_is_canonical_exact_and_tree_independent},
+            {"streamed frozen evidence oracles",
+             test_streamed_evidence_matches_frozen_legacy_oracles},
             {"corruption and trailing rejection",
              test_bundle_rejects_corruption_and_trailing_data},
+            {"streaming mutation rejection",
+             test_streaming_validator_rejects_mutations},
+            {"streaming binding cardinality",
+             test_streaming_binding_cardinality_is_exact},
             {"raw successor group rows",
              test_group_rows_are_raw_and_recomputed},
             {"global seed coordinate ownership",
@@ -3858,6 +4503,8 @@ int main() {
              test_semantic_forgeries_fail_closed},
             {"atomic no-replace and symlinks",
              test_atomic_writer_refuses_replace_and_symlinks},
+            {"streaming failure cleanup",
+             test_streaming_publication_failure_cleanup},
             {"fresh parent publication",
              test_publication_binds_fresh_parent_and_fingerprint},
         };

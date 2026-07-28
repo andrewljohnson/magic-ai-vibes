@@ -18,6 +18,7 @@
 #include <locale>
 #include <map>
 #include <optional>
+#include <ostream>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -84,32 +85,66 @@ class DigestWriter {
   public:
     void text(std::string_view value) {
         integer(value.size());
-        bytes_.append(value);
+        append(std::as_bytes(std::span(value)));
     }
 
     void integer(std::uint64_t value) {
+        std::array<std::byte, sizeof(value)> encoded{};
         for (std::size_t byte = 0; byte < sizeof(value);
              ++byte) {
-            bytes_.push_back(static_cast<char>(
+            encoded[byte] = static_cast<std::byte>(
                 static_cast<unsigned char>(
-                    value >> (byte * 8U))));
+                    value >> (byte * 8U)));
         }
+        append(encoded);
     }
 
     void boolean(bool value) {
-        bytes_.push_back(value ? '\1' : '\0');
+        const std::array<std::byte, 1> encoded = {
+            value ? std::byte{1} : std::byte{0},
+        };
+        append(encoded);
     }
 
     void real(double value) {
         integer(std::bit_cast<std::uint64_t>(value));
     }
 
-    std::string sha256() const {
-        return artifact_integrity::sha256_string(bytes_);
+    std::string sha256() {
+        flush();
+        return hash_.finish();
     }
 
   private:
-    std::string bytes_;
+    static constexpr std::size_t kBufferBytes = 64 * 1024;
+
+    void append(std::span<const std::byte> bytes) {
+        while (!bytes.empty()) {
+            const std::size_t copied = std::min(
+                bytes.size(), buffer_.size() - buffer_size_);
+            std::memcpy(
+                buffer_.data() + buffer_size_,
+                bytes.data(), copied);
+            buffer_size_ += copied;
+            bytes = bytes.subspan(copied);
+            if (buffer_size_ == buffer_.size()) {
+                flush();
+            }
+        }
+    }
+
+    void flush() {
+        if (buffer_size_ == 0) {
+            return;
+        }
+        hash_.update(std::span(
+            buffer_.data(), buffer_size_));
+        buffer_size_ = 0;
+    }
+
+    artifact_integrity::Sha256Accumulator hash_;
+    std::array<std::byte, kBufferBytes> buffer_{};
+    std::size_t buffer_size_ = 0;
 };
 
 void digest_priority_action(
@@ -394,8 +429,37 @@ void digest_dominance_operator(
     append_settlement(comparison.second);
 }
 
+class EvidenceByteSink {
+  public:
+    virtual ~EvidenceByteSink() = default;
+    virtual void append(std::string_view bytes) = 0;
+};
+
+class TsvOutput {
+  public:
+    explicit TsvOutput(
+        EvidenceByteSink* sink = nullptr)
+        : sink_(sink) {}
+
+    void append(std::string_view bytes) {
+        if (sink_ != nullptr) {
+            sink_->append(bytes);
+        } else {
+            bytes_.append(bytes);
+        }
+    }
+
+    std::string take_bytes() {
+        return std::move(bytes_);
+    }
+
+  private:
+    EvidenceByteSink* sink_ = nullptr;
+    std::string bytes_;
+};
+
 void append_row(
-    std::string& output,
+    TsvOutput& output,
     std::initializer_list<std::string> fields) {
     bool first = true;
     for (const std::string& field : fields) {
@@ -404,12 +468,20 @@ void append_row(
                 std::string::npos,
             "FQ0 TSV field contains a control character");
         if (!first) {
-            output.push_back('\t');
+            output.append("\t");
         }
         first = false;
-        output += field;
+        output.append(field);
     }
-    output.push_back('\n');
+    output.append("\n");
+}
+
+void append_row(
+    std::string& output,
+    std::initializer_list<std::string> fields) {
+    TsvOutput row;
+    append_row(row, fields);
+    output += row.take_bytes();
 }
 
 std::string optional_size(
@@ -428,7 +500,7 @@ std::string optional_stack(
 }
 
 void append_action_fields(
-    std::string& output, std::string_view row_kind,
+    TsvOutput& output, std::string_view row_kind,
     std::string_view coordinate,
     std::string_view descriptor,
     const PriorityAction& action) {
@@ -456,7 +528,7 @@ void append_action_fields(
 }
 
 void append_identity_witness(
-    std::string& output, std::string_view kind,
+    TsvOutput& output, std::string_view kind,
     std::string_view coordinate,
     const BitIdentityEvidence& witness) {
     append_row(
@@ -3638,8 +3710,10 @@ void validate_report(const RunReport& report) {
         "FQ0 scientific gate summaries do not match raw rows");
 }
 
-std::string metadata_section(const RunReport& report) {
-    std::string output;
+std::string metadata_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
+    TsvOutput output(sink);
     append_row(
         output,
         {"identity", "model_fingerprint",
@@ -3815,11 +3889,13 @@ std::string metadata_section(const RunReport& report) {
         output,
         {"verdict", "passed",
          bool_text(report.gate.passed)});
-    return output;
+    return output.take_bytes();
 }
 
-std::string manifest_section(const RunReport& report) {
-    std::string output;
+std::string manifest_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
+    TsvOutput output(sink);
     const auto& manifest = report.scientific.manifest;
     append_row(
         output,
@@ -3861,11 +3937,11 @@ std::string manifest_section(const RunReport& report) {
              root.factory_contract_fingerprint,
              bool_text(root.from_dev_v3)});
     }
-    return output;
+    return output.take_bytes();
 }
 
 void append_cross_fit_rows(
-    std::string& output, std::string_view coordinate,
+    TsvOutput& output, std::string_view coordinate,
     const fq0_bellman::CrossFitValue& cross_fit) {
     for (const auto& action : cross_fit.bank_a) {
         append_row(
@@ -3902,7 +3978,7 @@ void append_cross_fit_rows(
 }
 
 void append_bank_rows(
-    std::string& output, std::string_view coordinate,
+    TsvOutput& output, std::string_view coordinate,
     const GroupBankEvidence& bank) {
     append_row(
         output,
@@ -3963,8 +4039,10 @@ void append_bank_rows(
     }
 }
 
-std::string roots_section(const RunReport& report) {
-    std::string output;
+std::string roots_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
+    TsvOutput output(sink);
     for (const RootEvidence& root :
          report.scientific.roots) {
         append_row(
@@ -4320,11 +4398,13 @@ std::string roots_section(const RunReport& report) {
                  deck
                      .support_changed_fraction_bits))});
     }
-    return output;
+    return output.take_bytes();
 }
 
-std::string contrasts_section(const RunReport& report) {
-    std::string output;
+std::string contrasts_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
+    TsvOutput output(sink);
     for (const ContrastEvidence& evidence :
          report.scientific.contrasts) {
         const auto& contrast = evidence.contrast;
@@ -4356,11 +4436,13 @@ std::string contrasts_section(const RunReport& report) {
                  real_bits(contrast.block_deltas[block])});
         }
     }
-    return output;
+    return output.take_bytes();
 }
 
-std::string dominance_section(const RunReport& report) {
-    std::string output;
+std::string dominance_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
+    TsvOutput output(sink);
     for (const DominancePairEvidence& pair :
          report.scientific.dominance_pairs) {
         append_row(
@@ -4488,11 +4570,13 @@ std::string dominance_section(const RunReport& report) {
                 world.hidden_repartition_witness);
         }
     }
-    return output;
+    return output.take_bytes();
 }
 
-std::string collisions_section(const RunReport& report) {
-    std::string output;
+std::string collisions_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
+    TsvOutput output(sink);
     for (const fq0_bellman::FeatureTargetRow& row :
          report.scientific.feature_rows) {
         append_row(
@@ -4546,11 +4630,11 @@ std::string collisions_section(const RunReport& report) {
              bool_text(collision.support_conflict),
              bool_text(collision.harmful)});
     }
-    return output;
+    return output.take_bytes();
 }
 
 void append_snapshot(
-    std::string& output, std::string_view name,
+    TsvOutput& output, std::string_view name,
     const artifact_integrity::RegularFileSnapshot& snapshot) {
     append_row(
         output,
@@ -4563,7 +4647,7 @@ void append_snapshot(
 }
 
 void append_components(
-    std::string& output, std::string_view name,
+    TsvOutput& output, std::string_view name,
     const LearnedModelComponentFingerprints& components) {
     append_row(
         output,
@@ -4587,8 +4671,10 @@ void append_components(
          "damage_order", components.damage_order});
 }
 
-std::string integrity_section(const RunReport& report) {
-    std::string output;
+std::string integrity_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
+    TsvOutput output(sink);
     append_snapshot(
         output, "model_before",
         report.integrity.model_before);
@@ -4622,13 +4708,15 @@ std::string integrity_section(const RunReport& report) {
          report.gate.failures) {
         append_row(output, {"gate_failure", failure});
     }
-    return output;
+    return output.take_bytes();
 }
 
-std::string invariance_section(const RunReport& report) {
+std::string invariance_section(
+    const RunReport& report,
+    EvidenceByteSink* sink = nullptr) {
     const InvarianceEvidence& value =
         report.scientific.invariance;
-    std::string output;
+    TsvOutput output(sink);
     append_identity_witness(
         output, "independent_manifest", "global",
         value.independent_manifest_witness);
@@ -4697,7 +4785,215 @@ std::string invariance_section(const RunReport& report) {
         output,
         {"scientific", "passed",
          bool_text(report.scientific.passed)});
-    return output;
+    return output.take_bytes();
+}
+
+class StreamingEvidenceWriter final
+    : public EvidenceByteSink {
+  public:
+    static constexpr std::size_t kBufferBytes = 64 * 1024;
+
+    StreamingEvidenceWriter(
+        int descriptor,
+        testing::StreamingFailureStage failure_stage,
+        testing::StreamingPublicationMetrics* metrics)
+        : descriptor_(descriptor),
+          failure_stage_(failure_stage),
+          metrics_(metrics) {
+        if (metrics_ != nullptr) {
+            metrics_->emitter_buffer_capacity =
+                buffer_.size();
+        }
+    }
+
+    void append(std::string_view bytes) override {
+        require(
+            !finished_,
+            "FQ0 evidence writer used after completion");
+        if (failure_stage_ ==
+                testing::StreamingFailureStage::Write &&
+            byte_size_ != 0) {
+            throw std::runtime_error(
+                "injected FQ0 streaming write failure");
+        }
+        file_sha256_.update(bytes);
+        if (payload_active_) {
+            payload_sha256_.update(bytes);
+        }
+        if (complete_active_) {
+            complete_sha256_.update(bytes);
+        }
+        if (section_sha256_.has_value()) {
+            section_sha256_->update(bytes);
+        }
+        require(
+            bytes.size() <=
+                std::numeric_limits<std::uintmax_t>::max() -
+                    byte_size_,
+            "FQ0 evidence byte count overflowed");
+        byte_size_ += bytes.size();
+        while (!bytes.empty()) {
+            const std::size_t copied = std::min(
+                bytes.size(), buffer_.size() - buffer_size_);
+            std::memcpy(
+                buffer_.data() + buffer_size_,
+                bytes.data(), copied);
+            buffer_size_ += copied;
+            if (metrics_ != nullptr) {
+                metrics_->emitter_pending_high_water =
+                    std::max(
+                        metrics_
+                            ->emitter_pending_high_water,
+                        buffer_size_);
+            }
+            bytes.remove_prefix(copied);
+            if (buffer_size_ == buffer_.size()) {
+                flush();
+            }
+        }
+    }
+
+    void begin_section() {
+        require(
+            !section_sha256_.has_value(),
+            "FQ0 evidence section hashes overlapped");
+        section_sha256_.emplace();
+    }
+
+    std::string finish_section() {
+        require(
+            section_sha256_.has_value(),
+            "FQ0 evidence section hash is missing");
+        std::string digest = section_sha256_->finish();
+        section_sha256_.reset();
+        return digest;
+    }
+
+    std::string finish_payload() {
+        require(
+            payload_active_ &&
+                !section_sha256_.has_value(),
+            "FQ0 evidence payload ended inside a section");
+        payload_active_ = false;
+        return payload_sha256_.finish();
+    }
+
+    std::string finish_complete() {
+        require(
+            complete_active_ && !payload_active_,
+            "FQ0 evidence complete hash ended early");
+        complete_active_ = false;
+        return complete_sha256_.finish();
+    }
+
+    std::string finish_file() {
+        require(
+            !payload_active_ && !complete_active_ &&
+                !section_sha256_.has_value(),
+            "FQ0 evidence file hash ended early");
+        flush();
+        finished_ = true;
+        return file_sha256_.finish();
+    }
+
+    std::uintmax_t byte_size() const {
+        return byte_size_;
+    }
+
+  private:
+    void flush() {
+        std::size_t cursor = 0;
+        while (cursor < buffer_size_) {
+            const ssize_t written = ::write(
+                descriptor_, buffer_.data() + cursor,
+                buffer_size_ - cursor);
+            if (written < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                throw std::runtime_error(
+                    "cannot write FQ0 evidence temporary: " +
+                    std::string(std::strerror(errno)));
+            }
+            require(
+                written != 0,
+                "FQ0 evidence write made no progress");
+            cursor += static_cast<std::size_t>(written);
+        }
+        buffer_size_ = 0;
+    }
+
+    int descriptor_;
+    testing::StreamingFailureStage failure_stage_;
+    testing::StreamingPublicationMetrics* metrics_;
+    artifact_integrity::Sha256Accumulator file_sha256_;
+    artifact_integrity::Sha256Accumulator payload_sha256_;
+    artifact_integrity::Sha256Accumulator complete_sha256_;
+    std::optional<artifact_integrity::Sha256Accumulator>
+        section_sha256_;
+    std::array<char, kBufferBytes> buffer_{};
+    std::size_t buffer_size_ = 0;
+    std::uintmax_t byte_size_ = 0;
+    bool payload_active_ = true;
+    bool complete_active_ = true;
+    bool finished_ = false;
+};
+
+using SectionEmitter = std::string (*)(
+    const RunReport&, EvidenceByteSink*);
+
+testing::StreamedEvidenceSummary stream_report_to_descriptor(
+    int descriptor, const RunReport& report,
+    testing::StreamingFailureStage failure_stage,
+    testing::StreamingPublicationMetrics* metrics) {
+    const std::array<std::pair<std::string_view, SectionEmitter>,
+                     kSectionNames.size()>
+        sections = {{
+            {"metadata", metadata_section},
+            {"manifest", manifest_section},
+            {"roots", roots_section},
+            {"contrasts", contrasts_section},
+            {"dominance", dominance_section},
+            {"collisions", collisions_section},
+            {"integrity", integrity_section},
+            {"invariance", invariance_section},
+        }};
+    testing::StreamedEvidenceSummary summary;
+    summary.section_names.reserve(sections.size());
+    summary.section_sha256.reserve(sections.size());
+    StreamingEvidenceWriter writer(
+        descriptor, failure_stage, metrics);
+    TsvOutput framing(&writer);
+    append_row(
+        framing, {"schema", std::string(kEvidenceSchema)});
+    for (const auto& [name, emit] : sections) {
+        append_row(
+            framing, {"section_begin", std::string(name)});
+        writer.begin_section();
+        const std::string retained = emit(report, &writer);
+        require(
+            retained.empty(),
+            "FQ0 streaming section retained evidence bytes");
+        const std::string section_sha256 =
+            writer.finish_section();
+        summary.section_names.emplace_back(name);
+        summary.section_sha256.push_back(section_sha256);
+        append_row(
+            framing,
+            {"section_sha256", std::string(name),
+             section_sha256});
+    }
+    summary.payload_sha256 = writer.finish_payload();
+    append_row(
+        framing,
+        {"payload_sha256", summary.payload_sha256});
+    summary.complete_sha256 = writer.finish_complete();
+    append_row(
+        framing,
+        {"complete_sha256", summary.complete_sha256});
+    summary.sha256 = writer.finish_file();
+    summary.byte_size = writer.byte_size();
+    return summary;
 }
 
 EvidenceBundle serialize_impl(const RunReport& report) {
@@ -4879,6 +5175,456 @@ EvidenceBundle validate_bundle_impl(std::string_view bytes) {
         cursor == bytes.size(),
         "FQ0 evidence has trailing data");
     return result;
+}
+
+class BoundedLineReader {
+  public:
+    static constexpr std::size_t kBufferBytes = 64 * 1024;
+
+    BoundedLineReader(
+        int descriptor,
+        testing::StreamingFailureStage failure_stage,
+        testing::StreamingPublicationMetrics* metrics)
+        : descriptor_(descriptor),
+          failure_stage_(failure_stage),
+          metrics_(metrics) {
+        if (metrics_ != nullptr) {
+            metrics_->reread_buffer_capacity =
+                buffer_.size();
+        }
+    }
+
+    std::optional<std::string_view> next() {
+        while (true) {
+            const auto begin = buffer_.begin() +
+                               static_cast<std::ptrdiff_t>(
+                                   cursor_);
+            const auto end = buffer_.begin() +
+                             static_cast<std::ptrdiff_t>(
+                                 buffered_);
+            const auto newline =
+                std::find(begin, end, '\n');
+            if (newline != end) {
+                const std::size_t line_end =
+                    static_cast<std::size_t>(
+                        newline - buffer_.begin());
+                const std::string_view line(
+                    buffer_.data() + cursor_,
+                    line_end - cursor_);
+                require(
+                    line.find('\r') ==
+                            std::string_view::npos &&
+                        line.find('\0') ==
+                            std::string_view::npos,
+                    "FQ0 evidence contains a forbidden byte");
+                cursor_ = line_end + 1;
+                return line;
+            }
+            if (eof_) {
+                require(
+                    cursor_ == buffered_,
+                    "FQ0 evidence has a non-terminated line");
+                return std::nullopt;
+            }
+            compact();
+            require(
+                buffered_ < buffer_.size(),
+                "FQ0 evidence line exceeds bounded parser "
+                "capacity");
+            if (failure_stage_ ==
+                testing::StreamingFailureStage::Reread) {
+                throw std::runtime_error(
+                    "injected FQ0 streaming reread failure");
+            }
+            ssize_t read_size = 0;
+            do {
+                read_size = ::read(
+                    descriptor_,
+                    buffer_.data() + buffered_,
+                    buffer_.size() - buffered_);
+            } while (read_size < 0 && errno == EINTR);
+            if (read_size < 0) {
+                throw std::runtime_error(
+                    "cannot reread FQ0 evidence temporary: " +
+                    std::string(std::strerror(errno)));
+            }
+            if (read_size == 0) {
+                eof_ = true;
+                continue;
+            }
+            buffered_ +=
+                static_cast<std::size_t>(read_size);
+            if (metrics_ != nullptr) {
+                metrics_->reread_pending_high_water =
+                    std::max(
+                        metrics_
+                            ->reread_pending_high_water,
+                        buffered_ - cursor_);
+            }
+        }
+    }
+
+  private:
+    void compact() {
+        if (cursor_ == 0) {
+            return;
+        }
+        const std::size_t remaining = buffered_ - cursor_;
+        std::memmove(
+            buffer_.data(), buffer_.data() + cursor_,
+            remaining);
+        cursor_ = 0;
+        buffered_ = remaining;
+    }
+
+    int descriptor_;
+    testing::StreamingFailureStage failure_stage_;
+    testing::StreamingPublicationMetrics* metrics_;
+    std::array<char, kBufferBytes> buffer_{};
+    std::size_t cursor_ = 0;
+    std::size_t buffered_ = 0;
+    bool eof_ = false;
+};
+
+bool row_equals(
+    std::string_view line,
+    std::initializer_list<std::string_view> expected) {
+    std::size_t cursor = 0;
+    for (auto field = expected.begin();
+         field != expected.end(); ++field) {
+        const std::size_t tab = line.find('\t', cursor);
+        const bool final = std::next(field) == expected.end();
+        const std::size_t field_end =
+            tab == std::string_view::npos ? line.size() : tab;
+        if (line.substr(cursor, field_end - cursor) !=
+                *field ||
+            final !=
+                (tab == std::string_view::npos)) {
+            return false;
+        }
+        cursor = field_end + 1;
+    }
+    return true;
+}
+
+bool row_has_key(
+    std::string_view line, std::string_view first,
+    std::string_view second) {
+    const std::size_t first_tab = line.find('\t');
+    if (first_tab == std::string_view::npos ||
+        line.substr(0, first_tab) != first) {
+        return false;
+    }
+    const std::size_t second_start = first_tab + 1;
+    const std::size_t second_tab =
+        line.find('\t', second_start);
+    const std::size_t second_end =
+        second_tab == std::string_view::npos
+            ? line.size()
+            : second_tab;
+    return line.substr(
+               second_start, second_end - second_start) ==
+           second;
+}
+
+bool row_has_key(
+    std::string_view line, std::string_view first,
+    std::string_view second, std::string_view third) {
+    const std::size_t first_tab = line.find('\t');
+    if (first_tab == std::string_view::npos ||
+        line.substr(0, first_tab) != first) {
+        return false;
+    }
+    const std::size_t second_start = first_tab + 1;
+    const std::size_t second_tab =
+        line.find('\t', second_start);
+    if (second_tab == std::string_view::npos ||
+        line.substr(
+            second_start, second_tab - second_start) !=
+            second) {
+        return false;
+    }
+    const std::size_t third_start = second_tab + 1;
+    const std::size_t third_tab =
+        line.find('\t', third_start);
+    const std::size_t third_end =
+        third_tab == std::string_view::npos
+            ? line.size()
+            : third_tab;
+    return line.substr(
+               third_start, third_end - third_start) ==
+           third;
+}
+
+std::string_view first_field(std::string_view line) {
+    const std::size_t tab = line.find('\t');
+    return line.substr(
+        0, tab == std::string_view::npos ? line.size()
+                                         : tab);
+}
+
+void hash_line(
+    artifact_integrity::Sha256Accumulator& digest,
+    std::string_view line) {
+    digest.update(line);
+    digest.update("\n");
+}
+
+struct BindingRows {
+    std::array<std::string, 9> exact;
+};
+
+BindingRows make_binding_rows(
+    const artifact_integrity::RegularFileSnapshot&
+        expected_model,
+    std::string_view expected_model_fingerprint,
+    std::string_view observed_model_fingerprint) {
+    require(
+        audit_common::is_lower_hex_digest(
+            expected_model.sha256) &&
+            audit_common::is_lower_hex_digest(
+                expected_model_fingerprint) &&
+            observed_model_fingerprint ==
+                expected_model_fingerprint,
+        "FQ0 evidence model binding is invalid");
+    const std::string bytes =
+        std::to_string(expected_model.byte_size);
+    return {{
+        "identity\tmodel_fingerprint\t" +
+            std::string(observed_model_fingerprint),
+        "snapshot\tmodel_before\tbytes\t" + bytes,
+        "snapshot\tmodel_before\tsha256\t" +
+            expected_model.sha256,
+        "snapshot\tmodel_after\tbytes\t" + bytes,
+        "snapshot\tmodel_after\tsha256\t" +
+            expected_model.sha256,
+        "integrity\tartifact_unchanged\t1",
+        "integrity\tmodel_identity_matched\t1",
+        "integrity\tpassed\t1",
+        "scientific\tcomplete\t1",
+    }};
+}
+
+struct BindingRowCounts {
+    std::array<std::size_t, 9> keys{};
+    std::array<std::size_t, 9> exact{};
+    std::size_t verdict_keys = 0;
+    std::size_t accepted_verdicts = 0;
+};
+
+void count_binding_row(
+    std::string_view line, const BindingRows& expected,
+    BindingRowCounts& counts) {
+    const std::array<bool, 9> matches = {
+        row_has_key(
+            line, "identity", "model_fingerprint"),
+        row_has_key(
+            line, "snapshot", "model_before", "bytes"),
+        row_has_key(
+            line, "snapshot", "model_before", "sha256"),
+        row_has_key(
+            line, "snapshot", "model_after", "bytes"),
+        row_has_key(
+            line, "snapshot", "model_after", "sha256"),
+        row_has_key(
+            line, "integrity", "artifact_unchanged"),
+        row_has_key(
+            line, "integrity", "model_identity_matched"),
+        row_has_key(line, "integrity", "passed"),
+        row_has_key(line, "scientific", "complete"),
+    };
+    for (std::size_t index = 0; index < matches.size();
+         ++index) {
+        if (matches[index]) {
+            ++counts.keys[index];
+            if (line == expected.exact[index]) {
+                ++counts.exact[index];
+            }
+        }
+    }
+    if (row_has_key(line, "verdict", "exit_code")) {
+        ++counts.verdict_keys;
+        if (row_equals(
+                line, {"verdict", "exit_code", "0"}) ||
+            row_equals(
+                line, {"verdict", "exit_code", "1"})) {
+            ++counts.accepted_verdicts;
+        }
+    }
+}
+
+void require_exact_binding_counts(
+    const BindingRowCounts& counts) {
+    require(
+        std::all_of(
+            counts.keys.begin(), counts.keys.end(),
+            [](std::size_t value) { return value == 1; }) &&
+            std::all_of(
+                counts.exact.begin(), counts.exact.end(),
+                [](std::size_t value) {
+                    return value == 1;
+                }) &&
+            counts.verdict_keys == 1 &&
+            counts.accepted_verdicts == 1,
+        "FQ0 evidence binding rows are missing, duplicated, "
+        "or inconsistent");
+}
+
+testing::StreamedEvidenceSummary
+validate_streamed_descriptor(
+    int descriptor, const BindingRows& expected_bindings,
+    testing::StreamingFailureStage failure_stage,
+    testing::StreamingPublicationMetrics* metrics) {
+    require(
+        ::lseek(descriptor, 0, SEEK_SET) == 0,
+        "cannot rewind FQ0 evidence temporary");
+    struct stat before {};
+    require(
+        ::fstat(descriptor, &before) == 0 &&
+            S_ISREG(before.st_mode) && before.st_size >= 0,
+        "FQ0 evidence temporary is not a regular file");
+
+    BoundedLineReader reader(
+        descriptor, failure_stage, metrics);
+    artifact_integrity::Sha256Accumulator file_sha256;
+    artifact_integrity::Sha256Accumulator payload_sha256;
+    artifact_integrity::Sha256Accumulator complete_sha256;
+    BindingRowCounts binding_counts;
+    testing::StreamedEvidenceSummary summary;
+    summary.section_names.reserve(kSectionNames.size());
+    summary.section_sha256.reserve(kSectionNames.size());
+
+    const auto required_line = [&] {
+        const auto line = reader.next();
+        require(
+            line.has_value(),
+            "FQ0 evidence ended before its required footer");
+        count_binding_row(
+            *line, expected_bindings, binding_counts);
+        return *line;
+    };
+    const auto hash_payload_line =
+        [&](std::string_view line) {
+            hash_line(file_sha256, line);
+            hash_line(payload_sha256, line);
+            hash_line(complete_sha256, line);
+            summary.byte_size += line.size() + 1;
+        };
+    const auto hash_complete_line =
+        [&](std::string_view line) {
+            hash_line(file_sha256, line);
+            hash_line(complete_sha256, line);
+            summary.byte_size += line.size() + 1;
+        };
+    const auto hash_file_line =
+        [&](std::string_view line) {
+            hash_line(file_sha256, line);
+            summary.byte_size += line.size() + 1;
+        };
+
+    const std::string_view schema = required_line();
+    require(
+        row_equals(schema, {"schema", kEvidenceSchema}),
+        "FQ0 evidence framing row is malformed");
+    hash_payload_line(schema);
+    for (const std::string_view section : kSectionNames) {
+        const std::string_view begin = required_line();
+        require(
+            row_equals(begin, {"section_begin", section}),
+            "FQ0 evidence framing row is malformed");
+        hash_payload_line(begin);
+        artifact_integrity::Sha256Accumulator section_sha256;
+        while (true) {
+            const std::string_view line = required_line();
+            if (first_field(line) == "section_sha256") {
+                const std::size_t first_tab =
+                    line.find('\t');
+                const std::size_t second_tab =
+                    line.find('\t', first_tab + 1);
+                require(
+                    second_tab != std::string_view::npos &&
+                        line.find('\t', second_tab + 1) ==
+                            std::string_view::npos,
+                    "FQ0 evidence section footer is malformed");
+                const std::string_view footer_section =
+                    line.substr(
+                        first_tab + 1,
+                        second_tab - first_tab - 1);
+                const std::string_view footer_digest =
+                    line.substr(second_tab + 1);
+                require(
+                    footer_section == section &&
+                        audit_common::is_lower_hex_digest(
+                            footer_digest) &&
+                        section_sha256.finish() ==
+                            footer_digest,
+                    "FQ0 evidence section hash mismatch");
+                summary.section_names.emplace_back(section);
+                summary.section_sha256.emplace_back(
+                    footer_digest);
+                hash_payload_line(line);
+                break;
+            }
+            require(
+                first_field(line) != "section_begin",
+                "FQ0 evidence section is missing its hash");
+            hash_line(section_sha256, line);
+            hash_payload_line(line);
+        }
+    }
+
+    const std::string_view payload = required_line();
+    const std::size_t payload_tab = payload.find('\t');
+    require(
+        payload_tab != std::string_view::npos &&
+            payload.find('\t', payload_tab + 1) ==
+                std::string_view::npos &&
+            payload.substr(0, payload_tab) ==
+                "payload_sha256",
+        "FQ0 evidence payload footer is malformed");
+    const std::string_view payload_digest =
+        payload.substr(payload_tab + 1);
+    require(
+        audit_common::is_lower_hex_digest(payload_digest) &&
+            payload_sha256.finish() == payload_digest,
+        "FQ0 evidence payload hash mismatch");
+    summary.payload_sha256 = std::string(payload_digest);
+    hash_complete_line(payload);
+
+    const std::string_view complete = required_line();
+    const std::size_t complete_tab = complete.find('\t');
+    require(
+        complete_tab != std::string_view::npos &&
+            complete.find('\t', complete_tab + 1) ==
+                std::string_view::npos &&
+            complete.substr(0, complete_tab) ==
+                "complete_sha256",
+        "FQ0 evidence complete footer is malformed");
+    const std::string_view complete_digest =
+        complete.substr(complete_tab + 1);
+    require(
+        audit_common::is_lower_hex_digest(complete_digest) &&
+            complete_sha256.finish() == complete_digest,
+        "FQ0 evidence complete hash mismatch");
+    summary.complete_sha256 =
+        std::string(complete_digest);
+    hash_file_line(complete);
+    require(
+        !reader.next().has_value(),
+        "FQ0 evidence has trailing data");
+    require_exact_binding_counts(binding_counts);
+    summary.sha256 = file_sha256.finish();
+
+    struct stat after {};
+    require(
+        ::fstat(descriptor, &after) == 0 &&
+            before.st_dev == after.st_dev &&
+            before.st_ino == after.st_ino &&
+            before.st_size == after.st_size &&
+            summary.byte_size ==
+                static_cast<std::uintmax_t>(after.st_size),
+        "FQ0 evidence changed during bounded validation");
+    return summary;
 }
 
 bool contains_exact_row(
@@ -5117,6 +5863,183 @@ void write_atomic_impl(
         directory_descriptor, temporary.c_str(), 0));
     static_cast<void>(::fsync(directory_descriptor));
     close_directory();
+}
+
+void validate_publication_binding(
+    const RunReport& report,
+    const artifact_integrity::RegularFileSnapshot&
+        expected_model,
+    std::string_view expected_model_fingerprint,
+    std::string_view observed_model_fingerprint) {
+    require(
+        report.scientific.model_fingerprint ==
+                observed_model_fingerprint &&
+            observed_model_fingerprint ==
+                expected_model_fingerprint &&
+            report.integrity.model_before.byte_size ==
+                expected_model.byte_size &&
+            report.integrity.model_before.sha256 ==
+                expected_model.sha256 &&
+            report.integrity.model_after.byte_size ==
+                expected_model.byte_size &&
+            report.integrity.model_after.sha256 ==
+                expected_model.sha256 &&
+            report.integrity.artifact_unchanged &&
+            report.integrity.model_identity_matched &&
+            report.integrity.passed &&
+            report.scientific.complete &&
+            (exit_code(report.gate) == 0 ||
+             exit_code(report.gate) == 1),
+        "FQ0 report is not bound to the expected frozen "
+        "model");
+}
+
+EvidencePublication publish_streamed_report_for_parent(
+    std::string_view path_text, const RunReport& report,
+    const artifact_integrity::RegularFileSnapshot&
+        expected_model,
+    std::string_view expected_model_fingerprint,
+    std::string_view observed_model_fingerprint,
+    testing::StreamingFailureStage failure_stage,
+    testing::StreamingPublicationMetrics* metrics) {
+    if (metrics != nullptr) {
+        *metrics = {};
+    }
+    require(
+        !path_text.empty() &&
+            path_text.find('\0') == std::string_view::npos,
+        "FQ0 evidence path is invalid");
+    validate_publication_binding(
+        report, expected_model, expected_model_fingerprint,
+        observed_model_fingerprint);
+    const BindingRows expected_bindings =
+        make_binding_rows(
+            expected_model, expected_model_fingerprint,
+            observed_model_fingerprint);
+    const std::filesystem::path target{
+        std::string(path_text)};
+    require(
+        !target.filename().empty() &&
+            target.filename() != "." &&
+            target.filename() != "..",
+        "FQ0 evidence path must name a file");
+    const std::filesystem::path parent =
+        target.has_parent_path()
+            ? target.parent_path()
+            : std::filesystem::path(".");
+    int directory_descriptor =
+        open_or_create_verified_parent(parent);
+    const std::string filename =
+        target.filename().string();
+    const std::string temporary = filename + ".tmp";
+    const auto close_directory = [&] {
+        if (directory_descriptor >= 0) {
+            static_cast<void>(
+                ::close(directory_descriptor));
+            directory_descriptor = -1;
+        }
+    };
+    try {
+        require(
+            !path_exists_at(
+                directory_descriptor, filename) &&
+                !path_exists_at(
+                    directory_descriptor, temporary),
+            "FQ0 evidence destination or temporary exists");
+    } catch (...) {
+        close_directory();
+        throw;
+    }
+
+    int flags = O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC;
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
+    int descriptor = ::openat(
+        directory_descriptor, temporary.c_str(),
+        flags, 0644);
+    if (descriptor < 0) {
+        const std::string detail = std::strerror(errno);
+        close_directory();
+        throw std::runtime_error(
+            "cannot create FQ0 evidence temporary: " +
+            detail);
+    }
+    const auto clean_temporary = [&] {
+        if (descriptor >= 0) {
+            static_cast<void>(::close(descriptor));
+            descriptor = -1;
+        }
+        static_cast<void>(::unlinkat(
+            directory_descriptor, temporary.c_str(), 0));
+    };
+
+    EvidencePublication publication;
+    try {
+        const testing::StreamedEvidenceSummary emitted =
+            stream_report_to_descriptor(
+                descriptor, report, failure_stage, metrics);
+        require(
+            ::fsync(descriptor) == 0,
+            "cannot sync FQ0 evidence temporary");
+        const testing::StreamedEvidenceSummary validated =
+            validate_streamed_descriptor(
+                descriptor, expected_bindings,
+                failure_stage, metrics);
+        require(
+            validated == emitted,
+            "FQ0 streamed evidence summaries disagree");
+
+        publication = {
+            .path = std::string(path_text),
+            .byte_size = emitted.byte_size,
+            .sha256 = emitted.sha256,
+            .payload_sha256 = emitted.payload_sha256,
+            .atomic_no_replace = false,
+            .published = false,
+        };
+        if (failure_stage ==
+            testing::StreamingFailureStage::Precommit) {
+            throw std::runtime_error(
+                "injected FQ0 streaming precommit failure");
+        }
+        const auto current =
+            artifact_integrity::snapshot_regular_file(
+                expected_model.path);
+        require(
+            current == expected_model,
+            "FQ0 frozen model changed before publication");
+        require(
+            !path_exists_at(
+                directory_descriptor, filename),
+            "FQ0 evidence destination appeared before commit");
+        if (::linkat(
+                directory_descriptor, temporary.c_str(),
+                directory_descriptor, filename.c_str(),
+                0) != 0) {
+            throw std::runtime_error(
+                "cannot atomically publish FQ0 evidence: " +
+                std::string(std::strerror(errno)));
+        }
+    } catch (...) {
+        clean_temporary();
+        close_directory();
+        throw;
+    }
+    // linkat() above is the commit point. Everything below is allocation-free
+    // and best effort so a complete published target cannot be reported as a
+    // failed publication merely because temporary cleanup or directory sync
+    // was unavailable.
+    publication.atomic_no_replace = true;
+    publication.published = true;
+    static_cast<void>(::close(descriptor));
+    descriptor = -1;
+    static_cast<void>(::unlinkat(
+        directory_descriptor, temporary.c_str(), 0));
+    static_cast<void>(::fsync(directory_descriptor));
+    static_cast<void>(::close(directory_descriptor));
+    directory_descriptor = -1;
+    return publication;
 }
 
 } // namespace
@@ -5421,8 +6344,14 @@ EvidencePublication publish_bundle_for_parent(
 }
 
 EvidencePublication publish_evidence_atomic_no_replace(
-    const RunReport& report) {
-    const EvidenceBundle bundle = serialize_impl(report);
+    const RunReport& report, std::ostream* progress) {
+    validate_report(report);
+    if (progress != nullptr) {
+        *progress
+            << "FQ0 publication: report validation complete; "
+               "streaming evidence\n"
+            << std::flush;
+    }
     std::error_code path_error;
     const std::filesystem::path expected_path =
         std::filesystem::absolute(
@@ -5442,11 +6371,12 @@ EvidencePublication publish_evidence_atomic_no_replace(
             report.integrity.model_after.sha256 ==
                 kModelArtifactSha256,
         "FQ0 publication is not bound to the fixed model path");
-    return publish_bundle_for_parent(
-        kEvidencePath, bundle,
+    return publish_streamed_report_for_parent(
+        kEvidencePath, report,
         report.integrity.model_after,
         kModelFingerprint,
-        report.scientific.model_fingerprint);
+        report.scientific.model_fingerprint,
+        testing::StreamingFailureStage::None, nullptr);
 }
 
 namespace testing {
@@ -5475,6 +6405,20 @@ void validate_seed_coordinate_ownership(
     }
 }
 
+std::string digest_writer_framing_fixture_sha256() {
+    static constexpr std::array<char, 5> kText = {
+        'F', '\0', 'Q', '0', '\n',
+    };
+    DigestWriter output;
+    output.text(std::string_view(kText.data(), kText.size()));
+    output.integer(0x0123456789abcdefULL);
+    output.boolean(false);
+    output.boolean(true);
+    output.real(-0.0);
+    output.real(1.5);
+    return output.sha256();
+}
+
 EvidencePublication publish_evidence_for_parent(
     std::string_view path, const EvidenceBundle& bundle,
     const artifact_integrity::RegularFileSnapshot& expected_model,
@@ -5484,6 +6428,68 @@ EvidencePublication publish_evidence_for_parent(
         path, bundle, expected_model,
         expected_model_fingerprint,
         observed_model_fingerprint);
+}
+
+EvidencePublication publish_evidence_streaming_for_parent(
+    std::string_view path, const RunReport& report,
+    const artifact_integrity::RegularFileSnapshot& expected_model,
+    std::string_view expected_model_fingerprint,
+    std::string_view observed_model_fingerprint,
+    StreamingFailureStage failure_stage,
+    StreamingPublicationMetrics* metrics) {
+    validate_report(report);
+    return publish_streamed_report_for_parent(
+        path, report, expected_model,
+        expected_model_fingerprint,
+        observed_model_fingerprint, failure_stage, metrics);
+}
+
+StreamedEvidenceSummary validate_streamed_evidence_for_parent(
+    std::string_view path,
+    const artifact_integrity::RegularFileSnapshot& expected_model,
+    std::string_view expected_model_fingerprint,
+    std::string_view observed_model_fingerprint,
+    StreamingPublicationMetrics* metrics) {
+    if (metrics != nullptr) {
+        metrics->reread_buffer_capacity = 0;
+        metrics->reread_pending_high_water = 0;
+    }
+    require(
+        !path.empty() &&
+            path.find('\0') == std::string_view::npos,
+        "FQ0 evidence validation path is invalid");
+    const BindingRows bindings = make_binding_rows(
+        expected_model, expected_model_fingerprint,
+        observed_model_fingerprint);
+    int flags = O_RDONLY | O_CLOEXEC;
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
+    const std::string path_string(path);
+    int descriptor = ::open(path_string.c_str(), flags);
+    if (descriptor < 0) {
+        throw std::runtime_error(
+            "cannot open FQ0 evidence for bounded validation: " +
+            std::string(std::strerror(errno)));
+    }
+    try {
+        StreamedEvidenceSummary result =
+            validate_streamed_descriptor(
+                descriptor, bindings,
+                StreamingFailureStage::None, metrics);
+        if (::close(descriptor) != 0) {
+            descriptor = -1;
+            throw std::runtime_error(
+                "cannot close bounded FQ0 evidence input");
+        }
+        descriptor = -1;
+        return result;
+    } catch (...) {
+        if (descriptor >= 0) {
+            static_cast<void>(::close(descriptor));
+        }
+        throw;
+    }
 }
 
 } // namespace testing

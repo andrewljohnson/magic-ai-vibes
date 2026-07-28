@@ -335,6 +335,10 @@ SuccessorBankPairDigests successor_bank_pair_digests(
     const GroupBank& bank_a, const GroupBank& bank_b,
     const fq0_bellman::CrossFitValue& cross_fit);
 
+// Hashes a fixed sequence spanning every framing primitive. Tests compare
+// this streaming result with the legacy buffered serialization.
+std::string digest_writer_framing_fixture_sha256();
+
 Construction construct_reduced(
     const ac1_teacher_audit::Manifest& manifest,
     std::shared_ptr<const LearnedModel> model,

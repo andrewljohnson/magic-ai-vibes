@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -8,6 +9,33 @@
 #include <string_view>
 
 namespace old_school::artifact_integrity {
+
+// Incrementally hashes an exact byte stream. finish() consumes the
+// accumulator; updating or finishing it again throws std::logic_error.
+class Sha256Accumulator {
+  public:
+    void update(std::span<const std::byte> bytes);
+    void update(std::string_view text);
+    std::string finish();
+
+  private:
+    void transform(const std::array<std::byte, 64>& block);
+
+    std::array<std::uint32_t, 8> state_ = {
+        0x6a09e667U,
+        0xbb67ae85U,
+        0x3c6ef372U,
+        0xa54ff53aU,
+        0x510e527fU,
+        0x9b05688cU,
+        0x1f83d9abU,
+        0x5be0cd19U,
+    };
+    std::array<std::byte, 64> buffer_{};
+    std::size_t buffer_size_ = 0;
+    std::uint64_t total_bytes_ = 0;
+    bool finished_ = false;
+};
 
 // Returns the lower-case hexadecimal SHA-256 digest of the exact input bytes.
 std::string sha256_bytes(std::span<const std::byte> bytes);

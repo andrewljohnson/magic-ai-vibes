@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -1613,7 +1614,7 @@ class DigestWriter {
   public:
     void text(std::string_view value) {
         integer(value.size());
-        bytes_.append(value);
+        append(std::as_bytes(std::span(value)));
     }
 
     template <typename Integer>
@@ -1622,12 +1623,14 @@ class DigestWriter {
         using Unsigned = std::make_unsigned_t<Integer>;
         std::uint64_t bits = static_cast<std::uint64_t>(
             static_cast<Unsigned>(value));
+        std::array<std::byte, sizeof(Unsigned)> encoded{};
         for (std::size_t index = 0;
              index < sizeof(Unsigned); ++index) {
-            bytes_.push_back(static_cast<char>(
-                bits & std::uint64_t{0xff}));
+            encoded[index] = static_cast<std::byte>(
+                bits & std::uint64_t{0xff});
             bits >>= 8U;
         }
+        append(encoded);
     }
 
     void boolean(bool value) {
@@ -1638,12 +1641,39 @@ class DigestWriter {
         integer(std::bit_cast<std::uint64_t>(value));
     }
 
-    const std::string& bytes() const {
-        return bytes_;
+    std::string sha256() {
+        flush();
+        return hash_.finish();
     }
 
   private:
-    std::string bytes_;
+    void append(std::span<const std::byte> bytes) {
+        while (!bytes.empty()) {
+            const std::size_t count = std::min(
+                bytes.size(), buffer_.size() - buffer_size_);
+            std::memcpy(
+                buffer_.data() + buffer_size_,
+                bytes.data(), count);
+            buffer_size_ += count;
+            bytes = bytes.subspan(count);
+            if (buffer_size_ == buffer_.size()) {
+                flush();
+            }
+        }
+    }
+
+    void flush() {
+        if (buffer_size_ == 0) {
+            return;
+        }
+        hash_.update(std::span<const std::byte>(
+            buffer_.data(), buffer_size_));
+        buffer_size_ = 0;
+    }
+
+    artifact_integrity::Sha256Accumulator hash_;
+    std::array<std::byte, 64 * 1024> buffer_{};
+    std::size_t buffer_size_ = 0;
 };
 
 void append_action(
@@ -1749,8 +1779,7 @@ std::string bank_pair_sha256(const BankPair& pair) {
     append_bank(writer, pair.bank_a);
     append_bank(writer, pair.bank_b);
     append_cross_fit(writer, pair.cross_fit);
-    return artifact_integrity::sha256_string(
-        writer.bytes());
+    return writer.sha256();
 }
 
 std::string operator_bank_pair_sha256(
@@ -1761,8 +1790,7 @@ std::string operator_bank_pair_sha256(
     append_bank(writer, pair.bank_a, false);
     append_bank(writer, pair.bank_b, false);
     append_cross_fit(writer, pair.cross_fit);
-    return artifact_integrity::sha256_string(
-        writer.bytes());
+    return writer.sha256();
 }
 
 struct EmpiricalGroupRepresentativeCoordinate {
@@ -2492,8 +2520,7 @@ std::string semantic_sha256_impl(
          construction.roots_by_deck) {
         writer.integer(roots);
     }
-    return artifact_integrity::sha256_string(
-        writer.bytes());
+    return writer.sha256();
 }
 
 void validate_completed_transition_accounting(
@@ -3251,8 +3278,7 @@ std::string feature_rows_sha256(
     for (const bellman::FeatureTargetRow& row : rows) {
         append_feature_row(writer, row);
     }
-    return artifact_integrity::sha256_string(
-        writer.bytes());
+    return writer.sha256();
 }
 
 std::string collision_analysis_sha256(
@@ -3277,8 +3303,7 @@ std::string collision_analysis_sha256(
     }
     writer.integer(analysis.harmful_collisions);
     writer.boolean(analysis.passed);
-    return artifact_integrity::sha256_string(
-        writer.bytes());
+    return writer.sha256();
 }
 
 std::vector<bellman::FeatureTargetRow>
@@ -3971,6 +3996,30 @@ HiddenRepartitionDiagnostic hidden_repartition(
 }
 
 namespace testing {
+
+std::string digest_writer_framing_fixture_sha256() {
+    DigestWriter writer;
+    writer.text(
+        "old-school-fq0-digest-writer-framing-fixture-v1");
+    writer.integer<std::uint8_t>(0xa5U);
+    writer.integer<std::uint16_t>(0xb60cU);
+    writer.integer<std::uint32_t>(0xd70e1f20U);
+    writer.integer<std::uint64_t>(0xe80123456789abcdULL);
+    writer.integer<std::size_t>(0x01020304U);
+    writer.boolean(false);
+    writer.boolean(true);
+    writer.real(1.25);
+    writer.real(-0.0);
+    writer.text(std::string_view("left\0right", 10));
+    std::string boundary_text(64 * 1024 + 257, '\0');
+    for (std::size_t index = 0;
+         index < boundary_text.size(); ++index) {
+        boundary_text[index] = static_cast<char>(
+            (index * 37U + 11U) & 0xffU);
+    }
+    writer.text(boundary_text);
+    return writer.sha256();
+}
 
 SuccessorBankPairDigests successor_bank_pair_digests(
     const GroupBank& bank_a, const GroupBank& bank_b,

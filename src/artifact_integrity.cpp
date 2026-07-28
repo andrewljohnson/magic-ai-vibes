@@ -38,171 +38,6 @@ constexpr std::array<std::uint32_t, 64> kRoundConstants = {
     0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
 };
 
-class Sha256 {
-  public:
-    void update(std::span<const std::byte> bytes) {
-        constexpr std::uint64_t kMaximumBytes =
-            std::numeric_limits<std::uint64_t>::max() / CHAR_BIT;
-        if (bytes.size() > kMaximumBytes - total_bytes_) {
-            throw std::length_error(
-                "SHA-256 input exceeds its 64-bit length field");
-        }
-        total_bytes_ += static_cast<std::uint64_t>(bytes.size());
-
-        std::size_t offset = 0;
-        if (buffer_size_ != 0) {
-            const std::size_t copied =
-                std::min(
-                    bytes.size(), buffer_.size() - buffer_size_);
-            std::memcpy(
-                buffer_.data() + buffer_size_, bytes.data(), copied);
-            buffer_size_ += copied;
-            offset += copied;
-            if (buffer_size_ == buffer_.size()) {
-                transform(buffer_);
-                buffer_size_ = 0;
-            }
-        }
-
-        while (bytes.size() - offset >= buffer_.size()) {
-            std::array<std::byte, 64> block;
-            std::memcpy(
-                block.data(), bytes.data() + offset, block.size());
-            transform(block);
-            offset += block.size();
-        }
-
-        const std::size_t remaining = bytes.size() - offset;
-        if (remaining != 0) {
-            std::memcpy(
-                buffer_.data(), bytes.data() + offset, remaining);
-            buffer_size_ = remaining;
-        }
-    }
-
-    std::string finish() {
-        const std::uint64_t bit_count =
-            total_bytes_ * static_cast<std::uint64_t>(CHAR_BIT);
-        buffer_[buffer_size_++] = std::byte{0x80};
-        if (buffer_size_ > 56) {
-            while (buffer_size_ < buffer_.size()) {
-                buffer_[buffer_size_++] = std::byte{0};
-            }
-            transform(buffer_);
-            buffer_size_ = 0;
-        }
-        while (buffer_size_ < 56) {
-            buffer_[buffer_size_++] = std::byte{0};
-        }
-        for (std::size_t byte = 0; byte < 8; ++byte) {
-            const auto shift =
-                static_cast<unsigned int>((7 - byte) * CHAR_BIT);
-            buffer_[56 + byte] = static_cast<std::byte>(
-                (bit_count >> shift) & 0xffU);
-        }
-        transform(buffer_);
-        buffer_size_ = 0;
-
-        static constexpr char kHex[] = "0123456789abcdef";
-        std::string digest(64, '0');
-        for (std::size_t word = 0; word < state_.size(); ++word) {
-            for (std::size_t nibble = 0; nibble < 8; ++nibble) {
-                const auto shift =
-                    static_cast<unsigned int>((7 - nibble) * 4);
-                digest[word * 8 + nibble] =
-                    kHex[(state_[word] >> shift) & 0xfU];
-            }
-        }
-        return digest;
-    }
-
-  private:
-    void transform(const std::array<std::byte, 64>& block) {
-        std::array<std::uint32_t, 64> schedule{};
-        for (std::size_t word = 0; word < 16; ++word) {
-            const std::size_t offset = word * 4;
-            schedule[word] =
-                (std::to_integer<std::uint32_t>(block[offset]) << 24) |
-                (std::to_integer<std::uint32_t>(block[offset + 1]) << 16) |
-                (std::to_integer<std::uint32_t>(block[offset + 2]) << 8) |
-                std::to_integer<std::uint32_t>(block[offset + 3]);
-        }
-        for (std::size_t word = 16; word < schedule.size(); ++word) {
-            const std::uint32_t sigma_zero =
-                std::rotr(schedule[word - 15], 7) ^
-                std::rotr(schedule[word - 15], 18) ^
-                (schedule[word - 15] >> 3);
-            const std::uint32_t sigma_one =
-                std::rotr(schedule[word - 2], 17) ^
-                std::rotr(schedule[word - 2], 19) ^
-                (schedule[word - 2] >> 10);
-            schedule[word] =
-                schedule[word - 16] + sigma_zero +
-                schedule[word - 7] + sigma_one;
-        }
-
-        std::uint32_t a = state_[0];
-        std::uint32_t b = state_[1];
-        std::uint32_t c = state_[2];
-        std::uint32_t d = state_[3];
-        std::uint32_t e = state_[4];
-        std::uint32_t f = state_[5];
-        std::uint32_t g = state_[6];
-        std::uint32_t h = state_[7];
-
-        for (std::size_t round = 0;
-             round < kRoundConstants.size(); ++round) {
-            const std::uint32_t sum_one =
-                std::rotr(e, 6) ^ std::rotr(e, 11) ^
-                std::rotr(e, 25);
-            const std::uint32_t choice =
-                (e & f) ^ ((~e) & g);
-            const std::uint32_t temporary_one =
-                h + sum_one + choice + kRoundConstants[round] +
-                schedule[round];
-            const std::uint32_t sum_zero =
-                std::rotr(a, 2) ^ std::rotr(a, 13) ^
-                std::rotr(a, 22);
-            const std::uint32_t majority =
-                (a & b) ^ (a & c) ^ (b & c);
-            const std::uint32_t temporary_two =
-                sum_zero + majority;
-
-            h = g;
-            g = f;
-            f = e;
-            e = d + temporary_one;
-            d = c;
-            c = b;
-            b = a;
-            a = temporary_one + temporary_two;
-        }
-
-        state_[0] += a;
-        state_[1] += b;
-        state_[2] += c;
-        state_[3] += d;
-        state_[4] += e;
-        state_[5] += f;
-        state_[6] += g;
-        state_[7] += h;
-    }
-
-    std::array<std::uint32_t, 8> state_ = {
-        0x6a09e667U,
-        0xbb67ae85U,
-        0x3c6ef372U,
-        0xa54ff53aU,
-        0x510e527fU,
-        0x9b05688cU,
-        0x1f83d9abU,
-        0x5be0cd19U,
-    };
-    std::array<std::byte, 64> buffer_{};
-    std::size_t buffer_size_ = 0;
-    std::uint64_t total_bytes_ = 0;
-};
-
 class FileDescriptor {
   public:
     explicit FileDescriptor(int descriptor)
@@ -392,8 +227,174 @@ void require_unchanged(
 
 } // namespace
 
+void Sha256Accumulator::update(std::span<const std::byte> bytes) {
+    if (finished_) {
+        throw std::logic_error(
+            "cannot update a finished SHA-256 accumulator");
+    }
+
+    constexpr std::uint64_t kMaximumBytes =
+        std::numeric_limits<std::uint64_t>::max() / CHAR_BIT;
+    if (bytes.size() > kMaximumBytes - total_bytes_) {
+        throw std::length_error(
+            "SHA-256 input exceeds its 64-bit length field");
+    }
+    total_bytes_ += static_cast<std::uint64_t>(bytes.size());
+    if (bytes.empty()) {
+        return;
+    }
+
+    std::size_t offset = 0;
+    if (buffer_size_ != 0) {
+        const std::size_t copied =
+            std::min(
+                bytes.size(), buffer_.size() - buffer_size_);
+        std::memcpy(
+            buffer_.data() + buffer_size_, bytes.data(), copied);
+        buffer_size_ += copied;
+        offset += copied;
+        if (buffer_size_ == buffer_.size()) {
+            transform(buffer_);
+            buffer_size_ = 0;
+        }
+    }
+
+    while (bytes.size() - offset >= buffer_.size()) {
+        std::array<std::byte, 64> block;
+        std::memcpy(
+            block.data(), bytes.data() + offset, block.size());
+        transform(block);
+        offset += block.size();
+    }
+
+    const std::size_t remaining = bytes.size() - offset;
+    if (remaining != 0) {
+        std::memcpy(
+            buffer_.data(), bytes.data() + offset, remaining);
+        buffer_size_ = remaining;
+    }
+}
+
+void Sha256Accumulator::update(std::string_view text) {
+    update(std::as_bytes(std::span(text)));
+}
+
+std::string Sha256Accumulator::finish() {
+    if (finished_) {
+        throw std::logic_error(
+            "cannot finish a SHA-256 accumulator twice");
+    }
+    finished_ = true;
+
+    const std::uint64_t bit_count =
+        total_bytes_ * static_cast<std::uint64_t>(CHAR_BIT);
+    buffer_[buffer_size_++] = std::byte{0x80};
+    if (buffer_size_ > 56) {
+        while (buffer_size_ < buffer_.size()) {
+            buffer_[buffer_size_++] = std::byte{0};
+        }
+        transform(buffer_);
+        buffer_size_ = 0;
+    }
+    while (buffer_size_ < 56) {
+        buffer_[buffer_size_++] = std::byte{0};
+    }
+    for (std::size_t byte = 0; byte < 8; ++byte) {
+        const auto shift =
+            static_cast<unsigned int>((7 - byte) * CHAR_BIT);
+        buffer_[56 + byte] = static_cast<std::byte>(
+            (bit_count >> shift) & 0xffU);
+    }
+    transform(buffer_);
+    buffer_size_ = 0;
+
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string digest(64, '0');
+    for (std::size_t word = 0; word < state_.size(); ++word) {
+        for (std::size_t nibble = 0; nibble < 8; ++nibble) {
+            const auto shift =
+                static_cast<unsigned int>((7 - nibble) * 4);
+            digest[word * 8 + nibble] =
+                kHex[(state_[word] >> shift) & 0xfU];
+        }
+    }
+    return digest;
+}
+
+void Sha256Accumulator::transform(
+    const std::array<std::byte, 64>& block) {
+    std::array<std::uint32_t, 64> schedule{};
+    for (std::size_t word = 0; word < 16; ++word) {
+        const std::size_t offset = word * 4;
+        schedule[word] =
+            (std::to_integer<std::uint32_t>(block[offset]) << 24) |
+            (std::to_integer<std::uint32_t>(block[offset + 1]) << 16) |
+            (std::to_integer<std::uint32_t>(block[offset + 2]) << 8) |
+            std::to_integer<std::uint32_t>(block[offset + 3]);
+    }
+    for (std::size_t word = 16; word < schedule.size(); ++word) {
+        const std::uint32_t sigma_zero =
+            std::rotr(schedule[word - 15], 7) ^
+            std::rotr(schedule[word - 15], 18) ^
+            (schedule[word - 15] >> 3);
+        const std::uint32_t sigma_one =
+            std::rotr(schedule[word - 2], 17) ^
+            std::rotr(schedule[word - 2], 19) ^
+            (schedule[word - 2] >> 10);
+        schedule[word] =
+            schedule[word - 16] + sigma_zero +
+            schedule[word - 7] + sigma_one;
+    }
+
+    std::uint32_t a = state_[0];
+    std::uint32_t b = state_[1];
+    std::uint32_t c = state_[2];
+    std::uint32_t d = state_[3];
+    std::uint32_t e = state_[4];
+    std::uint32_t f = state_[5];
+    std::uint32_t g = state_[6];
+    std::uint32_t h = state_[7];
+
+    for (std::size_t round = 0;
+         round < kRoundConstants.size(); ++round) {
+        const std::uint32_t sum_one =
+            std::rotr(e, 6) ^ std::rotr(e, 11) ^
+            std::rotr(e, 25);
+        const std::uint32_t choice =
+            (e & f) ^ ((~e) & g);
+        const std::uint32_t temporary_one =
+            h + sum_one + choice + kRoundConstants[round] +
+            schedule[round];
+        const std::uint32_t sum_zero =
+            std::rotr(a, 2) ^ std::rotr(a, 13) ^
+            std::rotr(a, 22);
+        const std::uint32_t majority =
+            (a & b) ^ (a & c) ^ (b & c);
+        const std::uint32_t temporary_two =
+            sum_zero + majority;
+
+        h = g;
+        g = f;
+        f = e;
+        e = d + temporary_one;
+        d = c;
+        c = b;
+        b = a;
+        a = temporary_one + temporary_two;
+    }
+
+    state_[0] += a;
+    state_[1] += b;
+    state_[2] += c;
+    state_[3] += d;
+    state_[4] += e;
+    state_[5] += f;
+    state_[6] += g;
+    state_[7] += h;
+}
+
 std::string sha256_bytes(std::span<const std::byte> bytes) {
-    Sha256 hash;
+    Sha256Accumulator hash;
     hash.update(bytes);
     return hash.finish();
 }
@@ -434,7 +435,7 @@ RegularFileSnapshot snapshot_regular_file(
     require_unchanged(
         path_before, descriptor_before, absolute_path);
 
-    Sha256 hash;
+    Sha256Accumulator hash;
     std::array<std::byte, 64 * 1024> buffer;
     std::uintmax_t bytes_read = 0;
     while (true) {

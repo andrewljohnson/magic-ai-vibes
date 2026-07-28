@@ -1,5 +1,6 @@
 #include "old_school/fq0_bellman_science.hpp"
 
+#include "old_school/artifact_integrity.hpp"
 #include "old_school/fq0_bellman.hpp"
 #include "old_school/fq0_information_set.hpp"
 #include "old_school/probes.hpp"
@@ -17,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -46,6 +48,76 @@ void expect_invalid(
 bool same_bits(double first, double second) {
     return std::bit_cast<std::uint64_t>(first) ==
            std::bit_cast<std::uint64_t>(second);
+}
+
+class LegacyDigestWriter {
+  public:
+    void text(std::string_view value) {
+        integer(value.size());
+        bytes_.append(value);
+    }
+
+    template <typename Integer>
+    void integer(Integer value) {
+        static_assert(std::is_integral_v<Integer>);
+        using Unsigned = std::make_unsigned_t<Integer>;
+        std::uint64_t bits = static_cast<std::uint64_t>(
+            static_cast<Unsigned>(value));
+        for (std::size_t index = 0;
+             index < sizeof(Unsigned); ++index) {
+            bytes_.push_back(static_cast<char>(
+                bits & std::uint64_t{0xff}));
+            bits >>= 8U;
+        }
+    }
+
+    void boolean(bool value) {
+        integer<std::uint8_t>(value ? 1 : 0);
+    }
+
+    void real(double value) {
+        integer(std::bit_cast<std::uint64_t>(value));
+    }
+
+    std::string sha256() const {
+        return old_school::artifact_integrity::sha256_string(
+            bytes_);
+    }
+
+  private:
+    std::string bytes_;
+};
+
+std::string legacy_digest_writer_framing_fixture_sha256() {
+    LegacyDigestWriter writer;
+    writer.text(
+        "old-school-fq0-digest-writer-framing-fixture-v1");
+    writer.integer<std::uint8_t>(0xa5U);
+    writer.integer<std::uint16_t>(0xb60cU);
+    writer.integer<std::uint32_t>(0xd70e1f20U);
+    writer.integer<std::uint64_t>(0xe80123456789abcdULL);
+    writer.integer<std::size_t>(0x01020304U);
+    writer.boolean(false);
+    writer.boolean(true);
+    writer.real(1.25);
+    writer.real(-0.0);
+    writer.text(std::string_view("left\0right", 10));
+    std::string boundary_text(64 * 1024 + 257, '\0');
+    for (std::size_t index = 0;
+         index < boundary_text.size(); ++index) {
+        boundary_text[index] = static_cast<char>(
+            (index * 37U + 11U) & 0xffU);
+    }
+    writer.text(boundary_text);
+    return writer.sha256();
+}
+
+void test_streaming_digest_preserves_legacy_framing() {
+    expect(
+        science::testing::
+                digest_writer_framing_fixture_sha256() ==
+            legacy_digest_writer_framing_fixture_sha256(),
+        "streaming digest changed legacy primitive framing");
 }
 
 old_school::probes::DecisionProbe test_probe() {
@@ -1694,6 +1766,8 @@ int main() {
     const std::vector<
         std::pair<std::string_view, std::function<void()>>>
         tests = {
+            {"streaming digest preserves legacy framing",
+             test_streaming_digest_preserves_legacy_framing},
             {"authoritative root actions and common worlds",
              test_authoritative_actions_and_common_root_worlds},
             {"scope regrouping and perspective complement",

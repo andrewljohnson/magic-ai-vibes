@@ -552,11 +552,12 @@ GateReport evaluate_gate(
     const IntegrityEvidence& integrity);
 int exit_code(const GateReport& gate);
 
-// Semantically validates and serializes `report`, then publishes only at the
-// frozen path with atomic no-replace semantics. The frozen model is
+// Semantically validates `report`, then streams it only to the frozen path
+// with bounded memory and atomic no-replace semantics. The frozen model is
 // re-snapshotted immediately before the publication commit.
 EvidencePublication publish_evidence_atomic_no_replace(
-    const RunReport& report);
+    const RunReport& report,
+    std::ostream* progress = nullptr);
 
 RunReport run(std::ostream& progress);
 int run_cli(
@@ -564,6 +565,35 @@ int run_cli(
     std::ostream& error);
 
 namespace testing {
+
+enum class StreamingFailureStage {
+    None,
+    Write,
+    Reread,
+    Precommit,
+};
+
+struct StreamingPublicationMetrics {
+    std::size_t emitter_buffer_capacity = 0;
+    std::size_t emitter_pending_high_water = 0;
+    std::size_t reread_buffer_capacity = 0;
+    std::size_t reread_pending_high_water = 0;
+
+    bool operator==(
+        const StreamingPublicationMetrics&) const = default;
+};
+
+struct StreamedEvidenceSummary {
+    std::uintmax_t byte_size = 0;
+    std::string sha256;
+    std::string payload_sha256;
+    std::string complete_sha256;
+    std::vector<std::string> section_names;
+    std::vector<std::string> section_sha256;
+
+    bool operator==(
+        const StreamedEvidenceSummary&) const = default;
+};
 
 EvidenceBundle serialize_evidence_bundle(
     const RunReport& report);
@@ -581,6 +611,11 @@ void validate_seed_coordinate_ownership(
     const std::vector<std::pair<std::uint64_t, std::string>>&
         claims);
 
+// Exact digest produced by the audit layer's fixed-width framing over a
+// representative primitive fixture. Tests compare it with an independent
+// buffered reference so streaming cannot change the evidence protocol.
+std::string digest_writer_framing_fixture_sha256();
+
 // Exercises the production precommit parent re-snapshot and no-replace
 // mechanics without weakening the fixed-path semantic publication API.
 EvidencePublication publish_evidence_for_parent(
@@ -588,6 +623,26 @@ EvidencePublication publish_evidence_for_parent(
     const artifact_integrity::RegularFileSnapshot& expected_model,
     std::string_view expected_model_fingerprint,
     std::string_view observed_model_fingerprint);
+
+// Exercises the exact bounded production emitter, reread validator, and
+// no-replace publication path at an arbitrary destination.
+EvidencePublication publish_evidence_streaming_for_parent(
+    std::string_view path, const RunReport& report,
+    const artifact_integrity::RegularFileSnapshot& expected_model,
+    std::string_view expected_model_fingerprint,
+    std::string_view observed_model_fingerprint,
+    StreamingFailureStage failure_stage =
+        StreamingFailureStage::None,
+    StreamingPublicationMetrics* metrics = nullptr);
+
+// Validates an already-written file through the same bounded parser used
+// before production publication. The returned summary never owns file bytes.
+StreamedEvidenceSummary validate_streamed_evidence_for_parent(
+    std::string_view path,
+    const artifact_integrity::RegularFileSnapshot& expected_model,
+    std::string_view expected_model_fingerprint,
+    std::string_view observed_model_fingerprint,
+    StreamingPublicationMetrics* metrics = nullptr);
 
 } // namespace testing
 

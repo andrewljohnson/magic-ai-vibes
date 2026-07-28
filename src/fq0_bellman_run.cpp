@@ -318,18 +318,21 @@ SuccessorFeatureEvaluationEvidence take_feature_evaluation(
 
 ScientificEvidence take_construction_core(
     science::Construction source,
-    const ac1_teacher_audit::Manifest& canonical_manifest) {
+    const ac1_teacher_audit::Manifest&
+        expected_source_manifest,
+    const ac1_teacher_audit::Manifest&
+        canonical_output_manifest) {
     require(
-        source.manifest == canonical_manifest,
-        "FQ0 construction manifest is not the bound "
-        "canonical manifest");
+        source.manifest == expected_source_manifest,
+        "FQ0 construction manifest is not the exact "
+        "expected source manifest");
     require(
         !source.model_fingerprint.empty() &&
             source.semantic_sha256.size() == 64,
         "FQ0 construction identity or semantic digest is "
         "missing");
     ScientificEvidence result{
-        .manifest = canonical_manifest,
+        .manifest = canonical_output_manifest,
         .model_fingerprint =
             std::move(source.model_fingerprint),
         .feature_rows = std::move(source.feature_rows),
@@ -351,6 +354,34 @@ ScientificEvidence take_construction_core(
                 std::move(evaluation)));
     }
     return result;
+}
+
+ac1_teacher_audit::Manifest
+expected_descriptor_order_manifest(
+    const ac1_teacher_audit::Manifest& canonical_manifest) {
+    ac1_teacher_audit::Manifest expected =
+        canonical_manifest;
+    for (auto& root : expected.roots) {
+        std::reverse(
+            root.probe.candidates.begin(),
+            root.probe.candidates.end());
+    }
+    return expected;
+}
+
+ac1_teacher_audit::Manifest
+expected_hidden_repartition_manifest(
+    const ac1_teacher_audit::Manifest& canonical_manifest) {
+    ac1_teacher_audit::Manifest expected =
+        canonical_manifest;
+    for (auto& root : expected.roots) {
+        root.probe.state =
+            science::hidden_repartition(
+                root.probe.state,
+                root.probe.root_player)
+                .state;
+    }
+    return expected;
 }
 
 const ac1_teacher_audit::ManifestRoot& manifest_root_for(
@@ -2306,6 +2337,7 @@ void attach_root_and_global_invariance(
             ScientificEvidence comparison =
                 take_construction_core(
                     std::move(alternate),
+                    primary.manifest,
                     primary.manifest);
             return binding::make_witness(
                 std::move(domain), "global",
@@ -2337,9 +2369,14 @@ void attach_root_and_global_invariance(
             descriptor.execution,
             science::kProductionWorkers,
             "descriptor-order-construction");
+        const ac1_teacher_audit::Manifest
+            expected_source_manifest =
+                expected_descriptor_order_manifest(
+                    primary.manifest);
         ScientificEvidence descriptor_evidence =
             take_construction_core(
                 std::move(descriptor),
+                expected_source_manifest,
                 primary.manifest);
         for (RootEvidence& root : primary.roots) {
             const std::string baseline =
@@ -2385,9 +2422,14 @@ void attach_root_and_global_invariance(
             hidden.execution,
             science::kProductionWorkers,
             "hidden-repartition-construction");
+        const ac1_teacher_audit::Manifest
+            expected_source_manifest =
+                expected_hidden_repartition_manifest(
+                    primary.manifest);
         ScientificEvidence hidden_evidence =
             take_construction_core(
                 std::move(hidden),
+                expected_source_manifest,
                 primary.manifest);
         for (RootEvidence& root : primary.roots) {
             const std::string baseline =
@@ -2608,13 +2650,16 @@ void emit_summary_noexcept(
     const RunReport& report) noexcept {
     try {
         output
+            << "FQ0-T0: canonical evidence publication "
+               "complete.\n"
             << preamble
             << "  evidence=" << report.publication.path
             << " bytes=" << report.publication.byte_size
             << " sha256=" << report.publication.sha256
             << '\n'
             << "  exit_code=" << exit_code(report.gate)
-            << '\n';
+            << '\n'
+            << std::flush;
     } catch (...) {
         // The evidence is already atomically committed. A reporting stream
         // failure must not reinterpret a complete exit-0/1 result as an
@@ -2683,7 +2728,7 @@ RunReport run(std::ostream& progress) {
 
     report.scientific =
         take_construction_core(
-            std::move(construction), manifest);
+            std::move(construction), manifest, manifest);
     report.scientific.dominance_pairs =
         std::move(dominance);
     attach_reconstruction_proofs(
@@ -2719,8 +2764,13 @@ RunReport run(std::ostream& progress) {
         !report.gate.infrastructure_failure) {
         const std::string summary_preamble =
             render_summary_preamble(report);
+        progress
+            << "FQ0-T0: validating and streaming canonical "
+               "evidence...\n"
+            << std::flush;
         report.publication =
-            publish_evidence_atomic_no_replace(report);
+            publish_evidence_atomic_no_replace(
+                report, &progress);
         emit_summary_noexcept(
             progress, summary_preamble, report);
     }
@@ -2753,7 +2803,31 @@ ScientificEvidence take_reduced_construction_core_for_test(
     science::Construction construction,
     const ac1_teacher_audit::Manifest& manifest) {
     return take_construction_core(
-        std::move(construction), manifest);
+        std::move(construction), manifest, manifest);
+}
+
+ScientificEvidence
+take_descriptor_order_construction_core_for_test(
+    science::Construction construction,
+    const ac1_teacher_audit::Manifest& canonical_manifest) {
+    const ac1_teacher_audit::Manifest expected =
+        expected_descriptor_order_manifest(
+            canonical_manifest);
+    return take_construction_core(
+        std::move(construction), expected,
+        canonical_manifest);
+}
+
+ScientificEvidence
+take_hidden_repartition_construction_core_for_test(
+    science::Construction construction,
+    const ac1_teacher_audit::Manifest& canonical_manifest) {
+    const ac1_teacher_audit::Manifest expected =
+        expected_hidden_repartition_manifest(
+            canonical_manifest);
+    return take_construction_core(
+        std::move(construction), expected,
+        canonical_manifest);
 }
 
 std::tuple<ScientificEvidence, std::size_t, std::size_t>
@@ -2786,7 +2860,8 @@ reconstruct_reduced_information_sets_for_test(
             proofs.feature_scope_reconstructions,
         "reconstruction callback accounting drifted");
     ScientificEvidence evidence =
-        take_construction_core(construction, manifest);
+        take_construction_core(
+            construction, manifest, manifest);
     attach_reconstruction_proofs(evidence, proofs);
     return {
         std::move(evidence),

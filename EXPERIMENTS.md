@@ -12128,6 +12128,649 @@ and review, will be:
 ./build/old-school-fq0-bellman-audit
 ```
 
+##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
+
+Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
+rereading `REVIEW.md` through its newest 16:30 cycle. A5 and A5b are retained
+as monitoring-infrastructure voids. Their common failure is now independently
+countersigned: `/usr/bin/footprint`'s separately rendered current and
+lifetime-peak fields are not an atomic pair for a live allocating process.
+No scientific result, publication result, or resource-threshold result was
+observed in either run.
+
+`REVIEW.md` recommends dropping the auxiliary peak relation and qualifying a
+current+RSS monitor with a monotone observed maximum. That is a reasonable
+fallback, but D0 first tests a smaller and stronger replacement:
+macOS's public `proc_pid_rusage(pid, RUSAGE_INFO_V4, ...)` API returns
+`ri_phys_footprint`, `ri_lifetime_max_phys_footprint`, and
+`ri_resident_size` in one typed result. This is also the API used by
+`/usr/bin/time -l` for its postmortem resource record. If D0's controlled
+qualification cannot establish its contract, no A5c run is licensed; any
+fallback will receive a separate declaration rather than being substituted
+silently.
+
+Falsifiable hypothesis: a native supervisor that owns its child and process
+group, samples `RUSAGE_INFO_V4` directly, and takes a final sample while the
+exited child is waitable but unreaped can enforce the unchanged 20 GiB
+physical-footprint cap, 16 GiB resident-size cap, and 1 GiB post-marker
+publication-growth cap without the text-sampler coherence void. For every
+accepted same-call sample, lifetime peak must be at least current footprint;
+for one stable process identity it must never decrease. A violation, failed
+sample, identity change, missed final sample, or process-control ambiguity
+rejects D0.
+
+D0 is infrastructure-only. It may add a standalone supervisor, a small
+testable state machine, its focused test binary, and Makefile targets. It may
+reuse the existing bounded file snapshot/SHA-256 implementation. It must not
+change the FQ0 scientific binary, audit bytes, overlay headers, seeds, C16,
+evidence schema, production evidence path, or publisher. The production
+supervisor exposes no memory-limit knobs; lower limits used by integration
+tests exist only in the test seam.
+
+Qualification gates, all required before A5c:
+
+1. Strict and ASan+UBSan builds pass with `-Wall -Wextra -Wpedantic -Werror`.
+   Pure state-machine tests cover first/stable identity, UUID or process-start
+   mutation, current greater than lifetime peak, lifetime-peak regression,
+   sampler failure, physical and RSS limits one byte below and exactly at the
+   boundary, and publication delta exactly 1 GiB versus 1 GiB plus one byte.
+2. A controlled owned child touches, releases, and reallocates memory.
+   Repeated V4 samples must show stable UUID/start identity, current footprint
+   growth, nondecreasing lifetime peak, and lifetime peak at least current.
+   Current is allowed to fall after release. A final successful sample must be
+   taken after `waitid(..., WNOWAIT)` observes exit and before `waitpid`
+   reaps the child. Dead and deliberately wrong PIDs must fail closed.
+3. Process lifecycle tests prove the child is its own process-group leader,
+   a threshold kill reaches the whole group with no surviving descendant,
+   and ordinary target exits 0 and 1 are propagated only after all monitor
+   gates pass. Signals, exec failure, monitor interruption, and abnormal exits
+   are monitor failures, not scientific outcomes.
+4. The exact flushed publication marker is counted across chunk boundaries.
+   Missing, late-without-post-sample, and duplicate markers fail. A complete
+   sample begun after the unique marker is required. Target executable
+   identity/hash must match before and after the run.
+5. A harmless low-limit allocator integration test must be killed before its
+   test-only cap; a harmless valid marker child must pass with at least one
+   post-marker sample. Diagnostic comparisons against `ps`, `footprint`, and
+   `/usr/bin/time -l` are recorded for scale only, not required to be byte- or
+   instant-equal.
+6. The complete repository test gate and `git diff --check` pass. Freeze the
+   exact supervisor binary/source hashes, retain its qualification logs, and
+   obtain an independent read-only review of the exact implementation.
+7. Reconfirm the unchanged A5 binary
+   `7c2e2134f60e4278c64e2ba0f25bfe83a8f77d8b418cb1d7093932b72d654273`,
+   audit overlay `7895e37e...6e0c47`, science overlay
+   `a15fa2ab...8b88`, and C16
+   `53aeb904...44ca`, and reconfirm all synthetic and registered evidence and
+   temporary paths absent.
+
+Only if every D0 gate passes is one same-coordinate A5c invocation licensed:
+
+```sh
+./build/old-school-fq0-quarantine-supervisor \
+  --log-dir /private/tmp/fq0-quarantine-a5c-supervisor-20260727 -- \
+  /private/tmp/old-school-fq0-quarantine-a5-bounded-publication-20260727
+```
+
+A5c is valid only if the supervisor and target produce an ordinary exit 0 or
+1, exactly one marker plus a genuine later complete sample, stable target/C16
+identity, physical and resident peaks below their caps, publication growth at
+most 1 GiB, a fully valid A5 evidence file, and no temporary. Any other state
+is another infrastructure void or synthetic rejection and cannot license the
+registered FQ0 attempt. The registered seeds and command remain unopened.
+
+D0 ABI preflight result, completed 2026-07-27 16:36 PDT: **PASS; continue
+implementation, no A5c license yet**. After confirming `REVIEW.md` still ended
+at its 16:30 cycle, an independent throwaway program compiled and ran outside
+the repository and never opened the FQ0 binary or artifacts:
+
+```sh
+c++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror \
+  /private/tmp/d0_proc_pid_rusage_v4_smoke.cpp \
+  -o /private/tmp/d0_proc_pid_rusage_v4_smoke
+/private/tmp/d0_proc_pid_rusage_v4_smoke
+```
+
+Both commands returned 0 and every assertion passed. The installed ABI reports
+flavor 4, a 296-byte `rusage_info_v4`, and the expected resident/current/start/
+lifetime field offsets. Live self and owned-child calls returned 0. The owned
+child's live current and lifetime peak were both 34,357,824 bytes. After
+`waitid(P_PID, child, ..., WEXITED | WNOWAIT)` observed its ordinary exit,
+the unreaped-zombie V4 call still returned 0: current fell to zero, lifetime
+peak remained 34,357,824, resident remained 34,439,168, UUID and process-start
+identity were unchanged, and process-exit abstime became nonzero. Only after
+`waitpid` reaped it did the call fail with `ESRCH`, as required.
+
+Throwaway source SHA-256 is
+`60a8df8b95fa510e40750a9e4eebac7c0612c1a092bab1a787e0878f4d81598b`;
+its 39,784-byte arm64 binary is
+`52519fce78b1ca6c6e0e5b96b1ab1c1ba451f4b858bd4685c7cb8f2cfb4acecc`.
+Interpretation: D0's final-WNOWAIT premise is supported and strictly better
+than attempting to infer a lifetime maximum from separately rendered
+`footprint` fields. The controlled allocation, state-machine, marker,
+process-group, sanitizer, full-suite, and independent-review gates remain
+pending.
+
+D0 first implementation screen, completed 2026-07-27 16:53 PDT:
+**10/10 foundation PASS, qualification NO-GO pending declared full-path
+coverage**. `REVIEW.md` was reread through its new 16:44 cycle before the
+screen; it accepts D0 as strictly stronger than the earlier current+RSS
+fallback and asks that this be the last guard layer before A5c.
+
+The implementation is a separate Darwin supervisor and test seam; it does not
+link the game engine or audit science. It owns direct absolute `execv`, a
+dedicated child process group, CLOEXEC launch-status pipe, independent
+stdout/stderr marker automata, direct V4 sampling, a monotonic observation
+state machine, `waitid(WNOWAIT)` final-zombie sampling, exact reap and group
+quiescence, bounded target snapshots, and fixed production 20/16/1 GiB
+limits. A marker discovered by the scan performed during a V4 call binds to
+the prior completed sample; that in-flight call cannot count as post-marker.
+This closes the pre/post-marker race rather than asking the caller to label
+it. Any later sampler, identity, process-control, or target-integrity failure
+overrides a prior marker/resource classification to monitor status 92.
+
+Exact strict command:
+
+```sh
+make -j4 test-fq0-rusage-guard
+```
+
+It built both binaries with the repository's C++20 `-O3 -Wall -Wextra
+-Wpedantic -Werror` flags and passed 10/10: streaming marker matching and
+cross-stream isolation; stable identity/current-fall/lifetime monotonicity;
+zero/mutated identity, current-over-peak, peak-regression, and sampler
+rejection; exact physical/RSS boundaries; exact 1 GiB publication delta;
+marker/lifecycle contracts; infrastructure precedence; a real touched-memory
+and WNOWAIT-zombie V4 exercise; one valid full supervisor lifecycle with
+retained equal target hashes; and injected post-start EIO that killed and
+reaped both the target and its descendant with no survivor. The standalone
+invalid-CLI status-95 gate also passed. An independent combined ASan+UBSan run
+of these same 10 tests passed without diagnostics, and `git diff --check`
+passed.
+
+Decision: do not accept D0 and do not run A5c yet. An adversarial coverage
+audit found that the green foundation still lacked full-supervisor proofs for
+exit 1, exec/abnormal/signal outcomes, missing/duplicate/cross-stream marker
+failures, injected physical/RSS/publication statuses and cleanup, the genuine
+low-limit allocator kill, executable mutation, a separately sampled released
+state, wrong PID, and injected identity/order/regression failures. It also
+found that sample begin/complete observation epochs were not yet retained in
+the TSV and that an abnormal natural exit needed to force infrastructure
+status 92 even after an earlier marker failure. These are test/forensic gaps,
+not an observed V4 coherence failure. The next step is exactly to close those
+gaps, repeat strict and sanitizer gates, then obtain independent source/log
+review. A5c remains unlicensed.
+
+D0 cleanup-semantics clarification, recorded prospectively 2026-07-27 17:09
+PDT after rereading `REVIEW.md` through its 16:59 cycle and before changing
+the process-group check. The expanded strict matrix reached 18/18, but an
+independent sanitized repetition exposed a timing-dependent false void:
+SIGKILL had terminated the target and descendant, the target had a valid
+final zombie sample and was reaped, yet launchd retained the killed orphan
+descendant as a zombie for longer than the guard's arbitrary two-second
+`kill(-pgid, 0)` disappearance window. No sanitizer diagnostic occurred.
+
+The declared requirement is no *surviving* descendant, meaning no member can
+still execute, allocate, fork, or write. It does not require the external
+system reaper to remove an already-terminal PID within a guessed deadline.
+D0 will therefore use the public `proc_listpgrppids` API after group SIGKILL.
+The group is quiescent only when it is empty, or every enumerated member either
+races to `ESRCH` or has a successful same-API V4 sample with nonzero
+`ri_proc_exit_abstime`. Any member with zero exit time, any enumeration
+failure, or any V4 error other than an observed `ESRCH` race remains a
+status-92 process-control failure. Bounded retries remain, and terminal zombie
+PIDs/identities are logged so the decision is independently auditable.
+
+This is the process-group-cleanup case already named by the bounded NO-GO
+checklist, not a new protection layer or a weakening of memory/marker gates.
+Tests must prove both branches: a deliberately live descendant is never
+accepted as quiescent, while a SIGKILLed descendant is accepted only as
+absent or V4-confirmed terminal. The old strict `ESRCH` assertion is replaced
+by that stronger semantic assertion. A5c remains unlicensed until the exact
+post-change strict and sanitizer suites plus independent review pass.
+
+D0 final qualification, completed 2026-07-27 17:20 PDT: **GO; exactly one
+A5c run licensed**. `REVIEW.md` was reread through its newest 17:14 cycle
+before this conclusion. It accepts the executing-versus-terminal process-group
+semantics as the correct narrow closure of the already enumerated cleanup
+case, while warning that no further guard category should be added before
+A5c. No further category was added.
+
+Two final adversarial failures were retained rather than hidden:
+
+- A sanitized duplicate-marker run found a child naturally exiting between
+  marker rejection and the attempted group kill. D0 now checks waitability
+  around a failed signal so an already-terminal leader cannot overwrite the
+  correct marker status with a false process-control failure.
+- An independent line review found that a descendant could theoretically
+  append a late or duplicate marker between the prior final scan and group
+  quiescence. D0 now performs an unconditional last scan only after no group
+  member can execute, then applies the marker/post-marker gate. The regression
+  injects both a first late marker and a duplicate in that exact teardown gap:
+  the former fails for having no later sample and the latter fails uniqueness.
+
+Exact frozen source identities:
+
+- `include/old_school/fq0_rusage_guard.hpp`
+  `5209499b67de4083141afcc14f8b654e1ca362fc1e0971585812d2bca6b6518f`;
+- `src/fq0_rusage_guard.cpp`
+  `4ce00303c0691e5365f48747fc1771071fb90e369306a654283daf335490f35e`;
+- `src/fq0_rusage_guard_main.cpp`
+  `205847fc2fb748d762ac51d93e541a170c2d6a102b465b23e05b472f73414548`;
+- `tests/test_fq0_rusage_guard.cpp`
+  `71df535e9d03fa525d4eb72ce245a2c45f7e045072ecc1a10f8d9ac4462f121d`;
+- `Makefile`
+  `687806bbcb4b5424df9adc656e4be68ef3ee4ac8d72d312d45e5f69eefbead27`;
+- strict production supervisor
+  `706d04e82d0ec1eb4767f5701a1c0d2d52a954c2d193d279bd13d6beb1e9ecbc`;
+- strict test binary
+  `f293c93f44dc51a2e89d633a104af247b7276bb8a4151906deae3781d36d5853`.
+
+Exact forced strict gate:
+
+```sh
+make -B -j4 test-fq0-rusage-guard
+# 20/20 passed; standalone invalid syntax returned 95 with exact usage
+```
+
+The 20 groups cover the complete registered matrix: streaming/cross-stream
+markers; identity and all sample relations; live/terminal/error process-group
+member classification; exact physical/RSS/delta boundaries; lifecycle and
+infrastructure precedence; real touch/release/reallocate plus WNOWAIT zombie;
+valid exit 0 and exit 1; exec failure, exit 2, signal, and monitor interruption;
+missing/duplicate/teardown markers; target mutation; injected limit, delta,
+identity/order/regression and EIO paths; a real low-limit allocator; and two
+descendant group-kill paths. Every failure path proves final zombie sampling,
+reap, no execution-capable descendant, and the declared status.
+
+Independent sanitizer qualification used a fresh build directory and
+`-O1 -g -Wall -Wextra -Wpedantic -Werror
+-fsanitize=address,undefined -fno-omit-frame-pointer`. With
+`ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1`, eight consecutive
+exact-final runs each passed 20/20 with no sanitizer text. The independent
+test and supervisor binary hashes were
+`6957dbd33435617dde0bafbb23bd67f97fefef23e6fdc8eb462a3b49dea24ee5`
+and
+`c407b4083883f726fdaa514dfa5a2602758eae58c5350fe4f7483e45fb6a920d`.
+The identical focused log SHA was
+`4e4c196022bd3a359261fe9393c6ef21519a4af706fbd3cd7b7954fa82a25189`.
+
+The controlled allocator ran through the real release supervisor under
+`/usr/bin/time -l`: status 0, failure none, 70 complete samples, 22 genuine
+post-marker samples, exactly one marker, final-WNOWAIT/reap/quiescence all
+true, equal before/after target hashes, and zero publication delta. Maximum
+current/lifetime physical footprint was 101,515,968 bytes and maximum resident
+size was 101,711,872. On the 64 MiB plateau D0 reported
+67,945,088/68,157,440 physical/resident bytes, exactly matching
+`footprint`'s auxiliary current and `ps`'s 66,560 KiB. On the 96 MiB plateau
+D0's 101,515,968/101,711,872 matched `footprint`, `ps`, and `time -l`
+respectively. This is a scale cross-check, not an equality assumption for
+asynchronous production samples. Evidence is retained under
+`/private/tmp/fq0-d0-final2-20260727/`.
+
+The complete repository gate then passed: engine 168/168, learned 27/27,
+probes 57/57, probe metrics 11/11, probe runner 33/33, audit common 8/8,
+artifact integrity 9/9, D0 20/20, every historical audit/orchestration suite,
+FQ0 information 13/13, Bellman 8/8, dominance 10/10, transition 4/4,
+science 11/11, audit 20/20, runner 11/11, web bridge 18/18, web 106/106, and
+certification 48/48. `git diff --check` passed. Two independent reviewers
+returned exact-source GO after reproducing strict/sanitized gates and reading
+the lifecycle, log, and fixed-CLI contract.
+
+Final pre-run identity check: supervisor `706d04e8...e9ecbc`; A5 target
+`7c2e2134...54273`; audit overlay `7895e37e...6e0c47`; science overlay
+`a15fa2ab...8b88`; and C16 `53aeb904...44ca`. The registered evidence and
+temporary, A5 evidence and temporary, and A5c log directory are all absent.
+Therefore the sole now-licensed action is the already declared command:
+
+```sh
+./build/old-school-fq0-quarantine-supervisor \
+  --log-dir /private/tmp/fq0-quarantine-a5c-supervisor-20260727 -- \
+  /private/tmp/old-school-fq0-quarantine-a5-bounded-publication-20260727
+```
+
+This licenses no registered seed or command. Interpret A5c only under the
+previously declared exit/evidence/hash/memory/marker gates.
+
+Synthetic A5c result, completed 2026-07-27 17:25 PDT:
+**monitoring-infrastructure void; D0's same-call coherence hypothesis is
+refuted**. The exact licensed command ran unchanged supervisor
+`706d04e8...e9ecbc` and target `7c2e2134...54273`. It exited after 12.9066
+seconds with supervisor status 92 / target signal 9, before any publication
+marker, stdout, stderr, evidence, or temporary.
+
+The first 51 V4 samples were coherent and showed bounded growth. Sample 52
+then returned successfully for the same stable UUID/start identity with:
+
+- current physical footprint 556,550,592 bytes;
+- reported lifetime maximum 556,534,208 bytes;
+- a 16,384-byte inversion, exactly one host VM page;
+- resident size 597,639,168 bytes; and
+- zero process-exit time.
+
+The previous reported lifetime maximum was 359,745,600 bytes, so the raw
+lifetime field did not regress; it merely lagged the simultaneously returned
+current field. D0 correctly honored its preregistered invariant, logged the
+row, returned sample-order status 92, and killed the target. Its required
+post-`waitid` zombie sample then succeeded with current zero, lifetime maximum
+558,320,064, resident size 599,408,640, the same UUID/start identity, and a
+nonzero exit time. Final sampling, reap, group quiescence, and unchanged
+before/after target hash all passed.
+
+No threshold was approached: observed lifetime/current stayed below 0.56 GiB
+and resident size below 0.60 GiB, versus 20/16 GiB caps. The A5 evidence and
+temporary, registered evidence and temporary, and target stdout/stderr all
+remain absent/empty. C16 remains `53aeb904...44ca`. Therefore A5c has no
+scientific, publisher, or resource result and cannot license a registered
+run. It also consumes the sole A5c license; no rerun is authorized.
+
+Interpretation: one typed `proc_pid_rusage(RUSAGE_INFO_V4)` result does not
+guarantee an atomically coherent relation between
+`ri_phys_footprint` and `ri_lifetime_max_phys_footprint` during aggressive
+allocation. The exact one-page lag, followed milliseconds later by a larger
+final lifetime maximum, is the same kernel-update phenomenon seen through
+`footprint`; removing text parsing did not remove it. D0 remains useful for
+owned lifecycle, identity, RSS, marker, and final-zombie evidence, but its
+current-at-most-lifetime invariant is invalid for this workload.
+
+Decision: reject D0's coherence hypothesis and do not add another page
+tolerance. The minimal next choice must be separately declared after
+independent review: retain the native supervisor but stop treating the raw
+current/lifetime ordering as an invariant, enforcing current, raw lifetime,
+RSS, and a monotone externally observed
+`max(previous effective, current, raw lifetime)` independently; or drop the
+raw lifetime field entirely and use current+RSS with the same external
+observed maximum as `REVIEW.md` originally recommended. Either way, actual
+API errors, identity changes, raw lifetime regressions, caps, marker ordering,
+and final lifecycle remain fail-closed. No A5d action is yet licensed.
+
+##### FQ0-T0 D1 scalar-envelope repair and A5d declaration
+
+Declared 2026-07-27 17:31 PDT before changing D0 source or tests, after
+rereading `REVIEW.md` through its newest 17:14 cycle and receiving three
+independent read-only audits of A5c. Scientific target, overlays,
+A401/A402/A403 coordinate, evidence path/schema, publisher, C16, absolute
+20/16 GiB caps, 1 GiB publication cap, 250 ms sampling, marker/lifecycle
+contract, and all A5/A5b/A5c logs remain frozen.
+
+Root cause is source-grounded. On this host's XNU
+`gather_rusage_info`, the lifetime maximum is copied first; after additional
+collection work, `fill_task_rusage` separately reads current physical
+footprint and resident size. One V4 syscall therefore returns a typed but not
+atomic multi-counter bundle. A5, A5b, and A5c's 16/32/16 KiB skews all follow
+directly. This refutes only the cross-field assertion
+`raw_lifetime >= raw_current`; it does not refute either scalar, same-field
+lifetime monotonicity, identity, RSS, or final-zombie sampling.
+
+Falsifiable hypothesis: deleting exactly the invalid cross-field rejection,
+while continuing to treat current and raw lifetime as independent scalar
+observations, will admit A5c's valid allocation race without weakening any
+memory or publication bound. Define the diagnostic external envelope after
+each accepted sample as
+`effective_peak = max(previous_effective_peak, raw_current, raw_lifetime)`.
+The 20 GiB gate remains immediate on either raw physical field and therefore
+on the envelope; the 16 GiB gate remains on V4 resident plus final `wait4`
+maximum. The publication delta remains the conservative maximum of two
+same-axis differences:
+
+```text
+max(max_post_current - baseline_current,
+    max_post_raw_lifetime - baseline_raw_lifetime)
+```
+
+No current/lifetime ordering, page allowance, or maximum skew is accepted as
+a condition. Inversions of any size below the absolute caps are diagnostic
+only; count and maximum gap are retained in samples/summary. A raw lifetime
+regression remains fatal because A5c did not falsify the same-field monotone
+ledger. API errors, zero/changed identity, epoch/lifecycle/marker failures,
+caps, target mutation, and live descendants remain unchanged and fatal.
+
+This deliberately differs from `REVIEW.md`'s earlier strict current+RSS-only
+preference. The reason is concrete: A5c's final zombie lifetime value captured
+1,769,472 bytes above its largest observed live current, demonstrating useful
+between-poll high-water information. Discarding it would weaken the already
+declared physical and publication evidence, whereas the scalar envelope
+removes only the refuted relation. All three post-A5c reviewers converge on
+this narrower repair.
+
+Pre-run gates:
+
+1. Add literal A5c rows 51-53 and A5/A5b inversion rows to the pure tests.
+   Every inversion must be accepted, preserve stable identity, increment
+   inversion diagnostics, and produce the exact envelope. Mutating only raw
+   lifetime downward across samples must still fail.
+2. Reprove the physical cap one byte below and exactly at the boundary through
+   both raw current and raw lifetime. Reprove publication delta exactly 1 GiB
+   and 1 GiB+1 through both independent current and lifetime branches,
+   including a high historic lifetime where the current branch alone carries
+   the delta.
+3. The preflight must no longer impose cross-field ordering. All existing 20
+   lifecycle/marker/process-group/hash tests remain; strict forced rebuild and
+   repeated ASan+UBSan runs must pass. The full repository suite and
+   `git diff --check` must pass.
+4. Freeze exact new source/test/supervisor hashes and obtain independent
+   read-only review confirming that no status semantics changed except removal
+   of the cross-field rejection and addition of diagnostics.
+5. Reconfirm exact A5 target/overlay/C16 hashes and absence of A5 evidence and
+   temporary, registered evidence and temporary, and the new A5d log
+   directory.
+
+Only if all gates pass is one same-coordinate A5d retry licensed:
+
+```sh
+./build/old-school-fq0-quarantine-supervisor \
+  --log-dir /private/tmp/fq0-quarantine-a5d-supervisor-20260727 -- \
+  /private/tmp/old-school-fq0-quarantine-a5-bounded-publication-20260727
+```
+
+A5d must still satisfy every prior exit/evidence/hash/cap/marker gate. Any
+other result consumes the license and cannot authorize the registered run.
+Reusing the scientific coordinate is justified only because A5c was killed
+before marker, stdout, evidence, temporary, or scientific outcome. No
+registered command is licensed.
+
+D1 prospective semantic correction, recorded 2026-07-27 17:35 PDT while
+implementation was still in progress and before any D1 test result or A5d
+run. `REVIEW.md` was reread through its new 17:29 A5c cycle. That entry
+endorses the external envelope explicitly and recommends that raw lifetime be
+retained as input/logged data but never used as an invariant. Two independent
+reviews also found a counterexample to the declaration's raw-lifetime-axis
+publication formula.
+
+This correction supersedes only the D1 paragraphs about raw-lifetime
+regression and publication baseline:
+
+1. Raw lifetime inversions **and regressions** are diagnostic, not fatal.
+   Count/max inversion and count/max regression are logged. Neither can lower
+   the monotone effective envelope or weaken a cap. API failure and identity
+   change remain fatal.
+2. The marker freezes `baseline_current` and `baseline_effective`, not a raw
+   lifetime baseline. Post-marker tracking retains `max_post_current` and
+   `max_post_effective`. Publication growth is:
+
+```text
+max(max_post_current - baseline_current,
+    max_post_effective - baseline_effective)
+```
+
+with saturating differences.
+
+The reason is necessary, not cosmetic. If a pre-marker sample observes current
+3 GiB/raw lifetime 1 GiB, and raw lifetime later catches up to 3 GiB with no
+new allocation, subtracting raw lifetime from raw lifetime falsely charges
+2 GiB to publication. The corrected effective-axis difference charges zero
+because the memory was already in the pre-marker envelope. It still catches
+between-poll peaks when post-marker raw lifetime exceeds the pre-marker
+envelope, while the current axis catches a current rise hidden below an older
+historic peak.
+
+Add exact tests for: pre-marker inversion then post-marker raw catch-up gives
+zero delta; an historic high envelope plus post-marker current-only rise uses
+the current axis; flat current plus a new raw high uses the effective axis;
+and raw regression is logged without reducing effective peak. Samples must
+retain raw current/raw lifetime plus derived effective/inversion/regression
+data; summary must retain both baseline/max-post axes and their component
+deltas. CLI peak physical bytes means maximum effective peak. All other
+declaration gates and the sole conditional A5d command remain unchanged.
+
+FQ0-T0 D1 qualification result, completed 2026-07-27 17:55 PDT:
+**GO; exactly one A5d execution is licensed**. D1 removes the two
+kernel-refuted ordering assumptions and no other resource or lifecycle gate.
+For each valid V4 sample it records raw current, raw lifetime, and RSS, then
+advances
+`effective = max(previous_effective, raw_current, raw_lifetime)`.
+The 20 GiB physical limit is enforced on that envelope, the 16 GiB resident
+limit remains enforced on V4 RSS and final `wait4` RSS, and the marker freezes
+current/effective baselines. Publication growth is the maximum of the
+saturating current/effective same-axis deltas. Cross-field inversions and raw
+lifetime regressions are retained as count/gap diagnostics in sample, event,
+summary, report, and CLI output; neither can lower the envelope or produce a
+monitor failure.
+
+Exact final-file strict and sanitizer commands:
+
+```sh
+make -B -j4 test-fq0-rusage-guard
+clang++ -Iinclude -std=c++20 -O1 -g \
+  -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/artifact_integrity.cpp src/fq0_rusage_guard.cpp \
+  tests/test_fq0_rusage_guard.cpp \
+  -o /private/tmp/old-school-fq0-rusage-tests-d1-sanitized
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  /private/tmp/old-school-fq0-rusage-tests-d1-sanitized
+make -j4 test
+```
+
+The forced strict test passed 20/20. The fresh ASan+UBSan run and two
+concurrent repeats each passed 20/20. The final full suite exited 0, including
+engine 168/168, the D1 guard 20/20, every historical research/audit suite,
+web 106/106, and certification 48/48. `git diff --check` passed. The exact
+production supervisor hash is
+`0300221080c2f70dd46edac5baf4f9de996911021ea67ed87c252a48576b5f8d`;
+the header/source/main/test/Makefile hashes are respectively
+`66d06efa...c74b5`, `5e92dcd3...c3b35`, `205847fc...14548`,
+`e062cf58...2b5d`, and `687806bb...ead27`.
+
+An isolated independent build under
+`/private/tmp/fq0-d1-qualification-20260727` supplied a second qualification.
+Its strict O3 test passed 20/20; eight sequential ASan+UBSan runs each passed
+20/20 with no diagnostics; all eight focused logs were byte-identical at
+`4e4c1960...25189`; and the invalid CLI returned sealed status 95 with the
+exact usage line. Its read-only oracle checked the literal A5 16 KiB
+inversion, A5b 32 KiB inversion, all A5c rows 51-53 including identity,
+exit/RSS/epochs, diagnostic raw regression, monotone-envelope behavior,
+both physical-cap axes, raw-lifetime catch-up with zero publication growth,
+historic-current and new-effective publication branches, and exact 1 GiB
+versus 1 GiB+1 boundaries.
+
+Three independent read-only source reviews returned GO. `REVIEW.md` was
+reread through its newest 17:44 cycle immediately before this conclusion; it
+explicitly accepts D1 and the prospective effective-axis correction. Final
+frozen identities are A5 target `7c2e2134...54273` (3,784,840 bytes), audit
+overlay `7895e37e...6e0c47`, science overlay `a15fa2ab...8b88`, and C16
+`53aeb904...44ca`. The A5 evidence/temporary, registered
+evidence/temporary, and A5d log directory are absent.
+
+Therefore, and only therefore, the sole licensed next command is:
+
+```sh
+./build/old-school-fq0-quarantine-supervisor \
+  --log-dir /private/tmp/fq0-quarantine-a5d-supervisor-20260727 -- \
+  /private/tmp/old-school-fq0-quarantine-a5-bounded-publication-20260727
+```
+
+This licenses no registered seed or command. A5d must be interpreted under
+the frozen exit/evidence/hash/cap/marker/lifecycle gates. Any result other
+than a fully valid exit 0 or 1 consumes this license without authorizing a
+retry.
+
+Synthetic A5d result, completed 2026-07-27 19:14 PDT:
+**accepted infrastructure/publisher qualification; freeze commit and
+post-commit review are licensed**. The exact sole command was:
+
+```sh
+./build/old-school-fq0-quarantine-supervisor \
+  --log-dir /private/tmp/fq0-quarantine-a5d-supervisor-20260727 -- \
+  /private/tmp/old-school-fq0-quarantine-a5-bounded-publication-20260727
+```
+
+Supervisor `03002210...b5f8d` launched unchanged target
+`7c2e2134...54273` with the frozen synthetic A401/A402/A403 coordinate and
+returned status 1 after approximately 4,479.521 seconds. This was the
+target's legitimate exit 1, not a monitor failure: `failure=none`, reason
+`all supervisor gates passed`, stable before/after target hashes, successful
+exec, confirmed process group, final post-`waitid` zombie sample, reap, and
+execution-quiescent process group all passed.
+
+The native supervisor collected 17,529 complete samples, of which 8,446 were
+begun after the one unique stdout marker. It observed:
+
+- maximum raw current physical footprint 12,369,306,560 bytes;
+- monotone effective physical peak 12,448,097,216 bytes versus the fixed
+  21,474,836,480-byte cap;
+- maximum V4 and final `wait4` RSS 12,761,939,968 bytes versus the fixed
+  17,179,869,184-byte cap;
+- five diagnostic current-over-lifetime inversions, each at most one 16,384
+  byte host page, and zero raw-lifetime regressions;
+- marker baselines current/effective
+  9,101,008,576/12,448,097,216 bytes, identical post-marker maxima on the
+  corresponding axes, and therefore zero current, effective, and combined
+  publication delta versus the fixed 1 GiB limit.
+
+The target completed every construction and publication phase and printed:
+
+```text
+FQ0-T0 REJECT: complete frozen Bellman evidence
+  roots=26 feature_rows=11895 harmful_collisions=190
+  primary_delta64=0.013333 lower95=0.012309 positive_blocks=8/8
+```
+
+That direction is **scientifically ineligible** because A5d uses explicitly
+synthetic quarantine seeds, not registered FQ0 seeds. It neither accepts nor
+rejects the registered hypothesis, cannot license FQ1, and does not replace
+C16. It is nevertheless useful infrastructure evidence: the complete
+Bellman/publisher path is reachable, the primary computation is nondegenerate,
+and the conjunctive collision gate can emit a clean exit-1 result without
+hidden publication or resource failure.
+
+The no-replace evidence file is
+`/private/tmp/old-school-fq0-quarantine-a5.evidence.tsv`, exactly
+47,070,998,140 bytes with:
+
+- evidence SHA-256
+  `7e579da426633259a1ba267766386a46be91546b4a509e6096b2d1a462a8fe79`;
+- payload SHA-256
+  `1eb2adcb0a03607ac9be22ccf2e76ab2f455bdc1b8ac8f67b096580eea00f54e`;
+- complete SHA-256
+  `966fd28057cb66ff32fc12c9c3fcca59f85fd3ec5f1b622ee198270ad1fef3b5`.
+
+The eight exact section hashes are metadata `2a19626a...be76`, manifest
+`f8f310b0...a19`, roots `18631684...6416`, contrasts
+`bc96bb81...71e9`, dominance `5cfa47b0...3692`, collisions
+`8501e7ba...f659`, integrity `32b563e7...b3ee9`, and invariance
+`e3d21567...8c29b`. The frozen post-run validator
+`/private/tmp/fq0-a5-postrun-validator-20260727`
+(`2a22a47b...d68`) returned `result=valid`: exact C16 parent
+`53aeb904...44ca`, all section/payload/complete hashes, schema, census, and
+bounded reread metrics passed. Reread capacity and observed pending high-water
+were both exactly 65,536 bytes. The evidence temporary and both registered
+evidence paths remain absent.
+
+`REVIEW.md` was reread through its newest 19:29 cycle before this conclusion.
+Its independent 19:14 forensic reconstruction agrees that this is the first
+complete end-to-end FQ0 pipeline result after eight infrastructure voids and
+that its scientific direction must remain quarantined. The 47 GB synthetic
+artifact is retained through the freeze/reproduction step; the independently
+reported 856 GiB free volume is sufficient for a registered sibling.
+
+Decision: accept D1 plus the bounded publisher as the frozen qualification
+implementation. The next action is one commit containing the already-reviewed
+FQ0 implementation, D1 supervisor/tests, and this complete A5d record, followed
+by independent post-commit reproduction. Only an exact post-commit GO can
+license the unchanged registered command
+`./build/old-school-fq0-bellman-audit`.
+
 #### FQ0-T0 first registered execution: infrastructure failure
 
 Run 2026-07-27 02:35-02:40 PDT from pushed freeze commit `479cccd`, after
@@ -12957,6 +13600,1063 @@ destination must remain absent throughout. A quarantine exit `2` blocks the
 commit/retry and triggers another prospective mechanical diagnosis; a complete
 exit `0` or `1` allows the normal commit and post-commit review gate to
 continue.
+
+##### FQ0-T0 quarantined full-pipeline dry-run: invariance-binder exit 2
+
+Run 2026-07-27 11:07-11:34 PDT from `84bb065`, after the harvested-Pass
+repair's focused/full/sanitized gates passed. `REVIEW.md` was reread through
+its 11:31 PDT cycle before recording this conclusion.
+
+The two temporary headers were byte-identical to the committed headers except
+for the preregistered three seed bases and evidence destination:
+
+- audit header SHA-256
+  `e98bc14d3ce67223133e6ab189508866b2f2b85f995abc535c9c04cf1baa1247`;
+- science header SHA-256
+  `daa31779e0dbf273a413172302d07dd815daa53d87137bcff4cc76552c8d0f6c`.
+
+The exact compile shape was:
+
+```sh
+c++ -I/private/tmp/fq0-a4-20260727/include -Iinclude \
+  -std=c++20 -O3 -Wall -Wextra -Wpedantic -Werror \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/probe_eval.cpp src/probe_runner.cpp \
+  src/audit_common.cpp src/artifact_integrity.cpp \
+  src/output_calibration.cpp src/output_calibration_artifact.cpp \
+  src/oc1_action_scoring.cpp src/ac1_teacher_audit.cpp \
+  src/fq0_information_set.cpp src/fq0_bellman.cpp \
+  src/fq0_dominance.cpp src/fq0_dominance_transition.cpp \
+  src/fq0_bellman_science.cpp src/fq0_bellman_audit.cpp \
+  src/fq0_bellman_run.cpp src/fq0_bellman_audit_main.cpp \
+  -o /private/tmp/old-school-fq0-quarantine-a4-20260727
+/private/tmp/old-school-fq0-quarantine-a4-20260727
+```
+
+The binary SHA-256 was
+`3ca6d88a53054e13f85b38f32bd0ef77e85f14bed684cc80ad7c079e47374424`.
+It verified immutable C16, constructed the full K64/K8 Bellman core,
+reconstructed every successor information set, and completed exhaustive
+dominance. It then exited `2` during global invariance assembly:
+
+```text
+FQ0-T0 infrastructure failure:
+FQ0 construction manifest is not the bound canonical manifest
+```
+
+Neither quarantine evidence nor its temporary file was published. The
+registered evidence and temporary also remained absent. C16 remained
+3,111,437 bytes with SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+The synthetic result is scientifically ineligible, FQ0 remains unresolved,
+registered attempt 4 remains blocked, and C16 remains champion.
+
+Three independent read-only traces localized the failure without opening
+another seed. The primary construction is checked equal to the canonical
+manifest before reconstruction and dominance, and those stages receive it by
+const reference. The later descriptor-order invariance factory deliberately
+reverses every root's `probe.candidates` before `construct()` retains that
+transformed manifest. The runner then passes it through
+`take_construction_core(..., primary.manifest)`, whose strict equality compares
+candidate order and must fail. A second latent instance follows: the
+hidden-repartition factory deliberately replaces every root's `probe.state`,
+then routes that transformed manifest through the same canonical-only
+adapter. The exact failure is therefore source-manifest binding conflated with
+canonical output normalization, not primary mutation, memory corruption,
+temporary-header layout drift, or an ODR mismatch.
+
+##### FQ0-T0 alternate-manifest binder repair declaration
+
+Preregistered 2026-07-27 11:37 PDT after the quarantine exit and the
+read-only localization above, before changing production or test code.
+
+Falsifiable hypothesis: splitting the construction adapter's manifest roles
+will accept only the exact intended descriptor-order and hidden-repartition
+transforms, bind their emitted scientific evidence back to the canonical
+manifest for comparable core hashing, and allow the full quarantine pipeline
+to advance past both invariance constructions. Any other manifest mutation
+must still fail closed. Primary, repeated, and single-worker construction must
+retain exact canonical equality.
+
+The repair is frozen to:
+
+1. Change the internal binder to accept an exact expected source manifest and
+   a canonical output manifest. Require
+   `source.manifest == expected_source_manifest` before moving any evidence,
+   and store only `canonical_output_manifest` in the normalized result.
+2. Primary, repeated, single-worker, and every existing ordinary/test caller
+   pass the canonical manifest for both roles; their guard is not weakened.
+3. For descriptor-order invariance, independently copy the canonical manifest
+   and reverse every root's candidate vector. Require the alternate
+   construction's retained manifest to equal that exact transform, while
+   normalizing only the output manifest to canonical.
+4. For hidden-repartition invariance, independently copy the canonical
+   manifest and apply the public rules-neutral hidden-repartition transform to
+   each root state for its root player. Require exact equality to that
+   transformed manifest, including every untouched field, while normalizing
+   only the output manifest to canonical.
+5. Add focused positive tests for both exact transforms and mutation-sensitive
+   rejects for a non-exact candidate permutation, a changed noncandidate
+   field, an incorrect hidden state, changed hidden-root metadata, and
+   source/canonical role swapping. Prove the accepted output manifest is
+   exactly canonical.
+6. Do not change construction, seeds, model, worlds, gates, evidence schema,
+   scientific-core hashing, or any rules/policy/training behavior.
+
+Acceptance requires focused runner tests, all FQ0 suites, full
+`make -j4 test`, fresh runner ASan/UBSan, unchanged C16 bytes/hash, and absent
+registered/quarantine outputs. Then rebuild the same synthetic A401/A402/A403
+full-pipeline quarantine with only the already declared header overlay. A
+quarantine exit `2` blocks registered attempt 4 again; a complete exit `0` or
+`1` is the only result that permits commit, post-commit review, and the
+unchanged registered retry.
+
+##### FQ0-T0 alternate-manifest binder repair: pre-quarantine GO
+
+Implemented and verified 2026-07-27 11:37-11:47 PDT. The adapter now validates
+the retained construction manifest against a separate exact expected-source
+manifest before any move, then writes the explicitly supplied canonical
+manifest into normalized evidence. Canonical, repeat, and single-worker paths
+pass canonical for both roles. Descriptor-order and hidden-repartition paths
+independently derive the exact named transform and pass canonical only as the
+output role.
+
+The new focused test uses a natural three-action
+`white.mill-before-draw.v3` root and coherent reduced constructions for
+canonical, reversed-candidate, and hidden-repartition manifests under the same
+recipe. It proves canonical scientific-core hash equality after normalization
+and rejects a non-exact candidate permutation, changed noncandidate field,
+wrong source, literal source/output role swap, changed root metadata, and an
+incorrect opponent-library order that remains observationally identical to
+the root player. Two independent read-only reviews returned GO on the
+implementation and this mutation matrix.
+
+Exact verification:
+
+```sh
+make -j4 test-fq0-bellman-run
+# 11/11 passed
+
+make -j4 test-fq0
+# information-set 13/13; Bellman 8/8; dominance 10/10;
+# dominance-transition 4/4; science 10/10; artifact 15/15;
+# runner 11/11 (71/71 total)
+
+make -j4 test
+# all strict repository tests passed, including engine 168/168,
+# learned iteration 27/27, probes 57/57, probe runner 33/33,
+# web bridge 18/18, web 106/106, and certification 48/48
+
+c++ -Iinclude -std=c++20 -O1 -g \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  -Wall -Wextra -Wpedantic -Werror \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/probe_eval.cpp src/probe_runner.cpp \
+  src/audit_common.cpp src/artifact_integrity.cpp \
+  src/output_calibration.cpp src/output_calibration_artifact.cpp \
+  src/oc1_action_scoring.cpp src/ac1_teacher_audit.cpp \
+  src/fq0_information_set.cpp src/fq0_bellman.cpp \
+  src/fq0_dominance.cpp src/fq0_dominance_transition.cpp \
+  src/fq0_bellman_science.cpp src/fq0_bellman_audit.cpp \
+  src/fq0_bellman_run.cpp tests/test_fq0_bellman_run.cpp \
+  -o /private/tmp/old-school-fq0-bellman-run-tests-binder-asan
+ASAN_OPTIONS=detect_leaks=0 \
+  /private/tmp/old-school-fq0-bellman-run-tests-binder-asan
+# 11/11 passed
+```
+
+The sanitized binary SHA-256 was
+`e87d2565025dca046830cc5b69565563ede57e693a755db5736d30e582b5c035`.
+`git diff --check` was clean. C16 remained 3,111,437 bytes with SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+Registered and quarantine evidence/temporary paths remained absent.
+`REVIEW.md` was reread through its 11:47 cycle, which independently confirms
+the quarantine disposition and declared next gate.
+
+Decision: accept the narrow repair into the already declared second synthetic
+A401/A402/A403 quarantine. This is an implementation GO only, not scientific
+evidence and not a C16 promotion decision. A quarantine exit `2` still blocks
+commit and registered attempt 4.
+
+##### FQ0-T0 second full quarantine: OS memory-pressure void
+
+Run 2026-07-27 approximately 11:49-13:31 PDT after the pre-quarantine
+verification above and after rereading `REVIEW.md` through its 11:47 cycle.
+The rebuilt binary:
+
+```text
+/private/tmp/old-school-fq0-quarantine-a4-20260727-binder
+SHA-256 fa6ddee2389776b7238e80bfcc120267fd82777e62d717a63feab3e6fbe28945
+```
+
+was compiled with the exact all-source command already recorded for the first
+quarantine, using the same two overlay headers. Their hashes remained
+`e98bc14...1247` and `daa31779...f6c`; fresh diffs again showed only the
+private output path and seed bases A401/A402/A403. Exact sole run command:
+
+```sh
+/private/tmp/old-school-fq0-quarantine-a4-20260727-binder
+```
+
+The command was allowed to run to termination without an agent timeout or
+interruption. It returned status `137` (SIGKILL) with no buffered stage output.
+Neither quarantine evidence nor its temporary file existed afterward.
+Registered evidence and temporary also remained absent. C16 remained
+3,111,437 bytes with SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+
+The OS cause is independently recorded, not inferred from exit 137. macOS
+created three jetsam reports during this exact process lifetime:
+
+| Time | Audit resident pages | Approx. bytes at 16 KiB/page | Report SHA-256 |
+| --- | ---: | ---: | --- |
+| 12:23 | 534,097 (lifetime max 1,173,972) | 8.5 GiB current / 18.8 GiB max | `a4cc760aac77e582aa958adb791ce3540cf5983c605f0b9a1cbe6effcac0fd73` |
+| 13:10 | 3,539,014 | 56.6 GiB | `77bd9de2c013d3a9295b99268b785e2641902f6bbc5fb9e85110209c1d5e9590` |
+| 13:31 | 4,319,305 | 69.1 GiB | `a2dc60cfa26cbc31f3fdd090adf92d726c64ce61d98ecb6b44cddde8ebf0374e` |
+
+The final report, incident
+`1DAF266A-278A-4A9F-AA26-4CBF0B09467B`, names
+`old-school-fq0-quarantine-a4-202` as `largestProcess`, records CPU time
+5,721.596 seconds and lifetime max 4,319,305 pages, and records system reason
+`vm-compressor-space-shortage`. macOS simultaneously killed multiple unrelated
+services for the same pressure event. This rules out a command-runtime cap and
+confirms an audit memory-lifetime failure.
+
+Disposition: infrastructure void, not FQ0 scientific evidence. It does not
+license FQ1, reject the Bellman hypothesis, replace C16, or open/retire any
+registered seed. Registered attempt 4 remains blocked. The binder repair's
+focused/full/sanitized GO remains valid, but the complete pipeline is not yet
+operational.
+
+Next action: read-only localization of retained/transient memory across primary,
+repeat, descriptor-order, one-worker, and hidden-repartition constructions.
+The growth profile and 5,721 CPU seconds make the full one-worker construction
+the leading hypothesis, but no memory fix is authorized until source review
+identifies a deterministic lifetime mechanism and a falsifiable mechanical
+gate. Do not rerun the full quarantine blindly.
+
+##### FQ0-T0 incremental-digest memory repair declaration
+
+Declared 2026-07-27 13:43 PDT after the second synthetic quarantine's
+OS-confirmed memory-pressure void, source inspection of both FQ0 digest paths,
+and three independent read-only reviews. `REVIEW.md` was reread through its
+latest 13:16 cycle before this declaration. That cycle has not yet incorporated
+the 13:31 jetsam result, so its unchanged priority predates this mechanical
+blocker; it does not license a registered run. Registered attempt 4 remains
+unopened, both registered output paths remain absent, and C16 remains champion.
+
+Falsifiable hypothesis: the dominant 18.8 -> 56.6 -> 69.1 GiB resident-memory
+staircase is caused by the science and audit `DigestWriter` implementations
+materializing complete framed payloads in geometrically grown `std::string`s,
+not by retained Bellman results or `IndexedExecutor` lifetime. Replacing only
+those buffers with a shared fixed-state incremental SHA-256 accumulator should
+preserve every digest bit while removing memory proportional to serialized
+payload size. Reject this hypothesis if literal digests change, if the
+controlled reduced diagnostic does not lower peak RSS by at least 25%, or if
+the synthetic full quarantine still shows a monotonic one-large-buffer-per-
+alternate ratchet.
+
+Predeclared single repair axis:
+
+1. Expose a small incremental SHA-256 accumulator from
+   `artifact_integrity`, reusing the existing algorithm. It accepts byte spans
+   and string views, finalizes once, and rejects update-after-finalize and
+   double-finalize. The existing one-shot functions delegate to it.
+2. Change only the two FQ0-local `DigestWriter`s to feed their exact existing
+   framed bytes to that accumulator. Science keeps its templated integer-width
+   framing; audit keeps its fixed-`uint64_t` framing. Domain strings, field
+   order, little-endian encoding, IEEE-754 bits, nested digest text, seeds,
+   worlds, scheduling, models, actions, transitions, and evidence gates are
+   unchanged. A bounded staging buffer is allowed only as an O(1) throughput
+   optimization.
+3. Replace science callers that hash `writer.bytes()` with terminal
+   `writer.sha256()` calls. No executor-lifetime, bank ownership, census,
+   publication, game, learner, recipe, or evidence-format change may be
+   combined with this experiment. In particular, do not add allocator-pressure
+   calls.
+
+Mechanical gate, fixed before implementation:
+
+- First build a pre-change diagnostic over the canonical 26-root manifest with
+  synthetic nonregistered seeds, `root_worlds=8`, `successor_worlds=1`, and one
+  worker. Record `/usr/bin/time -l` peak RSS plus literal construction-semantic,
+  manifest-payload, mapped-root, scientific-core, and representative bank-pair
+  SHA-256 values. Preserve that exact pre-change binary.
+- Add incremental-versus-one-shot tests at input lengths
+  0/1/55/56/63/64/65, deterministic one-byte and irregular chunk partitions,
+  embedded NUL bytes, and the existing standard SHA vectors. Add fail-closed
+  lifecycle tests and buffered-reference-versus-streaming framed-digest tests
+  covering the primitive widths, booleans, doubles, and nested text used by
+  both writers.
+- Run the same diagnostic from the candidate binary. Every literal digest must
+  match the pre-change binary exactly, and candidate peak RSS must be no more
+  than 75% of baseline. Existing mutation-sensitive FQ0 tests, all FQ0 tests,
+  the full suite, `git diff --check`, and fresh ASan/UBSan focused binaries
+  must pass.
+- Only those gates license rebuilding the synthetic A401/A402/A403 quarantine.
+  Run it with a PTY or otherwise flushed progress plus `/usr/bin/time -l`.
+  Observe RSS externally; abort rather than pressure the host if it reaches
+  32 GiB. Quarantine must exit 0, preserve C16, and leave all registered paths
+  untouched before registered attempt 4 can be considered.
+
+If streaming passes literal identity but fails the RSS gate, retain the result
+as a valid negative and preregister exactly one next ownership/lifetime axis
+(per-root executor, deep bank copies, or streamed publication) from measured
+stage evidence. Do not stack those repairs or rerun registered coordinates.
+
+Baseline captured 2026-07-27 14:06 PDT. A host reboot after the declaration
+cleared the first `/private/tmp` binary before its timed result returned.
+Recovery did not use the partially edited worktree: the exact declared source
+was recreated byte-for-byte (SHA-256
+`4437b9e7047fc35d51ed5db933eb328295dff8706351ac5b6be79aa60bcdf9e7`)
+and compiled exclusively against a local detached clone of commit
+`84bb0659e726347325294ea85f1698ed4c98dd73`, whose FQ0 writers are the
+pre-repair buffered implementation. Exact compile command:
+
+```sh
+git clone --no-hardlinks --local . /private/tmp/fq0-prestream-tree
+c++ -I/private/tmp/fq0-prestream-tree/include \
+  -std=c++20 -O3 -Wall -Wextra -Wpedantic -Werror \
+  /private/tmp/fq0-prestream-tree/src/game.cpp \
+  /private/tmp/fq0-prestream-tree/src/learned_iteration.cpp \
+  /private/tmp/fq0-prestream-tree/src/probes.cpp \
+  /private/tmp/fq0-prestream-tree/src/dvr1_replay.cpp \
+  /private/tmp/fq0-prestream-tree/src/probe_eval.cpp \
+  /private/tmp/fq0-prestream-tree/src/probe_runner.cpp \
+  /private/tmp/fq0-prestream-tree/src/audit_common.cpp \
+  /private/tmp/fq0-prestream-tree/src/artifact_integrity.cpp \
+  /private/tmp/fq0-prestream-tree/src/output_calibration.cpp \
+  /private/tmp/fq0-prestream-tree/src/output_calibration_artifact.cpp \
+  /private/tmp/fq0-prestream-tree/src/oc1_action_scoring.cpp \
+  /private/tmp/fq0-prestream-tree/src/ac1_teacher_audit.cpp \
+  /private/tmp/fq0-prestream-tree/src/fq0_information_set.cpp \
+  /private/tmp/fq0-prestream-tree/src/fq0_bellman.cpp \
+  /private/tmp/fq0-prestream-tree/src/fq0_dominance.cpp \
+  /private/tmp/fq0-prestream-tree/src/fq0_dominance_transition.cpp \
+  /private/tmp/fq0-prestream-tree/src/fq0_bellman_science.cpp \
+  /private/tmp/fq0-prestream-tree/src/fq0_bellman_audit.cpp \
+  /private/tmp/fq0-prestream-tree/src/fq0_bellman_run.cpp \
+  /private/tmp/fq0_pre_streaming_digest_baseline.cpp \
+  -o /private/tmp/fq0_pre_streaming_digest_baseline
+/usr/bin/time -l /private/tmp/fq0_pre_streaming_digest_baseline
+```
+
+The rebuilt binary was 3,943,856 bytes with SHA-256
+`57c5c7c9147369b43a6dee4fb72040e294b50f2a52f2c0fecb72a5b6c56b2522`.
+The sandboxed first timing invocation completed the diagnostic but could not
+read `kern.clockrate`; the exact elevated read-only repeat completed in 6.79 s
+and recorded maximum resident set size **1,265,287,168 bytes** and peak memory
+footprint 894,766,400 bytes. Therefore the fixed 75% candidate RSS ceiling is
+**948,965,376 bytes**. Literal baseline:
+
+```text
+construction_semantic_sha256=5a95e749dc624abab9a226bfc17ca1e80ec0606ed1066ab3772902b289bb795e
+manifest_payload_sha256=9bbf8d7cf929e2df112c7f559b94b81990a9eda1a1a9cbbf26b82647b814875f
+mapped_root_stable_id=blue.counter-fire-elemental.v3
+mapped_root_payload_sha256=825306cdc4541a7f8114ba2383c003bf0a72224519a13e51ab4ae4708698c919
+scientific_core_payload_sha256=d9dabea53c91f19c0a203b656d2bd7de0a3c4eb5a0480ab5beacdf4b2f1f2cad
+representative_bank_pair_coordinate=blue.counter-fire-elemental.v3/counter-fire-elemental/0/0/24fe8c38c9b4156e742b94863402f2b3b1ef7e109ec0ae2194706d99f5b479a0
+representative_bank_pair_sha256=4a3fc541d56d83e3411d1463710a3e3e6a17b3fecb81add81ff1527e31e30e4e
+```
+
+No evidence path was opened. This is a mechanical baseline only; no FQ0 or
+Learned-strength inference is authorized.
+
+Candidate diagnostic completed 2026-07-27 14:08 PDT after the incremental
+accumulator and both streaming writers were present in the worktree. Exact
+compile/run:
+
+```sh
+c++ -Iinclude -std=c++20 -O3 \
+  -Wall -Wextra -Wpedantic -Werror \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/probe_eval.cpp src/probe_runner.cpp \
+  src/audit_common.cpp src/artifact_integrity.cpp \
+  src/output_calibration.cpp src/output_calibration_artifact.cpp \
+  src/oc1_action_scoring.cpp src/ac1_teacher_audit.cpp \
+  src/fq0_information_set.cpp src/fq0_bellman.cpp \
+  src/fq0_dominance.cpp src/fq0_dominance_transition.cpp \
+  src/fq0_bellman_science.cpp src/fq0_bellman_audit.cpp \
+  src/fq0_bellman_run.cpp \
+  /private/tmp/fq0_pre_streaming_digest_baseline.cpp \
+  -o /private/tmp/fq0_streaming_digest_candidate
+/usr/bin/time -l /private/tmp/fq0_streaming_digest_candidate
+```
+
+The candidate binary was 3,762,960 bytes with SHA-256
+`8a076a4db4a367a650333e6797d30107761b525bb5b460555fc3e2727f7c6b8f`.
+It completed in 5.41 s with maximum resident set size **406,061,056 bytes**
+and peak memory footprint 399,296,384 bytes. RSS is 32.09% of the buffered
+baseline, a **67.91% reduction**, and is well below the predeclared
+948,965,376-byte ceiling. All five requested literal values, the root stable
+ID, and the representative coordinate were byte-identical to the baseline:
+
+```text
+construction_semantic_sha256=5a95e749dc624abab9a226bfc17ca1e80ec0606ed1066ab3772902b289bb795e
+manifest_payload_sha256=9bbf8d7cf929e2df112c7f559b94b81990a9eda1a1a9cbbf26b82647b814875f
+mapped_root_stable_id=blue.counter-fire-elemental.v3
+mapped_root_payload_sha256=825306cdc4541a7f8114ba2383c003bf0a72224519a13e51ab4ae4708698c919
+scientific_core_payload_sha256=d9dabea53c91f19c0a203b656d2bd7de0a3c4eb5a0480ab5beacdf4b2f1f2cad
+representative_bank_pair_coordinate=blue.counter-fire-elemental.v3/counter-fire-elemental/0/0/24fe8c38c9b4156e742b94863402f2b3b1ef7e109ec0ae2194706d99f5b479a0
+representative_bank_pair_sha256=4a3fc541d56d83e3411d1463710a3e3e6a17b3fecb81add81ff1527e31e30e4e
+```
+
+Focused implementation gates at this point: artifact integrity 9/9, science
+11/11, and audit 16/16 passed `-Werror` clean, including independent buffered
+framing references for both FQ0 writers. `git diff --check` passed. C16
+remained 3,111,437 bytes with SHA-256 `53aeb904...44ca`; registered evidence
+and temporary paths remained absent. `REVIEW.md` was reread through its latest
+13:16 cycle after the result; that cycle predates the memory diagnosis and
+offers no conflicting newer evidence.
+
+Interim decision: the single-axis streaming hypothesis passes its literal
+identity and reduced-memory gate. This licenses the declared full and
+sanitized implementation verification, not the synthetic full quarantine yet,
+and is not FQ0 scientific evidence or a Learned-strength result.
+
+Full implementation verification completed 2026-07-27 14:21 PDT:
+
+```sh
+make -j4 test-fq0
+# information set 13/13; Bellman 8/8; dominance 10/10;
+# transition 4/4; science 11/11; audit 16/16; runner 11/11
+
+make -j4 test
+# all strict repository suites passed, including engine 168/168,
+# learned iteration 27/27, probes 57/57, probe runner 33/33,
+# web bridge 18/18, web 106/106, and certification 48/48
+```
+
+Fresh `-O1 -g -fsanitize=address,undefined
+-fno-omit-frame-pointer` builds, all with the normal warning gates:
+
+- artifact integrity: 9/9, SHA-256
+  `36bb01e7fae17a91262130d6f252a52e66f9d50616dcb1b6abada5f2fe5a5b11`;
+- FQ0 science: 11/11, SHA-256
+  `5fcc87b728daaae6d57530437223c8ce9ff0a4f27e3359d70f064b4b5eede1b5`;
+- FQ0 audit: 16/16, SHA-256
+  `72ab1a582a6e99d2899d6abe6a83d0511983f1db837d89e6e96e2240cfe651b0`;
+- FQ0 runner: 11/11, SHA-256
+  `7b09ed63ced2975c81b6dbb9ac5d00050a3fee35351ebb3430f2751b5e4737e5`.
+
+All sanitizer runs used `ASAN_OPTIONS=detect_leaks=0` and emitted no
+ASan/UBSan diagnostic. `git diff --check` remained clean. C16 and all four
+registered/quarantine output and temporary paths remained unchanged/absent.
+`REVIEW.md` was reread through its still-latest 13:16 cycle before this
+decision; the review loop has not yet resumed after the host reboot.
+
+Decision: accept the streaming repair through every predeclared mechanical
+gate and license exactly one rebuild/run of the already declared synthetic
+A401/A402/A403 full quarantine. The registered command remains forbidden.
+This remains an infrastructure GO, not scientific evidence.
+
+##### FQ0-T0 third full quarantine: final-publication jetsam void
+
+Run 2026-07-27 14:24-15:14 PDT after every gate above passed. The temporary
+headers were copied from the candidate worktree and differed only by the
+already declared three seed bases and evidence destination. Exact hashes:
+
+- audit overlay:
+  `93b7245276a13ac583fbc7b723f2b21cef34e7a105b30bed4cbdcfe2e4a5ae20`;
+- science overlay:
+  `a15fa2abb41223c290d5c880885ef468cdb655b70c3564974ee68440d5558b88`.
+
+Exact compile/run:
+
+```sh
+c++ -I/private/tmp/fq0-a4-streaming-20260727/include -Iinclude \
+  -std=c++20 -O3 -Wall -Wextra -Wpedantic -Werror \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/probe_eval.cpp src/probe_runner.cpp \
+  src/audit_common.cpp src/artifact_integrity.cpp \
+  src/output_calibration.cpp src/output_calibration_artifact.cpp \
+  src/oc1_action_scoring.cpp src/ac1_teacher_audit.cpp \
+  src/fq0_information_set.cpp src/fq0_bellman.cpp \
+  src/fq0_dominance.cpp src/fq0_dominance_transition.cpp \
+  src/fq0_bellman_science.cpp src/fq0_bellman_audit.cpp \
+  src/fq0_bellman_run.cpp src/fq0_bellman_audit_main.cpp \
+  -o /private/tmp/old-school-fq0-quarantine-a4-streaming-20260727
+/usr/bin/time -l \
+  /private/tmp/old-school-fq0-quarantine-a4-streaming-20260727
+```
+
+The binary was 3,746,320 bytes with SHA-256
+`d6a3505b7fe7332c0c0f47978751b6420120e6a212b37cb8870ad905c6b22fd3`.
+It emitted the flushed stages for immutable-C16 verification, full K64/K8
+construction, every successor reconstruction, and exhaustive cached
+next-boundary dominance. External polling then observed repeated memory
+sawteeth: each construction/invariance batch climbed from approximately
+7.2 GiB to 11.5-11.8 GiB and returned to approximately 7.2 GiB. This is the
+non-ratcheting profile predicted by the incremental-digest repair and
+categorically differs from the buffered 18.8 -> 56.6 -> 69.1 GiB staircase.
+
+The final validation/publication phase remained unbounded. Polling observed
+brief peaks of 23.40 and 26.09 GiB before releases, never reaching the declared
+32 GiB RSS abort threshold, and the monitor sent no signal. The process then
+terminated abnormally after 3,026.30 s. `/usr/bin/time -l` recorded
+5,531.22 user s, 110.60 system s, maximum resident set size
+30,533,861,376 bytes (28.437 GiB), and peak memory footprint
+112,321,783,808 bytes (104.608 GiB). No summary or evidence file was emitted.
+
+The OS cause is independently proven. Report
+`/Library/Logs/DiagnosticReports/JetsamEvent-2026-07-27-151442.ips`,
+SHA-256
+`c981677179c487c4f849ce8febaf8690e7a6db7344ab5a9f6c4adbe060e0a85e`,
+incident `9317247B-7C82-41BD-B7CA-1D08A3EA01C7`, names
+`old-school-fq0-quarantine-a4-str` as `largestProcess`. Its PID 43604
+record has 6,855,577 resident/footprint pages at the report's 16,384-byte
+page size, or 112,321,773,568 bytes, and the system reason is
+`vm-compressor-space-shortage`. macOS killed many unrelated services during
+the same incident. The 32 GiB RSS watcher did not catch compressed footprint;
+future memory gates must monitor physical footprint or use a substantially
+lower RSS bound.
+
+Neither quarantine evidence nor its temporary file existed afterward.
+Registered evidence and temporary remained absent. C16 remained 3,111,437
+bytes with SHA-256 `53aeb904...44ca`.
+
+Disposition: infrastructure void, not scientific evidence. The incremental
+digest repair remains a valid, literal-identity-tested improvement: it removed
+the repeated-hash ratchet and allowed every computational/invariance batch to
+finish. It is insufficient for the complete audit because final evidence
+serialization/validation still materializes simultaneous whole-payload
+copies. Registered attempt 4 remains unopened and blocked; C16 remains
+champion. Do not rerun either quarantine or registered coordinates until one
+new publication/ownership axis is prospectively declared and passes a reduced
+byte-identity plus memory gate.
+
+`REVIEW.md` was reread through its newest 15:14 cycle before this conclusion.
+That entry correctly observed bounded compute-stage RSS and absent evidence,
+but said no jetsam report existed; the report was generated at 15:14:42 after
+the reviewer's observation, so the OS evidence above supersedes that
+time-of-check inference. The review's new dominated-witness-v1/KD1 research is
+orthogonal and retained for the later FQ4 learned-policy stage.
+
+Next action: read-only localization of simultaneous owners across
+`serialize_impl`, strict bundle validation, section strings, complete-bundle
+hashing, and atomic no-replace publication. Preserve exact evidence bytes,
+digests, frozen-parent resnapshot, and fail-closed commit semantics. No repair
+is authorized until that ownership graph yields one falsifiable mechanical
+gate.
+
+Review reconciliation 2026-07-27 11:45 PDT: `REVIEW.md`'s 11:41 cycle says
+registered retry attempt 4 “appears to be executing.” That inference is
+incorrect. No registered no-argument process was started. The only runner work
+after the quarantine exit was `make test-fq0-bellman-run`, which compiles the
+registered binary and invokes only its sealed extra-argument rejection path.
+Both registered output paths remain absent, so attempt 4 is still unopened and
+blocked on this repair and the second quarantine.
+
+##### FQ0-T0 bounded evidence-publication repair declaration
+
+Declared 2026-07-27 15:22 PDT, before changing evidence serialization or
+publication code and after rereading `REVIEW.md` through its newest 15:14
+cycle. The host reboot did not alter the worktree, C16, or either registered
+evidence path. Three independent read-only ownership reviews agree on the
+following localization.
+
+The third quarantine completed the full computation and cached-dominance
+stages with bounded 7.2 -> 11.5-11.8 -> 7.2 GiB RSS sawteeth, proving the
+incremental-digest repair removed the former hash-buffer ratchet. It then died
+before the publication temporary existed. The production call graph explains
+the late 104.608 GiB physical footprint:
+
+1. `serialize_impl` validates the live `RunReport`, eagerly renders all eight
+   section strings, retains them simultaneously, and copies each into a
+   geometrically growing complete `bundle.bytes`;
+2. `publish_bundle_for_parent` retains that bundle while
+   `validate_bundle_impl` unconditionally copies the complete bytes into a
+   second `EvidenceBundle`;
+3. only after those whole-payload owners coexist does `write_atomic_impl`
+   create the temporary file.
+
+`validate_report` also makes secondary copies of first-seen successor banks.
+That is explicitly **not** part of this repair: the measured compute-stage
+profile is bounded, and mixing census ownership with publication would destroy
+single-axis attribution.
+
+Falsifiable hypothesis: replacing only the production whole-payload
+serialization/validation ownership with canonical direct-to-temporary
+streaming and bounded reread validation will:
+
+- emit exactly the legacy evidence bytes, byte count, whole-file SHA-256,
+  payload SHA-256, complete SHA-256, section order, and all eight section
+  SHA-256 values for the same typed report;
+- retain the existing semantic `validate_report` gate, fixed-model binding,
+  exact required-row cardinalities, fixed schema and row order, `fsync`,
+  destination-side temporary, frozen-parent resnapshot, hard-link
+  no-replace commit, cleanup, and exit semantics;
+- keep serializer-owned pending bytes at or below 1 MiB independent of
+  evidence size; and
+- prevent final publication from adding more than 1 GiB of physical footprint
+  above the immediately pre-publication sample in the next full quarantine.
+
+One-axis implementation:
+
+1. Introduce one private canonical byte sink used by every section renderer.
+   Keep a string sink only for the existing reduced testing API. Production
+   uses a fixed 64 KiB buffered file-descriptor sink and never constructs a
+   complete evidence string or complete section string.
+2. Incrementally hash section bodies, the payload prefix, the complete prefix,
+   and the entire file with the already verified `Sha256Accumulator`. Preserve
+   the exact current footer boundaries: section begin/footer rows are outside
+   the section digest; the payload footer is outside the payload digest but
+   inside the complete digest; the complete footer is outside the complete
+   digest but inside the whole-file digest.
+3. Validate the typed report before creating publication state. Create the
+   verified destination-side `.tmp` with
+   `O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC` and `O_NOFOLLOW`, stream and `fsync`, then
+   reread that same descriptor in fixed chunks. The reread parser must enforce
+   the current schema, fixed section order, newline/control-byte rules,
+   section/payload/complete hashes, EOF/no trailing data, whole-file hash and
+   byte count, and exact model/integrity/scientific/verdict binding-row
+   cardinalities. Its summary must equal the emitter summary.
+4. Allocate the complete `EvidencePublication`, resnapshot C16, recheck target
+   absence, and hard-link the already validated inode. No allocating or
+   throwing work may follow the commit point; cleanup and durability remain
+   best effort as before.
+5. Add flushed pre-publication and post-publication progress markers solely so
+   the full-run physical-footprint delta is attributable. Do not change any
+   scientific evidence, seed, bank, feature, score, gate, model, or registered
+   path.
+
+Preimplementation evidence freeze and gates:
+
+1. Before refactoring, record byte count plus whole-file, payload, complete,
+   and eight section digests for both the complete reduced report and its
+   leaf-heavy successor-bank form. Those constants are the independent legacy
+   oracle.
+2. After refactoring, require literal equality among the frozen oracle, the
+   in-memory reduced serializer, and bytes read from the production streaming
+   spool. The leaf-heavy fixture must cross multiple 64 KiB boundaries.
+3. Mutation tests must reject section content/footer corruption, payload and
+   complete footer corruption, truncation, trailing bytes, section
+   reordering, and missing or duplicate binding rows. Injected write/read or
+   precommit failures must leave neither target nor newly created temporary.
+   Preserve the existing occupied-target, occupied-temp, symlink, stale-model,
+   parent-change, and no-replace tests.
+4. Instrument and assert no more than 1 MiB of serializer-owned pending bytes
+   on a multi-buffer output fixture. Pass all focused FQ0 tests, the complete
+   strict suite, `git diff --check`, and fresh ASan/UBSan builds for artifact
+   integrity, FQ0 science, FQ0 audit, and the runner. C16 and registered paths
+   must remain unchanged.
+5. Only those results license one rebuild/run of the same synthetic
+   A401/A402/A403 full quarantine. Monitor macOS physical footprint rather than
+   trusting RSS: abort at 20 GiB physical footprint or 16 GiB RSS, whichever
+   comes first. If the pre-publication footprint already exceeds 20 GiB, stop
+   and reject this repair as insufficient rather than loosening the bound.
+   Require publication delta at most 1 GiB, process exit 0 or 1, a fully
+   reread-valid evidence file, absent `.tmp`, and unchanged C16.
+
+Any byte/digest drift, unbounded pending buffer, semantic or atomicity
+regression, sanitizer failure, threshold breach, exit 2, abnormal termination,
+or missing/invalid evidence rejects this repair or records an infrastructure
+void as applicable. It does not authorize the registered attempt 4. Only a
+successful synthetic exit 0/1 followed by a freeze commit and independent
+post-commit review can license the unchanged registered command. C16 remains
+champion throughout. The newer dominated-witness/K16 observations in
+`REVIEW.md` remain reserved for FQ4 after FQ0 infrastructure is closed.
+
+Preimplementation legacy oracle freeze, completed 2026-07-27 15:27 PDT.
+No repository file changed and no registered coordinate ran. A standalone
+buffered oracle was built from the existing reduced audit fixtures; its source
+was `/private/tmp/fq0_legacy_evidence_oracle.cpp`, SHA-256
+`08b7749a352ebe8a2bc0048cb279173edab2e164f4a37f734570624041e2a72f`,
+and its binary was `/private/tmp/fq0_legacy_evidence_oracle`, SHA-256
+`881f67a6df026c8e36951845ed1da8789cde0dc361940d174d4aefcb260b0a49`.
+Two executions were bit-identical; independent `wc -c` and
+`shasum -a 256` agreed with the program.
+
+For `complete_report()`:
+
+- bytes: 14,147,035;
+- complete-file SHA-256:
+  `0e0c75f71dcb63609d301be3c6fddeda000a7a2abae1cb3befffbbd4b394c5da`;
+- payload SHA-256:
+  `9847afd9d44ed2c89e348f67ec577f7a84e598975392c3d73505937bd9bbf445`;
+- complete-prefix SHA-256:
+  `7ec55140775011678197fe6a972f38453076b8385b31f72843ce82a474288b63`;
+- ordered section SHA-256 values:
+  metadata `3b188aab0319388564c3d6e9f52399a0ee7ffbdd1013daa87ee473c2daa088e6`,
+  manifest `f8f310b02c017c3ded6917ab3120084d7b1867c88f7850f96130b9921b8eba19`,
+  roots `f8f03f2beaea82295b465b4c43066781badb3f7d1255424c314faeb6d549fce7`,
+  contrasts `095586283ba7398c4758e03a7dc105d34efddf5c853f5b811e0531651e17d942`,
+  dominance `1139b48ac63efc872844bbaefb81b7f9d478237ef58a8bdda400187e38712734`,
+  collisions `0680502cc2b21156832a4fac2599483343b0dfbc06fc5b885d8a6d667c5f9245`,
+  integrity `dfac834fa796dec4e9ccb102fc8d064744f6e4f49e400e7c3d13c4c0faee1dd0`,
+  invariance `6f5772b25f4bf2e0ccbb2f92e627f2ffbea9123ac280d8e6cd6d8a6a4e5fcaa1`.
+
+For `complete_report()` plus
+`add_successor_group_to_first_root(report)`:
+
+- bytes: 15,859,759, or 241.99 times 64 KiB;
+- complete-file SHA-256:
+  `920c8e4a7f91b8eb03b47d9104ee717dd3237935185583b0edb3f52f78b72b18`;
+- payload SHA-256:
+  `c1baf8e1d4ec4f6f76bffc344f83dd1d8592b3d219c0aca616f29a90831db837`;
+- complete-prefix SHA-256:
+  `f3b7557813ca023b28b22791b5bee6271a945539ade4306091b8a6c60b558061`;
+- ordered section SHA-256 values:
+  metadata `99d3b832ef07b16e153112a6f8df5fb2996f48f487e948853a86627b749ba448`,
+  manifest `f8f310b02c017c3ded6917ab3120084d7b1867c88f7850f96130b9921b8eba19`,
+  roots `0be2a2575b6fab4c1bd5c96fdfd25e127d7ec7641e8f7b11db76fe66db8aa2b6`,
+  contrasts `095586283ba7398c4758e03a7dc105d34efddf5c853f5b811e0531651e17d942`,
+  dominance `1139b48ac63efc872844bbaefb81b7f9d478237ef58a8bdda400187e38712734`,
+  collisions `609cbd2ce9256c4a72463d01f9cc66ff3b2ac34c77dd6e8aed0c65e0458298dd`,
+  integrity `dfac834fa796dec4e9ccb102fc8d064744f6e4f49e400e7c3d13c4c0faee1dd0`,
+  invariance `51afc7cbb22e6793c4ef4fe2fabf92173e21751bbc1fe70f754ea2dae087f4e4`.
+
+The exact legacy files remain at
+`/private/tmp/fq0-legacy-complete.tsv` and
+`/private/tmp/fq0-legacy-leaf-heavy.tsv`. These are frozen mechanical
+oracles, not scientific evidence. `REVIEW.md` was reread through its unchanged
+15:14 cycle before recording them; its research conclusions do not conflict
+with this infrastructure gate.
+
+Review reconciliation 2026-07-27 15:45 PDT. `REVIEW.md`'s new 15:26/15:33
+cycles independently countersign the jetsam attribution, physical-footprint
+gate, and exact streaming-repair declaration. They propose running a
+publication-disabled A401/A402/A403 binary immediately and reading an
+explicitly promotion-ineligible scientific verdict before completing the
+sealed repair. That proposal is rejected for this already-running FQ0 repair,
+for three concrete reasons:
+
+1. The canonical streaming implementation and its independent legacy oracles
+   were already complete and its strict focused suite was green before the
+   proposal was read. The claimed wall-clock saving therefore no longer
+   exists.
+2. A compile-time no-publication fork would create a second execution path
+   after the exact sealed repair and gates were prospectively fixed. Looking
+   at its scientific outcome before the declared sealed quarantine would add
+   a result-conditioned branch and would not test the emitter/parser/atomic
+   path that caused the last void.
+3. The unchanged sealed synthetic run is now the shortest test of both the
+   mechanism and the repaired infrastructure. It remains bounded by the new
+   physical-footprint abort and cannot promote a model.
+
+The reviewer's broader two-tier proposal is reasonable for **future**
+mechanism diagnostics if declared before seed/output design: cheap
+diagnostic-grade stdout evidence can precede promotion-grade sealed artifacts.
+It will be considered when FQ4 is declared, not retrofitted into FQ0 after its
+artifact protocol and synthetic coordinates are frozen. This is a process
+disagreement, not a rejection of the review's dominated-witness/K16 evidence.
+
+Bounded-publication implementation result, completed 2026-07-27 15:52 PDT:
+**pre-quarantine GO**. The implementation follows the declaration exactly.
+Production now:
+
+- semantically validates the typed report, then emits a flushed
+  post-validation/pre-stream marker;
+- writes canonical rows directly to the destination-side `O_EXCL` temporary
+  through a 64 KiB buffer;
+- incrementally derives the eight section hashes, payload hash, complete hash,
+  whole-file hash, and byte count at the frozen legacy boundaries;
+- `fsync`s, rewinds, and rereads the same descriptor through a separate
+  bounded 64 KiB parser;
+- enforces fixed section order, newline/control-byte rules, every hash and
+  footer, exact EOF/size, whole-file identity, and exact cardinality for the
+  model/integrity/scientific/verdict binding rows;
+- compares emitter and validator summaries, constructs all publication
+  metadata, resnapshots C16 immediately before the target check and `linkat`,
+  and performs only nonthrowing flag changes and best-effort syscalls after
+  the no-replace commit.
+
+The legacy in-memory serializer remains only as a reduced test oracle.
+Production no longer constructs a section string, complete bundle string, or
+validated bundle copy. `EvidenceCensus` bank ownership and every scientific
+field remain unchanged.
+
+Exact legacy gates:
+
+- ordinary fixture: 14,147,035 bytes, whole-file
+  `0e0c75f7...c5da`, payload `9847afd9...445`, complete
+  `7ec55140...b63`, and all eight section hashes matched the frozen values;
+- leaf-heavy fixture: 15,859,759 bytes, whole-file
+  `920c8e4a...2b18`, payload `c1baf8e1...b837`, complete
+  `f3b75578...8061`, and all eight section hashes matched;
+- streamed files were literally equal to their buffered oracle bytes;
+- emitter and reread owned fixed 65,536-byte buffers, both crossed their
+  boundaries on the leaf-heavy fixture, and their combined declared capacity
+  was 131,072 bytes against the 1 MiB ceiling.
+
+The new-path tests also rejected section/body/footer corruption, payload and
+complete corruption, truncation, trailing data, section reordering, CR/NUL,
+an overlong row, coherently rehashed missing/duplicate bindings, simultaneous
+exit-0 and exit-1 rows, injected write/reread/precommit failures, occupied
+target and temporary, final and parent symlinks, and a stale exact-C16 parent.
+Every failure left no newly created target or temporary.
+
+Exact strict gates:
+
+```sh
+make -j4 test-fq0
+# information set 13/13; Bellman 8/8; dominance 10/10;
+# transition 4/4; science 11/11; audit 20/20; runner 11/11
+
+make -j4 test
+# complete repository gate passed: engine 168/168, learned 27/27,
+# probes 57/57, probe metrics 11/11, probe runner 33/33, all
+# historical audit/orchestration suites, FQ0 counts above, web
+# bridge 18/18, web 106/106, and certification 48/48
+```
+
+Fresh ASan+UBSan builds used
+`-O1 -g -Wall -Wextra -Wpedantic -Werror
+-fsanitize=address,undefined -fno-omit-frame-pointer`, then ran with
+`ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1`:
+
+- artifact integrity 9/9, binary SHA-256
+  `883e1f6196882ce37df65f88a193bb52b91dc2d04ff62c42c629fa049b6b11cb`;
+- FQ0 science 11/11,
+  `6ca40dc99a7264976ee2630ce76ddacf51be943221978f6a21a735ffd5201241`;
+- FQ0 audit 20/20,
+  `8a81620df47e9ff1735cc8739fa42f960831321de04be673e89e2f974a923106`;
+- FQ0 runner 11/11,
+  `08543cfa2ad29d9555646d4a5dcc0bc171745c688743bca5f37aea655a21df7f`.
+
+No sanitizer emitted a diagnostic. `git diff --check` passed. An independent
+read-only implementation review separately rebuilt audit 20/20 and runner
+11/11, verified every hash boundary, bounded ownership, exact row cardinality,
+atomic order, cleanup, and the post-link noexcept output path, and returned
+GO with no blocker.
+
+C16 remains 3,111,437 bytes with SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`.
+The registered evidence and `.tmp` remain absent. `REVIEW.md` was reread
+through its newest 15:47 cycle; it accepts the 15:45 reconciliation and keeps
+the same next priority. Its new SB diagnostic is directional support for the
+later fitted-backup axis and a warning about continuation healing, but is
+promotion-ineligible and does not change this mechanical gate.
+
+Decision: all declared pre-run gates pass. This licenses exactly one
+rebuild/run of the same synthetic A401/A402/A403 quarantine with the declared
+20 GiB physical-footprint, 16 GiB RSS, and 1 GiB post-validation publication
+delta gates. It does not license or open the registered attempt 4 and makes no
+Learned-strength claim.
+
+Physical-guard qualification, completed 2026-07-27 16:09 PDT. The exact
+project-scoped guard is `tools/fq0_quarantine_guard.sh`, SHA-256
+`a93847cc530cde58ee5d11f5621917728bedb3bc7b33691f74beb10ed9a8a87f`.
+It samples the direct child by exact PID, rejects incomplete `footprint`
+output, enforces every valid RSS/physical metric immediately, permits only
+three 0.25-second attach retries before the first lifetime-peak sample and no
+blind retry thereafter, and requires a complete sample that begins after the
+single flushed publication marker. Final marker recount, executable rehash,
+target exit, and conservative current/peak publication delta all fail closed.
+
+Three harmless exact-hash smokes established the contract:
+
+- a marker after three seconds followed by five seconds of continued
+  execution (`/private/tmp/fq0-guard-smoke-20260727-08`) returned guard 0 /
+  target 0, four complete samples, exactly one marker, two genuine
+  post-marker samples, unchanged executable hash, and zero publication delta;
+- the same marker followed by exit 0 after 0.1 second
+  (`/private/tmp/fq0-guard-smoke-20260727-09`) returned guard 93 / target 0
+  with zero post-marker samples; and
+- `/bin/sleep 4` with no marker
+  (`/private/tmp/fq0-guard-smoke-20260727-11`) returned guard 93 / target 0
+  with zero marker occurrences.
+
+An independent read-only line review returned GO on the exact guard hash after
+identifying and then rechecking fixes for a pre/post-marker sampling race,
+partial-sampler threshold handling, delayed RSS enforcement, permissive
+`footprint` diagnostics, final marker recount, hash validation, and startup
+signal handling. `zsh -n` returned 0 (with only the managed sandbox's
+non-fatal background-nice warning) and `git diff --check` remained clean.
+
+Independent A5 identity inspection also returned GO. The overlay contains
+exactly the audit/science headers; versus the repository they change only the
+private evidence path and A401/A402/A403 seed bases. Their SHA-256 values are
+`7895e37e4adc978c37f7c83be52c4e4c400799739be8230f49410b37c16e0c47`
+and
+`a15fa2abb41223c290d5c880885ef468cdb655b70c3564974ee68440d5558b88`.
+The 3,784,840-byte arm64 quarantine binary SHA-256 is
+`7c2e2134f60e4278c64e2ba0f25bfe83a8f77d8b418cb1d7093932b72d654273`;
+it contains each synthetic seed and the private path once, no production
+seed or registered evidence path, and the bounded publisher/validator marker
+and symbols. Every linked repository input predates the binary. C16 remains
+`53aeb904...44ca`; all registered and A5 target/temporary paths remain absent.
+`REVIEW.md` was reread through its newest 15:59 cycle and gives the same next
+priority. The sole now-licensed invocation is:
+
+```sh
+zsh tools/fq0_quarantine_guard.sh \
+  /private/tmp/fq0-quarantine-a5-guard-20260727 -- \
+  /private/tmp/old-school-fq0-quarantine-a5-bounded-publication-20260727
+```
+
+Synthetic A5 result, completed 2026-07-27 16:12 PDT:
+**monitoring-infrastructure void; no scientific or publication conclusion**.
+The exact licensed command above started at 23:09:38Z. Guard
+`a93847cc...a87f` launched exact binary `7c2e2134...54273` as PID 70092,
+collected 72 complete two-second samples, and fail-closed at sample 73 at
+23:12:12Z with guard status 92. The guard killed the child, whose resulting
+wait status was 137. The publication marker was never emitted, target stdout
+and stderr were both zero bytes, and neither A5 evidence nor its temporary
+ever existed. Consequently no outcome, fixture verdict, or publication-memory
+reading is available.
+
+The abort was not a resource threshold. At the terminating sample RSS was
+5,844,631,552 bytes, physical current was 5,591,003,392 bytes, and
+`footprint`'s reported lifetime peak was 5,590,987,008 bytes. `footprint`
+returned 0 with empty stderr and no warning/error/incomplete marker, but
+current exceeded reported peak by exactly 16,384 bytes, one arm64 VM page.
+The guard independently enforced both valid values below their limits, then
+classified the impossible ordering as an incomplete sample and honored its
+one-blind-sample abort. Across the raw logs all 74 footprint invocations
+(preflight plus target) returned 0 with both metrics and no diagnostics; all
+74 RSS invocations returned 0; current and reported peak were monotone; and
+this was the sole inversion. The target executable hash remained
+`7c2e2134...54273`; C16 remained `53aeb904...44ca`; A5 and registered
+evidence/temporary paths remain absent.
+
+Interpretation: this is a live-sampler coherence defect in the guard, not a
+publisher, audit, or scientific failure. The one-page skew is consistent with
+the live process changing while `footprint` gathers separately reported
+current and lifetime-peak fields. Rejecting the entire otherwise valid sample
+was safe but too strict. It also means the declared single A5 run was consumed
+as an infrastructure void. No rerun is licensed by the prior declaration.
+`REVIEW.md` was reread through its newest 15:59 cycle before this conclusion;
+its priority remains the same and it contains no conflicting new result.
+
+##### FQ0-T0 A5b one-page peak-normalization repair declaration
+
+Declared 2026-07-27 16:15 PDT, before changing the guard again. Scientific
+binary, overlay, A401/A402/A403 seeds, evidence path, C16 parent, 20 GiB
+physical cap, 16 GiB RSS cap, 1 GiB publication-delta cap, and every audit
+byte remain frozen. Only the external monitor may change, and A5b must use a
+new log directory. The failed A5 logs are retained unchanged.
+
+Falsifiable hypothesis: for a successful, diagnostic-free live `footprint`
+sample, accepting `reported_peak < current` only when the gap is no more than
+one independently validated host VM page, then defining
+`effective_peak = max(reported_peak, current)`, will admit the observed
+one-page sampling skew without weakening any memory gate. Any larger inversion
+remains invalid and fail-closed. Current remains an independently enforced
+metric. Effective peak, not the smaller raw peak, drives the physical cap,
+pre/post-publication baseline, publication delta, and lifetime maximum.
+
+One-axis implementation and pre-run gates:
+
+1. Preflight and log the host page size; require every `footprint` header to
+   report that same positive page size. Preserve raw reported peak and add
+   effective peak, normalization count, and maximum skew to samples/summary.
+2. Add pure normalizer tests for reported-above-current, equality, an exact
+   one-page inversion accepted and raised to current, and a greater-than-page
+   inversion rejected. Replay A5 sample 73 literally and reject a two-page
+   mutation.
+3. Prove a one-page-low raw peak cannot hide an over-limit current: the
+   synthetic threshold seam must still return 90. Prove a normalized
+   pre/post pair allows exactly 1 GiB publication delta and returns 94 above
+   it. Existing missing/malformed/duplicate/warning/nonempty-stderr cases stay
+   rejected.
+4. Repeat exact-hash happy-marker, marker-without-later-sample, and
+   missing-marker smokes; require `zsh -n`, `git diff --check`, and an
+   independent read-only guard review.
+5. Reconfirm exact A5 binary/overlay/C16 hashes and absent A5/registered
+   evidence and temporaries. Then and only then license one same-coordinate
+   A5b retry with:
+
+```sh
+zsh tools/fq0_quarantine_guard.sh \
+  /private/tmp/fq0-quarantine-a5b-guard-20260727 -- \
+  /private/tmp/old-school-fq0-quarantine-a5-bounded-publication-20260727
+```
+
+A5b passes only on guard/target exit 0 or 1, fully valid evidence, no
+temporary, unchanged target/C16, both absolute memory caps, at least one
+complete measurement begun after the marker, and publication delta at most
+1 GiB. Any other state is another void/rejection and cannot authorize the
+registered attempt. Reusing the exact scientific coordinate is permissible
+only because A5 exposed no marker, stdout, evidence, or outcome and the repair
+is confined to conservative interpretation of the external sampler.
+
+A5b guard-repair result, completed 2026-07-27 16:24 PDT:
+**implementation GO; one same-coordinate retry licensed**. Exact guard
+SHA-256 is
+`3eb640e9deec4cff892013bfa16fe3024d8fd215af34e6f921e8c0b47eb9a2da`.
+The guard now binds `/usr/bin/getconf PAGESIZE` to the unique page-size value
+in every clean `footprint` header. It preserves raw current/reported peak,
+derives and logs effective peak and skew, counts normalizations, and accepts
+an inversion only at or below that page size. Current is still enforced
+before normalization; raw and effective peaks are also independently checked.
+Effective peak is carried into the last pre-marker baseline, all post-marker
+samples, the 20 GiB cap, and the conservative publication delta.
+
+Exact pure/replay gate:
+
+```sh
+zsh tools/fq0_quarantine_guard.sh --self-test
+# FQ0 quarantine guard self-tests: 14/14 cases passed
+```
+
+The cases cover reported-above-current, equality, exact A5 row-73 values,
+greater-than-one-page rejection, a one-page-low 20 GiB current returning
+status 90, normalized effective-peak-only publication deltas of exactly
+1 GiB (status 0) and 1 GiB + 1 byte (status 94), a literal parse of A5's
+5,658,325,184-byte headline plus both auxiliary fields and page size, a
+literal two-page mutation, missing/duplicate metrics, duplicate page header,
+warning output, and nonempty stderr. No self-test temporary remained.
+
+Exact-hash process smokes:
+
+- `/private/tmp/fq0-guard-smoke-20260727-18`: guard 0 / target 0, four
+  complete samples, page size 16,384, one marker, two known-post-marker
+  samples, stable target hash, delta 0;
+- `/private/tmp/fq0-guard-smoke-20260727-19`: marker followed by exit before a
+  subsequent sample, guard 93 / target 0, post-marker samples 0;
+- `/private/tmp/fq0-guard-smoke-20260727-20`: no marker, guard 93 / target 0,
+  marker occurrences 0.
+
+`zsh -n` returned 0 with only the known managed-sandbox background-nice
+warning; `git diff --check` passed. Two independent read-only reviews checked
+the implementation and tests. One initially withheld GO because the first
+delta test exercised the current branch and the captured fixture did not yet
+parse the literal A5 headline/peak. Both deficiencies were corrected before
+the exact hash above; the stricter rereview returned final GO and independently
+rechecked all three smoke artifacts.
+
+Frozen identities remain: A5 binary `7c2e2134...54273`, audit overlay
+`7895e37e...6e0c47`, science overlay `a15fa2ab...8b88`, and C16
+`53aeb904...44ca`. The A5b log directory, A5 evidence/temporary, and registered
+evidence/temporary are absent. `REVIEW.md` was reread through its newest 16:14
+cycle. That entry records the earlier pre-A5 license and does not yet include
+the 16:12 sampler void, but its requested next action is otherwise consistent;
+the newer exact void/repair record here controls. All A5b declaration gates
+now pass, licensing exactly the predeclared A5b command and nothing registered.
+
+Synthetic A5b result, completed 2026-07-27 16:26 PDT:
+**monitoring-infrastructure void; the one-page hypothesis is refuted**. The
+exact declared A5b command launched unchanged binary `7c2e2134...54273` as
+PID 78847 under guard `3eb640e9...9a2da`. It collected 33 complete samples
+and then correctly exercised its declared greater-than-one-page rejection at
+sample 34:
+
+- `footprint` exit 0, empty stderr, no warning/error/incomplete marker;
+- physical current 2,272,483,264 bytes;
+- raw reported peak 2,272,450,496 bytes;
+- skew 32,768 bytes, exactly two validated 16,384-byte host pages;
+- RSS 2,424,750,080 bytes;
+- prior effective peak 2,156,893,888 bytes.
+
+The guard returned 92 and killed the child, whose wait status was 137. The
+target hash was unchanged. There was no prior normalization, marker, stdout,
+stderr, evidence, or temporary; registered paths and C16 remain untouched.
+This is neither a memory-threshold result nor scientific evidence.
+
+Decision: reject the one-page-normalization hypothesis. Do **not** widen the
+page count ad hoc and do not rerun under the current declaration. A5 and A5b
+together prove that `footprint`'s undocumented auxiliary current and lifetime
+peak are not an atomically coherent pair on this live allocating process.
+The next experiment is a separately preregistered monitor-semantics repair,
+chosen after independent comparison of (a) an externally maintained monotone
+effective peak over clean current/raw observations, (b) current+RSS sampling
+without trusting the auxiliary peak relation, and (c) `footprint --sample`.
+Any choice must preserve the same 20/16/1 GiB caps and scientific coordinate,
+retain raw logs, reject actual sampler diagnostics or regressions, and be
+qualified outside A5 before another retry. `REVIEW.md` was reread through
+16:14 before this record; it had licensed the pre-A5 run but had not yet
+observed either later sampler void, so this exact newer record controls.
 
 #### FQ0-T0 implementation-freeze addendum
 

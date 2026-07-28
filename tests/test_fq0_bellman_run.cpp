@@ -25,6 +25,16 @@ ScientificEvidence take_reduced_construction_core_for_test(
     fq0_bellman_science::Construction construction,
     const ac1_teacher_audit::Manifest& manifest);
 
+ScientificEvidence
+take_descriptor_order_construction_core_for_test(
+    fq0_bellman_science::Construction construction,
+    const ac1_teacher_audit::Manifest& canonical_manifest);
+
+ScientificEvidence
+take_hidden_repartition_construction_core_for_test(
+    fq0_bellman_science::Construction construction,
+    const ac1_teacher_audit::Manifest& canonical_manifest);
+
 std::tuple<ScientificEvidence, std::size_t, std::size_t>
 reconstruct_reduced_information_sets_for_test(
     const fq0_bellman_science::Construction& construction,
@@ -98,9 +108,9 @@ old_school::probes::DecisionProbe test_probe() {
     return *found;
 }
 
-old_school::ac1_teacher_audit::Manifest test_manifest() {
-    const old_school::probes::DecisionProbe probe =
-        test_probe();
+old_school::ac1_teacher_audit::Manifest
+manifest_for_test_probe(
+    const old_school::probes::DecisionProbe& probe) {
     old_school::ac1_teacher_audit::Manifest manifest;
     manifest.roots.push_back({
         .probe = probe,
@@ -113,8 +123,12 @@ old_school::ac1_teacher_audit::Manifest test_manifest() {
     });
     manifest.physical_roots_by_deck[
         static_cast<std::size_t>(
-            old_school::DeckId::White)] = 1;
+            probe.root_deck)] = 1;
     return manifest;
+}
+
+old_school::ac1_teacher_audit::Manifest test_manifest() {
+    return manifest_for_test_probe(test_probe());
 }
 
 old_school::probes::DecisionProbe find_natural_probe(
@@ -131,6 +145,13 @@ old_school::probes::DecisionProbe find_natural_probe(
             std::string(stable_id));
     }
     return *found;
+}
+
+old_school::ac1_teacher_audit::Manifest binder_manifest() {
+    return manifest_for_test_probe(
+        find_natural_probe(
+            old_school::probes::make_probe_dev_v3(),
+            "white.mill-before-draw.v3"));
 }
 
 audit::RootEvidence natural_x_zero_root(
@@ -706,6 +727,221 @@ void test_reduced_core_adapter_is_lossless() {
         saw_leaf && saw_critic_identity,
         "reduced runner fixture did not exercise and "
         "preserve a critic-identity leaf");
+}
+
+void test_alternate_manifest_binders_are_exact() {
+    const auto model =
+        old_school::train_learned_value_champion(
+            1, 0xF00D00000000C162ULL);
+    const auto canonical = binder_manifest();
+    const science::testing::ReducedRecipe recipe{
+        .root_seed_base =
+            0xF00D000000002101ULL,
+        .bank_a_seed_base =
+            0xF00D000000002102ULL,
+        .bank_b_seed_base =
+            0xF00D000000002103ULL,
+        .root_worlds =
+            old_school::fq0_bellman::kBlockCount,
+        .successor_worlds = 1,
+        .workers = 2,
+    };
+    const science::Construction base =
+        science::testing::construct_reduced(
+            canonical, model, recipe);
+    const audit::ScientificEvidence base_evidence =
+        audit::testing::
+            take_reduced_construction_core_for_test(
+                base, canonical);
+    expect(
+        canonical.roots.size() == 1 &&
+            canonical.roots.front()
+                    .probe.candidates.size() >= 3,
+        "alternate-manifest fixture lacks candidate "
+        "permutations");
+
+    auto descriptor_manifest = canonical;
+    for (auto& root : descriptor_manifest.roots) {
+        std::reverse(
+            root.probe.candidates.begin(),
+            root.probe.candidates.end());
+    }
+    const science::Construction descriptor =
+        science::testing::construct_reduced(
+            descriptor_manifest, model, recipe);
+    const audit::ScientificEvidence descriptor_evidence =
+        audit::testing::
+            take_descriptor_order_construction_core_for_test(
+                descriptor, canonical);
+    expect(
+        descriptor.manifest != canonical &&
+            descriptor_evidence.manifest == canonical &&
+            audit::binding::
+                    scientific_core_payload_sha256(
+                        descriptor_evidence) ==
+                audit::binding::
+                    scientific_core_payload_sha256(
+                        base_evidence),
+        "exact descriptor-order source was not normalized "
+        "to a comparable canonical core");
+
+    science::Construction non_exact_descriptor =
+        descriptor;
+    auto& permuted =
+        non_exact_descriptor.manifest.roots.front()
+            .probe.candidates;
+    std::rotate(
+        permuted.begin(), permuted.begin() + 1,
+        permuted.end());
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_descriptor_order_construction_core_for_test(
+                    non_exact_descriptor, canonical);
+        },
+        "descriptor-order binder accepted a non-exact "
+        "candidate permutation");
+
+    science::Construction descriptor_metadata =
+        descriptor;
+    descriptor_metadata.manifest.roots.front()
+        .factory_contract_fingerprint += ".mutated";
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_descriptor_order_construction_core_for_test(
+                    descriptor_metadata, canonical);
+        },
+        "descriptor-order binder accepted a changed "
+        "noncandidate field");
+
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_descriptor_order_construction_core_for_test(
+                    base, canonical);
+        },
+        "descriptor-order binder accepted "
+        "source/canonical role swapping");
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_descriptor_order_construction_core_for_test(
+                    descriptor, descriptor_manifest);
+        },
+        "descriptor-order binder accepted the transformed "
+        "source as its canonical output");
+
+    auto hidden_manifest = canonical;
+    bool any_hidden_change = false;
+    for (auto& root : hidden_manifest.roots) {
+        const science::HiddenRepartitionDiagnostic
+            repartition = science::hidden_repartition(
+                root.probe.state,
+                root.probe.root_player);
+        any_hidden_change =
+            any_hidden_change || repartition.changed;
+        root.probe.state = repartition.state;
+    }
+    const science::Construction hidden =
+        science::testing::construct_reduced(
+            hidden_manifest, model, recipe);
+    expect(
+        any_hidden_change && hidden.manifest != canonical,
+        "alternate-manifest fixture has no hidden "
+        "repartition");
+    const audit::ScientificEvidence hidden_evidence =
+        audit::testing::
+            take_hidden_repartition_construction_core_for_test(
+                hidden, canonical);
+    expect(
+        hidden_evidence.manifest == canonical &&
+            audit::binding::
+                    scientific_core_payload_sha256(
+                        hidden_evidence) ==
+                audit::binding::
+                    scientific_core_payload_sha256(
+                        base_evidence),
+        "exact hidden-repartition source was not normalized "
+        "to a comparable canonical core");
+
+    science::Construction incorrect_hidden = hidden;
+    const std::size_t opponent =
+        1 - canonical.roots.front().probe.root_player;
+    auto& hidden_library =
+        incorrect_hidden.manifest.roots.front()
+            .probe.state.players[opponent]
+            .library;
+    bool hidden_order_mutated = false;
+    for (std::size_t first = 0;
+         first < hidden_library.size() &&
+         !hidden_order_mutated;
+         ++first) {
+        for (std::size_t second = first + 1;
+             second < hidden_library.size();
+             ++second) {
+            if (hidden_library[first] ==
+                hidden_library[second]) {
+                continue;
+            }
+            std::swap(
+                hidden_library[first],
+                hidden_library[second]);
+            hidden_order_mutated = true;
+            break;
+        }
+    }
+    expect(
+        hidden_order_mutated &&
+            old_school::observe_game_state(
+                incorrect_hidden.manifest.roots.front()
+                    .probe.state,
+                canonical.roots.front()
+                    .probe.root_player) ==
+                old_school::observe_game_state(
+                    hidden.manifest.roots.front()
+                        .probe.state,
+                    canonical.roots.front()
+                        .probe.root_player),
+        "incorrect-hidden fixture changed public "
+        "information or lacked a mutation");
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_hidden_repartition_construction_core_for_test(
+                    incorrect_hidden, canonical);
+        },
+        "hidden-repartition binder accepted an incorrect "
+        "state");
+
+    science::Construction hidden_metadata = hidden;
+    hidden_metadata.manifest.roots.front()
+        .information_action_fingerprint += ".mutated";
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_hidden_repartition_construction_core_for_test(
+                    hidden_metadata, canonical);
+        },
+        "hidden-repartition binder accepted changed root "
+        "metadata");
+
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_hidden_repartition_construction_core_for_test(
+                    base, canonical);
+        },
+        "hidden-repartition binder accepted "
+        "source/canonical role swapping");
+    expect_runtime_error(
+        [&] {
+            audit::testing::
+                take_hidden_repartition_construction_core_for_test(
+                    hidden, hidden_manifest);
+        },
+        "hidden-repartition binder accepted the transformed "
+        "source as its canonical output");
 }
 
 std::vector<old_school::fq0_bellman::ActionSamples>
@@ -1437,6 +1673,8 @@ int main() {
              test_x_zero_contrasts_bind_natural_typed_pass},
             {"reduced construction adapter",
              test_reduced_core_adapter_is_lossless},
+            {"alternate manifest binders",
+             test_alternate_manifest_binders_are_exact},
             {"feature reconstruction reuse and binding",
              test_reconstruction_reuses_feature_scope_work},
             {"reconstruction raw-bank binding",
