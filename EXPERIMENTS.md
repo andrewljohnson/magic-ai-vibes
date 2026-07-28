@@ -16520,6 +16520,92 @@ obtain a committed-tree identity review, then run exactly
 or FAIL with all five decks and the measured elapsed time. Only PASS licenses
 a fresh gameplay declaration.
 
+DEV5 frozen anchored-fit result, completed 2026-07-28: **PASS at every
+conjunctive offline gate**. Committed and pushed evaluator
+`e69f6a8bb44877af51bf0d34f40378ae779e0be9` was independently checked against
+local and `origin/main`; its 1,863,528-byte production binary had SHA-256
+`40c69b21a204e561eb1794b3b0ca9e6c13735d415556926c54eb694efb9fd63f`.
+The review reproduced focused 13/13 tests, all four input identities, the
+minimal link graph, and the source-symbol firewall, then returned explicit GO
+for exactly:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev5-neutral-evaluate
+# FQ4 DEV5 neutral anchoring gate=PASS
+# model anchored=22834a951e8338568be93561a34c6b1df588faa71feb9d184ab62021b03b2171
+# training_sha256=a13c2bca589a42d020fcb7abfa1826fae5a9745be41602442fa7e7bc1d768fef
+# real 1.40
+# user 1.35
+# sys 0.02
+```
+
+All eight gate fields were exactly one: baseline positive contract, CHECK
+positive cleanliness, FIT preservation, nonzero neutral baseline, per-deck
+neutral nonworsening, pooled KL halving, support-change halving, and
+isolation. The fixed training boundary was 248 FIT rows / 987 options:
+88 unchanged positive rows followed by 160 neutral rows, optimizer seed
+`202607280212`, no CHECK or background row, and one anchored optimizer call.
+The omitted-neutral control reproduced model `71260078...6151`.
+
+Positive FIT retained all 30 repairs with zero regressions and improved exact
+support violations from 3 to 2: Green 1→1, Red 0→0, Blue 2→1, White 0→0,
+RU Aggro 0→0. Positive CHECK remained 94/94 Safe with all 37 repairs, zero
+regressions, and zero support violations on every deck. CHECK target KL is
+shown only as a descriptive preservation measure:
+
+| Deck | CHECK roots/options | Repairs | Baseline KL | Anchored KL |
+| --- | ---: | ---: | ---: | ---: |
+| Green | 20 / 54 | 11 | 0.000102915625 | 0.0001417515817 |
+| Red | 5 / 33 | 0 | 0.0003039294501 | 0.0002170920544 |
+| Blue | 31 / 140 | 11 | 0.00259344634 | 0.002696324533 |
+| White | 7 / 22 | 7 | 0.00002029117344 | 0.0001026581527 |
+| RU Aggro | 31 / 322 | 8 | 0.0002633099951 | 0.0002494808596 |
+| Equal-deck pooled | 94 / 571 | 37 | 0.0006567785167 | 0.0006814614363 |
+
+The preregistered neutral CHECK result cleared both factor-of-two gates and
+every per-deck direct nonworsening gate:
+
+| Deck | Rows/options | Baseline KL | Anchored KL | Support changes |
+| --- | ---: | ---: | ---: | ---: |
+| Green | 32 / 82 | 0.0003500215255 | 0.0002118129935 | 13→9 |
+| Red | 32 / 86 | 0.0004867509080 | 0.00003003689423 | 9→3 |
+| Blue | 32 / 80 | 0.0005579017809 | 0.00003917393413 | 14→6 |
+| White | 32 / 103 | 0.0003729649364 | 0.0001218976262 | 20→11 |
+| RU Aggro | 32 / 87 | 0.0005431706957 | 0.00004407370420 | 12→4 |
+| Equal-deck / pooled | 160 / 438 | 0.0004621619693 | 0.00008939903046 | 68→33 |
+
+Decision: accept model `22834a95...b2171` as the sole DEV5 gameplay
+challenger, not as champion. The fixed-artifact loop has now reduced the same
+kind of candidate fit and full five-deck offline decision gate from the
+311.75-second one-time reconstruction to 1.40 seconds.
+
+The licensed publication coordinate is now frozen before implementation.
+Reuse the existing Priority-tensor delta wire schema at new no-replace path
+`data/old-school-fq4-dev5-neutral-anchored-candidate-v1.fq4candidate`.
+Its contract family is `FQ4-DEV5-NEUTRAL-ANCHORED`; its environment string
+must bind both exact DEV1 `0911fc2e...859df` and neutral
+`47d94823...aa105` identities. Bind exact C16 parent/components, DEV1 in the
+structured corpus field, training input `a13c2bca...68fef`, 248 examples /
+987 options, zero CHECK/background rows, one call and the unchanged optimizer,
+candidate `22834a95...b2171`, all Priority tensor dimensions, and the exact
+existing K8/H4/R1/shallow-on/root-depth-one deployment recipe. Run the full
+evaluator twice, require bit-identical anchored models/accounting/gates,
+publish atomically without replacement, reload exactly, and record artifact
+bytes/SHA before gameplay. The fixed publisher may link the game-free
+evaluator but no collection/generator/coverage/gameplay/held-out source.
+
+Only after publication tests, sanitizer, full suite, immutable preflight, and
+independent review may fresh seed `202607280701` open for the licensed
+all-five-deck GP0 smoke: same-seed exact C16/C16 deployment control followed
+by anchored/C16, four repetitions over 15 balanced pairings, 240 games per
+comparison and 48 per challenger deck. The control must be 120-120; candidate
+must complete, score at least 40%, and take at most 1.25x control wall time.
+Deck slices are descriptive. A pass licenses a separately preregistered
+2,040-game candidate/C16 gate on a new seed; failure stops without one.
+`REVIEW.md` was reread through 09:34 after the fit and before this record; it
+endorsed the anchored fit as next and contained no conflicting post-result
+entry. No gameplay seed has opened.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
