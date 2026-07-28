@@ -14503,6 +14503,21 @@ scores, actions, or outcomes; all other selection and support rules are
 unchanged. `REVIEW.md` was reread through its newest 03:04 countersign and
 contained no conflicting DEV0 critique.
 
+Pre-data correction, 2026-07-28 03:13 PDT: the preceding clarification
+incorrectly assumed that `evenly_spaced_retained_indices(total, 16)` always
+contains index zero; for some truncated strata it does not. No development
+game or root had been opened when independent review found this. The exact
+superseding rule is: always reserve the first retained background row `b`;
+form the chronological dominance-positive stratum excluding `b`; select at
+most 15 rows from that stratum with
+`evenly_spaced_retained_indices(total, 15)`; then take its union with `b`.
+If `b` is itself dominance-positive, give it both role bits. Consequently
+each split/deck has at most 16 physical rows and at most 16 positive-role
+rows, the non-background positive sample is evenly spaced over its entire
+eligible stratum, and the two-split cap is exactly enforceable at 160. This
+rule is independent of every model score, source choice, outcome, and
+unopened root. It is the only operative DEV0 selection rule.
+
 Publication is forbidden unless both complete constructions are byte
 identical, both schedules/cross-sums are exact, no malformed root exists,
 every split has at least one positive row for each of the five decks, and
@@ -14549,6 +14564,25 @@ deck-balanced KL, dominance margins, exact-support violations,
 Safe/Class-1/Class-2/Class-3 transitions, repairs, regressions, and per-deck
 counts. The representative optimizer seed is `202607280212`.
 
+Prospective optimizer clarification, 2026-07-28 03:09 PDT, before any
+development game was opened: the representative 16-epoch transform is the
+mechanically generalized FQ4-D0 transform, with no parameter selected from
+FIT or CHECK results. For every FIT row carrying the dominance-positive role,
+start from the frozen parent combined-score softmax at temperature `0.10`;
+constrain Pass against every eight-of-eight robustly Pass-dominated action
+with the reverse-KL I-projection ratio
+`1.1051701859880913`; then form the target as
+`0.90 * projected + 0.10 / legal_action_count`, with unit row weight.
+Background-only and every CHECK row are excluded from training. The
+`LearnedValuePriorityHeadUpdateConfig` is exactly batch size `64`, epochs
+`16`, learning rate `0.001`, beta1 `0.9`, beta2 `0.999`, epsilon `1e-8`,
+global gradient-norm clip `5.0`, seed `202607280212`, residual weight `0.10`,
+and policy temperature `0.10`. All canonical FIT examples enter in stored
+split/deck/root order before the optimizer's seeded shuffle. This freezes
+both the speed trial and representative candidate; it does not make CHECK
+promotion evidence. The newest `REVIEW.md` entry remained the 03:04
+countersign and contained no conflicting DEV0 critique.
+
 Held-out firewalls are structural:
 
 - the generator and evaluator may share only seed-agnostic collector,
@@ -14571,6 +14605,42 @@ synthetic codecs and bad-argument paths only. No FQ4-DEV0 no-argument
 generation is licensed until exact schedule hashes, release/ASan/UBSan/full
 tests, link firewalls, atomic no-overwrite tests, and an independent
 execution GO are recorded.
+
+FQ4-DEV0 schedule-only preflight completed 2026-07-28 03:11 PDT before
+constructing any development game. The no-game executable uses
+`balanced_schedule` plus a frozen ten-field TSV schema containing split,
+seed base, generation namespace, block, schedule index, pairing index, game
+seed, starting player, and both seat decks. The exact command was:
+
+```sh
+./build/old-school-fq4-priority-dev-schedule
+```
+
+It exited `0` with:
+
+```text
+split=fit seed_base=202607280210 games=40 perspectives=80 bytes=2686 sha256=9b23969c646f75c1ee9d70d8359fbab9beb6a9f2b658e7f93ee51eaff5a9d6f2 exact=1
+split=check seed_base=202607280211 games=40 perspectives=80 bytes=2689 sha256=e8a3267f0cfedf6a4c38a0a1345c15bbfcb48cb109c38f9d33c2547f0b41be6a exact=1
+```
+
+Both splits have 40 unique game seeds, 80 owner perspectives, 16
+perspectives per deck, 8/8 seat balance, 8/8 play/draw balance, and four
+perspectives in every seat-by-play quadrant. FIT and CHECK game-seed sets are
+disjoint. `make -j4 test-fq4-dev-schedule` passed **3/3**, checking
+determinism, both literal byte/hash goldens, serialized row/field counts,
+complete balance, split disjointness, duplicate rejection, mixed-split
+rejection, and the CLI extra-argument path. The same **3/3** passed under
+AddressSanitizer/UndefinedBehaviorSanitizer with
+`-Wall -Wextra -Wpedantic -Werror`.
+
+An independent Node/BigInt implementation reproduced SplitMix64 derivation,
+the pairing order, all counts, and both bytes/hashes exactly without calling
+the new helper or constructing a game. `REVIEW.md` was reread through its
+newest 03:04 countersign before this conclusion and contained no conflicting
+DEV0 critique. Decision: accept and freeze the two schedule identities above.
+This is infrastructure evidence only and licenses the seed-agnostic collector
+implementation; neither split has opened a game and no strength evidence
+exists.
 
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
