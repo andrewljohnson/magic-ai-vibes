@@ -25,7 +25,13 @@ $(error a SHA-256 implementation (shasum, sha256sum, or openssl) is required)
 endif
 
 OBJ_DIR := $(BUILD_DIR)/obj/$(BUILD_CONFIG_ID)
-BUILD_CONFIG_STAMP := $(BUILD_DIR)/.compile-config
+program_config_sidecar = $(1).compile-config.mk
+program_config_variable = OLD_SCHOOL_PROGRAM_CONFIG_$(1)
+PROGRAM_CONFIG_SIDECARS := $(wildcard $(BUILD_DIR)/*.compile-config.mk)
+-include $(PROGRAM_CONFIG_SIDECARS)
+recorded_program_config = $($(call program_config_variable,$(1)))
+program_config_relink = $(if \
+	$(filter $(BUILD_CONFIG_ID),$(call recorded_program_config,$(1))),,FORCE)
 ENGINE_SOURCE := src/game.cpp
 INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
@@ -125,29 +131,25 @@ $(BUILD_DIR):
 
 FORCE:
 
-# Unlike the configuration-specific object directory, program paths are
-# stable. This content-stable stamp forces a relink exactly when a caller
-# switches configurations, including when it switches back to a warm cache.
-$(BUILD_CONFIG_STAMP): FORCE | $(BUILD_DIR)
-	@temporary="$@.tmp.$$$$"; \
-	printf '%s\n' "$(BUILD_CONFIG_ID)" >"$$temporary"; \
-	if [ -r "$@" ] && cmp -s "$@" "$$temporary"; then \
-		rm -f -- "$$temporary"; \
-	else \
-		mv -f -- "$$temporary" "$@"; \
-	fi
-
 $(OBJ_DIR)/%.o: %.cpp
 	@mkdir -p "$(@D)"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP \
 		-MF "$(@:.o=.d)" -MT "$@" -c "$<" -o "$@"
 
 # Keep each program's exact ordered translation-unit list at its declaration.
-# The same source always maps to the same object, so parallel builds compile it
-# once and every consumer waits on that shared prerequisite.
+# The same source/configuration maps to the same object, so parallel builds
+# compile it once and every consumer waits on that shared prerequisite. Each
+# stable program path records its own configuration only after a successful
+# link; a mismatched or missing sidecar adds FORCE for that program alone.
 define link_program
-$(1): $(call source_objects,$(2)) $(BUILD_CONFIG_STAMP) | $(BUILD_DIR)
+$(1): $(call source_objects,$(2)) $(call program_config_relink,$(1)) | $(BUILD_DIR)
+	@rm -f -- "$$@.compile-config.mk"
 	$$(CXX) $$(CPPFLAGS) $$(CXXFLAGS) $(call source_objects,$(2)) -o $$@
+	@temporary="$$@.compile-config.mk.tmp.$$$$$$$$"; \
+	printf '%s := %s\n' \
+		"$(call program_config_variable,$(1))" \
+		"$(BUILD_CONFIG_ID)" >"$$$$temporary" && \
+	mv -f -- "$$$$temporary" "$$@.compile-config.mk"
 endef
 
 $(eval $(call link_program,$(SIMULATOR),$(ENGINE_SOURCE) $(INTERACTIVE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(AUDIT_COMMON_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(TERMINAL_WEIGHT_EVAL_SOURCE) $(JOINT_C17_EVAL_SOURCE) $(JOINT_C17_RUNNER_SOURCE) $(JOINT_C17_EXECUTION_SOURCE) $(JOINT_C17_TRAINING_SOURCE) $(JOINT_C17_ORCHESTRATION_SOURCE) $(TURN_ALIGNMENT_AUDIT_SOURCE) $(TARGET_FACTORIAL_AUDIT_SOURCE) $(REPLAY_WEIGHT_AUDIT_SOURCE) src/main.cpp))

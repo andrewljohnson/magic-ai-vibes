@@ -37,6 +37,20 @@ run_build() {
         >"$output_path" 2>&1
 }
 
+run_one() {
+    output_path=$1
+    build_cxx=$2
+    build_cppflags=$3
+    build_cxxflags=$4
+    build_target=$5
+    MAKEFLAGS= MFLAGS= make --no-print-directory -j4 \
+        "BUILD_DIR=$build_directory" \
+        "CXX=$build_cxx" \
+        "CPPFLAGS=$build_cppflags" \
+        "CXXFLAGS=$build_cxxflags" \
+        "$build_target" >"$output_path" 2>&1
+}
+
 count_fixed() {
     pattern=$1
     input_path=$2
@@ -129,8 +143,47 @@ require_count 0 ' -c "' "$switch_back_log"
 require_count 1 "-o $probe_eval_target" "$switch_back_log"
 require_count 1 "-o $action_eval_target" "$switch_back_log"
 
+# Per-program sidecars must not let one target's configuration claim make a
+# differently configured sibling look current. Cache the changed objects for
+# both, switch only action-eval back to the base configuration, select the
+# already-current changed probe-eval target, then require action-eval to relink
+# when it returns to the changed configuration.
+stagger_changed_log=$test_directory/stagger-changed.log
+run_build \
+    "$stagger_changed_log" "$base_cxx" "$base_cppflags" "$changed_cxxflags"
+require_count 0 ' -c "' "$stagger_changed_log"
+require_count 1 "-o $probe_eval_target" "$stagger_changed_log"
+require_count 1 "-o $action_eval_target" "$stagger_changed_log"
+
+stagger_action_base_log=$test_directory/stagger-action-base.log
+run_one \
+    "$stagger_action_base_log" "$base_cxx" "$base_cppflags" \
+    "$base_cxxflags" "$action_eval_target"
+require_count 0 ' -c "' "$stagger_action_base_log"
+require_count 0 "-o $probe_eval_target" "$stagger_action_base_log"
+require_count 1 "-o $action_eval_target" "$stagger_action_base_log"
+
+stagger_probe_changed_log=$test_directory/stagger-probe-changed.log
+run_one \
+    "$stagger_probe_changed_log" "$base_cxx" "$base_cppflags" \
+    "$changed_cxxflags" "$probe_eval_target"
+require_count 0 ' -c "' "$stagger_probe_changed_log"
+require_count 0 "-o $probe_eval_target" "$stagger_probe_changed_log"
+require_count 0 "-o $action_eval_target" "$stagger_probe_changed_log"
+
+stagger_action_changed_log=$test_directory/stagger-action-changed.log
+run_one \
+    "$stagger_action_changed_log" "$base_cxx" "$base_cppflags" \
+    "$changed_cxxflags" "$action_eval_target"
+require_count 0 ' -c "' "$stagger_action_changed_log"
+require_count 0 "-o $probe_eval_target" "$stagger_action_changed_log"
+require_count 1 "-o $action_eval_target" "$stagger_action_changed_log"
+
 # Compiler depfiles must still rebuild a shared source exactly once and relink
 # both parallel consumers when one of its headers changes.
+# GNU Make 3.81 compares these freshly written files at one-second resolution,
+# so cross a timestamp tick before using -W's non-mutating header simulation.
+sleep 1
 header_log=$test_directory/header.log
 run_build \
     "$header_log" "$base_cxx" "$base_cppflags" "$base_cxxflags" \

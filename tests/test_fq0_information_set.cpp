@@ -1,10 +1,13 @@
 #include "old_school/fq0_information_set.hpp"
+#include "old_school/probes.hpp"
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -32,6 +35,55 @@ void expect_invalid(
         return;
     }
     throw std::runtime_error(std::string(message));
+}
+
+template <typename Function>
+void expect_out_of_range(
+    Function&& function, std::string_view message) {
+    try {
+        std::forward<Function>(function)();
+    } catch (const std::out_of_range&) {
+        return;
+    }
+    throw std::runtime_error(std::string(message));
+}
+
+template <typename Function>
+void expect_length_error(
+    Function&& function, std::string_view message) {
+    try {
+        std::forward<Function>(function)();
+    } catch (const std::length_error&) {
+        return;
+    }
+    throw std::runtime_error(std::string(message));
+}
+
+template <typename Values>
+bool bit_identical(const Values& first, const Values& second) {
+    return first.size() == second.size() &&
+           std::equal(
+               first.begin(), first.end(), second.begin(),
+               [](double left, double right) {
+                   return std::bit_cast<std::uint64_t>(left) ==
+                          std::bit_cast<std::uint64_t>(right);
+               });
+}
+
+std::size_t candidate_index(
+    const old_school::probes::DecisionProbe& probe,
+    std::string_view descriptor) {
+    const auto found = std::find_if(
+        probe.candidates.begin(), probe.candidates.end(),
+        [&](const old_school::probes::Candidate& candidate) {
+            return candidate.descriptor == descriptor;
+        });
+    if (found == probe.candidates.end()) {
+        throw std::runtime_error(
+            "missing candidate " + std::string(descriptor));
+    }
+    return static_cast<std::size_t>(
+        std::distance(probe.candidates.begin(), found));
 }
 
 old_school::GameState information_state() {
@@ -933,6 +985,383 @@ void test_indexed_seed_uses_every_coordinate() {
         "empty explicit seed scope was accepted");
 }
 
+void test_graveyard_order_features_are_exact_and_hidden_safe() {
+    using old_school::CardId;
+    constexpr std::size_t cards = old_school::kCardCount;
+
+    old_school::GameState state;
+    state.players[0].graveyard = {
+        CardId::GrizzlyBears,
+        CardId::LightningBolt,
+        CardId::GrizzlyBears,
+    };
+    state.players[1].graveyard = {
+        CardId::Counterspell,
+        CardId::Counterspell,
+    };
+    state.players[1].hand = {
+        CardId::Island,
+        CardId::ForceSpike,
+    };
+    state.players[1].library = {
+        CardId::AirElemental,
+        CardId::FlyingMen,
+    };
+    state.players[0].artifacts = {
+        {
+            .id = 41,
+            .card = CardId::Millstone,
+            .tapped = false,
+        },
+    };
+    state.next_permanent_id = 42;
+
+    const auto from_zero =
+        old_school::learned_graveyard_order_features(state, 0);
+    expect(
+        from_zero[static_cast<std::size_t>(
+                      CardId::GrizzlyBears)] ==
+                0.625 &&
+            from_zero[static_cast<std::size_t>(
+                          CardId::LightningBolt)] ==
+                0.25 &&
+            from_zero[cards +
+                      static_cast<std::size_t>(
+                          CardId::Counterspell)] ==
+                0.75,
+        "graveyard order did not use exact top-relative binary "
+        "weights");
+
+    const auto from_one =
+        old_school::learned_graveyard_order_features(state, 1);
+    for (std::size_t card = 0; card < cards; ++card) {
+        expect(
+            std::bit_cast<std::uint64_t>(from_zero[card]) ==
+                    std::bit_cast<std::uint64_t>(
+                        from_one[cards + card]) &&
+                std::bit_cast<std::uint64_t>(
+                    from_zero[cards + card]) ==
+                    std::bit_cast<std::uint64_t>(
+                        from_one[card]),
+            "graveyard order features are not observer-relative");
+    }
+
+    old_school::GameState hidden = state;
+    hidden.players[1].hand = {
+        CardId::AirElemental,
+        CardId::FlyingMen,
+    };
+    hidden.players[1].library = {
+        CardId::Island,
+        CardId::ForceSpike,
+    };
+    expect(
+        bit_identical(
+            from_zero,
+            old_school::learned_graveyard_order_features(hidden, 0)),
+        "opponent hidden repartition changed graveyard-order "
+        "features");
+
+    old_school::GameState physical = state;
+    physical.players[0].artifacts.front().id = 987654;
+    physical.next_permanent_id = 987655;
+    expect(
+        bit_identical(
+            from_zero,
+            old_school::learned_graveyard_order_features(physical, 0)),
+        "physical permanent IDs changed graveyard-order features");
+
+    old_school::GameState empty;
+    const old_school::LearnedGraveyardOrderFeatures zeros{};
+    expect(
+        bit_identical(
+            zeros,
+            old_school::learned_graveyard_order_features(empty, 0)),
+        "empty graveyards did not encode as exact zero");
+
+    expect_out_of_range(
+        [&] {
+            static_cast<void>(
+                old_school::learned_graveyard_order_features(
+                    state, 2));
+        },
+        "invalid graveyard-order perspective was accepted");
+
+    old_school::GameState exact_limit_first;
+    exact_limit_first.players[0].graveyard.assign(
+        std::numeric_limits<double>::digits,
+        CardId::Forest);
+    exact_limit_first.players[0].graveyard.front() =
+        CardId::Counterspell;
+    old_school::GameState exact_limit_second = exact_limit_first;
+    std::swap(
+        exact_limit_second.players[0].graveyard[0],
+        exact_limit_second.players[0].graveyard[1]);
+    const auto exact_first =
+        old_school::learned_graveyard_order_features(
+            exact_limit_first, 0);
+    const auto exact_second =
+        old_school::learned_graveyard_order_features(
+            exact_limit_second, 0);
+    expect(
+        exact_first[static_cast<std::size_t>(
+                        CardId::Counterspell)] ==
+                std::ldexp(
+                    1.0,
+                    -std::numeric_limits<double>::digits) &&
+            !bit_identical(exact_first, exact_second),
+        "graveyard-order features lost the exact depth-53 bit");
+
+    old_school::GameState too_deep;
+    too_deep.players[0].graveyard.assign(
+        std::numeric_limits<double>::digits + 1,
+        CardId::Forest);
+    expect_length_error(
+        [&] {
+            static_cast<void>(
+                old_school::learned_graveyard_order_features(
+                    too_deep, 0));
+        },
+        "inexact graveyard-order depth was accepted");
+}
+
+void test_ordered_graveyard_alias_micro_corpus() {
+    using old_school::CardId;
+    using old_school::LearnedDecisionContext;
+    using old_school::PriorityAction;
+    using old_school::TurnPhase;
+    using old_school::probes::Dc1CanonicalSettlement;
+
+    const auto controls =
+        old_school::probes::
+            make_counter_composition_controls_v1();
+    expect(
+        old_school::probes::
+                validate_counter_composition_controls_v1(controls)
+                    .empty() &&
+            controls.size() == 2,
+        "counter-composition control corpus is invalid");
+    const old_school::probes::DecisionProbe& blue = controls[1];
+    const old_school::GameState blue_world =
+        old_school::sample_determinization(
+            blue.state, blue.original_decks, blue.root_player,
+            577215);
+    const Dc1CanonicalSettlement same_target =
+        old_school::probes::settle_dc1_priority_candidate(
+            blue, blue_world,
+            candidate_index(
+                blue, "counter-same-air-elemental"));
+    const Dc1CanonicalSettlement answer_counter =
+        old_school::probes::settle_dc1_priority_candidate(
+            blue, blue_world,
+            candidate_index(
+                blue, "counter-opponent-counterspell"));
+    expect(
+        same_target.window_ended && answer_counter.window_ended &&
+            same_target.settled_state.stack.empty() &&
+            answer_counter.settled_state.stack.empty() &&
+            same_target.settled_state.players[1].graveyard ==
+                std::vector<CardId>{
+                    CardId::AirElemental,
+                    CardId::Counterspell,
+                } &&
+            answer_counter.settled_state.players[1].graveyard ==
+                std::vector<CardId>{
+                    CardId::Counterspell,
+                    CardId::AirElemental,
+                },
+        "counter settlements did not reproduce the registered "
+        "graveyard-order alias");
+
+    old_school::GameState blue_first =
+        same_target.settled_state;
+    old_school::GameState blue_second =
+        answer_counter.settled_state;
+    const std::size_t blue_owner = blue_first.active_player;
+    expect(
+        blue_owner == blue_second.active_player,
+        "counter settlements changed the next active player");
+    blue_first.players[blue_owner].hand.push_back(
+        CardId::MoxSapphire);
+    blue_second.players[blue_owner].hand.push_back(
+        CardId::MoxSapphire);
+
+    auto same_public = old_school::observe_game_state(
+        blue_first, 1);
+    auto answer_public = old_school::observe_game_state(
+        blue_second, 1);
+    answer_public.players[1].graveyard =
+        same_public.players[1].graveyard;
+    expect(
+        same_public == answer_public,
+        "counter settlements differ by more than public graveyard "
+        "order");
+
+    const bool blue_sorcery = true;
+    const auto same_actions =
+        old_school::legal_priority_actions(
+            blue_first, blue_owner, blue_sorcery);
+    const auto answer_actions =
+        old_school::legal_priority_actions(
+            blue_second, blue_owner, blue_sorcery);
+    expect(
+        same_actions.size() >= 2 &&
+            same_actions == answer_actions &&
+            bit_identical(
+                old_school::learned_observation(
+                    blue_first, blue_owner),
+                old_school::learned_observation(
+                    blue_second, blue_owner)),
+        "current learned observation did not reproduce the Blue "
+        "alias");
+
+    const LearnedDecisionContext blue_context{
+        .valid = true,
+        .phase = TurnPhase::FirstMain,
+        .decision_player = blue_owner,
+        .consecutive_passes = 0,
+        .sorcery_actions = blue_sorcery,
+    };
+    expect(
+        fq0::information_set_sha256(
+            fq0::make_information_set_key(
+                blue_first, blue_context, same_actions)) !=
+            fq0::information_set_sha256(
+                fq0::make_information_set_key(
+                    blue_second, blue_context, answer_actions)),
+        "FQ0 information identity lost public graveyard order");
+    for (const PriorityAction& action : same_actions) {
+        expect(
+            bit_identical(
+                old_school::learned_priority_policy_features(
+                    blue_first, blue_owner, action, blue_sorcery,
+                    blue_context.phase, 0),
+                old_school::learned_priority_policy_features(
+                    blue_second, blue_owner, action, blue_sorcery,
+                    blue_context.phase, 0)),
+            "current Blue policy row did not reproduce the "
+            "registered alias");
+    }
+    expect(
+        !bit_identical(
+            old_school::learned_graveyard_order_features(
+                blue_first, blue_owner),
+            old_school::learned_graveyard_order_features(
+                blue_second, blue_owner)),
+        "candidate planes did not split the Blue graveyard alias");
+
+    old_school::GameState white_first;
+    white_first.active_player = 0;
+    white_first.starting_player = 0;
+    white_first.turn_number = 9;
+    white_first.next_permanent_id = 2;
+    white_first.players[0].hand = {CardId::Plains};
+    white_first.players[0].library = {CardId::Moat};
+    white_first.players[0].lands = {
+        {.card = CardId::Plains},
+        {.card = CardId::Plains},
+    };
+    white_first.players[0].artifacts = {
+        {
+            .id = 1,
+            .card = CardId::Millstone,
+            .tapped = false,
+        },
+    };
+    white_first.players[0].graveyard = {
+        CardId::AirElemental,
+        CardId::Counterspell,
+        CardId::Island,
+    };
+    white_first.players[1].library = {
+        CardId::Forest,
+        CardId::GiantGrowth,
+    };
+    white_first.players[1].hand = {
+        CardId::LightningBolt,
+        CardId::Mountain,
+    };
+    old_school::GameState white_second = white_first;
+    std::swap(
+        white_second.players[0].graveyard[0],
+        white_second.players[0].graveyard[1]);
+    expect(
+        white_first.players[0].graveyard.back() ==
+            white_second.players[0].graveyard.back(),
+        "White witness does not bury the swapped graveyard pair");
+
+    const auto white_actions =
+        old_school::legal_priority_actions(
+            white_first, 0, true);
+    const auto white_second_actions =
+        old_school::legal_priority_actions(
+            white_second, 0, true);
+    expect(
+        white_actions.size() == 4 &&
+            white_actions == white_second_actions &&
+            bit_identical(
+                old_school::learned_observation(
+                    white_first, 0),
+                old_school::learned_observation(
+                    white_second, 0)),
+        "current learned observation did not reproduce the buried "
+        "White alias");
+    const LearnedDecisionContext white_context{
+        .valid = true,
+        .phase = TurnPhase::FirstMain,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    expect(
+        fq0::information_set_sha256(
+            fq0::make_information_set_key(
+                white_first, white_context,
+                white_actions)) !=
+            fq0::information_set_sha256(
+                fq0::make_information_set_key(
+                    white_second, white_context,
+                    white_second_actions)),
+        "White information identity lost buried graveyard order");
+    for (const PriorityAction& action : white_actions) {
+        expect(
+            bit_identical(
+                old_school::learned_priority_policy_features(
+                    white_first, 0, action, true,
+                    TurnPhase::FirstMain, 0),
+                old_school::learned_priority_policy_features(
+                    white_second, 0, action, true,
+                    TurnPhase::FirstMain, 0)),
+            "current White policy row did not reproduce the "
+            "registered alias");
+    }
+    expect(
+        !bit_identical(
+            old_school::learned_graveyard_order_features(
+                white_first, 0),
+            old_school::learned_graveyard_order_features(
+                white_second, 0)),
+        "candidate planes did not split the buried White alias");
+
+    old_school::GameState hidden = white_first;
+    hidden.players[1].hand = {
+        CardId::Forest,
+        CardId::GiantGrowth,
+    };
+    hidden.players[1].library = {
+        CardId::LightningBolt,
+        CardId::Mountain,
+    };
+    expect(
+        bit_identical(
+            old_school::learned_graveyard_order_features(
+                white_first, 0),
+            old_school::learned_graveyard_order_features(
+                hidden, 0)),
+        "hidden opponent repartition changed the White candidate "
+        "planes");
+}
+
 void test_terminal_values_draw_and_complement() {
     old_school::GameResult result;
     result.winner = -1;
@@ -1079,6 +1508,14 @@ int main() {
             {
                 "indexed seed coordinates",
                 test_indexed_seed_uses_every_coordinate,
+            },
+            {
+                "graveyard order exact hidden-safe features",
+                test_graveyard_order_features_are_exact_and_hidden_safe,
+            },
+            {
+                "ordered graveyard alias micro corpus",
+                test_ordered_graveyard_alias_micro_corpus,
             },
             {
                 "terminal values",

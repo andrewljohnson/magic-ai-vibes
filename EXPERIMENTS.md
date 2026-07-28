@@ -12359,15 +12359,15 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
 
 The direct Blue witness reproduces the engine's productive counter lines and
 their public opponent graveyards `[Air Elemental, Counterspell]` versus
-`[Counterspell, Air Elemental]`. The direct White witness swaps the same two
-cards below a shared top graveyard card, so a top-card-only feature would
-still alias it. In both pairs the current C16 observation and every shared
-policy row remain bit-identical while the FQ0 information identity and
-candidate positional planes differ. Duplicate cards, empty graveyards,
-observer-seat reversal, same-size opponent hidden repartition, physical-ID
-mutation, invalid perspective, and the binary64 exact-depth bound all pass.
-Production C16 features, model dimensions, artifacts, and selectors remain
-unchanged.
+`[Counterspell, Air Elemental]`. The synthetic buried-order White control
+swaps the same two cards below a shared top graveyard card, so a
+top-card-only feature would still alias it. In both pairs the current C16
+observation and every shared policy row remain bit-identical while the FQ0
+information identity and candidate positional planes differ. Duplicate
+cards, empty graveyards, observer-seat reversal, same-size opponent hidden
+repartition, physical-ID mutation, invalid perspective, and the binary64
+exact-depth bound all pass. Production C16 features, model dimensions,
+artifacts, and selectors remain unchanged.
 
 Verdict: **FR0 passes its diagnostic gate.** This accepts only the claim that
 the neutral two-plane encoder distinguishes the directly diagnosed aliases
@@ -12376,6 +12376,105 @@ vanish, improve a trained policy, or promote a challenger; C16 remains the
 champion. The next experiment remains the declared small root-transition
 alias replay, followed by a separately declared schema/retraining experiment
 only if that replay reaches zero collisions.
+
+##### FR0 post-review closure and relevance correction
+
+Finalized 2026-07-27 22:20 PDT after rereading `REVIEW.md` through its newest
+22:14 cycle and after two independent code reviews. The 21:56 result draft
+was premature under the literal conjunctive controls: its physical-ID test
+also added a public permanent, its White hidden mutation changed public zone
+sizes, and it asserted rather than exercised the exact depth-53 boundary.
+That draft was retained above rather than silently rewritten.
+
+The corrected test now:
+
+- swaps the same four-card opponent-hidden multiset between a two-card hand
+  and two-card library;
+- relabels only one already-present public permanent plus its allocator ID;
+- distinguishes an order swap whose deepest changed bit is exactly
+  `2^-53`, and rejects depth 54;
+- documents the actual 26-card pool and 52 candidate inputs; and
+- labels the unreachable White construction as the synthetic buried-order
+  negative control it is.
+
+Post-correction verification:
+
+```sh
+/usr/bin/time -p make -j4 test-fq0-information-set
+# clean configuration-specific build: 15/15 passed; real 14.56 s
+
+c++ -Iinclude -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  src/game.cpp src/learned_iteration.cpp src/probes.cpp \
+  src/dvr1_replay.cpp src/artifact_integrity.cpp \
+  src/fq0_information_set.cpp tests/test_fq0_information_set.cpp \
+  -o /private/tmp/old-school-fr0-sanitized-current
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  /private/tmp/old-school-fr0-sanitized-current
+# 15/15 passed; no sanitizer finding
+
+/usr/bin/time -p make -j4 test
+# corrected full project gate passed; real 321.79 s
+
+/usr/bin/time -p make -j4 test-fq0-information-set
+# final warm focused gate: 15/15 passed; real 0.12 s
+```
+
+Verdict correction: **FR0 still passes, but only as an injectivity and
+information-safety diagnostic.** It does not yet justify a 52-input schema.
+The registered compact extract gives a stronger reason to pause before the
+previously proposed alias replay: all 177 collisions are consequence-hash
+conflicts, zero are support conflicts, and the nine target conflicts all
+belong to one of the 38 Blue information-set pairs; the six White pairs have
+none. Production rules do not consume graveyard order, the determinizer uses
+graveyard counts, and the existing DC1 information-set key deliberately
+canonicalizes graveyards as unordered. Appending an injective order code
+would therefore make the collision count zero almost by construction without
+showing that play improves.
+
+The independent review's objection is accepted. Before any schema change,
+the next gate must test causal transition/value relevance by holding every
+other public and hidden field fixed and permuting only graveyard order. If
+the paired transitions are identical after canonicalizing graveyards, the
+correct repair is to canonicalize the FQ0 relevance/consequence projection,
+not to train 52 extra inputs. A separate held-out natural-history residual
+test would be required to justify using graveyard order merely as a belief
+signal.
+
+##### FR1 graveyard-order causal-quotient micro-gate declaration
+
+Declared 2026-07-27 22:20 PDT after the FR0 post-review correction and after
+rereading `REVIEW.md` through 22:14. This diagnostic opens no new seed and
+replays only frozen registered coordinates. It changes no C16 feature, model,
+artifact, selector, training corpus, or strength verdict.
+
+Falsifiable hypothesis: in the current 26-card engine, two complete states
+that differ only in the order of equal-multiset graveyards are causally
+equivalent for Learned decisions. For the direct Blue counter pair, the
+synthetic buried White control, and the 44 registered pairs reconstructed
+from the two implicated roots, FR1 will hold every hidden identity and every
+non-graveyard field fixed, enumerate the shared authoritative legal actions,
+and advance paired production macro transitions with identical continuation
+randomness. After sorting only the graveyards for comparison, require exact
+equality of disposition, terminal result, next legal set, C16 observation and
+value, and complete successor state for every pair/action. A life-total
+perturbation must be detected as a negative control, so equality cannot pass
+through an inert comparator.
+
+The reconstruction side must first reproduce the registered anatomy without
+successor banks: exactly 177 legacy rows, 163 Blue plus 14 White, spanning 38
+Blue and six White information-set pairs. It must bind the existing compact
+extract's canonical pair identities and complete all bounded root macros.
+Repeat the result bit-identically under strict `-Werror` and focused
+ASan/UBSan, and report focused runtime.
+
+If any graveyard-only pair has a noncanonicalized behavioral effect, FR1
+rejects the causal-quotient hypothesis and identifies the exact rule/action
+path before reconsidering order features. If all pairs are exactly
+equivalent and the negative control fires, FR1 accepts graveyard
+canonicalization for a separately tested FQ0 collision projection and
+rejects the 52-plane retrain as unsupported. Neither outcome promotes a bot;
+the independent X=0 and five dominance failures remain open.
 
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
@@ -12388,7 +12487,14 @@ source compilations to 79 unique compilations plus the unchanged 42 links.
 The focused FR0 build exercised the new graph; the complete `make -j4 test`
 gate above passed. Certification now uses the fixed recorded command
 `make -B -j4 test`; `python3 -m unittest tests/test_certify.py` passed 48/48.
-This is execution infrastructure only and supplies no bot-strength evidence.
+Objects are keyed by the effective compiler and flags; per-program
+configuration sidecars force only the affected stable executable to relink
+when configurations change. `make test-build-graph` exercises warm no-op,
+parallel sharing, header depfiles, `CXX`/`CPPFLAGS`/`CXXFLAGS` changes,
+switch-back cache reuse, and staggered consumers; it passed in 6.13 seconds.
+A simulated `game.cpp` edit plus the focused FR0 gate took 14.50 seconds, and
+the unchanged final focused gate took 0.12 seconds. This is execution
+infrastructure only and supplies no bot-strength evidence.
 
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
