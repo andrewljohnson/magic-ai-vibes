@@ -15041,6 +15041,78 @@ execution GO before the sole no-argument DEV1 invocation.
 only authorized source integration with no source game opened; neither
 conflicts with this result.
 
+FQ4-DEV1 one-shot corpus result, completed 2026-07-28 05:04 PDT:
+**publication PASS; accept the immutable bundle as development
+infrastructure only**.
+
+After commit `680591c7c4dd19990ede0c33e539f0130639a8aa` was pushed, the
+release generator was rebuilt with that exact embedded producer identity.
+Its SHA-256 was
+`8c8b0cb72013685c3793c15fa897b03dfa9256009baa1975bf5f5e8fb1891153`.
+The post-commit focused release, ASan/UBSan, provenance, firewall,
+parent-identity, clean-closure, artifact/temporary-absence, and independent
+execution-review gates all passed. The sole licensed command was invoked
+exactly once:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-dev-generate
+```
+
+It returned exit `0` with these complete count-only support results (deck
+order Green, Red, Blue, White, RU Aggro):
+
+| Split | Census | Selected | Positive | Background | HC roots/games/decks | Gates |
+| --- | --- | --- | --- | --- | --- | --- |
+| FIT | 921 / 978 / 1002 / 1001 / 969 | 12 / 5 / 32 / 14 / 30 | 11 / 4 / 31 / 13 / 29 | 1 / 1 / 1 / 1 / 1 | 31 / 29 / 4 | coverage 1, parent floor 1, mask 0 |
+| CHECK | 942 / 977 / 995 / 993 / 950 | 21 / 6 / 32 / 8 / 32 | 20 / 5 / 31 / 7 / 31 | 1 / 1 / 1 / 1 / 1 | 37 / 35 / 4 | coverage 1, parent floor 1, mask 0 |
+
+Both complete constructions finished all 160 FIT and 160 CHECK physical games:
+320 source games per construction, two constructions, 640 executions total.
+The 192 selected scored rows were byte-identical across constructions.
+Candidate rollout evaluations were exactly zero.
+
+Publication identity and timing:
+
+```text
+path=data/old-school-fq4-priority-dev-v2.fq4dev
+bytes=2250909
+sha256=0911fc2eb8b14ddc9165543eb1e4c4edb0b058256a58dedf61f6c4ea4ca859df
+real=606.06
+user=596.28
+sys=2.73
+```
+
+The embedded failure-scope report and an immediate independent filesystem
+check both reproduced generator SHA
+`8c8b0cb72013685c3793c15fa897b03dfa9256009baa1975bf5f5e8fb1891153`,
+parent SHA
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+artifact presence and exact size/hash, temporary absence, and zero candidate
+rollouts. `HEAD` and `origin/main` remained the exact producer commit; only
+the externally maintained `REVIEW.md` and the newly published bundle changed.
+
+Decision: accept FQ4-DEV1's corpus-support and deterministic-publication
+hypotheses. This is not a candidate-strength claim and does not yet prove the
+warm-process speed hypothesis. The observed one-time construction took 10.10
+minutes, slightly below the preregistered 10.4-minute point estimate and well
+inside the 20-minute watchdog. Next: freeze the artifact and wire the
+game-free loader/16-epoch FIT plus FIT/CHECK evaluator, then measure the ten
+warm-cache runs against median <2 seconds, maximum <5 seconds, and complete
+fit/evaluation <15 seconds before using it for bot iteration.
+
+`REVIEW.md` was reread through its newest 05:04 cycle after the run and before
+this conclusion. It independently reports commit `680591c` and the full
+repository gate green, observes the generator's healthy completion, and
+offers no conflicting result critique.
+
+An independent post-result audit then strictly loaded the published bytes and
+recomputed every count above exactly. It also verified every positive row is
+from a distinct physical game within its deck, all manifest provenance and
+schedule bindings, a regular single-link artifact, temporary absence, and
+unchanged executable/parent identities. It returned GO to accept the corpus
+as immutable development infrastructure, explicitly not as strength or
+warm-loop speed evidence.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
