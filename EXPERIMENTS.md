@@ -17280,6 +17280,54 @@ Keep the 31-29 attack-only pilot separately selectable.
 this conclusion. That entry still observed the earlier EXPLORE-4 job in
 progress and contained no EXPLORE-5 result or contrary analysis.
 
+##### FQ4-EXPLORE-6 learned Priority plus stack/combat composition declaration
+
+Declared 2026-07-28 before changing the fast runner or opening seed
+`202607280810`. Repository-wide search found that seed unused.
+`REVIEW.md` was reread through its newest 16:04 cycle; it verifies the recent
+commits green, preserves the fast pilot cadence, and its prior 15:59 analysis
+specifically says the alpha-0.50 plus AdversarialBlocks composition deserves
+a cheaper revisit.
+
+This is the one remaining evidence-led composition, not another alpha scan.
+The alpha-0.50 Priority blend plus AdversarialBlocks beat the attack-only
+pilot 34-26 in EXPLORE-4 E0 before its E1 was operationally voided.
+Separately, PD0 deterministically removes the owner's reproduced redundant
+same-target stack response. Their interaction has never been measured.
+
+Falsifiable exploratory hypothesis: adding PD0 to the strongest descriptive
+learned-Priority/combat composition will retain absolute short-screen traction
+against ordinary C16 while adding the general stack repair.
+
+Use exact C16 K8/H4/R1 Learned-mirror deployment throughout. Both candidate
+arms use the exact alpha-0.50 C16-to-DEV5 Priority blend and
+`value_adversarial_blocks=true`; the treatment alone also sets
+`value_pass_dominance=true`. Ordinary C16 has both treatments off. No other
+model component, feature, hidden-information boundary, or configuration may
+differ.
+
+The exact short-circuit gate is:
+
+1. On fresh seed `202607280810`, run the treatment
+   `alpha0.50+AdversarialBlocks+PD0` first against ordinary C16 for one
+   balanced repetition: 60 games total and 12 per challenger deck.
+2. If the treatment does not win strictly more games than it loses, stop
+   immediately without running the comparator; the conjunctive gate is
+   already impossible.
+3. Only after a strict treatment win, run
+   `alpha0.50+AdversarialBlocks` without PD0 against ordinary C16 on the same
+   seed and schedule. Advance the treatment as a separately named exploratory
+   web pilot iff its win count is at least the comparator's; a tie favors the
+   treatment because it carries the deterministic stack repair.
+4. Report every executed aggregate, all five deck rows, runtime, decisions,
+   and rollouts. There is no 240-game follow-up. This selects a human-play
+   candidate and is not a strength, promotion, or Learned-is-king claim.
+
+Implementation is one explicit mode in the existing runner plus frozen
+schedule, configuration-isolation, short-circuit, and selection tests. Reuse
+the exact alpha blend and existing treatment bits. Do not add policy logic,
+scan another alpha or seed, or build an evaluation framework.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
