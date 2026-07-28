@@ -290,11 +290,16 @@ std::vector<DescriptorScore> map_search_rows(
         probes::DecisionKind::Priority) {
         if (samples.q_samples.size() !=
                 probe.candidates.size() ||
+            samples.priority_shallow_prior_samples.size() !=
+                probe.candidates.size() ||
+            samples.priority_continuation_samples.size() !=
+                probe.candidates.size() ||
             samples.exact_priority_aggregate_scores.size() !=
                 probe.candidates.size()) {
             throw std::runtime_error(
                 probe.stable_id +
-                ": Priority sample/aggregate row count is wrong");
+                ": Priority sample/component/aggregate row count "
+                "is wrong");
         }
         for (std::size_t index = 0;
              index < probe.candidates.size(); ++index) {
@@ -310,6 +315,10 @@ std::vector<DescriptorScore> map_search_rows(
                 .descriptor =
                     probe.candidates[index].descriptor,
                 .raw_samples = row,
+                .shallow_prior_samples =
+                    samples.priority_shallow_prior_samples[index],
+                .continuation_samples =
+                    samples.priority_continuation_samples[index],
                 .raw_score = aggregate,
             });
         }
@@ -383,11 +392,15 @@ EvaluationAccounting require_exact_accounting(
     if (probe.decision_kind ==
             probes::DecisionKind::Priority) {
         if (samples.exact_priority_aggregate_scores.size() !=
-            probe.candidates.size()) {
+                probe.candidates.size() ||
+            samples.priority_shallow_prior_samples.size() !=
+                probe.candidates.size() ||
+            samples.priority_continuation_samples.size() !=
+                probe.candidates.size()) {
             throw std::runtime_error(
                 probe.stable_id +
-                ": AR1 Priority aggregate count does not "
-                "match candidates");
+                ": AR1 Priority aggregate/component count does "
+                "not match candidates");
         }
         for (const double aggregate :
              samples.exact_priority_aggregate_scores) {
@@ -397,16 +410,31 @@ EvaluationAccounting require_exact_accounting(
                     ": AR1 Priority aggregate is non-finite");
             }
         }
-    } else if (!samples.exact_priority_aggregate_scores.empty()) {
+    } else if (
+        !samples.exact_priority_aggregate_scores.empty() ||
+        !samples.priority_shallow_prior_samples.empty() ||
+        !samples.priority_continuation_samples.empty()) {
         throw std::runtime_error(
             probe.stable_id +
-            ": AR1 binary search invented Priority aggregates");
+            ": AR1 binary search invented Priority traces");
     }
-    for (const auto& row : samples.q_samples) {
-        if (row.size() != samples_per_action) {
+    for (std::size_t action = 0;
+         action < samples.q_samples.size(); ++action) {
+        if (samples.q_samples[action].size() !=
+            samples_per_action) {
             throw std::runtime_error(
                 probe.stable_id +
                 ": AR1 search row width is wrong");
+        }
+        if (probe.decision_kind ==
+                probes::DecisionKind::Priority &&
+            (samples.priority_shallow_prior_samples[action]
+                     .size() != samples_per_action ||
+             samples.priority_continuation_samples[action]
+                     .size() != samples_per_action)) {
+            throw std::runtime_error(
+                probe.stable_id +
+                ": AR1 Priority component row width is wrong");
         }
     }
     return {
@@ -832,7 +860,11 @@ bool bit_identical(const DecisionScore& first,
         if (left.descriptor != right.descriptor ||
             !same_double(left.raw_score, right.raw_score) ||
             left.raw_samples.size() !=
-                right.raw_samples.size()) {
+                right.raw_samples.size() ||
+            left.shallow_prior_samples.size() !=
+                right.shallow_prior_samples.size() ||
+            left.continuation_samples.size() !=
+                right.continuation_samples.size()) {
             return false;
         }
         for (std::size_t sample = 0;
@@ -840,6 +872,24 @@ bool bit_identical(const DecisionScore& first,
             if (!same_double(
                     left.raw_samples[sample],
                     right.raw_samples[sample])) {
+                return false;
+            }
+        }
+        for (std::size_t sample = 0;
+             sample < left.shallow_prior_samples.size();
+             ++sample) {
+            if (!same_double(
+                    left.shallow_prior_samples[sample],
+                    right.shallow_prior_samples[sample])) {
+                return false;
+            }
+        }
+        for (std::size_t sample = 0;
+             sample < left.continuation_samples.size();
+             ++sample) {
+            if (!same_double(
+                    left.continuation_samples[sample],
+                    right.continuation_samples[sample])) {
                 return false;
             }
         }

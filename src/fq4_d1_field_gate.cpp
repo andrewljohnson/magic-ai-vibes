@@ -36,8 +36,34 @@ namespace transition = fq0_dominance_transition;
 namespace information = fq0_information_set;
 namespace scoring = oc1_action_scoring;
 namespace probe_data = probes;
+namespace collection = fq4_priority_collection;
 
 constexpr std::size_t kPlayerCount = 2;
+constexpr std::string_view kOwnerInformationSchema =
+    "old-school-fq4-d1-p0-owner-information-action-v1";
+constexpr std::string_view kStableRootSchema =
+    "old-school-fq4-d1-p0-stable-root-v1";
+
+[[maybe_unused]] const collection::CollectionSpec&
+collection_spec() {
+    static constexpr collection::CollectionSpec spec{
+        .owner_information_schema =
+            kOwnerInformationSchema,
+        .stable_root_schema = kStableRootSchema,
+        .hidden_seed_namespace = kHiddenSeedNamespace,
+        .hidden_seed_scope =
+            "old-school-fq4-d1-p0-hidden-v1",
+        .dominance_seed_namespace =
+            kDominanceSeedNamespace,
+        .dominance_seed_scope =
+            "old-school-fq4-d1-p0-dominance-v1",
+        .maximum_legal_actions = kMaximumLegalActions,
+        .maximum_roots_per_owner_game =
+            kMaximumRootsPerOwnerGame,
+        .dominance_worlds = kDominanceWorlds,
+    };
+    return spec;
+}
 
 std::size_t deck_index(DeckId deck) {
     const std::size_t result =
@@ -646,7 +672,8 @@ RootBuildAttempt build_safe_root(
             result.category =
                 RootBuildAttempt::Category::Trivial;
             result.trajectory_row =
-                physical_game_id(locator) + "\t" +
+                fq4_d1_field_gate::physical_game_id(
+                    locator) + "\t" +
                 std::to_string(trace_ordinal) + "\t" +
                 information_fingerprint + "\t" +
                 descriptor + "\ttrivial\n";
@@ -743,7 +770,8 @@ RootBuildAttempt build_safe_root(
         result.category =
             RootBuildAttempt::Category::OverCap;
         result.trajectory_row =
-            physical_game_id(locator) + "\t" +
+            fq4_d1_field_gate::physical_game_id(
+                locator) + "\t" +
             std::to_string(trace_ordinal) + "\t" +
             information_fingerprint +
             "\t" + selected_descriptor +
@@ -751,7 +779,8 @@ RootBuildAttempt build_safe_root(
         return result;
     }
     const std::string root_id =
-        stable_root_id(locator, information_fingerprint);
+        fq4_d1_field_gate::stable_root_id(
+            locator, information_fingerprint);
     probe.stable_id = root_id;
     result.root = CanonicalRoot{
         .probe = std::move(probe),
@@ -776,7 +805,8 @@ RootBuildAttempt build_safe_root(
     result.category =
         RootBuildAttempt::Category::Nontrivial;
     result.trajectory_row =
-        physical_game_id(locator) + "\t" +
+        fq4_d1_field_gate::physical_game_id(
+            locator) + "\t" +
         std::to_string(trace_ordinal) + "\t" +
         information_fingerprint + "\t" +
         result.root->selected_descriptor + "\n";
@@ -876,7 +906,7 @@ std::vector<std::vector<double>> priority_option_features(
     return result;
 }
 
-bool priority_feature_bits_identical(
+[[maybe_unused]] bool priority_feature_bits_identical(
     const probe_data::DecisionProbe& visible,
     const probe_data::DecisionProbe& hidden) {
     const auto first = priority_option_features(visible);
@@ -983,7 +1013,8 @@ RobustDominance evaluate_dominance(
         }
         rows.push_back(std::move(row));
     }
-    return summarize_robust_dominance(
+    return fq4_d1_field_gate::
+        summarize_robust_dominance(
         root.manifest.pass_index,
         action_count, rows);
 }
@@ -1778,7 +1809,8 @@ Construction construct_once(
             }
 
             const RetentionResult selection =
-                retain_owner_game_roots(
+                fq4_d1_field_gate::
+                    retain_owner_game_roots(
                     retention_candidates);
             if (!selection.valid) {
                 record_failure(
@@ -2167,7 +2199,7 @@ Construction construct_once(
         }
         if (classification.high_confidence_unsafe()) {
             high_confidence_games.insert(
-                physical_game_id(
+                fq4_d1_field_gate::physical_game_id(
                     root.manifest.locator));
             high_confidence_decks.insert(deck);
         }
@@ -2486,480 +2518,33 @@ ScheduleBalance audit_schedule_balance(
     return result;
 }
 
-std::string physical_game_id(
-    const RootLocator& locator) {
-    return "source_seed_base=" +
-           std::to_string(locator.source_seed_base) +
-           "\nschedule_index=" +
-           std::to_string(locator.schedule_index) +
-           "\n";
-}
-
 std::string stable_root_id(
     const RootLocator& locator,
     std::string_view information_action_fingerprint) {
-    if (locator.owner_seat >= kPlayerCount ||
-        information_action_fingerprint.empty()) {
-        throw std::invalid_argument(
-            "invalid FQ4-D1-P0 stable-root coordinate");
-    }
-    std::string key(
-        "old-school-fq4-d1-p0-stable-root-v1\n");
-    key += "source_seed_base_index=" +
-           std::to_string(locator.source_block) + "\n";
-    key += "source_seed_base=" +
-           std::to_string(locator.source_seed_base) + "\n";
-    key += "schedule_index=" +
-           std::to_string(locator.schedule_index) + "\n";
-    key += "game_seed=" +
-           std::to_string(locator.game_seed) + "\n";
-    key += "owner=" +
-           std::to_string(locator.owner_seat) + "\n";
-    key += "trace=" +
-           std::to_string(locator.trace_ordinal) + "\n";
-    key += "information_action_sha256=";
-    key.append(information_action_fingerprint);
-    key.push_back('\n');
-    return integrity::sha256_string(key);
-}
-
-RetentionResult retain_owner_game_roots(
-    const std::vector<RetentionCandidate>& candidates,
-    std::size_t cap) {
-    RetentionResult result;
-    if (cap == 0) {
-        return result;
-    }
-    std::map<std::string, std::string> fingerprints;
-    std::set<std::string> stable_ids;
-    std::size_t previous_ordinal = 0;
-    bool first = true;
-    for (std::size_t index = 0;
-         index < candidates.size(); ++index) {
-        const RetentionCandidate& candidate =
-            candidates[index];
-        if (candidate.information_action_fingerprint.empty() ||
-            candidate.information_action_bytes.empty() ||
-            candidate.stable_id.empty() ||
-            (!first &&
-             candidate.trace_ordinal <=
-                 previous_ordinal) ||
-            !stable_ids.insert(candidate.stable_id).second) {
-            return result;
-        }
-        first = false;
-        previous_ordinal = candidate.trace_ordinal;
-        const auto [found, inserted] =
-            fingerprints.emplace(
-                candidate
-                    .information_action_fingerprint,
-                candidate.information_action_bytes);
-        if (!inserted &&
-            found->second !=
-                candidate.information_action_bytes) {
-            ++result.hash_collision_count;
-            return result;
-        }
-        if (!inserted) {
-            ++result.duplicate_count;
-            continue;
-        }
-        result.unique_input_indices.push_back(index);
-    }
-    const auto positions =
-        learned_iteration::
-            evenly_spaced_retained_indices(
-                result.unique_input_indices.size(), cap);
-    for (const std::size_t position : positions) {
-        result.retained_input_indices.push_back(
-            result.unique_input_indices[position]);
-    }
-    result.valid =
-        std::is_sorted(
-            result.retained_input_indices.begin(),
-            result.retained_input_indices.end()) &&
-        result.unique_input_indices.size() +
-                result.duplicate_count ==
-            candidates.size() &&
-        result.hash_collision_count == 0;
-    return result;
+    return collection::stable_root_id(
+        locator, information_action_fingerprint,
+        kStableRootSchema);
 }
 
 bool validate_replay_manifest(
     const std::vector<ReplayRootManifest>& roots) {
-    std::set<std::string> stable_ids;
-    for (const ReplayRootManifest& root : roots) {
-        if (deck_index(root.owner_deck) >= kDeckCount ||
-            deck_index(root.opponent_deck) >= kDeckCount ||
-            root.owner_deck == root.opponent_deck ||
-            root.locator.owner_seat >= kPlayerCount ||
-            root.stable_id.empty() ||
-            root.information_action_fingerprint.empty() ||
-            root.canonical_descriptors.size() < 2 ||
-            root.canonical_descriptors.size() >
-                kMaximumLegalActions ||
-            root.pass_index >=
-                root.canonical_descriptors.size() ||
-            !std::is_sorted(
-                root.canonical_descriptors.begin(),
-                root.canonical_descriptors.end()) ||
-            std::adjacent_find(
-                root.canonical_descriptors.begin(),
-                root.canonical_descriptors.end()) !=
-                root.canonical_descriptors.end() ||
-            root.stable_id != stable_root_id(
-                root.locator,
-                root.information_action_fingerprint) ||
-            !stable_ids.insert(root.stable_id).second) {
-            return false;
-        }
-    }
-    return true;
+    return collection::validate_replay_manifest(
+        roots, kStableRootSchema,
+        kMaximumLegalActions);
 }
 
 std::string serialize_replay_manifest(
     const std::vector<ReplayRootManifest>& roots) {
-    if (!validate_replay_manifest(roots)) {
-        throw std::invalid_argument(
-            "invalid FQ4-D1-P0 replay manifest");
-    }
-    std::string output(kSchema);
-    output += "\nretained-replay-manifest\n";
-    for (const ReplayRootManifest& root : roots) {
-        output +=
-            std::to_string(root.locator.source_block) +
-            "\t" +
-            std::to_string(
-                root.locator.source_seed_base) +
-            "\t" +
-            std::to_string(
-                root.locator.schedule_index) +
-            "\t" +
-            std::to_string(root.locator.game_seed) +
-            "\t" +
-            std::to_string(root.locator.owner_seat) +
-            "\t" +
-            std::to_string(
-                root.locator.trace_ordinal) +
-            "\t" +
-            std::to_string(
-                static_cast<std::size_t>(
-                    root.owner_deck)) +
-            "\t" +
-            std::to_string(
-                static_cast<std::size_t>(
-                    root.opponent_deck)) +
-            "\t" + root.stable_id +
-            "\t" +
-            root.information_action_fingerprint +
-            "\t" +
-            std::to_string(root.pass_index) +
-            "\t" +
-            std::to_string(
-                root.canonical_descriptors.size());
-        for (const std::string& descriptor :
-             root.canonical_descriptors) {
-            output += "\t" +
-                      std::to_string(
-                          descriptor.size()) +
-                      ":" + descriptor;
-        }
-        output.push_back('\n');
-    }
-    return output;
+    return collection::serialize_replay_manifest(
+        roots, kSchema, kStableRootSchema,
+        kMaximumLegalActions);
 }
 
 std::string replay_manifest_sha256(
     const std::vector<ReplayRootManifest>& roots) {
-    return integrity::sha256_string(
-        serialize_replay_manifest(roots));
-}
-
-bool RobustDominance::any_dominated() const {
-    return shape_valid &&
-           std::any_of(
-               robustly_pass_dominated.begin(),
-               robustly_pass_dominated.end(),
-               [](bool value) { return value; });
-}
-
-RobustDominance summarize_robust_dominance(
-    std::size_t pass_index, std::size_t action_count,
-    const std::vector<DominanceWorldRow>& worlds) {
-    RobustDominance result{
-        .pass_index = pass_index,
-        .strict_world_counts =
-            std::vector<std::size_t>(action_count, 0),
-        .robustly_pass_dominated =
-            std::vector<bool>(action_count, false),
-    };
-    if (action_count < 2 ||
-        action_count > kMaximumLegalActions ||
-        pass_index >= action_count ||
-        worlds.size() != kDominanceWorlds) {
-        return result;
-    }
-    for (const DominanceWorldRow& world : worlds) {
-        if (world.candidate_complete.size() !=
-                action_count ||
-            world.orientations.size() != action_count) {
-            return result;
-        }
-        ++result.transition_count;
-        for (std::size_t action = 0;
-             action < action_count; ++action) {
-            if (action == pass_index) {
-                continue;
-            }
-            ++result.transition_count;
-            if (!world.pass_complete ||
-                !world.candidate_complete[action]) {
-                continue;
-            }
-            ++result.complete_comparisons;
-            if (world.orientations[action] ==
-                dominance::Orientation::
-                    FirstDominatesSecond) {
-                ++result.strict_world_counts[action];
-            }
-        }
-    }
-    for (std::size_t action = 0;
-         action < action_count; ++action) {
-        if (action != pass_index &&
-            result.strict_world_counts[action] ==
-                kDominanceWorlds) {
-            result.robustly_pass_dominated[action] =
-                true;
-        }
-    }
-    result.shape_valid = true;
-    return result;
-}
-
-std::string_view parent_class_name(
-    ParentClass classification) {
-    switch (classification) {
-    case ParentClass::Safe:
-        return "Safe";
-    case ParentClass::Class1:
-        return "Class 1";
-    case ParentClass::Class2:
-        return "Class 2";
-    case ParentClass::Class3:
-        return "Class 3";
-    case ParentClass::Invalid:
-        return "Invalid";
-    }
-    return "Invalid";
-}
-
-bool ParentClassResult::high_confidence_unsafe() const {
-    return valid &&
-           (classification == ParentClass::Class1 ||
-            classification == ParentClass::Class2);
-}
-
-ParentClassResult classify_parent(
-    const ParentClassInput& input) {
-    ParentClassResult result;
-    const std::size_t count =
-        input.canonical_descriptors.size();
-    if (count < 2 ||
-        input.base_scores.size() != count ||
-        input.combined_scores.size() != count ||
-        input.base_samples.size() != count ||
-        input.robustly_pass_dominated.size() != count ||
-        !std::is_sorted(
-            input.canonical_descriptors.begin(),
-            input.canonical_descriptors.end()) ||
-        std::adjacent_find(
-            input.canonical_descriptors.begin(),
-            input.canonical_descriptors.end()) !=
-            input.canonical_descriptors.end()) {
-        return result;
-    }
-    std::optional<std::size_t> best_dominated;
-    std::optional<std::size_t> best_nondominated;
-    for (std::size_t index = 0; index < count; ++index) {
-        if (!std::isfinite(input.base_scores[index]) ||
-            !std::isfinite(input.combined_scores[index]) ||
-            input.base_samples[index].size() !=
-                kDominanceWorlds ||
-            !std::all_of(
-                input.base_samples[index].begin(),
-                input.base_samples[index].end(),
-                [](double value) {
-                    return std::isfinite(value);
-                })) {
-            return result;
-        }
-        std::optional<std::size_t>& best =
-            input.robustly_pass_dominated[index]
-                ? best_dominated
-                : best_nondominated;
-        // Canonical descriptor order supplies the exact-tie rule.
-        if (!best.has_value() ||
-            input.combined_scores[index] >
-                input.combined_scores[*best]) {
-            best = index;
-        }
-    }
-    if (!best_dominated.has_value() ||
-        !best_nondominated.has_value()) {
-        return result;
-    }
-    result.best_dominated_index =
-        *best_dominated;
-    result.best_nondominated_index =
-        *best_nondominated;
-    result.margin =
-        input.combined_scores[*best_dominated] -
-        input.combined_scores[*best_nondominated];
-    if (!std::isfinite(result.margin)) {
-        return ParentClassResult{};
-    }
-    const double residual_difference =
-        (input.combined_scores[*best_dominated] -
-         input.base_scores[*best_dominated]) -
-        (input.combined_scores[*best_nondominated] -
-         input.base_scores[*best_nondominated]);
-    std::array<double, kDominanceWorlds> differences{};
-    double mean = 0.0;
-    for (std::size_t world = 0;
-         world < kDominanceWorlds; ++world) {
-        differences[world] =
-            input.base_samples[*best_dominated][world] -
-            input.base_samples[*best_nondominated][world] +
-            residual_difference;
-        if (!std::isfinite(differences[world])) {
-            return ParentClassResult{};
-        }
-        mean += differences[world];
-    }
-    mean /= static_cast<double>(kDominanceWorlds);
-    double squared = 0.0;
-    for (const double difference : differences) {
-        const double centered = difference - mean;
-        squared += centered * centered;
-    }
-    result.paired_standard_error =
-        std::sqrt(
-            squared /
-            static_cast<double>(
-                kDominanceWorlds *
-                (kDominanceWorlds - 1)));
-    if (!std::isfinite(
-            result.paired_standard_error)) {
-        return ParentClassResult{};
-    }
-    if (result.margin < 0.0) {
-        result.classification = ParentClass::Safe;
-        result.sigma =
-            result.paired_standard_error == 0.0
-                ? 0.0
-                : result.margin /
-                      result.paired_standard_error;
-    } else if (
-        result.margin > 0.0 &&
-        result.paired_standard_error == 0.0) {
-        result.classification = ParentClass::Class1;
-        result.sigma = 0.0;
-    } else if (
-        result.margin > 0.0 &&
-        result.paired_standard_error > 0.0 &&
-        result.margin /
-                result.paired_standard_error >=
-            3.0) {
-        result.classification = ParentClass::Class2;
-        result.sigma =
-            result.margin /
-            result.paired_standard_error;
-    } else {
-        result.classification = ParentClass::Class3;
-        result.sigma =
-            result.paired_standard_error == 0.0
-                ? 0.0
-                : result.margin /
-                      result.paired_standard_error;
-    }
-    if (!std::isfinite(result.sigma)) {
-        return ParentClassResult{};
-    }
-    result.valid = true;
-    return result;
-}
-
-RootCounts& RootCounts::operator+=(
-    const RootCounts& other) {
-    raw += other.raw;
-    trivial += other.trivial;
-    nontrivial += other.nontrivial;
-    malformed += other.malformed;
-    over_cap += other.over_cap;
-    eligible += other.eligible;
-    duplicate += other.duplicate;
-    unique += other.unique;
-    retained += other.retained;
-    cap_dropped += other.cap_dropped;
-    dominance_positive +=
-        other.dominance_positive;
-    for (std::size_t index = 0;
-         index < parent_classes.size(); ++index) {
-        parent_classes[index] +=
-            other.parent_classes[index];
-    }
-    return *this;
-}
-
-bool RootCounts::terminal_cross_sums_valid() const {
-    const std::size_t class_count =
-        std::accumulate(
-            parent_classes.begin(),
-            parent_classes.end(),
-            std::size_t{0});
-    return
-        raw ==
-            malformed + trivial + over_cap +
-                eligible &&
-        nontrivial ==
-            over_cap + eligible &&
-        eligible == duplicate + unique &&
-        unique == retained + cap_dropped &&
-        dominance_positive <= retained &&
-        class_count == dominance_positive;
-}
-
-ProductionAccounting&
-ProductionAccounting::operator+=(
-    const ProductionAccounting& other) {
-    score_calls += other.score_calls;
-    scored_actions += other.scored_actions;
-    sampled_worlds += other.sampled_worlds;
-    rollout_evaluations +=
-        other.rollout_evaluations;
-    terminal_evaluations +=
-        other.terminal_evaluations;
-    bootstrapped_evaluations +=
-        other.bootstrapped_evaluations;
-    dominance_transitions +=
-        other.dominance_transitions;
-    return *this;
-}
-
-bool ProductionAccounting::valid() const {
-    return terminal_evaluations <=
-               rollout_evaluations &&
-           bootstrapped_evaluations ==
-               rollout_evaluations -
-                   terminal_evaluations &&
-           sampled_worlds ==
-               score_calls *
-                   scoring::kProductionWorlds &&
-           rollout_evaluations ==
-               scored_actions *
-                   scoring::kProductionWorlds *
-                   scoring::kProductionRolloutsPerWorld;
+    return collection::replay_manifest_sha256(
+        roots, kSchema, kStableRootSchema,
+        kMaximumLegalActions);
 }
 
 bool CensusReport::infrastructure_valid() const {
@@ -3134,18 +2719,18 @@ RootDisposition diagnose_root_disposition(
     const LearnedDecisionTracePoint& point,
     const SourceGame& source, std::size_t owner_seat,
     std::size_t trace_ordinal) {
-    const RootBuildAttempt attempt =
-        build_safe_root(
+    const collection::RootBuildResult attempt =
+        collection::build_canonical_root(
             point, source, owner_seat,
-            trace_ordinal);
-    switch (attempt.category) {
-    case RootBuildAttempt::Category::Malformed:
+            trace_ordinal, collection_spec());
+    switch (attempt.disposition) {
+    case collection::RootDisposition::Malformed:
         return RootDisposition::Malformed;
-    case RootBuildAttempt::Category::Trivial:
+    case collection::RootDisposition::Trivial:
         return RootDisposition::Trivial;
-    case RootBuildAttempt::Category::OverCap:
+    case collection::RootDisposition::OverCap:
         return RootDisposition::OverCap;
-    case RootBuildAttempt::Category::Nontrivial:
+    case collection::RootDisposition::RetentionCandidate:
         return RootDisposition::RetentionCandidate;
     }
     throw std::logic_error(
@@ -3156,43 +2741,32 @@ CanonicalHiddenDiagnostic diagnose_canonical_hidden_root(
     const LearnedDecisionTracePoint& point,
     const SourceGame& source, std::size_t owner_seat,
     std::size_t trace_ordinal) {
-    CanonicalHiddenDiagnostic diagnostic;
-    RootBuildAttempt attempt =
-        build_safe_root(
+    const collection::CanonicalHiddenDiagnostic common =
+        collection::diagnose_canonical_hidden_root(
             point, source, owner_seat,
-            trace_ordinal);
-    if (!attempt.root.has_value()) {
-        return diagnostic;
-    }
-    CanonicalRoot& root = *attempt.root;
-    HiddenClone clone =
-        make_hidden_clone(
-            root.probe, root.manifest.locator);
-    diagnostic.materialized = true;
-    diagnostic.canonical_state = root.probe.state;
-    diagnostic.hidden_clone_state =
-        clone.probe.state;
-    diagnostic.canonical_descriptors =
-        root.manifest.canonical_descriptors;
-    diagnostic.information_action_fingerprint =
-        root.manifest
-            .information_action_fingerprint;
-    diagnostic.owner_hand_preserved =
-        root.probe.state.players[owner_seat].hand ==
-        point.state.players[owner_seat].hand;
-    diagnostic.reporting_statistics_zero =
-        root.probe.state.stats ==
-        std::array<PlayerGameStats, 2>{};
-    diagnostic.second_replay_exact =
-        replay_exact(root, clone);
-    diagnostic.hidden_feature_bits_identical =
-        priority_feature_bits_identical(
-            root.probe, clone.probe);
-    diagnostic.hidden_clone_eligible =
-        clone.eligible;
-    diagnostic.hidden_clone_distinct =
-        clone.distinct;
-    return diagnostic;
+            trace_ordinal, collection_spec());
+    return {
+        .materialized = common.materialized,
+        .canonical_state = common.canonical_state,
+        .hidden_clone_state =
+            common.hidden_clone_state,
+        .canonical_descriptors =
+            common.canonical_descriptors,
+        .information_action_fingerprint =
+            common.information_action_fingerprint,
+        .owner_hand_preserved =
+            common.owner_hand_preserved,
+        .reporting_statistics_zero =
+            common.reporting_statistics_zero,
+        .second_replay_exact =
+            common.second_replay_exact,
+        .hidden_feature_bits_identical =
+            common.hidden_feature_bits_identical,
+        .hidden_clone_eligible =
+            common.hidden_clone_eligible,
+        .hidden_clone_distinct =
+            common.hidden_clone_distinct,
+    };
 }
 
 CensusReport complete_synthetic_report() {

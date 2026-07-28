@@ -1,0 +1,1856 @@
+#include "old_school/fq4_dev_generator.hpp"
+
+#include "old_school/artifact_integrity.hpp"
+#include "old_school/fq4_priority_math.hpp"
+#include "old_school/oc1_action_scoring.hpp"
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <numeric>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+namespace old_school::fq4_dev_generator {
+namespace {
+
+namespace bundle = fq4_dev_bundle;
+namespace collection = fq4_priority_collection;
+namespace integrity = artifact_integrity;
+namespace math = fq4_priority_math;
+namespace schedule_data = fq4_dev_schedule;
+namespace scoring = oc1_action_scoring;
+
+constexpr std::size_t kPlayerCount = 2;
+constexpr std::size_t kExpectedCardCount = 26;
+constexpr std::size_t kStateScalarFeatureCount = 50;
+constexpr std::size_t kStateCardPlaneCount = 24;
+constexpr std::size_t kPolicyDecisionCount = 4;
+constexpr std::size_t kPolicyPhaseCount = 7;
+constexpr std::size_t kPolicyVerbCount = 8;
+constexpr std::size_t kPolicyCardPlaneCount = 6;
+constexpr std::size_t kPolicyScalarCount = 44;
+
+static_assert(kCardCount == kExpectedCardCount);
+static_assert(
+    kStateScalarFeatureCount +
+        kStateCardPlaneCount * kExpectedCardCount +
+        kPolicyDecisionCount + kPolicyPhaseCount +
+        kPolicyVerbCount +
+        kPolicyCardPlaneCount * kExpectedCardCount +
+        kPolicyScalarCount ==
+    bundle::kFeatureCount);
+
+[[noreturn]] void fail(std::string_view message) {
+    throw std::runtime_error(
+        "FQ4 development generator: " +
+        std::string(message));
+}
+
+std::size_t deck_index(DeckId deck) {
+    const std::size_t result =
+        static_cast<std::size_t>(deck);
+    if (result >= kDeckCount) {
+        fail("deck is outside the five-deck field");
+    }
+    return result;
+}
+
+std::vector<CardId> cards_for_deck(DeckId deck) {
+    switch (deck) {
+    case DeckId::Green:
+        return green_deck();
+    case DeckId::Red:
+        return red_deck();
+    case DeckId::Blue:
+        return blue_deck();
+    case DeckId::White:
+        return white_control_deck();
+    case DeckId::RUAggro:
+        return ru_aggro_deck();
+    }
+    fail("unknown source deck");
+}
+
+bool same_double(double first, double second) {
+    return std::bit_cast<std::uint64_t>(first) ==
+           std::bit_cast<std::uint64_t>(second);
+}
+
+bool bit_identical(
+    const std::vector<double>& first,
+    const std::vector<double>& second) {
+    if (first.size() != second.size()) {
+        return false;
+    }
+    for (std::size_t index = 0;
+         index < first.size(); ++index) {
+        if (!same_double(first[index], second[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+class CanonicalBytes {
+  public:
+    void u8(std::uint8_t value) {
+        bytes_.push_back(static_cast<char>(value));
+    }
+
+    void u64(std::uint64_t value) {
+        for (std::size_t byte = 0; byte < 8; ++byte) {
+            u8(static_cast<std::uint8_t>(
+                (value >> (byte * 8U)) & 0xffU));
+        }
+    }
+
+    void boolean(bool value) {
+        u8(value ? 1U : 0U);
+    }
+
+    void text(std::string_view value) {
+        u64(static_cast<std::uint64_t>(value.size()));
+        bytes_.append(value);
+    }
+
+    void hash(const bundle::Hash256& digest) {
+        for (const std::uint8_t byte : digest) {
+            u8(byte);
+        }
+    }
+
+    void binary64(double value) {
+        u64(std::bit_cast<std::uint64_t>(value));
+    }
+
+    const std::string& bytes() const {
+        return bytes_;
+    }
+
+  private:
+    std::string bytes_;
+};
+
+bundle::Hash256 domain_hash(
+    std::string_view domain,
+    const CanonicalBytes& payload) {
+    CanonicalBytes framed;
+    framed.text(kGeneratorSchema);
+    framed.text(domain);
+    framed.text(payload.bytes());
+    return bundle::sha256(framed.bytes());
+}
+
+bool canonical_lower_hex(
+    std::string_view value, std::size_t size) {
+    return value.size() == size &&
+           std::all_of(
+               value.begin(), value.end(),
+               [](char character) {
+                   return
+                       (character >= '0' &&
+                        character <= '9') ||
+                       (character >= 'a' &&
+                        character <= 'f');
+               });
+}
+
+bool forbidden_seed(std::uint64_t seed) {
+    return std::find(
+               kForbiddenHeldOutSeedBases.begin(),
+               kForbiddenHeldOutSeedBases.end(),
+               seed) !=
+           kForbiddenHeldOutSeedBases.end();
+}
+
+collection::SourceGame collection_source(
+    const schedule_data::SourceGame& source) {
+    return {
+        .source_block = schedule_data::kScheduleBlock,
+        .source_seed_base = source.source_seed_base,
+        .schedule_index = source.schedule_index,
+        .pairing_index = source.pairing_index,
+        .seat_decks = source.seat_decks,
+        .starting_player = source.starting_player,
+        .game_seed = source.game_seed,
+    };
+}
+
+std::array<std::vector<CardId>, 2> original_decks(
+    const schedule_data::SourceGame& source) {
+    return {
+        cards_for_deck(source.seat_decks[0]),
+        cards_for_deck(source.seat_decks[1]),
+    };
+}
+
+schedule_data::Split split_for_seed_base(
+    std::uint64_t source_seed_base) {
+    if (source_seed_base ==
+        schedule_data::kFitSeedBase) {
+        return schedule_data::Split::Fit;
+    }
+    if (source_seed_base ==
+        schedule_data::kCheckSeedBase) {
+        return schedule_data::Split::Check;
+    }
+    throw std::invalid_argument(
+        "root source seed is outside frozen FIT/CHECK");
+}
+
+bool root_matches_frozen_schedule(
+    const collection::ReplayRootManifest& root) {
+    const collection::RootLocator& locator =
+        root.locator;
+    if (locator.source_block !=
+            schedule_data::kScheduleBlock ||
+        locator.schedule_index >=
+            schedule_data::kPhysicalGamesPerSplit ||
+        locator.owner_seat >= kPlayerCount) {
+        return false;
+    }
+    try {
+        const auto schedule =
+            schedule_data::source_schedule(
+                split_for_seed_base(
+                    locator.source_seed_base));
+        const auto& source =
+            schedule.at(locator.schedule_index);
+        return
+            source.source_seed_base ==
+                locator.source_seed_base &&
+            source.schedule_index ==
+                locator.schedule_index &&
+            source.game_seed == locator.game_seed &&
+            root.owner_deck ==
+                source.seat_decks[
+                    locator.owner_seat] &&
+            root.opponent_deck ==
+                source.seat_decks[
+                    1U - locator.owner_seat];
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+GameConfig source_game_config(
+    const std::shared_ptr<const LearnedModel>& parent,
+    std::size_t starting_player) {
+    const BotConfig bot{
+        .kind = BotKind::Learned,
+        .learned_variant =
+            LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action =
+            scoring::kProductionWorlds,
+        .exploration_rate = 0.0,
+        .value_continuation_epsilon = 0.0,
+        .value_priority_residual_weight = 0.0,
+        .value_pass_dominance = false,
+        .value_continuation_controller =
+            LearnedContinuationController::Legacy,
+        .training_games = kParentTrainingGames,
+        .learned_model = parent,
+    };
+    return {
+        .max_turns = kSourceTurnCap,
+        .starting_player = starting_player,
+        .bots = {bot, bot},
+        .learned_training_seed =
+            kParentTrainingSeed,
+        .learned_model = parent,
+        .learned_search_depth = 1,
+    };
+}
+
+bool source_config_exact(
+    const GameConfig& config,
+    const std::shared_ptr<const LearnedModel>& parent,
+    std::size_t starting_player) {
+    if (config.max_turns != kSourceTurnCap ||
+        config.starting_player !=
+            std::optional<std::size_t>(
+                starting_player) ||
+        config.learned_training_seed !=
+            kParentTrainingSeed ||
+        config.learned_search_depth != 1 ||
+        config.learned_model != parent ||
+        config.learned_policy_recorder != nullptr ||
+        std::any_of(
+            config.human_controllers.begin(),
+            config.human_controllers.end(),
+            [](const auto& controller) {
+                return controller.has_value();
+            })) {
+        return false;
+    }
+    for (const BotConfig& bot : config.bots) {
+        if (bot.kind != BotKind::Learned ||
+            bot.learned_variant !=
+                LearnedVariant::
+                    ValueSearchChampion ||
+            bot.rollouts_per_action !=
+                scoring::kProductionWorlds ||
+            !same_double(bot.exploration_rate, 0.0) ||
+            !same_double(
+                bot.value_continuation_epsilon, 0.0) ||
+            !same_double(
+                bot.value_priority_residual_weight, 0.0) ||
+            bot.value_pass_dominance ||
+            bot.value_continuation_controller !=
+                LearnedContinuationController::Legacy ||
+            bot.training_games !=
+                kParentTrainingGames ||
+            bot.learned_model != parent) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<PriorityAction> priority_actions(
+    const probes::DecisionProbe& probe) {
+    std::vector<PriorityAction> result;
+    result.reserve(probe.candidates.size());
+    for (const probes::Candidate& candidate :
+         probe.candidates) {
+        const auto* action =
+            std::get_if<PriorityAction>(
+                &candidate.action);
+        if (action == nullptr) {
+            fail("non-Priority action reached Priority scoring");
+        }
+        result.push_back(*action);
+    }
+    return result;
+}
+
+bool sorcery_actions_for(TurnPhase phase) {
+    return phase == TurnPhase::FirstMain ||
+           phase == TurnPhase::SecondMain;
+}
+
+bool production_recipe_exact(
+    const scoring::DecisionScore& score) {
+    const scoring::AppliedRecipe& recipe =
+        score.recipe;
+    return
+        score.decision_kind ==
+            probes::DecisionKind::Priority &&
+        score.score_mode ==
+            scoring::ScoreMode::
+                ProductionPrioritySearch &&
+        recipe.seed_source ==
+            scoring::SeedSource::Derived &&
+        recipe.seed_tag == scoring::kProductionTag &&
+        recipe.seed_base ==
+            scoring::kProductionSeedBase &&
+        recipe.resolved_seed.has_value() &&
+        recipe.worlds ==
+            scoring::kProductionWorlds &&
+        recipe.horizon_turns ==
+            scoring::kProductionHorizonTurns &&
+        recipe.rollouts_per_world ==
+            scoring::kProductionRolloutsPerWorld &&
+        recipe.blend_shallow_prior ==
+            scoring::kProductionBlendShallowPrior &&
+        recipe.evaluation_threads ==
+            scoring::kProductionEvaluationThreads &&
+        recipe.value_mirror &&
+        same_double(
+            recipe.value_continuation_epsilon, 0.0) &&
+        same_double(
+            recipe.value_priority_residual_weight, 0.0) &&
+        !recipe.value_pass_dominance &&
+        recipe.value_continuation_controller ==
+            LearnedContinuationController::Legacy &&
+        score.accounting.sampled_worlds ==
+            scoring::kProductionWorlds &&
+        score.accounting.rollout_evaluations ==
+            score.actions.size() *
+                scoring::kProductionWorlds *
+                scoring::kProductionRolloutsPerWorld &&
+        score.accounting.terminal_evaluations +
+                score.accounting.bootstrapped_evaluations ==
+            score.accounting.rollout_evaluations;
+}
+
+std::uint16_t narrow_u16(
+    std::size_t value, std::string_view context) {
+    if (value >
+        std::numeric_limits<std::uint16_t>::max()) {
+        fail(std::string(context) + " exceeds u16");
+    }
+    return static_cast<std::uint16_t>(value);
+}
+
+std::uint32_t narrow_u32(
+    std::size_t value, std::string_view context) {
+    if (value >
+        std::numeric_limits<std::uint32_t>::max()) {
+        fail(std::string(context) + " exceeds u32");
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+std::uint8_t narrow_u8(
+    std::size_t value, std::string_view context) {
+    if (value >
+        std::numeric_limits<std::uint8_t>::max()) {
+        fail(std::string(context) + " exceeds u8");
+    }
+    return static_cast<std::uint8_t>(value);
+}
+
+struct RetainedRoot {
+    collection::CanonicalRoot root;
+    collection::HiddenClone hidden;
+    collection::RobustDominance dominance;
+    std::vector<std::vector<double>> features;
+    bundle::CensusRow census;
+};
+
+struct SplitBuild {
+    std::vector<bundle::CensusRow> census;
+    std::vector<bundle::SelectedRow> selected;
+    std::vector<ParentWitness> witnesses;
+    bundle::SplitManifest manifest;
+    SplitSupport support;
+};
+
+struct CompleteBuild {
+    bundle::Bundle bundle;
+    SplitSupport fit;
+    SplitSupport check;
+};
+
+void append_census_digest(
+    CanonicalBytes& output,
+    const bundle::CensusRow& row) {
+    output.u64(row.schedule_index);
+    output.u64(row.owner_seat);
+    output.u64(row.trace_ordinal);
+    output.u64(row.owner_deck);
+    output.u64(row.opponent_deck);
+    output.hash(row.stable_root_id);
+    output.hash(row.physical_game_sha256);
+    output.hash(row.information_action_sha256);
+    output.hash(row.descriptor_set_sha256);
+    output.u64(row.pass_index);
+    output.u64(row.dominance.size());
+    for (const bundle::DominanceCount count :
+         row.dominance) {
+        output.u64(count.complete);
+        output.u64(count.strict);
+    }
+}
+
+void append_selected_digest(
+    CanonicalBytes& output,
+    const bundle::SelectedRow& row) {
+    output.u64(
+        static_cast<std::uint64_t>(row.split));
+    append_census_digest(output, row.census);
+    output.u64(row.roles);
+    output.u64(row.production_seed);
+    output.u64(row.accounting.score_calls);
+    output.u64(row.accounting.scored_actions);
+    output.u64(row.accounting.sampled_worlds);
+    output.u64(row.accounting.rollout_evaluations);
+    output.u64(row.accounting.terminal_evaluations);
+    output.u64(row.accounting.bootstrap_evaluations);
+    output.u64(row.actions.size());
+    for (const bundle::ActionRow& action :
+         row.actions) {
+        output.text(action.descriptor);
+        output.boolean(action.is_pass);
+        output.u64(action.dominance.complete);
+        output.u64(action.dominance.strict);
+        for (const std::uint64_t bits :
+             action.raw_sample_bits) {
+            output.u64(bits);
+        }
+        for (const std::uint64_t bits :
+             action.shallow_prior_sample_bits) {
+            output.u64(bits);
+        }
+        for (const std::uint64_t bits :
+             action.continuation_sample_bits) {
+            output.u64(bits);
+        }
+        output.u64(action.base_score_bits);
+        output.u64(action.parent_residual_bits);
+        output.u64(action.features.size());
+        for (const bundle::SparseFeature feature :
+             action.features) {
+            output.u64(feature.index);
+            output.u64(feature.value_bits);
+        }
+    }
+}
+
+bundle::SelectedRow score_selected_root(
+    bundle::Split split, std::uint8_t roles,
+    const RetainedRoot& retained,
+    const std::shared_ptr<const LearnedModel>& parent,
+    std::vector<ParentWitness>& witnesses) {
+    const scoring::DecisionScore base =
+        scoring::score_production(
+            retained.root.probe, parent);
+    if (!production_recipe_exact(base) ||
+        !base.recipe.resolved_seed.has_value() ||
+        base.stable_id !=
+            retained.root.manifest.stable_id ||
+        base.actions.size() !=
+            retained.root.manifest
+                .canonical_descriptors.size() ||
+        base.actions.size() !=
+            retained.features.size()) {
+        fail(
+            retained.root.manifest.stable_id +
+            ": frozen production scorer drifted");
+    }
+
+    std::vector<double> base_scores;
+    std::vector<std::vector<double>> raw_samples;
+    base_scores.reserve(base.actions.size());
+    raw_samples.reserve(base.actions.size());
+    for (std::size_t action = 0;
+         action < base.actions.size(); ++action) {
+        if (base.actions[action].descriptor !=
+                retained.root.manifest
+                    .canonical_descriptors[action] ||
+            base.actions[action].raw_samples.size() !=
+                bundle::kWorldCount ||
+            base.actions[action]
+                    .shallow_prior_samples.size() !=
+                bundle::kWorldCount ||
+            base.actions[action]
+                    .continuation_samples.size() !=
+                bundle::kWorldCount) {
+            fail(
+                retained.root.manifest.stable_id +
+                ": descriptor or K8 production trace drifted");
+        }
+        base_scores.push_back(
+            base.actions[action].raw_score);
+        raw_samples.push_back(
+            base.actions[action].raw_samples);
+    }
+
+    const std::vector<double> logits =
+        learned_policy_head_logits(
+            retained.features,
+            LearnedPolicyDecisionKind::Priority,
+            parent);
+    const math::CenteredResidualScores shared =
+        math::centered_tanh_scores(
+            base_scores, logits,
+            kParentPriorityResidualWeight);
+    const auto deployed =
+        diagnose_learned_value_priority_residual(
+            retained.root.probe.state,
+            retained.root.probe.root_player,
+            sorcery_actions_for(
+                retained.root.probe.phase),
+            retained.root.probe.phase,
+            retained.root.probe.consecutive_passes,
+            priority_actions(retained.root.probe),
+            parent,
+            kParentPriorityResidualWeight);
+    if (!bit_identical(
+            shared.centered_logits,
+            deployed.centered_policy_logits) ||
+        !bit_identical(
+            shared.residuals,
+            deployed.residuals)) {
+        fail(
+            retained.root.manifest.stable_id +
+            ": shared tensor evaluator did not reproduce "
+            "the deployed parent residual");
+    }
+
+    bundle::SelectedRow row{
+        .split = split,
+        .census = retained.census,
+        .roles = roles,
+        .production_seed =
+            *base.recipe.resolved_seed,
+        .accounting = {
+            .score_calls = 1,
+            .scored_actions =
+                static_cast<std::uint64_t>(
+                    base.actions.size()),
+            .sampled_worlds =
+                static_cast<std::uint64_t>(
+                    base.accounting.sampled_worlds),
+            .rollout_evaluations =
+                static_cast<std::uint64_t>(
+                    base.accounting
+                        .rollout_evaluations),
+            .terminal_evaluations =
+                static_cast<std::uint64_t>(
+                    base.accounting
+                        .terminal_evaluations),
+            .bootstrap_evaluations =
+                static_cast<std::uint64_t>(
+                    base.accounting
+                        .bootstrapped_evaluations),
+        },
+    };
+    row.actions.reserve(base.actions.size());
+    for (std::size_t action = 0;
+         action < base.actions.size(); ++action) {
+        bundle::ActionRow stored{
+            .descriptor =
+                base.actions[action].descriptor,
+            .is_pass =
+                action ==
+                retained.root.manifest.pass_index,
+            .dominance =
+                retained.census.dominance[action],
+            .base_score_bits =
+                std::bit_cast<std::uint64_t>(
+                    base.actions[action].raw_score),
+            .parent_residual_bits =
+                std::bit_cast<std::uint64_t>(
+                    shared.residuals[action]),
+            .features =
+                sparsify_priority_features(
+                    retained.features[action]),
+        };
+        for (std::size_t world = 0;
+             world < bundle::kWorldCount; ++world) {
+            stored.raw_sample_bits[world] =
+                std::bit_cast<std::uint64_t>(
+                    base.actions[action]
+                        .raw_samples[world]);
+            stored.shallow_prior_sample_bits[world] =
+                std::bit_cast<std::uint64_t>(
+                    base.actions[action]
+                        .shallow_prior_samples[world]);
+            stored.continuation_sample_bits[world] =
+                std::bit_cast<std::uint64_t>(
+                    base.actions[action]
+                        .continuation_samples[world]);
+        }
+        row.actions.push_back(std::move(stored));
+    }
+
+    if ((roles &
+         static_cast<std::uint8_t>(
+             bundle::Role::DominancePositive)) != 0) {
+        const collection::ParentClassResult classified =
+            collection::classify_parent({
+                .canonical_descriptors =
+                    retained.root.manifest
+                        .canonical_descriptors,
+                .base_scores = base_scores,
+                .combined_scores =
+                    shared.combined_scores,
+                .base_samples =
+                    std::move(raw_samples),
+                .robustly_pass_dominated =
+                    retained.dominance
+                        .robustly_pass_dominated,
+            });
+        if (!classified.valid) {
+            fail(
+                retained.root.manifest.stable_id +
+                ": parent classification is invalid");
+        }
+        witnesses.push_back({
+            .owner_deck =
+                retained.root.manifest.owner_deck,
+            .stable_root_id =
+                retained.census.stable_root_id,
+            .physical_game_sha256 =
+                retained.census
+                    .physical_game_sha256,
+            .classification =
+                classified.classification,
+        });
+    }
+    return row;
+}
+
+bundle::Split split_for(
+    schedule_data::Split split) {
+    switch (split) {
+    case schedule_data::Split::Fit:
+        return bundle::Split::Fit;
+    case schedule_data::Split::Check:
+        return bundle::Split::Check;
+    }
+    fail("invalid development split");
+}
+
+SplitBuild construct_split(
+    schedule_data::Split split,
+    const std::vector<schedule_data::SourceGame>& schedule,
+    const std::shared_ptr<const LearnedModel>& parent) {
+    const bundle::Split bundle_split =
+        split_for(split);
+    CanonicalBytes trajectory;
+    trajectory.text(kGeneratorSchema);
+    trajectory.text("trajectory");
+    trajectory.u64(
+        static_cast<std::uint64_t>(bundle_split));
+
+    std::vector<RetainedRoot> retained;
+    retained.reserve(
+        schedule_data::kOwnerPerspectivesPerSplit *
+        collection::kMaximumRootsPerOwnerGame);
+    std::vector<collection::ReplayRootManifest>
+        replay_manifest;
+    std::map<std::string, std::string>
+        global_information_bytes;
+
+    for (const schedule_data::SourceGame& source :
+         schedule) {
+        const collection::SourceGame common_source =
+            collection_source(source);
+        const GameConfig config =
+            source_game_config(
+                parent, source.starting_player);
+        if (!source_config_exact(
+                config, parent,
+                source.starting_player)) {
+            fail("source C16 K8/H4/R1 recipe drifted");
+        }
+        std::vector<LearnedDecisionTracePoint> trace;
+        try {
+            const auto decks = original_decks(source);
+            Game game(
+                decks[0], decks[1],
+                source.game_seed, config);
+            static_cast<void>(
+                game.run_with_priority_root_trace(
+                    trace));
+        } catch (const std::exception& error) {
+            fail(
+                "source game " +
+                std::to_string(source.schedule_index) +
+                " threw: " + error.what());
+        }
+
+        trajectory.u64(source.schedule_index);
+        trajectory.u64(trace.size());
+        for (std::size_t owner = 0;
+             owner < kPlayerCount; ++owner) {
+            std::vector<collection::CanonicalRoot>
+                owner_candidates;
+            std::vector<collection::RetentionCandidate>
+                retention_candidates;
+            std::size_t raw = 0;
+            std::size_t malformed = 0;
+            std::size_t trivial = 0;
+            std::size_t over_cap = 0;
+            std::size_t eligible = 0;
+            for (std::size_t ordinal = 0;
+                 ordinal < trace.size(); ++ordinal) {
+                const LearnedDecisionTracePoint& point =
+                    trace[ordinal];
+                if (point.context.decision_player != owner) {
+                    continue;
+                }
+                ++raw;
+                const collection::RootBuildResult attempt =
+                    collection::build_canonical_root(
+                        point, common_source, owner,
+                        ordinal, collection_spec());
+                trajectory.u64(owner);
+                trajectory.u64(ordinal);
+                trajectory.u64(
+                    static_cast<std::uint64_t>(
+                        attempt.disposition));
+                trajectory.text(
+                    attempt
+                        .information_action_fingerprint);
+                switch (attempt.disposition) {
+                case collection::RootDisposition::Malformed:
+                    ++malformed;
+                    fail(
+                        "malformed source root at schedule=" +
+                        std::to_string(
+                            source.schedule_index) +
+                        " owner=" +
+                        std::to_string(owner) +
+                        " trace=" +
+                        std::to_string(ordinal) +
+                        ": " + attempt.error);
+                case collection::RootDisposition::Trivial:
+                    ++trivial;
+                    continue;
+                case collection::RootDisposition::OverCap:
+                    ++over_cap;
+                    continue;
+                case collection::RootDisposition::
+                    RetentionCandidate:
+                    ++eligible;
+                    break;
+                }
+                if (!attempt.root.has_value()) {
+                    fail(
+                        "eligible root was not materialized");
+                }
+                const auto [known, inserted] =
+                    global_information_bytes.emplace(
+                        attempt
+                            .information_action_fingerprint,
+                        attempt.root
+                            ->information_action_bytes);
+                if (!inserted &&
+                    known->second !=
+                        attempt.root
+                            ->information_action_bytes) {
+                    fail(
+                        "information/action SHA-256 collision");
+                }
+                retention_candidates.push_back({
+                    .trace_ordinal = ordinal,
+                    .information_action_fingerprint =
+                        attempt
+                            .information_action_fingerprint,
+                    .information_action_bytes =
+                        attempt.root
+                            ->information_action_bytes,
+                    .stable_id =
+                        attempt.root
+                            ->manifest.stable_id,
+                });
+                owner_candidates.push_back(
+                    *attempt.root);
+            }
+
+            const collection::RetentionResult selection =
+                collection::retain_owner_game_roots(
+                    retention_candidates);
+            if (!selection.valid ||
+                selection.hash_collision_count != 0 ||
+                selection.unique_input_indices.size() +
+                        selection.duplicate_count !=
+                    eligible ||
+                raw !=
+                    malformed + trivial + over_cap +
+                        eligible) {
+                fail(
+                    "owner-game retention cross-sums failed");
+            }
+            for (const std::size_t index :
+                 selection.retained_input_indices) {
+                collection::CanonicalRoot root =
+                    std::move(owner_candidates[index]);
+                collection::HiddenClone hidden =
+                    collection::make_hidden_clone(root);
+                if (hidden.eligible != hidden.distinct ||
+                    !collection::replay_exact(
+                        root, hidden,
+                        collection_spec()) ||
+                    !collection::
+                        priority_feature_bits_identical(
+                            root.probe,
+                            hidden.probe)) {
+                    fail(
+                        root.manifest.stable_id +
+                        ": hidden-repartition control failed");
+                }
+                std::vector<std::vector<double>> features =
+                    collection::priority_option_features(
+                        root.probe);
+                if (features.size() !=
+                        root.probe.candidates.size() ||
+                    std::any_of(
+                        features.begin(), features.end(),
+                        [](const auto& option) {
+                            return option.size() !=
+                                       bundle::kFeatureCount ||
+                                   !std::all_of(
+                                       option.begin(),
+                                       option.end(),
+                                       [](double value) {
+                                           return std::isfinite(
+                                               value);
+                                       });
+                        })) {
+                    fail(
+                        root.manifest.stable_id +
+                        ": neutral Priority tensor is invalid");
+                }
+                replay_manifest.push_back(
+                    root.manifest);
+                retained.push_back({
+                    .root = std::move(root),
+                    .hidden = std::move(hidden),
+                    .features = std::move(features),
+                });
+            }
+        }
+    }
+
+    if (!collection::validate_replay_manifest(
+            replay_manifest, kStableRootSchema,
+            collection::kMaximumLegalActions)) {
+        fail("complete retained replay manifest is invalid");
+    }
+    const std::string retained_hash =
+        collection::replay_manifest_sha256(
+            replay_manifest, kReplayManifestSchema,
+            kStableRootSchema,
+            collection::kMaximumLegalActions);
+
+    // Phase boundary: every retained root exists before the first
+    // rules-owned dominance transition begins.
+    std::vector<std::string> dominance_failures;
+    for (RetainedRoot& row : retained) {
+        row.dominance =
+            collection::evaluate_robust_dominance(
+                row.root, collection_spec(),
+                dominance_failures);
+        if (!row.dominance.shape_valid) {
+            dominance_failures.push_back(
+                row.root.manifest.stable_id +
+                ": robust dominance shape is invalid");
+        }
+    }
+    if (!dominance_failures.empty()) {
+        fail(dominance_failures.front());
+    }
+
+    // Second phase boundary: only after the complete dominance census is
+    // frozen are blind role rows selected. No parent score or source choice
+    // is present in either input.
+    SplitBuild result;
+    result.census.reserve(retained.size());
+    std::vector<collection::BlindSelectionInput>
+        blind_inputs;
+    blind_inputs.reserve(retained.size());
+    CanonicalBytes dominance_digest;
+    dominance_digest.text(kGeneratorSchema);
+    dominance_digest.text("dominance");
+    dominance_digest.u64(
+        static_cast<std::uint64_t>(bundle_split));
+    for (RetainedRoot& row : retained) {
+        row.census =
+            make_census_row(
+                row.root, row.dominance);
+        result.census.push_back(row.census);
+        blind_inputs.push_back({
+            .stable_id =
+                row.root.manifest.stable_id,
+            .owner_deck =
+                row.root.manifest.owner_deck,
+            .dominance_positive =
+                row.dominance.any_dominated(),
+        });
+        append_census_digest(
+            dominance_digest, row.census);
+    }
+
+    const collection::BlindSelection selection =
+        collection::select_development_rows(
+            blind_inputs);
+    if (!selection.valid) {
+        fail("blind development-row selection failed");
+    }
+    CanonicalBytes selection_digest;
+    selection_digest.text(kGeneratorSchema);
+    selection_digest.text("selection");
+    selection_digest.u64(
+        static_cast<std::uint64_t>(bundle_split));
+    selection_digest.u64(selection.rows.size());
+    for (const collection::BlindSelectionRow& selected :
+         selection.rows) {
+        if (selected.input_index >= retained.size()) {
+            fail("blind selection index is out of range");
+        }
+        std::uint8_t roles = 0;
+        if ((selected.roles &
+             collection::DevelopmentRolePositive) != 0) {
+            roles |= static_cast<std::uint8_t>(
+                bundle::Role::DominancePositive);
+        }
+        if ((selected.roles &
+             collection::DevelopmentRoleBackground) != 0) {
+            roles |= static_cast<std::uint8_t>(
+                bundle::Role::BackgroundControl);
+        }
+        selection_digest.hash(
+            retained[selected.input_index]
+                .census.stable_root_id);
+        selection_digest.u64(roles);
+        result.selected.push_back(
+            score_selected_root(
+                bundle_split, roles,
+                retained[selected.input_index],
+                parent, result.witnesses));
+    }
+
+    result.support =
+        summarize_support(
+            result.census, result.selected,
+            result.witnesses);
+    if (!result.support.publishable()) {
+        fail(
+            std::string(
+                split == schedule_data::Split::Fit
+                    ? "FIT"
+                    : "CHECK") +
+            " split misses frozen coverage or parent-error "
+            "support");
+    }
+
+    CanonicalBytes scored_digest;
+    scored_digest.text(kGeneratorSchema);
+    scored_digest.text("scored");
+    scored_digest.u64(
+        static_cast<std::uint64_t>(bundle_split));
+    scored_digest.u64(result.selected.size());
+    for (const bundle::SelectedRow& row :
+         result.selected) {
+        append_selected_digest(
+            scored_digest, row);
+    }
+
+    result.manifest = {
+        .source_seed_base =
+            schedule_data::seed_base(split),
+        .schedule_sha256 =
+            bundle::parse_sha256(
+                schedule_data::
+                    expected_schedule_sha256(split)),
+        .trajectory_sha256 =
+            domain_hash("trajectory", trajectory),
+        .retained_sha256 =
+            bundle::parse_sha256(retained_hash),
+        .dominance_sha256 =
+            domain_hash(
+                "dominance", dominance_digest),
+        .selection_sha256 =
+            domain_hash(
+                "selection", selection_digest),
+        .scored_sha256 =
+            domain_hash("scored", scored_digest),
+        .census_rows =
+            narrow_u32(
+                result.census.size(),
+                "split census count"),
+        .selected_rows =
+            narrow_u32(
+                result.selected.size(),
+                "split selected count"),
+    };
+    for (std::size_t deck = 0;
+         deck < kDeckCount; ++deck) {
+        result.manifest.census_by_deck[deck] =
+            narrow_u16(
+                result.support
+                    .census_by_deck[deck],
+                "per-deck census count");
+        result.manifest.selected_by_deck[deck] =
+            narrow_u16(
+                result.support
+                    .selected_by_deck[deck],
+                "per-deck selected count");
+        result.manifest.positive_by_deck[deck] =
+            narrow_u16(
+                result.support
+                    .positive_by_deck[deck],
+                "per-deck positive count");
+        result.manifest.background_by_deck[deck] =
+            narrow_u16(
+                result.support
+                    .background_by_deck[deck],
+                "per-deck background count");
+    }
+    return result;
+}
+
+void require_parent_identity(
+    const std::shared_ptr<const LearnedModel>& parent) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            bundle::kParentModelFingerprint) {
+        fail("loaded model is not exact frozen C16");
+    }
+    const LearnedModelComponentFingerprints components =
+        learned_model_component_fingerprints(parent);
+    if (components.critic !=
+            bundle::kParentCriticFingerprint ||
+        components.priority !=
+            bundle::kParentPriorityFingerprint ||
+        components.attack !=
+            bundle::kParentAttackFingerprint ||
+        components.block !=
+            bundle::kParentBlockFingerprint ||
+        components.damage_order !=
+            bundle::kParentDamageOrderFingerprint) {
+        fail("frozen C16 component identity drifted");
+    }
+}
+
+bundle::Manifest base_manifest(
+    const integrity::RegularFileSnapshot& executable,
+    std::string_view producer_commit,
+    const SplitBuild& fit,
+    const SplitBuild& check) {
+    const std::string commit_domain =
+        "git-commit\n" +
+        std::string(producer_commit) + "\n";
+    return {
+        .purpose = std::string(bundle::kPurpose),
+        .producer_commit_sha256 =
+            bundle::sha256(commit_domain),
+        .producer_executable_sha256 =
+            bundle::parse_sha256(
+                executable.sha256),
+        .parent_artifact_sha256 =
+            bundle::parse_sha256(
+                bundle::kParentArtifactSha256),
+        .parent_model_fingerprint =
+            bundle::parse_sha256(
+                bundle::kParentModelFingerprint),
+        .parent_components = {
+            .critic =
+                bundle::parse_sha256(
+                    bundle::kParentCriticFingerprint),
+            .priority =
+                bundle::parse_sha256(
+                    bundle::kParentPriorityFingerprint),
+            .attack =
+                bundle::parse_sha256(
+                    bundle::kParentAttackFingerprint),
+            .block =
+                bundle::parse_sha256(
+                    bundle::kParentBlockFingerprint),
+            .damage_order =
+                bundle::parse_sha256(
+                    bundle::
+                        kParentDamageOrderFingerprint),
+        },
+        .generation_namespace =
+            bundle::kGenerationNamespace,
+        .hidden_namespace =
+            bundle::kHiddenNamespace,
+        .dominance_namespace =
+            bundle::kDominanceNamespace,
+        .collection_spec_sha256 =
+            collection_spec_contract_sha256(),
+        .production_recipe =
+            std::string(bundle::kProductionRecipe),
+        .feature_schema =
+            std::string(bundle::kFeatureSchema),
+        .feature_count =
+            static_cast<std::uint16_t>(
+                bundle::kFeatureCount),
+        .feature_contract_sha256 =
+            feature_contract_sha256(),
+        .fit = fit.manifest,
+        .check = check.manifest,
+    };
+}
+
+CompleteBuild construct_complete(
+    const std::vector<schedule_data::SourceGame>& fit_schedule,
+    const std::vector<schedule_data::SourceGame>& check_schedule,
+    const std::shared_ptr<const LearnedModel>& parent,
+    const integrity::RegularFileSnapshot& executable,
+    std::string_view producer_commit) {
+    require_parent_identity(parent);
+    SplitBuild fit =
+        construct_split(
+            schedule_data::Split::Fit,
+            fit_schedule, parent);
+    require_parent_identity(parent);
+    SplitBuild check =
+        construct_split(
+            schedule_data::Split::Check,
+            check_schedule, parent);
+    require_parent_identity(parent);
+
+    CompleteBuild result;
+    result.bundle.manifest =
+        base_manifest(
+            executable, producer_commit,
+            fit, check);
+    result.bundle.fit_census =
+        std::move(fit.census);
+    result.bundle.fit_rows =
+        std::move(fit.selected);
+    result.bundle.check_census =
+        std::move(check.census);
+    result.bundle.check_rows =
+        std::move(check.selected);
+    result.fit = fit.support;
+    result.check = check.support;
+    // Full semantic validation happens before returning a construction.
+    static_cast<void>(
+        bundle::encode(result.bundle));
+    return result;
+}
+
+} // namespace
+
+const collection::CollectionSpec& collection_spec() {
+    static constexpr collection::CollectionSpec spec{
+        .owner_information_schema =
+            kOwnerInformationSchema,
+        .stable_root_schema = kStableRootSchema,
+        .hidden_seed_namespace =
+            bundle::kHiddenNamespace,
+        .hidden_seed_scope = kHiddenSeedScope,
+        .dominance_seed_namespace =
+            bundle::kDominanceNamespace,
+        .dominance_seed_scope =
+            kDominanceSeedScope,
+        .maximum_legal_actions =
+            collection::kMaximumLegalActions,
+        .maximum_roots_per_owner_game =
+            collection::kMaximumRootsPerOwnerGame,
+        .dominance_worlds =
+            collection::kDominanceWorlds,
+    };
+    return spec;
+}
+
+std::string collection_spec_contract_bytes() {
+    const collection::CollectionSpec& spec =
+        collection_spec();
+    return
+        "old-school-fq4-priority-dev-collection-spec-v1\n"
+        "owner-information-schema=" +
+        std::string(spec.owner_information_schema) + "\n" +
+        "stable-root-schema=" +
+        std::string(spec.stable_root_schema) + "\n" +
+        "replay-manifest-schema=" +
+        std::string(kReplayManifestSchema) + "\n" +
+        "hidden-seed-namespace=" +
+        std::to_string(spec.hidden_seed_namespace) + "\n" +
+        "hidden-seed-scope=" +
+        std::string(spec.hidden_seed_scope) + "\n" +
+        "dominance-seed-namespace=" +
+        std::to_string(spec.dominance_seed_namespace) + "\n" +
+        "dominance-seed-scope=" +
+        std::string(spec.dominance_seed_scope) + "\n" +
+        "maximum-legal-actions=" +
+        std::to_string(spec.maximum_legal_actions) + "\n" +
+        "maximum-roots-per-owner-game=" +
+        std::to_string(
+            spec.maximum_roots_per_owner_game) + "\n" +
+        "dominance-worlds=" +
+        std::to_string(spec.dominance_worlds) + "\n";
+}
+
+bundle::Hash256 collection_spec_contract_sha256() {
+    const bundle::Hash256 result =
+        bundle::sha256(
+            collection_spec_contract_bytes());
+    if (result !=
+        bundle::parse_sha256(
+            bundle::kCollectionSpecSha256)) {
+        throw std::logic_error(
+            "FQ4 collection-spec bytes drifted");
+    }
+    return result;
+}
+
+SchedulePreflight preflight_schedules(
+    const std::vector<schedule_data::SourceGame>& fit,
+    const std::vector<schedule_data::SourceGame>& check) {
+    SchedulePreflight result;
+    const auto record_failure =
+        [&](std::string message) {
+            result.failures.push_back(
+                std::move(message));
+        };
+    try {
+        const std::string fit_bytes =
+            schedule_data::serialize_source_schedule(
+                fit);
+        const std::string check_bytes =
+            schedule_data::serialize_source_schedule(
+                check);
+        result.fit_sha256 =
+            integrity::sha256_string(fit_bytes);
+        result.check_sha256 =
+            integrity::sha256_string(check_bytes);
+        result.fit_balance =
+            schedule_data::audit_schedule_balance(fit);
+        result.check_balance =
+            schedule_data::audit_schedule_balance(check);
+
+        if (fit_bytes.size() !=
+                schedule_data::
+                    kExpectedFitScheduleBytes ||
+            result.fit_sha256 !=
+                schedule_data::
+                    kExpectedFitScheduleSha256 ||
+            !result.fit_balance.exact) {
+            record_failure(
+                "FIT schedule identity or balance drifted");
+        }
+        if (check_bytes.size() !=
+                schedule_data::
+                    kExpectedCheckScheduleBytes ||
+            result.check_sha256 !=
+                schedule_data::
+                    kExpectedCheckScheduleSha256 ||
+            !result.check_balance.exact) {
+            record_failure(
+                "CHECK schedule identity or balance drifted");
+        }
+        if (result.fit_sha256 ==
+                kForbiddenHeldOutScheduleSha256 ||
+            result.check_sha256 ==
+                kForbiddenHeldOutScheduleSha256) {
+            record_failure(
+                "development schedule overlaps held-out identity");
+        }
+        std::set<std::uint64_t> fit_seeds;
+        std::set<std::uint64_t> check_seeds;
+        for (const auto& source : fit) {
+            if (source.split !=
+                    schedule_data::Split::Fit ||
+                source.source_seed_base !=
+                    schedule_data::kFitSeedBase ||
+                forbidden_seed(source.source_seed_base) ||
+                forbidden_seed(source.game_seed) ||
+                !fit_seeds.insert(
+                    source.game_seed).second) {
+                record_failure(
+                    "FIT schedule row is malformed or forbidden");
+                break;
+            }
+        }
+        for (const auto& source : check) {
+            if (source.split !=
+                    schedule_data::Split::Check ||
+                source.source_seed_base !=
+                    schedule_data::kCheckSeedBase ||
+                forbidden_seed(source.source_seed_base) ||
+                forbidden_seed(source.game_seed) ||
+                !check_seeds.insert(
+                    source.game_seed).second) {
+                record_failure(
+                    "CHECK schedule row is malformed or forbidden");
+                break;
+            }
+        }
+        std::vector<std::uint64_t> overlap;
+        std::set_intersection(
+            fit_seeds.begin(), fit_seeds.end(),
+            check_seeds.begin(), check_seeds.end(),
+            std::back_inserter(overlap));
+        if (!overlap.empty()) {
+            record_failure(
+                "FIT and CHECK game seeds overlap");
+        }
+        if (schedule_data::kGenerationNamespace ==
+                kForbiddenHeldOutGenerationNamespace ||
+            bundle::kHiddenNamespace ==
+                kForbiddenHeldOutHiddenNamespace ||
+            bundle::kDominanceNamespace ==
+                kForbiddenHeldOutDominanceNamespace ||
+            schedule_data::kGenerationNamespace ==
+                bundle::kHiddenNamespace ||
+            schedule_data::kGenerationNamespace ==
+                bundle::kDominanceNamespace ||
+            bundle::kHiddenNamespace ==
+                bundle::kDominanceNamespace ||
+            !collection_spec().valid()) {
+            record_failure(
+                "development collection namespaces are not isolated");
+        }
+    } catch (const std::exception& error) {
+        record_failure(
+            std::string("schedule preflight threw: ") +
+            error.what());
+    }
+    result.exact = result.failures.empty();
+    return result;
+}
+
+std::string feature_contract_bytes() {
+    return
+        std::string(bundle::kFeatureSchema) + "\n" +
+        "wire=binary64-bits\n" +
+        "card-count=26\n" +
+        "state-scalar-count=50\n" +
+        "state-card-plane-count=24\n" +
+        "policy-decision-one-hot-count=4\n" +
+        "policy-phase-one-hot-count=7\n" +
+        "policy-verb-one-hot-count=8\n" +
+        "policy-card-plane-count=6\n" +
+        "policy-card-plane-order=source,target,"
+        "selected-attackers,assigned-blockers,"
+        "relevant-blockers,ordered-blockers\n" +
+        "policy-scalar-count=44\n" +
+        "layout=state,decision,phase,verb,"
+        "policy-card-planes,policy-scalars\n" +
+        "feature-count=893\n";
+}
+
+bundle::Hash256 feature_contract_sha256() {
+    const bundle::Hash256 result =
+        bundle::sha256(
+            feature_contract_bytes());
+    if (result !=
+        bundle::parse_sha256(
+            bundle::kFeatureContractSha256)) {
+        throw std::logic_error(
+            "FQ4 feature-contract bytes drifted");
+    }
+    return result;
+}
+
+bundle::CensusRow make_census_row(
+    const collection::CanonicalRoot& root,
+    const collection::RobustDominance& dominance) {
+    const auto& manifest = root.manifest;
+    const std::size_t action_count =
+        manifest.canonical_descriptors.size();
+    if (!dominance.shape_valid ||
+        dominance.pass_index != manifest.pass_index ||
+        dominance.complete_world_counts.size() !=
+            action_count ||
+        dominance.strict_world_counts.size() !=
+            action_count ||
+        dominance.robustly_pass_dominated.size() !=
+            action_count ||
+        root.probe.candidates.size() != action_count ||
+        !root_matches_frozen_schedule(manifest) ||
+        manifest.owner_deck ==
+            manifest.opponent_deck ||
+        root.probe.stable_id != manifest.stable_id ||
+        root.probe.root_deck != manifest.owner_deck ||
+        root.probe.opponent_deck !=
+            manifest.opponent_deck ||
+        root.probe.root_player !=
+            manifest.locator.owner_seat ||
+        manifest.stable_id !=
+            collection::stable_root_id(
+                manifest.locator,
+                manifest
+                    .information_action_fingerprint,
+                kStableRootSchema)) {
+        throw std::invalid_argument(
+            "cannot encode malformed FQ4 census root");
+    }
+    for (std::size_t action = 0;
+         action < action_count; ++action) {
+        if (root.probe.candidates[action].descriptor !=
+            manifest.canonical_descriptors[action]) {
+            throw std::invalid_argument(
+                "cannot encode descriptor-drifted FQ4 census root");
+        }
+    }
+    bundle::CensusRow result{
+        .schedule_index =
+            narrow_u16(
+                manifest.locator.schedule_index,
+                "schedule index"),
+        .owner_seat =
+            narrow_u8(
+                manifest.locator.owner_seat,
+                "owner seat"),
+        .trace_ordinal =
+            narrow_u32(
+                manifest.locator.trace_ordinal,
+                "trace ordinal"),
+        .owner_deck =
+            narrow_u8(
+                deck_index(manifest.owner_deck),
+                "owner deck"),
+        .opponent_deck =
+            narrow_u8(
+                deck_index(manifest.opponent_deck),
+                "opponent deck"),
+        .stable_root_id =
+            bundle::parse_sha256(
+                manifest.stable_id),
+        .physical_game_sha256 =
+            bundle::sha256(
+                collection::physical_game_id(
+                    manifest.locator)),
+        .information_action_sha256 =
+            bundle::parse_sha256(
+                manifest
+                    .information_action_fingerprint),
+        .descriptor_set_sha256 =
+            bundle::descriptor_set_sha256(
+                manifest.canonical_descriptors),
+        .pass_index =
+            narrow_u8(
+                manifest.pass_index,
+                "Pass index"),
+    };
+    result.dominance.reserve(action_count);
+    for (std::size_t action = 0;
+         action < action_count; ++action) {
+        const std::size_t complete =
+            dominance.complete_world_counts[action];
+        const std::size_t strict =
+            dominance.strict_world_counts[action];
+        if (complete > bundle::kWorldCount ||
+            strict > complete ||
+            dominance.robustly_pass_dominated[action] !=
+                (action != manifest.pass_index &&
+                 complete == bundle::kWorldCount &&
+                 strict == bundle::kWorldCount) ||
+            (action == manifest.pass_index &&
+             (complete != 0 || strict != 0))) {
+            throw std::invalid_argument(
+                "cannot encode inconsistent FQ4 dominance counts");
+        }
+        result.dominance.push_back({
+            .complete = narrow_u8(
+                complete, "dominance complete count"),
+            .strict = narrow_u8(
+                strict, "dominance strict count"),
+        });
+    }
+    const bundle::Split split =
+        split_for(
+            split_for_seed_base(
+                manifest.locator
+                    .source_seed_base));
+    if (result.physical_game_sha256 !=
+            bundle::expected_physical_game_sha256(
+                split, result.schedule_index) ||
+        result.stable_root_id !=
+            bundle::expected_stable_root_sha256(
+                split, result.schedule_index,
+                result.owner_seat,
+                result.trace_ordinal,
+                result
+                    .information_action_sha256)) {
+        throw std::invalid_argument(
+            "collector and strict codec root identities disagree");
+    }
+    return result;
+}
+
+std::vector<bundle::SparseFeature>
+sparsify_priority_features(
+    const std::vector<double>& dense_features) {
+    if (dense_features.size() !=
+        bundle::kFeatureCount) {
+        throw std::invalid_argument(
+            "Priority feature vector has wrong dimension");
+    }
+    std::vector<bundle::SparseFeature> result;
+    result.reserve(dense_features.size());
+    for (std::size_t index = 0;
+         index < dense_features.size(); ++index) {
+        const double value = dense_features[index];
+        if (!std::isfinite(value)) {
+            throw std::invalid_argument(
+                "Priority feature vector is nonfinite");
+        }
+        const std::uint64_t bits =
+            std::bit_cast<std::uint64_t>(value);
+        if (bits == 0) {
+            continue;
+        }
+        result.push_back({
+            .index = narrow_u16(
+                index, "Priority feature index"),
+            .value_bits = bits,
+        });
+    }
+    return result;
+}
+
+SplitSupport summarize_support(
+    const std::vector<bundle::CensusRow>& census,
+    const std::vector<bundle::SelectedRow>& selected,
+    const std::vector<ParentWitness>& witnesses) {
+    SplitSupport result;
+    std::set<bundle::Hash256> census_ids;
+    std::set<bundle::Hash256> selected_ids;
+    std::set<bundle::Hash256> positive_ids;
+    for (const bundle::CensusRow& row : census) {
+        if (row.owner_deck >= kDeckCount ||
+            !census_ids.insert(
+                row.stable_root_id).second) {
+            return result;
+        }
+        ++result.census_by_deck[row.owner_deck];
+    }
+    for (const bundle::SelectedRow& row :
+         selected) {
+        if (row.census.owner_deck >= kDeckCount ||
+            !census_ids.contains(
+                row.census.stable_root_id) ||
+            !selected_ids.insert(
+                row.census.stable_root_id).second) {
+            return SplitSupport{};
+        }
+        const std::size_t deck =
+            row.census.owner_deck;
+        ++result.selected_by_deck[deck];
+        if ((row.roles &
+             static_cast<std::uint8_t>(
+                 bundle::Role::DominancePositive)) != 0) {
+            ++result.positive_by_deck[deck];
+            positive_ids.insert(
+                row.census.stable_root_id);
+        }
+        if ((row.roles &
+             static_cast<std::uint8_t>(
+                 bundle::Role::BackgroundControl)) != 0) {
+            ++result.background_by_deck[deck];
+        }
+    }
+
+    std::set<bundle::Hash256> high_confidence_ids;
+    std::set<bundle::Hash256> high_confidence_games;
+    std::set<std::size_t> high_confidence_decks;
+    for (const ParentWitness& witness :
+         witnesses) {
+        const std::size_t deck =
+            deck_index(witness.owner_deck);
+        if (!positive_ids.contains(
+                witness.stable_root_id) ||
+            !high_confidence_ids
+                 .insert(witness.stable_root_id)
+                 .second) {
+            return SplitSupport{};
+        }
+        if (witness.classification ==
+                collection::ParentClass::Class1 ||
+            witness.classification ==
+                collection::ParentClass::Class2) {
+            ++result.high_confidence_roots;
+            high_confidence_games.insert(
+                witness.physical_game_sha256);
+            high_confidence_decks.insert(deck);
+        }
+    }
+    result.high_confidence_games =
+        high_confidence_games.size();
+    result.high_confidence_decks =
+        high_confidence_decks.size();
+
+    result.coverage_met =
+        !census.empty() &&
+        census.size() <=
+            bundle::kMaximumCensusRowsPerSplit &&
+        !selected.empty() &&
+        selected.size() <=
+            bundle::kMaximumSelectedRowsPerSplit &&
+        std::all_of(
+            result.census_by_deck.begin(),
+            result.census_by_deck.end(),
+            [](std::size_t count) {
+                return count > 0 &&
+                       count <=
+                           bundle::
+                               kMaximumCensusRowsPerDeck;
+            }) &&
+        std::all_of(
+            result.selected_by_deck.begin(),
+            result.selected_by_deck.end(),
+            [](std::size_t count) {
+                return count > 0 &&
+                       count <=
+                           bundle::
+                               kMaximumRowsPerDeckAndSplit;
+            }) &&
+        std::all_of(
+            result.positive_by_deck.begin(),
+            result.positive_by_deck.end(),
+            [](std::size_t count) {
+                return count > 0 &&
+                       count <=
+                           bundle::
+                               kMaximumRowsPerDeckAndSplit;
+            }) &&
+        std::all_of(
+            result.background_by_deck.begin(),
+            result.background_by_deck.end(),
+            [](std::size_t count) {
+                return count == 1;
+            });
+    result.parent_error_floor_met =
+        result.high_confidence_roots >=
+            kMinimumHighConfidenceRoots &&
+        result.high_confidence_games >=
+            kMinimumHighConfidenceGames &&
+        result.high_confidence_decks >=
+            kMinimumHighConfidenceDecks;
+    return result;
+}
+
+bool complete_constructions_byte_identical(
+    std::string_view first,
+    std::string_view second) {
+    return first == second;
+}
+
+GenerationReport generate_and_publish(
+    const std::filesystem::path& executable_path,
+    std::string_view producer_commit) {
+    if (!canonical_lower_hex(producer_commit, 40) &&
+        !canonical_lower_hex(producer_commit, 64)) {
+        throw std::invalid_argument(
+            "FQ4 producer commit must be canonical lowercase "
+            "Git hexadecimal");
+    }
+
+    // This is the only game-free schedule opening point. Nothing below may
+    // load a model or construct a Game unless this exact preflight passes.
+    const auto fit_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Fit);
+    const auto check_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Check);
+    const SchedulePreflight preflight =
+        preflight_schedules(
+            fit_schedule, check_schedule);
+    if (!preflight.exact) {
+        fail(
+            preflight.failures.empty()
+                ? "schedule preflight failed without a reason"
+                : preflight.failures.front());
+    }
+    if (feature_contract_sha256() !=
+        bundle::parse_sha256(
+            bundle::kFeatureContractSha256)) {
+        fail("feature-contract preflight drifted");
+    }
+    if (collection_spec_contract_sha256() !=
+        bundle::parse_sha256(
+            bundle::kCollectionSpecSha256)) {
+        fail("collection-spec preflight drifted");
+    }
+
+    std::error_code artifact_status_error;
+    const auto artifact_status =
+        std::filesystem::symlink_status(
+            std::filesystem::path(
+                bundle::kArtifactPath),
+            artifact_status_error);
+    if (!artifact_status_error &&
+        std::filesystem::exists(artifact_status)) {
+        fail(
+            "fixed development artifact already exists; "
+            "replacement is forbidden");
+    }
+    if (artifact_status_error &&
+        artifact_status_error !=
+            std::errc::no_such_file_or_directory) {
+        fail(
+            "cannot preflight fixed development artifact path");
+    }
+
+    const integrity::RegularFileSnapshot executable_before =
+        integrity::snapshot_regular_file(
+            executable_path);
+    const integrity::RegularFileSnapshot parent_before =
+        integrity::snapshot_regular_file(
+            std::filesystem::path(
+                kParentArtifactPath));
+    if (parent_before.sha256 !=
+        bundle::kParentArtifactSha256) {
+        fail("immutable C16 artifact SHA-256 drifted");
+    }
+    const auto parent =
+        load_learned_value_challenger_artifact(
+            std::string(kParentArtifactPath),
+            kParentTrainingGames,
+            kParentTrainingSeed,
+            kParentGenerations)
+            .model();
+    require_parent_identity(parent);
+
+    CompleteBuild first =
+        construct_complete(
+            fit_schedule, check_schedule,
+            parent, executable_before,
+            producer_commit);
+    const std::string first_bytes =
+        bundle::encode(first.bundle);
+    CompleteBuild second =
+        construct_complete(
+            fit_schedule, check_schedule,
+            parent, executable_before,
+            producer_commit);
+    const std::string second_bytes =
+        bundle::encode(second.bundle);
+    if (!complete_constructions_byte_identical(
+            first_bytes, second_bytes) ||
+        first.fit != second.fit ||
+        first.check != second.check) {
+        fail(
+            "two complete constructions are not byte identical");
+    }
+
+    const integrity::RegularFileSnapshot parent_after =
+        integrity::snapshot_regular_file(
+            std::filesystem::path(
+                kParentArtifactPath));
+    const integrity::RegularFileSnapshot executable_after =
+        integrity::snapshot_regular_file(
+            executable_path);
+    if (parent_after != parent_before) {
+        fail("immutable C16 artifact changed during generation");
+    }
+    if (executable_after != executable_before) {
+        fail("producer executable changed during generation");
+    }
+    require_parent_identity(parent);
+
+    // The bundle implementation writes a same-directory temporary, fsyncs
+    // it, and links it into the sole fixed target without replacement.
+    bundle::publish_atomic_no_replace(first.bundle);
+    const integrity::RegularFileSnapshot published =
+        integrity::snapshot_regular_file(
+            std::filesystem::path(
+                bundle::kArtifactPath));
+    if (published.byte_size !=
+            first_bytes.size() ||
+        published.sha256 !=
+            integrity::sha256_string(
+                first_bytes)) {
+        fail("published artifact identity drifted");
+    }
+
+    return {
+        .artifact_bytes = first_bytes.size(),
+        .artifact_sha256 =
+            integrity::sha256_string(
+                first_bytes),
+        .fit = first.fit,
+        .check = first.check,
+        .source_games_per_construction =
+            2 * schedule_data::
+                    kPhysicalGamesPerSplit,
+        .complete_constructions = 2,
+        .source_game_executions =
+            4 * schedule_data::
+                    kPhysicalGamesPerSplit,
+        .scored_rows =
+            first.bundle.fit_rows.size() +
+            first.bundle.check_rows.size(),
+        .candidate_rollout_evaluations = 0,
+        .repeated_construction_bit_identical =
+            true,
+        .published = true,
+    };
+}
+
+} // namespace old_school::fq4_dev_generator

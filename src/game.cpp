@@ -21668,11 +21668,17 @@ LearnedActionSamples learned_priority_action_samples(
     result.sampled_worlds = worlds.size();
     const std::size_t expected_evaluations =
         checked_rollout_evaluations(candidates.size(), config);
-    result.q_samples.resize(candidates.size());
-    result.exact_priority_aggregate_scores.resize(
-        candidates.size());
     const std::size_t samples_per_action =
         config.worlds * config.rollouts_per_world;
+    result.q_samples.resize(candidates.size());
+    result.priority_shallow_prior_samples.resize(
+        candidates.size(),
+        std::vector<double>(samples_per_action));
+    result.priority_continuation_samples.resize(
+        candidates.size(),
+        std::vector<double>(samples_per_action));
+    result.exact_priority_aggregate_scores.resize(
+        candidates.size());
     struct PriorityEvaluation {
         double q_score = 0.0;
         double shallow_prior = 0.0;
@@ -21680,12 +21686,6 @@ LearnedActionSamples learned_priority_action_samples(
         bool terminal = false;
         std::optional<LearnedPriorityH0Boundary> h0_boundary;
     };
-    std::vector<std::vector<double>> shallow_priors(
-        candidates.size(),
-        std::vector<double>(samples_per_action));
-    std::vector<std::vector<double>> continuations(
-        candidates.size(),
-        std::vector<double>(samples_per_action));
     const auto evaluate =
         [&](std::size_t action_index, std::size_t world_index,
             std::size_t rollout_index)
@@ -21825,10 +21825,12 @@ LearnedActionSamples learned_priority_action_samples(
                         world_index *
                             config.rollouts_per_world +
                         rollout_index;
-                    shallow_priors[action_index][sample_index] =
-                        evaluation.shallow_prior;
-                    continuations[action_index][sample_index] =
-                        evaluation.continuation;
+                    result.priority_shallow_prior_samples
+                        [action_index][sample_index] =
+                            evaluation.shallow_prior;
+                    result.priority_continuation_samples
+                        [action_index][sample_index] =
+                            evaluation.continuation;
                     if (config.capture_priority_h0_boundaries) {
                         if (!evaluation.h0_boundary.has_value()) {
                             throw std::logic_error(
@@ -21890,12 +21892,12 @@ LearnedActionSamples learned_priority_action_samples(
                         result.q_samples[action_index]
                                         [sample_index] =
                             result_cell.q_score;
-                        shallow_priors[action_index]
-                                      [sample_index] =
-                            result_cell.shallow_prior;
-                        continuations[action_index]
-                                     [sample_index] =
-                            result_cell.continuation;
+                        result.priority_shallow_prior_samples
+                            [action_index][sample_index] =
+                                result_cell.shallow_prior;
+                        result.priority_continuation_samples
+                            [action_index][sample_index] =
+                                result_cell.continuation;
                         if (config.capture_priority_h0_boundaries) {
                             if (!result_cell.h0_boundary.has_value()) {
                                 throw std::logic_error(
@@ -21937,13 +21939,15 @@ LearnedActionSamples learned_priority_action_samples(
         LearnedValuePriorityScoreAggregate aggregate;
         if (config.blend_shallow_prior) {
             for (const double shallow_prior :
-                 shallow_priors[action_index]) {
+                 result.priority_shallow_prior_samples[
+                     action_index]) {
                 aggregate.add_shallow(shallow_prior);
             }
             aggregate.average_shallow(samples_per_action);
         }
         for (const double continuation :
-             continuations[action_index]) {
+             result.priority_continuation_samples[
+                 action_index]) {
             aggregate.add_continuation(continuation);
         }
         aggregate.average_continuations(

@@ -2076,6 +2076,99 @@ TEST(generic_priority_samples_use_common_worlds_and_hide_repartition) {
     CHECK(rejected_illegal);
 }
 
+TEST(priority_sample_trace_reconstructs_deployed_arithmetic_bit_exactly) {
+    const old_school::GameState state =
+        old_school::white_lock_plan_diagnostic_state();
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::white_control_deck(),
+        old_school::red_deck(),
+    };
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    const old_school::LearnedSearchConfig config = {
+        .seed = 0x4651345452414345ULL,
+        .worlds = 2,
+        .rollouts_per_world = 2,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .blend_shallow_prior = true,
+        .evaluation_threads = 4,
+    };
+    const auto samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            small_value_model(), config);
+    const std::size_t samples_per_action =
+        config.worlds * config.rollouts_per_world;
+    CHECK(samples.q_samples.size() == actions.size());
+    CHECK(samples.priority_shallow_prior_samples.size() ==
+          actions.size());
+    CHECK(samples.priority_continuation_samples.size() ==
+          actions.size());
+    CHECK(samples.exact_priority_aggregate_scores.size() ==
+          actions.size());
+    for (std::size_t action = 0; action < actions.size();
+         ++action) {
+        CHECK(samples.q_samples[action].size() ==
+              samples_per_action);
+        CHECK(samples.priority_shallow_prior_samples[action]
+                  .size() == samples_per_action);
+        CHECK(samples.priority_continuation_samples[action]
+                  .size() == samples_per_action);
+        double reconstructed_aggregate = 0.0;
+        for (std::size_t sample = 0;
+             sample < samples_per_action; ++sample) {
+            const double shallow =
+                samples.priority_shallow_prior_samples[action]
+                                                       [sample];
+            const double continuation =
+                samples.priority_continuation_samples[action]
+                                                    [sample];
+            const double continuation_weight =
+                static_cast<double>(samples_per_action);
+            const double reconstructed_q =
+                (shallow +
+                 continuation_weight * continuation) /
+                (continuation_weight + 1.0);
+            CHECK(std::bit_cast<std::uint64_t>(
+                      reconstructed_q) ==
+                  std::bit_cast<std::uint64_t>(
+                      samples.q_samples[action][sample]));
+            reconstructed_aggregate += shallow;
+        }
+        reconstructed_aggregate /=
+            static_cast<double>(samples_per_action);
+        for (const double continuation :
+             samples.priority_continuation_samples[action]) {
+            reconstructed_aggregate += continuation;
+        }
+        reconstructed_aggregate /=
+            static_cast<double>(samples_per_action + 1);
+        CHECK(std::bit_cast<std::uint64_t>(
+                  reconstructed_aggregate) ==
+              std::bit_cast<std::uint64_t>(
+                  samples.exact_priority_aggregate_scores[
+                      action]));
+    }
+
+    auto serial_config = config;
+    serial_config.evaluation_threads = 1;
+    const auto serial =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            small_value_model(), serial_config);
+    CHECK(serial.q_samples == samples.q_samples);
+    CHECK(serial.priority_shallow_prior_samples ==
+          samples.priority_shallow_prior_samples);
+    CHECK(serial.priority_continuation_samples ==
+          samples.priority_continuation_samples);
+    CHECK(serial.exact_priority_aggregate_scores ==
+          samples.exact_priority_aggregate_scores);
+}
+
 TEST(learned_model_fingerprint_binds_exact_frozen_weights) {
     const auto actor = small_actor_model();
     const auto repeated =

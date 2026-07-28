@@ -687,6 +687,70 @@ void test_neutral_tensor_repeat_uses_ieee_bits() {
         "hidden tensor repeat ignored signed-zero bit drift");
 }
 
+void test_unqualified_legacy_helpers_are_unambiguous() {
+    using namespace old_school::fq4_d1_field_gate;
+
+    const RootLocator locator{
+        .source_block = 0,
+        .source_seed_base = 790,
+        .schedule_index = 2,
+        .game_seed = 1234567,
+        .owner_seat = 0,
+        .trace_ordinal = 3,
+    };
+    expect(
+        physical_game_id(locator) ==
+            "source_seed_base=790\n"
+            "schedule_index=2\n",
+        "unqualified physical-game helper drifted");
+
+    const std::vector<RetentionCandidate> candidates{
+        {
+            .trace_ordinal = 1,
+            .information_action_fingerprint = "hash",
+            .information_action_bytes = "bytes",
+            .stable_id = "root",
+        },
+    };
+    expect(
+        retain_owner_game_roots(candidates).valid,
+        "unqualified retention helper drifted");
+
+    std::vector<DominanceWorldRow> worlds(
+        kDominanceWorlds);
+    for (auto& world : worlds) {
+        world = {
+            .pass_complete = true,
+            .candidate_complete = {true, true},
+            .orientations = {
+                dominance::Orientation::Incomparable,
+                dominance::Orientation::
+                    FirstDominatesSecond,
+            },
+        };
+    }
+    expect(
+        summarize_robust_dominance(0, 2, worlds)
+            .robustly_pass_dominated[1],
+        "unqualified dominance helper drifted");
+
+    const std::array<double, kDominanceWorlds>
+        differences{
+            0.1, 0.1, 0.1, 0.1,
+            0.1, 0.1, 0.1, 0.1,
+        };
+    const auto classification =
+        classify_parent(
+            class_input(0.6, 0.5, differences));
+    expect(
+        classification.classification ==
+                ParentClass::Class1 &&
+            parent_class_name(
+                classification.classification) ==
+                "Class 1",
+        "unqualified classification helper drifted");
+}
+
 } // namespace
 
 int main() {
@@ -732,6 +796,10 @@ int main() {
             {
                 "neutral tensors use IEEE repeat identity",
                 test_neutral_tensor_repeat_uses_ieee_bits,
+            },
+            {
+                "unqualified legacy helpers",
+                test_unqualified_legacy_helpers_are_unambiguous,
             },
         };
     std::size_t passed = 0;

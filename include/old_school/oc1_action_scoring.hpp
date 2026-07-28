@@ -149,6 +149,11 @@ struct DescriptorScore {
     // Immediate production selectors have no rollout samples and leave this
     // vector empty.
     std::vector<double> raw_samples;
+    // Priority search rows expose the exact components of raw_samples in the
+    // same world-major, rollout-major order. Binary reference search and
+    // immediate selectors leave both vectors empty.
+    std::vector<double> shallow_prior_samples;
+    std::vector<double> continuation_samples;
     // Priority search exposes the engine's exact aggregate score, preserving
     // the deployed shallow-then-continuation arithmetic. Binary reference
     // search uses the arithmetic mean of raw_samples. Immediate selectors

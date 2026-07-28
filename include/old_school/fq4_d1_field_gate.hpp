@@ -1,6 +1,7 @@
 #pragma once
 
 #include "old_school/fq0_dominance.hpp"
+#include "old_school/fq4_priority_collection.hpp"
 #include "old_school/game.hpp"
 #include "old_school/learned_iteration.hpp"
 #include "old_school/oc1_action_scoring.hpp"
@@ -42,9 +43,12 @@ inline constexpr std::size_t kExpectedScheduleBytes = 4197;
 inline constexpr std::string_view kExpectedScheduleSha256 =
     "33f3826615e9c66b6c5c0c137e6c17bc0b53fbe967804e7b39dc8a53143fb28a";
 inline constexpr std::size_t kSourceTurnCap = 128;
-inline constexpr std::size_t kMaximumLegalActions = 32;
-inline constexpr std::size_t kMaximumRootsPerOwnerGame = 16;
-inline constexpr std::size_t kDominanceWorlds = 8;
+inline constexpr std::size_t kMaximumLegalActions =
+    fq4_priority_collection::kMaximumLegalActions;
+inline constexpr std::size_t kMaximumRootsPerOwnerGame =
+    fq4_priority_collection::kMaximumRootsPerOwnerGame;
+inline constexpr std::size_t kDominanceWorlds =
+    fq4_priority_collection::kDominanceWorlds;
 inline constexpr std::size_t kExpectedPhysicalGames =
     kSourceSeedBases.size() *
     learned_iteration::kBalancedScheduleGames;
@@ -62,20 +66,7 @@ inline constexpr std::size_t kMinimumHighConfidenceDecks = 2;
 inline constexpr double kParentResidualWeight = 0.10;
 inline constexpr std::size_t kWatchdogSeconds = 180;
 
-struct SourceGame {
-    std::size_t source_block = 0;
-    std::uint64_t source_seed_base = 0;
-    std::size_t schedule_index = 0;
-    std::size_t pairing_index = 0;
-    std::array<DeckId, 2> seat_decks{
-        DeckId::Green,
-        DeckId::Red,
-    };
-    std::size_t starting_player = 0;
-    std::uint64_t game_seed = 0;
-
-    bool operator==(const SourceGame&) const = default;
-};
+using SourceGame = fq4_priority_collection::SourceGame;
 
 struct ScheduleBalance {
     std::size_t physical_games = 0;
@@ -97,62 +88,22 @@ std::string source_schedule_sha256();
 ScheduleBalance audit_schedule_balance(
     const std::vector<SourceGame>& schedule);
 
-struct RootLocator {
-    std::size_t source_block = 0;
-    std::uint64_t source_seed_base = 0;
-    std::size_t schedule_index = 0;
-    std::uint64_t game_seed = 0;
-    std::size_t owner_seat = 0;
-    std::size_t trace_ordinal = 0;
+using RootLocator = fq4_priority_collection::RootLocator;
 
-    bool operator==(const RootLocator&) const = default;
-};
-
-std::string physical_game_id(const RootLocator& locator);
+using fq4_priority_collection::physical_game_id;
 std::string stable_root_id(
     const RootLocator& locator,
     std::string_view information_action_fingerprint);
 
-struct RetentionCandidate {
-    std::size_t trace_ordinal = 0;
-    std::string information_action_fingerprint;
-    // Exact owner-safe observation/context/action bytes. They are retained
-    // so a hypothetical SHA-256 collision fails closed instead of silently
-    // becoming a duplicate.
-    std::string information_action_bytes;
-    std::string stable_id;
+using RetentionCandidate =
+    fq4_priority_collection::RetentionCandidate;
+using RetentionResult =
+    fq4_priority_collection::RetentionResult;
 
-    bool operator==(const RetentionCandidate&) const = default;
-};
+using fq4_priority_collection::retain_owner_game_roots;
 
-struct RetentionResult {
-    // Indices refer to the caller's candidate vector. The first occurrence
-    // of an information/action fingerprint is the deterministic dedupe
-    // representative.
-    std::vector<std::size_t> unique_input_indices;
-    std::vector<std::size_t> retained_input_indices;
-    std::size_t duplicate_count = 0;
-    std::size_t hash_collision_count = 0;
-    bool valid = false;
-
-    bool operator==(const RetentionResult&) const = default;
-};
-
-RetentionResult retain_owner_game_roots(
-    const std::vector<RetentionCandidate>& candidates,
-    std::size_t cap = kMaximumRootsPerOwnerGame);
-
-struct ReplayRootManifest {
-    RootLocator locator;
-    DeckId owner_deck = DeckId::Green;
-    DeckId opponent_deck = DeckId::Red;
-    std::string stable_id;
-    std::string information_action_fingerprint;
-    std::vector<std::string> canonical_descriptors;
-    std::size_t pass_index = 0;
-
-    bool operator==(const ReplayRootManifest&) const = default;
-};
+using ReplayRootManifest =
+    fq4_priority_collection::ReplayRootManifest;
 
 bool validate_replay_manifest(
     const std::vector<ReplayRootManifest>& roots);
@@ -161,123 +112,32 @@ std::string serialize_replay_manifest(
 std::string replay_manifest_sha256(
     const std::vector<ReplayRootManifest>& roots);
 
-struct DominanceWorldRow {
-    bool pass_complete = false;
-    std::vector<bool> candidate_complete;
-    // Row i compares Pass (first) against candidate i (second).
-    std::vector<fq0_dominance::Orientation> orientations;
-
-    bool operator==(const DominanceWorldRow&) const = default;
-};
-
-struct RobustDominance {
-    std::size_t pass_index = 0;
-    std::vector<std::size_t> strict_world_counts;
-    std::vector<bool> robustly_pass_dominated;
-    std::size_t complete_comparisons = 0;
-    std::size_t transition_count = 0;
-    bool shape_valid = false;
-
-    bool any_dominated() const;
-    bool operator==(const RobustDominance&) const = default;
-};
+using DominanceWorldRow =
+    fq4_priority_collection::DominanceWorldRow;
+using RobustDominance =
+    fq4_priority_collection::RobustDominance;
 
 // Incomplete and incomparable rows remain nondominated. Shape errors are
 // infrastructure failures and return shape_valid=false.
-RobustDominance summarize_robust_dominance(
-    std::size_t pass_index, std::size_t action_count,
-    const std::vector<DominanceWorldRow>& worlds);
+using fq4_priority_collection::summarize_robust_dominance;
 
-enum class ParentClass : std::uint8_t {
-    Safe,
-    Class1,
-    Class2,
-    Class3,
-    Invalid,
-};
+using ParentClass = fq4_priority_collection::ParentClass;
 
-std::string_view parent_class_name(ParentClass classification);
+using fq4_priority_collection::parent_class_name;
 
-struct ParentClassInput {
-    std::vector<std::string> canonical_descriptors;
-    std::vector<double> base_scores;
-    std::vector<double> combined_scores;
-    std::vector<std::vector<double>> base_samples;
-    std::vector<bool> robustly_pass_dominated;
+using ParentClassInput =
+    fq4_priority_collection::ParentClassInput;
+using ParentClassResult =
+    fq4_priority_collection::ParentClassResult;
 
-    bool operator==(const ParentClassInput&) const = default;
-};
+using fq4_priority_collection::classify_parent;
 
-struct ParentClassResult {
-    ParentClass classification = ParentClass::Invalid;
-    std::size_t best_dominated_index = 0;
-    std::size_t best_nondominated_index = 0;
-    double margin = 0.0;
-    double paired_standard_error = 0.0;
-    double sigma = 0.0;
-    bool valid = false;
-
-    bool high_confidence_unsafe() const;
-    bool operator==(const ParentClassResult&) const = default;
-};
-
-ParentClassResult classify_parent(
-    const ParentClassInput& input);
-
-struct RootCounts {
-    std::size_t raw = 0;
-    // Ordered, exclusive accounting:
-    // raw = malformed + trivial + over_cap + eligible
-    // eligible = duplicate + unique
-    // unique = retained + cap_dropped
-    // nontrivial = over_cap + eligible
-    std::size_t nontrivial = 0;
-    std::size_t malformed = 0;
-    std::size_t trivial = 0;
-    std::size_t over_cap = 0;
-    std::size_t eligible = 0;
-    std::size_t duplicate = 0;
-    std::size_t unique = 0;
-    std::size_t retained = 0;
-    std::size_t cap_dropped = 0;
-    std::size_t dominance_positive = 0;
-    std::array<std::size_t, 4> parent_classes{};
-
-    RootCounts& operator+=(const RootCounts& other);
-    bool terminal_cross_sums_valid() const;
-    bool operator==(const RootCounts&) const = default;
-};
-
-struct ProductionAccounting {
-    std::size_t score_calls = 0;
-    std::size_t scored_actions = 0;
-    std::size_t sampled_worlds = 0;
-    std::size_t rollout_evaluations = 0;
-    std::size_t terminal_evaluations = 0;
-    std::size_t bootstrapped_evaluations = 0;
-    std::size_t dominance_transitions = 0;
-
-    ProductionAccounting& operator+=(
-        const ProductionAccounting& other);
-    bool valid() const;
-    bool operator==(const ProductionAccounting&) const = default;
-};
-
-struct GameCensus {
-    SourceGame source;
-    std::array<RootCounts, 2> owners;
-
-    bool operator==(const GameCensus&) const = default;
-};
-
-struct DeckGameCoverage {
-    std::size_t owner_games = 0;
-    std::size_t games_with_raw = 0;
-    std::size_t games_with_retained = 0;
-    std::size_t games_with_dominance_positive = 0;
-
-    bool operator==(const DeckGameCoverage&) const = default;
-};
+using RootCounts = fq4_priority_collection::RootCounts;
+using ProductionAccounting =
+    fq4_priority_collection::ProductionAccounting;
+using GameCensus = fq4_priority_collection::GameCensus;
+using DeckGameCoverage =
+    fq4_priority_collection::DeckGameCoverage;
 
 struct ScoredRoot {
     ReplayRootManifest manifest;

@@ -43,6 +43,19 @@ bool bit_identical(double first, double second) {
            std::bit_cast<std::uint64_t>(second);
 }
 
+bool bit_identical(const std::vector<double>& first,
+                   const std::vector<double>& second) {
+    if (first.size() != second.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < first.size(); ++index) {
+        if (!bit_identical(first[index], second[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::shared_ptr<const old_school::LearnedModel> test_model() {
     static const auto model =
         old_school::train_learned_value_champion(
@@ -336,6 +349,9 @@ void test_reference_dispatch_mapping_and_accounting() {
         expect(mapped.raw_samples ==
                    attack_direct.q_samples[branch],
                "Attack Skip/Include row mapping is wrong");
+        expect(mapped.shallow_prior_samples.empty() &&
+                   mapped.continuation_samples.empty(),
+               "binary Attack invented Priority trace components");
     }
 
     const probes::DecisionProbe block = block_probe();
@@ -359,6 +375,9 @@ void test_reference_dispatch_mapping_and_accounting() {
         expect(mapped.raw_samples ==
                    block_direct.q_samples[branch],
                "Block No Block/Block row mapping is wrong");
+        expect(mapped.shallow_prior_samples.empty() &&
+                   mapped.continuation_samples.empty(),
+               "binary Block invented Priority trace components");
     }
 }
 
@@ -506,9 +525,13 @@ void test_production_priority_and_exact_tie_support() {
             direct_config(score));
     expect(direct.q_samples.size() ==
                    canonical.candidates.size() &&
+               direct.priority_shallow_prior_samples.size() ==
+                   canonical.candidates.size() &&
+               direct.priority_continuation_samples.size() ==
+                   canonical.candidates.size() &&
                direct.exact_priority_aggregate_scores.size() ==
                    canonical.candidates.size(),
-           "direct production Priority row/aggregate count is "
+           "direct production Priority trace/aggregate count is "
            "wrong");
     bool distinguished_old_row_mean = false;
     std::vector<scoring::DescriptorScore> exact_actions;
@@ -522,6 +545,49 @@ void test_production_priority_and_exact_tie_support() {
                    direct.q_samples[action],
                "production Priority raw samples differ from "
                "the direct sampler");
+        expect(bit_identical(
+                   mapped.shallow_prior_samples,
+                   direct.priority_shallow_prior_samples[action]) &&
+                   bit_identical(
+                       mapped.continuation_samples,
+                       direct.priority_continuation_samples[action]),
+               "production Priority components differ from "
+               "the direct sampler");
+        expect(mapped.raw_samples.size() ==
+                   mapped.shallow_prior_samples.size() &&
+                   mapped.raw_samples.size() ==
+                       mapped.continuation_samples.size(),
+               "production Priority component widths are wrong");
+        const double continuation_weight =
+            static_cast<double>(mapped.raw_samples.size());
+        double reconstructed_aggregate = 0.0;
+        for (std::size_t sample = 0;
+             sample < mapped.raw_samples.size(); ++sample) {
+            const double reconstructed_q =
+                (mapped.shallow_prior_samples[sample] +
+                 continuation_weight *
+                     mapped.continuation_samples[sample]) /
+                (continuation_weight + 1.0);
+            expect(bit_identical(
+                       mapped.raw_samples[sample],
+                       reconstructed_q),
+                   "production Priority Q sample does not "
+                   "bit-match its deployed blend");
+            reconstructed_aggregate +=
+                mapped.shallow_prior_samples[sample];
+        }
+        reconstructed_aggregate /= continuation_weight;
+        for (const double continuation :
+             mapped.continuation_samples) {
+            reconstructed_aggregate += continuation;
+        }
+        reconstructed_aggregate /=
+            continuation_weight + 1.0;
+        expect(bit_identical(
+                   mapped.raw_score,
+                   reconstructed_aggregate),
+               "production Priority aggregate is not bit-exactly "
+               "reconstructible in deployed order");
         expect(bit_identical(
                    mapped.raw_score,
                    direct.exact_priority_aggregate_scores[action]),

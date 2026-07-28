@@ -845,6 +845,15 @@ struct LearnedActionSamples {
     // flattened world-major, then rollout-major, and are paired across every
     // candidate.
     std::vector<std::vector<double>> q_samples;
+    // Priority-only components of q_samples in the exact same outer and
+    // inner order. Together they expose the deployed blend inputs without
+    // changing its arithmetic; an optional action-wide Priority residual is
+    // still reflected in q_samples separately. Binary Attack and Block
+    // samplers leave both empty.
+    std::vector<std::vector<double>>
+        priority_shallow_prior_samples;
+    std::vector<std::vector<double>>
+        priority_continuation_samples;
     // Priority-only aggregate scores, in caller candidate order. These
     // reproduce the deployed Learned Value arithmetic exactly: aggregate
     // the shallow observations first, then the continuation observations,

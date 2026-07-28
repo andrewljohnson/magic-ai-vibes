@@ -14642,6 +14642,83 @@ This is infrastructure evidence only and licenses the seed-agnostic collector
 implementation; neither split has opened a game and no strength evidence
 exists.
 
+FQ4-DEV0 generator implementation freeze, completed 2026-07-28 04:01 PDT:
+**implementation GO; the current pre-commit executable remains unlicensed for
+no-argument generation**. No FIT/CHECK game was opened and the fixed artifact
+remains absent.
+
+The implementation now separates three layers:
+
+- a seed-neutral collector shared with the unchanged P0 compatibility
+  wrapper;
+- a game-free strict five-section codec/loader; and
+- a fixed-coordinate generator that performs complete chronological
+  retention and all K8 dominance work before blind selection or the first
+  parent score, constructs the entire bundle twice, and publishes only
+  byte-identical bytes through atomic no-replace.
+
+Independent review found three release-blocking seams before any development
+seed was opened. First, the original codec treated production `raw_score` as
+the arithmetic mean of the eight Q samples, but the deployed selector averages
+the eight shallow observations first, adds the eight continuations
+sequentially, then divides by nine. `ActionRow` therefore now stores the exact
+K8 raw Q, shallow-prior, and continuation binary64 traces. The isolated loader
+reconstructs every Q cell and the deployed aggregate in exact operation order.
+An independent 1-ULP adversarial case accepts only the deployed order and
+rejects the naïve mean. Second, the manifest originally omitted several
+collection scopes. It now binds the LF-final portable collection contract
+covering owner-information/stable-root/replay schemas, both seed namespaces
+and scopes, action/root limits, and eight dominance worlds; its independently
+reproduced SHA-256 is
+`581c23222e6e0abe84c3c8bb2733ab5ecf0ea8e580f3698511eb8ab33682ff3a`.
+Third, the ordinary shared-object rule left the production main without a
+commit identity. The Makefile now builds a dedicated main object keyed by the
+exact Git HEAD, statically rejects a noncanonical 40/64-digit lowercase
+commit, and mechanically checks the embedded commit, fallback absence, and
+held-out source/link/symbol firewalls. Because the current source is not yet
+committed, that mechanism correctly leaves the existing binary unlicensed;
+it must be rebuilt from the freeze commit before execution review.
+
+The portable feature contract is 450 bytes with SHA-256
+`240c91d19bb55279d7cbc58e64f4fddaef8da4248a089de8bc6e4cf96708a4f4`.
+The synthetic bundle wire golden is
+`6d955fc5262bb290e37eaa13518b744dae70ef1177ddc2fb8e8243baf8324aa3`.
+Focused release checks passed: Priority math **5/5**, collector **9/9**,
+bundle **9/9**, generator **7/7**, production action scoring **7/7**, P0
+compatibility **11/11**, and engine **169/169**. Focused
+AddressSanitizer/UndefinedBehaviorSanitizer checks passed for collector
+**9/9**, bundle **9/9**, generator **7/7**, and production scoring **7/7**.
+The bundle reviewer exhaustively flipped every bit in its 9,860-byte
+synthetic wire image and observed zero accepted mutations; the codec object
+has no game, P0, D1, model, or hidden-state linkage.
+
+Exact repository gate:
+
+```sh
+/usr/bin/time -p make -j4 test
+# real 317.19 user 690.26 sys 17.75
+```
+
+It passed engine **169/169**, learned iteration **27/27**, probes **57/57**,
+probe metrics **11/11**, probe runner **33/33**, every historical audit and
+FQ0/FQ4 suite including the new collector/bundle/generator tests, web bridge
+**18/18**, web **106/106**, certification **48/48**, CLI/capture/clean/
+incremental contracts, and the representative simulator smoke.
+`make test-build-graph`, `git diff --check`, the parent artifact identity
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+and fixed-artifact absence also passed. Two independent final source reviews
+returned semantic GO.
+
+Decision: accept this implementation for a commit-and-review freeze only.
+This supplies no model-strength or speed evidence yet. Required next action is
+to commit the complete Makefile/include/src/tests closure, rebuild so the
+embedded producer commit equals the new clean HEAD, rerun focused,
+sanitizer, full, provenance, firewall, parent-hash, and artifact-absence
+checks, obtain independent execution GO, then invoke the fixed no-argument
+generator exactly once. `REVIEW.md` was reread through its newest 03:59 cycle
+before this record; it reported the same uncommitted DEV0 state and no
+conflicting critique.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
