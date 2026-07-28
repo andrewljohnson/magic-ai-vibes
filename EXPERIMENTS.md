@@ -15953,6 +15953,157 @@ entry independently verifies the preceding DEV2 and workload-report commits
 through the full repository gate, identifies this confirmation and the
 coverage harvest as the next events, and contains no conflicting result.
 
+##### FQ4-DEV4 frozen ordinary-decision coverage census declaration
+
+Declared 2026-07-28 before reconstructing any source game or observing any
+new coverage count. FQ4-DEV3 established that the existing selected corpus
+cannot support a stack-active gate: every Green, Red, and RU Aggro repair is
+stack-empty, while the selected background has only one ordinary root per
+deck and split. The next descriptive question is whether the already-frozen
+DEV1 trajectories contain enough unselected, stack-empty, dominance-negative
+Priority decisions to supply a deck-balanced neutral behavior-preservation
+supplement.
+
+This census opens no new stochastic coordinate. Reuse exactly the published
+DEV1 FIT/CHECK schedules, source seeds, C16 Value-mirror source policy,
+K8/H4/R1 scoring recipe, retention rule, hidden-repartition control,
+dominance operator, feature contract, and parent artifact. Run one complete
+320-source-game reconstruction, not a second independent construction. Before
+accepting any count, require the reconstructed FIT and CHECK census rows,
+selected scored rows, split manifests, and all scientific hashes to equal the
+immutable 2,250,909-byte bundle `0911fc2e...59df` exactly. Snapshot the parent
+and published bundle before and after. Any mismatch voids the census.
+
+For every split and owner deck, report aggregate-only counts for:
+
+- all retained roots, options, and distinct physical games;
+- dominance-positive roots/options divided into stack-empty and stack-active;
+- existing selected background roots/options divided the same way;
+- unselected dominance-negative roots/options divided into stack-empty and
+  stack-active;
+- within the stack-empty unselected dominance-negative stratum, first/second
+  main versus other-phase roots/options and distinct physical games; and
+- eligible-game counts by schedule block, opponent deck, and the owner's
+  seat-by-play/draw quadrant, plus whether every block admits an eight-game
+  subset containing exactly two games from each of the four opponent decks
+  and exactly two games from each of the four owner quadrants. The exact
+  balanced source schedule has at most one owner perspective in each
+  opponent-by-quadrant cell, so every eligible matrix must be binary; a count
+  above one is an infrastructure failure, not extra capacity.
+
+Stack state must agree both with the public `GameState` and action-invariant
+neutral feature 20 (`stack.size()/5.0`) on every reconstructed row. Phase is
+rules-level public context only. The report may contain no root ID,
+descriptor, card, hand, state, outcome, selected action, per-root score, or
+candidate field. It must report zero fits, candidate rollouts, and gameplay
+evaluation seeds; the 192 frozen parent score calls needed to reproduce the
+published selected sections are reconstruction accounting, not a new
+candidate.
+
+Prospective capacity rule: a neutral supplement is licensed only if every
+split/deck/block cell admits the balanced eight-game subset above. That yields
+exactly 32 distinct physical games per split and deck, with eight from each
+schedule block, eight against each opponent deck, and eight from each owner
+seat-by-play/draw quadrant. Matching the sparse selected-positive counts is
+explicitly rejected as insufficient coverage: it would leave Red with only
+four FIT and five CHECK anchors.
+
+Eligibility is fixed before the counts: stack empty, dominance negative, not
+one of the existing 192 selected stable roots, and nontrivial by the frozen
+collector. If capacity passes, the later selection will choose one
+representative per eligible physical game by minimum domain-separated
+SHA-256 rank over its eligible stable-root IDs. Within each block it will
+enumerate all balanced eight-game subsets and choose the lexicographically
+minimum sorted tuple under a separate domain-separated game rank binding
+split, deck, physical-game digest, and representative stable-root ID. The two
+literal rank domains and their byte framing must be frozen before selection.
+This avoids both first-chronological early-turn bias and repeated-block
+schedule aliasing while remaining blind to parent scores, outcomes, chosen
+actions, descriptors/cards, phase, and every candidate. Failure in any one of
+the 40 split/deck/block cells closes this coordinate; no smaller quota,
+relaxed balance, or replacement seed may be chosen after seeing the counts.
+
+This declaration licenses only implementation, synthetic/adversarial tests,
+one exact descriptive reconstruction, and recording its immutable counts. It
+does not license a fit, model artifact, or gameplay seed. After the counts are
+known, a separate declaration must freeze the neutral artifact, exact C16
+behavior target, FIT-only update boundary, and conjunctive positive-repair
+plus neutral-drift gate before any challenger exists. `REVIEW.md` was reread
+through its newest 07:35 addendum before this declaration; it explicitly
+names broader stack-empty coverage as the next event and contains no
+conflicting result. It was reread again through its 07:44 cycle after the
+hash-ranked selection correction; that entry independently endorses the
+frozen-reconstruction, aggregate-only, phase-stratified census and keeps all
+gameplay seeds sealed.
+
+FQ4-DEV4 implementation qualification, completed before the production
+reconstruction: the fixed no-argument tool reuses the publisher's exact
+`construct_split` path once per frozen split while the retained canonical
+roots, hidden clones, dominance labels, and neutral features are live. It
+then requires both complete census sections, all 192 selected scored rows,
+and both scientific split manifests to equal the published bundle. Top-level
+producer commit/executable bytes are intentionally not compared because this
+is a different executable; every source-derived scientific field is.
+
+The aggregate adapter enforces action-invariant feature 20 against the public
+stack size, valid public phase, unique stable roots, consistent opaque
+physical-game strata, exact roles, and the frozen binary
+opponent-by-seat/play schedule cells. Its capacity predicate is the exact
+small bipartite b-matching declared above. The report pins
+182 selected-positive plus ten selected-background rows, excludes all 192
+from eligibility, and separately reports frozen-parent score calls, actions,
+worlds, rollouts, terminal leaves, and bootstrap leaves. It has no fit,
+candidate-rollout, or gameplay-evaluation coordinate.
+
+```sh
+make -j4 test-fq4-dev-coverage-census test-fq4-dev-generator
+# coverage 5/5; generator 8/8
+
+make -j4 BUILD_DIR=build-fq4-dev4-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -fno-omit-frame-pointer \
+  -fsanitize=address,undefined -Wall -Wextra -Wpedantic -Werror' \
+  test-fq4-dev-coverage-census
+# coverage 5/5; no sanitizer diagnostic
+```
+
+Independent review initially returned NO-GO because the first synthetic
+success used an impossible multiplicity-two schedule cell and selected-row
+cross-sums could be forged. The final implementation uses binary 0/1
+2-regular matrices, adds one-cell/Hall-deficient failures, pins
+`182 + 10 = 192`, verifies a stack-empty background stays excluded, and
+checks bounded parent-scoring arithmetic. Final independent review returned
+GO. No no-argument census, source game, fit, candidate, or gameplay seed was
+opened during implementation or testing. The sanitizer build directory was
+removed after its passing run and `git diff --check` passed.
+
+The complete repository qualification then ran exactly:
+
+```sh
+make -j4 test
+```
+
+It exited zero. The engine suite passed 171/171; the new coverage suite
+passed 5/5 and the existing DEV generator suite passed 8/8 inside the full
+gate; every remaining C++/shell/CLI suite passed; the web build and all
+106 Node tests passed; and the certification Python suite passed 48/48.
+This was the milestone regression gate only: it did not invoke the
+no-argument census or open any source game, fit, candidate, or gameplay
+evaluation coordinate.
+
+After the repository gate and a commit/rebuild freeze, the sole next
+scientific command is:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev4-coverage-census
+```
+
+Expected runtime from half of DEV1's 606.06-second double construction is
+about 303 seconds; the 128-turn source cap is unchanged. Any nonzero exit,
+identity mismatch, malformed aggregate, or interrupted run is VOID rather
+than a capacity result. `REVIEW.md` was reread through its newest 07:59 cycle
+before this qualification; it observes only the in-flight implementation and
+keeps this frozen reconstruction as the next event.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after

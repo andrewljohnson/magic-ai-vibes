@@ -38,6 +38,8 @@ inline constexpr std::uint64_t kParentTrainingSeed = 424242;
 inline constexpr std::size_t kParentGenerations = 16;
 inline constexpr std::size_t kSourceTurnCap = 128;
 inline constexpr double kParentPriorityResidualWeight = 0.10;
+inline constexpr std::size_t kCoverageStackSizeFeatureIndex = 20;
+inline constexpr std::size_t kCoverageStackSizeEncodingDenominator = 5;
 
 // These held-out coordinates are duplicated literally rather than imported:
 // linking a D1/P0 header or implementation into the development generator is
@@ -218,6 +220,62 @@ struct GenerationReport {
     bool published = false;
     FailureScopeReport scope;
 };
+
+// Aggregate-only coverage diagnostics reconstruct the same frozen retained
+// roots as the publisher. These records deliberately contain no state, hand,
+// card, descriptor, outcome, selected-action, or score payload. Stable and
+// physical-game hashes exist only so the census can prove uniqueness and
+// count distinct source games; the formatter never emits either identity.
+struct CoverageRootObservation {
+    fq4_dev_bundle::Split split =
+        fq4_dev_bundle::Split::Fit;
+    std::uint8_t schedule_block = 0;
+    std::uint8_t owner_deck = 0;
+    std::uint8_t opponent_deck = 0;
+    std::uint8_t owner_seat = 0;
+    bool owner_on_play = false;
+    fq4_dev_bundle::Hash256 stable_root_id{};
+    fq4_dev_bundle::Hash256 physical_game_sha256{};
+    std::size_t option_count = 0;
+    bool dominance_positive = false;
+    std::uint8_t selected_roles = 0;
+    std::size_t public_stack_size = 0;
+    TurnPhase phase = TurnPhase::FirstMain;
+    std::vector<std::uint64_t> stack_feature_bits;
+
+    bool operator==(const CoverageRootObservation&) const = default;
+};
+
+struct CoverageReconstruction {
+    std::vector<CoverageRootObservation> roots;
+    std::size_t source_games_reconstructed = 0;
+    std::size_t selected_rows_reconstructed = 0;
+    fq4_dev_bundle::ScoreAccounting parent_scoring;
+    std::string parent_artifact_sha256;
+    std::size_t bundle_bytes = 0;
+    std::string bundle_sha256;
+    bool schedules_exact = false;
+    bool scientific_manifest_exact = false;
+    bool fit_census_exact = false;
+    bool check_census_exact = false;
+    bool fit_selected_exact = false;
+    bool check_selected_exact = false;
+    bool fit_manifest_exact = false;
+    bool check_manifest_exact = false;
+    bool parent_immutable = false;
+    bool bundle_immutable = false;
+    std::size_t parent_models_loaded = 0;
+    std::size_t fits = 0;
+    std::size_t candidate_rollout_evaluations = 0;
+    std::size_t gameplay_evaluation_seeds = 0;
+
+    bool exact() const;
+};
+
+// Fixed, no-knob reconstruction of one FIT plus CHECK construction. It loads
+// only the immutable published bundle and C16 parent, then fails closed unless
+// all reconstructed scientific sections equal the published sections.
+CoverageReconstruction reconstruct_published_coverage_once();
 
 // Production-only fixed-path operation. The executable and commit identities
 // are provenance, not knobs for schedules, models, recipes, or publication.

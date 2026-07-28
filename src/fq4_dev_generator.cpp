@@ -432,6 +432,7 @@ struct RetainedRoot {
     collection::RobustDominance dominance;
     std::vector<std::vector<double>> features;
     bundle::CensusRow census;
+    std::uint8_t selected_roles = 0;
 };
 
 struct SplitBuild {
@@ -714,7 +715,9 @@ SplitBuild construct_split(
     schedule_data::Split split,
     const std::vector<schedule_data::SourceGame>& schedule,
     const std::shared_ptr<const LearnedModel>& parent,
-    std::uint64_t& completed_source_games) {
+    std::uint64_t& completed_source_games,
+    std::vector<CoverageRootObservation>*
+        coverage_observations = nullptr) {
     const bundle::Split bundle_split =
         split_for(split);
     CanonicalBytes trajectory;
@@ -1016,6 +1019,14 @@ SplitBuild construct_split(
             retained[selected.input_index]
                 .census.stable_root_id);
         selection_digest.u64(roles);
+        if (roles == 0 ||
+            retained[selected.input_index]
+                    .selected_roles != 0) {
+            fail(
+                "blind selection produced an invalid or duplicate role");
+        }
+        retained[selected.input_index]
+            .selected_roles = roles;
         result.selected.push_back(
             score_selected_root(
                 bundle_split, roles,
@@ -1090,6 +1101,76 @@ SplitBuild construct_split(
                 result.support
                     .background_by_deck[deck],
                 "per-deck background count");
+    }
+    if (coverage_observations != nullptr) {
+        coverage_observations->reserve(
+            coverage_observations->size() +
+            retained.size());
+        for (const RetainedRoot& row : retained) {
+            if (row.census.schedule_index >=
+                schedule.size()) {
+                fail(
+                    "coverage row schedule index is out of range");
+            }
+            const schedule_data::SourceGame& source =
+                schedule[row.census.schedule_index];
+            if (row.census.owner_seat >= kPlayerCount ||
+                source.schedule_block !=
+                    row.census.schedule_block ||
+                source.seat_decks[
+                    row.census.owner_seat] !=
+                    row.root.manifest.owner_deck) {
+                fail(
+                    "coverage row does not match its frozen source");
+            }
+            CoverageRootObservation observation{
+                .split = bundle_split,
+                .schedule_block =
+                    row.census.schedule_block,
+                .owner_deck =
+                    narrow_u8(
+                        deck_index(
+                            row.root.manifest.owner_deck),
+                        "coverage owner deck"),
+                .opponent_deck =
+                    narrow_u8(
+                        deck_index(
+                            row.root.manifest.opponent_deck),
+                        "coverage opponent deck"),
+                .owner_seat =
+                    row.census.owner_seat,
+                .owner_on_play =
+                    source.starting_player ==
+                        row.census.owner_seat,
+                .stable_root_id =
+                    row.census.stable_root_id,
+                .physical_game_sha256 =
+                    row.census.physical_game_sha256,
+                .option_count = row.features.size(),
+                .dominance_positive =
+                    row.dominance.any_dominated(),
+                .selected_roles = row.selected_roles,
+                .public_stack_size =
+                    row.root.probe.state.stack.size(),
+                .phase = row.root.probe.phase,
+            };
+            observation.stack_feature_bits.reserve(
+                row.features.size());
+            for (const auto& action_features :
+                 row.features) {
+                if (action_features.size() !=
+                    bundle::kFeatureCount) {
+                    fail(
+                        "coverage Priority feature dimension drifted");
+                }
+                observation.stack_feature_bits.push_back(
+                    std::bit_cast<std::uint64_t>(
+                        action_features[
+                            kCoverageStackSizeFeatureIndex]));
+            }
+            coverage_observations->push_back(
+                std::move(observation));
+        }
     }
     return result;
 }
@@ -1977,6 +2058,277 @@ GenerationFailure::GenerationFailure(
     FailureScopeReport scope)
     : std::runtime_error(std::move(message)),
       scope_(std::move(scope)) {}
+
+bool CoverageReconstruction::exact() const {
+    return
+        source_games_reconstructed ==
+            2 * schedule_data::kPhysicalGamesPerSplit &&
+        selected_rows_reconstructed != 0 &&
+        parent_scoring.score_calls ==
+            selected_rows_reconstructed &&
+        parent_scoring.scored_actions >=
+            parent_scoring.score_calls &&
+        parent_scoring.scored_actions <=
+            selected_rows_reconstructed *
+                bundle::kMaximumActions &&
+        parent_scoring.sampled_worlds ==
+            parent_scoring.score_calls *
+                scoring::kProductionWorlds &&
+        parent_scoring.rollout_evaluations ==
+            parent_scoring.scored_actions *
+                scoring::kProductionWorlds *
+                scoring::kProductionRolloutsPerWorld &&
+        parent_scoring.terminal_evaluations +
+                parent_scoring.bootstrap_evaluations ==
+            parent_scoring.rollout_evaluations &&
+        parent_artifact_sha256 ==
+            bundle::kParentArtifactSha256 &&
+        bundle_bytes ==
+            bundle::kPublishedArtifactBytes &&
+        bundle_sha256 ==
+            bundle::kPublishedArtifactSha256 &&
+        schedules_exact &&
+        scientific_manifest_exact &&
+        fit_census_exact &&
+        check_census_exact &&
+        fit_selected_exact &&
+        check_selected_exact &&
+        fit_manifest_exact &&
+        check_manifest_exact &&
+        parent_immutable &&
+        bundle_immutable &&
+        parent_models_loaded == 1 &&
+        fits == 0 &&
+        candidate_rollout_evaluations == 0 &&
+        gameplay_evaluation_seeds == 0;
+}
+
+CoverageReconstruction reconstruct_published_coverage_once() {
+    const auto fit_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Fit);
+    const auto check_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Check);
+    const SchedulePreflight preflight =
+        preflight_schedules(
+            fit_schedule, check_schedule);
+    if (!preflight.exact) {
+        fail(
+            preflight.failures.empty()
+                ? "coverage schedule preflight failed"
+                : preflight.failures.front());
+    }
+    if (feature_contract_sha256() !=
+            bundle::parse_sha256(
+                bundle::kFeatureContractSha256) ||
+        collection_spec_contract_sha256() !=
+            bundle::parse_sha256(
+                bundle::kCollectionSpecSha256)) {
+        fail("coverage scientific-contract preflight drifted");
+    }
+
+    const auto parent_path =
+        std::filesystem::path(kParentArtifactPath);
+    const auto bundle_path =
+        std::filesystem::path(bundle::kArtifactPath);
+    const integrity::RegularFileSnapshot parent_before =
+        integrity::snapshot_regular_file(parent_path);
+    const integrity::RegularFileSnapshot bundle_before =
+        integrity::snapshot_regular_file(bundle_path);
+    if (parent_before.sha256 !=
+            bundle::kParentArtifactSha256 ||
+        bundle_before.byte_size !=
+            bundle::kPublishedArtifactBytes ||
+        bundle_before.sha256 !=
+            bundle::kPublishedArtifactSha256) {
+        fail("coverage immutable input identity drifted");
+    }
+
+    const bundle::Bundle published =
+        bundle::load_published();
+    const bundle::Manifest& manifest =
+        published.manifest;
+    const bool scientific_manifest_exact =
+        manifest.purpose == bundle::kPurpose &&
+        manifest.parent_artifact_sha256 ==
+            bundle::parse_sha256(
+                bundle::kParentArtifactSha256) &&
+        manifest.parent_model_fingerprint ==
+            bundle::parse_sha256(
+                bundle::kParentModelFingerprint) &&
+        manifest.parent_components.critic ==
+            bundle::parse_sha256(
+                bundle::kParentCriticFingerprint) &&
+        manifest.parent_components.priority ==
+            bundle::parse_sha256(
+                bundle::kParentPriorityFingerprint) &&
+        manifest.parent_components.attack ==
+            bundle::parse_sha256(
+                bundle::kParentAttackFingerprint) &&
+        manifest.parent_components.block ==
+            bundle::parse_sha256(
+                bundle::kParentBlockFingerprint) &&
+        manifest.parent_components.damage_order ==
+            bundle::parse_sha256(
+                bundle::kParentDamageOrderFingerprint) &&
+        manifest.generation_namespace ==
+            bundle::kGenerationNamespace &&
+        manifest.hidden_namespace ==
+            bundle::kHiddenNamespace &&
+        manifest.dominance_namespace ==
+            bundle::kDominanceNamespace &&
+        manifest.collection_spec_sha256 ==
+            collection_spec_contract_sha256() &&
+        manifest.production_recipe ==
+            bundle::kProductionRecipe &&
+        manifest.feature_schema ==
+            bundle::kFeatureSchema &&
+        manifest.feature_count ==
+            bundle::kFeatureCount &&
+        manifest.feature_contract_sha256 ==
+            feature_contract_sha256();
+    if (!scientific_manifest_exact) {
+        fail("coverage published scientific manifest drifted");
+    }
+
+    const auto parent =
+        load_learned_value_challenger_artifact(
+            std::string(kParentArtifactPath),
+            kParentTrainingGames,
+            kParentTrainingSeed,
+            kParentGenerations)
+            .model();
+    require_parent_identity(parent);
+
+    CoverageReconstruction result;
+    result.roots.reserve(
+        published.fit_census.size() +
+        published.check_census.size());
+    std::uint64_t fit_games = 0;
+    std::uint64_t check_games = 0;
+    SplitBuild fit =
+        construct_split(
+            schedule_data::Split::Fit,
+            fit_schedule, parent, fit_games,
+            &result.roots);
+    require_parent_identity(parent);
+    SplitBuild check =
+        construct_split(
+            schedule_data::Split::Check,
+            check_schedule, parent, check_games,
+            &result.roots);
+    require_parent_identity(parent);
+
+    result.source_games_reconstructed =
+        static_cast<std::size_t>(
+            fit_games + check_games);
+    result.selected_rows_reconstructed =
+        fit.selected.size() +
+        check.selected.size();
+    const auto summarize_parent_scoring =
+        [](const std::vector<bundle::SelectedRow>& rows) {
+            bundle::ScoreAccounting total;
+            for (const bundle::SelectedRow& row : rows) {
+                const std::uint64_t actions =
+                    static_cast<std::uint64_t>(
+                        row.actions.size());
+                if (row.accounting.score_calls != 1 ||
+                    row.accounting.scored_actions !=
+                        actions ||
+                    row.accounting.sampled_worlds !=
+                        scoring::kProductionWorlds ||
+                    row.accounting
+                            .rollout_evaluations !=
+                        actions *
+                            scoring::
+                                kProductionWorlds *
+                            scoring::
+                                kProductionRolloutsPerWorld ||
+                    row.accounting
+                                .terminal_evaluations +
+                            row.accounting
+                                .bootstrap_evaluations !=
+                        row.accounting
+                            .rollout_evaluations) {
+                    fail(
+                        "published parent scoring accounting drifted");
+                }
+                total.score_calls +=
+                    row.accounting.score_calls;
+                total.scored_actions +=
+                    row.accounting.scored_actions;
+                total.sampled_worlds +=
+                    row.accounting.sampled_worlds;
+                total.rollout_evaluations +=
+                    row.accounting
+                        .rollout_evaluations;
+                total.terminal_evaluations +=
+                    row.accounting
+                        .terminal_evaluations;
+                total.bootstrap_evaluations +=
+                    row.accounting
+                        .bootstrap_evaluations;
+            }
+            return total;
+        };
+    result.parent_scoring =
+        summarize_parent_scoring(fit.selected);
+    const bundle::ScoreAccounting check_scoring =
+        summarize_parent_scoring(check.selected);
+    result.parent_scoring.score_calls +=
+        check_scoring.score_calls;
+    result.parent_scoring.scored_actions +=
+        check_scoring.scored_actions;
+    result.parent_scoring.sampled_worlds +=
+        check_scoring.sampled_worlds;
+    result.parent_scoring.rollout_evaluations +=
+        check_scoring.rollout_evaluations;
+    result.parent_scoring.terminal_evaluations +=
+        check_scoring.terminal_evaluations;
+    result.parent_scoring.bootstrap_evaluations +=
+        check_scoring.bootstrap_evaluations;
+    result.parent_artifact_sha256 =
+        parent_before.sha256;
+    result.bundle_bytes =
+        static_cast<std::size_t>(
+            bundle_before.byte_size);
+    result.bundle_sha256 =
+        bundle_before.sha256;
+    result.schedules_exact = preflight.exact;
+    result.scientific_manifest_exact =
+        scientific_manifest_exact;
+    result.fit_census_exact =
+        fit.census == published.fit_census;
+    result.check_census_exact =
+        check.census == published.check_census;
+    result.fit_selected_exact =
+        fit.selected == published.fit_rows;
+    result.check_selected_exact =
+        check.selected == published.check_rows;
+    result.fit_manifest_exact =
+        fit.manifest == manifest.fit;
+    result.check_manifest_exact =
+        check.manifest == manifest.check;
+    result.parent_models_loaded = 1;
+
+    const integrity::RegularFileSnapshot parent_after =
+        integrity::snapshot_regular_file(parent_path);
+    const integrity::RegularFileSnapshot bundle_after =
+        integrity::snapshot_regular_file(bundle_path);
+    result.parent_immutable =
+        parent_after == parent_before;
+    result.bundle_immutable =
+        bundle_after == bundle_before;
+
+    if (result.roots.size() !=
+            published.fit_census.size() +
+                published.check_census.size() ||
+        !result.exact()) {
+        fail("coverage reconstruction did not reproduce the bundle");
+    }
+    return result;
+}
 
 GenerationReport generate_and_publish(
     const std::filesystem::path& executable_path,
