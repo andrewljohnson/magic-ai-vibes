@@ -274,6 +274,11 @@ bool benchmark_accounting_exact_impl(
             summary.baseline_stats.wins ||
         summary.challenger_stats.draws !=
             summary.baseline_stats.draws ||
+        summary.total_turns < expected_total ||
+        summary.life_total_finishes +
+                summary.empty_library_finishes +
+                summary.turn_limit_draws !=
+            expected_total ||
         summary.challenger_quartet_cr1.clusters !=
             15U * spec.repetitions ||
         summary.challenger_quartet_cr1.records !=
@@ -589,6 +594,22 @@ void format_benchmark(
     std::ostringstream& output, std::string_view role,
     const TimedBenchmark& timed) {
     const BotBenchmarkSummary& summary = timed.summary;
+    const std::size_t total_decisions =
+        summary.challenger_stats.total_decisions +
+        summary.baseline_stats.total_decisions;
+    const std::size_t total_rollouts =
+        summary.challenger_stats.total_rollouts +
+        summary.baseline_stats.total_rollouts;
+    const double rollouts_per_decision =
+        total_decisions == 0
+            ? 0.0
+            : static_cast<double>(total_rollouts) /
+                  static_cast<double>(total_decisions);
+    const double average_turns =
+        summary.total_games == 0
+            ? 0.0
+            : static_cast<double>(summary.total_turns) /
+                  static_cast<double>(summary.total_games);
     output
         << "benchmark role=" << role
         << " seed=" << summary.evaluation_seed
@@ -605,7 +626,36 @@ void format_benchmark(
         << " wilson_low_95="
         << summary.confidence_low_95()
         << " wilson_high_95="
-        << summary.confidence_high_95() << '\n';
+        << summary.confidence_high_95() << '\n'
+        << "work role=" << role
+        << " decisions=" << total_decisions
+        << " rollouts=" << total_rollouts
+        << " rollouts_per_decision="
+        << rollouts_per_decision
+        << " challenger_decisions="
+        << summary.challenger_stats.total_decisions
+        << " challenger_rollouts="
+        << summary.challenger_stats.total_rollouts
+        << " challenger_rollouts_per_decision="
+        << summary.challenger_stats
+               .average_rollouts_per_decision()
+        << " baseline_decisions="
+        << summary.baseline_stats.total_decisions
+        << " baseline_rollouts="
+        << summary.baseline_stats.total_rollouts
+        << " baseline_rollouts_per_decision="
+        << summary.baseline_stats
+               .average_rollouts_per_decision()
+        << '\n'
+        << "trajectory role=" << role
+        << " total_turns=" << summary.total_turns
+        << " average_turns=" << average_turns
+        << " life_total_finishes="
+        << summary.life_total_finishes
+        << " empty_library_finishes="
+        << summary.empty_library_finishes
+        << " turn_limit_draws="
+        << summary.turn_limit_draws << '\n';
     for (std::size_t deck = 0; deck < kDeckCount; ++deck) {
         const auto& challenger =
             summary.challenger_decks[deck];

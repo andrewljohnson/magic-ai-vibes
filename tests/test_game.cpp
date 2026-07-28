@@ -10711,6 +10711,13 @@ TEST(bot_benchmark_balances_decks_seats_and_play_draw) {
               result.challenger_stats.losses +
               result.challenger_stats.draws ==
           120);
+    CHECK(result.challenger_stats.total_decisions > 0);
+    CHECK(result.baseline_stats.total_decisions > 0);
+    CHECK(result.total_turns >= result.total_games);
+    CHECK(result.life_total_finishes +
+              result.empty_library_finishes +
+              result.turn_limit_draws ==
+          result.total_games);
     for (std::size_t deck = 0;
          deck < result.challenger_decks.size(); ++deck) {
         CHECK(result.challenger_decks[deck].games == 24);

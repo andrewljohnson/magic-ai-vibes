@@ -1499,6 +1499,10 @@ struct BotBenchmarkSummary {
     // Rows are challenger decks and columns are baseline decks.
     std::array<std::array<DeckSimulationStats, kDeckCount>, kDeckCount>
         challenger_deck_matchups;
+    std::size_t total_turns = 0;
+    std::size_t life_total_finishes = 0;
+    std::size_t empty_library_finishes = 0;
+    std::size_t turn_limit_draws = 0;
 
     double challenger_win_rate() const;
     double confidence_low_95() const;

@@ -332,17 +332,24 @@ old_school::BotBenchmarkSummary summary(
             .wins = challenger_wins,
             .losses = challenger_losses,
             .draws = draws,
+            .total_decisions = 3 * games,
+            .total_rollouts = 24 * games,
         },
         .baseline_stats = {
             .games = games,
             .wins = challenger_losses,
             .losses = challenger_wins,
             .draws = draws,
+            .total_decisions = 2 * games,
+            .total_rollouts = 16 * games,
         },
         .challenger_quartet_cr1 = {
             .clusters = 15 * request.repetitions,
             .records = games,
         },
+        .total_turns = 7 * games,
+        .life_total_finishes = games - draws,
+        .turn_limit_draws = draws,
     };
     for (std::size_t deck = 0;
          deck < old_school::kDeckCount; ++deck) {
@@ -822,6 +829,15 @@ void test_smoke_rejections_and_infrastructure_failures() {
         !quadrant.gate.infrastructure_valid &&
             !quadrant.gate.accounting_complete,
         "incomplete quadrant was not invalid");
+
+    gameplay::RunReport finishes = base;
+    --finishes.candidate.summary.life_total_finishes;
+    finishes.gate =
+        gameplay::testing::evaluate_gate(finishes);
+    expect(
+        !finishes.gate.infrastructure_valid &&
+            !finishes.gate.accounting_complete,
+        "incomplete finish-reason accounting was not invalid");
 
     gameplay::RunReport artifact = base;
     ++artifact.candidate_artifact_after.inode;
@@ -1323,6 +1339,34 @@ void test_report_is_complete_and_aggregate_only() {
     expect(
         occurrence_count(output, "quadrant role=") == 40,
         "smoke report omitted full quadrant accounting");
+    expect(
+        occurrence_count(output, "work role=") == 2 &&
+            output.find(
+                "work role=candidate decisions=1200"
+                " rollouts=9600"
+                " rollouts_per_decision=8") !=
+                std::string::npos &&
+            output.find(
+                "challenger_decisions=720"
+                " challenger_rollouts=5760"
+                " challenger_rollouts_per_decision=8") !=
+                std::string::npos &&
+            output.find(
+                "baseline_decisions=480"
+                " baseline_rollouts=3840"
+                " baseline_rollouts_per_decision=8") !=
+                std::string::npos,
+        "report omitted deterministic policy work counters");
+    expect(
+        occurrence_count(output, "trajectory role=") == 2 &&
+            output.find(
+                "trajectory role=candidate total_turns=1680"
+                " average_turns=7"
+                " life_total_finishes=240"
+                " empty_library_finishes=0"
+                " turn_limit_draws=0") !=
+                std::string::npos,
+        "report omitted deterministic trajectory counters");
     expect(
         output.find("result=PASS\n") !=
             std::string::npos,

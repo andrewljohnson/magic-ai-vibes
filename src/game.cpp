@@ -23533,6 +23533,18 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
                 "benchmark result does not match its scheduled task");
         }
         ++summary.total_games;
+        summary.total_turns += result.turns;
+        switch (result.reason) {
+        case EndReason::LifeTotal:
+            ++summary.life_total_finishes;
+            break;
+        case EndReason::EmptyLibrary:
+            ++summary.empty_library_finishes;
+            break;
+        case EndReason::TurnLimit:
+            ++summary.turn_limit_draws;
+            break;
+        }
         record_bot_result(summary.challenger_stats, result,
                           task.challenger_player);
         record_bot_result(summary.baseline_stats, result,
@@ -23728,7 +23740,11 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
         summary.challenger_stats.losses !=
             summary.baseline_stats.wins ||
         summary.challenger_stats.draws !=
-            summary.baseline_stats.draws) {
+            summary.baseline_stats.draws ||
+        summary.life_total_finishes +
+                summary.empty_library_finishes +
+                summary.turn_limit_draws !=
+            summary.total_games) {
         throw std::logic_error(
             "benchmark aggregate outcome accounting mismatch");
     }
