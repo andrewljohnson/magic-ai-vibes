@@ -17164,6 +17164,79 @@ Implementation is limited to one explicit mode in the existing fast runner,
 with frozen schedule/config tests. Do not add a generalized evaluation
 framework, scan another alpha, or spend a 2,040-game gate.
 
+EXPLORE-4 result, stopped 2026-07-28: **E0 showed signal, but E1 was
+operationally abandoned without a gameplay verdict**. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-blend-explore \
+  --adversarial-composition
+```
+
+E0 completed as declared: alpha-0.50 Priority plus AdversarialBlocks beat
+C16 plus AdversarialBlocks 34-26 (56.6667%) on seed `202607280807`.
+The all-five rows were Green 7-5, Red 6-6, Blue 7-5, White 6-6, and RU Aggro
+8-4. It took 251.720 seconds, 3,371 decisions, and 92,752 rollouts, so the
+strict gate licensed E1.
+
+E1 opened seed `202607280808` but emitted no partial or final gameplay
+result. After the complete command had run for 3,017.66 seconds
+(`user 9628.51`, `sys 80.34`), direct process inspection still showed the
+benchmark actively consuming approximately 100% CPU. The project owner then
+reported the live attack-only pilot casting a second Counterspell at the same
+already-countered spell and explicitly directed work toward a general repair.
+The process was interrupted. Seed `202607280808` is opened and void; do not
+reuse it, infer an E1 result, or call EXPLORE-4 accepted/rejected. The 34-26
+E0 is descriptive only and does not license a web pilot under the declared
+two-stage rule.
+
+`REVIEW.md` was reread through its newest 15:44 entry before this record. It
+said "hands off" while the run continued. The newer direct owner instruction,
+the newly observed strategic stack failure, and the measured 50-minute
+single-screen runtime justify stopping rather than spending an unbounded
+amount of the rapid-iteration loop on this coordinate. This is a deliberate
+operational abandonment, not a scientific rejection.
+
+##### FQ4-EXPLORE-5 general stack-discipline composition declaration
+
+Declared 2026-07-28 before changing the fast runner or opening seed
+`202607280809`. The owner's exact field report matches the existing
+`control.blue.counter-redundant-same-target.v1` fixture: an opposing spell is
+on the stack, the Learned player already has one response targeting it, and
+Learned spends a second response on the same original object.
+
+The general repair already exists as default-off `value_pass_dominance`.
+It settles Pass and each candidate through the stack/priority window and
+compares normalized public outcomes plus actor/opponent resources. Existing
+tests prove that it filters the redundant same-target response, remains
+hidden-repartition invariant, and retains a response when an opponent
+intervenes in the counter war. It uses no card-name branch, hidden opponent
+identity, or Handcrafted knowledge. The live attack-only pilot has this bit
+off, which exactly explains the field behavior.
+
+Falsifiable exploratory hypothesis: composing Pass dominance with
+defender-best-response attacks will preserve the attack repair's short-screen
+strength while deterministically removing the reported redundant stack
+action. Run one fresh common-coordinate comparison against ordinary C16:
+
+1. On seed `202607280809`, run exactly one balanced repetition / 60 games /
+   12 per challenger deck for `C16+AdversarialBlocks` and separately for
+   `C16+AdversarialBlocks+PD0`, both against ordinary C16. All use exact
+   C16 K8/H4/R1 and differ only in the printed treatment bits.
+2. Advance the PD0 composition to a separately named web pilot iff it wins
+   more games than it loses and wins at least as many games as attack-only on
+   the same coordinate. A tie between candidates favors PD0 because the
+   owner's reproduced failure is deterministically removed. Otherwise stop;
+   do not tune the comparator.
+3. Report both aggregates, all five deck rows, runtime, decisions, and
+   rollouts. This is a rapid human-play candidate selector, not a strength
+   claim. There is no 240-game follow-up before the owner's play-test.
+
+Implementation is one explicit mode in the existing runner plus frozen
+schedule/config/selection tests. Reuse the existing Pass-dominance engine and
+its counter-war regressions; add no card-specific policy logic or evaluation
+framework.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
