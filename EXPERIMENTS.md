@@ -16335,6 +16335,81 @@ full. A rereview returned IMPLEMENTATION GO without opening evidence.
 this addendum; it independently marks commit `3863dec` green and contains no
 conflicting post-census result.
 
+DEV5 implementation qualification, completed 2026-07-28 before any source
+game or publisher run: the first independent read-only source review returned
+NO-GO on three fail-closed gaps. Artifact validation did not independently
+require eight distinct physical games in each selected block; the selector
+could not prove its input was the complete eligible population; and
+self-consistent but wrong DEV1/DEV4 bindings or production seeds could pass
+the then-current validator. No corpus row had been scored or selected and both
+the fixed artifact and temporary paths remained absent.
+
+All three findings were accepted and repaired without changing the frozen
+scientific coordinate. The selector now requires the exact accepted DEV4
+census and reproduces every split/deck eligible root, legal-option, and
+distinct-game cross-sum before ranking. Artifact validation separately
+requires eight distinct physical games per split/deck/block. Tests construct
+all 8,622 eligible roots across the exact physical schedules, include
+multiple roots per game, use independent rank and seed oracles, and reject a
+nonrepresentative-root omission, an option omission, a forged census, and a
+coherently rehashed balanced four-game duplication. DEV1's exact
+trajectory/retained/dominance/selection/scored hashes, the complete DEV4
+census, and production seeds derived from the fixed environment/tag/base plus
+stable-root digest are now literal validation boundaries.
+
+The generator reconstructs FIT then CHECK once, freezes each provisional
+selection before neutral scoring, measures the full census, authoritatively
+refreezes and exact-compares all 320 locators, and only then makes the 320
+canonical plus 320 hidden-clone calls. The publisher preflights both
+coordinates before source work, snapshots executable/bundle/C16, validates
+the in-memory artifact, publishes atomically without replacement, reloads the
+exact contract and file identity, and rechecks every source. It reports only
+aggregate accounting.
+
+Exact implementation verification:
+
+```sh
+make -j4 test-fq4-neutral-supplement test-fq4-neutral-publisher \
+  test-fq4-dev-generator test-fq4-dev-coverage-census
+# supplement 4/4, publisher 8/8, generator 8/8, census 5/5
+
+make -j4 BUILD_DIR=build-fq4-dev5-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -fno-omit-frame-pointer \
+  -fsanitize=address,undefined -Wall -Wextra -Wpedantic -Werror' \
+  test-fq4-neutral-publisher
+# publisher/materializer integration 8/8 under ASan/UBSan
+
+make -j4 test
+# engine 171/171, learned iteration 27/27, probes 57/57,
+# probe metrics 11/11, probe runner 33/33, web bridge 18/18,
+# web client 106/106, certification 48/48, and all other suites passed
+```
+
+The first combined focused command exposed an implementation-only link-graph
+failure: the legacy generator test binary did not yet link the newly called
+coverage and neutral modules. No test or production command ran past the
+linker. The source graph was corrected, and the unchanged focused command
+then passed all 25 tests above. The full gate's ordinary five-game seed-1 CLI
+smoke is not a DEV5 source or evaluation coordinate.
+
+The original reviewer then reread the complete scoped
+artifact/materializer/publisher implementation and returned **GO**: all three
+NO-GO items were closed, focused tests were independently reproduced, and no
+production run was made. It left one optional nonblocking hardening idea—an
+additional independent oracle for the lexicographically minimal balanced
+eight-game subset. Source inspection confirms exhaustive minimum selection,
+while the current suite independently covers per-game representative minima,
+balance, split/full equality, input-order invariance, and collision failure;
+therefore the suggestion is retained for later rather than changing the
+reviewed tree after GO.
+
+`REVIEW.md` was reread through its newest 08:59 cycle before this
+qualification. It records the implementation in flight, no new result, and
+no conflicting evidence. The fixed artifact and temporary remain absent.
+Next action: commit and push this exact implementation, obtain a
+committed-tree identity review, rebuild the commit-keyed publisher, and only
+then run the one no-argument materialization.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after

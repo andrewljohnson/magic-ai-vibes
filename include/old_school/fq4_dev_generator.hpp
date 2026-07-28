@@ -15,6 +15,10 @@
 #include <string_view>
 #include <vector>
 
+namespace old_school::fq4_neutral_supplement {
+struct Artifact;
+}
+
 namespace old_school::fq4_dev_generator {
 
 inline constexpr std::string_view kGeneratorSchema =
@@ -276,6 +280,14 @@ struct CoverageReconstruction {
 // only the immutable published bundle and C16 parent, then fails closed unless
 // all reconstructed scientific sections equal the published sections.
 CoverageReconstruction reconstruct_published_coverage_once();
+
+// Reconstructs each frozen DEV1 split exactly once, freezes the complete
+// neutral selection before its first neutral score call, and returns the
+// validated privacy-safe supplement in memory. Publication remains a
+// separate atomic no-replace operation owned by the supplement module.
+fq4_neutral_supplement::Artifact materialize_neutral_supplement(
+    const std::filesystem::path& executable_path,
+    std::string_view producer_commit);
 
 // Production-only fixed-path operation. The executable and commit identities
 // are provenance, not knobs for schedules, models, recipes, or publication.

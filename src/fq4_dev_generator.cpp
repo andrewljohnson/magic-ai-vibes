@@ -1,6 +1,7 @@
 #include "old_school/fq4_dev_generator.hpp"
 
 #include "old_school/artifact_integrity.hpp"
+#include "old_school/fq4_neutral_supplement.hpp"
 #include "old_school/fq4_priority_math.hpp"
 #include "old_school/oc1_action_scoring.hpp"
 
@@ -29,8 +30,10 @@ namespace {
 
 namespace bundle = fq4_dev_bundle;
 namespace collection = fq4_priority_collection;
+namespace coverage = fq4_dev_coverage_census;
 namespace integrity = artifact_integrity;
 namespace math = fq4_priority_math;
+namespace neutral = fq4_neutral_supplement;
 namespace schedule_data = fq4_dev_schedule;
 namespace scoring = oc1_action_scoring;
 
@@ -108,6 +111,21 @@ bool bit_identical(
     for (std::size_t index = 0;
          index < first.size(); ++index) {
         if (!same_double(first[index], second[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool bit_identical(
+    const std::vector<std::vector<double>>& first,
+    const std::vector<std::vector<double>>& second) {
+    if (first.size() != second.size()) {
+        return false;
+    }
+    for (std::size_t index = 0;
+         index < first.size(); ++index) {
+        if (!bit_identical(first[index], second[index])) {
             return false;
         }
     }
@@ -435,12 +453,19 @@ struct RetainedRoot {
     std::uint8_t selected_roles = 0;
 };
 
+struct CapturedNeutralRoot {
+    neutral::RankedLocator locator;
+    RetainedRoot retained;
+};
+
 struct SplitBuild {
     std::vector<bundle::CensusRow> census;
     std::vector<bundle::SelectedRow> selected;
     std::vector<ParentWitness> witnesses;
     bundle::SplitManifest manifest;
     SplitSupport support;
+    std::vector<neutral::EligibleRoot> neutral_eligible;
+    std::vector<CapturedNeutralRoot> neutral_selected;
 };
 
 struct CompleteBuild {
@@ -515,14 +540,18 @@ void append_selected_digest(
     }
 }
 
-bundle::SelectedRow score_selected_root(
-    bundle::Split split, std::uint8_t roles,
+struct ProductionRootScore {
+    scoring::DecisionScore decision;
+    math::CenteredResidualScores residual;
+};
+
+ProductionRootScore prepare_production_root_score(
     const RetainedRoot& retained,
+    const probes::DecisionProbe& probe,
+    const std::vector<std::vector<double>>& features,
+    scoring::DecisionScore base,
     const std::shared_ptr<const LearnedModel>& parent,
-    std::vector<ParentWitness>& witnesses) {
-    const scoring::DecisionScore base =
-        scoring::score_production(
-            retained.root.probe, parent);
+    std::string_view identity) {
     if (!production_recipe_exact(base) ||
         !base.recipe.resolved_seed.has_value() ||
         base.stable_id !=
@@ -531,16 +560,15 @@ bundle::SelectedRow score_selected_root(
             retained.root.manifest
                 .canonical_descriptors.size() ||
         base.actions.size() !=
-            retained.features.size()) {
+            features.size()) {
         fail(
             retained.root.manifest.stable_id +
-            ": frozen production scorer drifted");
+            ": " + std::string(identity) +
+            " production scorer drifted");
     }
 
     std::vector<double> base_scores;
-    std::vector<std::vector<double>> raw_samples;
     base_scores.reserve(base.actions.size());
-    raw_samples.reserve(base.actions.size());
     for (std::size_t action = 0;
          action < base.actions.size(); ++action) {
         if (base.actions[action].descriptor !=
@@ -556,17 +584,16 @@ bundle::SelectedRow score_selected_root(
                 bundle::kWorldCount) {
             fail(
                 retained.root.manifest.stable_id +
-                ": descriptor or K8 production trace drifted");
+                ": " + std::string(identity) +
+                " descriptor or K8 production trace drifted");
         }
         base_scores.push_back(
             base.actions[action].raw_score);
-        raw_samples.push_back(
-            base.actions[action].raw_samples);
     }
 
     const std::vector<double> logits =
         learned_policy_head_logits(
-            retained.features,
+            features,
             LearnedPolicyDecisionKind::Priority,
             parent);
     const math::CenteredResidualScores shared =
@@ -575,13 +602,13 @@ bundle::SelectedRow score_selected_root(
             kParentPriorityResidualWeight);
     const auto deployed =
         diagnose_learned_value_priority_residual(
-            retained.root.probe.state,
-            retained.root.probe.root_player,
+            probe.state,
+            probe.root_player,
             sorcery_actions_for(
-                retained.root.probe.phase),
-            retained.root.probe.phase,
-            retained.root.probe.consecutive_passes,
-            priority_actions(retained.root.probe),
+                probe.phase),
+            probe.phase,
+            probe.consecutive_passes,
+            priority_actions(probe),
             parent,
             kParentPriorityResidualWeight);
     if (!bit_identical(
@@ -592,9 +619,71 @@ bundle::SelectedRow score_selected_root(
             deployed.residuals)) {
         fail(
             retained.root.manifest.stable_id +
-            ": shared tensor evaluator did not reproduce "
+            ": " + std::string(identity) +
+            " shared tensor evaluator did not reproduce "
             "the deployed parent residual");
     }
+    return {
+        .decision = std::move(base),
+        .residual = shared,
+    };
+}
+
+ProductionRootScore score_canonical_root(
+    const RetainedRoot& retained,
+    const std::shared_ptr<const LearnedModel>& parent) {
+    return prepare_production_root_score(
+        retained, retained.root.probe,
+        retained.features,
+        scoring::score_production(
+            retained.root.probe, parent),
+        parent, "canonical");
+}
+
+ProductionRootScore score_hidden_root(
+    const RetainedRoot& retained,
+    const std::vector<std::vector<double>>& hidden_features,
+    const std::shared_ptr<const LearnedModel>& parent) {
+    return prepare_production_root_score(
+        retained, retained.hidden.probe,
+        hidden_features,
+        scoring::score_production_hidden_clone(
+            retained.root.probe,
+            retained.hidden.probe, parent),
+        parent, "hidden-clone");
+}
+
+bundle::ScoreAccounting score_accounting(
+    const scoring::DecisionScore& score) {
+    return {
+        .score_calls = 1,
+        .scored_actions =
+            static_cast<std::uint64_t>(
+                score.actions.size()),
+        .sampled_worlds =
+            static_cast<std::uint64_t>(
+                score.accounting.sampled_worlds),
+        .rollout_evaluations =
+            static_cast<std::uint64_t>(
+                score.accounting.rollout_evaluations),
+        .terminal_evaluations =
+            static_cast<std::uint64_t>(
+                score.accounting.terminal_evaluations),
+        .bootstrap_evaluations =
+            static_cast<std::uint64_t>(
+                score.accounting.bootstrapped_evaluations),
+    };
+}
+
+bundle::SelectedRow score_selected_root(
+    bundle::Split split, std::uint8_t roles,
+    const RetainedRoot& retained,
+    const ProductionRootScore& scored,
+    std::vector<ParentWitness>& witnesses) {
+    const scoring::DecisionScore& base =
+        scored.decision;
+    const math::CenteredResidualScores& shared =
+        scored.residual;
 
     bundle::SelectedRow row{
         .split = split,
@@ -602,27 +691,7 @@ bundle::SelectedRow score_selected_root(
         .roles = roles,
         .production_seed =
             *base.recipe.resolved_seed,
-        .accounting = {
-            .score_calls = 1,
-            .scored_actions =
-                static_cast<std::uint64_t>(
-                    base.actions.size()),
-            .sampled_worlds =
-                static_cast<std::uint64_t>(
-                    base.accounting.sampled_worlds),
-            .rollout_evaluations =
-                static_cast<std::uint64_t>(
-                    base.accounting
-                        .rollout_evaluations),
-            .terminal_evaluations =
-                static_cast<std::uint64_t>(
-                    base.accounting
-                        .terminal_evaluations),
-            .bootstrap_evaluations =
-                static_cast<std::uint64_t>(
-                    base.accounting
-                        .bootstrapped_evaluations),
-        },
+        .accounting = score_accounting(base),
     };
     row.actions.reserve(base.actions.size());
     for (std::size_t action = 0;
@@ -666,6 +735,15 @@ bundle::SelectedRow score_selected_root(
     if ((roles &
          static_cast<std::uint8_t>(
              bundle::Role::DominancePositive)) != 0) {
+        std::vector<double> base_scores;
+        std::vector<std::vector<double>> raw_samples;
+        base_scores.reserve(base.actions.size());
+        raw_samples.reserve(base.actions.size());
+        for (const scoring::DescriptorScore& action :
+             base.actions) {
+            base_scores.push_back(action.raw_score);
+            raw_samples.push_back(action.raw_samples);
+        }
         const collection::ParentClassResult classified =
             collection::classify_parent({
                 .canonical_descriptors =
@@ -700,6 +778,17 @@ bundle::SelectedRow score_selected_root(
     return row;
 }
 
+bundle::SelectedRow score_selected_root(
+    bundle::Split split, std::uint8_t roles,
+    const RetainedRoot& retained,
+    const std::shared_ptr<const LearnedModel>& parent,
+    std::vector<ParentWitness>& witnesses) {
+    return score_selected_root(
+        split, roles, retained,
+        score_canonical_root(retained, parent),
+        witnesses);
+}
+
 bundle::Split split_for(
     schedule_data::Split split) {
     switch (split) {
@@ -711,13 +800,110 @@ bundle::Split split_for(
     fail("invalid development split");
 }
 
+CoverageRootObservation make_coverage_observation(
+    bundle::Split split,
+    const std::vector<schedule_data::SourceGame>& schedule,
+    const RetainedRoot& row) {
+    if (row.census.schedule_index >= schedule.size()) {
+        fail("coverage row schedule index is out of range");
+    }
+    const schedule_data::SourceGame& source =
+        schedule[row.census.schedule_index];
+    if (row.census.owner_seat >= kPlayerCount ||
+        source.schedule_block !=
+            row.census.schedule_block ||
+        source.seat_decks[row.census.owner_seat] !=
+            row.root.manifest.owner_deck) {
+        fail("coverage row does not match its frozen source");
+    }
+    CoverageRootObservation observation{
+        .split = split,
+        .schedule_block = row.census.schedule_block,
+        .owner_deck =
+            narrow_u8(
+                deck_index(row.root.manifest.owner_deck),
+                "coverage owner deck"),
+        .opponent_deck =
+            narrow_u8(
+                deck_index(row.root.manifest.opponent_deck),
+                "coverage opponent deck"),
+        .owner_seat = row.census.owner_seat,
+        .owner_on_play =
+            source.starting_player ==
+                row.census.owner_seat,
+        .stable_root_id = row.census.stable_root_id,
+        .physical_game_sha256 =
+            row.census.physical_game_sha256,
+        .option_count = row.features.size(),
+        .dominance_positive =
+            row.dominance.any_dominated(),
+        .selected_roles = row.selected_roles,
+        .public_stack_size =
+            row.root.probe.state.stack.size(),
+        .phase = row.root.probe.phase,
+    };
+    observation.stack_feature_bits.reserve(
+        row.features.size());
+    for (const auto& action_features : row.features) {
+        if (action_features.size() !=
+            bundle::kFeatureCount) {
+            fail(
+                "coverage Priority feature dimension drifted");
+        }
+        observation.stack_feature_bits.push_back(
+            std::bit_cast<std::uint64_t>(
+                action_features[
+                    kCoverageStackSizeFeatureIndex]));
+    }
+    return observation;
+}
+
+neutral::EligibleRoot make_neutral_eligible_root(
+    bundle::Split split,
+    const std::vector<schedule_data::SourceGame>& schedule,
+    const RetainedRoot& row) {
+    const CoverageRootObservation observation =
+        make_coverage_observation(split, schedule, row);
+    if (observation.selected_roles != 0 ||
+        observation.dominance_positive ||
+        observation.public_stack_size != 0) {
+        fail("non-neutral root reached neutral selection");
+    }
+    return {
+        .rank = {
+            .split = split,
+            .owner_deck = observation.owner_deck,
+            .schedule_block =
+                observation.schedule_block,
+            .physical_game_sha256 =
+                observation.physical_game_sha256,
+            .stable_root_id =
+                observation.stable_root_id,
+        },
+        .schedule_index = row.census.schedule_index,
+        .owner_seat = observation.owner_seat,
+        .owner_on_play = observation.owner_on_play,
+        .opponent_deck = observation.opponent_deck,
+        .trace_ordinal = row.census.trace_ordinal,
+        .legal_action_count =
+            narrow_u8(
+                row.features.size(),
+                "neutral legal-action count"),
+        .retained_nontrivial = true,
+        .public_stack_size = 0,
+        .dominance_positive = false,
+        .existing_selected_roles = 0,
+    };
+}
+
 SplitBuild construct_split(
     schedule_data::Split split,
     const std::vector<schedule_data::SourceGame>& schedule,
     const std::shared_ptr<const LearnedModel>& parent,
     std::uint64_t& completed_source_games,
     std::vector<CoverageRootObservation>*
-        coverage_observations = nullptr) {
+        coverage_observations = nullptr,
+    bool capture_neutral = false) {
     const bundle::Split bundle_split =
         split_for(split);
     CanonicalBytes trajectory;
@@ -999,6 +1185,9 @@ SplitBuild construct_split(
     selection_digest.u64(
         static_cast<std::uint64_t>(bundle_split));
     selection_digest.u64(selection.rows.size());
+    std::vector<std::pair<std::size_t, std::uint8_t>>
+        blind_selected;
+    blind_selected.reserve(selection.rows.size());
     for (const collection::BlindSelectionRow& selected :
          selection.rows) {
         if (selected.input_index >= retained.size()) {
@@ -1027,10 +1216,86 @@ SplitBuild construct_split(
         }
         retained[selected.input_index]
             .selected_roles = roles;
+        blind_selected.emplace_back(
+            selected.input_index, roles);
+    }
+
+    // Freeze every role and export every aggregate-only coverage witness
+    // before any selected-row parent score is evaluated. DEV5 additionally
+    // freezes its split-local neutral locators at this boundary; neither
+    // selection path can receive a score, outcome, phase, or source choice.
+    if (coverage_observations != nullptr) {
+        coverage_observations->reserve(
+            coverage_observations->size() +
+            retained.size());
+        for (const RetainedRoot& row : retained) {
+            coverage_observations->push_back(
+                make_coverage_observation(
+                    bundle_split, schedule, row));
+        }
+    }
+    if (capture_neutral) {
+        result.neutral_eligible.reserve(
+            retained.size());
+        std::map<bundle::Hash256, std::size_t>
+            retained_by_stable;
+        for (std::size_t index = 0;
+             index < retained.size(); ++index) {
+            const RetainedRoot& row = retained[index];
+            if (!retained_by_stable
+                     .emplace(
+                         row.census.stable_root_id,
+                         index)
+                     .second) {
+                fail(
+                    "neutral candidate stable root is duplicated");
+            }
+            if (row.selected_roles == 0 &&
+                !row.dominance.any_dominated() &&
+                row.root.probe.state.stack.empty()) {
+                result.neutral_eligible.push_back(
+                    make_neutral_eligible_root(
+                        bundle_split, schedule, row));
+            }
+        }
+        const std::vector<neutral::RankedLocator>
+            provisional =
+                neutral::freeze_split_selection(
+                    bundle_split,
+                    result.neutral_eligible,
+                    neutral::accepted_dev4_capacity());
+        result.neutral_selected.reserve(
+            provisional.size());
+        for (const neutral::RankedLocator& locator :
+             provisional) {
+            const auto found =
+                retained_by_stable.find(
+                    locator.root.rank.stable_root_id);
+            if (found == retained_by_stable.end()) {
+                fail(
+                    "provisional neutral locator lacks a live root");
+            }
+            RetainedRoot& row = retained[found->second];
+            if (row.selected_roles != 0 ||
+                row.dominance.any_dominated() ||
+                !row.root.probe.state.stack.empty()) {
+                fail(
+                    "provisional neutral root changed eligibility");
+            }
+            result.neutral_selected.push_back({
+                .locator = locator,
+                .retained = std::move(row),
+            });
+        }
+    }
+
+    result.selected.reserve(blind_selected.size());
+    for (const auto [input_index, roles] :
+         blind_selected) {
         result.selected.push_back(
             score_selected_root(
                 bundle_split, roles,
-                retained[selected.input_index],
+                retained[input_index],
                 parent, result.witnesses));
     }
 
@@ -1101,76 +1366,6 @@ SplitBuild construct_split(
                 result.support
                     .background_by_deck[deck],
                 "per-deck background count");
-    }
-    if (coverage_observations != nullptr) {
-        coverage_observations->reserve(
-            coverage_observations->size() +
-            retained.size());
-        for (const RetainedRoot& row : retained) {
-            if (row.census.schedule_index >=
-                schedule.size()) {
-                fail(
-                    "coverage row schedule index is out of range");
-            }
-            const schedule_data::SourceGame& source =
-                schedule[row.census.schedule_index];
-            if (row.census.owner_seat >= kPlayerCount ||
-                source.schedule_block !=
-                    row.census.schedule_block ||
-                source.seat_decks[
-                    row.census.owner_seat] !=
-                    row.root.manifest.owner_deck) {
-                fail(
-                    "coverage row does not match its frozen source");
-            }
-            CoverageRootObservation observation{
-                .split = bundle_split,
-                .schedule_block =
-                    row.census.schedule_block,
-                .owner_deck =
-                    narrow_u8(
-                        deck_index(
-                            row.root.manifest.owner_deck),
-                        "coverage owner deck"),
-                .opponent_deck =
-                    narrow_u8(
-                        deck_index(
-                            row.root.manifest.opponent_deck),
-                        "coverage opponent deck"),
-                .owner_seat =
-                    row.census.owner_seat,
-                .owner_on_play =
-                    source.starting_player ==
-                        row.census.owner_seat,
-                .stable_root_id =
-                    row.census.stable_root_id,
-                .physical_game_sha256 =
-                    row.census.physical_game_sha256,
-                .option_count = row.features.size(),
-                .dominance_positive =
-                    row.dominance.any_dominated(),
-                .selected_roles = row.selected_roles,
-                .public_stack_size =
-                    row.root.probe.state.stack.size(),
-                .phase = row.root.probe.phase,
-            };
-            observation.stack_feature_bits.reserve(
-                row.features.size());
-            for (const auto& action_features :
-                 row.features) {
-                if (action_features.size() !=
-                    bundle::kFeatureCount) {
-                    fail(
-                        "coverage Priority feature dimension drifted");
-                }
-                observation.stack_feature_bits.push_back(
-                    std::bit_cast<std::uint64_t>(
-                        action_features[
-                            kCoverageStackSizeFeatureIndex]));
-            }
-            coverage_observations->push_back(
-                std::move(observation));
-        }
     }
     return result;
 }
@@ -1314,6 +1509,265 @@ CompleteBuild construct_complete(
             bundle::encode(result.bundle));
     }
     return result;
+}
+
+bool published_scientific_manifest_exact(
+    const bundle::Manifest& manifest) {
+    return
+        manifest.purpose == bundle::kPurpose &&
+        manifest.parent_artifact_sha256 ==
+            bundle::parse_sha256(
+                bundle::kParentArtifactSha256) &&
+        manifest.parent_model_fingerprint ==
+            bundle::parse_sha256(
+                bundle::kParentModelFingerprint) &&
+        manifest.parent_components.critic ==
+            bundle::parse_sha256(
+                bundle::kParentCriticFingerprint) &&
+        manifest.parent_components.priority ==
+            bundle::parse_sha256(
+                bundle::kParentPriorityFingerprint) &&
+        manifest.parent_components.attack ==
+            bundle::parse_sha256(
+                bundle::kParentAttackFingerprint) &&
+        manifest.parent_components.block ==
+            bundle::parse_sha256(
+                bundle::kParentBlockFingerprint) &&
+        manifest.parent_components.damage_order ==
+            bundle::parse_sha256(
+                bundle::kParentDamageOrderFingerprint) &&
+        manifest.generation_namespace ==
+            bundle::kGenerationNamespace &&
+        manifest.hidden_namespace ==
+            bundle::kHiddenNamespace &&
+        manifest.dominance_namespace ==
+            bundle::kDominanceNamespace &&
+        manifest.collection_spec_sha256 ==
+            collection_spec_contract_sha256() &&
+        manifest.production_recipe ==
+            bundle::kProductionRecipe &&
+        manifest.feature_schema ==
+            bundle::kFeatureSchema &&
+        manifest.feature_count ==
+            bundle::kFeatureCount &&
+        manifest.feature_contract_sha256 ==
+            feature_contract_sha256();
+}
+
+void add_score_accounting(
+    bundle::ScoreAccounting& total,
+    const bundle::ScoreAccounting& addend) {
+    const auto add =
+        [](std::uint64_t& target,
+           std::uint64_t value) {
+            if (value >
+                std::numeric_limits<std::uint64_t>::max() -
+                    target) {
+                fail("score accounting overflows");
+            }
+            target += value;
+        };
+    add(total.score_calls, addend.score_calls);
+    add(total.scored_actions, addend.scored_actions);
+    add(total.sampled_worlds, addend.sampled_worlds);
+    add(
+        total.rollout_evaluations,
+        addend.rollout_evaluations);
+    add(
+        total.terminal_evaluations,
+        addend.terminal_evaluations);
+    add(
+        total.bootstrap_evaluations,
+        addend.bootstrap_evaluations);
+}
+
+bundle::ScoreAccounting summarize_scoring(
+    const std::vector<bundle::SelectedRow>& rows) {
+    bundle::ScoreAccounting result;
+    for (const bundle::SelectedRow& row : rows) {
+        const std::uint64_t actions =
+            static_cast<std::uint64_t>(
+                row.actions.size());
+        if (row.accounting.score_calls != 1 ||
+            row.accounting.scored_actions != actions ||
+            row.accounting.sampled_worlds !=
+                scoring::kProductionWorlds ||
+            row.accounting.rollout_evaluations !=
+                actions *
+                    scoring::kProductionWorlds *
+                    scoring::kProductionRolloutsPerWorld ||
+            row.accounting.terminal_evaluations +
+                    row.accounting.bootstrap_evaluations !=
+                row.accounting.rollout_evaluations) {
+            fail("production score accounting drifted");
+        }
+        add_score_accounting(result, row.accounting);
+    }
+    return result;
+}
+
+neutral::NeutralRow adapt_neutral_row(
+    const neutral::RankedLocator& locator,
+    const RetainedRoot& retained,
+    const bundle::SelectedRow& selected) {
+    const bundle::CensusRow& census = selected.census;
+    const neutral::EligibleRoot& eligible =
+        locator.root;
+    if (selected.split != eligible.rank.split ||
+        selected.roles != 0 ||
+        census != retained.census ||
+        census.schedule_block !=
+            eligible.rank.schedule_block ||
+        census.schedule_index !=
+            eligible.schedule_index ||
+        census.owner_seat != eligible.owner_seat ||
+        census.trace_ordinal !=
+            eligible.trace_ordinal ||
+        census.owner_deck !=
+            eligible.rank.owner_deck ||
+        census.opponent_deck !=
+            eligible.opponent_deck ||
+        census.stable_root_id !=
+            eligible.rank.stable_root_id ||
+        census.physical_game_sha256 !=
+            eligible.rank.physical_game_sha256 ||
+        selected.actions.size() !=
+            eligible.legal_action_count ||
+        selected.actions.size() !=
+            retained.root.manifest
+                .canonical_descriptors.size() ||
+        selected.actions.size() !=
+            census.dominance.size() ||
+        census.pass_index !=
+            retained.root.manifest.pass_index ||
+        census.descriptor_set_sha256 !=
+            bundle::descriptor_set_sha256(
+                retained.root.manifest
+                    .canonical_descriptors) ||
+        retained.selected_roles != 0 ||
+        retained.dominance.any_dominated() ||
+        !retained.root.probe.state.stack.empty()) {
+        fail(
+            retained.root.manifest.stable_id +
+            ": neutral adapter boundary drifted");
+    }
+
+    neutral::NeutralRow result{
+        .locator = locator,
+        .information_action_sha256 =
+            census.information_action_sha256,
+        .descriptor_set_sha256 =
+            census.descriptor_set_sha256,
+        .pass_index = census.pass_index,
+        .production_seed = selected.production_seed,
+        .hidden_clone_eligible =
+            retained.hidden.eligible,
+        .hidden_clone_distinct =
+            retained.hidden.distinct,
+        .accounting = selected.accounting,
+    };
+    result.actions.reserve(selected.actions.size());
+    for (std::size_t index = 0;
+         index < selected.actions.size(); ++index) {
+        const bundle::ActionRow& source =
+            selected.actions[index];
+        if (source.descriptor !=
+                retained.root.manifest
+                    .canonical_descriptors[index] ||
+            source.dominance !=
+                census.dominance[index] ||
+            source.is_pass !=
+                (index == census.pass_index)) {
+            fail(
+                retained.root.manifest.stable_id +
+                ": neutral action adapter drifted");
+        }
+        result.actions.push_back({
+            .is_pass = source.is_pass,
+            .dominance = source.dominance,
+            .raw_sample_bits =
+                source.raw_sample_bits,
+            .shallow_prior_sample_bits =
+                source.shallow_prior_sample_bits,
+            .continuation_sample_bits =
+                source.continuation_sample_bits,
+            .base_score_bits =
+                source.base_score_bits,
+            .parent_residual_bits =
+                source.parent_residual_bits,
+            .features = source.features,
+        });
+    }
+    return result;
+}
+
+neutral::NeutralRow score_neutral_root(
+    const CapturedNeutralRoot& captured,
+    const std::shared_ptr<const LearnedModel>& parent,
+    bundle::ScoreAccounting& canonical_accounting,
+    bundle::ScoreAccounting& hidden_accounting,
+    std::uint64_t& bit_identical_actions) {
+    const RetainedRoot& retained = captured.retained;
+    const std::vector<std::vector<double>>
+        hidden_features =
+            collection::priority_option_features(
+                retained.hidden.probe);
+    if (!collection::priority_feature_bits_identical(
+            retained.root.probe,
+            retained.hidden.probe) ||
+        !bit_identical(
+            retained.features, hidden_features)) {
+        fail(
+            retained.root.manifest.stable_id +
+            ": hidden neutral features drifted");
+    }
+
+    const ProductionRootScore canonical =
+        score_canonical_root(retained, parent);
+    const ProductionRootScore hidden =
+        score_hidden_root(
+            retained, hidden_features, parent);
+    if (!scoring::bit_identical(
+            canonical.decision, hidden.decision) ||
+        !bit_identical(
+            canonical.residual.centered_logits,
+            hidden.residual.centered_logits) ||
+        !bit_identical(
+            canonical.residual.residuals,
+            hidden.residual.residuals) ||
+        !bit_identical(
+            canonical.residual.combined_scores,
+            hidden.residual.combined_scores) ||
+        canonical.residual.exact_max_indices !=
+            hidden.residual.exact_max_indices) {
+        fail(
+            retained.root.manifest.stable_id +
+            ": canonical and hidden neutral scores differ");
+    }
+
+    std::vector<ParentWitness> no_witnesses;
+    const bundle::SelectedRow selected =
+        score_selected_root(
+            captured.locator.root.rank.split, 0,
+            retained, canonical, no_witnesses);
+    if (!no_witnesses.empty()) {
+        fail("neutral row unexpectedly emitted a parent witness");
+    }
+    add_score_accounting(
+        canonical_accounting, selected.accounting);
+    add_score_accounting(
+        hidden_accounting,
+        score_accounting(hidden.decision));
+    if (selected.actions.size() >
+        std::numeric_limits<std::uint64_t>::max() -
+            bit_identical_actions) {
+        fail("bit-identical action count overflows");
+    }
+    bit_identical_actions +=
+        static_cast<std::uint64_t>(
+            selected.actions.size());
+    return adapt_neutral_row(
+        captured.locator, retained, selected);
 }
 
 } // namespace
@@ -2328,6 +2782,286 @@ CoverageReconstruction reconstruct_published_coverage_once() {
         fail("coverage reconstruction did not reproduce the bundle");
     }
     return result;
+}
+
+neutral::Artifact materialize_neutral_supplement(
+    const std::filesystem::path& executable_path,
+    std::string_view producer_commit) {
+    constexpr std::uintmax_t kParentArtifactBytes =
+        3'111'437;
+    constexpr std::uint64_t kExpectedSourceGames = 320;
+    constexpr std::uint64_t kExpectedRetainedRoots = 9'728;
+    constexpr std::uint64_t kExpectedRetainedOptions = 29'108;
+    const bundle::ScoreAccounting expected_parent_scoring{
+        .score_calls = 192,
+        .scored_actions = 1'141,
+        .sampled_worlds = 1'536,
+        .rollout_evaluations = 9'128,
+        .terminal_evaluations = 1'787,
+        .bootstrap_evaluations = 7'341,
+    };
+    if (!canonical_lower_hex(producer_commit, 40) ||
+        std::all_of(
+            producer_commit.begin(),
+            producer_commit.end(),
+            [](char character) {
+                return character == '0';
+            })) {
+        throw std::invalid_argument(
+            "FQ4 neutral producer commit must be nonzero "
+            "canonical lowercase 40-hex");
+    }
+
+    const auto fit_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Fit);
+    const auto check_schedule =
+        schedule_data::source_schedule(
+            schedule_data::Split::Check);
+    const SchedulePreflight preflight =
+        preflight_schedules(
+            fit_schedule, check_schedule);
+    if (!preflight.exact) {
+        fail(
+            preflight.failures.empty()
+                ? "neutral schedule preflight failed"
+                : preflight.failures.front());
+    }
+    if (feature_contract_sha256() !=
+            bundle::parse_sha256(
+                bundle::kFeatureContractSha256) ||
+        collection_spec_contract_sha256() !=
+            bundle::parse_sha256(
+                bundle::kCollectionSpecSha256)) {
+        fail("neutral scientific-contract preflight drifted");
+    }
+
+    const std::filesystem::path parent_path(
+        kParentArtifactPath);
+    const std::filesystem::path bundle_path(
+        bundle::kArtifactPath);
+    const integrity::RegularFileSnapshot executable_before =
+        integrity::snapshot_regular_file(executable_path);
+    const integrity::RegularFileSnapshot parent_before =
+        integrity::snapshot_regular_file(parent_path);
+    const integrity::RegularFileSnapshot bundle_before =
+        integrity::snapshot_regular_file(bundle_path);
+    if (parent_before.byte_size !=
+            kParentArtifactBytes ||
+        parent_before.sha256 !=
+            bundle::kParentArtifactSha256 ||
+        bundle_before.byte_size !=
+            bundle::kPublishedArtifactBytes ||
+        bundle_before.sha256 !=
+            bundle::kPublishedArtifactSha256) {
+        fail("neutral immutable input identity drifted");
+    }
+
+    const bundle::Bundle published =
+        bundle::load_published();
+    if (!published_scientific_manifest_exact(
+            published.manifest)) {
+        fail("neutral published scientific manifest drifted");
+    }
+
+    const auto parent =
+        load_learned_value_challenger_artifact(
+            std::string(kParentArtifactPath),
+            kParentTrainingGames,
+            kParentTrainingSeed,
+            kParentGenerations)
+            .model();
+    require_parent_identity(parent);
+
+    std::vector<CoverageRootObservation> observations;
+    observations.reserve(kExpectedRetainedRoots);
+    std::uint64_t fit_games = 0;
+    std::uint64_t check_games = 0;
+    SplitBuild fit =
+        construct_split(
+            schedule_data::Split::Fit,
+            fit_schedule, parent, fit_games,
+            &observations, true);
+    require_parent_identity(parent);
+    SplitBuild check =
+        construct_split(
+            schedule_data::Split::Check,
+            check_schedule, parent, check_games,
+            &observations, true);
+    require_parent_identity(parent);
+
+    const bool dev1_sections_exact =
+        fit.census == published.fit_census &&
+        check.census == published.check_census &&
+        fit.selected == published.fit_rows &&
+        check.selected == published.check_rows &&
+        fit.manifest == published.manifest.fit &&
+        check.manifest == published.manifest.check;
+    if (!dev1_sections_exact ||
+        fit_games + check_games !=
+            kExpectedSourceGames) {
+        fail(
+            "neutral reconstruction did not reproduce DEV1");
+    }
+
+    bundle::ScoreAccounting parent_scoring =
+        summarize_scoring(fit.selected);
+    add_score_accounting(
+        parent_scoring,
+        summarize_scoring(check.selected));
+    std::uint64_t retained_options = 0;
+    for (const CoverageRootObservation& observation :
+         observations) {
+        if (observation.option_count >
+            std::numeric_limits<std::uint64_t>::max() -
+                retained_options) {
+            fail("neutral retained-option count overflows");
+        }
+        retained_options +=
+            static_cast<std::uint64_t>(
+                observation.option_count);
+    }
+    if (observations.size() !=
+            kExpectedRetainedRoots ||
+        retained_options !=
+            kExpectedRetainedOptions ||
+        parent_scoring != expected_parent_scoring) {
+        fail(
+            "neutral reconstruction ledger disagrees "
+            "with published DEV1");
+    }
+    const coverage::CoverageCensus dev4_capacity =
+        coverage::measure(observations);
+
+    std::vector<neutral::EligibleRoot> eligible;
+    eligible.reserve(
+        fit.neutral_eligible.size() +
+        check.neutral_eligible.size());
+    eligible.insert(
+        eligible.end(),
+        fit.neutral_eligible.begin(),
+        fit.neutral_eligible.end());
+    eligible.insert(
+        eligible.end(),
+        check.neutral_eligible.begin(),
+        check.neutral_eligible.end());
+    const neutral::FrozenSelection frozen =
+        neutral::freeze_selection(
+            eligible, dev4_capacity);
+    const neutral::Hash256 selected_order_digest =
+        neutral::selected_order_sha256(frozen.rows);
+    if (selected_order_digest !=
+            frozen.selected_order_sha256) {
+        fail("neutral selected-order digest drifted");
+    }
+
+    std::vector<CapturedNeutralRoot> captured;
+    captured.reserve(
+        fit.neutral_selected.size() +
+        check.neutral_selected.size());
+    std::move(
+        fit.neutral_selected.begin(),
+        fit.neutral_selected.end(),
+        std::back_inserter(captured));
+    std::move(
+        check.neutral_selected.begin(),
+        check.neutral_selected.end(),
+        std::back_inserter(captured));
+    if (captured.size() != frozen.rows.size()) {
+        fail(
+            "provisional and authoritative neutral "
+            "selection sizes differ");
+    }
+    for (std::size_t index = 0;
+         index < captured.size(); ++index) {
+        if (captured[index].locator !=
+            frozen.rows[index]) {
+            fail(
+                "provisional and authoritative neutral "
+                "locators differ");
+        }
+    }
+
+    neutral::Artifact artifact;
+    artifact.manifest.contract =
+        neutral::make_contract(
+            published.manifest, dev4_capacity);
+    artifact.manifest.producer_commit =
+        std::string(producer_commit);
+    artifact.manifest.producer_executable_sha256 =
+        bundle::parse_sha256(
+            executable_before.sha256);
+    artifact.manifest.selected_order_sha256 =
+        selected_order_digest;
+    neutral::PublisherAccounting& accounting =
+        artifact.manifest.accounting;
+    accounting.reconstruction = {
+        .source_games =
+            static_cast<std::uint64_t>(
+                fit_games + check_games),
+        .retained_roots =
+            static_cast<std::uint64_t>(
+                observations.size()),
+        .retained_options = retained_options,
+        .parent_scoring = parent_scoring,
+    };
+    accounting.selection_frozen_before_scoring = true;
+    accounting.dev1_scientific_sections_exact =
+        dev1_sections_exact;
+    accounting.parent_models_loaded = 1;
+
+    artifact.rows.reserve(captured.size());
+    for (const CapturedNeutralRoot& row : captured) {
+        const std::size_t split =
+            row.locator.root.rank.split ==
+                    bundle::Split::Fit
+                ? 0
+                : 1;
+        const std::size_t deck =
+            row.locator.root.rank.owner_deck;
+        if (deck >= neutral::kDeckCount) {
+            fail("neutral hidden-control deck is invalid");
+        }
+        std::uint16_t& hidden_count =
+            row.retained.hidden.distinct
+                ? accounting
+                      .distinct_hidden_controls[split][deck]
+                : accounting
+                      .nondistinct_hidden_controls[split][deck];
+        if (hidden_count ==
+            std::numeric_limits<std::uint16_t>::max()) {
+            fail("neutral hidden-control count overflows");
+        }
+        ++hidden_count;
+        artifact.rows.push_back(
+            score_neutral_root(
+                row, parent,
+                accounting.canonical_neutral,
+                accounting.hidden_clone,
+                accounting.bit_identical_actions));
+    }
+    accounting.canonical_hidden_bit_identical = true;
+    require_parent_identity(parent);
+
+    const integrity::RegularFileSnapshot executable_after =
+        integrity::snapshot_regular_file(executable_path);
+    const integrity::RegularFileSnapshot parent_after =
+        integrity::snapshot_regular_file(parent_path);
+    const integrity::RegularFileSnapshot bundle_after =
+        integrity::snapshot_regular_file(bundle_path);
+    if (executable_after != executable_before ||
+        parent_after != parent_before ||
+        bundle_after != bundle_before) {
+        fail(
+            "neutral immutable input changed during "
+            "materialization");
+    }
+    accounting.parent_immutable = true;
+    accounting.bundle_immutable = true;
+    accounting.executable_immutable = true;
+
+    neutral::validate(artifact);
+    return artifact;
 }
 
 GenerationReport generate_and_publish(
