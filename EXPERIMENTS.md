@@ -16877,6 +16877,205 @@ contained no conflicting result. Independent post-result review countersigned
 the rejection and required the trajectory-sensitive correction above before
 selecting the exact next diagnostic implementation.
 
+##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
+
+Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
+logic, reconstructing a source game, building a cache, loading the rejected
+anchored challenger into a WORK0 evaluator, or observing any new trajectory
+partition. C16 remains champion. This is a diagnostic/infrastructure
+coordinate, not a strength comparison, training run, or candidate treatment.
+
+The immediate purpose is to replace the approximately five-minute repeated
+reconstruction of 320 frozen source games with one immutable internal cache
+of the exact roots that the already-published DEV1 and DEV5 artifacts select.
+The root universe is fixed without inspecting the challenger: the disjoint
+union of all 192 published DEV1 selected roots (182 dominance-positive plus
+ten background roots, 1,141 legal options) and all 320 published DEV5 neutral
+roots (877 legal options), for exactly 512 roots and 2,018 options across
+FIT/CHECK and Green, Red, Blue, White, and RU Aggro. Reconstructing the 9,728
+retained DEV1 roots and 29,108 options is permitted once only to locate and
+validate those 512 roots. No quota, stratum, or root may be selected from a
+candidate score, outcome, phase, stack state, action width, or successor.
+
+Falsifiable infrastructure hypothesis: a strict binary cache can preserve
+the complete engine-authoritative Priority decision needed to apply any
+ordered legal action and advance it to the next nontrivial Priority boundary,
+while reproducing every published root/action identity and without changing
+the information exposed to Learned. After that one-time construction, exact
+cache load plus parent-only census must require zero source-game executions,
+zero fits, zero candidate rollouts, and zero gameplay evaluation seeds. A
+cache that cannot rederive its ordered legal actions, published identities,
+and hidden-repartition control exactly is rejected rather than repaired from
+its own payload.
+
+The fixed cache must contain only research-internal transition state:
+owner-visible public state plus the owner's hand, hidden-zone counts, both
+original decklists, root player, public phase, `sorcery_actions`, consecutive
+passes, both raw and descriptor-canonical engine `PriorityAction` order, the
+DEV1 stable/root/physical-game/descriptor-set identities, split,
+owner/opponent deck and source role, and sufficient deterministic seed
+provenance for common-world continuation. The wire must not contain opponent
+hand/library identities or either player's library order. The one-time
+builder normalizes the live root with a domain-separated hidden seed; strict
+decode rehydrates the complete internal state through
+`sample_determinization` and requires bit equality with that normalized root.
+It must not add a feature, change a model artifact, enter a deployed policy,
+or expose a serialized state through aggregate reports. Every Learned score
+still receives only its established owner-information features, and
+hidden-zone repartition must leave those features and common-world scores
+bit-identical. Human/web/simulator consumers must not link this cache.
+
+The artifact contract must bind at least:
+
+- schema and fixed no-replace path;
+- the 2,250,909-byte DEV1 bundle
+  `0911fc2e...859df`, its complete scientific manifests, selected rows, and
+  192/1,141 selected census;
+- the 661,475-byte DEV5 neutral artifact
+  `47d94823...a105`, its selected-order digest, 320/877 census, and complete
+  reconstruction ledger;
+- exact C16 artifact/model/component identities and the K8/H4/R1 production
+  recipe used to create both source artifacts;
+- the collection, feature, schedule, stable-root, descriptor, and action-order
+  contracts; and
+- producer commit/executable identity, payload SHA-256, row count, option
+  count, and per-split/per-deck/source-role counts.
+
+The cache preserves both order notions: raw engine legal-action order, which
+deployment can observe when exact scores tie, and the descriptor-canonical
+DEV1/DEV5 order used by artifact features, descriptors, and Pass indices,
+with an exact bijection between them.
+
+Strict decode independently regenerates raw `legal_priority_actions` from
+state and context, requires exact raw equality, applies the same
+descriptor-canonical ordering used by DEV1/DEV5, and requires canonical
+typed-action equality, descriptors, Pass index, action count, the raw/canonical
+bijection, card conservation, deck identities, stable root, physical game,
+and both published source rows. It rejects trailing bytes, noncanonical
+integers or enums, impossible sizes, duplicate roots, role overlap,
+source-artifact drift, state/action mutation, and any missing deck/split
+cell. Encode/decode round trips and two independent encodings of the same
+once-reconstructed, validated root set must be byte-identical; a second
+320-game reconstruction is intentionally forbidden because eliminating it is
+the point of the cache.
+Atomic publication is no-replace, with before/after snapshots of the
+executable, C16, DEV1, and DEV5 artifacts. Tests and ordinary `make test` may
+exercise only synthetic codecs and bad-argument paths; the fixed no-argument
+cache builder is never an implicit test dependency.
+
+WORK0 then follows **parent census B, paired successor audit B, confirmatory
+replay A**, rather than using the already-open GP0 seed to choose a treatment:
+
+1. Load the cache and C16 only. Before loading or scoring any challenger,
+   report the immutable parent population by split, owner deck, source role,
+   phase, public stack empty/active, ordered legal-action-width histogram,
+   source-game count, exact-max support size, the action selected by a
+   candidate-independent domain-separated tie rule, and selected Pass versus
+   non-Pass. Apply that frozen parent action in the same eight
+   domain-separated determinized worlds and freeze next-boundary disposition,
+   legal-action-width sum (terminal contributes zero), forced Priority
+   actions, phase transitions, and turn advances. Any incomplete macro
+   transition voids the census. Unknown cells and counts are descriptive and
+   deliberately not guessed here. Exact 512/2,018 totals, all-five coverage,
+   published-source cross-sums, hidden-repartition invariance, and zero source
+   games/fits/candidate/gameplay coordinates are hard gates.
+2. Freeze that exact parent census in a separate paired declaration. On the
+   same ordered roots, common determinized worlds, and domain-separated tie
+   seeds, compare C16 with a challenger only through successor-sensitive
+   work: each selected action advances through
+   `advance_learned_priority_macro_transition` to the next nontrivial Priority
+   boundary or terminal state. The sole primary proxy-validity statistic is
+   deck-balanced: for each of Green, Red, Blue, White, and RU Aggro, take the
+   mean next-boundary legal-action width over that deck's roots times eight
+   worlds, then take the arithmetic mean of those five deck means. The fixed
+   inherited root counts are 97/75/128/86/126 respectively; the unequal
+   pooled sum is descriptive only. Terminal contributes zero and any
+   incomplete transition makes the coordinate void. Forced actions and
+   phase/turn transitions are descriptive secondary accounting. Existing
+   macro transition deliberately
+   stops before the first later multi-action Priority call, so it makes no H4
+   internal-decision claim. Any separately bounded H4 continuation
+   instrumentation requires its own declaration. At a shared root, legal
+   options, worlds, and
+   `8 * option_count` root evaluations are exact-equality negative controls;
+   no differential current-root-cost claim is permitted.
+3. Only after an independently frozen WORK0 mechanism exists may an
+   instrumentation-only replay of already-open GP0 seed `202607280701`
+   confirm it in real trajectories. That replay is void unless it exactly
+   reproduces 120-120 and 112-128, 10,506/14,666 decisions,
+   255,088/408,808 rollouts, 4,846/5,158 turns, all ten recorded
+   challenger/baseline deck rows, and finish counts. The original notebook
+   did not retain the 40
+   literal quadrant/matchup outcome cells or a full-report digest, so those
+   cells may be required to remain structurally balanced and reconcile to the
+   frozen aggregates but may not be invented as exact historical values.
+   Recovering them by an extra uninstrumented replay is forbidden.
+   Instrumented wall time is never evidence.
+
+The parent scorer and seed contract are fixed before P0. For every root, use
+the already-published descriptor-canonical `base_score_bits` generated by the
+K8/H4/R1, shallow-prior-on production scorer and add the published
+`parent_residual_bits`, which are exactly
+`0.10 * tanh(parent_logit - mean(parent_logits))` for C16. Recompute C16
+logits from the published sparse features and require both residual and
+combined-score bits to reproduce; do not run a fresh stochastic root scorer.
+The stored production seed must exactly equal
+`reference_seed_for_probe("old-school-oc1-action-regression-v1.production",
+stable_root_id, 5787775625948253273)`.
+
+Exact-max ties use one model-independent rule. For each supported action,
+hash the byte framing `LE64(domain length) || domain ||
+stable_root_id[32] || LE64(source family) || LE64(source-row ordinal) ||
+LE64(descriptor length) || descriptor`, where domain is literal
+`old-school-fq4-work0-action-tie-v1`; select the lexicographically smallest
+32-byte SHA-256 digest. Source family is frozen as unsigned `0` for DEV1
+selected and `1` for DEV5 neutral; no other value is valid. Report support
+size and whether this rule was needed. This does not claim to reconstruct an
+unavailable gameplay RNG position.
+
+For world index `w = 0..7`, determinize with the production search's literal
+WORLD domain `0x574f524c44` and run the macro with its literal CONTINUE domain
+`0x434f4e54494e5545`, both through the engine's frozen indexed-search formula:
+`mix(seed ^ mix(domain) ^ mix(w) ^
+mix(0 ^ 0xd1b54a32d192ed03))`, where `mix(x)` adds
+`0x9e3779b97f4a7c15`, applies xor-shift/multiply pairs
+`(30,0xbf58476d1ce4e5b9)` and `(27,0x94d049bb133111eb)`, then xor-shifts by
+31. The WORLD result seeds `sample_determinization`; the CONTINUE result
+seeds `advance_learned_priority_macro_transition`. Tests must cross-check
+these seeds against the production K8 scorer rather than trusting a duplicate
+implementation.
+
+The parent census has no directional hypothesis because its job is to measure
+immutable facts before thresholds are declared. After those facts and the
+tie rule are frozen, the separate paired WORK0 declaration will state one
+directional proxy-validity hypothesis on the primary equal-weight arithmetic
+mean of the five per-deck next-boundary-width means; the pooled width sum
+remains descriptive and “any increased metric” is forbidden. Null or opposite
+evidence means WORK0 failed to model the field cost and cannot license a
+treatment. Every newly observed
+per-deck/phase/stack/width cell and every secondary transition counter remains
+descriptive. Only agreement between the independently frozen WORK0 mechanism
+and the confirmatory replay may nominate one generic, card-agnostic treatment
+axis. Any resulting candidate must still pass the fast five-deck offline gate
+and a fresh gameplay seed before a powered milestone.
+
+This deliberately refines the prior “replay next” note. Starting with the
+cache and parent-only census prevents one evaluation seed from selecting the
+mechanism or strata, while the later exact replay remains the authoritative
+field confirmation. `REVIEW.md` was reread through its newest 12:49
+verification addendum before this declaration. It countersigns the rejected
+smoke and exact-reproduction requirement; an independent prospective review
+recommended this B-then-A ordering and the successor-sensitive negative
+controls. No conflicting result exists.
+
+Prospective clarification after rereading `REVIEW.md` through its 12:59
+cycle: that entry endorses WORK0 but describes “H4 internals.” The current
+protocol deliberately does **not** make that claim, because
+`advance_learned_priority_macro_transition` stops before the first later
+multi-action Priority call. The next-boundary primary above is the only
+declared WORK0 mechanism; a true bounded-H4 work instrument would require a
+separate declaration.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
