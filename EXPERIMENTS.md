@@ -16877,6 +16877,60 @@ contained no conflicting result. Independent post-result review countersigned
 the rejection and required the trajectory-sensitive correction above before
 selecting the exact next diagnostic implementation.
 
+##### FQ4-EXPLORE-1 fast Priority-blend sweep declaration
+
+Declared 2026-07-28 after the project owner explicitly changed the immediate
+objective from publication-grade evidence to rapid candidate discovery and
+human play-testing. `REVIEW.md` was reread through its newest 14:04 PDT entry,
+which reinstates DEV5 because runtime is descriptive rather than a rejection
+gate. The historical DEV1 and DEV5 records remain unchanged. WORK0 is paused
+off the critical path; this experiment neither consumes nor modifies it.
+
+Recent-candidate accounting motivates this change of cadence. Since C16, four
+distinct model fingerprints have received some measurement, but only DEV1 and
+DEV5 reached gameplay. DEV1 changed only the Priority head using 88
+dominance-positive FIT roots and scored 90-150 (37.5%) against C16. DEV5 used
+the same head and optimizer with those 88 roots plus 160 neutral anchors and
+scored 112-128 (46.7%). No new gameplay candidate has been tested since DEV5.
+
+Falsifiable exploratory hypothesis: DEV5 contains a useful learned Priority
+direction, but applying its full parameter delta causes unnecessary
+out-of-distribution drift. At least one partial interpolation from exact C16
+to exact DEV5 will outperform full DEV5 in a short balanced screen, and the
+best partial interpolation will score above 50% against C16 in the follow-up
+screen.
+
+Construct four candidates entirely in memory by replacing only C16's Priority
+parameters with
+`C16 + alpha * (DEV5 - C16)` for literal binary64
+`alpha = {0.25, 0.50, 0.75, 1.00}`. All critic, Attack, Block, DamageOrder,
+features, hidden-information boundaries, and K8/H4/R1 deployment settings
+remain exact C16. Do not publish artifacts or add a promotion ceremony.
+
+The exact exploratory ladder is:
+
+1. E0: run each alpha against C16 for one repetition of the existing 15
+   balanced pairings on seed `202607280801`: 60 games per candidate and 12
+   per challenger deck. Rank by total wins, breaking ties toward smaller
+   alpha. This is a coarse search result, not a strength claim.
+2. E1: run only the top two E0 candidates for four repetitions on fresh seed
+   `202607280802`: 240 games per candidate and 48 per challenger deck. The
+   higher total-wins candidate is the exploratory winner, again breaking ties
+   toward smaller alpha.
+3. Runtime, decisions, rollouts, and all five deck rows are reported but never
+   reject a candidate. If the E1 winner exceeds 50% against C16, expose it in
+   the web client for the owner's strategic play-test. If neither candidate
+   exceeds 50%, stop this interpolation family and immediately test a
+   genuinely different learning intervention rather than building more
+   evidence infrastructure.
+
+These sample sizes intentionally cannot certify small effects. They answer the
+cheaper question the project currently needs: whether this candidate family
+shows enough gameplay traction to deserve human testing or a later powered,
+frozen evaluation. Exact commands, model fingerprints, aggregate and
+five-deck rows, runtimes, and the stop/advance decision will be recorded after
+the run.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
