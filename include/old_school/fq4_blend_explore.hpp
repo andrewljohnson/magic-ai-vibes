@@ -48,6 +48,10 @@ inline constexpr double kAdversarialCompositionBlendAlpha = 0.50;
 inline constexpr std::uint64_t kStackDisciplineSeed =
     202607280809ULL;
 inline constexpr std::size_t kStackDisciplineRepetitions = 1;
+inline constexpr std::uint64_t kLearnedStackCombatSeed =
+    202607280810ULL;
+inline constexpr std::size_t kLearnedStackCombatRepetitions = 1;
+inline constexpr double kLearnedStackCombatBlendAlpha = 0.50;
 
 struct CandidateScore {
     double alpha = 0.0;
@@ -99,6 +103,24 @@ bool stack_discipline_advances(
 // All three share the same exact frozen model and deployment configuration.
 std::array<BotConfig, 3> make_stack_discipline_bots(
     std::shared_ptr<const LearnedModel> model);
+
+// EXPLORE-6 runs its comparator only after the treatment wins strictly
+// against ordinary C16. Draws do not relax the short-circuit gate.
+bool learned_stack_combat_runs_comparator(
+    const CandidateScore& treatment);
+
+// After the strict-win gate, the treatment advances when it wins at least as
+// many games as the common-coordinate no-PD0 comparator. Equal win counts
+// favor the treatment carrying the deterministic stack repair.
+bool learned_stack_combat_advances(
+    const CandidateScore& treatment,
+    const CandidateScore& comparator);
+
+// Returns treatment (alpha blend+attack+PD0), comparator (same blend+attack),
+// and ordinary-C16 baseline recipes in that order.
+std::array<BotConfig, 3> make_learned_stack_combat_bots(
+    std::shared_ptr<const LearnedModel> blended_model,
+    std::shared_ptr<const LearnedModel> baseline_model);
 
 // Returns the exact K8/H4/R1 C16 deployment recipe with only the explicit
 // exploratory switches selected by the caller.

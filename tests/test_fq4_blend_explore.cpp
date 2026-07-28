@@ -137,6 +137,12 @@ void test_frozen_schedule() {
         explore::kStackDisciplineSeed == 202607280809ULL &&
             explore::kStackDisciplineRepetitions == 1,
         "StackDiscipline exploration schedule drifted");
+    expect(
+        explore::kLearnedStackCombatSeed ==
+                202607280810ULL &&
+            explore::kLearnedStackCombatRepetitions == 1 &&
+            explore::kLearnedStackCombatBlendAlpha == 0.50,
+        "LearnedStackCombat exploration schedule drifted");
 }
 
 void test_blend_endpoints_and_isolation() {
@@ -579,6 +585,133 @@ void test_stack_discipline_config_isolation() {
         "StackDiscipline accepted a missing frozen model");
 }
 
+void test_learned_stack_combat_short_circuit_and_selection() {
+    expect(
+        explore::learned_stack_combat_runs_comparator({
+            .wins = 31,
+            .losses = 29,
+        }),
+        "LearnedStackCombat short-circuited a strict win");
+    expect(
+        !explore::learned_stack_combat_runs_comparator({
+            .wins = 30,
+            .losses = 30,
+        }),
+        "LearnedStackCombat ran comparator after a tie");
+    expect(
+        !explore::learned_stack_combat_runs_comparator({
+            .wins = 29,
+            .losses = 30,
+            .draws = 1,
+        }),
+        "LearnedStackCombat ran comparator after a loss");
+
+    const explore::CandidateScore treatment{
+        .alpha = 0.50,
+        .wins = 31,
+        .losses = 29,
+    };
+    expect(
+        explore::learned_stack_combat_advances(
+            treatment,
+            {.alpha = 0.50, .wins = 31, .losses = 29}),
+        "LearnedStackCombat did not favor PD0 on an arm tie");
+    expect(
+        explore::learned_stack_combat_advances(
+            treatment,
+            {.alpha = 0.50, .wins = 30, .losses = 30}),
+        "LearnedStackCombat rejected a superior treatment");
+    expect(
+        !explore::learned_stack_combat_advances(
+            treatment,
+            {.alpha = 0.50, .wins = 32, .losses = 28}),
+        "LearnedStackCombat advanced a treatment with fewer wins");
+    expect(
+        !explore::learned_stack_combat_advances(
+            {.alpha = 0.50, .wins = 30, .losses = 30},
+            {.alpha = 0.50, .wins = 29, .losses = 31}),
+        "LearnedStackCombat advanced a non-winning treatment");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::learned_stack_combat_advances(
+                    treatment,
+                    {.alpha = 0.50,
+                     .wins = 30,
+                     .losses = 29}));
+        },
+        "LearnedStackCombat accepted unequal game counts");
+}
+
+void test_learned_stack_combat_config_isolation() {
+    const auto parent = parent_model();
+    const auto blended = explore::blend_priority_heads(
+        parent, priority_only_candidate(),
+        explore::kLearnedStackCombatBlendAlpha);
+    const auto bots =
+        explore::make_learned_stack_combat_bots(
+            blended, parent);
+    const auto& treatment = bots[0];
+    const auto& comparator = bots[1];
+    const auto& baseline = bots[2];
+    expect(
+        treatment.kind == comparator.kind &&
+            treatment.kind == baseline.kind &&
+            treatment.learned_variant ==
+                comparator.learned_variant &&
+            treatment.learned_variant ==
+                baseline.learned_variant &&
+            treatment.rollouts_per_action ==
+                comparator.rollouts_per_action &&
+            treatment.rollouts_per_action ==
+                baseline.rollouts_per_action &&
+            treatment.exploration_rate ==
+                comparator.exploration_rate &&
+            treatment.exploration_rate ==
+                baseline.exploration_rate &&
+            treatment.value_continuation_epsilon ==
+                comparator.value_continuation_epsilon &&
+            treatment.value_continuation_epsilon ==
+                baseline.value_continuation_epsilon &&
+            treatment.value_priority_residual_weight ==
+                comparator.value_priority_residual_weight &&
+            treatment.value_priority_residual_weight ==
+                baseline.value_priority_residual_weight &&
+            treatment.value_pass_dominance &&
+            !comparator.value_pass_dominance &&
+            !baseline.value_pass_dominance &&
+            treatment.value_adversarial_blocks &&
+            comparator.value_adversarial_blocks &&
+            !baseline.value_adversarial_blocks &&
+            treatment.value_continuation_controller ==
+                comparator.value_continuation_controller &&
+            treatment.value_continuation_controller ==
+                baseline.value_continuation_controller &&
+            treatment.training_games ==
+                comparator.training_games &&
+            treatment.training_games ==
+                baseline.training_games &&
+            treatment.learned_model == blended &&
+            comparator.learned_model == blended &&
+            baseline.learned_model == parent,
+        "LearnedStackCombat arms changed outside the frozen "
+        "model and printed treatment bits");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::make_learned_stack_combat_bots(
+                    nullptr, parent));
+        },
+        "LearnedStackCombat accepted a missing blend");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::make_learned_stack_combat_bots(
+                    blended, nullptr));
+        },
+        "LearnedStackCombat accepted a missing baseline");
+}
+
 void test_adversarial_block_aggregation_changes_ranking() {
     const std::vector<std::vector<double>> block_scores{
         {1.0, 1.0, 1.0, 0.0},
@@ -629,7 +762,8 @@ void test_cli_rejects_arguments_without_loading_models() {
                 "Usage: old-school-fq4-blend-explore"
                 " [--pd0|--adversarial-blocks|"
                 "--adversarial-composition|"
-                "--stack-discipline]\n",
+                "--stack-discipline|"
+                "--learned-stack-combat]\n",
         "CLI argument rejection was not concise");
 }
 
@@ -671,6 +805,12 @@ int main() {
     runner.run(
         "StackDiscipline config isolation",
         test_stack_discipline_config_isolation);
+    runner.run(
+        "LearnedStackCombat short circuit and selection",
+        test_learned_stack_combat_short_circuit_and_selection);
+    runner.run(
+        "LearnedStackCombat config isolation",
+        test_learned_stack_combat_config_isolation);
     runner.run(
         "AdversarialBlocks synthetic aggregation",
         test_adversarial_block_aggregation_changes_ranking);

@@ -744,6 +744,113 @@ int run_stack_discipline_exploration(
     return 0;
 }
 
+int run_learned_stack_combat_exploration(
+    const gameplay::FixedDeployment& deployment,
+    std::ostream& output) {
+    auto blended_model = blend_priority_heads(
+        deployment.parent, deployment.candidate,
+        kLearnedStackCombatBlendAlpha);
+    const std::string blended_fingerprint =
+        learned_model_fingerprint(blended_model);
+    const auto bots = make_learned_stack_combat_bots(
+        blended_model, deployment.parent);
+
+    output
+        << "FQ4 learned Priority plus stack/combat exploration"
+        << " parent="
+        << deployment.parent_model_fingerprint
+        << " alpha0.50=" << blended_fingerprint
+        << '\n'
+        << "plan mode=LearnedStackCombat seed="
+        << kLearnedStackCombatSeed
+        << " repetitions=" << kLearnedStackCombatRepetitions
+        << " first=alpha0.50+AdversarialBlocks+PD0"
+        << " conditional_second=alpha0.50+AdversarialBlocks"
+        << " baseline=ordinary-C16"
+        << " common_seed=on"
+        << " short_circuit=treatment_not_strict_win"
+        << " advance=treatment_not_fewer_wins"
+        << " tie_break=PD0"
+        << " runtime=descriptive\n";
+    output.flush();
+
+    output
+        << "running mode=LearnedStackCombat"
+        << " variant=alpha0.50+AdversarialBlocks+PD0"
+        << " model=" << blended_fingerprint
+        << " pass_dominance=on"
+        << " adversarial_blocks=on\n";
+    output.flush();
+    const TimedResult treatment = run_one(
+        bots[0], bots[2],
+        kLearnedStackCombatRepetitions,
+        kLearnedStackCombatSeed, false);
+    print_result(
+        output, "E0",
+        "alpha0.50+AdversarialBlocks+PD0",
+        kLearnedStackCombatBlendAlpha, treatment);
+    const CandidateScore treatment_score{
+        .alpha = kLearnedStackCombatBlendAlpha,
+        .wins = treatment.summary.challenger_stats.wins,
+        .losses = treatment.summary.challenger_stats.losses,
+        .draws = treatment.summary.challenger_stats.draws,
+    };
+    if (!learned_stack_combat_runs_comparator(
+            treatment_score)) {
+        output
+            << "stop mode=LearnedStackCombat"
+            << " variant=alpha0.50+AdversarialBlocks+PD0"
+            << " treatment_wins=" << treatment_score.wins
+            << " treatment_losses=" << treatment_score.losses
+            << " treatment_draws=" << treatment_score.draws
+            << " comparator=not_run"
+            << " reason=treatment_not_strict_win\n";
+        output.flush();
+        return 0;
+    }
+
+    output
+        << "running mode=LearnedStackCombat"
+        << " variant=alpha0.50+AdversarialBlocks"
+        << " model=" << blended_fingerprint
+        << " pass_dominance=off"
+        << " adversarial_blocks=on\n";
+    output.flush();
+    const TimedResult comparator = run_one(
+        bots[1], bots[2],
+        kLearnedStackCombatRepetitions,
+        kLearnedStackCombatSeed, false);
+    print_result(
+        output, "E0",
+        "alpha0.50+AdversarialBlocks",
+        kLearnedStackCombatBlendAlpha, comparator);
+    const CandidateScore comparator_score{
+        .alpha = kLearnedStackCombatBlendAlpha,
+        .wins = comparator.summary.challenger_stats.wins,
+        .losses = comparator.summary.challenger_stats.losses,
+        .draws = comparator.summary.challenger_stats.draws,
+    };
+
+    const bool advances = learned_stack_combat_advances(
+        treatment_score, comparator_score);
+    output
+        << (advances ? "advance" : "stop")
+        << " mode=LearnedStackCombat"
+        << " variant=alpha0.50+AdversarialBlocks+PD0"
+        << " treatment_wins=" << treatment_score.wins
+        << " treatment_losses=" << treatment_score.losses
+        << " treatment_draws=" << treatment_score.draws
+        << " comparator_wins=" << comparator_score.wins
+        << " comparator_losses=" << comparator_score.losses
+        << " comparator_draws=" << comparator_score.draws;
+    if (!advances) {
+        output << " reason=treatment_has_fewer_wins";
+    }
+    output << '\n';
+    output.flush();
+    return 0;
+}
+
 } // namespace
 
 std::shared_ptr<const LearnedModel> blend_priority_heads(
@@ -944,6 +1051,44 @@ std::array<BotConfig, 3> make_stack_discipline_bots(
     };
 }
 
+bool learned_stack_combat_runs_comparator(
+    const CandidateScore& treatment) {
+    return treatment.wins > treatment.losses;
+}
+
+bool learned_stack_combat_advances(
+    const CandidateScore& treatment,
+    const CandidateScore& comparator) {
+    const std::size_t treatment_games =
+        treatment.wins + treatment.losses + treatment.draws;
+    const std::size_t comparator_games =
+        comparator.wins + comparator.losses + comparator.draws;
+    if (treatment_games == 0 ||
+        treatment_games != comparator_games) {
+        throw std::invalid_argument(
+            "LearnedStackCombat selection requires equal "
+            "nonempty game counts");
+    }
+    return learned_stack_combat_runs_comparator(treatment) &&
+           treatment.wins >= comparator.wins;
+}
+
+std::array<BotConfig, 3> make_learned_stack_combat_bots(
+    std::shared_ptr<const LearnedModel> blended_model,
+    std::shared_ptr<const LearnedModel> baseline_model) {
+    if (!blended_model || !baseline_model) {
+        throw std::invalid_argument(
+            "LearnedStackCombat requires frozen models");
+    }
+    return {
+        make_exploratory_bot(blended_model, true, true),
+        make_exploratory_bot(
+            std::move(blended_model), false, true),
+        make_exploratory_bot(
+            std::move(baseline_model), false, false),
+    };
+}
+
 BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
     bool pass_dominance,
@@ -966,7 +1111,8 @@ int run_cli(
     constexpr std::string_view kUsage =
         "Usage: old-school-fq4-blend-explore"
         " [--pd0|--adversarial-blocks|"
-        "--adversarial-composition|--stack-discipline]\n";
+        "--adversarial-composition|--stack-discipline|"
+        "--learned-stack-combat]\n";
     const bool valid_arguments =
         argv != nullptr && argv[0] != nullptr &&
         (argc == 1 ||
@@ -977,7 +1123,9 @@ int run_cli(
            std::string_view(argv[1]) ==
                "--adversarial-composition" ||
            std::string_view(argv[1]) ==
-               "--stack-discipline")));
+               "--stack-discipline" ||
+           std::string_view(argv[1]) ==
+               "--learned-stack-combat")));
     if (!valid_arguments) {
         error << kUsage;
         return 2;
@@ -998,6 +1146,11 @@ int run_cli(
             if (std::string_view(argv[1]) ==
                 "--stack-discipline") {
                 return run_stack_discipline_exploration(
+                    deployment, output);
+            }
+            if (std::string_view(argv[1]) ==
+                "--learned-stack-combat") {
+                return run_learned_stack_combat_exploration(
                     deployment, output);
             }
             return run_adversarial_blocks_exploration(
