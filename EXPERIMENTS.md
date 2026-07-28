@@ -14719,6 +14719,203 @@ generator exactly once. `REVIEW.md` was reread through its newest 03:59 cycle
 before this record; it reported the same uncommitted DEV0 state and no
 conflicting critique.
 
+FQ4-DEV0 post-freeze execution and result, completed 2026-07-28 04:10 PDT:
+**REJECT / unusable fixed development coordinate; no bundle was
+published**.
+
+The complete source closure was committed and pushed as
+`5784b10ef60ae884df1e3ecd9bcb8dd38108ffc4`. The release generator
+embedded that exact commit and had SHA-256
+`4b1f5a2f0199cc885633005a0b09ca5859332f555c1b377bf33bcd97822bf691`.
+The post-freeze focused suites, source/link/symbol firewalls,
+AddressSanitizer/UndefinedBehaviorSanitizer suites, `make test-build-graph`,
+and full repository gate all passed. The post-freeze full gate was:
+
+```sh
+/usr/bin/time -p make -j4 test
+# all suites passed
+# real 258.26 user 515.70 sys 9.47
+```
+
+The parent C16 artifact remained
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`;
+the fixed DEV artifact was absent; `origin/main` equaled the frozen commit.
+An independent execution review reproduced those preconditions and licensed
+exactly one invocation of:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-priority-dev-generate
+```
+
+That invocation returned exit `2` after opening the fixed FIT construction
+(`202607280210`, namespace `0x46513444455631`), whose schedule contains 40
+physical source games and 80 owner perspectives, balanced 16 per deck and
+8/8 by seat and play/draw. Exact complete output was:
+
+```text
+FQ4 development generation failed: FQ4 development generator: FIT split misses frozen coverage or parent-error support
+real 38.96
+user 38.53
+sys 0.15
+```
+
+The combined fail-closed diagnostic does not distinguish whether the failed
+conjunct was every-deck dominance-positive coverage or the `5/5/2`
+high-confidence parent-error floor, and it intentionally disclosed no
+adaptive row/deck counts. A complete FIT corpus existed transiently in memory,
+but FIT failure meant CHECK and the repeated complete construction were not
+reached. No publishable or persisted corpus, bundle, or temporary was
+published; C16 was unchanged; and candidate rollout count remained
+structurally zero. Thus there are no aggregate or per-deck candidate metrics
+to report: the prospective source-coordinate support gate failed before a
+persisted development corpus existed. Both DEV0 split coordinates are now
+consumed; unopened CHECK may not be salvaged into a later experiment.
+
+Decision: reject FQ4-DEV0 exactly as preregistered. Do not rerun either fixed
+split, append a seed, weaken its support floor, or recover observations from
+the failed process. The speed hypothesis remains unmeasured rather than
+refuted; the failure concerns corpus support, not load/fit/evaluation speed.
+The next experiment must be a separately preregistered FQ4-DEV1 coordinate
+with unopened seeds and a prospectively larger all-five-deck schedule. Before
+opening it, improve the fail-closed result report so a failed split records
+only the predeclared aggregate/per-deck support counts needed to diagnose the
+gate, qualify that reporting on synthetic fixtures, and use a failure-path
+scope guard so post-run parent/artifact identities and temporary absence are
+reported even during exception unwinding. Construct and report both fixed
+splits before applying the conjunctive publication decision. Obtain a fresh
+independent execution review before opening either split. A larger one-time
+collection cost is acceptable because the scientific purpose is to remove
+that cost from every subsequent candidate iteration.
+
+`REVIEW.md` was reread through its newest 03:59 cycle after the failed
+invocation and before this conclusion. It still described DEV0 as awaiting
+construction and offered no conflicting post-result critique.
+An independent post-result audit then reproduced the frozen commit,
+executable and parent identities plus artifact/temporary absence, agreed with
+the rejection, and supplied the transient-corpus, consumed-CHECK, and
+failure-path-reporting clarifications incorporated above.
+
+###### FQ4-DEV1 adequately powered fast-bundle declaration
+
+Declared 2026-07-28 04:18 PDT after FQ4-DEV0 was closed and before deriving
+either replacement schedule or constructing any replacement game. This is a
+new development-only coordinate, not a retry or extension of DEV0. DEV0 FIT
+and CHECK remain consumed and forbidden. D1 treatment data remain held out.
+
+Falsifiable hypothesis: four complete independent balanced blocks per split,
+combined with a larger but still tiny blind selected set, will satisfy the
+unchanged every-deck dominance-positive coverage gate and independent
+`5/5/2` high-confidence parent-error floor, allowing one immutable corpus to
+remove collection and rollout work from ordinary candidate iteration. The
+original speed thresholds remain unchanged: over ten warm-cache processes,
+strict load/validation/parent reproduction plus one candidate evaluation must
+have median below two seconds and maximum below five seconds; one
+deterministic 16-epoch FIT update plus complete FIT/CHECK evaluation must
+finish below fifteen seconds, excluding compilation.
+
+Fresh source seed bases are mechanically derived rather than selected. For
+each ASCII split name `fit` and `check`, hash these exact LF-final bytes:
+
+```text
+old-school-fq4-priority-dev1-source-seed-v2
+<split>
+5784b10ef60ae884df1e3ecd9bcb8dd38108ffc4
+```
+
+Interpret the first eight SHA-256 digest bytes as one unsigned big-endian
+64-bit seed base. There is no rejection sampling or alternate derivation. The
+generation, hidden, and dominance namespaces are the eight-byte ASCII values
+`FQ4DV2GN`, `FQ4DV2HI`, and `FQ4DV2DO`, respectively. Blocks are exactly
+`0,1,2,3`; each calls `balanced_schedule(seed_base, generation_namespace,
+block)` once in block order. Thus each split has exactly 160 physical games,
+320 owner perspectives, 64 perspectives per deck, 32/32 by seat and
+play/draw, and 16 in every seat-by-play quadrant. FIT and CHECK must be
+disjoint by resolved game seed.
+
+All collection and scoring mechanics remain C16/P0: Value mirror K8/H4/R1,
+shallow prior on, source Priority residual zero, no exploration, PD0 off,
+Legacy continuation, 128-turn cap, 16 retained roots per owner-game, and
+32-action cap. Complete chronological retention and robust K8
+Pass-dominance evaluation over all four blocks still precede blind selection
+and every parent score. Per split/deck, reserve the first retained row as the
+background control, remove it from the chronological positive stratum, and
+reduce the remaining stratum to its first positive row per distinct opaque
+physical-game digest. Select at most 31 evenly spaced rows from that
+chronological game-diverse stratum. This uses no model score, state, action,
+outcome, or card identity and ensures any five selected parent errors belong
+to five games. If the background is positive, it carries both bits. The union
+therefore contains at most 32 physical rows per deck, 160 per split, and 320
+total. FIT alone may enter the unchanged preregistered 16-epoch optimizer;
+CHECK remains adaptive ranking only.
+
+The publication floor is unchanged and conjunctive for each split: at least
+one dominance-positive row for every one of the five decks and at least five
+Class-1/2 parent errors in five physical games and two owner decks. Both
+fixed splits must be fully constructed and their count-only support reports
+emitted before this decision is applied. The predeclared report contains,
+for each split, census/selected/positive/background rows per deck,
+high-confidence roots/games/decks, `coverage_met`,
+`parent_error_floor_met`, and a two-bit failed-gate mask. It may expose no
+state, action, outcome, source choice, opponent hand, model score, or
+unselected-row classification. If either split fails, DEV1 is unusable:
+publish nothing, append no block or seed, do not retry, and do not salvage
+the other split.
+
+The wire and artifact become v2:
+`old-school-fq4-priority-dev-bundle-v2` at
+`data/old-school-fq4-priority-dev-v2.fq4dev`. Because no v1 artifact exists,
+replace the dead v1 constants and keep one loader rather than carrying a
+compatibility layer. V2 source locators, stable-root inputs, retained
+manifests, trajectory rows, and physical-game hashes include the explicit
+schedule block. Bounds become at most 5,120 census rows per split, 1,024 per
+deck, 160 selected rows per split, and 32 selected rows per deck; all other
+strict wire, feature, arithmetic, hidden-information, component, and
+no-overwrite rules remain unchanged.
+
+A failure-path scope guard must record post-run executable hash, parent hash,
+artifact absence/presence, temporary absence, source games completed per
+split/construction, and structurally zero candidate rollout accounting even
+when construction throws. Synthetic tests must distinguish coverage-only,
+parent-floor-only, both-gate, and successful reports; prove both split
+reports precede rejection; and prove one-bit/count/order/block mutations fail.
+The one-shot executable has a hard 1,200-second watchdog. Based only on
+DEV0's observed 38.96 seconds for one 40-game split, the prospective point
+estimate for four blocks × two splits × two constructions is about 624
+seconds. This cost is paid once; it is not part of the warm iteration timing.
+
+Before opening a replacement game: derive and freeze both exact seed bases;
+run only the game-free schedule serializer; independently reproduce every
+schedule byte/hash and balance cross-sum; implement and synthetic-qualify v2;
+pass release, ASan/UBSan, full repository, provenance, no-overwrite,
+failure-path, block-identity, and held-out firewall gates; commit and rebuild
+with the exact producer identity; reread a timestamped post-DEV0
+`REVIEW.md`; and obtain a fresh independent execution GO. Only then may the
+fixed no-argument DEV1 generator run exactly once.
+
+FQ4-DEV1 mechanical seed derivation, completed 2026-07-28 04:20 PDT
+without constructing a schedule or game:
+
+```text
+fit   sha256=d00d1c78aff152f98b31ad6fcf7d5f69f1298b55061930b21377f5a76aeb8e02
+      seed_base=0xd00d1c78aff152f9=14991670039259730681
+check sha256=267030dea492541ba3f88ebf705800e5838b9d929b6eb580b1b42091f1b1f9ae
+      seed_base=0x267030dea492541b=2769767503634781211
+```
+
+These are now frozen literals. No alternate digest bytes, seeds, namespace,
+or block count may be substituted.
+
+Prospective power interpretation, recorded before schedule serialization:
+the four-block choice is a detectable-prevalence design, not a guarantee.
+Treating each of 64 owner perspectives in each of the ten deck-by-split cells
+as an opportunity to produce at least one dominance-positive root, a true
+cell prevalence of at least 7.95% gives a union-bound probability of at most
+5% that any cell is empty; at 10% prevalence the bound is 1.18%. For each of
+two parent-error-bearing deck strata, 31 game-diverse positive rows and a
+conditional high-confidence prevalence of at least 15% give 95.895%
+probability of at least five errors pooled with both decks represented. The
+fixed gates, not these planning assumptions, decide publication.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation
