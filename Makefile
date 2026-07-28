@@ -96,6 +96,7 @@ FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
 FQ4_NEUTRAL_PUBLISHER_SOURCE := src/fq4_neutral_publisher.cpp
 FQ4_NEUTRAL_EVALUATOR_SOURCE := src/fq4_neutral_evaluator.cpp
 FQ4_NEUTRAL_EVALUATOR_RUNNER_SOURCE := src/fq4_neutral_evaluator_runner.cpp
+FQ4_NEUTRAL_CANDIDATE_PUBLISHER_SOURCE := src/fq4_neutral_candidate_publisher.cpp
 FQ4_PRIORITY_FIT_SOURCE := src/fq4_priority_fit.cpp
 FQ4_D1_FIELD_GATE_SOURCE := src/fq4_d1_field_gate.cpp
 FQ4_D1_TREATMENT_SOURCE := src/fq4_d1_treatment.cpp
@@ -170,6 +171,8 @@ FQ4_NEUTRAL_PUBLISHER := $(BUILD_DIR)/old-school-fq4-dev5-neutral-publish
 FQ4_NEUTRAL_EVALUATOR_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev5-neutral-evaluator-tests
 FQ4_NEUTRAL_EVALUATOR_RUNNER_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev5-neutral-evaluator-runner-tests
 FQ4_NEUTRAL_EVALUATOR := $(BUILD_DIR)/old-school-fq4-dev5-neutral-evaluate
+FQ4_NEUTRAL_CANDIDATE_PUBLISHER_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev5-candidate-publisher-tests
+FQ4_NEUTRAL_CANDIDATE_PUBLISHER := $(BUILD_DIR)/old-school-fq4-dev5-candidate-publish
 FQ4_PRIORITY_FIT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-priority-fit-tests
 FQ4_PRIORITY_FIT := $(BUILD_DIR)/old-school-fq4-priority-fit
 FQ4_PRIORITY_FIT_D0B := $(BUILD_DIR)/old-school-fq4-priority-fit-d0b
@@ -197,8 +200,10 @@ FQ4_DEV_GENERATOR_MAIN_OBJECT := $(OBJ_DIR)/src/fq4_dev_generator_main.$(FQ4_DEV
 FQ4_DEV_GENERATOR_MAIN_DEPFILE := $(FQ4_DEV_GENERATOR_MAIN_OBJECT:.o=.d)
 FQ4_NEUTRAL_PUBLISHER_MAIN_OBJECT := $(OBJ_DIR)/src/fq4_neutral_publisher_main.$(FQ4_DEV_PRODUCER_COMMIT).o
 FQ4_NEUTRAL_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_PUBLISHER_MAIN_OBJECT:.o=.d)
+FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT := $(OBJ_DIR)/src/fq4_neutral_candidate_publisher_main.$(FQ4_DEV_PRODUCER_COMMIT).o
+FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT:.o=.d)
 
-.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-dev-candidate-artifact test-fq4-dev-candidate-publisher fq4-dev-candidate-publish test-fq4-dev1-gameplay test-fq4-dev-background-diagnostic fq4-dev-background-diagnostic test-fq4-dev-coverage-census fq4-dev-coverage-census test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-dev-candidate-artifact test-fq4-dev-candidate-publisher fq4-dev-candidate-publish test-fq4-dev1-gameplay test-fq4-dev-background-diagnostic fq4-dev-background-diagnostic test-fq4-dev-coverage-census fq4-dev-coverage-census test-fq4-neutral-candidate-publisher fq4-neutral-candidate-publish test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -322,6 +327,7 @@ FQ4_NEUTRAL_SUPPLEMENT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOUR
 FQ4_NEUTRAL_PUBLISHER_LINK_SOURCES := $(FQ4_DEV_COVERAGE_CENSUS_LINK_SOURCES) $(FQ4_NEUTRAL_PUBLISHER_SOURCE)
 FQ4_NEUTRAL_EVALUATOR_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE) $(FQ4_NEUTRAL_EVALUATOR_SOURCE)
 FQ4_NEUTRAL_EVALUATOR_RUNNER_LINK_SOURCES := $(FQ4_NEUTRAL_EVALUATOR_LINK_SOURCES) $(FQ4_NEUTRAL_EVALUATOR_RUNNER_SOURCE)
+FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_SOURCES := $(FQ4_NEUTRAL_EVALUATOR_LINK_SOURCES) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_SOURCE)
 FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
 FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
@@ -392,6 +398,8 @@ $(eval $(call link_program,$(FQ4_NEUTRAL_EVALUATOR_RUNNER_TEST_RUNNER),$(FQ4_NEU
 
 $(eval $(call link_program,$(FQ4_NEUTRAL_EVALUATOR),$(FQ4_NEUTRAL_EVALUATOR_RUNNER_LINK_SOURCES) src/fq4_neutral_evaluator_main.cpp))
 
+$(eval $(call link_program,$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_TEST_RUNNER),$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_SOURCES) tests/test_fq4_neutral_candidate_publisher.cpp))
+
 $(FQ4_DEV_GENERATOR_MAIN_OBJECT): src/fq4_dev_generator_main.cpp
 	@mkdir -p "$(@D)"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) \
@@ -433,7 +441,29 @@ $(FQ4_NEUTRAL_PUBLISHER): $(FQ4_NEUTRAL_PUBLISHER_LINK_OBJECTS) $(call program_c
 		"$(call program_config_variable,$(FQ4_NEUTRAL_PUBLISHER))" \
 		"$(BUILD_CONFIG_ID)" \
 		"$(call program_link_objects_variable,$(FQ4_NEUTRAL_PUBLISHER))" \
-		"$(FQ4_NEUTRAL_PUBLISHER_LINK_OBJECTS)" >"$$temporary" && \
+	"$(FQ4_NEUTRAL_PUBLISHER_LINK_OBJECTS)" >"$$temporary" && \
+	mv -f -- "$$temporary" "$@.compile-config.mk"
+
+$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT): src/fq4_neutral_candidate_publisher_main.cpp
+	@mkdir -p "$(@D)"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) \
+		-DOLD_SCHOOL_FQ4_DEV5_PRODUCER_COMMIT=\"$(FQ4_DEV_PRODUCER_COMMIT)\" \
+		-MMD -MP -MF "$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE)" \
+		-MT "$@" -c "$<" -o "$@"
+
+FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_OBJECTS := $(call source_objects,$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_SOURCES)) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT)
+
+$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER): $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_OBJECTS) $(call program_config_relink,$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER),$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_OBJECTS)) | $(BUILD_DIR)
+	@rm -f -- "$@.compile-config.mk"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) \
+		$(call source_objects,$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_SOURCES)) \
+		$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_OBJECT) -o "$@"
+	@temporary="$@.compile-config.mk.tmp.$$$$$$$$"; \
+	printf '%s := %s\n%s := %s\n' \
+		"$(call program_config_variable,$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER))" \
+		"$(BUILD_CONFIG_ID)" \
+		"$(call program_link_objects_variable,$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER))" \
+		"$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_OBJECTS)" >"$$temporary" && \
 	mv -f -- "$$temporary" "$@.compile-config.mk"
 
 $(eval $(call link_program,$(FQ4_PRIORITY_FIT_TEST_RUNNER),$(FQ4_PRIORITY_FIT_LINK_SOURCES) tests/test_fq4_priority_fit.cpp))
@@ -458,12 +488,12 @@ $(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SO
 
 $(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp))
 
--include $(DEPFILES) $(FQ4_DEV_GENERATOR_MAIN_DEPFILE) $(FQ4_NEUTRAL_PUBLISHER_MAIN_DEPFILE)
+-include $(DEPFILES) $(FQ4_DEV_GENERATOR_MAIN_DEPFILE) $(FQ4_NEUTRAL_PUBLISHER_MAIN_DEPFILE) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE)
 
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(FQ4_PRIORITY_MATH_TEST_RUNNER) $(FQ4_PRIORITY_COLLECTION_TEST_RUNNER) $(FQ4_DEV_BUNDLE_TEST_RUNNER) $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR) $(FQ4_DEV_EVALUATOR_TEST_RUNNER) $(FQ4_DEV_EVALUATOR) $(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER) $(FQ4_DEV1_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV1_GAMEPLAY) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC) $(FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER) $(FQ4_DEV_COVERAGE_CENSUS) $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT) $(FQ4_PRIORITY_FIT_D0B) $(FQ4_D1_FIELD_GATE_TEST_RUNNER) $(FQ4_D1_CENSUS) $(FQ4_D1_TREATMENT_TEST_RUNNER) $(FQ4_D1_TREATMENT) $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(FQ4_PRIORITY_MATH_TEST_RUNNER) $(FQ4_PRIORITY_COLLECTION_TEST_RUNNER) $(FQ4_DEV_BUNDLE_TEST_RUNNER) $(FQ4_DEV_GENERATOR_TEST_RUNNER) $(FQ4_DEV_GENERATOR) $(FQ4_DEV_EVALUATOR_TEST_RUNNER) $(FQ4_DEV_EVALUATOR) $(FQ4_DEV_CANDIDATE_ARTIFACT_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_DEV_CANDIDATE_PUBLISHER) $(FQ4_DEV1_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV1_GAMEPLAY) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC) $(FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER) $(FQ4_DEV_COVERAGE_CENSUS) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER) $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT) $(FQ4_PRIORITY_FIT_D0B) $(FQ4_D1_FIELD_GATE_TEST_RUNNER) $(FQ4_D1_CENSUS) $(FQ4_D1_TREATMENT_TEST_RUNNER) $(FQ4_D1_TREATMENT) $(FQ4_DEV_SCHEDULE_TEST_RUNNER) $(FQ4_DEV_SCHEDULE) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
@@ -515,6 +545,14 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(FQ4_NEUTRAL_PUBLISHER_TEST_RUNNER)
 	./$(FQ4_NEUTRAL_EVALUATOR_TEST_RUNNER)
 	./$(FQ4_NEUTRAL_EVALUATOR_RUNNER_TEST_RUNNER)
+	./$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_TEST_RUNNER)
+	@set +e; output=`./$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FQ4-DEV5 anchored candidate publisher accepted an argument\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage: old-school-fq4-dev5-candidate-publish' >/dev/null
 	./$(FQ4_PRIORITY_FIT_TEST_RUNNER)
 	@set +e; output=`./$(FQ0_BELLMAN_AUDIT) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
@@ -1207,6 +1245,49 @@ test-fq4-neutral-evaluator: $(FQ4_NEUTRAL_EVALUATOR_TEST_RUNNER) $(FQ4_NEUTRAL_E
 
 fq4-neutral-evaluate: $(FQ4_NEUTRAL_EVALUATOR)
 	./$(FQ4_NEUTRAL_EVALUATOR)
+
+test-fq4-neutral-candidate-publisher: $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_TEST_RUNNER) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER)
+	./$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_TEST_RUNNER)
+	@set +e; output=`./$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FQ4-DEV5 anchored candidate publisher accepted an argument\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage: old-school-fq4-dev5-candidate-publish' >/dev/null
+	@if ! /usr/bin/strings -a "$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER)" | \
+		grep -Fx "$(FQ4_DEV_PRODUCER_COMMIT)" >/dev/null; then \
+		printf 'FQ4-DEV5 anchored candidate publisher lost its exact producer commit\n' >&2; \
+		exit 1; \
+	fi
+	@if rg -n 'error=|\.what\(\)' \
+		src/fq4_neutral_candidate_publisher_main.cpp >/dev/null; then \
+		printf 'FQ4-DEV5 anchored candidate publisher CLI can disclose exception details\n' >&2; \
+		exit 1; \
+	fi
+	@case " $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_SOURCES) " in \
+		*" src/fq4_priority_collection.cpp "*|\
+		*" src/fq4_dev_generator.cpp "*|\
+		*" src/fq4_dev_coverage_census.cpp "*|\
+		*" src/fq4_neutral_publisher.cpp "*|\
+		*" src/fq4_neutral_evaluator_runner.cpp "*|\
+		*" src/fq4_dev_candidate_publisher.cpp "*|\
+		*" src/fq4_dev1_gameplay.cpp "*|\
+		*" src/fq4_priority_fit.cpp "*|\
+		*" src/fq4_d1_field_gate.cpp "*|\
+		*" src/fq4_d1_treatment.cpp "*|\
+		*" src/fq4_d1_treatment_production.cpp "*) \
+			printf 'FQ4-DEV5 anchored candidate publisher crossed a source/gameplay/held-out firewall\n' >&2; \
+			exit 1;; \
+	esac
+	@if nm -gU "$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER)" | c++filt | \
+		rg -q 'build_canonical_root|evaluate_robust_dominance|make_hidden_clone|replay_exact|select_development_rows|run_fq4_dev1_gameplay'; then \
+		printf 'FQ4-DEV5 anchored candidate publisher contains forbidden source-game symbols\n' >&2; \
+		exit 1; \
+	fi
+
+fq4-neutral-candidate-publish: $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER)
+	./$(FQ4_NEUTRAL_CANDIDATE_PUBLISHER)
 
 test-fq4-priority-fit: $(FQ4_PRIORITY_FIT_TEST_RUNNER) $(FQ4_PRIORITY_FIT)
 	./$(FQ4_PRIORITY_FIT_TEST_RUNNER)

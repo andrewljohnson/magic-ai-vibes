@@ -16615,6 +16615,66 @@ Deck slices are descriptive. A pass licenses a separately preregistered
 endorsed the anchored fit as next and contained no conflicting post-result
 entry. No gameplay seed has opened.
 
+DEV5 anchored-candidate publisher implementation qualification, completed
+2026-07-28: **GO for commit and post-commit identity review; production
+publication remains NO-GO until that review**. The new fixed publisher uses
+the preregistered exact 238-byte environment literal and separate anchored
+contract/path without modifying the existing DEV1 wire contract. It checks a
+nonzero canonical 40-hex HEAD stamp, treats destination and deterministic
+temporary (including broken symlinks) as occupied before source work, snapshots
+the executable plus DEV1/C16/positive-candidate/neutral inputs at three
+boundaries, runs the complete evaluator twice, and compares all models,
+Priority parameters, batches, metrics, isolation fields, gate booleans, and
+failure text by raw bits where applicable. Publication and strict reload use
+fresh independently validated C16 loads. The production link graph excludes
+collection, generator, coverage, corpus publisher, evaluator runner, gameplay,
+Priority-fit, and held-out treatment sources.
+
+Exact focused release command:
+
+```sh
+make -j4 test-fq4-neutral-candidate-publisher
+# 10 FQ4 anchored candidate publisher tests passed
+```
+
+The tests include exact-contract mutations, signed-zero parameter and metric
+drift, false gates and isolation checks, changed failure text, source drift,
+late coordinate occupation, broken symlinks, wrong fresh publication/reload
+parents, exact reload, and CLI redaction. The focused target also verified the
+embedded HEAD string and found none of the forbidden source-game symbols.
+Two independent read-only reviews reproduced 10/10 release and 10/10
+AddressSanitizer/UndefinedBehaviorSanitizer tests; the final review returned GO
+for commit and explicitly kept the no-argument production run closed until a
+post-commit rebuild.
+
+Local sanitizer reproduction used:
+
+```sh
+make -j4 \
+  BUILD_DIR=/private/tmp/old-school-fq4-dev5-candidate-publisher-sanitize-root \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer' \
+  test-fq4-neutral-candidate-publisher
+```
+
+All sanitizer objects and both binaries built cleanly. The Make recipe's
+relative `./$(BUILD_DIR)` invocation cannot execute an absolute `BUILD_DIR`
+(`.//private/tmp/...`), so that wrapper exited 1 without running the test; the
+exact built test binary was then run directly and passed 10/10 with no
+sanitizer finding. Its production binary's extra-argument path returned the
+required usage and status 2. The temporary build directory was removed.
+
+`make -j4 test` then passed the complete repository gate: engine 171/171,
+learned iteration 27/27, probes 57/57, probe metrics 11/11, probe runner
+33/33, the new publisher 10/10, every historical audit/orchestration suite,
+web bridge 18/18, web 106/106, and certification 48/48. `git diff --check`
+was clean. `REVIEW.md` was reread through its newest 09:59 cycle after the
+full suite; it records the exact frozen contract and publication as next, with
+no conflicting result. The destination and temporary remain absent, and no
+no-argument publisher or gameplay command has run. Next: commit these exact
+sources, rebuild so the publisher embeds that implementation commit, obtain
+committed-tree identity review, then run the one licensed no-argument
+publication.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
