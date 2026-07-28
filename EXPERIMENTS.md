@@ -16410,6 +16410,46 @@ Next action: commit and push this exact implementation, obtain a
 committed-tree identity review, rebuild the commit-keyed publisher, and only
 then run the one no-argument materialization.
 
+DEV5 production materialization result, completed 2026-07-28 after the
+qualification above: **PASS for corpus publication only**. This is not a
+candidate-strength result and licenses no gameplay by itself. The exact
+implementation was committed and pushed as
+`bc03fd627affc5c61a334871348094994ee423e7`. A post-commit independent review
+reproduced the publisher 8/8 and supplement 4/4 suites, confirmed that the
+binary embedded that exact commit, confirmed the fixed destination and
+temporary were absent, and returned explicit GO for the one no-argument run.
+The reviewed publisher was 3,108,464 bytes with SHA-256
+`66d7925aef31eb0662a6621dcc2006725b99e6633088f13697486034f9df6fb6`.
+
+Exact command and complete output:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev5-neutral-publish
+# schema=old-school-fq4-priority-neutral-supplement-v1 result=PUBLISHED artifact_bytes=661475 artifact_sha256=47d94823f043971f6f9f0aa5f552bfae210af9615d8f6dc7392e52dad3eaa105 selected_order_sha256=c0925e709daaeefdb7d7714db6b07e68bd70b60f0a201d1626ee0fde28f61b7b rows=320 canonical_score_calls=320 hidden_score_calls=320 distinct_hidden_controls=320 nondistinct_hidden_controls=0 fits=0 candidate_rollouts=0 gameplay_seeds=0
+# real 311.75
+# user 307.40
+# sys 0.99
+```
+
+The published artifact is exactly 661,475 bytes with SHA-256
+`47d94823f043971f6f9f0aa5f552bfae210af9615d8f6dc7392e52dad3eaa105`.
+All 320 selected roots had genuinely distinct hidden repartitions and every
+paired score remained bit-identical. The source bundle remained exactly
+2,250,909 bytes / `0911fc2e...859df`, C16 remained exactly 3,111,437 bytes /
+`53aeb904...944ca`, the publisher remained exact, and the deterministic
+`.publishing.tmp` path was absent after publication. Thus the one-time
+five-minute source-game reconstruction is closed: subsequent anchored
+candidate fits and offline gates consume the fixed bundle and supplement
+without replaying source games.
+
+`REVIEW.md` was reread through its newest 09:14 cycle after the run and before
+this conclusion. It had observed the exact publisher executing and requested
+the supplement identity next; it contained no conflicting result. Next:
+commit the immutable supplement, integrate and harden the already independently
+reviewed game-free evaluator, then run the one frozen 248-row anchored fit and
+conjunctive five-deck offline gate. No gameplay seed opens unless that gate
+passes.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
