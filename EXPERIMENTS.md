@@ -15721,6 +15721,135 @@ offline loop identifies which mechanism protects ordinary development.
 it independently countersigns the accounting diagnosis, the 37.5%/1.63x
 reading, the sealed next seed, and this background-coverage priority.
 
+##### FQ4-DEV2 background-spillover diagnostic declaration
+
+Declared 2026-07-28 07:02 PDT before adding background metrics or observing
+the rejected candidate on any background control. This is evaluator-only:
+freeze the committed DEV1 bundle, C16 parent, optimizer, regenerated
+`71260078...6151` candidate, FIT/CHECK partition, and every gameplay result.
+It opens no game or evaluation seed, changes no model, and publishes no
+artifact.
+
+Falsifiable hypothesis: DEV1's positive-only Priority update moved the policy
+materially on untrained ordinary-development controls, with more spillover on
+Green/White than on the two stack-heavy decks. This would explain how all 94
+positive roots became Safe while Green and White collapsed in GP0.
+
+For each row carrying the existing `BackgroundControl` role, report by split
+and deck:
+
+- row and option counts;
+- `KL(parent_behavior || candidate_behavior)` and total variation, where both
+  behaviors use the evaluator's exact frozen base score, centered-tanh
+  Priority residual at weight 0.10, temperature 0.10, and 90/10 behavior
+  mixture;
+- whether the exact argmax support changed; and
+- maximum absolute change in the deployed combined score.
+
+Report deck-balanced aggregates without descriptors, cards, states, or
+hidden information. Parent-versus-parent must be bit-exact zero on every
+metric. The frozen corpus must contribute exactly one background row per deck
+per split; any missing/extra row fails closed.
+
+Predeclared directional read: support the spillover mechanism only if
+(a) at least one Green/White background row either changes exact support or
+has parent-to-candidate KL at least 0.01, and (b) the mean Green/White KL
+across FIT+CHECK exceeds the mean Blue/RU Aggro KL. Red is reported but is not
+used to rescue either clause. Failure of either clause rejects this specific
+diagnosis and sends the next experiment toward missing state coverage rather
+than background anchoring.
+
+The diagnostic may reject a mechanism but cannot accept a bot. Add analytic
+metric tests plus the fixed-corpus count/zero-control checks, require the warm
+`--fit` path to remain below two seconds, and rerun focused sanitizers. Only
+if both clauses hold may the next declaration test a parent-behavior
+background-anchor weight; do not combine that with stack gating or residual
+shrinkage. `REVIEW.md` was reread through its newest 06:44 cycle before this
+declaration; it explicitly requests measuring the existing background rows
+before another fit.
+
+Immutable parent-control census, completed 2026-07-28 07:12 PDT before
+measuring the rejected candidate:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-dev2-background-diagnostic --parent-control
+```
+
+The frozen bundle `0911fc2e...59df` and C16 parent `68126afc...3e2f`
+were immutable. FIT and CHECK each contain exactly five background roots,
+one per deck, and 11 options: Green 2, Red 2, Blue 2, White 2, RU Aggro 3.
+Thus the immutable exact total is 10 roots and 22 options. Every per-deck and
+deck-balanced parent-versus-parent KL, total variation, support change, and
+maximum combined-score delta was bit-exact zero. Offline accounting was zero;
+result PASS; timing `real 0.26`, `user 0.25`, `sys 0.00` seconds. This
+descriptive result binds the exact 22-option census used by the declared
+candidate diagnostic; it does not inspect or license a new candidate.
+
+Implementation qualification before the census: strict focused tests 4/4 and
+the same 4/4 under AddressSanitizer/UndefinedBehaviorSanitizer. An independent
+read-only review first found and withheld GO for a synthetic dominance-anchor
+error, a forgeable hypothesis flag, missing production parent control, unsafe
+owner indexing, and unvalidated aggregates. All were repaired with
+missing/extra/OOB and report-mutation regressions; the rereview returned GO
+specifically for the parent-only census. `REVIEW.md` was reread through its
+newest 07:07 cycle before and after the run; it identifies this offline
+background measurement as the next scientific event and offers no conflicting
+result.
+
+Rejected-candidate spillover result, completed 2026-07-28 07:14 PDT:
+**specific Green/White background-spillover hypothesis NOT SUPPORTED**.
+The exact command was:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-dev2-background-diagnostic
+```
+
+It regenerated exact candidate `71260078...6151` from 88 FIT roots / 548
+options with optimizer seed `202607280212`, canonical training-input SHA
+`586b121c...393a1`, zero CHECK/background training examples, and one
+optimizer call. C16, the bundle, and all non-Priority components remained
+bit-identical; the production parent control remained exact zero. There was
+no game seed, model publication, or gameplay accounting. Runtime was
+`real 0.62`, `user 0.60`, `sys 0.01` seconds, satisfying the fast-loop gate.
+
+Background metrics:
+
+| Split | Deck | Roots/options | KL(parent || candidate) | TV | Support changes | Max score delta |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| FIT | Green | 1/2 | 0.0002544874 | 0.0112801 | 1 | 0.00250684 |
+| FIT | Red | 1/2 | 0.0006442589 | 0.0179461 | 1 | 0.00399010 |
+| FIT | Blue | 1/2 | 0.0004504488 | 0.0148377 | 0 | 0.00339811 |
+| FIT | White | 1/2 | 0.0003127860 | 0.0125054 | 1 | 0.00277941 |
+| FIT | RU Aggro | 1/3 | 0.0006029954 | 0.0163153 | 1 | 0.00548364 |
+| CHECK | Green | 1/2 | 0.0002547407 | 0.0112857 | 1 | 0.00250808 |
+| CHECK | Red | 1/2 | 0.0006447520 | 0.0179531 | 1 | 0.00399152 |
+| CHECK | Blue | 1/2 | 0.0007313491 | 0.0191218 | 1 | 0.00425027 |
+| CHECK | White | 1/2 | 0.0003121189 | 0.0124920 | 1 | 0.00277647 |
+| CHECK | RU Aggro | 1/3 | 0.0004939079 | 0.0144485 | 0 | 0.00421370 |
+
+Clause (a) passed because Green and White changed exact support, despite every
+Green/White KL being far below 0.01. Clause (b) failed:
+Green/White mean KL was `0.0002835333`, while Blue/RU Aggro mean KL was
+`0.0005696753`. FIT and CHECK each changed support on four of five controls.
+Therefore the candidate does spill into ordinary controls, but not with the
+predeclared Green/White concentration needed to explain those decks'
+gameplay collapse. Per the declaration, reject parent-background anchors as
+the next candidate axis.
+
+Next experiment: remain offline and measure missing state coverage before
+another fit. First census whether the frozen positive and background roots
+are stack-active using only the public rules feature/state representation,
+then preregister a one-axis public stack-active residual gate only if the
+census shows it preserves the intended fitted support while protecting a
+meaningful untrained context. Do not combine this with residual shrinkage or
+open gameplay seed `202607280602`. `REVIEW.md` was reread through its newest
+07:14 cycle before finalizing this conclusion. It independently reproduces
+both exact runs and the split verdict, interprets the 8/10 tiny-margin support
+flips as further reason to prefer a public stack-active census over shrinkage,
+and contains no conflicting result.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
