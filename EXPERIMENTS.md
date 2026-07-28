@@ -12476,6 +12476,454 @@ canonicalization for a separately tested FQ0 collision projection and
 rejects the 52-plane retrain as unsupported. Neither outcome promotes a bot;
 the independent X=0 and five dominance failures remain open.
 
+##### FR1 result: literal gate rejected; graveyard-only cases are equivalent
+
+Completed 2026-07-27 22:38 PDT after rereading `REVIEW.md` through its newest
+22:34 verification addendum. The implementation is a bounded, no-successor-
+bank diagnostic with a portable tiny-model unit seam and a separate no-knob
+exact-C16 executable. It leaves the production observation, C16 artifact,
+selector, training corpus, and gameplay path unchanged.
+
+Exact frozen-C16 command (expected scientific exit 1):
+
+```sh
+/usr/bin/time -p ./build/old-school-fr1-causal-quotient
+```
+
+The exact output anatomy was:
+
+```text
+direct_blue=1/2 direct_white=1/4 life_control=1
+root_macros=448 incomplete=0
+pairs=44 blue_pairs=38 white_pairs=6
+legacy_rows=177 blue_rows=163 white_rows=14
+row_identity_sha256=564d2a185c6d591b9848a33b7f19c669893c7e4c85aba0b7054e931f1533745c
+reconstructed=44 graveyard_only=39/167 additional_public_difference=5/10 equivalent=39
+repeat_bit_identical=1
+verdict=REJECT
+real 0.22
+```
+
+The direct Blue control compared two authoritative actions, the buried White
+control compared four, and every paired transition was equivalent; the
+life-total mutation was detected. The registered reconstruction completed all
+448 root macros with no bound exhaustion, reproduced all 44 pair identities
+and all 177 row identities, and matched the independently derived row digest.
+All 39 genuinely graveyard-order-only pairs, covering 167 rows (all 38 Blue
+pairs plus one White pair), were exactly equivalent in disposition, terminal
+result, next context and legal actions, observation and C16 value bits,
+accounting, and complete successor state after sorting only graveyards.
+
+The literal all-44 gate nevertheless **rejects**. The other five White
+`mill-self` pairs, covering ten two-action rows, are not graveyard-only:
+their natural representatives also permute the observer's six-card hand.
+For each, the hand multiset is identical and the complete public observation
+becomes equal only after sorting both graveyards and the observer hand. The
+five exact registered pairs are pinned in the focused test. They were not
+silently canonicalized and their ten actions were not counted as graveyard-
+only comparisons.
+
+This is not evidence that graveyard order has a causal effect; no eligible
+graveyard-only comparison failed. It is a falsification of FR1's registered-
+anatomy premise and therefore does not yet license changing the FQ0
+projection. The 52-plane ordered-graveyard retrain remains unsupported.
+
+Verification:
+
+```sh
+/usr/bin/time -p make -j4 test-fq0-causal-quotient
+# 3/3 passed; real 1.21 s after the final source edit
+
+/usr/bin/time -p make test-fq0-causal-quotient-production
+# exact C16 expected-rejection contract passed; real 0.15 s
+
+make -j4 \
+  CXXFLAGS='-std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Werror' \
+  build/old-school-fq0-causal-quotient-tests
+ASAN_OPTIONS=detect_leaks=0 \
+  ./build/old-school-fq0-causal-quotient-tests
+# 3/3 passed
+```
+
+##### FR2 graveyard-order × observer-hand-order factorial declaration
+
+Declared 2026-07-27 22:39 PDT after the FR1 result and after rereading
+`REVIEW.md` through 22:34. FR2 opens no new random base, changes no bot, and
+reuses only the five pinned White registered pairs and their frozen
+root-macro continuation seeds. It is a causal projection diagnostic, not
+strength evidence.
+
+Falsifiable hypothesis: graveyard sequence and the observer's own-hand
+sequence are both rules-irrelevant representations of card multisets in the
+five FR1-ineligible White states.
+
+The current FQ0 information and leaf-consequence projections already sort the
+observer hand; they do not sort graveyards. Thus the hand factor is a
+complete-state causal control for the natural representatives, not a proposal
+for an additional new model feature or projection rule.
+
+From one canonical complete representative per pair, with the same hidden
+zones and every untreated field held fixed, FR2 will construct three
+nontrivial interventions:
+
+1. replace only both graveyard sequences with the paired representative's
+   sequences;
+2. replace only the observer-hand sequence;
+3. replace both graveyard and observer-hand sequences.
+
+Every treatment must preserve the relevant card multiset. The combined
+treatment must reproduce the exact paired registered information-set
+identity; the single-factor treatments must differ from the baseline only in
+their named factor. For every shared authoritative legal action, paired
+production macros use the same reused frozen seed. Comparison canonicalizes
+only the factor or factors under treatment and otherwise requires exact
+disposition, terminal result, context, legal actions, C16 observation/value
+bits, accounting, and complete successor state. A life-total perturbation
+must still fail.
+
+The exact gate is five registered pairs, two actions per pair, and all three
+contrasts: 15 pair contrasts and 30 action comparisons. It must pin the five
+pair identities, reproduce the FR1 44/177 anatomy first, repeat bit-
+identically, compile under strict `-Werror`, pass focused ASan/UBSan, and
+report runtime.
+
+If all 15 contrasts pass, FR2 accepts only the causal equivalence of these two
+sequence-order factors and licenses a separately tested FQ0 projection that
+canonicalizes graveyard and observer-hand order. If any contrast fails, FR2
+rejects and reports the exact factor, pair, action, and differing field.
+Neither result licenses ordered-graveyard model inputs or promotes a bot.
+After this projection question closes, the next strength-facing micro-gate is
+the separately declared dominance-constrained Priority-target experiment for
+the three genuine X=0 failures; redundant-counter and combat cases remain
+separate mechanisms.
+
+##### FR2 result: both sequence-order factors are inert in the five pinned states
+
+Completed 2026-07-27 22:55 PDT after rereading `REVIEW.md` through its newest
+22:44 FR1 cycle. FR2 reused frozen C16
+`53aeb904...944ca` (800 training games, training seed `424242`, 16
+generations), the five preregistered White pair identities, and only their
+already-frozen continuation seeds. It opened no evaluation seed, changed no
+bot, and supplies no strength evidence.
+
+Exact frozen-C16 command:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq0-causal-quotient
+```
+
+The registered summary lines were:
+
+```text
+direct_blue=1/2 direct_white=1/4 life_control=1
+root_macros=448 incomplete=0
+pairs=44 blue_pairs=38 white_pairs=6
+legacy_rows=177 blue_rows=163 white_rows=14
+row_identity_sha256=564d2a185c6d591b9848a33b7f19c669893c7e4c85aba0b7054e931f1533745c
+reconstructed=44 graveyard_only=39/167 additional_public_difference=5/10 equivalent=39
+fr1_verdict=REJECT
+fr2_pairs=5 contrasts=15 action_comparisons=30
+fr2_equal graveyards=5 observer_hand=5 combined=5
+fr2_controls wrong_masks=4/4 life=1
+repeat_bit_identical=1
+fr2_verdict=PASS
+real 0.07
+```
+
+Verdict: **accept the FR2 causal-equivalence hypothesis for these five pinned
+states in the current 26-card engine**. Graveyard order, observer-hand order,
+and their combined intervention were each exactly equivalent for all five
+pairs and all 30 production macro comparisons. The four intentionally wrong
+factor masks were detected, as was the life-total negative control. The
+baseline, each single-factor treatment, and each combined treatment are bound
+to the preregistered information-set identities; the exact five root worlds,
+root actions, continuation seeds, and authoritative `Pass`/`Cast Mox
+Sapphire` action vectors are pinned. Bound exhaustion and setup drift are
+infrastructure errors rather than scientific rejections.
+
+FR1 remains a literal `REJECT` because its all-44 premise required the five
+natural White representatives to differ only in graveyard order. FR2 explains
+that rejection completely: their additional observer-hand permutation is
+also causally inert. This licenses only a separately tested diagnostic
+projection that canonicalizes graveyards; it does not justify ordered
+graveyard inputs, change C16, or promote a bot.
+
+Verification:
+
+```sh
+/usr/bin/time -p make -j4 test-fq0-causal-quotient
+# 5/5 passed; real 1.50 s after the final integration edit
+
+/usr/bin/time -p make test-fq0-causal-quotient-production
+# exact C16 FR1-REJECT / FR2-PASS contract passed; real 0.16 s
+
+make -j4 \
+  CXXFLAGS='-std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Werror' \
+  build/old-school-fq0-causal-quotient-tests
+ASAN_OPTIONS=detect_leaks=0 \
+  ./build/old-school-fq0-causal-quotient-tests
+# 5/5 passed
+```
+
+Next experiment: implement the smallest diagnostic-grade graveyard-canonical
+FQ0 projection over the already reconstructed 44 pairs / 177 rows, preserve
+the frozen historical audit and current observer-hand canonicalization, and
+require the projected collision/consequence conflict to disappear with exact
+identity, repeat, and negative controls. Only then preregister FQ4's
+dominance-constrained Priority-head fit, using the 213 class-1 dominated
+witnesses and the three mechanically proven X=0 failures as its fast
+behavioral gate before any gameplay seeds are opened.
+
+##### FR3 graveyard-quotient residual-conflict gate declaration
+
+Declared 2026-07-27 23:00 PDT after the FR2 result, independent implementation
+review, and rereading `REVIEW.md` through its newest 22:44 cycle. FR3 opens no
+new random base, changes no deployed observation or bot, and reuses only
+frozen C16 plus the 44 registered FR1 pairs and their 177 authoritative action
+rows. It is a compact diagnostic repair for the measurement projection, not a
+global rerun of the 11,541-row / 43 GiB audit and not strength evidence.
+
+Falsifiable hypothesis: after quotienting only public graveyard sequence,
+every one of the 177 registered feature collisions has one information-set
+identity and one immediate rules consequence, while the current Learned
+Priority feature vector remains bit-identical. The previously observed
+conflicts therefore disappear without adding 52 ordered-graveyard inputs.
+
+Preserve the frozen historical APIs, schemas, evidence, C16 artifact, and
+FR1/FR2 verdicts byte-for-byte. Add explicit, domain-separated graveyard-
+quotient hashes for information sets, leaf consequences, and immediate
+Priority consequences. Each copies the complete state, sorts only both public
+graveyards, and delegates to the existing hidden-information-safe
+projection. The existing observer-hand multiset canonicalization remains
+unchanged; no opponent hidden identity or new hand feature may enter.
+
+Reconstruct each registered pair from its exact frozen root coordinate. The
+controlled second state copies the paired graveyards into the first state;
+for the five FR2 pairs it also copies only the already-proven-inert observer
+hand sequence so that both exact registered identities are reproduced. For
+all 44 pairs and 177 shared action descriptors require:
+
+1. both exact legacy information-set identities match the registered pair;
+2. the graveyard-quotient information identities are equal;
+3. the current Learned Priority feature vectors are bit-identical;
+4. all 177 legacy immediate consequence pairs conflict, reproducing the
+   registered anatomy;
+5. all 177 graveyard-quotient immediate consequence pairs are equal.
+
+The census is exactly 44 controlled pairs, 177 paired actions, and 354 source
+state/action instances. Report residual quotient conflicts as zero; do not
+misstate that compact result as a global collision census. A changed
+graveyard multiset and a life-total mutation must remain distinct, while an
+opponent hand/library hidden repartition must remain aliased. FR1's exact
+registered rejection, FR2's 15/30 pass, the wrong-mask controls, and all 448
+complete root macros are prerequisites rather than rewritten history.
+
+Serialize a deterministic 177-row catalog containing root, both exact IDs,
+quotient ID, action descriptor, both legacy consequence hashes, and the
+quotient consequence hash. Derive the catalog digest independently in
+production and test code. The literal digest will be frozen in an
+implementation-freeze addendum after portable derivation but before the
+no-knob exact-C16 executable is run; counts, equality predicates, controls,
+and not that after-seeing literal decide the scientific pass.
+
+Acceptance requires exact repeatability, strict `-Werror`, focused
+ASan/UBSan, and these exit semantics: 0 only for zero residual quotient
+conflicts with every prerequisite/control passing; 1 for a complete
+scientific residual conflict; 2 for anatomy, artifact, catalog, setup, or
+bound drift. An FR3 pass clears only FQ0's representation blocker and licenses
+an FQ4 declaration using the quotient projection for grouping. FQ4 must still
+pass the separate three-X=0 dominance target gate and the 319/213
+dominated-witness behavioral gate across all five decks before any gameplay
+seed is opened.
+
+Pre-implementation review addendum, 2026-07-27 23:04 PDT: `REVIEW.md` was
+reread through its new 22:59 FR2 cycle. Its correction is accepted. FR3 can
+remove only the collision/projection layer of the registered rejection; it
+does **not** predict that the whole historical audit becomes `ACCEPT`.
+Braingeyser/Disintegrate X=0 support and redundant same-target Counterspell
+remain real, separate behavioral failures. A passing FR3 therefore licenses a
+canonical-key FQ0' diagnostic declaration that preserves those layer-1
+failures, followed by an FQ4 target fit that learns the opportunity cost of a
+spent card from exact rules transitions. It cannot silently declare FQ0 or
+C16 repaired.
+
+FR3 implementation-freeze addendum, 2026-07-27 23:07 PDT: the portable
+tiny-Value reconstruction completed all declared predicates and 7/7 focused
+tests before the production catalog constant was populated. The production
+serializer and an independently coded test serializer both derived:
+
+```text
+ffe52f04973793f49d5a841384b8992fc650682f99b7b4e1c8107948582cb7e8
+```
+
+Both paths used the exact declared schema and 177 ordered catalog rows. The
+portable report also reproduced 44 pairs, 177 paired actions, 354 source
+instances, 177 legacy consequence conflicts, zero quotient residual
+conflicts, and the projection controls. The production API still refused to
+run while its registered digest literal was empty. Freeze that exact digest
+now; any subsequent exact-C16 mismatch is infrastructure drift, not a
+post-hoc opportunity to choose another hash.
+
+##### FR3 result: compact projection residual is zero
+
+Completed 2026-07-27 23:09 PDT after rereading `REVIEW.md` through its newest
+22:59 FR2 cycle. The production run reused frozen C16
+`53aeb904...944ca` (training seed `424242`) and no new evaluation seed or
+successor bank. The 43 GiB historical evidence was neither regenerated nor
+scanned.
+
+Exact commands:
+
+```sh
+/usr/bin/time -p make -j4 test-fq0-causal-quotient
+/usr/bin/time -p make test-fq0-causal-quotient-production
+/usr/bin/time -p ./build/old-school-fq0-causal-quotient
+```
+
+Registered production summary:
+
+```text
+root_macros=448 incomplete=0
+pairs=44 blue_pairs=38 white_pairs=6
+legacy_rows=177 blue_rows=163 white_rows=14
+row_identity_sha256=564d2a185c6d591b9848a33b7f19c669893c7e4c85aba0b7054e931f1533745c
+fr1_verdict=REJECT
+fr2_pairs=5 contrasts=15 action_comparisons=30
+fr2_verdict=PASS
+fr3_pairs=44 paired_actions=177 source_instances=354
+fr3_identity exact_legacy=44 quotient_equal=44 feature_bit_identical=177/177
+fr3_consequences legacy_conflicts=177 residual_quotient_conflicts=0
+fr3_leaf legacy_conflicts=44 residual_quotient_conflicts=0
+fr3_controls graveyard_multiset=1 life=1 hidden_repartition=1
+fr3_catalog_sha256=ffe52f04973793f49d5a841384b8992fc650682f99b7b4e1c8107948582cb7e8
+fr3_verdict=PASS
+```
+
+The focused build/test took 1.74 seconds, the production output contract 0.20
+seconds, and the final warm exact run 0.09 seconds. The exact C16 catalog
+matched the literal frozen from the prior portable dual derivation. Repeated
+reports were bit-identical.
+
+Verdict: **accept FR3's compact residual-conflict hypothesis**. All 177
+registered legacy consequence conflicts collapse to zero under the
+graveyard-quotient projection, all 44 information-set pairs merge, and every
+current Priority feature row was already bit-identical. Graveyard multiset
+and life mutations remained distinct; opponent hidden repartition remained
+aliased. This is direct evidence that the registered collision layer was a
+measurement artifact, not evidence for 52 ordered-graveyard inputs.
+
+Verification also included:
+
+```sh
+make -j4 test-fq0-sequence-projection
+# 4 tests passed
+
+make -j4 \
+  CXXFLAGS='-std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Werror' \
+  build/old-school-fq0-sequence-projection-tests
+ASAN_OPTIONS=detect_leaks=0 \
+  ./build/old-school-fq0-sequence-projection-tests
+# 4 tests passed
+
+make -j4 \
+  CXXFLAGS='-std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Werror' \
+  build/old-school-fq0-causal-quotient-tests
+ASAN_OPTIONS=detect_leaks=0 \
+  ./build/old-school-fq0-causal-quotient-tests
+# 7/7 passed
+
+make test-build-graph
+# shared-object incremental build tests passed
+```
+
+This does not change the honest overall FQ0 result. The X=0 spend/no-effect
+support failures and redundant Counterspell orientation remain real. Next,
+record a canonical-key FQ0' diagnostic verdict that explicitly reports
+collision-layer `PASS` and behavioral-layer `REJECT`; then preregister the
+Priority-head-only FQ4 fit against exact rules-owned card-spend dominance.
+Use production K8/H4 deployment scores as the immutable parent surface, not
+FQ0 Tq0 Bellman scores, and do not open gameplay seeds until the fast
+behavioral controls pass.
+
+##### FQ0' canonical-key diagnostic: collision PASS, behavior REJECT
+
+Recorded 2026-07-27 23:17 PDT as a sealed interpretive overlay, after the FR3
+result and after rereading `REVIEW.md` through 22:59. This is not a new
+Bellman run. It changes exactly one registered predicate: the historical
+collision guard is replaced by FR3's exact graveyard-quotient residual. Every
+registered contrast, dominance row, support condition, C16 score, and
+invariance result remains frozen.
+
+The source FQ0-T0 complete SHA-256 is
+`f6989c41510b3987a3ceb08bc208ff71c5667a5e009763d191b7f5b9a336e53e`.
+The 154-row compact gate extract (15 contrast rows plus 139 dominance rows)
+was rehashed read-only:
+
+```sh
+shasum -a 256 \
+  /private/tmp/fq0-registered-gate-rows-20260727.tsv
+# fd12d6a72f1bbc86b452ae92878480e415e6c8f5b5d6a3d781934d9ebd2dbbb4
+```
+
+The replacement collision evidence is the exact live FR3 report: historical
+row identity `564d2a18...745c`, quotient catalog
+`ffe52f04...b7e8`, 44/44 information pairs merged, 177/177 policy rows
+bit-identical, and zero residual consequence conflicts.
+
+The resulting no-free-parameter overlay is:
+
+```text
+FQ0' canonical-key diagnostic
+source_complete_sha256=f6989c41510b3987a3ceb08bc208ff71c5667a5e009763d191b7f5b9a336e53e
+source_gate_extract_sha256=fd12d6a72f1bbc86b452ae92878480e415e6c8f5b5d6a3d781934d9ebd2dbbb4
+
+collision_layer registered_feature_rows=11541 implicated_rows=177
+collision_layer reconstructed_pairs=44 residual_conflicts=0 verdict=PASS
+
+primary_layer contrasts=1/1 dominance=1/1 verdict=PASS
+
+behavioral_layer guarded_contrasts=10/12 guarded_dominance=11/16
+behavioral_layer xzero_support=4/6 xzero_dominance=3/6
+behavioral_layer dominance_consistency=3/4 incomparable_controls=5/6
+behavioral_layer verdict=REJECT
+
+overall_verdict=REJECT
+```
+
+The seven frozen failed rows remain: two Braingeyser X=0 support rows; three
+Pass-dominance target rows (Braingeyser X=0 opponent and both validation-RU
+Disintegrate X=0 targets); redundant same-target Counterspell consistency;
+and the own-Counterspell incomparable control's settlement validity. Only the
+first three dominance rows are clean backed-target repairs for FQ4. The
+redundant-counter and settlement-validity failures remain separate mechanisms.
+
+Verdict: **FQ0' remains an overall scientific REJECT**. The representation
+blocker is cleared, the primary sick-Bear operator result remains a pass, and
+the card-spend/no-effect behavior layer is now the precise next target. No
+new executable is justified: FR3 already supplies the live machine contract,
+and composing immutable registered facts is O(1) notebook work. This overlay
+licenses an FQ4 declaration but does not change or promote C16.
+
+Final FR3 verification addendum: the independent 23:14 review countersigned
+the exact 44/177/354 result, hidden-information boundary, exit
+classification, and narrow conclusion. Its one hardening request was adopted:
+the portable test now asserts its independently derived catalog digest equals
+the frozen production literal, so clean clones without the gitignored C16
+artifact still catch catalog/domain drift. After that final test-only edit:
+
+```sh
+make -j4 test-fq0-causal-quotient
+make test-fq0-causal-quotient-production
+ASAN_OPTIONS=detect_leaks=0 \
+  ./build/old-school-fq0-causal-quotient-tests
+make -j4 test
+```
+
+passed with 7/7 focused and sanitized FR tests, 168/168 engine, 27 learned
+iteration, 57 probes, 11 probe metrics, 33 probe runner, every audit/FQ0
+suite, 18 web bridge, 106 web, 48 certification, CLI/capture/clean/build-graph
+contracts, and the representative five-game simulator smoke.
+
 ##### Shared-object build graph result (iteration-speed infrastructure)
 
 The same verification pass replaced per-binary whole-program recompilation

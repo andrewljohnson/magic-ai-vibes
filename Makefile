@@ -67,6 +67,8 @@ FQ0_DOMINANCE_TRANSITION_SOURCE := src/fq0_dominance_transition.cpp
 FQ0_BELLMAN_SCIENCE_SOURCE := src/fq0_bellman_science.cpp
 FQ0_BELLMAN_AUDIT_SOURCE := src/fq0_bellman_audit.cpp
 FQ0_BELLMAN_RUN_SOURCE := src/fq0_bellman_run.cpp
+FQ0_SEQUENCE_PROJECTION_SOURCE := src/fq0_sequence_projection.cpp
+FQ0_CAUSAL_QUOTIENT_SOURCE := src/fq0_causal_quotient.cpp
 WEB_BRIDGE_SOURCE := src/web_bridge.cpp
 SIMULATOR := $(BUILD_DIR)/old-school-sim
 TEST_RUNNER := $(BUILD_DIR)/old-school-tests
@@ -111,6 +113,9 @@ FQ0_BELLMAN_SCIENCE_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-bellman-science-t
 FQ0_BELLMAN_AUDIT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-bellman-audit-tests
 FQ0_BELLMAN_RUN_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-bellman-run-tests
 FQ0_BELLMAN_AUDIT := $(BUILD_DIR)/old-school-fq0-bellman-audit
+FQ0_SEQUENCE_PROJECTION_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-sequence-projection-tests
+FQ0_CAUSAL_QUOTIENT_TEST_RUNNER := $(BUILD_DIR)/old-school-fq0-causal-quotient-tests
+FQ0_CAUSAL_QUOTIENT := $(BUILD_DIR)/old-school-fq0-causal-quotient
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 WEB_BRIDGE_TEST_RUNNER := $(BUILD_DIR)/old-school-web-bridge-tests
 WEB_DEPENDENCIES := web/node_modules/.package-lock.json
@@ -122,7 +127,7 @@ ALL_CPP := $(wildcard src/*.cpp tests/*.cpp)
 source_objects = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(1))
 DEPFILES := $(patsubst %.o,%.d,$(call source_objects,$(ALL_CPP)))
 
-.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
+.PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 
 all: $(SIMULATOR)
 
@@ -226,6 +231,8 @@ FQ0_DOMINANCE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PRO
 FQ0_BELLMAN_SCIENCE_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(FQ0_BELLMAN_SCIENCE_SOURCE)
 FQ0_BELLMAN_AUDIT_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_BELLMAN_AUDIT_SOURCE)
 FQ0_BELLMAN_RUN_LINK_SOURCES := $(AC1_TEACHER_AUDIT_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(FQ0_BELLMAN_SCIENCE_SOURCE) $(FQ0_BELLMAN_AUDIT_SOURCE) $(FQ0_BELLMAN_RUN_SOURCE)
+FQ0_SEQUENCE_PROJECTION_LINK_SOURCES := $(FQ0_INFORMATION_SET_LINK_SOURCES) $(FQ0_SEQUENCE_PROJECTION_SOURCE)
+FQ0_CAUSAL_QUOTIENT_LINK_SOURCES := $(FQ0_SEQUENCE_PROJECTION_LINK_SOURCES) $(FQ0_CAUSAL_QUOTIENT_SOURCE)
 
 $(eval $(call link_program,$(AC1_TEACHER_AUDIT_TEST_RUNNER),$(AC1_TEACHER_AUDIT_LINK_SOURCES) tests/test_ac1_teacher_audit.cpp))
 
@@ -247,6 +254,12 @@ $(eval $(call link_program,$(FQ0_BELLMAN_RUN_TEST_RUNNER),$(FQ0_BELLMAN_RUN_LINK
 
 $(eval $(call link_program,$(FQ0_BELLMAN_AUDIT),$(FQ0_BELLMAN_RUN_LINK_SOURCES) src/fq0_bellman_audit_main.cpp))
 
+$(eval $(call link_program,$(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER),$(FQ0_SEQUENCE_PROJECTION_LINK_SOURCES) tests/test_fq0_sequence_projection.cpp))
+
+$(eval $(call link_program,$(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER),$(FQ0_CAUSAL_QUOTIENT_LINK_SOURCES) tests/test_fq0_causal_quotient.cpp))
+
+$(eval $(call link_program,$(FQ0_CAUSAL_QUOTIENT),$(FQ0_CAUSAL_QUOTIENT_LINK_SOURCES) src/fq0_causal_quotient_main.cpp))
+
 $(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp))
 
 $(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp))
@@ -256,7 +269,7 @@ $(eval $(call link_program,$(WEB_BRIDGE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci --ignore-scripts
 
-test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
+test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PROBE_EVAL_TEST_RUNNER) $(PROBE_RUNNER_TEST_RUNNER) $(AUDIT_COMMON_TEST_RUNNER) $(ARTIFACT_INTEGRITY_TEST_RUNNER) $(FQ0_RUSAGE_GUARD_TEST_RUNNER) $(TERMINAL_WEIGHT_EVAL_TEST_RUNNER) $(JOINT_C17_EVAL_TEST_RUNNER) $(JOINT_C17_RUNNER_TEST_RUNNER) $(JOINT_C17_EXECUTION_TEST_RUNNER) $(JOINT_C17_TRAINING_TEST_RUNNER) $(JOINT_C17_ORCHESTRATION_TEST_RUNNER) $(TURN_ALIGNMENT_AUDIT_TEST_RUNNER) $(TARGET_FACTORIAL_AUDIT_TEST_RUNNER) $(REPLAY_WEIGHT_AUDIT_TEST_RUNNER) $(RB0_MECHANICAL_PREFLIGHT_TEST_RUNNER) $(DVR2_HARVEST_TEST_RUNNER) $(DVR2_REPLAY_BUNDLE_TEST_RUNNER) $(DVR2_HARVEST) $(OUTPUT_CALIBRATION_TEST_RUNNER) $(OUTPUT_CALIBRATION_ARTIFACT_TEST_RUNNER) $(OUTPUT_CALIBRATION_RUNNER_TEST_RUNNER) $(OUTPUT_CALIBRATION) $(OC1_ACTION_EVAL_TEST_RUNNER) $(OC1_ACTION_SCORING_TEST_RUNNER) $(OC1_ACTION_REGRESSION_TEST_RUNNER) $(OC1_ACTION_REGRESSION) $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT) $(FQ0_INFORMATION_SET_TEST_RUNNER) $(FQ0_BELLMAN_TEST_RUNNER) $(FQ0_DOMINANCE_TEST_RUNNER) $(FQ0_DOMINANCE_TRANSITION_TEST_RUNNER) $(FQ0_BELLMAN_SCIENCE_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT_TEST_RUNNER) $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT) $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT) $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES) $(SIMULATOR)
 	./$(TEST_RUNNER)
 	./$(LEARNED_ITERATION_TEST_RUNNER)
 	./$(PROBE_TEST_RUNNER)
@@ -292,6 +305,8 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(FQ0_BELLMAN_SCIENCE_TEST_RUNNER)
 	./$(FQ0_BELLMAN_AUDIT_TEST_RUNNER)
 	./$(FQ0_BELLMAN_RUN_TEST_RUNNER)
+	./$(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER)
+	./$(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER)
 	@set +e; output=`./$(FQ0_BELLMAN_AUDIT) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
@@ -459,7 +474,7 @@ test-ac1-teacher-audit: $(AC1_TEACHER_AUDIT_TEST_RUNNER) $(AC1_TEACHER_AUDIT)
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'Usage: old-school-ac1-teacher-audit' >/dev/null
 
-test-fq0: test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run
+test-fq0: test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run test-fq0-sequence-projection test-fq0-causal-quotient
 
 test-fq0-information-set: $(FQ0_INFORMATION_SET_TEST_RUNNER)
 	./$(FQ0_INFORMATION_SET_TEST_RUNNER)
@@ -490,6 +505,55 @@ test-fq0-bellman-run: $(FQ0_BELLMAN_RUN_TEST_RUNNER) $(FQ0_BELLMAN_AUDIT)
 		exit 1; \
 	fi; \
 	printf '%s\n' "$$output" | grep -F 'Usage: old-school-fq0-bellman-audit' >/dev/null
+
+test-fq0-sequence-projection: $(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER)
+	./$(FQ0_SEQUENCE_PROJECTION_TEST_RUNNER)
+
+test-fq0-causal-quotient: $(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER) $(FQ0_CAUSAL_QUOTIENT)
+	./$(FQ0_CAUSAL_QUOTIENT_TEST_RUNNER)
+	@set +e; output=`./$(FQ0_CAUSAL_QUOTIENT) unexpected 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 2 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FR1 causal-quotient CLI accepted an argument\n' >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+
+test-fq0-causal-quotient-production: $(FQ0_CAUSAL_QUOTIENT)
+	@set +e; output=`./$(FQ0_CAUSAL_QUOTIENT) 2>&1`; status=$$?; set -e; \
+	if [ $$status -ne 0 ]; then \
+		printf '%s\n' "$$output"; \
+		printf 'FR3 production gate did not return its registered pass\n' >&2; \
+		exit 1; \
+	fi; \
+	require_line() { \
+		printf '%s\n' "$$output" | grep -Fx "$$1" >/dev/null || { \
+			printf 'FR3 production output missing: %s\n' "$$1" >&2; \
+			exit 1; \
+		}; \
+	}; \
+	require_line 'direct_blue=1/2 direct_white=1/4 life_control=1'; \
+	require_line 'root_macros=448 incomplete=0'; \
+	require_line 'pairs=44 blue_pairs=38 white_pairs=6'; \
+	require_line 'legacy_rows=177 blue_rows=163 white_rows=14'; \
+	require_line 'row_identity_sha256=564d2a185c6d591b9848a33b7f19c669893c7e4c85aba0b7054e931f1533745c'; \
+	require_line 'reconstructed=44 graveyard_only=39/167 additional_public_difference=5/10 equivalent=39'; \
+	require_line 'fr1_verdict=REJECT'; \
+	require_line 'fr2_pairs=5 contrasts=15 action_comparisons=30'; \
+	require_line 'fr2_equal graveyards=5 observer_hand=5 combined=5'; \
+	require_line 'fr2_controls wrong_masks=4/4 life=1'; \
+	require_line 'repeat_bit_identical=1'; \
+	require_line 'fr2_verdict=PASS'; \
+	require_line 'fr3_pairs=44 paired_actions=177 source_instances=354'; \
+	require_line 'fr3_identity exact_legacy=44 quotient_equal=44 feature_bit_identical=177/177'; \
+	require_line 'fr3_consequences legacy_conflicts=177 residual_quotient_conflicts=0'; \
+	require_line 'fr3_leaf legacy_conflicts=44 residual_quotient_conflicts=0'; \
+	require_line 'fr3_controls graveyard_multiset=1 life=1 hidden_repartition=1'; \
+	require_line 'fr3_catalog_sha256=ffe52f04973793f49d5a841384b8992fc650682f99b7b4e1c8107948582cb7e8'; \
+	require_line 'fr3_verdict=PASS'
+
+fq0-causal-quotient: $(FQ0_CAUSAL_QUOTIENT)
+	./$(FQ0_CAUSAL_QUOTIENT)
 
 test-web: $(WEB_BRIDGE_TEST_RUNNER) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 	./$(WEB_BRIDGE_TEST_RUNNER)
