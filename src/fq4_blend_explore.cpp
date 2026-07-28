@@ -192,13 +192,15 @@ TimedResult run_one(
     std::shared_ptr<const LearnedModel> challenger_model,
     std::shared_ptr<const LearnedModel> baseline_model,
     std::size_t repetitions, std::uint64_t seed,
-    bool identical_control) {
+    bool identical_control,
+    bool challenger_pass_dominance = false) {
     const BotConfig challenger =
-        gameplay::testing::make_learned_bot(
-            std::move(challenger_model));
+        make_exploratory_bot(
+            std::move(challenger_model),
+            challenger_pass_dominance);
     const BotConfig baseline =
-        gameplay::testing::make_learned_bot(
-            std::move(baseline_model));
+        make_exploratory_bot(
+            std::move(baseline_model), false);
     const auto started = std::chrono::steady_clock::now();
     BotBenchmarkSummary summary = run_bot_benchmark(
         repetitions, seed, challenger, baseline,
@@ -291,6 +293,115 @@ const Variant& find_variant(
             "selected alpha has no model");
     }
     return *found;
+}
+
+int run_pd0_exploration(
+    const gameplay::FixedDeployment& deployment,
+    std::ostream& output) {
+    struct Pd0Variant {
+        std::string_view name;
+        double alpha = 0.0;
+        std::shared_ptr<const LearnedModel> model;
+        std::string fingerprint;
+    };
+
+    auto half_blend = blend_priority_heads(
+        deployment.parent, deployment.candidate,
+        kPd0BlendAlpha);
+    std::array<Pd0Variant, 2> variants{{
+        {
+            .name = "C16+PD0",
+            .alpha = 0.0,
+            .model = deployment.parent,
+            .fingerprint =
+                deployment.parent_model_fingerprint,
+        },
+        {
+            .name = "alpha0.50+PD0",
+            .alpha = kPd0BlendAlpha,
+            .model = std::move(half_blend),
+            .fingerprint = {},
+        },
+    }};
+    variants[1].fingerprint =
+        learned_model_fingerprint(variants[1].model);
+
+    output
+        << "FQ4 Pass-dominance composition exploration"
+        << " parent="
+        << deployment.parent_model_fingerprint
+        << " alpha0.50=" << variants[1].fingerprint
+        << '\n'
+        << "plan mode=PD0 E0_seed=" << kPd0StageE0Seed
+        << " E0_repetitions=" << kPd0StageE0Repetitions
+        << " E1_seed=" << kPd0StageE1Seed
+        << " E1_repetitions=" << kPd0StageE1Repetitions
+        << " baseline=C16 pass_dominance=on"
+        << " runtime=descriptive\n";
+    output.flush();
+
+    std::array<CandidateScore, 2> stage_e0_scores;
+    for (std::size_t index = 0; index < variants.size();
+         ++index) {
+        const auto& variant = variants[index];
+        output << "running mode=PD0 stage=E0 variant="
+               << variant.name << " alpha=" << variant.alpha
+               << " model=" << variant.fingerprint << '\n';
+        output.flush();
+        const TimedResult result = run_one(
+            variant.model, deployment.parent,
+            kPd0StageE0Repetitions, kPd0StageE0Seed,
+            false, true);
+        print_result(
+            output, "E0", variant.name,
+            variant.alpha, result);
+        stage_e0_scores[index] = {
+            .alpha = variant.alpha,
+            .wins = result.summary.challenger_stats.wins,
+            .losses =
+                result.summary.challenger_stats.losses,
+            .draws = result.summary.challenger_stats.draws,
+        };
+    }
+
+    const double winner_alpha =
+        select_pd0_winner_alpha(stage_e0_scores);
+    const auto winner = std::find_if(
+        variants.begin(), variants.end(),
+        [winner_alpha](const Pd0Variant& variant) {
+            return variant.alpha == winner_alpha;
+        });
+    if (winner == variants.end()) {
+        throw std::logic_error(
+            "PD0 winner has no model");
+    }
+    output << "selection mode=PD0 stage=E1 variant="
+           << winner->name << " alpha=" << winner->alpha
+           << " tie_break=C16+PD0\n";
+    output.flush();
+
+    output << "running mode=PD0 stage=E1 variant="
+           << winner->name << " alpha=" << winner->alpha
+           << " model=" << winner->fingerprint
+           << '\n';
+    output.flush();
+    const TimedResult stage_e1 = run_one(
+        winner->model, deployment.parent,
+        kPd0StageE1Repetitions, kPd0StageE1Seed,
+        false, true);
+    print_result(
+        output, "E1", winner->name,
+        winner->alpha, stage_e1);
+    output << "winner mode=PD0 stage=E1 variant="
+           << winner->name << " alpha=" << winner->alpha
+           << " wins=" << stage_e1.summary.challenger_stats.wins
+           << " losses="
+           << stage_e1.summary.challenger_stats.losses
+           << " draws="
+           << stage_e1.summary.challenger_stats.draws
+           << '\n';
+    output.flush();
+    return 0;
 }
 
 } // namespace
@@ -387,18 +498,69 @@ std::array<double, 2> select_top_two_alphas(
     return {ranked[0].alpha, ranked[1].alpha};
 }
 
+double select_pd0_winner_alpha(
+    const std::array<CandidateScore, 2>& scores) {
+    const auto is_expected_alpha =
+        [](double alpha) {
+            return alpha == 0.0 ||
+                   alpha == kPd0BlendAlpha;
+        };
+    if (!is_expected_alpha(scores[0].alpha) ||
+        !is_expected_alpha(scores[1].alpha) ||
+        scores[0].alpha == scores[1].alpha) {
+        throw std::invalid_argument(
+            "PD0 ranking requires C16 and alpha 0.50");
+    }
+    const std::size_t first_games =
+        scores[0].wins + scores[0].losses +
+        scores[0].draws;
+    const std::size_t second_games =
+        scores[1].wins + scores[1].losses +
+        scores[1].draws;
+    if (first_games == 0 || first_games != second_games) {
+        throw std::invalid_argument(
+            "PD0 ranking requires equal nonempty game counts");
+    }
+    return score_precedes(scores[1], scores[0])
+               ? scores[1].alpha
+               : scores[0].alpha;
+}
+
+BotConfig make_exploratory_bot(
+    std::shared_ptr<const LearnedModel> model,
+    bool pass_dominance) {
+    if (!model) {
+        throw std::invalid_argument(
+            "exploratory bot requires a frozen model");
+    }
+    BotConfig bot =
+        gameplay::testing::make_learned_bot(
+            std::move(model));
+    bot.value_pass_dominance = pass_dominance;
+    return bot;
+}
+
 int run_cli(
     int argc, char* argv[], std::ostream& output,
     std::ostream& error) {
     constexpr std::string_view kUsage =
-        "Usage: old-school-fq4-blend-explore\n";
-    if (argc != 1 || argv == nullptr || argv[0] == nullptr) {
+        "Usage: old-school-fq4-blend-explore [--pd0]\n";
+    const bool valid_arguments =
+        argv != nullptr && argv[0] != nullptr &&
+        (argc == 1 ||
+         (argc == 2 && argv[1] != nullptr &&
+          std::string_view(argv[1]) == "--pd0"));
+    if (!valid_arguments) {
         error << kUsage;
         return 2;
     }
     try {
         const gameplay::FixedDeployment deployment =
             load_exact_deployment();
+        if (argc == 2) {
+            return run_pd0_exploration(
+                deployment, output);
+        }
         const std::vector<Variant> variants =
             make_variants(deployment);
         output

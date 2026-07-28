@@ -20,6 +20,13 @@ inline constexpr std::size_t kStageE0Repetitions = 1;
 inline constexpr std::uint64_t kStageE1Seed =
     202607280802ULL;
 inline constexpr std::size_t kStageE1Repetitions = 4;
+inline constexpr std::uint64_t kPd0StageE0Seed =
+    202607280803ULL;
+inline constexpr std::size_t kPd0StageE0Repetitions = 1;
+inline constexpr std::uint64_t kPd0StageE1Seed =
+    202607280804ULL;
+inline constexpr std::size_t kPd0StageE1Repetitions = 4;
+inline constexpr double kPd0BlendAlpha = 0.50;
 
 struct CandidateScore {
     double alpha = 0.0;
@@ -39,6 +46,17 @@ std::shared_ptr<const LearnedModel> blend_priority_heads(
 // Ranks by total wins, then prefers the smaller alpha on a tie.
 std::array<double, 2> select_top_two_alphas(
     const std::vector<CandidateScore>& scores);
+
+// The two EXPLORE-2 candidates are represented by alpha zero (exact
+// C16+PD0) and alpha 0.50 (the half-blend+PD0). Ties prefer alpha zero.
+double select_pd0_winner_alpha(
+    const std::array<CandidateScore, 2>& scores);
+
+// Returns the exact K8/H4/R1 C16 deployment recipe with only the explicit
+// Pass-dominance switch selected by the caller.
+BotConfig make_exploratory_bot(
+    std::shared_ptr<const LearnedModel> model,
+    bool pass_dominance);
 
 int run_cli(
     int argc, char* argv[], std::ostream& output,

@@ -104,6 +104,13 @@ void test_frozen_schedule() {
             explore::kStageE1Seed == 202607280802ULL &&
             explore::kStageE1Repetitions == 4,
         "exploration schedule drifted");
+    expect(
+        explore::kPd0StageE0Seed == 202607280803ULL &&
+            explore::kPd0StageE0Repetitions == 1 &&
+            explore::kPd0StageE1Seed == 202607280804ULL &&
+            explore::kPd0StageE1Repetitions == 4 &&
+            explore::kPd0BlendAlpha == 0.50,
+        "PD0 exploration schedule drifted");
 }
 
 void test_blend_endpoints_and_isolation() {
@@ -232,6 +239,90 @@ void test_ranking_and_tie_break() {
         "ranking accepted a duplicate alpha");
 }
 
+void test_pd0_ranking_and_tie_break() {
+    std::array<explore::CandidateScore, 2> scores{{
+        {.alpha = 0.50, .wins = 31, .losses = 29},
+        {.alpha = 0.00, .wins = 31, .losses = 29},
+    }};
+    expect(
+        explore::select_pd0_winner_alpha(scores) == 0.0,
+        "PD0 tie did not prefer exact C16");
+    scores[0] = {
+        .alpha = 0.50, .wins = 32, .losses = 28,
+    };
+    expect(
+        explore::select_pd0_winner_alpha(scores) == 0.50,
+        "PD0 ranking did not prefer more wins");
+
+    auto malformed = scores;
+    malformed[1].alpha = 0.50;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::select_pd0_winner_alpha(malformed));
+        },
+        "PD0 ranking accepted duplicate candidates");
+    malformed = scores;
+    malformed[1] = {
+        .alpha = 0.0, .wins = 30, .losses = 29,
+    };
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::select_pd0_winner_alpha(malformed));
+        },
+        "PD0 ranking accepted unequal game counts");
+}
+
+void test_pd0_config_changes_only_pass_dominance() {
+    const auto model = parent_model();
+    const auto ordinary =
+        explore::make_exploratory_bot(model, false);
+    const auto pd0 =
+        explore::make_exploratory_bot(model, true);
+    expect(
+        ordinary.kind == old_school::BotKind::Learned &&
+            ordinary.learned_variant ==
+                old_school::LearnedVariant::
+                    ValueSearchChampion &&
+            ordinary.rollouts_per_action == 8 &&
+            ordinary.exploration_rate == 0.0 &&
+            ordinary.value_continuation_epsilon == 0.0 &&
+            ordinary.value_priority_residual_weight == 0.10 &&
+            !ordinary.value_pass_dominance &&
+            ordinary.value_continuation_controller ==
+                old_school::LearnedContinuationController::
+                    Legacy &&
+            ordinary.training_games == 800 &&
+            ordinary.learned_model == model,
+        "ordinary exploratory bot recipe drifted");
+    expect(
+        pd0.kind == ordinary.kind &&
+            pd0.learned_variant ==
+                ordinary.learned_variant &&
+            pd0.rollouts_per_action ==
+                ordinary.rollouts_per_action &&
+            pd0.exploration_rate ==
+                ordinary.exploration_rate &&
+            pd0.value_continuation_epsilon ==
+                ordinary.value_continuation_epsilon &&
+            pd0.value_priority_residual_weight ==
+                ordinary.value_priority_residual_weight &&
+            pd0.value_pass_dominance &&
+            pd0.value_continuation_controller ==
+                ordinary.value_continuation_controller &&
+            pd0.training_games == ordinary.training_games &&
+            pd0.learned_model == ordinary.learned_model,
+        "PD0 changed more than Pass dominance");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                explore::make_exploratory_bot(
+                    nullptr, true));
+        },
+        "PD0 accepted a missing frozen model");
+}
+
 void test_cli_rejects_arguments_without_loading_models() {
     char program[] = "old-school-fq4-blend-explore";
     char unexpected[] = "unexpected";
@@ -245,7 +336,8 @@ void test_cli_rejects_arguments_without_loading_models() {
     expect(
         output.str().empty() &&
             error.str() ==
-                "Usage: old-school-fq4-blend-explore\n",
+                "Usage: old-school-fq4-blend-explore"
+                " [--pd0]\n",
         "CLI argument rejection was not concise");
 }
 
@@ -263,6 +355,12 @@ int main() {
     runner.run(
         "ranking and tie break",
         test_ranking_and_tie_break);
+    runner.run(
+        "PD0 ranking and tie break",
+        test_pd0_ranking_and_tie_break);
+    runner.run(
+        "PD0 config isolation",
+        test_pd0_config_changes_only_pass_dominance);
     runner.run(
         "CLI argument rejection",
         test_cli_rejects_arguments_without_loading_models);
