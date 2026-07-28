@@ -122,6 +122,17 @@ void test_frozen_schedule() {
                 4 &&
             explore::kAdversarialBlocksBlendAlpha == 0.50,
         "AdversarialBlocks exploration schedule drifted");
+    expect(
+        explore::kAdversarialCompositionStageE0Seed ==
+                202607280807ULL &&
+            explore::kAdversarialCompositionStageE0Repetitions ==
+                1 &&
+            explore::kAdversarialCompositionStageE1Seed ==
+                202607280808ULL &&
+            explore::kAdversarialCompositionStageE1Repetitions ==
+                4 &&
+            explore::kAdversarialCompositionBlendAlpha == 0.50,
+        "AdversarialComposition exploration schedule drifted");
 }
 
 void test_blend_endpoints_and_isolation() {
@@ -411,6 +422,67 @@ void test_adversarial_blocks_config_changes_only_aggregation() {
         "aggregation");
 }
 
+void test_adversarial_composition_strict_advance_gate() {
+    expect(
+        explore::adversarial_composition_advances({
+            .alpha = 0.50,
+            .wins = 31,
+            .losses = 29,
+        }),
+        "AdversarialComposition rejected a strict win");
+    expect(
+        !explore::adversarial_composition_advances({
+            .alpha = 0.50,
+            .wins = 30,
+            .losses = 30,
+        }),
+        "AdversarialComposition advanced a tie");
+    expect(
+        !explore::adversarial_composition_advances({
+            .alpha = 0.50,
+            .wins = 29,
+            .losses = 30,
+            .draws = 1,
+        }),
+        "AdversarialComposition advanced a loss");
+}
+
+void test_adversarial_composition_matchup_isolation() {
+    const auto parent = parent_model();
+    const auto blended = explore::blend_priority_heads(
+        parent, priority_only_candidate(),
+        explore::kAdversarialCompositionBlendAlpha);
+    const auto bots =
+        explore::make_adversarial_composition_bots(
+            blended, parent);
+    const auto& challenger = bots[0];
+    const auto& baseline = bots[1];
+    expect(
+        challenger.kind == baseline.kind &&
+            challenger.learned_variant ==
+                baseline.learned_variant &&
+            challenger.rollouts_per_action ==
+                baseline.rollouts_per_action &&
+            challenger.exploration_rate ==
+                baseline.exploration_rate &&
+            challenger.value_continuation_epsilon ==
+                baseline.value_continuation_epsilon &&
+            challenger.value_priority_residual_weight ==
+                baseline.value_priority_residual_weight &&
+            !challenger.value_pass_dominance &&
+            !baseline.value_pass_dominance &&
+            challenger.value_adversarial_blocks &&
+            baseline.value_adversarial_blocks &&
+            challenger.value_continuation_controller ==
+                baseline.value_continuation_controller &&
+            challenger.training_games ==
+                baseline.training_games &&
+            challenger.learned_model == blended &&
+            baseline.learned_model == parent,
+        "AdversarialComposition matchup changed more than "
+        "the frozen Priority model");
+}
+
 void test_adversarial_block_aggregation_changes_ranking() {
     const std::vector<std::vector<double>> block_scores{
         {1.0, 1.0, 1.0, 0.0},
@@ -459,7 +531,8 @@ void test_cli_rejects_arguments_without_loading_models() {
         output.str().empty() &&
             error.str() ==
                 "Usage: old-school-fq4-blend-explore"
-                " [--pd0|--adversarial-blocks]\n",
+                " [--pd0|--adversarial-blocks|"
+                "--adversarial-composition]\n",
         "CLI argument rejection was not concise");
 }
 
@@ -489,6 +562,12 @@ int main() {
     runner.run(
         "AdversarialBlocks config isolation",
         test_adversarial_blocks_config_changes_only_aggregation);
+    runner.run(
+        "AdversarialComposition strict advance gate",
+        test_adversarial_composition_strict_advance_gate);
+    runner.run(
+        "AdversarialComposition matchup isolation",
+        test_adversarial_composition_matchup_isolation);
     runner.run(
         "AdversarialBlocks synthetic aggregation",
         test_adversarial_block_aggregation_changes_ranking);

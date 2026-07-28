@@ -36,6 +36,15 @@ inline constexpr std::uint64_t
 inline constexpr std::size_t
     kAdversarialBlocksStageE1Repetitions = 4;
 inline constexpr double kAdversarialBlocksBlendAlpha = 0.50;
+inline constexpr std::uint64_t
+    kAdversarialCompositionStageE0Seed = 202607280807ULL;
+inline constexpr std::size_t
+    kAdversarialCompositionStageE0Repetitions = 1;
+inline constexpr std::uint64_t
+    kAdversarialCompositionStageE1Seed = 202607280808ULL;
+inline constexpr std::size_t
+    kAdversarialCompositionStageE1Repetitions = 4;
+inline constexpr double kAdversarialCompositionBlendAlpha = 0.50;
 
 struct CandidateScore {
     double alpha = 0.0;
@@ -63,6 +72,18 @@ double select_pd0_winner_alpha(
 
 double select_adversarial_blocks_winner_alpha(
     const std::array<CandidateScore, 2>& scores);
+
+// EXPLORE-4 advances only on strictly more wins than losses. Draws do not
+// relax the gate.
+bool adversarial_composition_advances(
+    const CandidateScore& score);
+
+// Builds the EXPLORE-4 direct matchup. Both policies use the exact
+// defender-best-response attack treatment; only their frozen model pointers
+// differ.
+std::array<BotConfig, 2> make_adversarial_composition_bots(
+    std::shared_ptr<const LearnedModel> challenger_model,
+    std::shared_ptr<const LearnedModel> baseline_model);
 
 // Returns the exact K8/H4/R1 C16 deployment recipe with only the explicit
 // exploratory switches selected by the caller.

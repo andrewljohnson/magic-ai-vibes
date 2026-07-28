@@ -189,20 +189,9 @@ std::vector<Variant> make_variants(
 }
 
 TimedResult run_one(
-    std::shared_ptr<const LearnedModel> challenger_model,
-    std::shared_ptr<const LearnedModel> baseline_model,
+    const BotConfig& challenger, const BotConfig& baseline,
     std::size_t repetitions, std::uint64_t seed,
-    bool identical_control,
-    bool challenger_pass_dominance = false,
-    bool challenger_adversarial_blocks = false) {
-    const BotConfig challenger =
-        make_exploratory_bot(
-            std::move(challenger_model),
-            challenger_pass_dominance,
-            challenger_adversarial_blocks);
-    const BotConfig baseline =
-        make_exploratory_bot(
-            std::move(baseline_model), false, false);
+    bool identical_control) {
     const auto started = std::chrono::steady_clock::now();
     BotBenchmarkSummary summary = run_bot_benchmark(
         repetitions, seed, challenger, baseline,
@@ -233,6 +222,28 @@ TimedResult run_one(
         .summary = std::move(summary),
         .elapsed_seconds = elapsed.count(),
     };
+}
+
+TimedResult run_one(
+    std::shared_ptr<const LearnedModel> challenger_model,
+    std::shared_ptr<const LearnedModel> baseline_model,
+    std::size_t repetitions, std::uint64_t seed,
+    bool identical_control,
+    bool challenger_pass_dominance = false,
+    bool challenger_adversarial_blocks = false,
+    bool baseline_adversarial_blocks = false) {
+    const BotConfig challenger =
+        make_exploratory_bot(
+            std::move(challenger_model),
+            challenger_pass_dominance,
+            challenger_adversarial_blocks);
+    const BotConfig baseline =
+        make_exploratory_bot(
+            std::move(baseline_model), false,
+            baseline_adversarial_blocks);
+    return run_one(
+        challenger, baseline, repetitions, seed,
+        identical_control);
 }
 
 void print_result(
@@ -534,6 +545,113 @@ int run_adversarial_blocks_exploration(
     return 0;
 }
 
+int run_adversarial_composition_exploration(
+    const gameplay::FixedDeployment& deployment,
+    std::ostream& output) {
+    auto challenger_model = blend_priority_heads(
+        deployment.parent, deployment.candidate,
+        kAdversarialCompositionBlendAlpha);
+    const std::string challenger_fingerprint =
+        learned_model_fingerprint(challenger_model);
+
+    output
+        << "FQ4 Priority-plus-attack composition exploration"
+        << " parent="
+        << deployment.parent_model_fingerprint
+        << " alpha0.50=" << challenger_fingerprint
+        << '\n'
+        << "plan mode=AdversarialComposition E0_seed="
+        << kAdversarialCompositionStageE0Seed
+        << " E0_repetitions="
+        << kAdversarialCompositionStageE0Repetitions
+        << " E1_seed="
+        << kAdversarialCompositionStageE1Seed
+        << " E1_repetitions="
+        << kAdversarialCompositionStageE1Repetitions
+        << " challenger=alpha0.50+AdversarialBlocks"
+        << " baseline=C16+AdversarialBlocks"
+        << " challenger_adversarial_blocks=on"
+        << " baseline_adversarial_blocks=on"
+        << " advance=strictly_more_wins"
+        << " runtime=descriptive\n";
+    output.flush();
+
+    output
+        << "running mode=AdversarialComposition stage=E0"
+        << " variant=alpha0.50+AdversarialBlocks"
+        << " alpha=" << kAdversarialCompositionBlendAlpha
+        << " model=" << challenger_fingerprint << '\n';
+    output.flush();
+    const auto bots = make_adversarial_composition_bots(
+        challenger_model, deployment.parent);
+    const TimedResult stage_e0 = run_one(
+        bots[0], bots[1],
+        kAdversarialCompositionStageE0Repetitions,
+        kAdversarialCompositionStageE0Seed,
+        false);
+    print_result(
+        output, "E0", "alpha0.50+AdversarialBlocks",
+        kAdversarialCompositionBlendAlpha, stage_e0);
+    const CandidateScore stage_e0_score{
+        .alpha = kAdversarialCompositionBlendAlpha,
+        .wins = stage_e0.summary.challenger_stats.wins,
+        .losses = stage_e0.summary.challenger_stats.losses,
+        .draws = stage_e0.summary.challenger_stats.draws,
+    };
+    if (!adversarial_composition_advances(stage_e0_score)) {
+        output
+            << "stop mode=AdversarialComposition stage=E0"
+            << " variant=alpha0.50+AdversarialBlocks"
+            << " wins=" << stage_e0_score.wins
+            << " losses=" << stage_e0_score.losses
+            << " draws=" << stage_e0_score.draws
+            << " reason=not_strictly_more_wins\n";
+        output.flush();
+        return 0;
+    }
+
+    output
+        << "advance mode=AdversarialComposition stage=E1"
+        << " variant=alpha0.50+AdversarialBlocks"
+        << " E0_wins=" << stage_e0_score.wins
+        << " E0_losses=" << stage_e0_score.losses
+        << " E0_draws=" << stage_e0_score.draws << '\n'
+        << "running mode=AdversarialComposition stage=E1"
+        << " variant=alpha0.50+AdversarialBlocks"
+        << " alpha=" << kAdversarialCompositionBlendAlpha
+        << " model=" << challenger_fingerprint << '\n';
+    output.flush();
+    const TimedResult stage_e1 = run_one(
+        bots[0], bots[1],
+        kAdversarialCompositionStageE1Repetitions,
+        kAdversarialCompositionStageE1Seed,
+        false);
+    print_result(
+        output, "E1", "alpha0.50+AdversarialBlocks",
+        kAdversarialCompositionBlendAlpha, stage_e1);
+    const CandidateScore stage_e1_score{
+        .alpha = kAdversarialCompositionBlendAlpha,
+        .wins = stage_e1.summary.challenger_stats.wins,
+        .losses = stage_e1.summary.challenger_stats.losses,
+        .draws = stage_e1.summary.challenger_stats.draws,
+    };
+    output
+        << (adversarial_composition_advances(stage_e1_score)
+                ? "winner"
+                : "stop")
+        << " mode=AdversarialComposition stage=E1"
+        << " variant=alpha0.50+AdversarialBlocks"
+        << " wins=" << stage_e1_score.wins
+        << " losses=" << stage_e1_score.losses
+        << " draws=" << stage_e1_score.draws;
+    if (!adversarial_composition_advances(stage_e1_score)) {
+        output << " reason=not_strictly_more_wins";
+    }
+    output << '\n';
+    output.flush();
+    return 0;
+}
+
 } // namespace
 
 std::shared_ptr<const LearnedModel> blend_priority_heads(
@@ -686,6 +804,22 @@ double select_adversarial_blocks_winner_alpha(
                : scores[0].alpha;
 }
 
+bool adversarial_composition_advances(
+    const CandidateScore& score) {
+    return score.wins > score.losses;
+}
+
+std::array<BotConfig, 2> make_adversarial_composition_bots(
+    std::shared_ptr<const LearnedModel> challenger_model,
+    std::shared_ptr<const LearnedModel> baseline_model) {
+    return {
+        make_exploratory_bot(
+            std::move(challenger_model), false, true),
+        make_exploratory_bot(
+            std::move(baseline_model), false, true),
+    };
+}
+
 BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
     bool pass_dominance,
@@ -707,14 +841,17 @@ int run_cli(
     std::ostream& error) {
     constexpr std::string_view kUsage =
         "Usage: old-school-fq4-blend-explore"
-        " [--pd0|--adversarial-blocks]\n";
+        " [--pd0|--adversarial-blocks|"
+        "--adversarial-composition]\n";
     const bool valid_arguments =
         argv != nullptr && argv[0] != nullptr &&
         (argc == 1 ||
          (argc == 2 && argv[1] != nullptr &&
           (std::string_view(argv[1]) == "--pd0" ||
            std::string_view(argv[1]) ==
-               "--adversarial-blocks")));
+               "--adversarial-blocks" ||
+           std::string_view(argv[1]) ==
+               "--adversarial-composition")));
     if (!valid_arguments) {
         error << kUsage;
         return 2;
@@ -725,6 +862,11 @@ int run_cli(
         if (argc == 2) {
             if (std::string_view(argv[1]) == "--pd0") {
                 return run_pd0_exploration(
+                    deployment, output);
+            }
+            if (std::string_view(argv[1]) ==
+                "--adversarial-composition") {
+                return run_adversarial_composition_exploration(
                     deployment, output);
             }
             return run_adversarial_blocks_exploration(
