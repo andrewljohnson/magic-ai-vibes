@@ -16675,6 +16675,57 @@ sources, rebuild so the publisher embeds that implementation commit, obtain
 committed-tree identity review, then run the one licensed no-argument
 publication.
 
+DEV5 anchored-candidate publication result, completed 2026-07-28:
+**PUBLISHED and reload-verified**. Commit and `origin/main` were both
+`a3ac1f7bf3cdceba823b7a1aada6450564540916`. Two independent post-commit
+preflights force-rebuilt the focused target, reproduced 10/10 tests, confirmed
+the exact embedded commit and source-game firewall, and independently matched
+the production binary at 1,907,864 bytes / SHA-256
+`99c176296c94a5a9f9ce56d19a4c46ac916e7bcdcb7f7286c96614f778be37ba`.
+Both returned explicit GO for the sole fixed command without running it.
+
+Exact publication command and output:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev5-candidate-publish
+# schema=old-school-fq4-dev1-priority-candidate-v1
+# family=FQ4-DEV5-NEUTRAL-ANCHORED result=PUBLISHED
+# artifact_bytes=237496
+# artifact_sha256=8252646b8eef00d1abb5779d91fdc6b1da2a67d35cd786a835818461b210f5fc
+# candidate_model=22834a951e8338568be93561a34c6b1df588faa71feb9d184ab62021b03b2171
+# training_sha256=a13c2bca589a42d020fcb7abfa1826fae5a9745be41602442fa7e7bc1d768fef
+# gate=PASS
+# real 2.77
+# user 2.64
+# sys 0.03
+```
+
+The publisher completed both full evaluator passes, atomic no-replace write,
+and strict reload before reporting PASS. Immediate independent filesystem
+checks reproduced the new artifact identity, found the deterministic
+publication temporary absent, and rechecked all four immutable inputs
+unchanged at their exact preregistered sizes and hashes. `REVIEW.md` was
+reread through its newest 10:04 cycle after publication; it names publication
+and GP0 as the next events and contains no conflicting result. Two independent
+postpublication validators then returned GO without touching the publisher or
+gameplay. One performed an independent byte-framing/payload-hash parse; the
+other compiled a temporary minimal generic loader with no publisher,
+evaluator, or gameplay source and loaded the artifact twice from fresh exact
+C16 parents. Both reconstructed model `22834a95...b2171`, exact 32x893 /
+29,534 finite Priority parameters, and Priority component
+`e279267435b9644d42b66c0b2cb917b86b1b8c3fceacae65a4f3cd565ddb6732`;
+all non-Priority components remained exact C16. Tensor hashes were parent
+`4593663a4c2512ca9996d08c64dd28de217e430ea691174af2168d11d066e4ee`,
+candidate
+`77cf99a4ff1f9d460f6b80294f91a01d846a3c6515de40a5106e5398e688f769`,
+and XOR delta
+`23dd5dec0944b855fc523ef607aee6fac3d5ae3a59b866f7aa40f446efa8b297`.
+All artifacts remained unchanged and validator temporaries were removed.
+`REVIEW.md` was reread again through 10:04 before this conclusion. No gameplay
+seed has opened. Next: commit this exact artifact and record, obtain
+cross-tree verification, then implement the load-only GP0 consumer pinned to
+the new identity.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
