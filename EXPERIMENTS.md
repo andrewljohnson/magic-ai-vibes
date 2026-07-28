@@ -16450,6 +16450,76 @@ reviewed game-free evaluator, then run the one frozen 248-row anchored fit and
 conjunctive five-deck offline gate. No gameplay seed opens unless that gate
 passes.
 
+DEV5 evaluator implementation qualification, completed 2026-07-28 before the
+frozen fit: the runner accepts no arguments and pins all four inputs exactly:
+DEV1 2,250,909 bytes / `0911fc2e...859df`, C16 3,111,437 bytes /
+`53aeb904...944ca`, the positive-only candidate 237,282 bytes /
+`aca8ba9c...67f63`, and the neutral supplement 661,475 bytes /
+`47d94823...aa105`. It snapshots all four before and after, loads them through
+their exact contracts, reproduces the omitted-neutral input hash
+`586b121c...393a1` and candidate fingerprint `71260078...6151`, fits only the
+fixed 88-positive-plus-160-neutral FIT batch, and evaluates positive and
+neutral CHECK without opening a source game or gameplay seed.
+
+The first independent integration review returned **NO-GO** on two boundaries.
+First, a scientific gate failure was thrown away as a generic infrastructure
+error. Second, the evaluator inherited `fq4_priority_collection.cpp`, so its
+binary still contained source-game construction even though it never called
+it. Both findings were accepted. Scientific failure now returns status 1 and
+retains the complete pooled and per-deck FIT/CHECK report; exceptions remain a
+redacted status 2. The pure, existing `classify_parent` implementation was
+moved mechanically into `fq4_parent_classification.cpp`, and the evaluator
+link graph now excludes the collection, generator, coverage, publisher,
+gameplay, and held-out treatment modules. An independent rereview returned
+**GO** after reproducing the exact inputs, test results, status behavior, and
+symbol firewall.
+
+Exact implementation verification:
+
+```sh
+make -j4 test-fq4-neutral-evaluator
+# evaluator 6/6; runner 7/7
+
+make -j4 test-fq4-priority-collection test-fq4-dev-evaluator \
+  test-fq4-dev-candidate-publisher test-fq4-dev-generator \
+  test-fq4-d1-field-gate test-fq4-d1-treatment
+# 10/10, 9/9, 7/7, 8/8, 11/11, 9/9
+
+make -j4 BUILD_DIR=build-fq4-dev5-evaluator-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -fno-omit-frame-pointer \
+  -fsanitize=address,undefined -Wall -Wextra -Wpedantic -Werror' \
+  test-fq4-neutral-evaluator
+# evaluator 6/6; runner 7/7 under ASan/UBSan
+
+nm -gU build/old-school-fq4-dev5-neutral-evaluate | c++filt
+# none of build_canonical_root, evaluate_robust_dominance,
+# make_hidden_clone, replay_exact, or select_development_rows present
+
+make -j4 test
+# engine 171/171, learned iteration 27/27, probes 57/57,
+# probe metrics 11/11, probe runner 33/33, web bridge 18/18,
+# web client 106/106, certification 48/48, every audit/FQ4 suite,
+# representative CLI smoke, capture, cleanup, and build-graph checks passed
+```
+
+The evaluator tests now include an asymmetric three-action forward-KL oracle,
+a pooled-pass/per-deck-worsening rejection, the full 248-row order and exact
+five-deck 1:1 loss masses, literal half-thresholds, bitwise support including
+signed zero, CHECK isolation, exact omitted control, all four fixed
+coordinates, before/after drift, distinct PASS/FAIL/error statuses, five-deck
+failure reporting, and failure-detail redaction. ASan/UBSan produced no
+finding; its temporary build directory was removed. `git diff --check`
+passed. No production evaluator or gameplay command ran.
+
+`REVIEW.md` was reread through its newest 09:34 cycle before this
+qualification. It independently verifies commit `86214a9`, the neutral
+artifact hash, and the complete frozen candidate chain, and endorses the
+anchored fit as the next event. Next: commit and push this exact evaluator,
+obtain a committed-tree identity review, then run exactly
+`/usr/bin/time -p ./build/old-school-fq4-dev5-neutral-evaluate`. Record PASS
+or FAIL with all five decks and the measured elapsed time. Only PASS licenses
+a fresh gameplay declaration.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after
