@@ -166,6 +166,73 @@ old_school::DeckSimulationStats deck_stats(
     };
 }
 
+void rebuild_baseline_from_matchups(
+    old_school::BotBenchmarkSummary& summary,
+    std::size_t repetitions) {
+    const std::size_t games_per_quadrant =
+        3U * repetitions;
+    for (std::size_t baseline_deck = 0;
+         baseline_deck < old_school::kDeckCount;
+         ++baseline_deck) {
+        old_school::DeckSimulationStats rebuilt;
+        for (std::size_t challenger_deck = 0;
+             challenger_deck < old_school::kDeckCount;
+             ++challenger_deck) {
+            const auto& cell =
+                summary.challenger_deck_matchups
+                    [challenger_deck][baseline_deck];
+            rebuilt.games += cell.games;
+            rebuilt.wins += cell.losses;
+            rebuilt.losses += cell.wins;
+            rebuilt.draws += cell.draws;
+        }
+        rebuilt.on_play_games = 2U * games_per_quadrant;
+        rebuilt.on_draw_games = 2U * games_per_quadrant;
+        std::size_t remaining_wins = rebuilt.wins;
+        std::size_t remaining_losses = rebuilt.losses;
+        std::size_t remaining_draws = rebuilt.draws;
+        for (std::size_t play_draw = 0;
+             play_draw < 2; ++play_draw) {
+            for (std::size_t seat = 0; seat < 2; ++seat) {
+                const std::size_t wins =
+                    std::min(
+                        remaining_wins,
+                        games_per_quadrant);
+                remaining_wins -= wins;
+                const std::size_t losses =
+                    std::min(
+                        remaining_losses,
+                        games_per_quadrant - wins);
+                remaining_losses -= losses;
+                const std::size_t draws =
+                    games_per_quadrant - wins - losses;
+                expect(
+                    draws <= remaining_draws,
+                    "synthetic baseline allocation failed");
+                remaining_draws -= draws;
+                summary.baseline_outcome_quadrants
+                    [baseline_deck][seat][play_draw] = {
+                    .games = games_per_quadrant,
+                    .wins = wins,
+                    .losses = losses,
+                    .draws = draws,
+                };
+                if (play_draw == 0) {
+                    rebuilt.on_play_wins += wins;
+                } else {
+                    rebuilt.on_draw_wins += wins;
+                }
+            }
+        }
+        expect(
+            remaining_wins == 0 &&
+                remaining_losses == 0 &&
+                remaining_draws == 0,
+            "synthetic baseline outcomes were not conserved");
+        summary.baseline_decks[baseline_deck] = rebuilt;
+    }
+}
+
 void populate_matchup_row(
     old_school::BotBenchmarkSummary& summary,
     std::size_t deck, std::size_t repetitions,
@@ -319,6 +386,8 @@ old_school::BotBenchmarkSummary summary(
             4U * challenger_losses_per_quadrant,
             4U * draws_per_quadrant);
     }
+    rebuild_baseline_from_matchups(
+        result, request.repetitions);
     return result;
 }
 
@@ -708,6 +777,8 @@ void test_smoke_rejections_and_infrastructure_failures() {
         populate_matchup_row(
             low.candidate.summary, deck, 4, 16, 32, 0);
     }
+    rebuild_baseline_from_matchups(
+        low.candidate.summary, 4);
     low.candidate.summary.baseline_stats = {
         .games = 240,
         .wins = 160,
@@ -779,6 +850,227 @@ void test_smoke_rejections_and_infrastructure_failures() {
         !identity.gate.infrastructure_valid &&
             !identity.gate.fixed_identity,
         "identity failure was not invalid");
+}
+
+void test_accounting_accepts_unequal_production_summary() {
+    const old_school::BotConfig handcrafted =
+        gameplay::testing::make_handcrafted_bot();
+    const old_school::BotConfig random = {
+        .kind = old_school::BotKind::Random,
+        .rollouts_per_action = 1,
+    };
+    old_school::GameConfig game =
+        gameplay::testing::make_game_config();
+    game.max_turns = 80;
+    constexpr std::size_t kRepetitions = 2;
+    constexpr std::uint64_t kEvaluationSeed =
+        0xB07B07ULL;
+    const gameplay::ModeSpec spec{
+        .mode = gameplay::Mode::Smoke,
+        .token = "accounting-regression",
+        .evaluation_seed = kEvaluationSeed,
+        .repetitions = kRepetitions,
+    };
+    const old_school::BotBenchmarkSummary production =
+        old_school::run_bot_benchmark(
+            kRepetitions, kEvaluationSeed,
+            handcrafted, random, game);
+
+    bool has_noncomplementary_same_index = false;
+    for (std::size_t deck = 0;
+         deck < old_school::kDeckCount; ++deck) {
+        const auto& challenger_deck =
+            production.challenger_decks[deck];
+        const auto& baseline_deck =
+            production.baseline_decks[deck];
+        has_noncomplementary_same_index =
+            has_noncomplementary_same_index ||
+            challenger_deck.wins != baseline_deck.losses ||
+            challenger_deck.losses != baseline_deck.wins ||
+            challenger_deck.draws != baseline_deck.draws;
+        for (std::size_t seat = 0; seat < 2; ++seat) {
+            for (std::size_t play_draw = 0;
+                 play_draw < 2; ++play_draw) {
+                const auto& challenger =
+                    production.challenger_outcome_quadrants
+                        [deck][seat][play_draw];
+                const auto& baseline =
+                    production.baseline_outcome_quadrants
+                        [deck][seat][play_draw];
+                has_noncomplementary_same_index =
+                    has_noncomplementary_same_index ||
+                    challenger.wins != baseline.losses ||
+                    challenger.losses != baseline.wins ||
+                    challenger.draws != baseline.draws;
+            }
+        }
+    }
+    expect(
+        has_noncomplementary_same_index,
+        "unequal-policy regression did not exercise the old bug");
+    expect(
+        gameplay::testing::benchmark_accounting_exact(
+            production, spec, handcrafted, random, {}, {}),
+        "valid unequal-policy production accounting was rejected");
+
+    const auto row_totals =
+        [](const old_school::BotBenchmarkSummary& value,
+           std::size_t row) {
+            std::array<std::size_t, 8> totals{};
+            for (const auto& cell :
+                 value.challenger_deck_matchups[row]) {
+                totals[0] += cell.games;
+                totals[1] += cell.wins;
+                totals[2] += cell.losses;
+                totals[3] += cell.draws;
+                totals[4] += cell.on_play_games;
+                totals[5] += cell.on_play_wins;
+                totals[6] += cell.on_draw_games;
+                totals[7] += cell.on_draw_wins;
+            }
+            return totals;
+        };
+    const auto column_totals =
+        [](const old_school::BotBenchmarkSummary& value,
+           std::size_t column) {
+            std::array<std::size_t, 8> totals{};
+            for (const auto& row :
+                 value.challenger_deck_matchups) {
+                const auto& cell = row[column];
+                totals[0] += cell.games;
+                totals[1] += cell.wins;
+                totals[2] += cell.losses;
+                totals[3] += cell.draws;
+                totals[4] += cell.on_play_games;
+                totals[5] += cell.on_play_wins;
+                totals[6] += cell.on_draw_games;
+                totals[7] += cell.on_draw_wins;
+            }
+            return totals;
+        };
+    const auto distinct_outcomes =
+        [](const old_school::DeckSimulationStats& left,
+           const old_school::DeckSimulationStats& right) {
+            return left.wins != right.wins ||
+                   left.losses != right.losses ||
+                   left.draws != right.draws;
+        };
+
+    old_school::BotBenchmarkSummary broken_row = production;
+    bool changed_row = false;
+    std::size_t preserved_column = 0;
+    std::size_t changed_first_row = 0;
+    std::size_t changed_second_row = 0;
+    for (std::size_t column = 0;
+         column < old_school::kDeckCount && !changed_row;
+         ++column) {
+        for (std::size_t first_row = 0;
+             first_row < old_school::kDeckCount && !changed_row;
+             ++first_row) {
+            if (first_row == column) {
+                continue;
+            }
+            for (std::size_t second_row = first_row + 1;
+                 second_row < old_school::kDeckCount;
+                 ++second_row) {
+                if (second_row == column ||
+                    !distinct_outcomes(
+                        broken_row.challenger_deck_matchups
+                            [first_row][column],
+                        broken_row.challenger_deck_matchups
+                            [second_row][column])) {
+                    continue;
+                }
+                std::swap(
+                    broken_row.challenger_deck_matchups
+                        [first_row][column],
+                    broken_row.challenger_deck_matchups
+                        [second_row][column]);
+                preserved_column = column;
+                changed_first_row = first_row;
+                changed_second_row = second_row;
+                changed_row = true;
+                break;
+            }
+        }
+    }
+    expect(
+        changed_row,
+        "production summary lacked a row-only cell swap");
+    expect(
+        column_totals(broken_row, preserved_column) ==
+                column_totals(production, preserved_column) &&
+            (row_totals(broken_row, changed_first_row) !=
+                 row_totals(production, changed_first_row) ||
+             row_totals(broken_row, changed_second_row) !=
+                 row_totals(production, changed_second_row)),
+        "row-only mutation did not preserve its matrix column");
+    expect(
+        !gameplay::testing::benchmark_accounting_exact(
+            broken_row, spec, handcrafted, random, {}, {}),
+        "checker accepted a matchup row that disagrees with its deck");
+
+    old_school::BotBenchmarkSummary broken_column = production;
+    bool changed_column = false;
+    std::size_t preserved_row = 0;
+    std::size_t changed_first_column = 0;
+    std::size_t changed_second_column = 0;
+    for (std::size_t row = 0;
+         row < old_school::kDeckCount && !changed_column;
+         ++row) {
+        for (std::size_t first_column = 0;
+             first_column < old_school::kDeckCount &&
+                 !changed_column;
+             ++first_column) {
+            if (first_column == row) {
+                continue;
+            }
+            for (std::size_t second_column =
+                     first_column + 1;
+                 second_column < old_school::kDeckCount;
+                 ++second_column) {
+                if (second_column == row ||
+                    !distinct_outcomes(
+                        broken_column
+                            .challenger_deck_matchups
+                                [row][first_column],
+                        broken_column
+                            .challenger_deck_matchups
+                                [row][second_column])) {
+                    continue;
+                }
+                std::swap(
+                    broken_column.challenger_deck_matchups
+                        [row][first_column],
+                    broken_column.challenger_deck_matchups
+                        [row][second_column]);
+                preserved_row = row;
+                changed_first_column = first_column;
+                changed_second_column = second_column;
+                changed_column = true;
+                break;
+            }
+        }
+    }
+    expect(
+        changed_column,
+        "production summary lacked a column-only cell swap");
+    expect(
+        row_totals(broken_column, preserved_row) ==
+                row_totals(production, preserved_row) &&
+            (column_totals(
+                 broken_column, changed_first_column) !=
+                 column_totals(
+                     production, changed_first_column) ||
+             column_totals(
+                 broken_column, changed_second_column) !=
+                 column_totals(
+                     production, changed_second_column)),
+        "column-only mutation did not preserve its matrix row");
+    expect(
+        !gameplay::testing::benchmark_accounting_exact(
+            broken_column, spec, handcrafted, random, {}, {}),
+        "checker accepted reciprocal columns that disagree with baselines");
 }
 
 void test_control_model_mutation_stops_candidate() {
@@ -985,6 +1277,8 @@ void test_milestone_gates_and_baselines() {
         deck.candidate.summary, 0, 34, 204, 204, 0);
     populate_matchup_row(
         deck.candidate.summary, 1, 34, 236, 172, 0);
+    rebuild_baseline_from_matchups(
+        deck.candidate.summary, 34);
     deck.gate = gameplay::testing::evaluate_gate(deck);
     expect(
         deck.gate.infrastructure_valid &&
@@ -1063,6 +1357,9 @@ int main() {
     runner.run(
         "smoke rejection and infrastructure classes",
         test_smoke_rejections_and_infrastructure_failures);
+    runner.run(
+        "unequal production accounting invariants",
+        test_accounting_accepts_unequal_production_summary);
     runner.run(
         "control model mutation stops candidate",
         test_control_model_mutation_stops_candidate);

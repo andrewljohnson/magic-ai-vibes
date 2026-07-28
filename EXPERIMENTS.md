@@ -15601,6 +15601,126 @@ seeds never enter training.
 this declaration. It explicitly places the build-graph repair first and this
 candidate-to-gameplay step next; there is no conflicting feedback.
 
+GP0 first execution completed 2026-07-28 06:34 PDT as an
+**infrastructure ERROR; no strength verdict and no later seed opened**:
+
+```sh
+/usr/bin/time -p ./build/old-school-fq4-dev1-gameplay --smoke
+# control:   120-120-0, 52.914696167 seconds
+# candidate:  90-150-0, 37.5000%,
+#             Wilson 95% [31.6173%, 43.7766%],
+#             86.244599292 seconds
+# candidate/control runtime ratio: 1.62988
+# result=ERROR
+# real 139.25
+```
+
+Candidate challenger-deck outcomes, each over the declared 48 games, were
+Green 10-38, Red 18-30, Blue 24-24, White 14-34, and RU Aggro 24-24.
+Every printed policy-seat/play-draw quadrant contained the declared 12 games.
+The candidate was below both prospective smoke requirements: 37.5% is below
+40%, and 1.62988 is above the 1.25 runtime ratio. The executor nevertheless
+reported `accounting_complete=0`, so its fail-closed contract classified the
+whole run as infrastructure-invalid rather than issuing a scientific
+rejection. Seed `202607280602` remains unopened.
+
+Post-run source comparison localized the accounting failure before any
+rerun. `run_bot_benchmark` defines challenger and baseline per-deck and
+quadrant rows independently: the same deck index covers different ordered
+matchups in the two policy roles. Only aggregate outcomes are direct
+complements. Baseline per-deck totals are instead the win/loss-reciprocal
+columns of `challenger_deck_matchups`. The GP0 checker incorrectly required
+same-index challenger/baseline deck rows and quadrant cells to be direct
+complements. That happens to hold for the identical C16/C16 control and for
+the symmetric synthetic tests, but not for a genuine unequal-policy
+comparison. The production benchmark's own complete row/column validation
+did not fail.
+
+Mechanical correction declared before editing the checker: the falsifiable
+hypothesis is that those two invalid same-index complement assertions are
+the sole cause of GP0's accounting error. Replace them with the production
+invariant: validate each policy's quadrants independently, validate each
+challenger matchup-matrix row against its challenger deck, and validate each
+win/loss-reciprocal matchup-matrix column against its baseline deck. Preserve
+the aggregate complement requirement. A deterministic unequal-policy
+production summary must contain at least one non-complementary same-index
+row/cell and pass the corrected checker; mutations that break a matrix row,
+a reciprocal column, or a quadrant/deck total must still fail. This changes
+no model, game, seed, schedule, threshold, or artifact.
+
+After focused, sanitizer, and relevant repository verification plus
+independent review, decide explicitly whether the already-opened coordinate
+can be classified from its complete output or requires one transparent
+same-seed infrastructure replay. Such a replay would not be a new statistical
+draw and may not alter the recipe. Do not open `202607280602` either way.
+`REVIEW.md` was reread through its newest 06:29 cycle before this record; that
+entry had observed only the preflight and awaited GP0, so it contains no
+conflicting post-run disposition.
+
+GP0 accounting correction and final disposition, completed 2026-07-28 06:56
+PDT: **mechanical fix PASS; original GP0 scientifically REJECTED; no replay**.
+The checker now uses the production definitions exactly: independent
+challenger/baseline quadrant-to-deck conservation, matchup-matrix rows to
+challenger decks, win/loss-reciprocal columns to baseline decks, and aggregate
+policy complement. It also requires
+`on_play_wins + on_draw_wins == wins` for every deck statistic.
+
+The new regression constructs a real 120-game Handcrafted-versus-Random
+production summary, first proves at least one same-index policy row/cell is
+not complementary, and then proves the corrected checker accepts it. Two
+whole-cell mutations remain production-shaped and isolate the negative
+invariants: swapping equal-width off-diagonal cells within one column
+preserves the column/global totals while breaking challenger rows; swapping
+them within one row preserves row/global totals while breaking reciprocal
+columns. Existing quadrant and aggregate mutations remain rejected.
+
+```sh
+make -j4 test-fq4-dev1-gameplay
+# 11 passed, 0 failed
+
+make -j4 BUILD_DIR=build-fq4-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -fno-omit-frame-pointer \
+  -fsanitize=address,undefined -Wall -Wextra -Wpedantic -Werror' \
+  test-fq4-dev1-gameplay
+# 11 passed, 0 failed
+
+make -j4 test
+# engine 171/171, learned iteration 27/27, probes 57/57,
+# probe metrics 11/11, probe runner 33/33, every historical audit/FQ0/FQ4
+# suite including FQ4 DEV1 gameplay 11/11, web bridge 18/18,
+# web client 106/106, certification 48/48
+```
+
+`git diff --check` passed. Independent read-only source review returned GO
+after requiring and rechecking the production-shaped row/column mutations.
+Two independent disposition reviews agreed that no replay is scientifically
+necessary. `run_bot_benchmark` had already validated every authoritative
+schedule, quadrant, row, reciprocal-column, and aggregate invariant before it
+returned the completed summary; the false wrapper condition ran afterward
+and did not affect any game. Replaying would add no statistical information
+and could only offer a different wall-clock sample, so the original elapsed
+times remain controlling.
+
+Final GP0 verdict: reject candidate `71260078...6151`. Its original 90-150
+(37.5%) result fails the preregistered 40% large-regression floor, and its
+1.62988 runtime ratio independently fails the 1.25 limit. Green 10-38 and
+White 14-34 locate the large gameplay damage; Red 18-30 also loses, while
+Blue and RU Aggro tie 24-24. This candidate stops. C16 remains champion, and
+seeds `202607280602` and `202607280603` remain unopened.
+
+The mechanism suggested by the deck split is an update-surface coverage
+failure, not evidence that the 88 repaired stack roots were mislabeled: the
+Priority delta was fitted only on those roots and then applied to every
+Priority decision. The next work must measure the rejected candidate on the
+existing background/CHECK rows before another fit. Candidate axes remain
+separate: add neutral background anchors at the update boundary, restrict
+the residual to a card-agnostic public stack-active context, or reduce its
+global residual weight. Do not combine or game-screen them before the fast
+offline loop identifies which mechanism protects ordinary development.
+`REVIEW.md` was reread through its newest 06:44 cycle before this conclusion;
+it independently countersigns the accounting diagnosis, the 37.5%/1.63x
+reading, the sealed next seed, and this background-coverage priority.
+
 ##### FQ0-T0 D0 native-rusage supervisor qualification and A5c declaration
 
 Declared 2026-07-27 16:32 PDT, before implementing the supervisor and after

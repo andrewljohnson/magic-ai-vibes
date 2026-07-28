@@ -230,11 +230,13 @@ bool valid_deck_stats(const DeckSimulationStats& stats,
                stats.games &&
            stats.on_play_games == expected_games / 2 &&
            stats.on_draw_games == expected_games / 2 &&
+           stats.on_play_wins + stats.on_draw_wins ==
+               stats.wins &&
            stats.on_play_wins <= stats.on_play_games &&
            stats.on_draw_wins <= stats.on_draw_games;
 }
 
-bool benchmark_accounting_exact(
+bool benchmark_accounting_exact_impl(
     const BotBenchmarkSummary& summary, const ModeSpec& spec,
     const BotConfig& expected_challenger,
     const BotConfig& expected_baseline,
@@ -332,10 +334,7 @@ bool benchmark_accounting_exact(
                 if (!valid_outcomes(
                         challenger, expected_quadrant) ||
                     !valid_outcomes(
-                        baseline, expected_quadrant) ||
-                    challenger.wins != baseline.losses ||
-                    challenger.losses != baseline.wins ||
-                    challenger.draws != baseline.draws) {
+                        baseline, expected_quadrant)) {
                     return false;
                 }
                 challenger_deck_outcomes.games +=
@@ -401,12 +400,6 @@ bool benchmark_accounting_exact(
                 baseline_deck.losses ||
             baseline_deck_outcomes.draws !=
                 baseline_deck.draws ||
-            challenger_deck.wins !=
-                baseline_deck.losses ||
-            challenger_deck.losses !=
-                baseline_deck.wins ||
-            challenger_deck.draws !=
-                baseline_deck.draws ||
             challenger_wins_by_play_draw[0] !=
                 challenger_deck.on_play_wins ||
             challenger_wins_by_play_draw[1] !=
@@ -427,6 +420,35 @@ bool benchmark_accounting_exact(
                 challenger_deck.on_play_wins ||
             challenger_matchup_wins_by_play_draw[1] !=
                 challenger_deck.on_draw_wins) {
+            return false;
+        }
+    }
+    for (std::size_t baseline_deck_index = 0;
+         baseline_deck_index < kDeckCount;
+         ++baseline_deck_index) {
+        BotBenchmarkOutcomeCounts reciprocal_column;
+        for (std::size_t challenger_deck_index = 0;
+             challenger_deck_index < kDeckCount;
+             ++challenger_deck_index) {
+            const auto& matchup =
+                summary.challenger_deck_matchups
+                    [challenger_deck_index]
+                    [baseline_deck_index];
+            reciprocal_column.games += matchup.games;
+            reciprocal_column.wins += matchup.losses;
+            reciprocal_column.losses += matchup.wins;
+            reciprocal_column.draws += matchup.draws;
+        }
+        const auto& baseline_deck =
+            summary.baseline_decks[baseline_deck_index];
+        if (reciprocal_column.games !=
+                baseline_deck.games ||
+            reciprocal_column.wins !=
+                baseline_deck.wins ||
+            reciprocal_column.losses !=
+                baseline_deck.losses ||
+            reciprocal_column.draws !=
+                baseline_deck.draws) {
             return false;
         }
     }
@@ -710,6 +732,19 @@ Mode parse_mode(
 
 namespace testing {
 
+bool benchmark_accounting_exact(
+    const BotBenchmarkSummary& summary, const ModeSpec& spec,
+    const BotConfig& expected_challenger,
+    const BotConfig& expected_baseline,
+    std::string_view expected_challenger_fingerprint,
+    std::string_view expected_baseline_fingerprint) {
+    return benchmark_accounting_exact_impl(
+        summary, spec, expected_challenger,
+        expected_baseline,
+        expected_challenger_fingerprint,
+        expected_baseline_fingerprint);
+}
+
 BotConfig make_learned_bot(
     std::shared_ptr<const LearnedModel> model) {
     return {
@@ -790,7 +825,7 @@ GateReport evaluate_gate(const RunReport& report) {
                   report.deployment
                       .parent_model_fingerprint);
     gate.accounting_complete =
-        benchmark_accounting_exact(
+        benchmark_accounting_exact_impl(
             report.candidate.summary, report.spec,
             treatment, baseline,
             report.deployment.candidate_model_fingerprint,
@@ -799,7 +834,7 @@ GateReport evaluate_gate(const RunReport& report) {
         gate.accounting_complete =
             gate.accounting_complete &&
             report.identical_control.has_value() &&
-            benchmark_accounting_exact(
+            benchmark_accounting_exact_impl(
                 report.identical_control->summary,
                 report.spec, control, control,
                 report.deployment.parent_model_fingerprint,

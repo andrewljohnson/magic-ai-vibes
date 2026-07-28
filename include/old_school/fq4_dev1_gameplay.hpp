@@ -186,6 +186,12 @@ BotConfig make_learned_bot(
     std::shared_ptr<const LearnedModel> model);
 BotConfig make_handcrafted_bot();
 GameConfig make_game_config();
+bool benchmark_accounting_exact(
+    const BotBenchmarkSummary& summary, const ModeSpec& spec,
+    const BotConfig& expected_challenger,
+    const BotConfig& expected_baseline,
+    std::string_view expected_challenger_fingerprint,
+    std::string_view expected_baseline_fingerprint);
 RunReport run_with(
     Mode mode, FixedDeployment deployment,
     const BenchmarkExecutor& benchmark,
