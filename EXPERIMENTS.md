@@ -23509,6 +23509,49 @@ model or artifact, or license gameplay. After a matching replay, accept AQ16
 as `CENSUS_ONLY` and freeze the complete manifest/count table; the next action
 remains a separate label-free selection declaration.
 
+Report-recovery result, completed 2026-07-29:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-census --census |
+  grep -E '^(result=|split=|deck )'
+```
+
+The exact replay passed in 202.29 seconds real / 201.53 user / 0.22 sys and
+reproduced the parent, manifest, witness, repeated-collection flag, aggregate
+counts, and all five TRAIN rows byte-for-byte. The recovered complete deck
+table is:
+
+| split / owner deck | actor-games | roots | options | potential pairs |
+| --- | ---: | ---: | ---: | ---: |
+| TRAIN / Green | 32 | 653 | 1,676 | 1,613 |
+| TRAIN / Red | 32 | 701 | 2,296 | 4,016 |
+| TRAIN / Blue | 32 | 620 | 1,555 | 1,566 |
+| TRAIN / White | 32 | 1,039 | 3,180 | 4,306 |
+| TRAIN / RU Aggro | 32 | 584 | 2,155 | 9,448 |
+| DEV / Green | 16 | 271 | 704 | 766 |
+| DEV / Red | 16 | 333 | 1,057 | 1,713 |
+| DEV / Blue | 16 | 329 | 783 | 610 |
+| DEV / White | 16 | 478 | 1,475 | 2,051 |
+| DEV / RU Aggro | 16 | 276 | 885 | 1,731 |
+
+Decision: **accept AQ16 as CENSUS_ONLY**. It freezes 5,284 label-free
+nontrivial Priority roots, 15,766 legal options, and 27,820 unordered
+potential pairs across a whole-game-disjoint, all-five-deck source. This is
+roughly 33 times the root support of DBC1's 80/80 cache and directly removes
+the earlier 16-root-per-deck sampling bottleneck. No teacher label, candidate
+score, selector, model, gameplay seed, or artifact was opened. C16 remains
+champion.
+
+The next experiment will use only the frozen label-free root identity, legal
+action width, owner deck, actor-game, and stable hash to select a fixed
+deck/width/game-balanced subset before any deep score is computed. It will
+also census bit-identical 893-feature rows before fitting: the current
+representation already distinguishes the field-reported Counterspell,
+Ancestral Recall, X-spell, and Giant Growth choices, but public stack order
+and same-card target topology remain a generic possible alias class that must
+be measured rather than assumed away.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
