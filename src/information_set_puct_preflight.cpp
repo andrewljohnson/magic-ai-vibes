@@ -2316,6 +2316,32 @@ run_opponent_noninterference_evidence(
         terminal_utility_mode);
 }
 
+RootReport run_output_calibrated_candidate_root_evidence(
+    const aq5::PreparedRoot& root,
+    std::shared_ptr<const LearnedModel> candidate,
+    std::uint64_t experiment_seed,
+    std::size_t simulation_count,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
+    static_cast<void>(
+        learned_output_calibration_parameters(candidate));
+    return run_engine_root(
+        root, candidate, experiment_seed,
+        simulation_count, terminal_utility_mode);
+}
+
+OpponentNoninterferenceReport
+run_output_calibrated_candidate_opponent_noninterference_evidence(
+    const std::vector<aq5::PreparedRoot>& roots,
+    std::shared_ptr<const LearnedModel> candidate,
+    std::uint64_t experiment_seed,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
+    static_cast<void>(
+        learned_output_calibration_parameters(candidate));
+    return check_engine_opponent_noninterference(
+        roots, candidate, experiment_seed,
+        terminal_utility_mode);
+}
+
 void print_report(
     const PreflightReport& report,
     std::ostream& output) {

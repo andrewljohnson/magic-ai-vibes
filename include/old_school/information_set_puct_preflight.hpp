@@ -260,6 +260,25 @@ run_opponent_noninterference_evidence(
     std::uint64_t experiment_seed,
     LearnedTerminalUtilityMode terminal_utility_mode);
 
+// DBC1-only evidence seam for a fitted output-layer candidate. Unlike the
+// sealed wrappers above, these functions intentionally do not require the
+// exact C16 fingerprint. They do require C16's two-leaf Value/output-
+// calibration topology; the caller remains responsible for authenticating
+// the candidate's derivation before invoking this evaluation-only seam.
+RootReport run_output_calibrated_candidate_root_evidence(
+    const aq5::PreparedRoot& root,
+    std::shared_ptr<const LearnedModel> candidate,
+    std::uint64_t experiment_seed,
+    std::size_t simulation_count,
+    LearnedTerminalUtilityMode terminal_utility_mode);
+
+OpponentNoninterferenceReport
+run_output_calibrated_candidate_opponent_noninterference_evidence(
+    const std::vector<aq5::PreparedRoot>& roots,
+    std::shared_ptr<const LearnedModel> candidate,
+    std::uint64_t experiment_seed,
+    LearnedTerminalUtilityMode terminal_utility_mode);
+
 void print_report(
     const PreflightReport& report,
     std::ostream& output);

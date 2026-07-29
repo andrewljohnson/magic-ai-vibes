@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -136,6 +137,37 @@ passing_opponent_report() {
         .local_accounting_bit_identical = true,
         .no_shared_opponent_node_or_q_update = true,
     };
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+output_calibrated_value_candidate() {
+    static const auto candidate = [] {
+        const auto parent =
+            old_school::train_learned_value_champion(
+                1, UINT64_C(0x43414e4449444154));
+        auto parameters =
+            old_school::
+                learned_output_calibration_parameters(parent);
+        parameters.leaves.front().back() += 0.125;
+        const auto changed =
+            old_school::
+                with_learned_output_calibration_parameters(
+                    parent, parameters);
+        expect(
+            old_school::learned_model_fingerprint(changed) !=
+                old_school::learned_model_fingerprint(parent),
+            "candidate fixture did not alter the output layer");
+        return changed;
+    }();
+    return candidate;
+}
+
+std::shared_ptr<const old_school::LearnedModel>
+small_actor_model() {
+    static const auto model =
+        old_school::train_learned_actor_model(
+            1, UINT64_C(0x4e4f4e56414c5545));
+    return model;
 }
 
 isp0::PreflightApi passing_api() {
@@ -603,6 +635,110 @@ void test_terminal_bridge_and_evidence_fail_closed() {
         "root evidence omitted a terminal leaf");
 }
 
+void test_output_calibrated_candidate_evidence_seam() {
+    constexpr std::uint64_t kSeed =
+        UINT64_C(0x43414e4449444154);
+    constexpr std::size_t kSimulations = 2;
+    const auto roots = aq5::build_fixture_roots();
+    const auto candidate =
+        output_calibrated_value_candidate();
+
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                isp0::run_root_evidence(
+                    roots.front(), candidate, kSeed,
+                    kSimulations));
+        },
+        "legacy root wrapper accepted a non-C16 candidate");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                isp0::
+                    run_opponent_noninterference_evidence(
+                        roots, candidate, kSeed));
+        },
+        "legacy opponent wrapper accepted a non-C16 "
+        "candidate");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                isp0::
+                    run_output_calibrated_candidate_root_evidence(
+                        roots.front(), nullptr, kSeed,
+                        kSimulations,
+                        old_school::
+                            LearnedTerminalUtilityMode::
+                                ExactOutcome));
+        },
+        "candidate root wrapper accepted a null model");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                isp0::
+                    run_output_calibrated_candidate_root_evidence(
+                        roots.front(), small_actor_model(),
+                        kSeed, kSimulations,
+                        old_school::
+                            LearnedTerminalUtilityMode::
+                                ExactOutcome));
+        },
+        "candidate root wrapper accepted a non-Value model");
+
+    const auto first =
+        isp0::run_output_calibrated_candidate_root_evidence(
+            roots.front(), candidate, kSeed, kSimulations,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    const auto repeated =
+        isp0::run_output_calibrated_candidate_root_evidence(
+            roots.front(), candidate, kSeed, kSimulations,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    expect(
+        first.terminal_utility_mode ==
+                old_school::LearnedTerminalUtilityMode::
+                    C16DiscountedAbsoluteTurn &&
+            first.search_seed == repeated.search_seed &&
+            first.tie_seed == repeated.tie_seed &&
+            first.selected_key == repeated.selected_key &&
+            first.actions == repeated.actions &&
+            first.accounting == repeated.accounting &&
+            first.principal_variation ==
+                repeated.principal_variation,
+        "candidate root wrapper ignored terminal mode or "
+        "was nondeterministic");
+
+    const auto exact =
+        isp0::run_output_calibrated_candidate_root_evidence(
+            roots.front(), candidate, kSeed, kSimulations,
+            old_school::LearnedTerminalUtilityMode::
+                ExactOutcome);
+    expect(
+        exact.terminal_utility_mode ==
+                old_school::LearnedTerminalUtilityMode::
+                    ExactOutcome &&
+            exact.requested_simulations == kSimulations,
+        "candidate root wrapper did not carry its supplied "
+        "configuration");
+
+    const auto opponent = isp0::
+        run_output_calibrated_candidate_opponent_noninterference_evidence(
+            roots, candidate, kSeed,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    const auto opponent_repeated = isp0::
+        run_output_calibrated_candidate_opponent_noninterference_evidence(
+            roots, candidate, kSeed,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    expect(
+        opponent.gate_passed() &&
+            opponent == opponent_repeated,
+        "candidate opponent evidence failed or was "
+        "nondeterministic");
+}
+
 } // namespace
 
 int main() {
@@ -616,6 +752,7 @@ int main() {
         test_pv_witness_requires_an_actual_completed_cutoff();
         test_report_exposes_opponent_subfields();
         test_terminal_bridge_and_evidence_fail_closed();
+        test_output_calibrated_candidate_evidence_seam();
     } catch (const std::exception& error) {
         std::cerr
             << "information-set PUCT preflight tests failed: "
@@ -624,6 +761,6 @@ int main() {
     }
     std::cout
         << "information-set PUCT preflight tests passed: "
-           "9/9 groups\n";
+           "10/10 groups\n";
     return 0;
 }
