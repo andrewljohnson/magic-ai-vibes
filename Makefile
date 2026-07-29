@@ -99,6 +99,7 @@ ACTION_Q_BELLMAN_TEACHER_SOURCE := src/action_q_bellman_teacher.cpp
 ACTION_Q_BELLMAN_EXPLORE_SOURCE := src/action_q_bellman_explore.cpp
 ACTION_Q_MULTISCALE_TEACHER_SOURCE := src/action_q_multiscale_teacher.cpp
 ACTION_Q_MULTISCALE_EXPLORE_SOURCE := src/action_q_multiscale_explore.cpp
+ACTION_Q_LONG_HORIZON_DIAGNOSTIC_SOURCE := src/action_q_long_horizon_diagnostic.cpp
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE := src/fq4_dev_background_diagnostic.cpp
 FQ4_DEV_COVERAGE_CENSUS_SOURCE := src/fq4_dev_coverage_census.cpp
 FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
@@ -186,6 +187,8 @@ ACTION_Q_BELLMAN_EXPLORE := $(BUILD_DIR)/old-school-action-q-bellman-explore
 ACTION_Q_MULTISCALE_TEACHER_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-multiscale-teacher-tests
 ACTION_Q_MULTISCALE_EXPLORE_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-multiscale-explore-tests
 ACTION_Q_MULTISCALE_EXPLORE := $(BUILD_DIR)/old-school-action-q-multiscale-explore
+ACTION_Q_LONG_HORIZON_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-long-horizon-diagnostic-tests
+ACTION_Q_LONG_HORIZON_DIAGNOSTIC := $(BUILD_DIR)/old-school-action-q-long-horizon-diagnostic
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic-tests
 FQ4_DEV_BACKGROUND_DIAGNOSTIC := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic
 FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev4-coverage-census-tests
@@ -233,6 +236,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-action-q-explore test-action-q-field-gate test-action-q-offline-gate action-q-census action-q-run
 .PHONY: test-action-q-bellman-teacher test-action-q-bellman-explore action-q-bellman-census action-q-bellman-run
 .PHONY: test-action-q-multiscale-teacher test-action-q-multiscale-explore action-q-multiscale-census action-q-multiscale-run
+.PHONY: test-action-q-long-horizon-diagnostic action-q-long-horizon-diagnose
 
 all: $(SIMULATOR)
 
@@ -361,6 +365,7 @@ ACTION_Q_BELLMAN_TEACHER_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SO
 ACTION_Q_BELLMAN_EXPLORE_LINK_SOURCES := $(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(ACTION_Q_BELLMAN_TEACHER_SOURCE) $(ACTION_Q_BELLMAN_EXPLORE_SOURCE)
 ACTION_Q_MULTISCALE_TEACHER_LINK_SOURCES := $(ACTION_Q_BELLMAN_TEACHER_LINK_SOURCES) $(ACTION_Q_MULTISCALE_TEACHER_SOURCE)
 ACTION_Q_MULTISCALE_EXPLORE_LINK_SOURCES := $(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_BELLMAN_SOURCE) $(ACTION_Q_BELLMAN_TEACHER_SOURCE) $(ACTION_Q_MULTISCALE_TEACHER_SOURCE) $(ACTION_Q_MULTISCALE_EXPLORE_SOURCE)
+ACTION_Q_LONG_HORIZON_DIAGNOSTIC_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_SOURCE)
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE)
 FQ4_DEV_COVERAGE_CENSUS_LINK_SOURCES := $(FQ4_DEV_GENERATOR_LINK_SOURCES)
 FQ4_NEUTRAL_SUPPLEMENT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(FQ4_DEV_BUNDLE_LINK_SOURCES) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE)
@@ -449,6 +454,10 @@ $(eval $(call link_program,$(ACTION_Q_MULTISCALE_TEACHER_TEST_RUNNER),$(ACTION_Q
 $(eval $(call link_program,$(ACTION_Q_MULTISCALE_EXPLORE_TEST_RUNNER),$(ACTION_Q_MULTISCALE_EXPLORE_LINK_SOURCES) tests/test_action_q_multiscale_explore.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_MULTISCALE_EXPLORE),$(ACTION_Q_MULTISCALE_EXPLORE_LINK_SOURCES) src/action_q_multiscale_explore_main.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_TEST_RUNNER),$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_LINK_SOURCES) tests/test_action_q_long_horizon_diagnostic.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC),$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_LINK_SOURCES) src/action_q_long_horizon_diagnostic_main.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER),$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES) tests/test_fq4_dev_background_diagnostic.cpp))
 
@@ -571,6 +580,7 @@ test: $(FQ4_BLEND_EXPLORE_TEST_RUNNER) $(FQ4_BLEND_EXPLORE)
 test: $(ACTION_Q_EXPLORE_TEST_RUNNER) $(ACTION_Q_FIELD_GATE_TEST_RUNNER) $(ACTION_Q_OFFLINE_GATE_TEST_RUNNER) $(ACTION_Q_EXPLORE)
 test: $(ACTION_Q_BELLMAN_TEACHER_TEST_RUNNER) $(ACTION_Q_BELLMAN_EXPLORE_TEST_RUNNER) $(ACTION_Q_BELLMAN_EXPLORE)
 test: $(ACTION_Q_MULTISCALE_TEACHER_TEST_RUNNER) $(ACTION_Q_MULTISCALE_EXPLORE_TEST_RUNNER) $(ACTION_Q_MULTISCALE_EXPLORE)
+test: $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_TEST_RUNNER) $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC)
 test: $(FQ4_WORK0_CACHE_TEST_RUNNER)
 test: test-fq4-work0-firewall
 
@@ -630,6 +640,14 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(ACTION_Q_BELLMAN_EXPLORE_TEST_RUNNER)
 	./$(ACTION_Q_MULTISCALE_TEACHER_TEST_RUNNER)
 	./$(ACTION_Q_MULTISCALE_EXPLORE_TEST_RUNNER)
+	./$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_TEST_RUNNER)
+	@set +e; output=`./$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ3-D0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-long-horizon-diagnostic --diagnose' >/dev/null
 	@set +e; output=`./$(ACTION_Q_MULTISCALE_EXPLORE) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
 			printf '%s\n' "$$output"; \
@@ -1397,6 +1415,19 @@ action-q-multiscale-census: $(ACTION_Q_MULTISCALE_EXPLORE)
 
 action-q-multiscale-run: $(ACTION_Q_MULTISCALE_EXPLORE)
 	./$(ACTION_Q_MULTISCALE_EXPLORE) --run
+
+test-action-q-long-horizon-diagnostic: $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_TEST_RUNNER) $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC)
+	./$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_TEST_RUNNER)
+	@set +e; output=`./$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ3-D0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-long-horizon-diagnostic --diagnose' >/dev/null
+
+action-q-long-horizon-diagnose: $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC)
+	./$(ACTION_Q_LONG_HORIZON_DIAGNOSTIC) --diagnose
 
 test-fq4-dev-background-diagnostic: $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC)
 	./$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER)
