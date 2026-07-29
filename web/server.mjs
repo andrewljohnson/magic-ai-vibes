@@ -16,6 +16,11 @@ const FROZEN_C16_GENERATIONS = 16;
 const FROZEN_C16_TRAIN_GAMES = 800;
 const FROZEN_C16_TRAIN_SEED = "424242";
 const FROZEN_C16_SEARCH_WORLDS = 8;
+const AQ19_PARAMETER_SHA256 =
+  "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194";
+const AQ19_ARTIFACT_FILE_SHA256 =
+  "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a";
+const AQ19_ARTIFACT_BYTES = 14_502;
 const EVOLUTION_TIMEOUT_MS = 120_000;
 const MAX_EVOLUTION_OUTPUT_BYTES = 512 * 1024;
 const MAX_EVOLUTION_RESULTS = 32;
@@ -191,6 +196,16 @@ export const POLICIES = Object.freeze([
     lifecycle: "Manual diagnostic · unscreened · not promoted",
   },
   {
+    id: "learned-value-c16-bilinear-aq19",
+    label: "Learned C16 · Bilinear AQ19",
+    name: "Learned C16 · Bilinear AQ19",
+    description:
+      "Rank-2 card-agnostic state×action residual trained on deep actor-local labels over the exact C16 K8/H4 base. Offline all-five-deck gates passed; the small selector only licenses manual testing.",
+    versionDate: "2026-07-29",
+    versionDateLabel: "Manual pilot introduced",
+    lifecycle: "Manual pilot · 31–29 selector · not promoted",
+  },
+  {
     id: "learned-value-c16-adversarial-blocks",
     label: "Learned C16 · Best-Response Attacks",
     name: "Learned C16 · Best-Response Attacks",
@@ -240,6 +255,7 @@ const FROZEN_C16_POLICY_IDS = new Set([
   "learned-value-c16",
   "learned-value-c16-actor-local-search",
   "learned-value-c16-combined-search",
+  "learned-value-c16-bilinear-aq19",
   "learned-value-c16-adversarial-blocks",
   "learned-value-c16-stack-discipline",
 ]);
@@ -355,6 +371,25 @@ function normalizedPublicModelIdentity(value) {
   ) {
     return null;
   }
+  let treatment;
+  if (value.treatment !== undefined) {
+    if (
+      !isRecord(value.treatment) ||
+      value.treatment.id !== "aq19-bilinear" ||
+      value.treatment.parameterSha256 !== AQ19_PARAMETER_SHA256 ||
+      value.treatment.artifactFileSha256 !==
+        AQ19_ARTIFACT_FILE_SHA256 ||
+      value.treatment.artifactBytes !== AQ19_ARTIFACT_BYTES
+    ) {
+      return null;
+    }
+    treatment = {
+      id: value.treatment.id,
+      parameterSha256: value.treatment.parameterSha256,
+      artifactFileSha256: value.treatment.artifactFileSha256,
+      artifactBytes: value.treatment.artifactBytes,
+    };
+  }
   return {
     family: value.family,
     generation: value.generation,
@@ -362,6 +397,7 @@ function normalizedPublicModelIdentity(value) {
     horizonTurns: value.horizonTurns,
     source: value.source,
     fingerprint: value.fingerprint,
+    ...(treatment === undefined ? {} : { treatment }),
   };
 }
 
@@ -612,6 +648,17 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
       400,
       "invalid_config",
       "learned-value-c16-combined-search requires learnedRollouts=8",
+    );
+  }
+  if (
+    normalizedOpponentPolicy ===
+      "learned-value-c16-bilinear-aq19" &&
+    learnedRollouts !== FROZEN_C16_SEARCH_WORLDS
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_config",
+      "learned-value-c16-bilinear-aq19 requires learnedRollouts=8",
     );
   }
 
@@ -1700,6 +1747,16 @@ class GameSession {
         const model = normalizedPublicModelIdentity(envelope.model);
         if (model === null) {
           this.#fail("The game engine produced invalid model identity");
+          this.stop();
+          return;
+        }
+        const expectsAq19 =
+          this.config.players[1].policyId ===
+          "learned-value-c16-bilinear-aq19";
+        if (expectsAq19 !== (model.treatment?.id === "aq19-bilinear")) {
+          this.#fail(
+            "The game engine produced mismatched AQ19 treatment identity",
+          );
           this.stop();
           return;
         }

@@ -36,11 +36,13 @@ struct BridgeConfig {
     std::size_t training_games = kFrozenWebC16TrainingGames;
     std::uint64_t training_seed = kDefaultLearnedTrainingSeed;
     std::string frozen_c16_artifact_path;
+    std::string aq19_bilinear_artifact_path;
     bool reveal_opponent_hand = false;
     bool bluff_mode = false;
     bool value_adversarial_blocks = false;
     bool value_pass_dominance = false;
     bool value_actor_local_search = false;
+    bool value_priority_bilinear = false;
 
     bool operator==(const BridgeConfig&) const = default;
 };
@@ -68,7 +70,8 @@ BotKind parse_opponent_bot(std::string_view value,
                            std::size_t& learned_generations,
                            bool& value_adversarial_blocks,
                            bool& value_pass_dominance,
-                           bool& value_actor_local_search);
+                           bool& value_actor_local_search,
+                           bool& value_priority_bilinear);
 EvolutionPilot parse_evolution_pilot(std::string_view value);
 
 // Parses the bridge's transport-only representation of an exact custom deck.
@@ -81,12 +84,25 @@ std::vector<CardId> parse_exact_deck_cards(std::string_view value);
 std::shared_ptr<const LearnedModel>
 load_frozen_learned_value_c16(const std::string& path);
 
+struct FrozenAq19Bilinear {
+    std::shared_ptr<const LearnedPriorityBilinear> residual;
+    std::uintmax_t artifact_bytes = 0;
+    std::string artifact_file_sha256;
+    std::string parameter_sha256;
+    std::string parent_fingerprint;
+};
+
+FrozenAq19Bilinear
+load_frozen_aq19_bilinear(const std::string& path);
+
 // Pure translation from the web policy configuration into the engine policy.
 // The web's frozen C16 research pilots differ only through the explicit
 // default-off policy-treatment flags.
 BotConfig make_opponent_bot_config(
     const BridgeConfig& config,
-    std::shared_ptr<const LearnedModel> learned_model);
+    std::shared_ptr<const LearnedModel> learned_model,
+    std::shared_ptr<const LearnedPriorityBilinear>
+        priority_bilinear = nullptr);
 
 // Pure serialization seam used by focused tests. The manifest is sorted by
 // numeric CardId and includes both the engine card name and exact count.

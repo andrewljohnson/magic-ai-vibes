@@ -233,6 +233,7 @@ async function configureFrozenC16Match(page) {
       "learned-value-c16",
       "learned-value-c16-actor-local-search",
       "learned-value-c16-combined-search",
+      "learned-value-c16-bilinear-aq19",
       "learned-value-c16-adversarial-blocks",
       "learned-value-c16-stack-discipline",
       "learned-value-g0",
@@ -562,6 +563,37 @@ test(
     );
     assert.match(await provenance.innerText(), /Manual diagnostic/);
     assert.match(await provenance.innerText(), /unscreened/);
+    assert.match(await provenance.innerText(), /not promoted/);
+    assert.match(
+      await provenance.innerText(),
+      /Manual pilot introduced Jul 29, 2026/,
+    );
+    assert.equal(
+      await provenance.locator("time").getAttribute("datetime"),
+      "2026-07-29",
+    );
+    assert.equal(await numberInputs.nth(1).inputValue(), "800");
+    assert.equal(await numberInputs.nth(2).inputValue(), "424242");
+    assert.equal(await numberInputs.nth(1).isEditable(), false);
+    assert.equal(await numberInputs.nth(2).isEditable(), false);
+
+    await policy.selectOption("learned-value-c16-bilinear-aq19");
+    assert.match(
+      await description.innerText(),
+      /Rank-2 card-agnostic state×action residual/,
+    );
+    assert.match(await description.innerText(), /deep actor-local labels/);
+    assert.match(await description.innerText(), /exact C16 K8\/H4 base/);
+    assert.match(
+      await description.innerText(),
+      /Offline all-five-deck gates passed/,
+    );
+    assert.match(
+      await description.innerText(),
+      /small selector only licenses manual testing/,
+    );
+    assert.match(await provenance.innerText(), /Manual pilot/);
+    assert.match(await provenance.innerText(), /31–29 selector/);
     assert.match(await provenance.innerText(), /not promoted/);
     assert.match(
       await provenance.innerText(),

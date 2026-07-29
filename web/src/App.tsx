@@ -115,6 +115,15 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
     lifecycle: "Manual diagnostic · unscreened · not promoted",
   },
   {
+    id: "learned-value-c16-bilinear-aq19",
+    name: "Learned C16 · Bilinear AQ19",
+    description:
+      "Rank-2 card-agnostic state×action residual trained on deep actor-local labels over the exact C16 K8/H4 base. Offline all-five-deck gates passed; the small selector only licenses manual testing.",
+    versionDate: "2026-07-29",
+    versionDateLabel: "Manual pilot introduced",
+    lifecycle: "Manual pilot · 31–29 selector · not promoted",
+  },
+  {
     id: "learned-value-c16-adversarial-blocks",
     name: "Learned C16 · Best-Response Attacks",
     description:
@@ -158,6 +167,7 @@ const FROZEN_C16_POLICY_IDS = new Set([
   "learned-value-c16",
   "learned-value-c16-actor-local-search",
   "learned-value-c16-combined-search",
+  "learned-value-c16-bilinear-aq19",
   "learned-value-c16-adversarial-blocks",
   "learned-value-c16-stack-discipline",
 ]);
@@ -4246,6 +4256,19 @@ function ReproductionSummary({
                   {snapshot.model.searchWorlds}/H
                   {snapshot.model.horizonTurns} ·{" "}
                   <span>{snapshot.model.fingerprint}</span>
+                  {snapshot.model.treatment ? (
+                    <>
+                      <br />
+                      {snapshot.model.treatment.id} · params{" "}
+                      <span>
+                        {snapshot.model.treatment.parameterSha256}
+                      </span>{" "}
+                      · artifact{" "}
+                      <span>
+                        {snapshot.model.treatment.artifactFileSha256}
+                      </span>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <>None loaded</>

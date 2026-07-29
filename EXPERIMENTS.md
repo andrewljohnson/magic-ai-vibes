@@ -24252,6 +24252,134 @@ owner's qualitative play test; it is not a strength claim, champion
 replacement, Handcrafted comparison, or substitute for the later 2,000-game
 and fixed-seed gates.
 
+###### AQ19 result: offline PASS; 31-29 manual pilot licensed, not FAST_GO
+
+Run 2026-07-29 after rereading `REVIEW.md` through its newest 14:14 PDT
+cycle. The implementation uses the exact declared rank-2, 674-state /
+219-action bilinear residual, fixed SplitMix64 `U0`, equal 15-cell objective,
+256-step full-batch Adam recipe, grouped physical-game OOF, immutable AQ18
+cache, and exact C16 parent. Before the evidence run, independent sanitizer
+review found that the zero-`V` runtime fast path had incorrectly left the
+training derivative workspace empty. The fix retained exact positive-zero C16
+runtime behavior while still computing the live first-step `V` gradient; its
+focused regression passed before any production fit or gameplay seed opened.
+
+The exact evidence command was:
+
+```sh
+time ./build/old-school-decision-density-bilinear --run
+```
+
+It exited zero in 17.152 seconds wall (`77.12s` user, `0.56s` system). Cache
+bytes/SHA, corpus digest, parent fingerprint, 1,465/2,293 TRAIN and 472/811 DEV
+pair censuses, and fold manifest
+`51852e6fa7fee97edf809e7f29cf5859cca7fd0e1575a388053d5d2b042c7765`
+all matched the declaration. The four held folds were exactly 20/76, 20/76,
+21/76, and 19/72 physical-games/roots with the declared deck-width cells.
+The deterministic full-fit parameter SHA-256 is
+`3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194`;
+the objective moved `0.47745959805425064 -> 0.47744424244615874`, all
+256 steps completed, and no gradient step clipped.
+
+Aggregate frozen-parent to AQ19 metrics were:
+
+| Split | Pair BCE | Listwise CE | Regret | Top-one | Stable-pair |
+| --- | --- | --- | --- | --- | --- |
+| TRAIN | .4774595980542512 -> .47741713626667204 | 1.1659151286438101 -> 1.1658761235415642 | .018436662452262116 -> .018108270406560753 | .67333333333333334 -> .68000000000000005 | .88637241175128145 -> .88726526889413859 |
+| Grouped OOF | .4774595980542512 -> .47745340221887206 | 1.1659151286438101 -> 1.1658959361331662 | .018436662452262116 -> .018128661632956275 | .67333333333333334 -> .68000000000000005 | .88637241175128145 -> .88943918193761673 |
+| Reused DEV | .4748353665080301 -> .47479935119678185 | 1.1637936593825811 -> 1.1637441703672631 | .020787171201295095 -> .020352653974269084 | .6333333333333333 -> .64666666666666672 | .80451191229179853 -> .80451191229179853 |
+
+TRAIN per-deck metrics:
+
+| Deck | Pair BCE | Listwise CE | Regret | Top-one | Stable-pair |
+| --- | --- | --- | --- | --- | --- |
+| Green | .47041695187344756 -> .47037872186504109 | 1.1654749116388439 -> 1.1654370681708108 | .013165204668703483 -> .013038174994677269 | .66666666666666663 -> .68333333333333335 | .78947368421052633 -> .78947368421052633 |
+| Red | .51473637966184826 -> .51468429158900719 | 1.1839152571367475 -> 1.1838748526581406 | .026226565361018767 -> .024711634806538169 | .59999999999999998 -> .6166666666666667 | .96226415094339623 -> .96226415094339623 |
+| Blue | .45087944368792221 -> .45078976859718228 | 1.137675375613985 -> 1.1375973901231606 | .013099042185603772 -> .013099042185603772 | .76666666666666672 -> .76666666666666672 | .85869565217391308 -> .85869565217391308 |
+| White | .4302369220008686 -> .43023296321238713 | 1.1465191975012019 -> 1.1465168230805856 | .0071829827867596731 -> .0071829827867596731 | .75 -> .75 | .875 -> .875 |
+| RU Aggro | .52102829304716924 -> .52099993606974249 | 1.1959909013282726 -> 1.1959544836751235 | .0325095172592249 -> .0325095172592249 | .58333333333333337 -> .58333333333333337 | .9464285714285714 -> .9508928571428571 |
+
+Grouped-OOF per-deck metrics:
+
+| Deck | Pair BCE | Listwise CE | Regret | Top-one | Stable-pair |
+| --- | --- | --- | --- | --- | --- |
+| Green | .47041695187344756 -> .47037246554278139 | 1.1654749116388439 -> 1.1654257725616317 | .013165204668703483 -> .013140131126654879 | .66666666666666663 -> .68333333333333335 | .78947368421052633 -> .78947368421052633 |
+| Red | .51473637966184826 -> .51466728040721166 | 1.1839152571367475 -> 1.1838439975235533 | .026226565361018767 -> .024711634806538169 | .59999999999999998 -> .6166666666666667 | .96226415094339623 -> .96226415094339623 |
+| Blue | .45087944368792221 -> .45080410185776232 | 1.137675375613985 -> 1.1376062830039 | .013099042185603772 -> .013099042185603772 | .76666666666666672 -> .76666666666666672 | .85869565217391308 -> .86956521739130432 |
+| White | .4302369220008686 -> .43025749826862558 | 1.1465191975012019 -> 1.1465309801742924 | .0071829827867596731 -> .0071829827867596731 | .75 -> .75 | .875 -> .875 |
+| RU Aggro | .52102829304716924 -> .52116566501797945 | 1.1959909013282726 -> 1.1960726474024532 | .0325095172592249 -> .0325095172592249 | .58333333333333337 -> .58333333333333337 | .9464285714285714 -> .9508928571428571 |
+
+Reused-DEV per-deck metrics:
+
+| Deck | Pair BCE | Listwise CE | Regret | Top-one | Stable-pair |
+| --- | --- | --- | --- | --- | --- |
+| Green | .46332034443296854 -> .46330034325439856 | 1.1812045479461293 -> 1.1811749463102268 | .022600880109329907 -> .022600880109329907 | .76666666666666672 -> .76666666666666672 | .5 -> .5 |
+| Red | .56471768728882199 -> .5645807607665706 | 1.149915076235636 -> 1.1497529306913847 | .042331708942387608 -> .040843404069568108 | .53333333333333333 -> .56666666666666665 | .77419354838709675 -> .77419354838709675 |
+| Blue | .36959849391349325 -> .36955775481552627 | 1.1372031671820977 -> 1.1371589102639545 | .007263855399591396 -> .0065795741372808398 | .69999999999999996 -> .73333333333333328 | .77777777777777779 -> .77777777777777779 |
+| White | .50708458637084464 -> .50707547162799382 | 1.1659535723057173 -> 1.1659446534556694 | .014111532193467153 -> .014111532193467153 | .53333333333333333 -> .53333333333333333 | 1 -> 1 |
+| RU Aggro | .46945572053402185 -> .4694824255194201 | 1.1846919332433248 -> 1.1846894111150794 | .017627879361699406 -> .017627879361699406 | .6333333333333333 -> .6333333333333333 | .97058823529411764 -> .97058823529411764 |
+
+Thus every formal offline gate passed: aggregate pair BCE and regret strictly
+improved on TRAIN, OOF, and DEV; aggregate listwise did not increase; OOF/DEV
+top-one and stable-pair did not decrease; and every OOF/DEV deck regret was
+non-increasing. This does **not** mean every auxiliary metric improved in
+every deck: OOF White and RU pair/listwise moved slightly backward, while
+their regret/top-one guards held, and DEV RU pair BCE moved slightly backward.
+The improvement is concentrated in Red plus smaller Green/Blue effects.
+
+Because the offline conjunction passed, the one declared selector seed
+`202607291911` opened. AQ19 finished **31-29** against exact C16 over 60
+balanced games:
+
+| Challenger deck | AQ19 wins / 12 |
+| --- | ---: |
+| Green | 5 |
+| Red | 10 |
+| Blue | 5 |
+| White | 5 |
+| RU Aggro | 6 |
+
+This clears `>30/60` and every `>=3/12` deck floor, so the exact candidate is
+**accepted only as a dated manual web pilot**. It misses the predeclared
+`FAST_GO` threshold of 37 wins. It is not accepted as stronger, does not
+replace C16, and opens no Handcrafted or Learned-is-king claim.
+
+The evidence binary was the zero-gradient-fixed pre-helper-extraction build.
+Immediately afterward, the duplicate continuation `BotConfig` initializers
+were mechanically extracted into one builder and tied to a diagnostic. Review
+confirmed that the pre-run code already copied the exact same AQ19 shared
+pointer and byte-for-byte same fields to both seats; the extraction changed no
+score, action, RNG, or branch. The selector was therefore not replayed.
+
+Independent review then found that the first report printed only per-deck
+regret even though the declaration required all five metrics per deck. The
+reporting defect did not affect fitting, gates, or selector disposition. It
+was repaired and the missing evidence recovered without authorizing gameplay:
+
+```sh
+/usr/bin/time -p ./build/old-school-decision-density-bilinear \
+  --offline-report \
+  > /private/tmp/aq19-offline-recovery.stdout \
+  2> /private/tmp/aq19-offline-recovery.stderr
+```
+
+That deterministic offline-only replay exited zero in 4.81 seconds and
+reproduced the parameter SHA and every aggregate above. It printed the full
+per-deck tables above, every cache/census/layout/optimizer/replay/isolation
+invariant as `pass`, `PASS stage=offline`, and
+`selector_seed_authorized=no selector_opened=no gameplay_games=0`.
+
+Focused default builds pass 13/13 for the mechanically generalized DBC4
+precomputed-metric adapter, 8/8 for the immutable live AQ19 runtime, and 9/9
+for the fitter/report runner. Independent ASan/UBSan runtime and fitter checks
+are green. The next step is the separately identified load-only
+**Learned C16 · Bilinear AQ19** web pilot for owner play-testing, especially
+the observed general failures: zero-X spells, harmful self/opponent targets,
+redundant counters, and strategically dominated attacks. Those observations
+are qualitative diagnostics, not card-specific training rules. C16 remains
+the champion and the next research candidate must address the weak/sparse
+cross-deck lift rather than retune this closed rank-2 recipe.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

@@ -134,6 +134,9 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   const combinedSearch = body.policies.find(
     ({ id }) => id === "learned-value-c16-combined-search",
   );
+  const bilinear = body.policies.find(
+    ({ id }) => id === "learned-value-c16-bilinear-aq19",
+  );
   const bestResponse = body.policies.find(
     ({ id }) => id === "learned-value-c16-adversarial-blocks",
   );
@@ -192,6 +195,25 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   assert.match(combinedSearch?.description ?? "", /real attack sets/);
   assert.match(combinedSearch?.description ?? "", /defender-best-response minimum/);
   assert.match(combinedSearch?.description ?? "", /Simulated continuations retain canonical C16 combat/);
+  assert.deepEqual(
+    {
+      name: bilinear?.name,
+      versionDate: bilinear?.versionDate,
+      versionDateLabel: bilinear?.versionDateLabel,
+      lifecycle: bilinear?.lifecycle,
+    },
+    {
+      name: "Learned C16 · Bilinear AQ19",
+      versionDate: "2026-07-29",
+      versionDateLabel: "Manual pilot introduced",
+      lifecycle: "Manual pilot · 31–29 selector · not promoted",
+    },
+  );
+  assert.match(bilinear?.description ?? "", /Rank-2 card-agnostic state×action residual/);
+  assert.match(bilinear?.description ?? "", /deep actor-local labels/);
+  assert.match(bilinear?.description ?? "", /exact C16 K8\/H4 base/);
+  assert.match(bilinear?.description ?? "", /Offline all-five-deck gates passed/);
+  assert.match(bilinear?.description ?? "", /small selector only licenses manual testing/);
   assert.deepEqual(
     {
       name: bestResponse?.name,
@@ -561,6 +583,52 @@ test("AQ15 combined search reuses exact frozen C16 identity", async (t) => {
   });
 });
 
+test("AQ19 bilinear reuses exact frozen C16 identity", async (t) => {
+  const { request } = await startTestServer(t);
+  const policyId = "learned-value-c16-bilinear-aq19";
+  const { response, body } = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        players: [
+          { deckId: "blue", policyId: "human" },
+          { deckId: "blue", policyId },
+        ],
+        seed: 42,
+        trainGames: 800,
+        trainSeed: 424242,
+        learnedRollouts: 8,
+        learnedGenerations: 16,
+      }),
+    }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(body.game.config.players[1].policyId, policyId);
+  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
+  assert.equal(body.game.snapshot.received.trainGames, "800");
+  assert.equal(body.game.snapshot.received.trainSeed, "424242");
+  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
+  assert.deepEqual(body.game.model, {
+    family: "learned-value",
+    generation: 16,
+    searchWorlds: 8,
+    horizonTurns: 4,
+    source: "frozen-artifact+aq19-bilinear",
+    fingerprint:
+      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
+    treatment: {
+      id: "aq19-bilinear",
+      parameterSha256:
+        "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194",
+      artifactFileSha256:
+        "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a",
+      artifactBytes: 14_502,
+    },
+  });
+});
+
 test("rejects stale and illegal choices before progressing a valid game", async (t) => {
   const { request } = await startTestServer(t);
   await request("/api/games", {
@@ -794,6 +862,16 @@ test("rejects malformed config without spawning a game", async (t) => {
         {
           deckId: "blue",
           policyId: "learned-value-c16-actor-local-search",
+        },
+      ],
+      learnedRollouts: 7,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-bilinear-aq19",
         },
       ],
       learnedRollouts: 7,

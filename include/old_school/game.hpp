@@ -619,6 +619,7 @@ inline constexpr std::string_view
 
 class LearnedModel;
 class LearnedPolicyRecorder;
+class LearnedPriorityBilinear;
 struct LearnedNestedSearchTracker;
 
 inline constexpr std::uint64_t kDefaultLearnedTrainingSeed = 424242;
@@ -640,6 +641,11 @@ struct BotConfig {
     //   weight * tanh(logit - mean legal logit)
     // after the unchanged production Value score has been computed.
     double value_priority_residual_weight = 0.0;
+    // AQ19's immutable rank-2 state-by-action Priority residual. It is valid
+    // only beside exact frozen C16 in the untreated K8/R1/H4 Learned Value
+    // recipe. A null pointer preserves C16 bit-for-bit.
+    std::shared_ptr<const LearnedPriorityBilinear>
+        value_priority_bilinear;
     // Research-only exact Pass-dominance filter for Learned Value Priority
     // choices. It changes neither legal actions nor any other policy. False
     // preserves the historical selector and RNG stream bit-for-bit.
@@ -777,6 +783,32 @@ struct LearnedValuePriorityResidualDiagnostic {
     double mean_legal_logit = 0.0;
     std::vector<double> centered_policy_logits;
     std::vector<double> residuals;
+};
+
+struct LearnedPriorityBilinearDiagnostic {
+    // Rows retain caller action order; canonical reduction order is exposed
+    // so tests and the fit runner can verify the production mapping.
+    std::vector<std::vector<double>> option_rows;
+    std::vector<std::size_t> canonical_order;
+    std::vector<double> residuals;
+
+    bool operator==(
+        const LearnedPriorityBilinearDiagnostic&) const =
+        default;
+};
+
+struct LearnedPriorityBilinearContinuationDiagnostic {
+    bool first_seat_has_root_object = false;
+    bool second_seat_has_root_object = false;
+    bool seats_share_object_identity = false;
+    bool seats_are_semantically_equivalent = false;
+    std::array<std::size_t, 2> rollout_counts{};
+    std::array<LearnedVariant, 2> variants{};
+    std::array<double, 2> exploration_rates{};
+
+    bool operator==(
+        const LearnedPriorityBilinearContinuationDiagnostic&) const =
+        default;
 };
 
 // Structural, model-free audit of context omitted from the current Value
@@ -1685,6 +1717,22 @@ diagnose_learned_value_priority_residual(
     const std::vector<PriorityAction>& candidates,
     std::shared_ptr<const LearnedModel> model,
     double value_priority_residual_weight);
+
+// Evaluation-only view of AQ19's exact production scorer. The candidate list
+// may be permuted, but every entry must be a unique legal action.
+// Reductions always follow the engine's canonical typed-action order.
+LearnedPriorityBilinearDiagnostic
+diagnose_learned_priority_bilinear_residual(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedPriorityBilinear> residual);
+
+// Evaluation-only view of the exact builder used by Value search for its two
+// symmetric depth-zero mirror seats.
+LearnedPriorityBilinearContinuationDiagnostic
+diagnose_learned_priority_bilinear_continuation(
+    const BotConfig& root);
 
 // Focused evaluation-only seams for proving that generation-mode searched
 // choices are the actions actually applied by the engine.

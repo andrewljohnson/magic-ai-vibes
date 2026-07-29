@@ -56,6 +56,27 @@ struct Dataset {
     bool operator==(const Dataset&) const = default;
 };
 
+// Minimal score-only view used by later action-head experiments. Aggregate
+// vectors are authoritative production/search reductions; the paired teacher
+// samples exist only for the stable-pair uncertainty calculation and must
+// never be averaged to reconstruct either aggregate.
+struct PrecomputedScoreRoot {
+    DeckId deck = DeckId::Green;
+    std::vector<double> base_aggregate_scores;
+    std::vector<double> teacher_aggregate_scores;
+    std::vector<std::vector<double>>
+        common_world_teacher_samples;
+
+    bool operator==(const PrecomputedScoreRoot&) const = default;
+};
+
+struct PrecomputedScoreDataset {
+    std::vector<PrecomputedScoreRoot> roots;
+    std::array<std::size_t, kDeckCount> roots_by_deck{};
+
+    bool operator==(const PrecomputedScoreDataset&) const = default;
+};
+
 struct Corpus {
     Dataset train;
     Dataset dev;
@@ -227,6 +248,8 @@ Corpus project_corpus(
     const dbc::Corpus& source,
     std::shared_ptr<const LearnedModel> parent);
 void validate_dataset(const Dataset& dataset);
+void validate_precomputed_score_dataset(
+    const PrecomputedScoreDataset& dataset);
 void validate_corpus(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent);
@@ -244,6 +267,13 @@ Metrics evaluate(const Dataset& dataset, const Delta& delta);
 // action-head experiments do not clone the metric implementation.
 Metrics evaluate_residuals(
     const Dataset& dataset,
+    const std::vector<std::vector<double>>& residuals);
+// Uses the authoritative aggregate vectors verbatim. Common-world samples
+// affect only stable-pair uncertainty and are not an aggregate source. The
+// returned ranking successor-calibration fields are zero because this
+// score-only dataset intentionally carries no successor observations.
+Metrics evaluate_precomputed_residuals(
+    const PrecomputedScoreDataset& dataset,
     const std::vector<std::vector<double>>& residuals);
 OptimizerReport optimize(
     const Dataset& train,

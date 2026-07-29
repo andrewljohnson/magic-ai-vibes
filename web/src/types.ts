@@ -651,6 +651,12 @@ export interface LearnedModelIdentity {
   horizonTurns: number;
   source: string;
   fingerprint: string;
+  treatment?: {
+    id: "aq19-bilinear";
+    parameterSha256: string;
+    artifactFileSha256: string;
+    artifactBytes: number;
+  };
 }
 
 export interface ReproductionPublicContext {
@@ -697,6 +703,13 @@ export function formatReproductionSummary(
     context.model
       ? `model-fingerprint=${context.model.fingerprint}`
       : "model-fingerprint=none",
+    ...(context.model?.treatment
+      ? [
+          `treatment=${context.model.treatment.id}`,
+          `treatment-parameter-sha256=${context.model.treatment.parameterSha256}`,
+          `treatment-artifact-sha256=${context.model.treatment.artifactFileSha256}`,
+        ]
+      : []),
     context.model
       ? `learned-search=K${context.model.searchWorlds}/H${context.model.horizonTurns}`
       : "learned-search=none",

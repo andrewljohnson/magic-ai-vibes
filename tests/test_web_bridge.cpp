@@ -1,16 +1,21 @@
 #include "old_school/web_bridge.hpp"
+#include "old_school/learned_priority_bilinear.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <unistd.h>
 
 namespace {
 
@@ -48,6 +53,47 @@ void expect(bool condition, std::string_view message) {
         throw std::runtime_error(std::string(message));
     }
 }
+
+class CorruptAq19Artifact {
+  public:
+    CorruptAq19Artifact() {
+        path_ =
+            std::filesystem::temp_directory_path() /
+            ("old-school-web-corrupt-aq19-" +
+             std::to_string(
+                 static_cast<unsigned long long>(
+                     ::getpid())) +
+             ".bin");
+        if (std::filesystem::exists(path_)) {
+            throw std::runtime_error(
+                "corrupt AQ19 fixture already exists");
+        }
+        std::ofstream output(path_, std::ios::binary);
+        output << "not-an-aq19-artifact";
+        if (!output) {
+            throw std::runtime_error(
+                "could not create corrupt AQ19 fixture");
+        }
+    }
+
+    CorruptAq19Artifact(
+        const CorruptAq19Artifact&) = delete;
+    CorruptAq19Artifact& operator=(
+        const CorruptAq19Artifact&) = delete;
+
+    ~CorruptAq19Artifact() {
+        std::error_code error;
+        static_cast<void>(
+            std::filesystem::remove(path_, error));
+    }
+
+    const std::filesystem::path& path() const {
+        return path_;
+    }
+
+  private:
+    std::filesystem::path path_;
+};
 
 std::string indexed_responses(std::size_t count,
                               std::size_t priority_index) {
@@ -128,88 +174,114 @@ void test_names_parse_strictly() {
     bool adversarial_blocks = true;
     bool pass_dominance = true;
     bool actor_local_search = true;
+    bool priority_bilinear = true;
     expect(parse_opponent_bot(
                "learned-value-c16", variant, generations,
                adversarial_blocks, pass_dominance,
-               actor_local_search) ==
+               actor_local_search, priority_bilinear) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                !adversarial_blocks &&
                !pass_dominance &&
-               !actor_local_search,
+               !actor_local_search &&
+               !priority_bilinear,
            "Learned Value C16 did not parse");
     expect(parse_opponent_bot(
                "learned-value-c16-actor-local-search",
                variant, generations, adversarial_blocks,
-               pass_dominance, actor_local_search) ==
+               pass_dominance, actor_local_search,
+               priority_bilinear) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                !adversarial_blocks &&
                !pass_dominance &&
-               actor_local_search,
+               actor_local_search &&
+               !priority_bilinear,
            "AQ4 actor-local-search pilot did not parse");
     expect(parse_opponent_bot(
                "learned-value-c16-combined-search",
                variant, generations, adversarial_blocks,
-               pass_dominance, actor_local_search) ==
+               pass_dominance, actor_local_search,
+               priority_bilinear) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                adversarial_blocks &&
                !pass_dominance &&
-               actor_local_search,
+               actor_local_search &&
+               !priority_bilinear,
            "AQ15 combined-search pilot did not parse");
     expect(parse_opponent_bot(
                "learned-value-c16-stack-discipline",
                variant, generations, adversarial_blocks,
-               pass_dominance, actor_local_search) ==
+               pass_dominance, actor_local_search,
+               priority_bilinear) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                adversarial_blocks &&
                pass_dominance &&
-               !actor_local_search,
+               !actor_local_search &&
+               !priority_bilinear,
            "stack-discipline diagnostic did not parse");
     expect(parse_opponent_bot(
                "learned-value-c16-adversarial-blocks",
                variant, generations, adversarial_blocks,
-               pass_dominance, actor_local_search) ==
+               pass_dominance, actor_local_search,
+               priority_bilinear) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                adversarial_blocks &&
                !pass_dominance &&
-               !actor_local_search,
+               !actor_local_search &&
+               !priority_bilinear,
            "best-response attack challenger did not parse");
+    expect(parse_opponent_bot(
+               "learned-value-c16-bilinear-aq19",
+               variant, generations, adversarial_blocks,
+               pass_dominance, actor_local_search,
+               priority_bilinear) ==
+               BotKind::Learned &&
+               variant ==
+                   LearnedVariant::ValueSearchChampion &&
+               generations == 16 &&
+               !adversarial_blocks &&
+               !pass_dominance &&
+               !actor_local_search &&
+               priority_bilinear,
+           "AQ19 bilinear pilot did not parse");
     expect(parse_opponent_bot(
                "learned-value-g0", variant, generations,
                adversarial_blocks, pass_dominance,
-               actor_local_search) ==
+               actor_local_search, priority_bilinear) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 0 &&
                !adversarial_blocks &&
                !pass_dominance &&
-               !actor_local_search,
+               !actor_local_search &&
+               !priority_bilinear,
            "Learned Value G0 did not parse");
     expect(parse_opponent_bot(
                "learned-actor", variant, generations,
                adversarial_blocks, pass_dominance,
-               actor_local_search) ==
+               actor_local_search, priority_bilinear) ==
                BotKind::Learned &&
                variant == LearnedVariant::UnifiedActor &&
                generations == 0 &&
                !adversarial_blocks &&
                !pass_dominance &&
-               !actor_local_search,
+               !actor_local_search &&
+               !priority_bilinear,
            "Learned Actor did not parse");
 
     bool bad_deck = false;
@@ -669,6 +741,185 @@ void test_actor_local_search_maps_only_the_exact_pilot_flag() {
             invalid,
             "cannot be combined with Pass dominance"),
         "AQ15 web policy accepted Pass dominance");
+}
+
+void test_aq19_maps_only_the_bilinear_residual() {
+    auto pilot = fast_config();
+    pilot.opponent_bot = old_school::BotKind::Learned;
+    pilot.learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    pilot.learned_generations = 16;
+    pilot.training_games = 800;
+    pilot.training_seed = 424242;
+    pilot.learned_rollouts = 8;
+
+    const auto canonical_bot =
+        old_school::web::make_opponent_bot_config(
+            pilot, nullptr);
+    const auto residual =
+        std::make_shared<
+            const old_school::
+                LearnedPriorityBilinear>(
+            old_school::
+                LearnedPriorityBilinearParameters{});
+    bool rejected_unflagged_residual = false;
+    try {
+        static_cast<void>(
+            old_school::web::make_opponent_bot_config(
+                pilot, nullptr, residual));
+    } catch (const std::invalid_argument&) {
+        rejected_unflagged_residual = true;
+    }
+    expect(
+        rejected_unflagged_residual,
+        "programmatic caller injected AQ19 residual while "
+        "its treatment flag was false");
+    pilot.value_priority_bilinear = true;
+    bool rejected_missing_residual = false;
+    try {
+        static_cast<void>(
+            old_school::web::make_opponent_bot_config(
+                pilot, nullptr));
+    } catch (const std::invalid_argument&) {
+        rejected_missing_residual = true;
+    }
+    expect(
+        rejected_missing_residual,
+        "programmatic caller enabled AQ19 without its "
+        "authenticated residual");
+    const auto aq19_bot =
+        old_school::web::make_opponent_bot_config(
+            pilot, nullptr, residual);
+    expect(
+        aq19_bot.kind == canonical_bot.kind &&
+            aq19_bot.learned_variant ==
+                canonical_bot.learned_variant &&
+            aq19_bot.rollouts_per_action ==
+                canonical_bot.rollouts_per_action &&
+            aq19_bot.exploration_rate ==
+                canonical_bot.exploration_rate &&
+            aq19_bot.value_continuation_epsilon ==
+                canonical_bot.value_continuation_epsilon &&
+            aq19_bot.value_priority_residual_weight ==
+                canonical_bot.value_priority_residual_weight &&
+            aq19_bot.value_pass_dominance ==
+                canonical_bot.value_pass_dominance &&
+            aq19_bot
+                    .value_resolved_shallow_prior_weight ==
+                canonical_bot
+                    .value_resolved_shallow_prior_weight &&
+            aq19_bot.value_adversarial_blocks ==
+                canonical_bot.value_adversarial_blocks &&
+            aq19_bot.value_actor_local_search ==
+                canonical_bot.value_actor_local_search &&
+            aq19_bot
+                    .value_recursive_policy_improvement ==
+                canonical_bot
+                    .value_recursive_policy_improvement &&
+            aq19_bot.value_continuation_controller ==
+                canonical_bot.value_continuation_controller &&
+            aq19_bot.training_games ==
+                canonical_bot.training_games &&
+            aq19_bot.learned_model ==
+                canonical_bot.learned_model &&
+            aq19_bot.value_priority_bilinear ==
+                residual &&
+            !canonical_bot.value_priority_bilinear,
+        "AQ19 pilot changed more than the immutable "
+        "bilinear residual object");
+
+    const auto rejected_with =
+        [](old_school::web::BridgeConfig config,
+           std::string_view required_text) {
+            std::istringstream input(
+                passive_responses(1));
+            std::ostringstream output;
+            bool rejected = false;
+            try {
+                static_cast<void>(
+                    old_school::web::run_bridge_session(
+                        input, output, config));
+            } catch (const std::invalid_argument& error) {
+                rejected =
+                    std::string_view(error.what()).find(
+                        required_text) !=
+                    std::string_view::npos;
+            }
+            return rejected && output.str().empty();
+        };
+
+    auto invalid = fast_config();
+    invalid.value_priority_bilinear = true;
+    expect(
+        rejected_with(
+            invalid,
+            "AQ19 bilinear requires frozen Learned Value C16"),
+        "non-C16 web policy accepted AQ19");
+
+    invalid = pilot;
+    invalid.learned_rollouts = 7;
+    expect(
+        rejected_with(
+            invalid,
+            "AQ19 bilinear requires frozen C16 K8/H4 search"),
+        "AQ19 web policy accepted non-K8 search");
+
+    invalid = pilot;
+    invalid.value_adversarial_blocks = true;
+    expect(
+        rejected_with(
+            invalid,
+            "AQ19 bilinear cannot be combined with another "
+            "web research treatment"),
+        "AQ19 web policy accepted a companion treatment");
+
+    pilot.aq19_bilinear_artifact_path =
+        "build/model-cache/"
+        "deliberately-missing-aq19-bilinear.bin";
+    std::istringstream missing_input(
+        passive_responses(1));
+    std::ostringstream missing_output;
+    bool missing_rejected = false;
+    std::string missing_message;
+    try {
+        static_cast<void>(
+            old_school::web::run_bridge_session(
+                missing_input, missing_output, pilot));
+    } catch (const std::runtime_error& error) {
+        missing_rejected = true;
+        missing_message = error.what();
+    }
+    expect(
+        missing_rejected &&
+            missing_message.find(
+                "old-school-decision-density-bilinear-artifact "
+                "--publish") != std::string::npos,
+        "missing AQ19 artifact did not fail with its offline "
+        "publication command");
+    expect(
+        missing_output.str().empty(),
+        "missing AQ19 artifact emitted partial session JSON");
+
+    const CorruptAq19Artifact corrupt;
+    pilot.aq19_bilinear_artifact_path =
+        corrupt.path().string();
+    std::istringstream corrupt_input(
+        passive_responses(1));
+    std::ostringstream corrupt_output;
+    bool corrupt_rejected = false;
+    try {
+        static_cast<void>(
+            old_school::web::run_bridge_session(
+                corrupt_input, corrupt_output, pilot));
+    } catch (const std::runtime_error&) {
+        corrupt_rejected = true;
+    }
+    expect(
+        corrupt_rejected,
+        "corrupt AQ19 artifact was accepted");
+    expect(
+        corrupt_output.str().empty(),
+        "corrupt AQ19 artifact emitted partial session JSON");
 }
 
 void test_g0_status_exposes_actual_model_identity() {
@@ -1156,6 +1407,8 @@ int main() {
                test_adversarial_challenger_maps_only_the_attack_flag);
     runner.run("AQ4 actor-local pilot maps exactly",
                test_actor_local_search_maps_only_the_exact_pilot_flag);
+    runner.run("AQ19 bilinear pilot maps exactly",
+               test_aq19_maps_only_the_bilinear_residual);
     runner.run("G0 status exposes model identity",
                test_g0_status_exposes_actual_model_identity);
     runner.run("passive client reaches terminal result",

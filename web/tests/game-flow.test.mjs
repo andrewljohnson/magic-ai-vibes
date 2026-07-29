@@ -147,6 +147,37 @@ test("reproduction summaries keep setup stable while public context advances", a
     advanced,
     'you=ru-aggro/human | opponent=blue/learned-value-g0 | game-seed=18446744073709551615 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=3 | learned-generations=0 | model=learned-value/C0 | model-fingerprint=0000000000000000000000000000000000000000000000000000000000000000 | learned-search=K3/H4 | bluff=on | reveal=off | turn=3 | phase=declare_attackers | priority-holder=None | latest-event="You declared 2 attacker(s)"',
   );
+  const aq19 = formatReproductionSummary(config, {
+    turnNumber: 1,
+    phase: "first_main",
+    priorityHolder: "You",
+    model: {
+      family: "learned-value",
+      generation: 16,
+      searchWorlds: 8,
+      horizonTurns: 4,
+      source: "frozen-artifact+aq19-bilinear",
+      fingerprint:
+        "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
+      treatment: {
+        id: "aq19-bilinear",
+        parameterSha256:
+          "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194",
+        artifactFileSha256:
+          "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a",
+        artifactBytes: 14_502,
+      },
+    },
+  });
+  assert.match(aq19, /treatment=aq19-bilinear/);
+  assert.match(
+    aq19,
+    /treatment-parameter-sha256=3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194/,
+  );
+  assert.match(
+    aq19,
+    /treatment-artifact-sha256=445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a/,
+  );
   assert.equal(
     first.slice(0, first.indexOf(" | turn=")),
     advanced.slice(0, advanced.indexOf(" | turn=")),

@@ -1,4 +1,5 @@
 #include "old_school/web_bridge.hpp"
+#include "old_school/learned_priority_bilinear_artifact.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iomanip>
 #include <istream>
 #include <memory>
@@ -265,7 +267,8 @@ void write_model_status(
     std::string_view family, std::size_t generation,
     std::size_t learned_rollouts, std::size_t horizon_turns,
     std::string_view source,
-    std::string_view fingerprint) {
+    std::string_view fingerprint,
+    const FrozenAq19Bilinear* aq19 = nullptr) {
     output << "{\"type\":\"status\",\"message\":";
     write_json_string(output, message);
     output << ",\"model\":{\"family\":";
@@ -277,6 +280,18 @@ void write_model_status(
     write_json_string(output, source);
     output << ",\"fingerprint\":";
     write_json_string(output, fingerprint);
+    if (aq19 != nullptr) {
+        output << ",\"treatment\":{\"id\":"
+                  "\"aq19-bilinear\","
+                  "\"parameterSha256\":";
+        write_json_string(
+            output, aq19->parameter_sha256);
+        output << ",\"artifactFileSha256\":";
+        write_json_string(
+            output, aq19->artifact_file_sha256);
+        output << ",\"artifactBytes\":"
+               << aq19->artifact_bytes << '}';
+    }
     output << "}}\n" << std::flush;
 }
 
@@ -1297,6 +1312,50 @@ load_frozen_learned_value_c16(const std::string& path) {
     return model;
 }
 
+FrozenAq19Bilinear
+load_frozen_aq19_bilinear(const std::string& path) {
+    try {
+        const auto loaded =
+            learned_priority_bilinear_artifact::load(
+                path,
+                learned_priority_bilinear_artifact::
+                    production_contract());
+        if (loaded.identity.parameter_sha256 !=
+                learned_priority_bilinear_artifact::
+                    kProductionParameterSha256 ||
+            loaded.identity.parent_fingerprint !=
+                kFrozenWebC16Fingerprint ||
+            loaded.identity.bytes !=
+                learned_priority_bilinear_artifact::
+                    kProductionArtifactBytes ||
+            loaded.identity.file_sha256 !=
+                learned_priority_bilinear_artifact::
+                    kProductionFileSha256) {
+            throw std::runtime_error(
+                "loaded identity differs from the frozen "
+                "web contract");
+        }
+        return {
+            .residual = loaded.residual,
+            .artifact_bytes = loaded.identity.bytes,
+            .artifact_file_sha256 =
+                loaded.identity.file_sha256,
+            .parameter_sha256 =
+                loaded.identity.parameter_sha256,
+            .parent_fingerprint =
+                loaded.identity.parent_fingerprint,
+        };
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            "frozen AQ19 bilinear artifact '" + path +
+            "' is missing, stale, or invalid: " +
+            error.what() +
+            "; generate it offline with "
+            "./build/old-school-decision-density-bilinear-artifact "
+            "--publish");
+    }
+}
+
 void write_evolution_json(
     std::ostream& output,
     const DeckEvolutionSummary& summary,
@@ -1471,8 +1530,10 @@ BotKind parse_opponent_bot(
     std::size_t& learned_generations,
     bool& value_adversarial_blocks,
     bool& value_pass_dominance,
-    bool& value_actor_local_search) {
+    bool& value_actor_local_search,
+    bool& value_priority_bilinear) {
     value_actor_local_search = false;
+    value_priority_bilinear = false;
     if (value == "random") {
         value_adversarial_blocks = false;
         value_pass_dominance = false;
@@ -1527,6 +1588,18 @@ BotKind parse_opponent_bot(
         value_actor_local_search = true;
         return BotKind::Learned;
     }
+    if (value ==
+        "learned-value-c16-bilinear-aq19") {
+        learned_variant =
+            LearnedVariant::ValueSearchChampion;
+        learned_generations =
+            kFrozenWebC16Generations;
+        value_adversarial_blocks = false;
+        value_pass_dominance = false;
+        value_actor_local_search = false;
+        value_priority_bilinear = true;
+        return BotKind::Learned;
+    }
     if (value == "learned-value-c16" ||
         value == "learned-value" || value == "learned") {
         learned_variant = LearnedVariant::ValueSearchChampion;
@@ -1555,7 +1628,15 @@ BotKind parse_opponent_bot(
 
 BotConfig make_opponent_bot_config(
     const BridgeConfig& config,
-    std::shared_ptr<const LearnedModel> learned_model) {
+    std::shared_ptr<const LearnedModel> learned_model,
+    std::shared_ptr<const LearnedPriorityBilinear>
+        priority_bilinear) {
+    if (config.value_priority_bilinear !=
+        static_cast<bool>(priority_bilinear)) {
+        throw std::invalid_argument(
+            "AQ19 bilinear configuration and residual "
+            "presence must match exactly");
+    }
     return {
         .kind = config.opponent_bot,
         .learned_variant = config.learned_variant,
@@ -1567,6 +1648,8 @@ BotConfig make_opponent_bot_config(
                       : config.opponent_bot == BotKind::Learned
                             ? config.learned_rollouts
                             : 1,
+        .value_priority_bilinear =
+            std::move(priority_bilinear),
         .value_pass_dominance =
             config.value_pass_dominance,
         .value_adversarial_blocks =
@@ -1671,6 +1754,29 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             "actor-local search requires frozen C16 K8/H8 plus "
             "inner K2/H4 search");
     }
+    if (config.value_priority_bilinear &&
+        (config.opponent_bot != BotKind::Learned ||
+         config.learned_variant !=
+             LearnedVariant::ValueSearchChampion ||
+         config.learned_generations !=
+             kFrozenWebC16Generations)) {
+        throw std::invalid_argument(
+            "AQ19 bilinear requires frozen Learned Value C16");
+    }
+    if (config.value_priority_bilinear &&
+        config.learned_rollouts !=
+            kFrozenWebC16SearchWorlds) {
+        throw std::invalid_argument(
+            "AQ19 bilinear requires frozen C16 K8/H4 search");
+    }
+    if (config.value_priority_bilinear &&
+        (config.value_adversarial_blocks ||
+         config.value_pass_dominance ||
+         config.value_actor_local_search)) {
+        throw std::invalid_argument(
+            "AQ19 bilinear cannot be combined with another "
+            "web research treatment");
+    }
     const std::vector<CardId> human_cards =
         configured_deck_cards(
             config.human_deck, config.human_deck_cards,
@@ -1679,6 +1785,42 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         configured_deck_cards(
             config.opponent_deck, config.opponent_deck_cards,
             "--opponent-deck-cards");
+
+    std::shared_ptr<const LearnedModel> learned_model;
+    std::shared_ptr<const LearnedPriorityBilinear>
+        priority_bilinear;
+    std::optional<FrozenAq19Bilinear> aq19_identity;
+    if (config.opponent_bot == BotKind::Learned &&
+        config.learned_variant ==
+            LearnedVariant::ValueSearchChampion &&
+        config.learned_generations ==
+            kFrozenWebC16Generations) {
+        const std::string artifact_path =
+            config.frozen_c16_artifact_path.empty()
+                ? learned_value_challenger_cache_path(
+                      kFrozenWebC16TrainingGames,
+                      kFrozenWebC16TrainingSeed,
+                      kFrozenWebC16Generations)
+                : config.frozen_c16_artifact_path;
+        if (config.value_priority_bilinear) {
+            const std::string bilinear_path =
+                config.aq19_bilinear_artifact_path.empty()
+                    ? (std::filesystem::path(
+                           artifact_path)
+                           .parent_path() /
+                       learned_priority_bilinear_artifact::
+                           kProductionFilename)
+                          .string()
+                    : config.aq19_bilinear_artifact_path;
+            aq19_identity =
+                load_frozen_aq19_bilinear(
+                    bilinear_path);
+            priority_bilinear =
+                aq19_identity->residual;
+        }
+        learned_model =
+            load_frozen_learned_value_c16(artifact_path);
+    }
 
     output << "{\"type\":\"status\",\"message\":";
     write_json_string(
@@ -1692,7 +1834,6 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             : "Preparing the battlefield");
     output << "}\n" << std::flush;
 
-    std::shared_ptr<const LearnedModel> learned_model;
     if (config.opponent_bot == BotKind::Learned) {
         if (config.learned_variant ==
             LearnedVariant::UnifiedActor) {
@@ -1716,25 +1857,25 @@ int run_bridge_session(std::istream& input, std::ostream& output,
                 "trained-for-match",
                 learned_model_fingerprint(learned_model));
         } else {
-            const std::string artifact_path =
-                config.frozen_c16_artifact_path.empty()
-                    ? learned_value_challenger_cache_path(
-                          kFrozenWebC16TrainingGames,
-                          kFrozenWebC16TrainingSeed,
-                          kFrozenWebC16Generations)
-                    : config.frozen_c16_artifact_path;
-            learned_model =
-                load_frozen_learned_value_c16(artifact_path);
             write_model_status(
-                output, "Frozen Learned Value C16 loaded",
+                output,
+                config.value_priority_bilinear
+                    ? "Frozen Learned Value C16 and AQ19 "
+                      "bilinear residual loaded"
+                    : "Frozen Learned Value C16 loaded",
                 "learned-value",
                 kFrozenWebC16Generations,
                 config.learned_rollouts,
                 config.value_actor_local_search
                     ? kLearnedValueActorLocalSearchHorizonTurns
                     : kLearnedValueSearchHorizonTurns,
-                "frozen-artifact",
-                learned_model_fingerprint(learned_model));
+                config.value_priority_bilinear
+                    ? "frozen-artifact+aq19-bilinear"
+                    : "frozen-artifact",
+                learned_model_fingerprint(learned_model),
+                aq19_identity
+                    ? &*aq19_identity
+                    : nullptr);
         }
     }
 
@@ -1745,7 +1886,9 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         .rollouts_per_action = 1,
     };
     game_config.bots[1] =
-        make_opponent_bot_config(config, learned_model);
+        make_opponent_bot_config(
+            config, learned_model,
+            priority_bilinear);
     game_config.learned_model = learned_model;
 
     JsonController controller(

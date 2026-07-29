@@ -59,6 +59,7 @@ void print_help(std::ostream& output) {
            "handcrafted|learned-value-c16|"
            "learned-value-c16-actor-local-search|"
            "learned-value-c16-combined-search|"
+           "learned-value-c16-bilinear-aq19|"
            "learned-value-c16-adversarial-blocks|"
            "learned-value-c16-stack-discipline|"
            "learned-value-g0|learned-actor\n"
@@ -84,6 +85,10 @@ int main(int argc, char** argv) {
         const std::string frozen_c16_artifact_path =
             (executable.parent_path() / "model-cache" /
              "old-school-value-challenger-v3-c16-t800-s424242.bin")
+                .string();
+        const std::string aq19_bilinear_artifact_path =
+            (executable.parent_path() / "model-cache" /
+             "old-school-aq19-dbc6-r2-bilinear.bin")
                 .string();
         if (argc == 2 &&
             std::string_view(argv[1]) == "--help") {
@@ -158,6 +163,8 @@ int main(int argc, char** argv) {
         old_school::web::BridgeConfig config;
         config.frozen_c16_artifact_path =
             frozen_c16_artifact_path;
+        config.aq19_bilinear_artifact_path =
+            aq19_bilinear_artifact_path;
         for (int argument = 1; argument < argc; ++argument) {
             const std::string_view option(argv[argument]);
             if (option == "--help") {
@@ -198,7 +205,8 @@ int main(int argc, char** argv) {
                         config.learned_generations,
                         config.value_adversarial_blocks,
                         config.value_pass_dominance,
-                        config.value_actor_local_search);
+                        config.value_actor_local_search,
+                        config.value_priority_bilinear);
             } else if (option == "--seed") {
                 config.game_seed = parse_u64(option, value);
             } else if (option == "--train-games") {

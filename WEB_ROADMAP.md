@@ -378,6 +378,92 @@ promoted**
   including the setup policy/date/lifecycle selection smoke with no
   horizontal overflow.
 
+#### Preregistered AQ19 bilinear manual-pilot exposure slice
+
+Hypothesis: exposing the licensed AQ19 residual as a separately identified,
+load-only manual pilot will let the owner test whether its offline
+state-by-action ranking gains produce visibly better Priority choices without
+silently replacing or mutating the frozen C16 control.
+
+Status: **complete — load/artifact/metadata/complete policy-matrix gates,
+dual-viewport rendered acceptance, rebuilt live-server restart, and real
+AQ19 match/provenance smoke all passed; manual strategic play-test in progress**
+
+- The stable ID is `learned-value-c16-bilinear-aq19`, displayed as
+  `Learned C16 · Bilinear AQ19`.
+- Metadata dates the pilot `2026-07-29` and labels its lifecycle exactly
+  `Manual pilot · 31–29 selector · not promoted`.
+- Its description states that it is a rank-2 card-agnostic state×action
+  residual trained on deep actor-local labels, retains the exact C16 K8/H4
+  base, passed offline all-five-deck gates, and that the small selector only
+  licenses manual testing. It makes no promotion or gameplay-strength claim.
+- The bridge loads the exact canonical C16 T800/S424242/G16 artifact and a
+  separate immutable AQ19 parameter artifact whose canonical parameter-byte
+  SHA-256 is
+  `3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194`.
+  The parameter artifact uses a versioned, deterministic load-only format,
+  binds the AQ19 identifier/recipe dimensions and parent fingerprint, and
+  fails closed when missing, malformed, noncanonical, nonfinite, or
+  SHA-mismatched.
+- Artifact publication is a separate explicit offline command: it
+  authenticates the frozen AQ18 cache, deterministically replays the already
+  declared fit, verifies the exact parameter SHA above, and writes atomically.
+  It opens no gameplay seed. Starting a web match never fits, refreshes,
+  substitutes, or writes either artifact.
+- The C++ policy translation proves that AQ19 and canonical C16 are identical
+  in model, K8/H4 search, continuation policy, attack/block policy, and every
+  other treatment; only the immutable rank-2 bilinear Priority residual may
+  differ. AQ19 must fail before session output for any noncanonical parent,
+  generation, T/S/K identity, artifact, or companion treatment.
+- Node normalization treats AQ19 as frozen C16 for generation, training-game,
+  training-seed, and K8 identity while preserving its distinct stable policy
+  ID. Server metadata and the client fallback carry the exact date, lifecycle,
+  label, and description.
+- Acceptance requires focused artifact round-trip/corruption/SHA tests, C++
+  parser/config and exact-treatment isolation tests, Node normalization and
+  bridge-argument tests, client fallback/setup assertions, the complete
+  five-deck × twelve-policy journey matrix, `make test-web-ui`, and
+  `make test-web`, followed by dual-viewport rendered selection and a real
+  rebuilt-server first-match provenance smoke.
+- Evidence on 2026-07-29: the separate command
+  `./build/old-school-decision-density-bilinear-artifact --publish` ran the
+  offline report path only and published
+  `build/model-cache/old-school-aq19-dbc6-r2-bilinear.bin` at exactly 14,502
+  bytes, file SHA-256
+  `445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a`,
+  parameter SHA-256
+  `3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194`,
+  parent fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+  and `gameplay_games=0`. Publication is no-replace; bridge startup is
+  load-only and now authenticates both artifacts before emitting any session
+  byte. Missing and corrupt AQ19 artifacts, wrong configuration, non-K8
+  search, companion treatments, and pointer/flag mismatches all fail closed.
+  The real rebuilt bridge loaded the exact artifact for a fixed Blue mirror,
+  emitted parent plus AQ19 parameter/file identity, and reached the first
+  authoritative decision; stdin was then deliberately absent, so the smoke
+  ended with the expected client-disconnected error rather than playing a
+  game. Focused artifact tests passed 3/3 under both optimized Werror and
+  AddressSanitizer/UndefinedBehaviorSanitizer builds; the C++ bridge passed
+  21/21.
+  `make test-web-ui` passed 112/112, including the complete 60-case five-deck
+  × twelve-policy matrix. The final identical `make test-web` retry passed
+  21/21 C++ bridge tests and 136/136 Node/client/session tests; its immediately
+  preceding run had passed every AQ19 case but hit the pre-existing
+  timing-sensitive evolution child-exit case at 135/136.
+- Final acceptance on 2026-07-29: the repository-wide `make -j4 test` gate
+  passed, including engine 184/184, AQ19 runtime 8/8, fitter 9/9, artifact 3/3,
+  bridge 21/21, Node/web 136/136, and Python certification 48/48. The first
+  `make test-web-rendered` invocation was infrastructure-only `listen EPERM`;
+  the identical localhost-permitted rerun passed 10/10 real-Chromium journeys
+  at 1280 × 720 and 1440 × 900. The rebuilt server was then restarted at
+  `http://127.0.0.1:4173`. A real in-app-browser seed-42 RU Aggro mirror
+  selected `Learned C16 · Bilinear AQ19`, rendered its July 29 date and exact
+  `Manual pilot · 31–29 selector · not promoted` lifecycle, reached turn-1
+  Priority with the opponent hand hidden, and exposed the exact C16 parent,
+  parameter SHA, and 14,502-byte artifact SHA in REPRO. The verified live
+  match was left open for owner play-testing.
+
 Acceptance criteria:
 
 - At 1200–1800 px wide, hand, both battlefields, life totals, phase, stack, and

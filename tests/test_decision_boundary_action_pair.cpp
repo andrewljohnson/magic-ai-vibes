@@ -11,6 +11,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -45,6 +46,12 @@ void expect_near(
     }
 }
 
+bool bit_equal(double left, double right) {
+    return
+        std::bit_cast<std::uint64_t>(left) ==
+        std::bit_cast<std::uint64_t>(right);
+}
+
 template <typename Function>
 void expect_rejected(
     Function&& function, std::string_view message) {
@@ -68,6 +75,10 @@ concept HasOpponentHandMember = requires(T value) {
 
 static_assert(!HasStateMember<pair::Root>);
 static_assert(!HasOpponentHandMember<pair::Root>);
+static_assert(
+    !HasStateMember<pair::PrecomputedScoreRoot>);
+static_assert(
+    !HasOpponentHandMember<pair::PrecomputedScoreRoot>);
 static_assert(pair::kPolicyFeatureCount == 893);
 static_assert(pair::kHiddenCount == 32);
 static_assert(pair::kFoldCount == 4);
@@ -257,6 +268,50 @@ pair::Dataset replicated_dataset(
     }
     return pair::testing::make_dataset(
         std::move(roots));
+}
+
+pair::PrecomputedScoreDataset precompute_scores(
+    const pair::Dataset& dataset) {
+    pair::PrecomputedScoreDataset result{
+        .roots_by_deck = dataset.roots_by_deck,
+    };
+    for (const pair::Root& root : dataset.roots) {
+        pair::PrecomputedScoreRoot scored{
+            .deck = root.ranking.deck,
+        };
+        for (const direct::RankAction& action :
+             root.ranking.actions) {
+            double base = 0.0;
+            double teacher = 0.0;
+            std::vector<double> samples;
+            for (const direct::RankCell& cell :
+                 action.worlds) {
+                teacher += cell.teacher_target;
+                base +=
+                    cell.terminal_before_boundary
+                    ? cell.teacher_target
+                    : std::accumulate(
+                          cell.parent_leaf_values.begin(),
+                          cell.parent_leaf_values.end(), 0.0) /
+                          static_cast<double>(
+                              direct::kLeafCount);
+                samples.push_back(cell.teacher_target);
+            }
+            scored.base_aggregate_scores.push_back(
+                base /
+                static_cast<double>(
+                    action.worlds.size()));
+            scored.teacher_aggregate_scores.push_back(
+                teacher /
+                static_cast<double>(
+                    action.worlds.size()));
+            scored.common_world_teacher_samples.push_back(
+                std::move(samples));
+        }
+        result.roots.push_back(std::move(scored));
+    }
+    pair::validate_precomputed_score_dataset(result);
+    return result;
 }
 
 pair::Dataset learning_dataset() {
@@ -648,6 +703,180 @@ void test_ranking_metric_tie_semantics() {
             0.25, 1.0e-15,
             "per-deck stable-pair semantics drifted");
     }
+}
+
+void test_precomputed_score_metric_equivalence() {
+    const pair::Dataset source =
+        replicated_dataset(
+            {0.9, 0.5, 0.2},
+            {0.2, 0.6, 0.4});
+    const pair::PrecomputedScoreDataset precomputed =
+        precompute_scores(source);
+    const std::vector<std::vector<double>> residuals(
+        source.roots.size(),
+        {0.0125, -0.00625, 0.003125});
+    const pair::Metrics legacy =
+        pair::evaluate_residuals(
+            source, residuals);
+    const pair::Metrics scored =
+        pair::evaluate_precomputed_residuals(
+            precomputed, residuals);
+
+    expect(
+        legacy.pairs == scored.pairs &&
+            bit_equal(
+                legacy.pairs.equal_deck_pair_bce,
+                scored.pairs.equal_deck_pair_bce),
+        "precomputed pair metrics differed from DBC4");
+    const auto expect_ranking_equal =
+        [](const direct::Metrics& left,
+           const direct::Metrics& right,
+           std::string_view message) {
+            bool equal =
+                left.roots == right.roots &&
+                left.stable_pairs ==
+                    right.stable_pairs &&
+                bit_equal(
+                    left.equal_deck_listwise_cross_entropy,
+                    right.equal_deck_listwise_cross_entropy) &&
+                bit_equal(
+                    left.equal_deck_top_one_expected_agreement,
+                    right.equal_deck_top_one_expected_agreement) &&
+                bit_equal(
+                    left.equal_deck_stable_pair_agreement,
+                    right.equal_deck_stable_pair_agreement) &&
+                bit_equal(
+                    left.equal_deck_mean_regret,
+                    right.equal_deck_mean_regret);
+            for (std::size_t deck = 0;
+                 deck < old_school::kDeckCount; ++deck) {
+                const auto& left_deck =
+                    left.decks[deck];
+                const auto& right_deck =
+                    right.decks[deck];
+                equal =
+                    equal &&
+                    left_deck.deck ==
+                        right_deck.deck &&
+                    left_deck.roots ==
+                        right_deck.roots &&
+                    left_deck.stable_pairs ==
+                        right_deck.stable_pairs &&
+                    bit_equal(
+                        left_deck.listwise_cross_entropy,
+                        right_deck.listwise_cross_entropy) &&
+                    bit_equal(
+                        left_deck.top_one_expected_agreement,
+                        right_deck.top_one_expected_agreement) &&
+                    bit_equal(
+                        left_deck.stable_pair_agreement,
+                        right_deck.stable_pair_agreement) &&
+                    bit_equal(
+                        left_deck.mean_regret,
+                        right_deck.mean_regret);
+            }
+            expect(equal, message);
+        };
+    expect_ranking_equal(
+        legacy.ranking, scored.ranking,
+        "precomputed ranking metrics differed from DBC4");
+
+    pair::PrecomputedScoreDataset changed_samples =
+        precomputed;
+    for (pair::PrecomputedScoreRoot& root :
+         changed_samples.roots) {
+        for (auto& action_samples :
+             root.common_world_teacher_samples) {
+            std::fill(
+                action_samples.begin(),
+                action_samples.end(), 0.25);
+        }
+    }
+    const pair::Metrics sample_only =
+        pair::evaluate_precomputed_residuals(
+            changed_samples, residuals);
+    expect(
+        sample_only.pairs == scored.pairs,
+        "teacher samples were used to recreate aggregates");
+    expect_ranking_equal(
+        sample_only.ranking, scored.ranking,
+        "teacher samples changed non-uncertainty metrics");
+
+    pair::PrecomputedScoreDataset changed_teacher =
+        precomputed;
+    changed_teacher.roots.front()
+        .teacher_aggregate_scores.front() = 0.7;
+    const pair::Metrics teacher_result =
+        pair::evaluate_precomputed_residuals(
+            changed_teacher, residuals);
+    expect(
+        !bit_equal(
+            teacher_result.pairs
+                .equal_deck_pair_bce,
+            scored.pairs.equal_deck_pair_bce) &&
+            !bit_equal(
+                teacher_result.ranking
+                    .equal_deck_listwise_cross_entropy,
+                scored.ranking
+                    .equal_deck_listwise_cross_entropy),
+        "authoritative teacher aggregate was ignored");
+
+    pair::PrecomputedScoreDataset changed_base =
+        precomputed;
+    changed_base.roots.front()
+        .base_aggregate_scores.front() = 0.7;
+    const pair::Metrics base_result =
+        pair::evaluate_precomputed_residuals(
+            changed_base, residuals);
+    expect(
+        !bit_equal(
+            base_result.pairs.equal_deck_pair_bce,
+            scored.pairs.equal_deck_pair_bce) &&
+            !bit_equal(
+                base_result.ranking
+                    .equal_deck_listwise_cross_entropy,
+                scored.ranking
+                    .equal_deck_listwise_cross_entropy),
+        "authoritative base aggregate was ignored");
+
+    const pair::Dataset stable_source =
+        replicated_dataset(
+            {0.52, 0.48},
+            {0.49, 0.51});
+    pair::PrecomputedScoreDataset noisy =
+        precompute_scores(stable_source);
+    const std::vector<std::vector<double>>
+        stable_residuals(
+            stable_source.roots.size(),
+            std::vector<double>(2, 0.0));
+    const pair::Metrics stable =
+        pair::evaluate_precomputed_residuals(
+            noisy, stable_residuals);
+    for (pair::PrecomputedScoreRoot& root :
+         noisy.roots) {
+        root.common_world_teacher_samples[0] =
+            {1.0, 0.0};
+        root.common_world_teacher_samples[1] =
+            {0.0, 1.0};
+    }
+    const pair::Metrics uncertain =
+        pair::evaluate_precomputed_residuals(
+            noisy, stable_residuals);
+    expect(
+        stable.ranking.stable_pairs ==
+                old_school::kDeckCount &&
+            uncertain.ranking.stable_pairs == 0 &&
+            stable.pairs == uncertain.pairs &&
+            bit_equal(
+                stable.ranking
+                    .equal_deck_listwise_cross_entropy,
+                uncertain.ranking
+                    .equal_deck_listwise_cross_entropy) &&
+            bit_equal(
+                stable.ranking.equal_deck_mean_regret,
+                uncertain.ranking.equal_deck_mean_regret),
+        "common-world samples did not exclusively control "
+        "stable-pair uncertainty");
 }
 
 void test_adam_is_bit_deterministic() {
@@ -1396,6 +1625,134 @@ void test_offline_gate_exact_boundaries() {
     }
 }
 
+void test_precomputed_score_validation_fails_closed() {
+    const pair::PrecomputedScoreDataset valid =
+        precompute_scores(
+            replicated_dataset(
+                {0.8, 0.2},
+                {0.4, 0.6}));
+    const std::vector<std::vector<double>> residuals(
+        valid.roots.size(),
+        std::vector<double>(2, 0.0));
+    pair::validate_precomputed_score_dataset(valid);
+    static_cast<void>(
+        pair::evaluate_precomputed_residuals(
+            valid, residuals));
+
+    const auto require_dataset_reject =
+        [](pair::PrecomputedScoreDataset changed,
+           std::string_view message) {
+            expect_rejected(
+                [&] {
+                    pair::validate_precomputed_score_dataset(
+                        changed);
+                },
+                message);
+        };
+
+    pair::PrecomputedScoreDataset changed = valid;
+    changed.roots.front().deck =
+        static_cast<old_school::DeckId>(
+            old_school::kDeckCount);
+    require_dataset_reject(
+        std::move(changed),
+        "invalid precomputed deck was accepted");
+
+    changed = valid;
+    changed.roots.front()
+        .base_aggregate_scores.pop_back();
+    require_dataset_reject(
+        std::move(changed),
+        "short precomputed base aggregates were accepted");
+
+    changed = valid;
+    changed.roots.front()
+        .teacher_aggregate_scores.front() =
+        std::numeric_limits<double>::quiet_NaN();
+    require_dataset_reject(
+        std::move(changed),
+        "nonfinite teacher aggregate was accepted");
+
+    changed = valid;
+    changed.roots.front()
+        .base_aggregate_scores.front() =
+        std::nextafter(
+            1.0,
+            std::numeric_limits<double>::infinity());
+    require_dataset_reject(
+        std::move(changed),
+        "out-of-range base aggregate was accepted");
+
+    changed = valid;
+    changed.roots.front()
+        .common_world_teacher_samples.front()
+        .pop_back();
+    require_dataset_reject(
+        std::move(changed),
+        "single precomputed teacher world was accepted");
+
+    changed = valid;
+    changed.roots.front()
+        .common_world_teacher_samples.back()
+        .push_back(0.5);
+    require_dataset_reject(
+        std::move(changed),
+        "unpaired precomputed teacher worlds were accepted");
+
+    changed = valid;
+    changed.roots.front()
+        .common_world_teacher_samples.front()
+        .front() =
+        std::numeric_limits<double>::infinity();
+    require_dataset_reject(
+        std::move(changed),
+        "nonfinite precomputed teacher sample was accepted");
+
+    changed = valid;
+    ++changed.roots_by_deck.front();
+    require_dataset_reject(
+        std::move(changed),
+        "precomputed deck census mutation was accepted");
+
+    changed = valid;
+    changed.roots.erase(changed.roots.begin());
+    changed.roots_by_deck.front() = 0;
+    require_dataset_reject(
+        std::move(changed),
+        "empty precomputed deck was accepted");
+
+    auto changed_residuals = residuals;
+    changed_residuals.pop_back();
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                pair::evaluate_precomputed_residuals(
+                    valid, changed_residuals));
+        },
+        "short precomputed residual root list was accepted");
+
+    changed_residuals = residuals;
+    changed_residuals.front().pop_back();
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                pair::evaluate_precomputed_residuals(
+                    valid, changed_residuals));
+        },
+        "short precomputed residual row was accepted");
+
+    changed_residuals = residuals;
+    changed_residuals.front().front() =
+        std::numeric_limits<double>::quiet_NaN();
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                pair::evaluate_precomputed_residuals(
+                    valid, changed_residuals));
+        },
+        "nonfinite precomputed residual was accepted");
+}
+
 void test_validation_fails_closed() {
     pair::Dataset malformed =
         learning_dataset();
@@ -1538,6 +1895,9 @@ int main() {
         "ranking metric tie semantics",
         test_ranking_metric_tie_semantics);
     run(
+        "precomputed score metric equivalence",
+        test_precomputed_score_metric_equivalence);
+    run(
         "Adam is bit deterministic",
         test_adam_is_bit_deterministic);
     run(
@@ -1552,6 +1912,9 @@ int main() {
     run(
         "offline gate exact boundaries",
         test_offline_gate_exact_boundaries);
+    run(
+        "precomputed score validation fails closed",
+        test_precomputed_score_validation_fails_closed);
     run(
         "validation fails closed",
         test_validation_fails_closed);

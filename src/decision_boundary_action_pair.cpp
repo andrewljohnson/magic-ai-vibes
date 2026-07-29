@@ -36,6 +36,16 @@ bool finite(std::span<const double> values) {
         });
 }
 
+bool finite_probability(std::span<const double> values) {
+    return finite(values) &&
+           std::all_of(
+               values.begin(), values.end(),
+               [](double value) {
+                   return value >= 0.0 &&
+                          value <= 1.0;
+               });
+}
+
 bool valid_hidden(std::span<const double> values) {
     return finite(values) &&
            std::all_of(
@@ -206,6 +216,42 @@ direct::Dataset ranking_dataset(const Dataset& dataset) {
         std::move(roots));
 }
 
+PrecomputedScoreDataset precompute_scores(
+    const Dataset& dataset) {
+    PrecomputedScoreDataset result{
+        .roots_by_deck = dataset.roots_by_deck,
+    };
+    result.roots.reserve(dataset.roots.size());
+    for (const Root& root : dataset.roots) {
+        PrecomputedScoreRoot projected{
+            .deck = root.ranking.deck,
+        };
+        projected.base_aggregate_scores.reserve(
+            root.ranking.actions.size());
+        projected.teacher_aggregate_scores.reserve(
+            root.ranking.actions.size());
+        projected.common_world_teacher_samples.reserve(
+            root.ranking.actions.size());
+        for (const direct::RankAction& action :
+             root.ranking.actions) {
+            projected.base_aggregate_scores.push_back(
+                parent_action_score(action));
+            projected.teacher_aggregate_scores.push_back(
+                teacher_action_score(action));
+            std::vector<double> samples;
+            samples.reserve(action.worlds.size());
+            for (const direct::RankCell& cell :
+                 action.worlds) {
+                samples.push_back(cell.teacher_target);
+            }
+            projected.common_world_teacher_samples.push_back(
+                std::move(samples));
+        }
+        result.roots.push_back(std::move(projected));
+    }
+    return result;
+}
+
 std::vector<double> analytic_residuals(
     const Root& root, const Delta& delta,
     double residual_weight = kResidualWeight) {
@@ -245,34 +291,30 @@ struct ActionScores {
 };
 
 ActionScores action_scores(
-    const Root& root,
+    const PrecomputedScoreRoot& root,
     std::span<const double> residuals) {
     if (residuals.size() !=
-        root.ranking.actions.size()) {
+        root.base_aggregate_scores.size()) {
         throw std::invalid_argument(
             "DBC4-ACTION-PAIR residual width drifted");
     }
-    ActionScores result;
-    result.teacher.reserve(
-        root.ranking.actions.size());
+    ActionScores result{
+        .teacher = root.teacher_aggregate_scores,
+    };
     result.candidate.reserve(
-        root.ranking.actions.size());
+        root.base_aggregate_scores.size());
     for (std::size_t action = 0;
-         action < root.ranking.actions.size();
+         action < root.base_aggregate_scores.size();
          ++action) {
-        result.teacher.push_back(
-            teacher_action_score(
-                root.ranking.actions[action]));
         result.candidate.push_back(
-            parent_action_score(
-                root.ranking.actions[action]) +
+            root.base_aggregate_scores[action] +
             residuals[action]);
     }
     return result;
 }
 
 PairMetrics pair_metrics(
-    const Dataset& dataset,
+    const PrecomputedScoreDataset& dataset,
     const std::vector<std::vector<double>>& residuals) {
     if (residuals.size() != dataset.roots.size()) {
         throw std::invalid_argument(
@@ -289,11 +331,12 @@ PairMetrics pair_metrics(
     for (std::size_t root_index = 0;
          root_index < dataset.roots.size();
          ++root_index) {
-        const Root& root = dataset.roots[root_index];
+        const PrecomputedScoreRoot& root =
+            dataset.roots[root_index];
         const ActionScores scores =
             action_scores(root, residuals[root_index]);
         Accumulator& accumulator =
-            accumulators[deck_index(root.ranking.deck)];
+            accumulators[deck_index(root.deck)];
         ++accumulator.roots;
         const std::size_t action_count =
             scores.teacher.size();
@@ -385,13 +428,9 @@ PairMetrics pair_metrics(
 }
 
 direct::Metrics ranking_metrics(
-    const Dataset& dataset,
-    const std::vector<std::vector<double>>& residuals) {
-    direct::Metrics result =
-        direct::evaluate(
-            ranking_dataset(dataset),
-            std::vector<double>(
-                direct::kFeatureCount, 0.0));
+    const PrecomputedScoreDataset& dataset,
+    const std::vector<std::vector<double>>& residuals,
+    direct::Metrics result) {
     struct Accumulator {
         std::size_t roots = 0;
         std::size_t stable_pairs = 0;
@@ -404,11 +443,12 @@ direct::Metrics ranking_metrics(
     for (std::size_t root_index = 0;
          root_index < dataset.roots.size();
          ++root_index) {
-        const Root& root = dataset.roots[root_index];
+        const PrecomputedScoreRoot& root =
+            dataset.roots[root_index];
         const ActionScores scores =
             action_scores(root, residuals[root_index]);
         Accumulator& accumulator =
-            accumulators[deck_index(root.ranking.deck)];
+            accumulators[deck_index(root.deck)];
         ++accumulator.roots;
         const std::vector<double> teacher_distribution =
             mixed_distribution(scores.teacher);
@@ -450,27 +490,27 @@ direct::Metrics ranking_metrics(
             selected_teacher;
 
         for (std::size_t first = 0;
-             first < root.ranking.actions.size();
+             first <
+                 root.common_world_teacher_samples.size();
              ++first) {
             for (std::size_t second = first + 1;
-                 second < root.ranking.actions.size();
+                 second <
+                     root.common_world_teacher_samples.size();
                  ++second) {
                 std::vector<double> differences;
                 differences.reserve(
-                    root.ranking.actions[first]
-                        .worlds.size());
+                    root.common_world_teacher_samples[first]
+                        .size());
                 for (std::size_t world = 0;
                      world <
-                     root.ranking.actions[first]
-                         .worlds.size();
+                     root.common_world_teacher_samples[first]
+                         .size();
                      ++world) {
                     differences.push_back(
-                        root.ranking.actions[first]
-                            .worlds[world]
-                            .teacher_target -
-                        root.ranking.actions[second]
-                            .worlds[world]
-                            .teacher_target);
+                        root.common_world_teacher_samples
+                                [first][world] -
+                        root.common_world_teacher_samples
+                                [second][world]);
                 }
                 const double teacher_difference =
                     scores.teacher[first] -
@@ -508,11 +548,14 @@ direct::Metrics ranking_metrics(
     result.equal_deck_stable_pair_agreement = 0.0;
     result.equal_deck_mean_regret = 0.0;
     result.stable_pairs = 0;
+    result.roots = dataset.roots.size();
     for (std::size_t deck = 0;
          deck < kDeckCount; ++deck) {
         const Accumulator& accumulator =
             accumulators[deck];
         auto& row = result.decks[deck];
+        row.deck = static_cast<DeckId>(deck);
+        row.roots = accumulator.roots;
         row.stable_pairs =
             accumulator.stable_pairs;
         row.listwise_cross_entropy =
@@ -547,14 +590,47 @@ direct::Metrics ranking_metrics(
     return result;
 }
 
-Metrics metrics_from_residuals(
-    const Dataset& dataset,
-    const std::vector<std::vector<double>>& residuals) {
+direct::Metrics empty_ranking_metrics(
+    const PrecomputedScoreDataset& dataset) {
+    direct::Metrics result{
+        .roots = dataset.roots.size(),
+    };
+    for (std::size_t deck = 0;
+         deck < kDeckCount; ++deck) {
+        result.decks[deck].deck =
+            static_cast<DeckId>(deck);
+        result.decks[deck].roots =
+            dataset.roots_by_deck[deck];
+    }
+    return result;
+}
+
+Metrics metrics_from_precomputed_residuals(
+    const PrecomputedScoreDataset& dataset,
+    const std::vector<std::vector<double>>& residuals,
+    direct::Metrics ranking_seed) {
     return {
         .pairs = pair_metrics(dataset, residuals),
         .ranking =
-            ranking_metrics(dataset, residuals),
+            ranking_metrics(
+                dataset, residuals,
+                std::move(ranking_seed)),
     };
+}
+
+Metrics metrics_from_residuals(
+    const Dataset& dataset,
+    const std::vector<std::vector<double>>& residuals) {
+    const PrecomputedScoreDataset precomputed =
+        precompute_scores(dataset);
+    direct::Metrics ranking_seed =
+        direct::evaluate(
+            ranking_dataset(dataset),
+            std::vector<double>(
+                direct::kFeatureCount, 0.0));
+    return metrics_from_precomputed_residuals(
+        precomputed, residuals,
+        std::move(ranking_seed));
 }
 
 struct ObjectiveResult {
@@ -1296,6 +1372,62 @@ void validate_dataset(const Dataset& dataset) {
         ranking_dataset(dataset));
 }
 
+void validate_precomputed_score_dataset(
+    const PrecomputedScoreDataset& dataset) {
+    if (dataset.roots.empty()) {
+        throw std::invalid_argument(
+            "DBC4-ACTION-PAIR precomputed dataset is empty");
+    }
+    std::array<std::size_t, kDeckCount> roots_by_deck{};
+    for (const PrecomputedScoreRoot& root :
+         dataset.roots) {
+        ++roots_by_deck[deck_index(root.deck)];
+        const std::size_t actions =
+            root.base_aggregate_scores.size();
+        if (actions < 2 ||
+            root.teacher_aggregate_scores.size() !=
+                actions ||
+            root.common_world_teacher_samples.size() !=
+                actions ||
+            !finite_probability(
+                root.base_aggregate_scores) ||
+            !finite_probability(
+                root.teacher_aggregate_scores)) {
+            throw std::invalid_argument(
+                "DBC4-ACTION-PAIR precomputed root shape "
+                "is invalid");
+        }
+        std::size_t worlds = 0;
+        for (const auto& samples :
+             root.common_world_teacher_samples) {
+            if (samples.size() < 2 ||
+                !finite_probability(samples)) {
+                throw std::invalid_argument(
+                    "DBC4-ACTION-PAIR precomputed teacher "
+                    "samples are invalid");
+            }
+            if (worlds == 0) {
+                worlds = samples.size();
+            } else if (samples.size() != worlds) {
+                throw std::invalid_argument(
+                    "DBC4-ACTION-PAIR precomputed worlds "
+                    "are unpaired");
+            }
+        }
+    }
+    if (roots_by_deck != dataset.roots_by_deck ||
+        std::any_of(
+            roots_by_deck.begin(),
+            roots_by_deck.end(),
+            [](std::size_t count) {
+                return count == 0;
+            })) {
+        throw std::invalid_argument(
+            "DBC4-ACTION-PAIR precomputed deck census "
+            "drifted");
+    }
+}
+
 void validate_corpus(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent) {
@@ -1314,7 +1446,7 @@ void validate_corpus(
 PairMetrics pair_census(const Dataset& dataset) {
     validate_dataset(dataset);
     return pair_metrics(
-        dataset,
+        precompute_scores(dataset),
         analytic_residuals(dataset, Delta{}));
 }
 
@@ -1400,6 +1532,31 @@ Metrics evaluate_residuals(
         }
     }
     return metrics_from_residuals(dataset, residuals);
+}
+
+Metrics evaluate_precomputed_residuals(
+    const PrecomputedScoreDataset& dataset,
+    const std::vector<std::vector<double>>& residuals) {
+    validate_precomputed_score_dataset(dataset);
+    if (residuals.size() != dataset.roots.size()) {
+        throw std::invalid_argument(
+            "DBC4-ACTION-PAIR precomputed residual roots "
+            "drifted");
+    }
+    for (std::size_t root = 0;
+         root < dataset.roots.size(); ++root) {
+        if (residuals[root].size() !=
+                dataset.roots[root]
+                    .base_aggregate_scores.size() ||
+            !finite(residuals[root])) {
+            throw std::invalid_argument(
+                "DBC4-ACTION-PAIR precomputed residual row "
+                "is invalid");
+        }
+    }
+    return metrics_from_precomputed_residuals(
+        dataset, residuals,
+        empty_ranking_metrics(dataset));
 }
 
 OptimizerReport optimize(
