@@ -21868,6 +21868,68 @@ No result on this seed may authorize testing 128, 256, a different depth,
 another PUCT constant, prior temperature, or leaf blend. The next declared
 axis after a budget rejection is general critic target/backup quality.
 
+AQ8-ISP1 result, completed 2026-07-29 from pushed commit `a1ebdd1`:
+**REJECT; close the simulation-budget axis**. The exact registered command was
+run once:
+
+```sh
+./build/old-school-information-set-puct-budget-diagnostic --run-isp1
+```
+
+The frozen parent fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+the experiment seed was exactly `202607291101`, and the process returned 1
+with its declared `REJECT_CLOSE_BUDGET_AXIS` verdict. The summed per-root
+measured wall times were 30.499770 seconds at 64 simulations and 331.544442
+seconds at 512, 362.044212 seconds total. All eighteen root-budget evaluations
+completed their exact requested simulation/visit counts. The common-prefix seed
+contract, direct replay, reversed input order, hidden repartition, opponent
+noninterference, root-observer-only tree, accounting, prior formula, macro
+bounds, combat bounds, and finite-value gates all passed at both budgets.
+
+Primary results:
+
+| Root | 64 simulations | 512 simulations | Direction |
+| --- | --- | --- | --- |
+| Braingeyser | self X=1, 17 visits/Q 0.323288; Pass 15/0.317232 | **Pass**, 215/0.309349; self X=1 123/0.293857 | 64 correct -> 512 wrong: regression |
+| Ancestral Recall | **Pass**, 17/0.932479; self 11/0.898727 | **Pass**, 131/0.944273; self 55/0.899414 | wrong at both budgets |
+| payable Force Spike | **Spike**, 33/0.262127; Pass 31/0.264474 | Pass, 322/0.274161; Spike 190/0.246839 | 64 wrong -> 512 correct: improvement |
+
+Thus each budget was only 1/3 correct. There was one explicit improvement but
+also one explicit regression, so the preregistered no-primary-regression gate
+failed. The payable-Spike 64 result is also informative: root visit selection
+slightly favored Spike even though its backed actor Q was already lower than
+Pass; at 512 the visit distribution caught up. In contrast, the much larger
+budget strengthened the wrong backed-Q Pass preference for Ancestral and
+created a wrong Pass preference for Braingeyser. More tree reuse therefore
+does not monotonically recover strategically correct choices under the frozen
+critic.
+
+Control results were 5/6 at both budgets:
+
+- redundant Counterspell: Pass at 64 and 512;
+- intervening Counterspell: one new Counterspell on the real threat at both
+  budgets, no own-Counter target, underlying spell countered, stack settled;
+- productive Giant Growth: own Ironroot Treefolk at both budgets;
+- live Force Spike: cast at both budgets;
+- life-20 RU block: No Blocks at both budgets, with exact combat completed and
+  a nonzero completed-plan witness;
+- Blue first blocker: **failed at both budgets**, choosing the Flying Men
+  chump instead of first No Block and the later Air Elemental trade. The
+  selected 64 path had a real completed exact-combat cutoff, so this is no
+  longer the ISP0 measurement-vacuity failure. At 512 the wrong chump received
+  279 visits/Q 0.410886 versus No Block at 233/0.403170.
+
+Decision: reject ISP1, retain C16 as champion, and do not expose this search
+budget in the web pilot. Per the declaration, do not test 128/256, a different
+depth, `c_puct`, prior temperature, or leaf blend. The hidden-safe PUCT engine
+is functioning and its evidence gates are green; the result instead implicates
+the learned critic/continuation backup. The next experiment must change a
+general critic target or backup-training mechanism, remain Learned-mirror and
+hidden-information safe, and be preregistered on a fresh seed before any run.
+In particular it must predict improvements on the Ancestral, Braingeyser, and
+Blue no-chump decisions without forgetting the two Force Spike directions.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
