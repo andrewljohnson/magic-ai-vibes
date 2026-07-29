@@ -8,6 +8,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace old_school::decision_boundary_rank_direct {
@@ -207,6 +208,24 @@ struct OfflineGate {
     bool operator==(const OfflineGate&) const = default;
 };
 
+// Shared metric gate used by representation-specific DBC ranking
+// treatments. Each treatment remains responsible for authenticating its
+// optimizer recipe, replay, model identity, and tensor-isolation boundary.
+struct OfflineGateInputs {
+    bool repeated_optimizer_bit_identical = false;
+    bool optimizer_recipe_exact = false;
+    bool objective_strictly_improved = false;
+    bool surrogate_engine_agreement = false;
+    bool exact_model_identity = false;
+    bool model_isolation_passed = false;
+    Metrics parent_train;
+    Metrics candidate_train;
+    Metrics parent_dev;
+    Metrics candidate_dev;
+
+    bool operator==(const OfflineGateInputs&) const = default;
+};
+
 // Converts the cached owner-safe DBC1 successor corpus into action groups.
 // Loaded cache cells have no boundary_state; this projection intentionally
 // scores their neutral observations directly through the frozen parent.
@@ -264,6 +283,10 @@ OfflineGate evaluate_offline_gate(
     const OptimizerReport& repeated_fit,
     const ExactEvaluationReport& exact,
     const ModelIsolationReport& isolation);
+OfflineGate evaluate_offline_gate(
+    const OfflineGateInputs& inputs,
+    std::string_view isolation_failure =
+        "model isolation failed");
 
 namespace testing {
 

@@ -1518,6 +1518,8 @@ inline constexpr std::size_t
         50 + 24 * kCardCount;
 inline constexpr std::size_t
     kLearnedCriticLeafCount = 2;
+inline constexpr std::size_t
+    kLearnedCriticHiddenCount = 16;
 struct LearnedCriticDirectPathParameters {
     std::array<
         std::array<
@@ -1536,6 +1538,16 @@ using LearnedCriticContextDirectPathParameters =
             double,
             kLearnedDecisionContextFeatureCount>,
         kLearnedCriticLeafCount>;
+using LearnedCriticHiddenActivations =
+    std::array<
+        std::array<
+            double,
+            kLearnedCriticHiddenCount>,
+        kLearnedCriticLeafCount>;
+using LearnedCriticHiddenOutputParameters =
+    LearnedCriticHiddenActivations;
+using LearnedCriticOutputBiasParameters =
+    std::array<double, kLearnedCriticLeafCount>;
 double learned_critic_value(
     const GameState& state, std::size_t perspective,
     std::shared_ptr<const LearnedModel> model);
@@ -1549,12 +1561,25 @@ std::array<double, kLearnedCriticLeafCount>
 learned_critic_observation_leaf_values(
     std::span<const double> observation,
     std::shared_ptr<const LearnedModel> model);
+// Exact frozen tanh activations for the two critic leaves. This deliberately
+// exposes no trunk parameters and accepts only the exact two-leaf
+// LegacyStateOnly Value topology.
+LearnedCriticHiddenActivations
+learned_critic_observation_hidden_activations(
+    std::span<const double> observation,
+    std::shared_ptr<const LearnedModel> model);
 // Exact two-leaf LegacyStateOnly Value topology only.
 LearnedCriticDirectPathParameters
 learned_critic_direct_path_parameters(
     std::shared_ptr<const LearnedModel> model);
 LearnedCriticContextDirectPathParameters
 learned_critic_context_direct_path_parameters(
+    std::shared_ptr<const LearnedModel> model);
+LearnedCriticHiddenOutputParameters
+learned_critic_hidden_output_parameters(
+    std::shared_ptr<const LearnedModel> model);
+LearnedCriticOutputBiasParameters
+learned_critic_output_bias_parameters(
     std::shared_ptr<const LearnedModel> model);
 // Returns an immutable clone after adding one shared actor-local feature
 // delta to both critic leaves. A numerically all-zero delta returns the exact
@@ -1563,6 +1588,13 @@ std::shared_ptr<const LearnedModel>
 with_learned_shared_critic_direct_delta(
     std::shared_ptr<const LearnedModel> parent,
     std::span<const double> delta);
+// Returns an immutable clone after adding an independent hidden-to-output
+// delta to each exact critic leaf. A numerically all-zero delta returns the
+// exact parent object, preserving bit identity.
+std::shared_ptr<const LearnedModel>
+with_learned_critic_hidden_output_delta(
+    std::shared_ptr<const LearnedModel> parent,
+    const LearnedCriticHiddenOutputParameters& delta);
 // Evaluation-only access to the two predictions underlying an exact
 // two-leaf LegacyStateOnly Value ensemble.
 std::array<double, 2> learned_critic_leaf_values(

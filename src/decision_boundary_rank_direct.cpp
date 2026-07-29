@@ -1223,70 +1223,95 @@ OfflineGate evaluate_offline_gate(
     const OptimizerReport& repeated_fit,
     const ExactEvaluationReport& exact,
     const ModelIsolationReport& isolation) {
+    return evaluate_offline_gate(
+        OfflineGateInputs{
+            .repeated_optimizer_bit_identical =
+                fit == repeated_fit,
+            .optimizer_recipe_exact =
+                fit.config == OptimizerConfig{} &&
+                fit.completed_steps == kAdamSteps &&
+                fit.delta.size() == kFeatureCount,
+            .objective_strictly_improved =
+                fit.final_objective <
+                fit.initial_objective,
+            .surrogate_engine_agreement =
+                exact
+                        .maximum_surrogate_engine_cell_difference <=
+                1.0e-12,
+            .exact_model_identity =
+                exact.parent_fingerprint ==
+                    isolation.parent_fingerprint_before &&
+                exact.candidate_fingerprint ==
+                    isolation.candidate_fingerprint,
+            .model_isolation_passed =
+                isolation.passed(),
+            .parent_train = exact.parent_train,
+            .candidate_train = exact.candidate_train,
+            .parent_dev = exact.parent_dev,
+            .candidate_dev = exact.candidate_dev,
+        },
+        "shared direct-path model isolation failed");
+}
+
+OfflineGate evaluate_offline_gate(
+    const OfflineGateInputs& inputs,
+    std::string_view isolation_failure) {
     OfflineGate gate{
         .repeated_optimizer_bit_identical =
-            fit == repeated_fit,
+            inputs.repeated_optimizer_bit_identical,
         .optimizer_recipe_exact =
-            fit.config == OptimizerConfig{} &&
-            fit.completed_steps == kAdamSteps &&
-            fit.delta.size() == kFeatureCount,
+            inputs.optimizer_recipe_exact,
         .objective_strictly_improved =
-            fit.final_objective <
-            fit.initial_objective,
+            inputs.objective_strictly_improved,
         .surrogate_engine_agreement =
-            exact
-                    .maximum_surrogate_engine_cell_difference <=
-            1.0e-12,
+            inputs.surrogate_engine_agreement,
         .exact_model_identity =
-            exact.parent_fingerprint ==
-                isolation.parent_fingerprint_before &&
-            exact.candidate_fingerprint ==
-                isolation.candidate_fingerprint,
+            inputs.exact_model_identity,
         .model_isolation_passed =
-            isolation.passed(),
+            inputs.model_isolation_passed,
         .train_listwise_strictly_improved =
-            exact.candidate_train
+            inputs.candidate_train
                     .equal_deck_listwise_cross_entropy <
-            exact.parent_train
+            inputs.parent_train
                     .equal_deck_listwise_cross_entropy,
         .train_regret_strictly_improved =
-            exact.candidate_train
+            inputs.candidate_train
                     .equal_deck_mean_regret <
-            exact.parent_train
+            inputs.parent_train
                     .equal_deck_mean_regret,
         .dev_listwise_strictly_improved =
-            exact.candidate_dev
+            inputs.candidate_dev
                     .equal_deck_listwise_cross_entropy <
-            exact.parent_dev
+            inputs.parent_dev
                     .equal_deck_listwise_cross_entropy,
         .dev_regret_strictly_improved =
-            exact.candidate_dev
+            inputs.candidate_dev
                     .equal_deck_mean_regret <
-            exact.parent_dev
+            inputs.parent_dev
                     .equal_deck_mean_regret,
         .dev_top_one_non_decreasing =
-            exact.candidate_dev
+            inputs.candidate_dev
                     .equal_deck_top_one_expected_agreement >=
-            exact.parent_dev
+            inputs.parent_dev
                     .equal_deck_top_one_expected_agreement,
         .dev_stable_pair_non_decreasing =
-            exact.candidate_dev
+            inputs.candidate_dev
                     .equal_deck_stable_pair_agreement >=
-            exact.parent_dev
+            inputs.parent_dev
                     .equal_deck_stable_pair_agreement,
         .dev_successor_bce_guard =
-            exact.candidate_dev
+            inputs.candidate_dev
                     .equal_deck_successor_bce <=
-            exact.parent_dev
+            inputs.parent_dev
                     .equal_deck_successor_bce +
                 kMaximumDevSuccessorBceIncrease,
     };
     for (std::size_t deck = 0;
          deck < kDeckCount; ++deck) {
         gate.dev_deck_regret_guard[deck] =
-            exact.candidate_dev
+            inputs.candidate_dev
                     .decks[deck].mean_regret <=
-            exact.parent_dev.decks[deck].mean_regret +
+            inputs.parent_dev.decks[deck].mean_regret +
                 kMaximumDevDeckRegretIncrease;
     }
     const auto fail =
@@ -1313,7 +1338,7 @@ OfflineGate evaluate_offline_gate(
         "exact metrics and isolation model identities differ");
     fail(
         gate.model_isolation_passed,
-        "shared direct-path model isolation failed");
+        std::string(isolation_failure));
     fail(
         gate.train_listwise_strictly_improved,
         "TRAIN listwise cross-entropy did not improve");

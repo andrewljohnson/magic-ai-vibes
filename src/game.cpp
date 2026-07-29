@@ -2231,10 +2231,24 @@ class LearnedModel {
     friend LearnedCriticContextDirectPathParameters
     learned_critic_context_direct_path_parameters(
         std::shared_ptr<const LearnedModel> model);
+    friend LearnedCriticHiddenActivations
+    learned_critic_observation_hidden_activations(
+        std::span<const double> observation,
+        std::shared_ptr<const LearnedModel> model);
+    friend LearnedCriticHiddenOutputParameters
+    learned_critic_hidden_output_parameters(
+        std::shared_ptr<const LearnedModel> model);
+    friend LearnedCriticOutputBiasParameters
+    learned_critic_output_bias_parameters(
+        std::shared_ptr<const LearnedModel> model);
     friend std::shared_ptr<const LearnedModel>
     with_learned_shared_critic_direct_delta(
         std::shared_ptr<const LearnedModel> parent,
         std::span<const double> delta);
+    friend std::shared_ptr<const LearnedModel>
+    with_learned_critic_hidden_output_delta(
+        std::shared_ptr<const LearnedModel> parent,
+        const LearnedCriticHiddenOutputParameters& delta);
     friend LearnedPriorityHeadParameters
     learned_priority_head_parameters(
         std::shared_ptr<const LearnedModel> model);
@@ -18107,6 +18121,37 @@ learned_critic_observation_leaf_values(
         features);
 }
 
+LearnedCriticHiddenActivations
+learned_critic_observation_hidden_activations(
+    std::span<const double> observation,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    if (!model->has_output_calibration_topology() ||
+        observation.size() != LearnedModel::kFeatureCount ||
+        !std::all_of(
+            observation.begin(), observation.end(),
+            [](double value) {
+                return std::isfinite(value);
+            })) {
+        throw std::invalid_argument(
+            "Learned critic hidden activations require an "
+            "exact two-leaf legacy Value ensemble and finite "
+            "full-width observation");
+    }
+    LearnedModel::FeatureVector features{};
+    std::copy(
+        observation.begin(), observation.end(),
+        features.begin());
+    LearnedCriticHiddenActivations result{};
+    for (std::size_t leaf = 0;
+         leaf < result.size(); ++leaf) {
+        result[leaf] =
+            model->ensemble_[leaf]->hidden_values(features);
+    }
+    return result;
+}
+
 LearnedCriticDirectPathParameters
 learned_critic_direct_path_parameters(
     std::shared_ptr<const LearnedModel> model) {
@@ -18143,6 +18188,44 @@ learned_critic_context_direct_path_parameters(
         result[leaf] =
             model->ensemble_[leaf]
                 ->context_direct_output_weights_;
+    }
+    return result;
+}
+
+LearnedCriticHiddenOutputParameters
+learned_critic_hidden_output_parameters(
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    if (!model->has_output_calibration_topology()) {
+        throw std::invalid_argument(
+            "Learned critic hidden output parameters require an "
+            "exact two-leaf legacy Value ensemble");
+    }
+    LearnedCriticHiddenOutputParameters result{};
+    for (std::size_t leaf = 0;
+         leaf < result.size(); ++leaf) {
+        result[leaf] =
+            model->ensemble_[leaf]->output_weights_;
+    }
+    return result;
+}
+
+LearnedCriticOutputBiasParameters
+learned_critic_output_bias_parameters(
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    if (!model->has_output_calibration_topology()) {
+        throw std::invalid_argument(
+            "Learned critic output biases require an exact "
+            "two-leaf legacy Value ensemble");
+    }
+    LearnedCriticOutputBiasParameters result{};
+    for (std::size_t leaf = 0;
+         leaf < result.size(); ++leaf) {
+        result[leaf] =
+            model->ensemble_[leaf]->output_bias_;
     }
     return result;
 }
@@ -18193,6 +18276,68 @@ with_learned_shared_critic_direct_delta(
                     "shared critic direct delta overflowed");
             }
             leaf->direct_output_weights_[feature] =
+                updated;
+        }
+    }
+    return candidate;
+}
+
+std::shared_ptr<const LearnedModel>
+with_learned_critic_hidden_output_delta(
+    std::shared_ptr<const LearnedModel> parent,
+    const LearnedCriticHiddenOutputParameters& delta) {
+    validate_learned_model(
+        parent, LearnedVariant::ValueSearchChampion);
+    const bool finite =
+        std::all_of(
+            delta.begin(), delta.end(),
+            [](const auto& leaf) {
+                return std::all_of(
+                    leaf.begin(), leaf.end(),
+                    [](double value) {
+                        return std::isfinite(value);
+                    });
+            });
+    if (!parent->has_output_calibration_topology() ||
+        !finite) {
+        throw std::invalid_argument(
+            "critic hidden-output delta requires an exact "
+            "two-leaf legacy Value ensemble and finite "
+            "parameters");
+    }
+    const bool all_zero =
+        std::all_of(
+            delta.begin(), delta.end(),
+            [](const auto& leaf) {
+                return std::all_of(
+                    leaf.begin(), leaf.end(),
+                    [](double value) {
+                        return value == 0.0;
+                    });
+            });
+    if (all_zero) {
+        return parent;
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> leaves;
+    auto candidate =
+        parent->deep_clone_mutable(leaves);
+    if (leaves.size() != kLearnedCriticLeafCount) {
+        throw std::logic_error(
+            "critic hidden-output delta topology drifted");
+    }
+    for (std::size_t leaf = 0;
+         leaf < leaves.size(); ++leaf) {
+        for (std::size_t hidden = 0;
+             hidden < kLearnedCriticHiddenCount; ++hidden) {
+            const double updated =
+                leaves[leaf]->output_weights_[hidden] +
+                delta[leaf][hidden];
+            if (!std::isfinite(updated)) {
+                throw std::overflow_error(
+                    "critic hidden-output delta overflowed");
+            }
+            leaves[leaf]->output_weights_[hidden] =
                 updated;
         }
     }
