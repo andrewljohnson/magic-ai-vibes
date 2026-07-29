@@ -177,7 +177,7 @@ bool parse_census_command(
 void print_usage(std::ostream& output) {
     output
         << "Usage: old-school-decision-boundary-critic "
-           "--census\n";
+           "(--census|--run)\n";
 }
 
 std::string canonical_subset_hash(const Census& census) {

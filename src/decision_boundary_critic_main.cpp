@@ -1,4 +1,5 @@
 #include "old_school/decision_boundary_critic.hpp"
+#include "old_school/decision_boundary_critic_gate.hpp"
 
 #include "old_school/artifact_integrity.hpp"
 
@@ -15,6 +16,8 @@ namespace {
 
 namespace dbc =
     old_school::decision_boundary_critic;
+namespace dbc_gate =
+    old_school::decision_boundary_critic_gate;
 
 constexpr std::string_view kParentArtifactPath =
     "build/model-cache/"
@@ -32,7 +35,7 @@ parent_artifact_snapshot() {
     if (snapshot.byte_size != kParentArtifactBytes ||
         snapshot.sha256 != kParentArtifactSha256) {
         throw std::runtime_error(
-            "AQ10-DBC0 parent artifact identity drifted");
+            "AQ10-DBC parent artifact identity drifted");
     }
     return snapshot;
 }
@@ -42,7 +45,7 @@ void require_parent_artifact_unchanged(
         RegularFileSnapshot& expected) {
     if (parent_artifact_snapshot() != expected) {
         throw std::runtime_error(
-            "AQ10-DBC0 parent artifact changed during census");
+            "AQ10-DBC parent artifact changed during run");
     }
 }
 
@@ -59,7 +62,7 @@ load_parent(
     if (old_school::learned_model_fingerprint(parent) !=
             dbc::kRequiredParentFingerprint) {
         throw std::runtime_error(
-            "AQ10-DBC0 loaded parent fingerprint drifted");
+            "AQ10-DBC loaded parent fingerprint drifted");
     }
     return parent;
 }
@@ -71,7 +74,12 @@ int main(int argc, char* argv[]) {
     for (int index = 1; index < argc; ++index) {
         arguments.emplace_back(argv[index]);
     }
-    if (!dbc::parse_census_command(arguments)) {
+    const bool census_mode =
+        dbc::parse_census_command(arguments);
+    const bool run_mode =
+        arguments.size() == 1 &&
+        arguments.front() == "--run";
+    if (!census_mode && !run_mode) {
         dbc::print_usage(std::cerr);
         return 2;
     }
@@ -81,10 +89,61 @@ int main(int argc, char* argv[]) {
             parent_artifact_snapshot();
         const auto parent =
             load_parent(parent_artifact);
-        const dbc::Census census =
-            dbc::collect_census(parent);
+        if (census_mode) {
+            const dbc::Census census =
+                dbc::collect_census(parent);
+            require_parent_artifact_unchanged(
+                parent_artifact);
+            dbc::print_census(std::cout, census);
+            require_parent_artifact_unchanged(
+                parent_artifact);
+            return 0;
+        }
+
+        const dbc::RunReport offline =
+            dbc::run(parent);
         require_parent_artifact_unchanged(parent_artifact);
-        dbc::print_census(std::cout, census);
+        dbc::print_run(std::cout, offline);
+        if (!offline.gate.passed()) {
+            std::cout
+                << "final_result=REJECT stage=offline"
+                << " mechanism_opened=0 selector_opened=0"
+                << " pilot_licensed=0\n";
+            require_parent_artifact_unchanged(
+                parent_artifact);
+            return 0;
+        }
+
+        const dbc_gate::MechanismReport mechanism =
+            dbc_gate::run_mechanism_gate(
+                parent, offline.fit);
+        require_parent_artifact_unchanged(parent_artifact);
+        dbc_gate::print_mechanism_report(
+            std::cout, mechanism);
+        if (!mechanism.selector_licensed()) {
+            std::cout
+                << "final_result=REJECT stage=mechanism"
+                << " selector_opened=0 pilot_licensed=0\n";
+            require_parent_artifact_unchanged(
+                parent_artifact);
+            return 0;
+        }
+
+        const dbc_gate::SelectorReport selector =
+            dbc_gate::run_selector(parent, offline.fit);
+        require_parent_artifact_unchanged(parent_artifact);
+        dbc_gate::print_selector_report(
+            std::cout, selector);
+        std::cout
+            << "final_result="
+            << (selector.pilot_licensed
+                    ? "PILOT_LICENSED"
+                    : "REJECT")
+            << " stage=selector selector_opened=1"
+            << " pilot_licensed="
+            << selector.pilot_licensed
+            << " fast_go=" << selector.fast_go
+            << " strength_claim=0 champion_replaced=0\n";
         require_parent_artifact_unchanged(parent_artifact);
         return 0;
     } catch (const std::exception& error) {

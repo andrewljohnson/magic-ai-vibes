@@ -1,4 +1,5 @@
 #include "old_school/decision_boundary_critic.hpp"
+#include "old_school/decision_boundary_critic_gate.hpp"
 
 #include "old_school/probes.hpp"
 
@@ -21,6 +22,8 @@ namespace {
 
 namespace dbc =
     old_school::decision_boundary_critic;
+namespace dbc_gate =
+    old_school::decision_boundary_critic_gate;
 
 void expect(bool condition, std::string_view message) {
     if (!condition) {
@@ -720,6 +723,34 @@ int main() {
                 !rejected.dev_top_one_non_decreasing &&
                 !rejected.dev_deck_regret_guard[0],
             "DEV regression escaped conjunctive gate");
+    });
+
+    test("mechanism gate distinguishes support from selector license", [] {
+        dbc_gate::MechanismReport report{
+            .candidate_derivation_authenticated = true,
+            .exact_configuration = true,
+            .common_seed_contract = true,
+            .exact_nine_root_census = true,
+            .all_invariants_green = true,
+            .all_controls_green = true,
+            .no_parent_correct_repair_regression = true,
+            .repairs_correct = 3,
+            .controls_correct = 5,
+        };
+        expect(
+            report.mechanism_supported() &&
+                !report.selector_licensed(),
+            "three repairs incorrectly licensed the selector");
+        report.repairs_correct = 4;
+        expect(
+            report.mechanism_supported() &&
+                report.selector_licensed(),
+            "four repairs did not license the selector");
+        report.all_controls_green = false;
+        expect(
+            !report.mechanism_supported() &&
+                !report.selector_licensed(),
+            "control regression passed the mechanism gate");
     });
 
     std::cout << passed
