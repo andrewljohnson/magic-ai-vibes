@@ -19882,6 +19882,73 @@ manifest hash is now frozen in source. After committing and reviewing that
 freeze, the single predeclared `--run` may reconstruct both boundaries and
 open the G4B teacher coordinates.
 
+###### AQ4-G4B broad actor-teacher result
+
+Completed 2026-07-28 from census-freeze commit `9e369f5`, after an
+independent source-only replay reproduced the exact manifest and returned GO.
+Before recording this conclusion, `REVIEW.md` was reread through its newest
+23:29 PDT cycle. That entry described the then-live run and contained no
+conflicting result.
+
+Exact command:
+
+```sh
+/usr/bin/time -p ./build/old-school-action-q-broad-distill --run
+```
+
+Runtime was 558.28 seconds real / 1,427.40 user / 4.02 sys. The frozen
+preflight reproduced exactly. The reconstructed corpus contained 478 TRAIN
+roots / 1,379 options and 160 whole-game-disjoint DEV roots / 550 options.
+Canonical corpus digest was
+`91ef011cb2044d902a5805a58ee1a7dbae662cb38e75f021b10db9ff6db48a51`.
+Exact parent fingerprint remained
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+the repeat-identical Priority-only candidate fingerprint was
+`d0d46d2b4b365686d0c7109df8b32c6ec0b8229b5df9fb43f304c5f33e1003f8`.
+
+| Split | Deck | Parent agreement | Candidate agreement | Parent regret | Candidate regret | Regret delta |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| TRAIN | Green | 0.72917 | 0.78125 | 0.01340814 | 0.00922106 | -0.00418708 |
+| TRAIN | Red | 0.71875 | 0.82292 | 0.02222761 | 0.00565437 | -0.01657325 |
+| TRAIN | Blue | 0.70833 | 0.93750 | 0.02232400 | 0.00114837 | -0.02117563 |
+| TRAIN | White | 0.71875 | 0.82292 | 0.01499329 | 0.00444848 | -0.01054481 |
+| TRAIN | RU Aggro | 0.68750 | 0.84375 | 0.02908893 | 0.00667708 | -0.02241185 |
+| TRAIN | Equal-deck | 0.71250 | 0.84167 | 0.02040839 | 0.00542987 | -0.01497852 |
+| DEV | Green | 0.75000 | 0.75000 | 0.01501709 | 0.01113829 | -0.00387880 |
+| DEV | Red | 0.71875 | 0.75000 | 0.01781358 | 0.01048923 | -0.00732436 |
+| DEV | Blue | 0.84375 | 0.84375 | 0.00749901 | 0.01656744 | +0.00906844 |
+| DEV | White | 0.84375 | 0.62500 | 0.01439373 | 0.03303111 | +0.01863738 |
+| DEV | RU Aggro | 0.71875 | 0.71875 | 0.01233445 | 0.01694580 | +0.00461135 |
+| DEV | Equal-deck | 0.77500 | 0.73750 | 0.01341157 | 0.01763437 | +0.00422280 |
+
+The candidate fit the teacher very strongly in TRAIN, reducing equal-deck
+regret by 73.4%, but the preregistered whole-game-disjoint DEV direction
+reversed: regret worsened 31.5%. Green and Red generalized positively; Blue
+and RU remained within the `+0.01` per-deck guard; White exceeded it at
+`+0.01863738`. Parent teacher regret was nonzero in every deck and split.
+All census, corpus-digest, preflight, component-isolation, repeated-fit,
+target, descriptor/order, hidden-safety, redundant-Counterspell, sick-Bear
+Growth, live-Force-Spike, and complete-Ancestral gates passed. Productive
+Braingeyser failed.
+
+Decision: **reject AQ4-G4B at the offline gate**. The failures were
+game-disjoint DEV aggregate regret, White's per-deck guard, and productive
+Braingeyser. Reserved selector seed `202607282311` remained unopened, no
+60-game screen ran, no model artifact was published, and no web policy
+changed. C16 remains champion.
+
+This is a falsification of one-generation broad distillation, not of the AQ4
+search operator: the large TRAIN gain coupled with negative disjoint DEV
+shows that a fixed parent-state corpus and one supervised projection still
+overfit even when ordinary decisions are labeled. Per the declaration, do
+not tune the cap, split, K/H, network width, optimizer, epochs, temperature,
+residual, or seed around this result. The next bot experiment is a true
+on-policy multi-generation loop: generation `g+1` must collect fresh
+whole-game-disjoint TRAIN/DEV trajectories from generation `g` with that
+generation's deployed Priority residual active in both source play and its
+actor-local teacher. Compare each frozen child against its frozen parent and
+stop at the first disjoint-DEV regression rather than selecting retrospectively.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
