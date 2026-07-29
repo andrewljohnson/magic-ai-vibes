@@ -265,6 +265,11 @@ void validate_corpus(const Corpus& corpus);
 void write_corpus_cache_atomic(
     const std::filesystem::path& path,
     const Corpus& corpus);
+// Exercises the exact production codec without touching the filesystem.
+// Transient state witnesses are intentionally absent from the returned copy.
+Corpus roundtrip_corpus_cache(
+    const Corpus& corpus,
+    std::shared_ptr<const LearnedModel> parent);
 Corpus load_corpus_cache(
     const std::filesystem::path& path,
     std::shared_ptr<const LearnedModel> parent);

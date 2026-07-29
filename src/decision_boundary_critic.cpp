@@ -185,7 +185,7 @@ bool parse_census_command(
 void print_usage(std::ostream& output) {
     output
         << "Usage: old-school-decision-boundary-critic "
-           "(--census|--run)\n";
+           "(--census|--run|--cache)\n";
 }
 
 std::string canonical_subset_hash(const Census& census) {
@@ -2189,6 +2189,44 @@ void write_corpus_cache_atomic(
     }
     write_corpus_cache_file_atomic(
         path, make_corpus_cache_file(corpus));
+}
+
+Corpus roundtrip_corpus_cache(
+    const Corpus& corpus,
+    std::shared_ptr<const LearnedModel> parent) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            kRequiredParentFingerprint ||
+        learned_critic_schema(parent) !=
+            LearnedCriticSchema::LegacyStateOnly) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 cache roundtrip requires exact frozen C16");
+    }
+    validate_corpus(corpus);
+    require_frozen_census(corpus.census);
+    if (corpus.digest != kFrozenCorpusDigest ||
+        corpus.parent_components !=
+            learned_model_component_fingerprints(parent)) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache roundtrip identity drifted");
+    }
+    Corpus expected = corpus;
+    for (auto* examples :
+         {&expected.train, &expected.dev}) {
+        for (RootExample& root : *examples) {
+            for (BoundaryCell& cell : root.cells) {
+                cell.boundary_state.reset();
+            }
+        }
+    }
+    Corpus decoded =
+        parse_corpus_cache_file(
+            make_corpus_cache_file(corpus));
+    if (decoded != expected) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache codec roundtrip drifted");
+    }
+    return decoded;
 }
 
 Corpus load_corpus_cache(

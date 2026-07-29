@@ -284,7 +284,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-action-q-nested-actor-early-stop action-q-nested-actor-early-stop-run
 .PHONY: test-action-q-nested-actor-anchor action-q-nested-actor-anchor-run
 .PHONY: test-action-q-broad-distill action-q-broad-distill-preflight action-q-broad-distill-census action-q-broad-distill-run
-.PHONY: test-decision-boundary-critic old-school-decision-boundary-critic decision-boundary-critic-census decision-boundary-critic-run
+.PHONY: test-decision-boundary-critic old-school-decision-boundary-critic decision-boundary-critic-census decision-boundary-critic-run decision-boundary-critic-cache
 .PHONY: test-action-q-on-policy-successor action-q-on-policy-successor-census action-q-on-policy-successor-run
 .PHONY: test-action-q-priority-trust-region action-q-priority-trust-region-run
 .PHONY: test-action-q-recursive-policy-improvement action-q-recursive-policy-improvement-run
@@ -820,7 +820,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			printf 'AQ10-DBC0 accepted an arbitrary mode\n' >&2; \
 			exit 1; \
 		fi; \
-		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-critic (--census|--run)' >/dev/null
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-critic (--census|--run|--cache)' >/dev/null
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
 	@set +e; output=`./$(ACTION_Q_ON_POLICY_SUCCESSOR) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
@@ -1728,7 +1728,7 @@ test-decision-boundary-critic: $(DECISION_BOUNDARY_CRITIC_TEST_RUNNER) $(DECISIO
 			printf 'AQ10-DBC0 accepted an arbitrary mode\n' >&2; \
 			exit 1; \
 		fi; \
-		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-critic (--census|--run)' >/dev/null
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-critic (--census|--run|--cache)' >/dev/null
 
 old-school-decision-boundary-critic: $(DECISION_BOUNDARY_CRITIC)
 
@@ -1737,6 +1737,9 @@ decision-boundary-critic-census: $(DECISION_BOUNDARY_CRITIC)
 
 decision-boundary-critic-run: $(DECISION_BOUNDARY_CRITIC)
 	./$(DECISION_BOUNDARY_CRITIC) --run
+
+decision-boundary-critic-cache: $(DECISION_BOUNDARY_CRITIC)
+	./$(DECISION_BOUNDARY_CRITIC) --cache
 
 test-action-q-on-policy-successor: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)

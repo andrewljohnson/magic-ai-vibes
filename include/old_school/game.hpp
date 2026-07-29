@@ -1530,6 +1530,12 @@ struct LearnedCriticDirectPathParameters {
         const LearnedCriticDirectPathParameters&) const =
         default;
 };
+using LearnedCriticContextDirectPathParameters =
+    std::array<
+        std::array<
+            double,
+            kLearnedDecisionContextFeatureCount>,
+        kLearnedCriticLeafCount>;
 double learned_critic_value(
     const GameState& state, std::size_t perspective,
     std::shared_ptr<const LearnedModel> model);
@@ -1546,6 +1552,9 @@ learned_critic_observation_leaf_values(
 // Exact two-leaf LegacyStateOnly Value topology only.
 LearnedCriticDirectPathParameters
 learned_critic_direct_path_parameters(
+    std::shared_ptr<const LearnedModel> model);
+LearnedCriticContextDirectPathParameters
+learned_critic_context_direct_path_parameters(
     std::shared_ptr<const LearnedModel> model);
 // Returns an immutable clone after adding one shared actor-local feature
 // delta to both critic leaves. A numerically all-zero delta returns the exact
@@ -2415,6 +2424,10 @@ struct LearnedWeightedCriticTrainingExample {
     std::vector<double> features;
     double target = 0.5;
     double weight = 1.0;
+
+    bool operator==(
+        const LearnedWeightedCriticTrainingExample&) const =
+        default;
 };
 
 struct LearnedOutputCalibrationConfig {

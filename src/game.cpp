@@ -2228,6 +2228,9 @@ class LearnedModel {
     friend LearnedCriticDirectPathParameters
     learned_critic_direct_path_parameters(
         std::shared_ptr<const LearnedModel> model);
+    friend LearnedCriticContextDirectPathParameters
+    learned_critic_context_direct_path_parameters(
+        std::shared_ptr<const LearnedModel> model);
     friend std::shared_ptr<const LearnedModel>
     with_learned_shared_critic_direct_delta(
         std::shared_ptr<const LearnedModel> parent,
@@ -18120,6 +18123,26 @@ learned_critic_direct_path_parameters(
         result.leaves[leaf] =
             model->ensemble_[leaf]
                 ->direct_output_weights_;
+    }
+    return result;
+}
+
+LearnedCriticContextDirectPathParameters
+learned_critic_context_direct_path_parameters(
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    if (!model->has_output_calibration_topology()) {
+        throw std::invalid_argument(
+            "Learned critic context direct paths require an "
+            "exact two-leaf legacy Value ensemble");
+    }
+    LearnedCriticContextDirectPathParameters result{};
+    for (std::size_t leaf = 0;
+         leaf < result.size(); ++leaf) {
+        result[leaf] =
+            model->ensemble_[leaf]
+                ->context_direct_output_weights_;
     }
     return result;
 }

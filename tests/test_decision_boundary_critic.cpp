@@ -824,6 +824,10 @@ int main() {
             old_school::
                 learned_critic_direct_path_parameters(
                     parent);
+        const auto parent_context_parameters =
+            old_school::
+                learned_critic_context_direct_path_parameters(
+                    parent);
         std::vector<double> zero(
             observation.size(), 0.0);
         const auto unchanged =
@@ -857,6 +861,10 @@ int main() {
             old_school::
                 learned_critic_direct_path_parameters(
                     candidate);
+        const auto candidate_context_parameters =
+            old_school::
+                learned_critic_context_direct_path_parameters(
+                    candidate);
         for (std::size_t leaf = 0;
              leaf <
              old_school::kLearnedCriticLeafCount;
@@ -870,18 +878,10 @@ int main() {
                     "shared delta changed a direct path incorrectly");
             }
         }
-        const double first_difference =
-            candidate_parameters.leaves[0][0] -
-            parent_parameters.leaves[0][0];
-        const double second_difference =
-            candidate_parameters.leaves[1][0] -
-            parent_parameters.leaves[1][0];
         expect(
-            std::bit_cast<std::uint64_t>(
-                first_difference) ==
-                std::bit_cast<std::uint64_t>(
-                    second_difference),
-            "leaf direct-path differences were not bit-identical");
+            candidate_context_parameters ==
+                parent_context_parameters,
+            "shared state-direct delta changed a context-direct path");
 
         const auto parent_components =
             old_school::
@@ -948,6 +948,14 @@ int main() {
                             actor));
             },
             "actor topology exported Value direct paths");
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    old_school::
+                        learned_critic_context_direct_path_parameters(
+                            actor));
+            },
+            "actor topology exported Value context direct paths");
         expect_rejected(
             [&] {
                 static_cast<void>(
