@@ -19361,6 +19361,158 @@ keep the same actor-local teacher examples, add broad owner-safe neutral
 decision anchors sampled without inspecting candidate scores, and require the
 candidate to learn the repairs without moving C16's already-correct behavior.
 
+##### AQ4-G3 broad parent-behavior anchor declaration
+
+Declared 2026-07-28 from result commit `2d9cf92`, before changing another fit
+path, reconstructing the G1 labels, loading a neutral row into AQ4, fitting a
+model, or opening a gameplay seed. `REVIEW.md` was reread through its newest
+21:49 PDT entry. Fresh selector seed `202607282201` was searched across the
+review-excluded worktree and Git history and was unused.
+
+Falsifiable hypothesis: G1's actor-local teacher contains useful general
+improvements, but fitting only its search targets lets the shared Priority
+head drift on ordinary decisions. One exact, card-agnostic 1:1
+parent-behavior regularizer over a separately collected, owner-safe,
+deck-balanced neutral corpus will simultaneously:
+
+1. pass every G1 offline and field-observed tactical gate;
+2. improve G1 DEV teacher regret over frozen C16;
+3. reduce the unanchored G1 model's neutral behavioral drift by at least half;
+   and
+4. win at least 31/60 against exact C16 on one fresh all-five-deck selector.
+
+This is one combined training treatment, not an anchor coefficient, epoch, or
+optimizer sweep. It introduces no card name, card-specific target, combat
+score, Handcrafted signal, opponent hidden identity, new search budget, or
+candidate-dependent row selection.
+
+The treatment reuses three immutable inputs:
+
+- exact C16 artifact
+  `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`,
+  3,111,437 bytes / SHA-256 `53aeb904...1f944ca`, model fingerprint
+  `68126afc...3e2f`;
+- the G1 corpus reconstructed once and required to reproduce owner-safe digest
+  `3b1fa739cbe5ece28f581f7361bc7ba22e9bc0d6f90f39addce783f1e7df346b`,
+  320 FIT roots / 1,023 options and 319 DEV roots / 1,018 options; and
+- published schema `old-school-fq4-priority-neutral-supplement-v1` at
+  `data/old-school-fq4-priority-neutral-supplement-v1.fq4neutral`, exactly
+  661,475 bytes / SHA-256
+  `47d94823f043971f6f9f0aa5f552bfae210af9615d8f6dc7392e52dad3eaa105`,
+  selected-order SHA-256
+  `c0925e709daaeefdb7d7714db6b07e68bd70b60f0a201d1626ee0fde28f61b7b`.
+  Its contract is authenticated through exact 2,250,909-byte DEV1 bundle
+  `0911fc2e...ca859df`.
+
+The neutral artifact was selected and published before AQ4: selection was
+blind to cards, phase, descriptors, parent/candidate score, game outcome, and
+source-selected action. It stores only owner-safe 893-feature options, public
+base scores, frozen-parent residuals, structural provenance, and accounting.
+Its exact canonical split is 160 FIT roots / 439 options and 160 diagnostic
+DEV roots / 438 options, 32 roots per deck in each split. DEV options by deck
+are Green 82, Red 86, Blue 80, White 103, and RU Aggro 87. Its FIT and DEV
+locators are disjoint and only FIT may enter the update. G1 and the neutral
+artifact have separately frozen source/seed provenance; coincident
+information-set feature rows, if any, are neither inspected nor filtered
+after the fact. The neutral DEV split has been observed by earlier FQ4 work,
+so it is explicitly a development/retention diagnostic, not fresh held-out
+strength evidence.
+
+Before the treatment, the omitted-anchor 320-row control must reproduce the
+exact G1 optimizer, candidate fingerprint
+`e0217302d83a4949950af84ab754e38be6ebbd6c2adac6a4193f05f70b7a1376`,
+and all four G1/G2 aggregate metric bit patterns. Any mismatch rejects G3
+before constructing the anchored candidate.
+
+The sole treatment is **one Adam call over exactly 480 rows / 1,462 option
+occurrences** in canonical pre-shuffle order:
+
+1. the unchanged 320 G1 FIT teacher rows in corpus order, each retaining
+   inverse-deck-count weight `1/64`; then
+2. all 160 neutral FIT rows in artifact order, each with weight `1/32`.
+
+Thus teacher and parent anchors each contribute exact loss mass one within
+each of Green, Red, Blue, White, and RU Aggro. The seeded optimizer may
+shuffle that one combined vector internally each epoch; there is no separate
+teacher call, anchor call, staged update, or blended parameter model. Keep
+every G1 optimizer coordinate exact: batch 64, epochs 64, learning rate
+0.003, Adam betas 0.9/0.999, epsilon `1e-8`, global gradient clip 5, seed
+`12262988820247274425`, residual weight 0.10, and policy temperature 0.10.
+
+For a neutral row, let stored frozen-parent combined score for action `i` be
+`s_i = base_i + parent_residual_i`. Its parent target is exactly
+
+```text
+z_i = exp((s_i - max(s)) / 0.10) / sum_j exp((s_j - max(s)) / 0.10)
+target_i = 0.90 * z_i + 0.10 / action_count
+```
+
+This is the already-published frozen C16 Priority-head behavior at residual
+0.10, not a one-hot action, C16's residual-zero root search distribution, or
+a claim about sampled gameplay. Weighted cross-entropy against this target
+is `KL(parent_behavior || candidate_behavior)` plus a parent-only constant.
+Teacher rows retain their exact actor-local targets. A canonical mixed-batch
+digest must bind source kind, order, every option/base/target/weight binary64
+bit, both source identities, parent identity, and optimizer. The repeated
+anchored fit must be bit-identical; C16 must remain immutable; only Priority
+parameters may change.
+
+The anchored candidate is eligible only if all of these gates pass:
+
+1. every original G1 isolation, FIT-improvement, DEV-improvement, per-deck
+   `+0.01` regret guard, descriptor/order identity, redundant Counterspell,
+   productive Braingeyser, sick-Bear Giant Growth, and live Force Spike gate;
+2. the complete Ancestral gate now conjunctively required: self strictly
+   above opponent, opponent absent from exact-max support, complete legal
+   actions/fingerprint exact, and hidden-repartition identity;
+3. the exact neutral DEV diagnostic below.
+
+For each neutral DEV row, obtain model logits from the established owner-safe
+Priority features, center them by their row mean, and form combined candidate
+scores `qscore_i = base_i + 0.10 * tanh(logit_i - mean(logit))`. Convert both
+the stored parent combined scores and model combined scores through the same
+0.10-temperature, 0.90/0.10-positive distribution above. Row drift is
+forward
+`D_KL(parent_behavior || candidate_behavior) = sum_i P_i * log(P_i / Q_i)`.
+Within each deck, average its 32 rows in artifact order; the equal-deck value
+is the arithmetic mean of the five deck means. Exact support is the set of
+indices whose raw combined score equals that row's binary64 maximum; a
+support change is one row whose parent and candidate index sets differ.
+
+Score exact unanchored G1 and the anchored candidate on the same 160 neutral
+DEV rows. All distributions and metrics must be finite; the unanchored G1
+equal-deck KL and pooled support-change count must both be strictly positive.
+For **every deck**, anchored mean KL and support-change count must each be no
+greater than unanchored G1. The pooled gates are literal direct comparisons
+`2 * anchored_equal_deck_KL <= unanchored_equal_deck_KL` and
+`2 * anchored_support_changes <= unanchored_support_changes`. The integer
+inequality defines odd counts exactly; a zero pooled baseline rejects rather
+than making “halved” vacuous. No epsilon, confidence tolerance, alternate KL
+direction, or tie relaxation is allowed.
+
+Only this one offline-passing model may open
+`run_bot_benchmark(1, 202607282201, anchored, C16, max_turns=500, false)`.
+Reuse the exact 60-game/all-five-deck/quadrant/joint-matchup validator and
+G1/G2 interpretation: FAST_GO at at least 37 wins plus at least 3/12 for each
+challenger deck; MANUAL_ONLY at 31--36 with that same deck floor; otherwise
+REJECT. The selector is a quick manual-pilot screen, not a champion claim.
+It contains no Handcrafted policy or training signal. C16 remains champion
+and deployed on the web unless a later full acceptance gate promotes a
+challenger.
+
+Exact CLI after a reviewed implementation-freeze commit:
+
+```sh
+./build/old-school-action-q-nested-actor-anchor --run
+```
+
+If the fixed treatment fails offline or in the selector, retain the result
+and close this 1:1 parent-anchor packaging hypothesis without trying another
+weight, epoch, learning rate, residual, seed, or artifact subset. The next
+research axis is then a genuinely broader/iterated actor-local teacher corpus,
+because early stopping and the independent parent-retention treatment will
+both have failed to package the same fixed labels.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
