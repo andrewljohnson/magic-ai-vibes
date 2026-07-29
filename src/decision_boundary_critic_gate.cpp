@@ -74,7 +74,8 @@ bool accounted(const Stats& stats) {
 bool selector_recipe_exact(
     const BotBenchmarkSummary& summary,
     const std::shared_ptr<const LearnedModel>& parent,
-    const std::shared_ptr<const LearnedModel>& candidate) {
+    const std::shared_ptr<const LearnedModel>& candidate,
+    std::uint64_t selector_seed) {
     const auto bot_exact =
         [](const BotConfig& bot,
            const std::shared_ptr<const LearnedModel>& model) {
@@ -98,7 +99,7 @@ bool selector_recipe_exact(
                 bot.training_games == 800 &&
                 bot.learned_model == model;
         };
-    return summary.evaluation_seed == kSelectorSeed &&
+    return summary.evaluation_seed == selector_seed &&
         summary.learned_training_seed == 424242 &&
         summary.repetitions_per_deck_pairing ==
             g1::kSelectorRepetitions &&
@@ -109,6 +110,22 @@ bool selector_recipe_exact(
         summary.challenger_model_fingerprint ==
             learned_model_fingerprint(candidate) &&
         summary.baseline_model_fingerprint ==
+            learned_model_fingerprint(parent);
+}
+
+bool generic_candidate_authenticated(
+    const std::shared_ptr<const LearnedModel>& parent,
+    const std::shared_ptr<const LearnedModel>& candidate,
+    bool derivation_authenticated) {
+    return derivation_authenticated &&
+        parent && candidate &&
+        learned_model_fingerprint(parent) ==
+            dbc::kRequiredParentFingerprint &&
+        learned_critic_schema(parent) ==
+            LearnedCriticSchema::LegacyStateOnly &&
+        learned_critic_schema(candidate) ==
+            LearnedCriticSchema::LegacyStateOnly &&
+        learned_model_fingerprint(candidate) !=
             learned_model_fingerprint(parent);
 }
 
@@ -201,13 +218,24 @@ bool MechanismReport::selector_licensed() const {
 MechanismReport run_mechanism_gate(
     std::shared_ptr<const LearnedModel> parent,
     const dbc::FitReport& fit) {
+    return run_candidate_mechanism_gate(
+        parent, fit.candidate,
+        fitted_candidate_authenticated(parent, fit));
+}
+
+MechanismReport run_candidate_mechanism_gate(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate,
+    bool derivation_authenticated) {
     MechanismReport report{
         .parent_fingerprint =
             learned_model_fingerprint(parent),
         .candidate_fingerprint =
-            fit.candidate_fingerprint,
+            learned_model_fingerprint(candidate),
         .candidate_derivation_authenticated =
-            fitted_candidate_authenticated(parent, fit),
+            generic_candidate_authenticated(
+                parent, candidate,
+                derivation_authenticated),
         .exact_configuration =
             kMechanismSimulations ==
                 diagnostic::kSmallBudget &&
@@ -242,7 +270,7 @@ MechanismReport run_mechanism_gate(
             .candidate =
                 isp0::
                     run_output_calibrated_candidate_root_evidence(
-                        root, fit.candidate,
+                        root, candidate,
                         kMechanismSeed,
                         kMechanismSimulations,
                         LearnedTerminalUtilityMode::
@@ -299,7 +327,7 @@ MechanismReport run_mechanism_gate(
     report.candidate_opponent =
         isp0::
             run_output_calibrated_candidate_opponent_noninterference_evidence(
-                roots, fit.candidate, kMechanismSeed,
+                roots, candidate, kMechanismSeed,
                 LearnedTerminalUtilityMode::
                     C16DiscountedAbsoluteTurn);
     report.exact_nine_root_census =
@@ -358,9 +386,21 @@ void print_mechanism_report(
 SelectorReport run_selector(
     std::shared_ptr<const LearnedModel> parent,
     const dbc::FitReport& fit) {
+    return run_candidate_selector(
+        parent, fit.candidate, kSelectorSeed,
+        fitted_candidate_authenticated(parent, fit));
+}
+
+SelectorReport run_candidate_selector(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate,
+    std::uint64_t selector_seed,
+    bool derivation_authenticated) {
     SelectorReport report{
         .candidate_derivation_authenticated =
-            fitted_candidate_authenticated(parent, fit),
+            generic_candidate_authenticated(
+                parent, candidate,
+                derivation_authenticated),
     };
     if (!report.candidate_derivation_authenticated) {
         throw std::invalid_argument(
@@ -374,14 +414,15 @@ SelectorReport run_selector(
     report.summary =
         run_bot_benchmark(
             g1::kSelectorRepetitions,
-            kSelectorSeed,
+            selector_seed,
             g1::selector_bot_config(
-                fit.candidate, 0.0),
+                candidate, 0.0),
             g1::selector_bot_config(parent, 0.0),
             game, false);
     report.exact_recipe =
         selector_recipe_exact(
-            report.summary, parent, fit.candidate);
+            report.summary, parent, candidate,
+            selector_seed);
     report.exact_balance =
         selector_balance_exact(report.summary);
     report.every_deck_floor = true;
@@ -409,7 +450,8 @@ void print_selector_report(
     std::ostream& output,
     const SelectorReport& report) {
     output
-        << "selector seed=" << kSelectorSeed
+        << "selector seed="
+        << report.summary.evaluation_seed
         << " wins=" << report.summary.challenger_stats.wins
         << " losses="
         << report.summary.challenger_stats.losses

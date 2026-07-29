@@ -59,6 +59,10 @@ struct MechanismReport {
 MechanismReport run_mechanism_gate(
     std::shared_ptr<const LearnedModel> parent,
     const dbc::FitReport& fit);
+MechanismReport run_candidate_mechanism_gate(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate,
+    bool derivation_authenticated);
 void print_mechanism_report(
     std::ostream& output,
     const MechanismReport& report);
@@ -77,6 +81,11 @@ struct SelectorReport {
 SelectorReport run_selector(
     std::shared_ptr<const LearnedModel> parent,
     const dbc::FitReport& fit);
+SelectorReport run_candidate_selector(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate,
+    std::uint64_t selector_seed,
+    bool derivation_authenticated);
 void print_selector_report(
     std::ostream& output,
     const SelectorReport& report);
