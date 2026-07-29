@@ -20555,6 +20555,22 @@ single operator question quickly. A passing pilot must later be rebuilt and
 judged on fresh whole-game-disjoint roots plus the AGENTS.md milestone gates
 before it can challenge C16.
 
+AQ4-OP2 preregistration review addendum, recorded 2026-07-29 02:45 PDT
+before bot-logic implementation or reconstruction: tighten the sweep to a
+descending, stop-on-first-pass protocol. Alpha 1.00 remains an exact rejected
+control and must be reconstructed and checked first. Then evaluate candidate
+arms in the fixed order `0.75, 0.50, 0.25`; stop at the first arm satisfying
+every offline gate and do not inspect any smaller arm. If an attempted arm
+fails, report its full metrics and individual safety booleans before advancing.
+Thus “largest passing arm” means the first passing arm in this fixed order,
+not an after-the-fact comparison across all observed DEV results. Only that
+arm may open the one fresh selector. If its selector fails, stop OP2 rather
+than trying a smaller alpha on the same gameplay seed. This addendum reduces
+runtime and adaptive validation exposure without changing the hypothesis,
+candidate set, thresholds, selector, or manual-only status. Top-one agreement
+remains descriptive; no new KL metric or infrastructure gate is introduced
+for this fast first test.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
