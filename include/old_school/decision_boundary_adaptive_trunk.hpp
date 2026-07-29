@@ -1,7 +1,6 @@
 #pragma once
 
-#include "old_school/action_q_offline_gate.hpp"
-#include "old_school/decision_boundary_rank_direct.hpp"
+#include "old_school/decision_boundary_action_pair.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,19 +9,23 @@
 #include <string>
 #include <vector>
 
-namespace old_school::decision_boundary_action_pair {
+namespace old_school::decision_boundary_adaptive_trunk {
 
 namespace dbc = decision_boundary_critic;
-namespace direct = decision_boundary_rank_direct;
+namespace pair = decision_boundary_action_pair;
 
 inline constexpr std::size_t kPolicyFeatureCount =
-    dbc::kPolicyFeatureCount;
-inline constexpr std::size_t kHiddenCount = 32;
-inline constexpr std::size_t kFoldCount = 4;
+    pair::kPolicyFeatureCount;
+inline constexpr std::size_t kHiddenCount =
+    pair::kHiddenCount;
+inline constexpr std::size_t kParameterCount =
+    3 * kHiddenCount;
+inline constexpr std::size_t kFoldCount =
+    pair::kFoldCount;
 inline constexpr std::uint64_t kFitTag =
-    UINT64_C(202607291601);
+    UINT64_C(202607291701);
 inline constexpr std::uint64_t kSelectorSeed =
-    UINT64_C(202607291611);
+    UINT64_C(202607291711);
 inline constexpr std::size_t kAdamSteps = 256;
 inline constexpr double kAdamLearningRate = 0.001;
 inline constexpr double kAdamBetaOne = 0.9;
@@ -32,19 +35,27 @@ inline constexpr double kGlobalGradientNormClip = 5.0;
 inline constexpr double kPairTemperature = 0.10;
 inline constexpr double kResidualWeight = 0.10;
 inline constexpr double kL2Tether = 0.10;
+inline constexpr double kMaximumAgreementError = 1.0e-12;
 
 static_assert(kPolicyFeatureCount == 893);
 static_assert(kHiddenCount == 32);
+static_assert(kParameterCount == 96);
 
-using Delta = std::array<double, kHiddenCount>;
-using Hidden = std::array<double, kHiddenCount>;
+using Hidden = pair::Hidden;
+using Metrics = pair::Metrics;
+using OfflineGate = pair::OfflineGate;
+
+struct Parameters {
+    Hidden gain{};
+    Hidden bias{};
+    Hidden output{};
+
+    bool operator==(const Parameters&) const = default;
+};
 
 struct Root {
-    direct::RankRoot ranking;
-    std::size_t schedule_index = 0;
-    std::size_t actor = 0;
-    std::vector<std::vector<double>> options;
-    std::vector<Hidden> hidden;
+    pair::Root paired;
+    std::vector<Hidden> parent_preactivations;
 
     bool operator==(const Root&) const = default;
 };
@@ -65,35 +76,6 @@ struct Corpus {
     bool operator==(const Corpus&) const = default;
 };
 
-struct PairDeckMetrics {
-    DeckId deck = DeckId::Green;
-    std::size_t roots = 0;
-    std::size_t all_tied_roots = 0;
-    std::size_t unordered_pairs = 0;
-    std::size_t eligible_pairs = 0;
-    double pair_bce = 0.0;
-
-    bool operator==(const PairDeckMetrics&) const = default;
-};
-
-struct PairMetrics {
-    std::array<PairDeckMetrics, kDeckCount> decks{};
-    std::size_t roots = 0;
-    std::size_t all_tied_roots = 0;
-    std::size_t unordered_pairs = 0;
-    std::size_t eligible_pairs = 0;
-    double equal_deck_pair_bce = 0.0;
-
-    bool operator==(const PairMetrics&) const = default;
-};
-
-struct Metrics {
-    PairMetrics pairs;
-    direct::Metrics ranking;
-
-    bool operator==(const Metrics&) const = default;
-};
-
 struct OptimizerConfig {
     std::uint64_t fit_tag = kFitTag;
     std::size_t steps = kAdamSteps;
@@ -112,11 +94,11 @@ struct OptimizerConfig {
 
 struct OptimizerReport {
     OptimizerConfig config;
-    Delta delta{};
+    Parameters parameters;
     std::size_t completed_steps = 0;
     double initial_objective = 0.0;
     double final_objective = 0.0;
-    double delta_l2_norm = 0.0;
+    double parameter_l2_norm = 0.0;
     double final_gradient_l2_norm = 0.0;
     double maximum_preclip_gradient_l2_norm = 0.0;
     std::size_t clipped_steps = 0;
@@ -137,8 +119,8 @@ struct ModelIsolationReport {
     bool parent_positive_zero = false;
     bool parent_immutable = false;
     bool repeated_application_bit_identical = false;
-    bool only_priority_hidden_output_changed = false;
-    bool exact_delta = false;
+    bool only_priority_adaptive_trunk_changed = false;
+    bool exact_transform = false;
     std::size_t changed_coordinates = 0;
 
     bool safe_for_evaluation() const;
@@ -150,30 +132,24 @@ struct ExactEvaluationReport {
     Metrics candidate_train;
     Metrics parent_dev;
     Metrics candidate_dev;
+    double maximum_preactivation_difference = 0.0;
     double maximum_activation_difference = 0.0;
     double maximum_logit_difference = 0.0;
     double maximum_residual_difference = 0.0;
-    bool zero_delta_equivalent = false;
+    bool legal_action_permutation_equivariant = false;
+    bool hidden_repartition_live_probe_eligible = false;
+    bool hidden_repartition_nonvacuous = false;
+    bool hidden_repartition_owner_observation_bit_identical = false;
+    bool hidden_repartition_actions_bit_identical = false;
+    bool hidden_repartition_options_bit_identical = false;
+    bool hidden_repartition_logits_bit_identical = false;
+    bool hidden_repartition_centered_logits_bit_identical = false;
+    bool hidden_repartition_residuals_bit_identical = false;
+    bool zero_parameters_equivalent = false;
     bool successor_predictions_bit_identical = false;
     bool successor_metrics_bit_identical = false;
 
     bool operator==(const ExactEvaluationReport&) const = default;
-};
-
-struct FoldReport {
-    std::array<OptimizerReport, kFoldCount> fits{};
-    std::array<OptimizerReport, kFoldCount> repeated_fits{};
-    Metrics parent;
-    Metrics candidate;
-    bool exact_balance = false;
-    bool repeated_fits_bit_identical = false;
-    bool repeated_scores_bit_identical = false;
-    bool model_isolation_passed = false;
-    double maximum_activation_difference = 0.0;
-    double maximum_logit_difference = 0.0;
-    double maximum_residual_difference = 0.0;
-
-    bool operator==(const FoldReport&) const = default;
 };
 
 struct OfflineGateInputs {
@@ -191,6 +167,14 @@ struct OfflineGateInputs {
     bool parameter_replay_bit_identical = false;
     bool zero_delta_equivalent = false;
     bool actual_model_agreement = false;
+    bool hidden_repartition_live_probe_eligible = false;
+    bool hidden_repartition_nonvacuous = false;
+    bool hidden_repartition_owner_observation_bit_identical = false;
+    bool hidden_repartition_actions_bit_identical = false;
+    bool hidden_repartition_options_bit_identical = false;
+    bool hidden_repartition_logits_bit_identical = false;
+    bool hidden_repartition_centered_logits_bit_identical = false;
+    bool hidden_repartition_residuals_bit_identical = false;
     bool parent_immutable = false;
     bool model_isolation_passed = false;
     bool successor_predictions_bit_identical = false;
@@ -199,28 +183,21 @@ struct OfflineGateInputs {
     bool operator==(const OfflineGateInputs&) const = default;
 };
 
-struct OfflineGate {
-    bool train_pair_bce_improved = false;
-    bool train_regret_improved = false;
-    bool train_listwise_non_increasing = false;
-    bool oof_pair_bce_improved = false;
-    bool oof_regret_improved = false;
-    bool oof_listwise_non_increasing = false;
-    bool oof_top_one_non_decreasing = false;
-    bool oof_stable_pair_non_decreasing = false;
-    std::array<bool, kDeckCount> oof_deck_regret_non_increasing{};
-    bool dev_pair_bce_improved = false;
-    bool dev_regret_improved = false;
-    bool dev_listwise_non_increasing = false;
-    bool dev_top_one_non_decreasing = false;
-    bool dev_stable_pair_non_decreasing = false;
-    std::array<bool, kDeckCount> dev_deck_regret_non_increasing{};
-    bool successor_unchanged = false;
-    bool invariants_passed = false;
-    std::vector<std::string> failures;
+struct FoldReport {
+    std::array<OptimizerReport, kFoldCount> fits{};
+    std::array<OptimizerReport, kFoldCount> repeated_fits{};
+    Metrics parent;
+    Metrics candidate;
+    bool exact_balance = false;
+    bool repeated_fits_bit_identical = false;
+    bool repeated_scores_bit_identical = false;
+    bool model_isolation_passed = false;
+    double maximum_preactivation_difference = 0.0;
+    double maximum_activation_difference = 0.0;
+    double maximum_logit_difference = 0.0;
+    double maximum_residual_difference = 0.0;
 
-    bool passed() const;
-    bool operator==(const OfflineGate&) const = default;
+    bool operator==(const FoldReport&) const = default;
 };
 
 Corpus project_corpus(
@@ -231,34 +208,30 @@ void validate_corpus(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent);
 
-PairMetrics pair_census(const Dataset& dataset);
+pair::PairMetrics pair_census(const Dataset& dataset);
 bool frozen_pair_census_exact(const Corpus& corpus);
 Dataset fold_training_dataset(
     const Dataset& train, std::size_t held_out_fold);
 Dataset fold_holdout_dataset(
     const Dataset& train, std::size_t held_out_fold);
 
-Metrics evaluate(const Dataset& dataset, const Delta& delta);
-// Reuses DBC4's exact pair/ranking aggregation for already computed
-// current-root residuals. This is read-only and exists so later frozen
-// action-head experiments do not clone the metric implementation.
-Metrics evaluate_residuals(
+Metrics evaluate(
     const Dataset& dataset,
-    const std::vector<std::vector<double>>& residuals);
+    const Parameters& parameters);
 OptimizerReport optimize(
     const Dataset& train,
     OptimizerConfig config = {});
 bool optimizer_bit_identical(
     const OptimizerReport& first,
     const OptimizerReport& second);
-ModelIsolationReport apply_delta(
+ModelIsolationReport apply_parameters(
     std::shared_ptr<const LearnedModel> parent,
-    const Delta& delta);
+    const Parameters& parameters);
 ExactEvaluationReport evaluate_exact(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent,
     const ModelIsolationReport& isolation,
-    const Delta& delta);
+    const Parameters& parameters);
 FoldReport evaluate_grouped_oof(
     const Dataset& train,
     std::shared_ptr<const LearnedModel> parent);
@@ -276,11 +249,47 @@ bool model_scores_bit_identical(
 
 namespace testing {
 
+struct HiddenRepartitionView {
+    std::vector<double> owner_observation;
+    std::vector<PriorityAction> actions;
+    std::vector<std::vector<double>> option_rows;
+    std::vector<double> logits;
+    std::vector<double> centered_logits;
+    std::vector<double> centered_residuals;
+
+    bool operator==(
+        const HiddenRepartitionView&) const = default;
+};
+
+struct HiddenRepartitionWitness {
+    bool live_probe_eligible = false;
+    bool nonvacuous = false;
+    bool owner_observation_bit_identical = false;
+    bool actions_bit_identical = false;
+    bool options_bit_identical = false;
+    bool logits_bit_identical = false;
+    bool centered_logits_bit_identical = false;
+    bool residuals_bit_identical = false;
+
+    bool passed() const;
+    bool operator==(
+        const HiddenRepartitionWitness&) const = default;
+};
+
 struct ObjectiveProbe {
     double objective = 0.0;
-    Delta gradient{};
+    Parameters gradient;
 
     bool operator==(const ObjectiveProbe&) const = default;
+};
+
+struct ForwardProbe {
+    std::vector<Hidden> preactivations;
+    std::vector<Hidden> activations;
+    std::vector<double> logits;
+    std::vector<double> residuals;
+
+    bool operator==(const ForwardProbe&) const = default;
 };
 
 Dataset make_dataset(std::vector<Root> roots);
@@ -288,8 +297,28 @@ Corpus make_corpus(
     Dataset train, Dataset dev,
     LearnedModelComponentFingerprints parent_components);
 ObjectiveProbe objective_probe(
-    const Dataset& dataset, const Delta& delta);
+    const Dataset& dataset,
+    const Parameters& parameters);
+ForwardProbe analytic_forward(
+    const Root& root,
+    const Parameters& parameters);
+ForwardProbe model_forward(
+    const Root& root,
+    std::shared_ptr<const LearnedModel> model);
+Root permute_actions(
+    const Root& root,
+    const std::vector<std::size_t>& permutation);
+bool legal_action_permutation_equivariant(
+    const Root& root,
+    const Parameters& parameters,
+    std::shared_ptr<const LearnedModel> model);
+HiddenRepartitionWitness
+compare_hidden_repartition_views(
+    bool live_probe_eligible,
+    bool opponent_hidden_zones_nonvacuous,
+    const HiddenRepartitionView& original,
+    const HiddenRepartitionView& repartitioned);
 
 } // namespace testing
 
-} // namespace old_school::decision_boundary_action_pair
+} // namespace old_school::decision_boundary_adaptive_trunk

@@ -1389,6 +1389,19 @@ Metrics evaluate(
         analytic_residuals(dataset, delta));
 }
 
+Metrics evaluate_residuals(
+    const Dataset& dataset,
+    const std::vector<std::vector<double>>& residuals) {
+    validate_dataset(dataset);
+    for (const auto& root : residuals) {
+        if (!finite(root)) {
+            throw std::invalid_argument(
+                "DBC4-ACTION-PAIR residuals are nonfinite");
+        }
+    }
+    return metrics_from_residuals(dataset, residuals);
+}
+
 OptimizerReport optimize(
     const Dataset& train,
     OptimizerConfig config) {
