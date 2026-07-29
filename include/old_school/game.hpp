@@ -583,6 +583,7 @@ inline constexpr bool
 
 class LearnedModel;
 class LearnedPolicyRecorder;
+struct LearnedNestedSearchTracker;
 
 inline constexpr std::uint64_t kDefaultLearnedTrainingSeed = 424242;
 
@@ -764,7 +765,8 @@ ValueContextAliasDiagnostic diagnose_value_context_aliases();
 // Configuration for evaluation-only information-set action scoring. Worlds
 // are sampled once from the root player's observation, then every candidate
 // is evaluated with the same world and continuation-seed matrix. Nested root
-// search is always disabled inside continuations.
+// search is disabled by default and, when explicitly enabled for Value
+// continuations, is bounded to one actor-local level.
 struct LearnedSearchConfig {
     std::uint64_t seed = 0;
     std::size_t worlds = 1;
@@ -809,6 +811,13 @@ struct LearnedSearchConfig {
     // already produced by each candidate/world/rollout evaluation. The
     // default leaves the historical result schema and execution untouched.
     bool capture_priority_h0_boundaries = false;
+    // Evaluation-only symmetric policy-improvement seam. Kept last so the
+    // default-zero extension does not perturb existing aggregate
+    // initialization. Zero preserves historical depth-zero continuations
+    // bit-for-bit. A positive value gives each continuation actor a fresh
+    // Value root search over this many worlds; inner continuations stay at
+    // depth zero.
+    std::size_t value_continuation_search_worlds = 0;
 };
 
 struct LearnedPriorityH0Boundary {
@@ -921,6 +930,18 @@ struct LearnedActionSamples {
     // Each rollout is classified exactly once by the score source.
     std::size_t terminal_evaluations = 0;
     std::size_t bootstrapped_evaluations = 0;
+    // Priority-only nested actor-search accounting. The matrix is absent when
+    // value_continuation_search_worlds is zero; otherwise it has the exact
+    // q_samples shape and cross-sums to inner_rollout_evaluations.
+    std::vector<std::vector<std::size_t>>
+        priority_inner_rollout_evaluations;
+    std::vector<std::vector<std::size_t>>
+        priority_inner_search_invocations;
+    std::vector<std::vector<std::size_t>>
+        priority_inner_search_max_depth;
+    std::size_t inner_rollout_evaluations = 0;
+    std::size_t inner_search_invocations = 0;
+    std::size_t inner_search_max_depth = 0;
     // Present only when capture_priority_h0_boundaries is enabled. Outer and
     // inner order exactly match q_samples.
     std::vector<std::vector<LearnedPriorityH0Boundary>>
@@ -1343,6 +1364,11 @@ class Game {
     // Non-null only inside the evaluation-only macro-transition driver.
     LearnedPriorityMacroControl*
         learned_priority_macro_control_ = nullptr;
+    // Evaluation-only shared witness. Copies created by inner action
+    // continuations retain this pointer, making accidental recursive root
+    // search observable even when the child Game itself is discarded.
+    std::shared_ptr<LearnedNestedSearchTracker>
+        learned_nested_search_tracker_;
 };
 
 struct DeckSimulationStats {

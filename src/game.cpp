@@ -31,6 +31,69 @@ namespace old_school {
 
 constexpr std::size_t kLearnedCardCount = kCardCount;
 
+struct LearnedNestedSearchTracker {
+    std::size_t invocations = 0;
+    std::size_t rollout_evaluations = 0;
+    std::size_t active_depth = 0;
+    std::size_t maximum_active_depth = 0;
+
+    void begin() {
+        if (invocations ==
+                std::numeric_limits<std::size_t>::max() ||
+            active_depth ==
+                std::numeric_limits<std::size_t>::max()) {
+            throw std::overflow_error(
+                "nested search invocation accounting overflow");
+        }
+        ++invocations;
+        ++active_depth;
+        maximum_active_depth =
+            std::max(maximum_active_depth, active_depth);
+    }
+
+    void add_rollouts(std::size_t count) {
+        if (rollout_evaluations >
+            std::numeric_limits<std::size_t>::max() -
+                count) {
+            throw std::overflow_error(
+                "nested search rollout accounting overflow");
+        }
+        rollout_evaluations += count;
+    }
+
+    void end() noexcept {
+        if (active_depth != 0) {
+            --active_depth;
+        }
+    }
+};
+
+class LearnedNestedSearchScope {
+  public:
+    explicit LearnedNestedSearchScope(
+        const std::shared_ptr<LearnedNestedSearchTracker>&
+            tracker)
+        : tracker_(tracker) {
+        if (tracker_) {
+            tracker_->begin();
+        }
+    }
+
+    ~LearnedNestedSearchScope() {
+        if (tracker_) {
+            tracker_->end();
+        }
+    }
+
+    LearnedNestedSearchScope(
+        const LearnedNestedSearchScope&) = delete;
+    LearnedNestedSearchScope& operator=(
+        const LearnedNestedSearchScope&) = delete;
+
+  private:
+    std::shared_ptr<LearnedNestedSearchTracker> tracker_;
+};
+
 class ModelFingerprintHash {
   public:
     void add(std::uint64_t value) {
@@ -13424,6 +13487,10 @@ PriorityAction Game::choose_priority_action(
         const bool root_search =
             bot.rollouts_per_action > 0 &&
             config_.learned_search_depth > 0;
+        LearnedNestedSearchScope nested_search_scope(
+            root_search
+                ? learned_nested_search_tracker_
+                : nullptr);
         const std::size_t world_count =
             root_search ? bot.rollouts_per_action : 1;
         std::vector<SampledWorld> worlds;
@@ -13490,13 +13557,33 @@ PriorityAction Game::choose_priority_action(
             scores[action_index] = aggregate.score();
         }
         if (root_search) {
-            state_.stats[player].monte_carlo_rollouts +=
-                (continuation_controller_active
-                     ? continuation_controller_retained.size()
-                 : bot.value_pass_dominance
-                     ? pass_dominance_retained.size()
-                     : actions.size()) *
+            const std::size_t evaluated_actions =
+                continuation_controller_active
+                    ? continuation_controller_retained.size()
+                : bot.value_pass_dominance
+                    ? pass_dominance_retained.size()
+                    : actions.size();
+            if (evaluated_actions >
+                std::numeric_limits<std::size_t>::max() /
+                    bot.rollouts_per_action) {
+                throw std::overflow_error(
+                    "Value root-search rollout accounting overflow");
+            }
+            const std::size_t rollout_evaluations =
+                evaluated_actions *
                 bot.rollouts_per_action;
+            if (state_.stats[player].monte_carlo_rollouts >
+                std::numeric_limits<std::size_t>::max() -
+                    rollout_evaluations) {
+                throw std::overflow_error(
+                    "Value root-search rollout total overflow");
+            }
+            state_.stats[player].monte_carlo_rollouts +=
+                rollout_evaluations;
+            if (learned_nested_search_tracker_) {
+                learned_nested_search_tracker_->add_rollouts(
+                    rollout_evaluations);
+            }
         }
         if (bot.value_priority_residual_weight != 0.0) {
             const auto residual =
@@ -21669,6 +21756,17 @@ void validate_search_config(
         throw std::invalid_argument(
             "Value continuation controller requires a Value-mirror search");
     }
+    if (config.value_continuation_search_worlds >
+        kMaximumEvaluationWorlds) {
+        throw std::invalid_argument(
+            "Value continuation search worlds must be at most 4096");
+    }
+    if (config.value_continuation_search_worlds != 0 &&
+        config.continuation_variant !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "Value continuation search requires a Value-mirror search");
+    }
     if (config.worlds == 0 ||
         config.worlds > kMaximumEvaluationWorlds) {
         throw std::invalid_argument(
@@ -21750,6 +21848,7 @@ std::vector<LearnedEvaluationWorld> sample_evaluation_worlds(
 GameConfig learned_evaluation_game_config(
     const std::shared_ptr<const LearnedModel>& model,
     LearnedVariant variant,
+    std::size_t value_continuation_search_worlds,
     double value_continuation_epsilon,
     double value_priority_residual_weight,
     bool value_pass_dominance,
@@ -21757,12 +21856,14 @@ GameConfig learned_evaluation_game_config(
         value_continuation_controller) {
     GameConfig config;
     config.learned_model = model;
-    config.learned_search_depth = 0;
+    config.learned_search_depth =
+        value_continuation_search_worlds == 0 ? 0 : 1;
     config.bots = {
         BotConfig{
             .kind = BotKind::Learned,
             .learned_variant = variant,
-            .rollouts_per_action = 0,
+            .rollouts_per_action =
+                value_continuation_search_worlds,
             .exploration_rate =
                 value_continuation_epsilon,
             .value_priority_residual_weight =
@@ -21776,7 +21877,8 @@ GameConfig learned_evaluation_game_config(
         BotConfig{
             .kind = BotKind::Learned,
             .learned_variant = variant,
-            .rollouts_per_action = 0,
+            .rollouts_per_action =
+                value_continuation_search_worlds,
             .exploration_rate =
                 value_continuation_epsilon,
             .value_priority_residual_weight =
@@ -22062,6 +22164,7 @@ LearnedActionSamples learned_priority_action_samples(
             config.seed, 0x4556414C55415445ULL, 0),
         learned_evaluation_game_config(
             model, config.continuation_variant,
+            config.value_continuation_search_worlds,
             config.value_continuation_epsilon,
             config.value_priority_residual_weight,
             config.value_pass_dominance,
@@ -22083,11 +22186,25 @@ LearnedActionSamples learned_priority_action_samples(
         std::vector<double>(samples_per_action));
     result.exact_priority_aggregate_scores.resize(
         candidates.size());
+    if (config.value_continuation_search_worlds != 0) {
+        result.priority_inner_rollout_evaluations.resize(
+            candidates.size(),
+            std::vector<std::size_t>(samples_per_action));
+        result.priority_inner_search_invocations.resize(
+            candidates.size(),
+            std::vector<std::size_t>(samples_per_action));
+        result.priority_inner_search_max_depth.resize(
+            candidates.size(),
+            std::vector<std::size_t>(samples_per_action));
+    }
     struct PriorityEvaluation {
         double q_score = 0.0;
         double shallow_prior = 0.0;
         double continuation = 0.0;
         bool terminal = false;
+        std::size_t inner_rollout_evaluations = 0;
+        std::size_t inner_search_invocations = 0;
+        std::size_t inner_search_max_depth = 0;
         std::optional<LearnedPriorityH0Boundary> h0_boundary;
     };
     const auto evaluate =
@@ -22104,7 +22221,21 @@ LearnedActionSamples learned_priority_action_samples(
         simulation.trace_ = nullptr;
         simulation.learned_decision_trace_ = nullptr;
         simulation.config_.learned_policy_recorder.reset();
-        simulation.config_.learned_search_depth = 0;
+        simulation.config_.learned_search_depth =
+            config.value_continuation_search_worlds == 0
+                ? 0
+                : 1;
+        std::shared_ptr<LearnedNestedSearchTracker>
+            nested_search_tracker;
+        if (config.value_continuation_search_worlds != 0) {
+            nested_search_tracker =
+                std::make_shared<
+                    LearnedNestedSearchTracker>();
+            simulation.learned_nested_search_tracker_ =
+                nested_search_tracker;
+        } else {
+            simulation.learned_nested_search_tracker_.reset();
+        }
         if (config.continuation_variant ==
             LearnedVariant::ValueSearchChampion) {
             simulation.learned_decision_role_ =
@@ -22118,6 +22249,24 @@ LearnedActionSamples learned_priority_action_samples(
                       consecutive_passes, world.state,
                       config.value_resolved_shallow_prior_weight)
                 : 0.0;
+        const auto rollout_count =
+            [&simulation]() {
+                const std::size_t first =
+                    simulation.state_.stats[0]
+                        .monte_carlo_rollouts;
+                const std::size_t second =
+                    simulation.state_.stats[1]
+                        .monte_carlo_rollouts;
+                if (first >
+                    std::numeric_limits<std::size_t>::max() -
+                        second) {
+                    throw std::overflow_error(
+                        "inner rollout accounting overflow");
+                }
+                return first + second;
+            };
+        const std::size_t inner_rollouts_before =
+            rollout_count();
         PriorityState priority{
             .player = player,
             .consecutive_passes = consecutive_passes,
@@ -22191,11 +22340,52 @@ LearnedActionSamples learned_priority_action_samples(
                 .terminal = terminal_evaluation,
             };
         }
+        const std::size_t inner_rollouts_after =
+            rollout_count();
+        if (inner_rollouts_after < inner_rollouts_before) {
+            throw std::logic_error(
+                "inner rollout accounting regressed");
+        }
+        const std::size_t inner_rollout_evaluations =
+            inner_rollouts_after -
+            inner_rollouts_before;
+        std::size_t inner_search_invocations = 0;
+        std::size_t inner_search_max_depth = 0;
+        if (nested_search_tracker) {
+            if (nested_search_tracker->active_depth != 0 ||
+                nested_search_tracker->rollout_evaluations !=
+                    inner_rollout_evaluations ||
+                nested_search_tracker
+                        ->maximum_active_depth >
+                    1 ||
+                (nested_search_tracker->invocations != 0 &&
+                 nested_search_tracker
+                         ->maximum_active_depth !=
+                     1)) {
+                throw std::logic_error(
+                    "nested actor search accounting or depth "
+                    "bound failed");
+            }
+            inner_search_invocations =
+                nested_search_tracker->invocations;
+            inner_search_max_depth =
+                nested_search_tracker
+                    ->maximum_active_depth;
+        } else if (inner_rollout_evaluations != 0) {
+            throw std::logic_error(
+                "legacy continuation performed an inner search");
+        }
         return {
             .q_score = score,
             .shallow_prior = shallow_prior,
             .continuation = continuation,
             .terminal = terminal_evaluation,
+            .inner_rollout_evaluations =
+                inner_rollout_evaluations,
+            .inner_search_invocations =
+                inner_search_invocations,
+            .inner_search_max_depth =
+                inner_search_max_depth,
             .h0_boundary = std::move(h0_boundary),
         };
     };
@@ -22247,6 +22437,55 @@ LearnedActionSamples learned_priority_action_samples(
                             *evaluation.h0_boundary);
                     }
                     ++result.rollout_evaluations;
+                    if (config.value_continuation_search_worlds !=
+                        0) {
+                        result.priority_inner_rollout_evaluations
+                            [action_index][sample_index] =
+                                evaluation
+                                    .inner_rollout_evaluations;
+                        result.priority_inner_search_invocations
+                            [action_index][sample_index] =
+                                evaluation
+                                    .inner_search_invocations;
+                        result.priority_inner_search_max_depth
+                            [action_index][sample_index] =
+                                evaluation
+                                    .inner_search_max_depth;
+                    } else if (
+                        evaluation.inner_rollout_evaluations !=
+                            0 ||
+                        evaluation.inner_search_invocations !=
+                            0 ||
+                        evaluation.inner_search_max_depth !=
+                            0) {
+                        throw std::logic_error(
+                            "depth-zero continuation performed "
+                            "an inner rollout");
+                    }
+                    if (result.inner_rollout_evaluations >
+                        std::numeric_limits<std::size_t>::max() -
+                            evaluation
+                                .inner_rollout_evaluations) {
+                        throw std::overflow_error(
+                            "inner rollout total overflow");
+                    }
+                    result.inner_rollout_evaluations +=
+                        evaluation.inner_rollout_evaluations;
+                    if (result.inner_search_invocations >
+                        std::numeric_limits<std::size_t>::max() -
+                            evaluation
+                                .inner_search_invocations) {
+                        throw std::overflow_error(
+                            "inner search invocation total "
+                            "overflow");
+                    }
+                    result.inner_search_invocations +=
+                        evaluation.inner_search_invocations;
+                    result.inner_search_max_depth =
+                        std::max(
+                            result.inner_search_max_depth,
+                            evaluation
+                                .inner_search_max_depth);
                     if (evaluation.terminal) {
                         ++result.terminal_evaluations;
                     } else {
@@ -22265,6 +22504,14 @@ LearnedActionSamples learned_priority_action_samples(
         }
         std::vector<unsigned char> terminal_flags(
             expected_evaluations, 0);
+        std::vector<std::size_t> inner_rollout_counts(
+            expected_evaluations, 0);
+        std::vector<std::size_t>
+            inner_search_invocation_counts(
+                expected_evaluations, 0);
+        std::vector<std::size_t>
+            inner_search_max_depths(
+                expected_evaluations, 0);
         std::vector<std::exception_ptr> failures(
             expected_evaluations);
         const std::size_t worker_count =
@@ -22315,6 +22562,47 @@ LearnedActionSamples learned_priority_action_samples(
                         }
                         terminal_flags[evaluation] =
                             result_cell.terminal ? 1U : 0U;
+                        inner_rollout_counts[evaluation] =
+                            result_cell
+                                .inner_rollout_evaluations;
+                        inner_search_invocation_counts[
+                            evaluation] =
+                            result_cell
+                                .inner_search_invocations;
+                        inner_search_max_depths[evaluation] =
+                            result_cell
+                                .inner_search_max_depth;
+                        if (config.value_continuation_search_worlds !=
+                            0) {
+                            result
+                                .priority_inner_rollout_evaluations
+                                    [action_index][sample_index] =
+                                result_cell
+                                    .inner_rollout_evaluations;
+                            result
+                                .priority_inner_search_invocations
+                                    [action_index][sample_index] =
+                                result_cell
+                                    .inner_search_invocations;
+                            result
+                                .priority_inner_search_max_depth
+                                    [action_index][sample_index] =
+                                result_cell
+                                    .inner_search_max_depth;
+                        } else if (
+                            result_cell
+                                    .inner_rollout_evaluations !=
+                                0 ||
+                            result_cell
+                                    .inner_search_invocations !=
+                                0 ||
+                            result_cell
+                                    .inner_search_max_depth !=
+                                0) {
+                            throw std::logic_error(
+                                "depth-zero continuation performed "
+                                "an inner rollout");
+                        }
                     } catch (...) {
                         failures[evaluation] =
                             std::current_exception();
@@ -22338,6 +22626,30 @@ LearnedActionSamples learned_priority_action_samples(
         result.bootstrapped_evaluations =
             expected_evaluations -
             result.terminal_evaluations;
+        for (const std::size_t count :
+             inner_rollout_counts) {
+            if (result.inner_rollout_evaluations >
+                std::numeric_limits<std::size_t>::max() -
+                    count) {
+                throw std::overflow_error(
+                    "inner rollout total overflow");
+            }
+            result.inner_rollout_evaluations += count;
+        }
+        for (const std::size_t count :
+             inner_search_invocation_counts) {
+            if (result.inner_search_invocations >
+                std::numeric_limits<std::size_t>::max() -
+                    count) {
+                throw std::overflow_error(
+                    "inner search invocation total overflow");
+            }
+            result.inner_search_invocations += count;
+        }
+        result.inner_search_max_depth =
+            *std::max_element(
+                inner_search_max_depths.begin(),
+                inner_search_max_depths.end());
     }
     for (std::size_t action_index = 0;
          action_index < candidates.size(); ++action_index) {
@@ -22375,6 +22687,95 @@ LearnedActionSamples learned_priority_action_samples(
         throw std::logic_error(
             "Learned priority evaluation accounting mismatch");
     }
+    if (config.value_continuation_search_worlds == 0) {
+        if (!result.priority_inner_rollout_evaluations.empty() ||
+            !result.priority_inner_search_invocations.empty() ||
+            !result.priority_inner_search_max_depth.empty() ||
+            result.inner_rollout_evaluations != 0 ||
+            result.inner_search_invocations != 0 ||
+            result.inner_search_max_depth != 0) {
+            throw std::logic_error(
+                "depth-zero inner rollout accounting mismatch");
+        }
+    } else {
+        std::size_t inner_cross_sum = 0;
+        std::size_t invocation_cross_sum = 0;
+        std::size_t maximum_depth = 0;
+        if (result.priority_inner_search_invocations.size() !=
+                candidates.size() ||
+            result.priority_inner_search_max_depth.size() !=
+                candidates.size()) {
+            throw std::logic_error(
+                "inner search accounting shape mismatch");
+        }
+        for (std::size_t action_index = 0;
+             action_index < candidates.size();
+             ++action_index) {
+            const auto& counts =
+                result.priority_inner_rollout_evaluations[
+                    action_index];
+            const auto& invocations =
+                result.priority_inner_search_invocations[
+                    action_index];
+            const auto& depths =
+                result.priority_inner_search_max_depth[
+                    action_index];
+            if (counts.size() != samples_per_action) {
+                throw std::logic_error(
+                    "inner rollout accounting shape mismatch");
+            }
+            if (invocations.size() != samples_per_action ||
+                depths.size() != samples_per_action) {
+                throw std::logic_error(
+                    "inner search accounting row mismatch");
+            }
+            for (std::size_t sample_index = 0;
+                 sample_index < samples_per_action;
+                 ++sample_index) {
+                const std::size_t count =
+                    counts[sample_index];
+                if (inner_cross_sum >
+                    std::numeric_limits<std::size_t>::max() -
+                        count) {
+                    throw std::overflow_error(
+                        "inner rollout cross-sum overflow");
+                }
+                inner_cross_sum += count;
+                if (invocation_cross_sum >
+                    std::numeric_limits<std::size_t>::max() -
+                        invocations[sample_index]) {
+                    throw std::overflow_error(
+                        "inner search invocation cross-sum "
+                        "overflow");
+                }
+                invocation_cross_sum +=
+                    invocations[sample_index];
+                maximum_depth =
+                    std::max(
+                        maximum_depth,
+                        depths[sample_index]);
+                if (depths[sample_index] > 1 ||
+                    (invocations[sample_index] != 0 &&
+                     depths[sample_index] != 1)) {
+                    throw std::logic_error(
+                        "inner search nesting-depth evidence "
+                        "is invalid");
+                }
+            }
+        }
+        if (inner_cross_sum !=
+                result.inner_rollout_evaluations ||
+            invocation_cross_sum !=
+                result.inner_search_invocations ||
+            maximum_depth !=
+                result.inner_search_max_depth ||
+            (result.inner_search_invocations == 0
+                 ? result.inner_search_max_depth != 0
+                 : result.inner_search_max_depth != 1)) {
+            throw std::logic_error(
+                "inner search accounting cross-sum mismatch");
+        }
+    }
     return result;
 }
 
@@ -22388,6 +22789,11 @@ LearnedActionSamples learned_binary_attack_samples(
     std::shared_ptr<const LearnedModel> model,
     LearnedSearchConfig config) {
     validate_search_config(config, model);
+    if (config.value_continuation_search_worlds != 0) {
+        throw std::invalid_argument(
+            "Value continuation search is available only for "
+            "Priority samples");
+    }
     if (config.capture_priority_h0_boundaries) {
         throw std::invalid_argument(
             "Priority H0 boundary capture is unavailable for Attack");
@@ -22404,6 +22810,7 @@ LearnedActionSamples learned_binary_attack_samples(
             config.seed, 0x41545441434B4556ULL, 0),
         learned_evaluation_game_config(
             model, config.continuation_variant,
+            0,
             config.value_continuation_epsilon,
             config.value_priority_residual_weight,
             config.value_pass_dominance,
@@ -22570,6 +22977,11 @@ LearnedActionSamples learned_binary_block_samples(
     std::shared_ptr<const LearnedModel> model,
     LearnedSearchConfig config) {
     validate_search_config(config, model);
+    if (config.value_continuation_search_worlds != 0) {
+        throw std::invalid_argument(
+            "Value continuation search is available only for "
+            "Priority samples");
+    }
     if (config.capture_priority_h0_boundaries) {
         throw std::invalid_argument(
             "Priority H0 boundary capture is unavailable for Block");
@@ -22586,6 +22998,7 @@ LearnedActionSamples learned_binary_block_samples(
             config.seed, 0x424C4F434B455641ULL, 0),
         learned_evaluation_game_config(
             model, config.continuation_variant,
+            0,
             config.value_continuation_epsilon,
             config.value_priority_residual_weight,
             config.value_pass_dominance,
