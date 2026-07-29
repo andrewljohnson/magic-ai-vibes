@@ -23450,6 +23450,65 @@ support, then collect deep symmetric Learned teacher labels and train a new
 state-by-action representation. This two-stage boundary prevents choosing
 roots from teacher ties, candidate behavior, or a guessed density quota.
 
+###### AQ16-DBC6-DENSITY-CENSUS result and report-recovery addendum
+
+The licensed census completed 2026-07-29 after implementation commit
+`d5ab72b`, the focused release suite passed 8/8 under `-O3 -Werror`, the
+same suite passed under AddressSanitizer/UndefinedBehaviorSanitizer, an
+independent declaration/implementation review closed every finding, and
+`REVIEW.md` was reread through its newest 11:14 PDT cycle. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-census --census
+```
+
+The command returned `result=PASS disposition=CENSUS_ONLY` in 199.45 seconds
+real / 199.06 user / 0.23 sys. Both complete source collections were
+bit-identical, the live hidden-repartition witness passed, and the exact
+frozen identities are:
+
+```text
+parent   68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+manifest 7de71c44a3d1d1fa20eb1b738bc8c675e83c4336f284e95f7401a4b79ea345cc
+witness  f10229a38e0fc646d267f6b5b655bc830634dcecd7bd62c4e894a80f3afb2fa5
+```
+
+The retained aggregate census is:
+
+| split | games | actor-games | roots | options | potential pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TRAIN | 80 | 160 | 3,597 | 10,862 | 20,949 |
+| DEV | 40 | 80 | 1,687 | 4,904 | 6,871 |
+
+TRAIN deck rows retained in the command output were Green
+`653/1,676/1,613`, Red `701/2,296/4,016`, Blue `620/1,555/1,566`, White
+`1,039/3,180/4,306`, and RU Aggro `584/2,155/9,448`, in
+roots/options/potential-pairs order. The command also emitted every DEV deck,
+width, and actor-game row, but its 1,371-line stdout exceeded the execution
+tool's retained-output cap: the tool preserved the beginning and end while
+clipping the middle containing the five DEV deck summary lines. This is an
+output-capture defect after a successful deterministic result, not missing
+scientific computation.
+
+Before selecting a root, opening a label, or changing code, license exactly
+one report-recovery replay of the same frozen binary and coordinate, with
+stdout filtered only after the binary exits its ordinary collection path:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-census --census |
+  grep -E '^(result=|split=|deck )'
+```
+
+This replay is descriptive recovery only. It must reproduce the exact parent,
+manifest, witness, aggregate counts, and TRAIN deck rows above; otherwise the
+entire census is void. Only the five missing DEV deck rows and a second runtime
+may be newly recorded. It cannot choose a quota, inspect a label, create a
+model or artifact, or license gameplay. After a matching replay, accept AQ16
+as `CENSUS_ONLY` and freeze the complete manifest/count table; the next action
+remains a separate label-free selection declaration.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
