@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -480,6 +481,96 @@ void test_seed_and_weight_contract() {
         "out-of-range schedule coordinate must fail");
 }
 
+void test_finite_score_root_metrics() {
+    const std::vector<double> teacher_scores{
+        -2.0, 2.0, 2.0, 0.5};
+    const std::vector<double> policy_scores{
+        -1.5, 4.0, 4.0, 4.0};
+    const auto metrics =
+        op1::testing::finite_score_root_metrics(
+            teacher_scores, policy_scores);
+    expect(
+        metrics.action_count == 4 &&
+            metrics.teacher_support ==
+                std::vector<std::size_t>{1, 2} &&
+            metrics.policy_support ==
+                std::vector<std::size_t>{1, 2, 3} &&
+            metrics.top_one_expected_agreement ==
+                2.0 / 3.0 &&
+            metrics.regret == 0.5,
+        "finite-real ties must preserve analytic agreement and regret");
+
+    const std::vector<double> bounded_teacher_scores{
+        0.1, 0.9, 0.9, 0.4};
+    expect(
+        op1::testing::finite_score_root_metrics(
+            bounded_teacher_scores, policy_scores) ==
+            old_school::action_q_explore::evaluate_root(
+                bounded_teacher_scores, policy_scores),
+        "bounded OP1 root metrics must be bit-exact with frozen AQ0");
+
+    auto shifted_teacher_scores = teacher_scores;
+    for (double& score : shifted_teacher_scores) {
+        score += 8.0;
+    }
+    const auto shifted =
+        op1::testing::finite_score_root_metrics(
+            shifted_teacher_scores, policy_scores);
+    expect(
+        shifted.teacher_support ==
+                metrics.teacher_support &&
+            shifted.policy_support ==
+                metrics.policy_support &&
+            shifted.top_one_expected_agreement ==
+                metrics.top_one_expected_agreement &&
+            shifted.regret == metrics.regret,
+        "a common teacher shift must leave root metrics unchanged");
+
+    const std::vector<double> empty;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                op1::testing::
+                    finite_score_root_metrics(
+                        empty, empty));
+        },
+        "empty finite-score metrics must fail");
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                op1::testing::
+                    finite_score_root_metrics(
+                        teacher_scores,
+                        std::vector<double>{1.0}));
+        },
+        "misaligned finite-score metrics must fail");
+
+    auto nan_teacher = teacher_scores;
+    nan_teacher[0] =
+        std::numeric_limits<double>::quiet_NaN();
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                op1::testing::
+                    finite_score_root_metrics(
+                        nan_teacher, policy_scores));
+        },
+        "NaN teacher score must fail");
+
+    auto infinite_policy = policy_scores;
+    infinite_policy[0] =
+        std::numeric_limits<double>::infinity();
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                op1::testing::
+                    finite_score_root_metrics(
+                        teacher_scores,
+                        infinite_policy));
+        },
+        "infinite policy score must fail");
+}
+
 void test_census_validation_and_mutations() {
     const op1::Census census = make_valid_census();
     op1::validate_census(census);
@@ -679,16 +770,113 @@ void test_corpus_projection_and_mutations() {
         projection_identical,
         "DEV changes must not enter fit projection");
 
-    auto bad_target = corpus;
-    bad_target.train.front().target_probabilities[0] =
-        0.99;
-    bad_target =
+    auto finite_teacher_scores = corpus;
+    finite_teacher_scores.train.front().teacher_scores = {
+        -0.50, 1.50};
+    finite_teacher_scores.train.front().target_probabilities =
+        old_school::learned_soft_priority_target(
+            finite_teacher_scores.train.front()
+                .teacher_scores);
+    finite_teacher_scores =
         op1::testing::make_corpus(
-            bad_target.census,
-            bad_target.parent_components,
-            bad_target.train, bad_target.dev);
+            finite_teacher_scores.census,
+            finite_teacher_scores.parent_components,
+            finite_teacher_scores.train,
+            finite_teacher_scores.dev);
+    op1::validate_corpus(finite_teacher_scores);
+    expect(
+        finite_teacher_scores.train.front()
+                .teacher_scores.front() < 0.0 &&
+            finite_teacher_scores.train.front()
+                .teacher_scores.back() > 1.0,
+        "finite teacher scores outside [0,1] must be accepted");
+
+    auto negative_base_score = corpus;
+    negative_base_score.train.front().base_scores[0] =
+        -0.25;
+    negative_base_score =
+        op1::testing::make_corpus(
+            negative_base_score.census,
+            negative_base_score.parent_components,
+            negative_base_score.train,
+            negative_base_score.dev);
     expect_rejected(
-        [&] { op1::validate_corpus(bad_target); },
+        [&] {
+            op1::validate_corpus(
+                negative_base_score);
+        },
+        "negative base probability must fail");
+
+    auto high_base_score = corpus;
+    high_base_score.train.front().base_scores[0] =
+        1.25;
+    high_base_score =
+        op1::testing::make_corpus(
+            high_base_score.census,
+            high_base_score.parent_components,
+            high_base_score.train,
+            high_base_score.dev);
+    expect_rejected(
+        [&] {
+            op1::validate_corpus(high_base_score);
+        },
+        "base probability above one must fail");
+
+    auto nan_score = corpus;
+    nan_score.train.front().base_scores[0] =
+        std::numeric_limits<double>::quiet_NaN();
+    nan_score =
+        op1::testing::make_corpus(
+            nan_score.census,
+            nan_score.parent_components,
+            nan_score.train, nan_score.dev);
+    expect_rejected(
+        [&] { op1::validate_corpus(nan_score); },
+        "NaN search score must fail");
+
+    auto infinite_score = corpus;
+    infinite_score.dev.front().teacher_scores[0] =
+        std::numeric_limits<double>::infinity();
+    infinite_score =
+        op1::testing::make_corpus(
+            infinite_score.census,
+            infinite_score.parent_components,
+            infinite_score.train, infinite_score.dev);
+    expect_rejected(
+        [&] { op1::validate_corpus(infinite_score); },
+        "infinite search score must fail");
+
+    auto out_of_range_target = corpus;
+    out_of_range_target.train.front()
+        .target_probabilities[0] = -0.01;
+    out_of_range_target =
+        op1::testing::make_corpus(
+            out_of_range_target.census,
+            out_of_range_target.parent_components,
+            out_of_range_target.train,
+            out_of_range_target.dev);
+    expect_rejected(
+        [&] {
+            op1::validate_corpus(
+                out_of_range_target);
+        },
+        "out-of-range target probability must fail");
+
+    auto unnormalized_target = corpus;
+    unnormalized_target.train.front()
+        .target_probabilities[0] =
+        0.99;
+    unnormalized_target =
+        op1::testing::make_corpus(
+            unnormalized_target.census,
+            unnormalized_target.parent_components,
+            unnormalized_target.train,
+            unnormalized_target.dev);
+    expect_rejected(
+        [&] {
+            op1::validate_corpus(
+                unnormalized_target);
+        },
         "unnormalized target must fail");
 
     auto bad_weight = corpus;
@@ -795,11 +983,12 @@ int main() {
     try {
         test_command_and_recipe();
         test_seed_and_weight_contract();
+        test_finite_score_root_metrics();
         test_census_validation_and_mutations();
         test_corpus_projection_and_mutations();
         test_selector_binding_and_classification();
         std::cout
-            << "5 action-Q on-policy successor tests passed\n";
+            << "6 action-Q on-policy successor tests passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr

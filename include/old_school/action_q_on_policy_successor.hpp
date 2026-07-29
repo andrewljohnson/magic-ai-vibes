@@ -250,6 +250,11 @@ void print_selector(
 
 namespace testing {
 
+// Pure OP1 metric seam for residual-active finite-real teacher scores.
+action_q_explore::RootMetrics finite_score_root_metrics(
+    std::span<const double> teacher_scores,
+    std::span<const double> policy_scores);
+
 // Pure assembly seams for validation/mutation tests. Production collection
 // never accepts caller-supplied manifests, examples, or counts.
 Census make_census(

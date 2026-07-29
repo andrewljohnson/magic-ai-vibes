@@ -20261,6 +20261,154 @@ cross-summed every row and returned GO to commit this exact freeze. The
 single OP1 run remains unopened pending commit plus post-commit identity
 review.
 
+AQ4-OP1 first-run result, completed 2026-07-29:
+**infrastructure void; scientific hypothesis unresolved**.
+
+Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-action-q-on-policy-successor --run
+```
+
+Commit `9124078` passed both post-commit opening reviews and reconstructed
+the warm parent plus frozen source census, then exited 1 after 732.33 seconds
+(`user 1606.05`, `sys 5.37`) with exactly:
+
+```text
+result=ERROR reason=action_q_on_policy_successor_failed message=AQ4-OP1 outer sample shape drifted
+```
+
+The failure occurred inside a retained root's `label_root`, after that root's
+base and teacher calls and before its `RootExample` could be returned. The
+generic fail-closed stderr does not expose the manifest position: timing is
+consistent with the first label invocation, but that is not proof, so some
+preceding examples may have existed transiently in process memory. No example,
+score, corpus, digest, count, or TRAIN/DEV metric was printed or persisted;
+`collect_corpus` never returned, no fit or model was created, and selector
+seed `202607290111` remained unopened. This is not an OP1 rejection or
+acceptance.
+
+Static trace localizes the failure to a mechanical validator mistake:
+`validate_outer_samples` applies `finite_probability` (`0 <= x <= 1`) to raw
+`q_samples` and aggregate action scores. Production search deliberately adds
+the Priority residual after its bounded continuation score; the registered
+teacher has residual `0.10`, so a valid finite search score may leave the
+probability interval. The engine independently guarantees the configured
+sample matrix shape and finite arithmetic. G4B did not expose this because its
+teacher residual was zero. No score, action, deck, or magnitude was printed or
+inspected; the only new fact is the generic failed predicate above.
+
+##### AQ4-OP1-I1 finite-score validator repair declaration
+
+Declared 2026-07-29 before changing source after the void above. Falsifiable
+mechanical hypothesis: distinguishing unconstrained finite search scores from
+normalized target probabilities will allow the exact registered OP1
+coordinate to pass validation without changing one search result, target,
+weight, fit, gate, seed, or model byte.
+
+The sole allowed production change is to add/use a `finite_score` predicate
+(`std::isfinite` only) for raw base/teacher samples and aggregate scores in
+`validate_outer_samples` and `validate_example`. Keep
+`finite_probability` unchanged for soft target probabilities. Add mutation
+tests proving finite scores below zero and above one are accepted into the
+synthetic corpus, while NaN/infinity scores and out-of-range or unnormalized
+target probabilities fail. Do not change the frozen census, source/teacher
+recipes, labels, optimizer, offline gates, selector, or any engine function.
+
+After focused release and ASan/UBSan tests, full `make test`, diff check,
+commit, and independent review, exactly one same-coordinate retry of the exact
+command above is eligible. Reusing the coordinate is justified narrowly
+because the first process exposed no label, score, corpus, model, metric, or
+selector observation, and the repair removes an invalid assertion without
+altering computation. Any other source change, a different error, or a second
+failed retry closes OP1-I1 and requires a separately declared successor.
+
+AQ4-OP1-I1 preregistration review addendum, recorded 2026-07-29 before any
+retry and before changing metric code: an independent reviewer found a second
+instance of the same domain mismatch. OP1 `evaluate()` delegates to
+G4B's evaluator, which calls `action_q_explore::evaluate_root`; that frozen
+AQ0 helper also requires teacher scores in `[0,1]`. A residual-active OP1
+teacher produces finite ranking scores, so the validator-only patch could
+complete labeling and fitting but then fail mechanically during TRAIN/DEV
+regret evaluation. No retry has occurred. The initial I1 implementation is
+therefore insufficient as written.
+
+Extend the allowed repair by replacing only OP1's delegation to the G4B
+metric evaluator with an OP1-local weighted evaluator. Its per-root operation
+must require aligned nonempty finite teacher and deployed-policy score vectors,
+compute each exact-max support with the existing
+`action_q_explore::exact_max_support`, and preserve byte-for-byte the existing
+top-one expected agreement and regret formulas (best teacher score minus the
+uniform mean teacher score over deployed max-support, with only the existing
+32-epsilon negative-roundoff clamp). Preserve G4B's exact root weights,
+per-deck mass-one checks, per-deck aggregates, and equal-deck aggregate.
+`combined_scores` remains unchanged and valid because OP1 base scores are
+residual-free probabilities; only the teacher reference is a finite-real
+score. Add a pure test seam proving:
+
+- finite teacher/policy scores below zero and above one preserve exact
+  max-support, tie agreement, and analytic regret;
+- adding a common constant to every teacher score leaves support, agreement,
+  and regret unchanged; and
+- empty, misaligned, NaN, and infinity inputs fail.
+
+Do not generalize or modify frozen AQ0/G4B helpers. No recipe, corpus, target,
+fit, gate, seed, or selector change is licensed. The same test/commit/review
+and one-retry boundary above remains in force.
+
+AQ4-OP1-I1 domain-scope correction, recorded during preregistration review
+before retry: keep residual-free **base** outer samples, aggregates, and
+`base_scores` under the original `[0,1]` probability predicate. Apply the
+finite-real domain only to residual-active **teacher** samples, aggregates,
+and `teacher_scores`. The first I1 draft and implementation widened both;
+that is broader than the observed defect and would admit a corpus that
+unchanged `combined_scores` correctly rejects. Revise the test so out-of-range
+finite teacher scores pass, out-of-range base scores fail, and all prior
+NaN/infinity/target guards remain. This correction supersedes only the initial
+I1 phrase that grouped base and teacher scores together.
+
+AQ4-OP1-I1 implementation verification, completed 2026-07-29:
+**PASS; accept the mechanical repair for commit, science retry still
+unopened**. The production diff is confined to OP1: teacher sample/aggregate
+and stored teacher-score validation now accepts any finite real; base scores
+remain probability-bounded; normalized targets remain probability-bounded;
+and OP1's local root/deck evaluator preserves the frozen support, regret,
+weight, reduction-order, and equal-deck formulas. Frozen AQ0, G4B, engine,
+recipes, seeds, census, optimizer, gates, and selector are unchanged.
+
+Exact focused release command:
+
+```sh
+make -j4 test-action-q-on-policy-successor
+```
+
+Result: 6/6 passed under `-Werror`. Exact sanitizer build/run:
+
+```sh
+make -j4 \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer' \
+  build/old-school-action-q-on-policy-successor-tests
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  ./build/old-school-action-q-on-policy-successor-tests
+```
+
+Result: 6/6 passed. `make -j4 test` passed the 183 engine tests, the repaired
+6-test OP1 suite and every other research suite, 124 web tests, 48
+certification tests, CLI/build smokes, and the representative simulator run.
+`git diff --check` passed. The bounded in-range regression compares the entire
+OP1 `RootMetrics` object bit-exactly with frozen AQ0; out-of-range finite
+teacher scores preserve analytic support/agreement/regret, while out-of-range
+base scores, NaN/infinity, and invalid targets fail.
+
+`REVIEW.md`'s newest 01:44 entry independently confirmed the void diagnosis
+and same-coordinate retry rationale, but its in-flight summary still grouped
+base and teacher under the finite-real repair. A subsequent independent code
+review found unchanged `combined_scores` correctly requires probability-domain
+base scores; the narrower domain-scope correction above resolves that issue
+and both final implementation reviews returned GO. The exact retry remains
+blocked only on commit plus post-commit identity review.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

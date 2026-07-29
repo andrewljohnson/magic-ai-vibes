@@ -60,6 +60,78 @@ bool finite_probability(double value) {
            value >= 0.0 && value <= 1.0;
 }
 
+bool finite_score(double value) {
+    return std::isfinite(value);
+}
+
+action_q_explore::RootMetrics finite_score_root_metrics_impl(
+    std::span<const double> teacher_scores,
+    std::span<const double> policy_scores) {
+    if (teacher_scores.empty() ||
+        teacher_scores.size() !=
+            policy_scores.size() ||
+        !std::all_of(
+            teacher_scores.begin(),
+            teacher_scores.end(), finite_score) ||
+        !std::all_of(
+            policy_scores.begin(),
+            policy_scores.end(), finite_score)) {
+        throw std::invalid_argument(
+            "AQ4-OP1 root metrics require aligned finite scores");
+    }
+
+    action_q_explore::RootMetrics result;
+    result.action_count = teacher_scores.size();
+    result.teacher_support =
+        action_q_explore::exact_max_support(
+            teacher_scores);
+    result.policy_support =
+        action_q_explore::exact_max_support(
+            policy_scores);
+
+    std::size_t overlap = 0;
+    double selected_teacher_total = 0.0;
+    for (const std::size_t selected :
+         result.policy_support) {
+        selected_teacher_total +=
+            teacher_scores[selected];
+        overlap +=
+            std::find(
+                result.teacher_support.begin(),
+                result.teacher_support.end(),
+                selected) !=
+                    result.teacher_support.end()
+                ? 1
+                : 0;
+    }
+    result.top_one_expected_agreement =
+        static_cast<double>(overlap) /
+        static_cast<double>(
+            result.policy_support.size());
+    const double selected_teacher_mean =
+        selected_teacher_total /
+        static_cast<double>(
+            result.policy_support.size());
+    const double best_teacher =
+        teacher_scores[
+            result.teacher_support.front()];
+    result.regret =
+        best_teacher -
+        selected_teacher_mean;
+    if (result.regret < 0.0 &&
+        result.regret >
+            -32.0 *
+                std::numeric_limits<double>::epsilon()) {
+        result.regret = 0.0;
+    }
+    if (!std::isfinite(result.regret) ||
+        result.regret < 0.0) {
+        throw std::logic_error(
+            "AQ4-OP1 root regret is invalid");
+    }
+    return result;
+}
+
 void append_u64(std::string& output, std::uint64_t value) {
     for (unsigned int shift = 0; shift < 64; shift += 8) {
         output.push_back(static_cast<char>(
@@ -511,6 +583,8 @@ void validate_outer_samples(
     std::size_t actions, std::size_t worlds,
     bool expect_inner) {
     const std::size_t expected = actions * worlds;
+    const auto score_predicate =
+        expect_inner ? finite_score : finite_probability;
     if (samples.sampled_worlds != worlds ||
         samples.rollout_evaluations != expected ||
         samples.terminal_evaluations +
@@ -522,7 +596,7 @@ void validate_outer_samples(
         !std::all_of(
             samples.exact_priority_aggregate_scores.begin(),
             samples.exact_priority_aggregate_scores.end(),
-            finite_probability)) {
+            score_predicate)) {
         throw std::logic_error(
             "AQ4-OP1 outer search accounting drifted");
     }
@@ -530,7 +604,7 @@ void validate_outer_samples(
         if (row.size() != worlds ||
             !std::all_of(
                 row.begin(), row.end(),
-                finite_probability)) {
+                score_predicate)) {
             throw std::logic_error(
                 "AQ4-OP1 outer sample shape drifted");
         }
@@ -714,11 +788,12 @@ void validate_example(
         example.target_probabilities.size() != actions ||
         !std::all_of(
             example.base_scores.begin(),
-            example.base_scores.end(), finite_probability) ||
+            example.base_scores.end(),
+            finite_probability) ||
         !std::all_of(
             example.teacher_scores.begin(),
             example.teacher_scores.end(),
-            finite_probability) ||
+            finite_score) ||
         !normalized_target(example.target_probabilities) ||
         example.target_probabilities !=
             learned_soft_priority_target(
@@ -1596,8 +1671,79 @@ Corpus collect_corpus(
 Metrics evaluate(
     std::span<const RootExample> examples,
     std::shared_ptr<const LearnedModel> model) {
-    return g4b::evaluate(
-        examples, std::move(model), kResidualWeight);
+    if (!model || examples.empty()) {
+        throw std::invalid_argument(
+            "AQ4-OP1 metric inputs are invalid");
+    }
+    Metrics result;
+    std::array<double, kDeckCount> agreement_sums{};
+    std::array<double, kDeckCount> regret_sums{};
+    for (const RootExample& example : examples) {
+        if (!std::isfinite(example.weight) ||
+            example.weight <= 0.0) {
+            throw std::invalid_argument(
+                "AQ4-OP1 metric root weight is invalid");
+        }
+        const auto logits =
+            learned_policy_head_logits(
+                example.manifest.options,
+                LearnedPolicyDecisionKind::Priority,
+                model);
+        const auto scores =
+            action_q_explore::combined_scores(
+                example.base_scores, logits,
+                kResidualWeight);
+        const auto root_metrics =
+            finite_score_root_metrics_impl(
+                example.teacher_scores, scores);
+        const std::size_t deck =
+            deck_index(
+                example.manifest.coordinate.owner_deck());
+        DeckMetrics& deck_metrics =
+            result.decks[deck];
+        deck_metrics.deck =
+            static_cast<DeckId>(deck);
+        ++deck_metrics.roots;
+        deck_metrics.options +=
+            root_metrics.action_count;
+        deck_metrics.weight_mass += example.weight;
+        agreement_sums[deck] +=
+            example.weight *
+            root_metrics.top_one_expected_agreement;
+        regret_sums[deck] +=
+            example.weight * root_metrics.regret;
+    }
+
+    double agreement_total = 0.0;
+    double regret_total = 0.0;
+    for (std::size_t deck = 0;
+         deck < kDeckCount; ++deck) {
+        DeckMetrics& metrics = result.decks[deck];
+        if (metrics.roots == 0 ||
+            std::abs(metrics.weight_mass - 1.0) >
+                1.0e-12) {
+            throw std::invalid_argument(
+                "AQ4-OP1 metrics are not deck balanced");
+        }
+        metrics.top_one_expected_agreement =
+            agreement_sums[deck] /
+            metrics.weight_mass;
+        metrics.mean_regret =
+            regret_sums[deck] /
+            metrics.weight_mass;
+        result.roots += metrics.roots;
+        result.options += metrics.options;
+        agreement_total +=
+            metrics.top_one_expected_agreement;
+        regret_total += metrics.mean_regret;
+    }
+    result.equal_deck_top_one_expected_agreement =
+        agreement_total /
+        static_cast<double>(kDeckCount);
+    result.equal_deck_mean_regret =
+        regret_total /
+        static_cast<double>(kDeckCount);
+    return result;
 }
 
 FitReport fit(
@@ -2224,6 +2370,13 @@ void print_selector(
 }
 
 namespace testing {
+
+action_q_explore::RootMetrics finite_score_root_metrics(
+    std::span<const double> teacher_scores,
+    std::span<const double> policy_scores) {
+    return finite_score_root_metrics_impl(
+        teacher_scores, policy_scores);
+}
 
 Census make_census(
     std::string parent_fingerprint,
