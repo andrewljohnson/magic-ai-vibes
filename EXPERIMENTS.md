@@ -18702,6 +18702,172 @@ opponent. Declare its exact simulation budget and backup semantics after the
 mechanistic trace of these two remaining failures; no AQ4 science seed is
 opened by this result entry.
 
+##### AQ3 counter-control semantic correction
+
+Recorded 2026-07-28 after tracing only the already-open AQ3 coordinate and
+the engine priority transitions; no new seed was opened. The preregistered
+intervening-Counterspell direction was strategically mislabeled. That state
+starts with one prior pass and stack order opposing Counterspell, friendly
+Counterspell, opposing Air Elemental. If the root passes, the opposing
+Counterspell resolves and priority resets. After the opponent's forced pass,
+the root receives another choice while Air Elemental remains on the stack and
+may counter it then. Passing therefore preserves an option and can reach the
+same gameplay-relevant card/resource position as immediately countering the
+opposing Counterspell. AQ3's exact equality between countering the original
+Air Elemental and countering the opposing Counterspell (`0.4109624876` each)
+is consistent with that equivalence. The observed Pass maximum is not
+evidence of broken stack discipline.
+
+Keep the original AQ3 rejection above as the result of its declared
+conjunctive gate, but do not reuse that direction. The user's actual
+double-Counterspell complaint is represented by the companion
+**redundant-same-target** control, where a second friendly Counterspell is
+placed on the original spell without an intervening hostile counter. Future
+gates must reject that redundant action while allowing strategic delay.
+
+The Braingeyser finding remains a genuine rollout-policy failure. X=0 self
+and X=0 opponent have the same forced quiescent rules consequence and
+resource cost, yet the long continuation separated them by 2.09 points.
+Because the opponent is Red, that target-only difference must arise from the
+frozen mirror's public response while the no-op spell is live—principally its
+Bolt/Pass/target choice—not from the resolved game state. This is precisely
+the failure mode a two-player policy-improvement tree must remove.
+
+##### AQ4-D0 observation-keyed two-player UCT declaration
+
+Declared 2026-07-28 after the AQ3 result and counter-control semantic
+correction, before implementing a tree, opening a new search coordinate, or
+changing/training a model. `REVIEW.md` was reread through its newest 19:49
+PDT entry. Root seed `202607282002` was searched across the source-visible
+worktree and was unused. This is a fast teacher diagnostic, not a bot-strength
+claim.
+
+Falsifiable hypothesis: revising both players' subsequent nontrivial Priority
+choices in one shared observation-keyed search will produce all four
+strategic directions at 512 simulations:
+
+1. Pass is the unique maximum-visit action on
+   `control.blue.counter-redundant-same-target.v1`;
+2. neither Braingeyser X=0 action belongs to maximum-visit support;
+3. Pass receives strictly more visits than Giant Growth on the
+   summoning-sick Bear; and
+4. live Force Spike receives strictly more visits than Pass.
+
+Implement a reusable card-agnostic Priority search, separate from the fixture
+wrapper. Run exactly 512 serial simulations per fixture with at most eight
+nontrivial Priority boundaries per simulation, UCT exploration constant
+`sqrt(2)`, uniform priors, and no rollout-policy or Handcrafted heuristic.
+Each simulation samples one fresh root determinization from the root owner's
+information set. A node is keyed by the public action-observation history plus
+the acting player's exact `fq0_information_set::InformationSetKey`: its own
+hand, public state, decision context, and complete authoritative legal action
+set, never the other player's hand or either library order. Descriptor-sort
+actions before selection. Unvisited actions are tried in canonical order.
+At root-owned nodes UCT maximizes root-perspective value; at opponent-owned
+nodes it maximizes `1 - root_value`. Store root-perspective returns.
+
+Use `advance_learned_priority_macro_transition` to apply a selected edge and
+advance through forced actions and non-Priority play to the next multi-action
+Priority boundary. Exact terminal leaves back up `0/0.5/1`; a newly expanded
+node or the eighth Priority boundary uses the unchanged frozen C16 critic.
+Candidate identity must not enter simulation seeds. The final policy is visit
+count, with mean root-Q then canonical descriptor used only to break an exact
+visit tie. Print visits, root-Q, maximum-visit support at simulation snapshots
+128, 256, and 512, plus nodes, transitions, terminal/critic leaves, and depth.
+
+This is a multiple-observer/root-sampled ISMCTS diagnostic, not ordinary
+perfect-information AlphaZero MCTS: actions are shared only inside the acting
+player's information set, so a per-determinization best action cannot leak
+into the policy. Root input reversal and a nonvacuous opponent hidden-zone
+repartition must reproduce the descriptor-sorted full result bit-exactly.
+Unit controls must additionally show that opponent nodes optimize the
+opponent's value, information-equivalent particles share a node, different
+acting-player hands do not share a node, all root actions are visited, visit
+counts sum to 512, and terminal plus critic leaves equal 512. Any incomplete
+macro transition, missing/extra legal action, identity failure, or accounting
+failure is invalid evidence, not a directional rejection.
+
+If all four directions pass, the next step is one cap-eight, all-five-deck
+generation using the tree's all-action visit distributions as soft targets
+for the unchanged existing 893-feature/32-hidden Priority head, followed by
+the 60-game five-deck selector and a manual web pilot. If the tree fails, do
+not tune the UCT constant or simulation count from these fixtures; use its
+terminal/critic/depth census to declare either a deeper terminal search or a
+critic/policy retrain. No corpus, fit, artifact, gameplay seed, or web
+deployment is licensed by AQ4-D0 itself.
+
+##### AQ4-D0 safety withdrawal before implementation
+
+Withdrawn 2026-07-28 before implementation and before opening reserved seed
+`202607282002`. A design review found that omitting the root player's hidden
+hand from an opponent UCT node key is necessary but not sufficient. Every
+root determinization preserves the root player's actual known hand, so every
+return updating the opponent node remains conditioned on that fixed hidden
+hand. The opponent's shared UCT statistics could therefore learn which
+response works against cards it never observed. Root hidden-repartition
+invariance does not detect this because that check correctly preserves the
+root observer's own hand.
+
+Verdict: **invalid design; no code and no evidence**. Do not implement this
+shared adversarial tree without restore-safe RIS/POMCP belief handling. That
+requires an explicit private-state ledger or public-history particle replay
+across casts, draws, and discards and is not a safe small patch to the macro
+transition. `REVIEW.md` was reread through its new 19:59 PDT cycle, whose
+requirement for root re-determinization and information-safe Learned-mirror
+play supports withdrawing rather than rationalizing this flaw.
+
+##### AQ4-D1 symmetric nested actor-root search declaration
+
+Declared 2026-07-28 immediately after withdrawing AQ4-D0 and before changing
+search code or opening a new coordinate. Root seed `202607282011` was searched
+across the source-visible worktree and was unused.
+
+Falsifiable hypothesis: replacing every subsequent nontrivial Priority choice
+inside a continuation with one bounded search freshly rooted in the **acting
+player's own information set** will pass the corrected four-control battery:
+
+1. Pass strictly exceeds each redundant same-target Counterspell action;
+2. neither Braingeyser X=0 action belongs to exact-max support;
+3. Pass strictly exceeds Giant Growth on the summoning-sick Bear; and
+4. live Force Spike strictly exceeds Pass.
+
+Use unchanged C16 and outer common-world evaluation
+`K32 / R1 / H8`, four workers, no outer shallow-prior blend, Legacy
+continuation control, and zero epsilon, Priority residual, Pass dominance,
+and resolved prior. Add one isolated search configuration field:
+`value_continuation_search_worlds=2`. When nonzero, each outer simulation
+sets `learned_search_depth=1` and both continuation seats use the existing
+deployed C16 root search with exactly two worlds, its fixed H4/R1 horizon,
+and its historical shallow-prior blend. That inner search samples a new
+determinization from the current acting seat's observation. Its own action
+continuations set search depth zero exactly as production already does, so
+nesting is bounded to one level. Both seats use the same operator; neither
+uses Handcrafted or card-specific rules.
+
+Report every outer action mean and exact-max support, outer
+terminal/bootstrap counts, and separately the total inner rollout
+evaluations. Candidate input reversal and a nonvacuous root-opponent hidden
+repartition must reproduce every scalar sample, aggregate, selection, and
+accounting field bit-exactly. Add a decisive actor-local noninterference
+control at Red's Priority response after an X=0 Braingeyser is put on the
+stack: two physical states have the same complete Red observation, Red hand,
+public state, and legal actions but different Blue hand/library identities.
+With the same inner K2 seed, Red's complete score vector, selected action, and
+accounting must be bit-identical. This proves the improved opponent response
+is a function of its own information set rather than the outer root's hidden
+hand.
+
+Any failure of the actor-local invariant, root hidden/reverse identity,
+complete legal-action accounting, one-level nesting bound, or
+terminal/bootstrap/inner-rollout cross-sum is invalid evidence. The exact
+four directions are a conjunctive gate. If all pass, collect one cap-eight
+all-five-deck generation from this improved symmetric continuation and
+distill all-action soft targets into the existing Priority head before a
+60-game selector/manual web pilot. If X=0 still fails, do not tune K or H:
+the next declared implementation is restore-safe information-set MCTS/POMCP,
+not another flat-horizon sweep. AQ4-D1 licenses no corpus, model, benchmark,
+gameplay seed, or deployment by itself.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
