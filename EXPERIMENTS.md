@@ -17780,6 +17780,64 @@ the next research axis becomes the preregistered card-agnostic,
 action-conditioned fitted-Q/dueling-head learner before information-set tree
 search. This is a rapid selector, not a strength claim.
 
+##### FQ4-EXPLORE-11 result — rejected; scalar boundary axis closed
+
+Run 2026-07-28 after the external frozen-root diagnostic reproduced
+self-target `.9880259759` > Pass `.9876290663` > opponent-target
+`.9865390426`, 181/181 engine tests and 181/181 ASan/UBSan tests passed,
+the 17-test runner and all affected frozen-recipe suites passed, and an
+independent review found no hidden-safety or continuation-isolation defect.
+Implementation commit `ae04080` was pushed before opening the seed.
+`REVIEW.md` was reread through its newest 17:21 verification addendum before
+recording the result.
+
+Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-blend-explore --dual-boundary
+```
+
+Exact frozen coordinates: seed `202607281731`; alpha `0.75`; 60 balanced
+games; 12 per challenger deck; treatment first; frozen C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+K8/H4/R1; zero root/continuation exploration; zero Priority residual; PD0
+off; AdversarialBlocks off; Legacy continuation controller.
+
+| Challenger deck | Wins | Losses | Draws |
+| --- | ---: | ---: | ---: |
+| Green | 7 | 5 | 0 |
+| Red | 8 | 4 | 0 |
+| Blue | 4 | 8 | 0 |
+| White | 5 | 7 | 0 |
+| RU Aggro | 6 | 6 | 0 |
+| **Aggregate** | **30** | **30** | **0** |
+
+Treatment win rate was `50.0%`; quartet-CR1 95% interval
+`[45.2182%, 54.7818%]`. The runner reported `10.7598s`, 2,800 decisions, and
+67,248 rollouts; `/usr/bin/time` reported `real 10.83`, `user 78.29`,
+`sys 0.36`.
+
+The predeclared selector required strictly more than 30 wins. The exact tie
+therefore **rejects** EXPLORE-11; it is not exposed on the web and C16 remains
+champion. Alpha 0.75 recovered the full-resolution treatment from 45% to
+parity while preserving the target fix, but the opposing Green/Red versus
+Blue/White slices show that one global boundary scalar does not supply a
+generally stronger action policy. Per declaration, scalar observation-boundary
+tuning is closed.
+
+Next experiment: a compact, card-agnostic action-conditioned Q learner over
+the existing owner information state, legal action features, and
+rules-authoritative macro transition. It must learn different consequences
+for different legal actions instead of asking one state-value critic to
+resolve every decision through a timing scalar. The first gate will be
+offline and deterministic: held-out action ranking, the exact Ancestral
+target root, redundant-counter and payable-Force-Spike controls, hidden
+repartition identity, and generation-over-parent action agreement/regret.
+Only a passing artifact gets a fresh five-deck gameplay selector; ordinary
+perfect-information AlphaZero MCTS remains deferred until the learned Q
+signal is nonsaturated and trustworthy.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
