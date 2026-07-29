@@ -24380,6 +24380,87 @@ are qualitative diagnostics, not card-specific training rules. C16 remains
 the champion and the next research candidate must address the weak/sparse
 cross-deck lift rather than retune this closed rank-2 recipe.
 
+###### AQ19 field observation: redundant same-target counter remains
+
+Recorded 2026-07-29 after the dated load-only pilot was deployed. The owner
+observed AQ19 cast two Counterspells at the same opposing spell in a Blue
+mirror. The supplied public REPRO identity was:
+
+```text
+you=blue/human | opponent=blue/learned-value-c16-bilinear-aq19 | game-seed=42 | train-games=800 | train-seed=424242 | rollouts=2 | deep-rollouts=8 | learned-rollouts=8 | learned-generations=16 | model=learned-value/C16 | model-fingerprint=68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f | treatment=aq19-bilinear | treatment-parameter-sha256=3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194 | treatment-artifact-sha256=445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a | learned-search=K8/H4 | bluff=off | reveal=off | turn=13 | phase=first_main | priority-holder=You | latest-event="Opponent: Pass priority"
+```
+
+This authenticates the exact AQ19 artifact and public match context, but does
+not contain the human action history or a complete state snapshot, so it is a
+qualitative field failure rather than a replayable benchmark. It nevertheless
+refutes any suggestion that AQ19's aggregate offline pass itself repaired
+counter composition. The already frozen typed pair
+`control.blue.counter-redundant-same-target.v1` /
+`control.blue.counter-same-target-after-intervening-counter.v1` represents the
+general public-stack distinction: preserve the extra card when the first
+counter already settles the spell, but retain a productive response to an
+intervening opposing counter. A future learned candidate may use this pair as
+a reject-only safety gate, never as card-specific training data or promotion
+evidence.
+
+##### AQ20-DBC6-S0-SPARSE-SUPPORT label-blind declaration
+
+Declared 2026-07-29 at exact AQ19 implementation/result commit `bfd4010`,
+after rereading `REVIEW.md` through its newest cross-tree verification of that
+commit and before inspecting a new candidate, teacher gradient, selected
+coordinate, tactical score, or gameplay seed. Repository and history searches
+found identifier `AQ20-DBC6-S0-SPARSE-SUPPORT` and schema
+`old-school-aq20-sparse-support-v1` unused. C16 remains champion.
+
+This is a small feature-only census needed before preregistering a sparse
+state-by-action fit. AQ19's rank-two residual changed the exact-max choice on
+only 2/300 grouped-OOF and 2/150 reused-DEV roots, and its 31-29 selector was
+concentrated in Red at 10/12. A 16-term unrestricted-rank interaction model is
+the next plausible fast candidate, but it would select among 674 × 219 =
+147,606 possible cross coordinates. Guessing their support or promising a fast
+fit before measuring the frozen feature rows would violate the workflow and
+could favor rare, high-leverage card interactions.
+
+Load only the exact immutable AQ18 cache (13,006,842 bytes, SHA-256
+`591498b82d352c870c786289f54b4e5c197f1c972b06d4f74c7a3ca7731916e8`,
+corpus digest
+`519ebe666adaf567ac3b4fdf7a1e2096cf96ccc70ad23e55b5db7f45c37c3f3f`)
+and reuse AQ19's exact 674-state / 219-action projection, physical-game fold
+assignment, and manifest
+`51852e6fa7fee97edf809e7f29cf5859cca7fd0e1575a388053d5d2b042c7765`.
+Run the census on exactly five fit partitions: all 300 TRAIN roots and the four
+AQ19 fold-training complements. No DEV root participates.
+
+For root `r`, canonical action `i`, state coordinate `p`, and action coordinate
+`q`, define
+`d[r,i,q] = action[r,i,q] - canonical_mean_i(action[r,i,q])` and
+`x[r,i,p,q] = state[r,p] * d[r,i,q]`. A coordinate is active when its
+equal-15-cell root-weighted `sum_i x^2/n_actions` is finite and strictly
+positive. It is **eligible** only when its action-difference support appears in
+at least 24 roots from at least 12 distinct physical-game groups and no one
+physical group contributes more than 10% of its total weighted `x^2`.
+These are fixed generic leverage guards, not observed counts. Exact-zero,
+nonfinite, or threshold-failing coordinates remain in the descriptive census
+but cannot enter the later fit.
+
+The command must report, for each of the five partitions, root/group counts,
+active and eligible coordinate counts, minimum eligible root/group support,
+maximum eligible group leverage, and a canonical SHA-256 binding the complete
+active/eligibility/support/energy table. It must also report a cross-partition
+digest and whether at least 16 eligible coordinates exist in every partition.
+Canonical reductions scan roots, actions, `p`, and `q` in fixed order; repeated
+runs must be bit-identical. Tests must prove action-order equivariance,
+whole-physical-group fold isolation, and that arbitrary mutation of cached
+teacher aggregates/samples cannot change one census byte.
+
+The census must report `teacher_fields_read=0`, `candidate_scores=0`,
+`selected_terms=0`, `optimizer_steps=0`, `model_created=0`,
+`tactical_seed_opened=0`, `selector_seed_opened=0`, and
+`gameplay_games=0`. Passing only freezes the measured support and licenses a
+separate exact AQ20 fit declaration. Failure opens no learner; any revised
+support floor must be declared from this label-blind result before teacher
+values are exposed. No support result can count as bot-strength evidence.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
