@@ -22266,6 +22266,12 @@ gradient tol.   = 1e-10
 Only the two critic leaves' 16 hidden-to-output weights plus output bias may
 change: exactly 34 scalar parameters. The critic input trunk, direct state
 path, all four policy heads, topology/schema, and parent remain bit-identical.
+Here "34 scalar parameters" fixes the complete trainable scope; the fitted
+candidate must differ from C16 in at least one and at most all 34 scalar
+slots, rather than requiring every slot to move numerically. Exporting the
+parent and candidate output parameters, replaying the candidate vector onto
+C16, and reproducing the candidate fingerprint are mandatory isolation
+witnesses.
 Repeat the fit from C16 and require the same fingerprint. This intentionally
 tests the successor-boundary target with minimal capacity first; it does not
 repeat OC1's terminal-outcome labels.
@@ -22307,7 +22313,17 @@ The conditional selector uses fresh seed `202607291311` and exactly
 `run_bot_benchmark(1, seed, DBC1, C16, max_turns=500, false)`: 60 paired
 games, 12 per DBC1 challenger deck, both seats and play/draw. More than
 30/60 wins and at least 3/12 on every deck licenses a dated manual web pilot
-only; 37/60 may be described as `FAST_GO`. It is never a strength,
+only. Both bots use ordinary Learned Value with their frozen model, K8/R1/H4
+Priority search, legacy scoring, zero exploration, zero continuation
+epsilon, zero residual, zero resolved-prior blend, and false pass-dominance,
+adversarial-blocks, actor-local-search, and recursive-policy-improvement
+treatments. Both use explicit frozen models with `training_games=800`;
+`GameConfig` fixes `learned_training_seed=424242`,
+`learned_search_depth=1`, and `max_turns=500`. The selector deliberately
+uses the production game's exact 0/1 terminal semantics, symmetrically in
+both arms; `C16DiscountedAbsoluteTurn` applies only to the DBC1 corpus and
+aligned nine-root mechanism battery. A qualifying
+result of 37/60 or more may be described as `FAST_GO`. It is never a strength,
 Learned-is-king, or champion claim. Any other result rejects the candidate.
 Do not run 200 or 2,000 games unless a later declaration promotes a
 field-validated pilot to a milestone candidate.
