@@ -22948,19 +22948,23 @@ S_cache,a = B_cache,a + 0.10 * tanh(z_a - mean_legal(z))
 
 Thus all-zero `delta` plus residual weight `0.10` must reproduce C16 action
 scores on the cache exactly. Production does not contain `B_cache`: it
-computes the ordinary residual-free `K8/R1/H4` root score `B_prod,a` and adds
-the identical, same-unit residual:
+computes the ordinary `K8/R1/H4` aggregate `B_prod,a` before adding the
+current root's residual:
 
 ```text
 S_prod,a = B_prod,a + 0.10 * tanh(z_a - mean_legal(z))
 ```
 
-The immutable candidate is deployed through that existing Learned Value path
-with `value_priority_residual_weight = 0.10`; the parent comparison uses the
-same model with residual weight zero. Only the action-conditioned residual
-function is shared between cached fitting and production, not the numerical
-base-score source. The treatment changes Priority choices only; it is a
-proof-of-traction experiment, not yet an all-decision AlphaZero head.
+`B_prod,a` is not globally residual-free: in the candidate arm, symmetric
+continuations already use the candidate's residual-active Priority policy.
+The equation decomposes only the current-root score into the ordinary search
+aggregate before the current-root additive residual. The immutable candidate
+is deployed through that existing Learned Value path with
+`value_priority_residual_weight = 0.10`; the parent comparison uses the same
+model with residual weight zero. Only the action-conditioned residual function
+is shared between cached fitting and production, not the numerical base-score
+source. The treatment changes Priority choices only; it is a proof-of-traction
+experiment, not yet an all-decision AlphaZero head.
 
 ###### Fixed pairwise fit and whole-game out-of-fold check
 

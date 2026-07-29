@@ -111,6 +111,7 @@ DECISION_BOUNDARY_CRITIC_SOURCE := src/decision_boundary_critic.cpp
 DECISION_BOUNDARY_CRITIC_GATE_SOURCE := src/decision_boundary_critic_gate.cpp
 DECISION_BOUNDARY_RANK_DIRECT_SOURCE := src/decision_boundary_rank_direct.cpp
 DECISION_BOUNDARY_RANK_HIDDEN_SOURCE := src/decision_boundary_rank_hidden.cpp
+DECISION_BOUNDARY_ACTION_PAIR_SOURCE := src/decision_boundary_action_pair.cpp
 ACTION_Q_ON_POLICY_SUCCESSOR_SOURCE := src/action_q_on_policy_successor.cpp
 ACTION_Q_PRIORITY_TRUST_REGION_SOURCE := src/action_q_priority_trust_region.cpp
 ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE := src/action_q_recursive_policy_improvement.cpp
@@ -223,6 +224,8 @@ DECISION_BOUNDARY_RANK_DIRECT_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-bo
 DECISION_BOUNDARY_RANK_DIRECT := $(BUILD_DIR)/old-school-decision-boundary-rank-direct
 DECISION_BOUNDARY_RANK_HIDDEN_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-boundary-rank-hidden-tests
 DECISION_BOUNDARY_RANK_HIDDEN := $(BUILD_DIR)/old-school-decision-boundary-rank-hidden
+DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-boundary-action-pair-tests
+DECISION_BOUNDARY_ACTION_PAIR := $(BUILD_DIR)/old-school-decision-boundary-action-pair
 ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-on-policy-successor-tests
 ACTION_Q_ON_POLICY_SUCCESSOR := $(BUILD_DIR)/old-school-action-q-on-policy-successor
 ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-priority-trust-region-tests
@@ -293,6 +296,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-decision-boundary-critic old-school-decision-boundary-critic decision-boundary-critic-census decision-boundary-critic-run decision-boundary-critic-cache
 .PHONY: test-decision-boundary-rank-direct decision-boundary-rank-direct-run
 .PHONY: test-decision-boundary-rank-hidden decision-boundary-rank-hidden-run
+.PHONY: test-decision-boundary-action-pair decision-boundary-action-pair-run
 .PHONY: test-action-q-on-policy-successor action-q-on-policy-successor-census action-q-on-policy-successor-run
 .PHONY: test-action-q-priority-trust-region action-q-priority-trust-region-run
 .PHONY: test-action-q-recursive-policy-improvement action-q-recursive-policy-improvement-run
@@ -446,6 +450,7 @@ INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_LINK_SOURCES := $(INFORMATION_SET_PUCT_PR
 DECISION_BOUNDARY_CRITIC_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES) $(filter-out $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES),$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_LINK_SOURCES)) $(DECISION_BOUNDARY_CRITIC_SOURCE) $(DECISION_BOUNDARY_CRITIC_GATE_SOURCE)
 DECISION_BOUNDARY_RANK_DIRECT_LINK_SOURCES := $(DECISION_BOUNDARY_CRITIC_LINK_SOURCES) $(DECISION_BOUNDARY_RANK_DIRECT_SOURCE)
 DECISION_BOUNDARY_RANK_HIDDEN_LINK_SOURCES := $(DECISION_BOUNDARY_RANK_DIRECT_LINK_SOURCES) $(DECISION_BOUNDARY_RANK_HIDDEN_SOURCE)
+DECISION_BOUNDARY_ACTION_PAIR_LINK_SOURCES := $(DECISION_BOUNDARY_RANK_DIRECT_LINK_SOURCES) $(DECISION_BOUNDARY_ACTION_PAIR_SOURCE)
 FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
 FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
@@ -563,6 +568,10 @@ $(eval $(call link_program,$(DECISION_BOUNDARY_RANK_DIRECT),$(DECISION_BOUNDARY_
 $(eval $(call link_program,$(DECISION_BOUNDARY_RANK_HIDDEN_TEST_RUNNER),$(DECISION_BOUNDARY_RANK_HIDDEN_LINK_SOURCES) tests/test_decision_boundary_rank_hidden.cpp))
 
 $(eval $(call link_program,$(DECISION_BOUNDARY_RANK_HIDDEN),$(DECISION_BOUNDARY_RANK_HIDDEN_LINK_SOURCES) src/decision_boundary_rank_hidden_main.cpp))
+
+$(eval $(call link_program,$(DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER),$(DECISION_BOUNDARY_ACTION_PAIR_LINK_SOURCES) tests/test_decision_boundary_action_pair.cpp))
+
+$(eval $(call link_program,$(DECISION_BOUNDARY_ACTION_PAIR),$(DECISION_BOUNDARY_ACTION_PAIR_LINK_SOURCES) src/decision_boundary_action_pair_main.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER),$(ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES) tests/test_action_q_on_policy_successor.cpp))
 
@@ -722,6 +731,7 @@ test: $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR
 test: $(DECISION_BOUNDARY_CRITIC_TEST_RUNNER) $(DECISION_BOUNDARY_CRITIC)
 test: $(DECISION_BOUNDARY_RANK_DIRECT_TEST_RUNNER) $(DECISION_BOUNDARY_RANK_DIRECT)
 test: $(DECISION_BOUNDARY_RANK_HIDDEN_TEST_RUNNER) $(DECISION_BOUNDARY_RANK_HIDDEN)
+test: $(DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER) $(DECISION_BOUNDARY_ACTION_PAIR)
 test: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 test: $(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER) $(ACTION_Q_PRIORITY_TRUST_REGION)
 test: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
@@ -857,6 +867,14 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-rank-hidden --run' >/dev/null
+	./$(DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_BOUNDARY_ACTION_PAIR) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ13-DBC4 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-action-pair --run' >/dev/null
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
 	@set +e; output=`./$(ACTION_Q_ON_POLICY_SUCCESSOR) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
@@ -1802,6 +1820,19 @@ test-decision-boundary-rank-hidden: $(DECISION_BOUNDARY_RANK_HIDDEN_TEST_RUNNER)
 
 decision-boundary-rank-hidden-run: $(DECISION_BOUNDARY_RANK_HIDDEN)
 	./$(DECISION_BOUNDARY_RANK_HIDDEN) --run
+
+test-decision-boundary-action-pair: $(DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER) $(DECISION_BOUNDARY_ACTION_PAIR)
+	./$(DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_BOUNDARY_ACTION_PAIR) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ13-DBC4 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-action-pair --run' >/dev/null
+
+decision-boundary-action-pair-run: $(DECISION_BOUNDARY_ACTION_PAIR)
+	./$(DECISION_BOUNDARY_ACTION_PAIR) --run
 
 test-action-q-on-policy-successor: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
