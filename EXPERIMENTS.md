@@ -18877,6 +18877,57 @@ the next declared implementation is restore-safe information-set MCTS/POMCP,
 not another flat-horizon sweep. AQ4-D1 licenses no corpus, model, benchmark,
 gameplay seed, or deployment by itself.
 
+##### AQ4-D1 symmetric nested actor-root search result
+
+Run 2026-07-28 from immutable commit `1a3cb0a` after the full repository
+gate and independent implementation review passed. Exact command:
+
+```sh
+./build/old-school-action-q-nested-actor-diagnostic --diagnose
+```
+
+The command opened only preregistered root seed `202607282011`. It used the
+frozen C16 parent fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+outer `K32/R1/H8` with four workers, and symmetric actor-local inner
+`K2/R1/H4`. All four declared directions passed:
+
+| Fixture | Exact action means | Result |
+| --- | --- | --- |
+| Redundant same-target Counterspell | Pass `0.4435625655`; counter original Air Elemental `0.3669169305`; counter own Counterspell `0.0846177266` | **PASS**, Pass unique max and strictly above both redundant counters |
+| Braingeyser X choice | X=1 self `0.1762160865`; Pass `0.1680476850`; X=0 self `0.1551384596`; X=0 opponent `0.1487620946`; X=1 opponent `0.1123738747` | **PASS**, X=1 self unique max and neither X=0 action in max support |
+| Sick-Bear Giant Growth | Pass `0.1417431456`; Growth `0.1272875149` | **PASS** |
+| Live Force Spike | Spike `0.1284271695`; Pass `0.0934457693` | **PASS** |
+
+Every fixture's hidden-repartition and reversed-action evidence was
+bit-identical. The actor-local Red response control had three legal actions,
+including Pass and Bolt, after Blue correctly passed priority
+(`consecutive_passes=1`); changing Blue's hidden hand/library identities
+left Red's observation, legal actions, complete K2 score vector, selection,
+and accounting bit-identical. Aggregate accounting was 128 sampled outer
+worlds, 384 outer action continuations, 75 terminal leaves, 309 C16
+bootstraps, 41,236 inner rollout evaluations, 7,160 inner search
+invocations, and maximum active nesting depth exactly one. The run performed
+no fit, corpus collection, artifact publication, benchmark, or gameplay
+evaluation.
+
+Verdict: **accept AQ4-D1 as a general, hidden-information-safe search
+teacher mechanism**, not yet as a stronger deployed bot. This is the first
+single operator in the AQ series to repair all four preregistered strategic
+classes together without card-specific policy. It directly supports the
+working diagnosis that the rich state/action representation can express
+these choices and that C16's frozen continuation policy—not lack of public
+board/stack/hand features—was the nearer bottleneck.
+
+Next experiment: freeze one cap-eight, all-five-deck collection from the
+AQ4-D1 symmetric continuation operator, distill its complete Priority
+action distributions into the existing 893-input/32-hidden Priority head,
+and compare that single-axis challenger with frozen C16 in the fast
+five-deck selector before any Handcrafted benchmark or web deployment.
+Preregister the exact collection schedule, fit seed, selector seed, and
+promotion threshold before collecting it; do not tune AQ4's K/H from this
+successful fixture coordinate.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
