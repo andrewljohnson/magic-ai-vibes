@@ -23143,6 +23143,128 @@ state/action row—while retaining the fast cache, grouped whole-game OOF,
 five-deck guards, symmetric Learned continuations, and conditional gameplay
 gate. Its exact recipe will be declared separately after independent review.
 
+##### AQ14-DBC5-ADAPTIVE-TRUNK adaptive action-policy declaration
+
+Declared 2026-07-29 10:28 PDT at exact DBC4 result commit `e1e479a`, after
+rereading `REVIEW.md` through its newest 10:14 PDT cycle and before changing
+source, fitting, or opening a gameplay coordinate. Repository and history
+searches found fit tag `202607291701`, selector seed `202607291711`, and
+identifier `DBC5-ADAPTIVE-TRUNK` unused. C16 remains champion.
+
+Descriptive frozen-parent fact: DBC4's 32-weight readout improved TRAIN and
+whole-game grouped-OOF pair BCE and regret but worsened reused DEV regret
+`0.023696003 -> 0.026626351`; four DEV deck guards failed, with RU Aggro
+again the largest reversal. DBC5 is one representation treatment, not a
+temperature, tether, step-count, learning-rate, residual-scale, seed, data,
+gate, or threshold sweep.
+
+Falsifiable hypothesis: DBC4 overfit because it could only reweight 32 frozen
+random nonlinear projections of the owner-safe action row. Allowing each
+projection to adapt its gain and operating-point bias, while retaining the
+same small cached corpus and cost-weighted pairwise teacher, will improve
+TRAIN, grouped whole-game OOF, and reused DEV pair BCE and regret without
+increasing any deck's OOF or DEV regret. Failure rejects DBC5 and closes the
+small frozen-direction action-head family; the next representation must add
+new state-by-action directions or use a larger independently sampled corpus.
+
+###### Immutable 96-parameter action trunk
+
+Reuse only the exact DBC4 parent and owner-safe cache:
+
+```text
+parent fingerprint 68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+cache path          build/model-cache/old-school-aq10-dbc1-owner-safe-corpus-v1.bin
+cache bytes         25886525
+cache sha256        9234b10d7181d566d4dacb972fbb32bf20d2961eb34c4d95d7e92ece1622a4a4
+cache digest        28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58
+roots               TRAIN 80 / DEV 80, exactly 16 per deck and split
+```
+
+For action row `x_a`, let `u_a,j` be the exact preactivation of C16's frozen
+Priority input row `W0_j` in engine arithmetic. C16's Priority hidden bias,
+hidden output, direct path, and output bias must again be exact positive-zero
+binary64. Train only three 32-vectors, all initialized to exact positive zero:
+
+```text
+h_a,j = tanh((1 + gain_j) * u_a,j + bias_j)
+z_a   = sum_j(output_j * h_a,j)
+S_a   = B_a + 0.10 * tanh(z_a - mean_legal(z))
+```
+
+`B_a` has the same meaning as DBC4: the cached parent boundary aggregate
+during fitting and the ordinary K8/R1/H4 aggregate before the current-root
+residual in production, with candidate-residual-active symmetric Learned
+continuations in the candidate arm. The exported model replaces only:
+
+```text
+W_priority[j,f] = (1 + gain_j) * W0[j,f]
+b_priority[j]   = bias_j
+o_priority[j]   = output_j
+```
+
+The Priority direct path and output bias, complete critic, and Attack, Block,
+and DamageOrder heads remain bit-identical to C16. The runner must reproduce
+the candidate from the exact 96 learned scalars, require at least one and at
+most 96 nonzero learned coordinates, and prove that no unauthorized component
+changed. This is a general learned state/action representation: it receives
+only the existing 893 rules-level owner-information features and contains no
+card name, card-specific switch, authored policy preference, Handcrafted
+label, opponent hidden identity, stack rule, target rule, or combat rule.
+
+###### Frozen fit, folds, and gates
+
+Reuse DBC4's exact teacher means, 246 TRAIN and 470 DEV eligible-pair census,
+root-normalized absolute teacher-gap pair weights, pair temperature `0.10`,
+and score residual `0.10`. Optimize equal-root/equal-deck pair BCE plus
+`0.5 * 0.10 * (sum(gain^2) + sum(bias^2) + sum(output^2))` with deterministic
+full-batch Adam from exact zero for 256 updates: learning rate `0.001`, betas
+`0.9/0.999`, epsilon `1e-8`, and global 96-gradient norm clip `5.0`. Use fit
+tag `202607291701`. There is no shuffle, random initialization, early
+stopping, arm choice, interpolation, retry, or post-result adjustment.
+
+Before the final all-TRAIN fit, repeat DBC4's exact grouped four-fold
+whole-game OOF protocol: `schedule_index % 4`, both actors of a game together,
+ten games/20 roots/four roots per deck held out in every fold. Recombine the
+80 held-out root predictions once in canonical order. Repeat every fold and
+the full fit from exact zero and require bit-identical parameters, scores, and
+fingerprints. Require analytic activations/logits/residuals to agree with the
+actual immutable model within `1e-12`; require legal-action permutation
+equivariance, hidden-repartition bit identity, zero-parameter C16 equivalence,
+cache/census/fold identity, parent immutability, parameter replay, exact
+component isolation, and bit-identical successor predictions and
+BCE/Brier/bias/ECE. Floating-point drift between analytic `(1 + gain) * u`
+and the engine's dot product through elementwise-scaled `W0` fails offline;
+every reported candidate metric must come from the actual immutable model,
+not the analytic surrogate.
+
+The offline metric gate is exactly DBC4's conjunctive gate: TRAIN pair BCE and
+regret strictly improve with listwise CE non-increasing; combined OOF and
+reused DEV pair BCE and regret strictly improve, listwise CE does not
+increase, top-one and stable-pair agreement do not decrease, and no deck's
+regret increases. Any failure returns `REJECT stage=offline` and opens no
+model fixture, gameplay seed, or pilot.
+
+Only a complete offline pass licenses the existing balanced action-model
+battery (Ancestral Recall, Counterspell, Braingeyser, Force Spike, Giant
+Growth, descriptor/order, and hidden-repartition controls). Its fixture
+corpus, expected action relations, balance, thresholds, and hidden-safety
+controls are byte-for-byte or semantically unchanged from DBC4; only scorer
+plumbing and the component-isolation expectation may change to accept exactly
+the declared gain/bias/output transform. No fixture, relation, threshold, or
+control may change after an offline result. Every fixture must pass.
+
+Only then may the runner open one fresh five-deck, seat/play-draw-balanced
+60-game selector at seed `202607291711`: DBC5 at residual weight `0.10`
+versus C16 at zero, ordinary K8/R1/H4 Learned Value play. Both arms use the
+same frozen C16 lineage and DBC4 training-game configuration. Continuation
+epsilon and resolved-shallow-prior weight are zero; pass dominance,
+adversarial blocks, actor-local search, and recursive policy improvement are
+false; the continuation controller is Legacy; no other research treatment is
+enabled. An exact config assertion must pass before the seed opens. More than
+30/60 wins plus at least 3/12 on every deck licenses a dated manual web pilot;
+at least 37/60 is `FAST_GO`. Neither result promotes the champion or licenses
+a Handcrafted strength claim without the full repository gates.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
