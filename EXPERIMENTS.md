@@ -19053,6 +19053,46 @@ dated user web pilot; it does not replace C16 or license a Handcrafted
 conclusion. No Handcrafted policy, target, rollout, card heuristic, or
 opponent hidden identity enters AQ4-G1.
 
+##### AQ4-G1 implementation clarification before code
+
+Recorded immediately after the declaration and before implementation or any
+source/science run, in response to a read-only design audit. This changes no
+treatment, quota, threshold, or observed coordinate; it closes four
+implementation ambiguities.
+
+- Freeze actor-local noninterference seed
+  `855487582482885674`, exactly
+  `derive_seed(collection_root, PrioritySearch, 1, 4, 0)`.
+  At every retained root, the base K8/H4 and teacher K8/H8 calls use the
+  same declared per-root seed so their first eight common
+  determinizations are paired. Both consume
+  `exact_priority_aggregate_scores`; do not replace the production shallow
+  aggregation with a mean of raw `q_samples`.
+- The census firewall is: `--census` may open only its deterministic
+  `SelfPlayGame` schedule and ordinary C16 source-policy searches. It opens
+  no AQ4 `PrioritySearch` coordinate. `--run` first reconstructs and verifies
+  that owner-safe source manifest, then opens the five preflight coordinates,
+  and only after they pass opens each retained-root AQ4 teacher coordinate
+  once. Replaying the deterministic source trajectories in census and run is
+  intentional; “once” applies to AQ4 teacher/preflight coordinates.
+- The existing K32 AQ4 diagnostic remains frozen. Add a small reusable pure
+  scoring seam that accepts an explicit search config/seed and uses the same
+  public probe factories plus actor-local pair; K8 preflight calls that seam.
+  Do not copy fixture semantics by hand or weaken the K32 diagnostic.
+- `run_with_priority_root_trace` may necessarily hold `GameState` snapshots
+  transiently while selecting/scoring. No `GameState` may survive in a
+  retained training example, manifest/hash payload, report, or serialized
+  artifact. Hidden-repartition and action-order bit identity are required on
+  the preflight and focused deployed-candidate fixtures; retained corpus
+  roots instead require complete canonical action/feature/accounting
+  mappings, not two additional full nested-search rescoring passes.
+
+The even/odd CHECK split is a same-trajectory, example-held-out fast overfit
+guard, not independent milestone evidence; the fresh selector is the
+independent gameplay coordinate. The 37-win tail calculation assumes binary
+outcomes, so any turn-limit draw makes that threshold conservative rather
+than literally exact. The threshold itself remains frozen.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
