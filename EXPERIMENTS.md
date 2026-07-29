@@ -20145,8 +20145,9 @@ The sole OP1 coordinate is:
 - initialize from the immutable warm parent and fit TRAIN only with the
   unchanged G4B 64-epoch Adam recipe: batch 64, learning rate `0.003`,
   beta1 `0.9`, beta2 `0.999`, epsilon `1e-8`, global norm clip `5.0`, fit seed
-  `12262988820247274425`, residual `0.10`, temperature `0.10`. Do not replay
-  G4B rows or use DEV for fitting or selection.
+  `12262988820247274425`, residual `0.10`, temperature `0.10`. Do not include
+  any G4B row in the OP1 child fit. DEV enters no gradient update and cannot
+  choose among fits; it is used once for this fixed child's eligibility.
 
 Follow the same measured-first seal as G4B. `--census` may reconstruct the
 warm parent and report the immutable TRAIN/DEV game, actor-game, nontrivial
@@ -20156,8 +20157,10 @@ necessarily replays its already-frozen labels and fit; this old-coordinate
 replay is permitted only to reproduce and verify `d0d46...003f8`. Report the
 old G4B labels replayed separately from `OP1 labels opened`, which must remain
 zero in `--census`. No G4B row may enter the OP1 child fit. Freeze the exact
-OP1 census in a notebook-only commit before `--run`; no count may be guessed
-or changed after inspection.
+OP1 manifest hash and measured counts in both source and the notebook, then
+commit and review that census freeze before `--run`; no count may be guessed
+or changed after inspection. Until that source seal is nonempty and exact,
+`--run` must fail closed without accepting an external hash or count knob.
 
 `--run` must reconstruct the frozen census bit-exactly, label it once, and fit
 twice from the same immutable warm parent. Before any selector opens, require:
