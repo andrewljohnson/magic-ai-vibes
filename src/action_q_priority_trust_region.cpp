@@ -237,27 +237,46 @@ bool metrics_match_record(
 bool expected_full_child_safety_signature(
     const action_q_offline_gate::ModelGateReport& report) {
     const auto& behavior = report.behavior;
-    return !report.gate_passed() &&
-           report.frozen_dev.gate_passed() &&
-           report.ancestral.gate_passed() &&
-           report.descriptor_order.gate_passed() &&
-           !behavior.gate_passed() &&
-           !behavior.force_spike.gate_passed() &&
-           behavior.force_spike.hidden_repartition_passed &&
-           !behavior.force_spike.live_selects_force_spike() &&
-           !behavior.live_force_spike_preserved &&
-           behavior.one_open_payable_selects_pass ==
-               behavior.force_spike.payable_selects_pass() &&
-           behavior.five_open_force_spike_selects_pass &&
-           behavior.redundant_counter_selects_pass &&
-           behavior
-               .intervening_counter_selects_opposing_counter &&
-           behavior.sick_bear_growth_selects_pass &&
-           behavior.opponent_growth_excluded &&
-           behavior.braingeyser_x_zero_excluded &&
-           report.failures() ==
-               std::vector<std::string>{
-                   "focused behavior gate failed"};
+    return full_child_safety_signature_exact({
+        .model_gate_passed = report.gate_passed(),
+        .frozen_dev_passed =
+            report.frozen_dev.gate_passed(),
+        .ancestral_passed =
+            report.ancestral.gate_passed(),
+        .descriptor_order_passed =
+            report.descriptor_order.gate_passed(),
+        .behavior_gate_passed =
+            behavior.gate_passed(),
+        .force_spike_gate_passed =
+            behavior.force_spike.gate_passed(),
+        .force_spike_hidden_repartition_passed =
+            behavior.force_spike.hidden_repartition_passed,
+        .force_spike_live_selects =
+            behavior.force_spike.live_selects_force_spike(),
+        .live_force_spike_preserved =
+            behavior.live_force_spike_preserved,
+        .one_open_payable_selects_pass =
+            behavior.one_open_payable_selects_pass,
+        .payable_force_spike_selects_pass =
+            behavior.force_spike.payable_selects_pass(),
+        .five_open_force_spike_selects_pass =
+            behavior.five_open_force_spike_selects_pass,
+        .redundant_counter_selects_pass =
+            behavior.redundant_counter_selects_pass,
+        .intervening_counter_selects_opposing_counter =
+            behavior
+                .intervening_counter_selects_opposing_counter,
+        .sick_bear_growth_selects_pass =
+            behavior.sick_bear_growth_selects_pass,
+        .opponent_growth_excluded =
+            behavior.opponent_growth_excluded,
+        .braingeyser_x_zero_excluded =
+            behavior.braingeyser_x_zero_excluded,
+        .failures_exact =
+            report.failures() ==
+            std::vector<std::string>{
+                "focused behavior gate failed"},
+    });
 }
 
 void append_model_gate_failures(
@@ -470,6 +489,29 @@ bool full_control_gate_passed(
            inputs.candidate_dev_metrics_exact &&
            inputs.offline_metric_gates_exact &&
            inputs.expected_safety_signature_exact;
+}
+
+bool full_child_safety_signature_exact(
+    const FullChildSafetySignatureInputs& inputs) {
+    return !inputs.model_gate_passed &&
+           inputs.frozen_dev_passed &&
+           inputs.ancestral_passed &&
+           inputs.descriptor_order_passed &&
+           !inputs.behavior_gate_passed &&
+           !inputs.force_spike_gate_passed &&
+           inputs.force_spike_hidden_repartition_passed &&
+           !inputs.force_spike_live_selects &&
+           !inputs.live_force_spike_preserved &&
+           inputs.one_open_payable_selects_pass &&
+           inputs.payable_force_spike_selects_pass &&
+           inputs.five_open_force_spike_selects_pass &&
+           inputs.redundant_counter_selects_pass &&
+           inputs
+               .intervening_counter_selects_opposing_counter &&
+           inputs.sick_bear_growth_selects_pass &&
+           !inputs.opponent_growth_excluded &&
+           inputs.braingeyser_x_zero_excluded &&
+           inputs.failures_exact;
 }
 
 bool ArmEvaluation::gate_passed() const {

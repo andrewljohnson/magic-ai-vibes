@@ -169,6 +169,30 @@ passing_full_control_inputs() {
     };
 }
 
+trust::FullChildSafetySignatureInputs
+passing_full_child_safety_signature() {
+    return {
+        .model_gate_passed = false,
+        .frozen_dev_passed = true,
+        .ancestral_passed = true,
+        .descriptor_order_passed = true,
+        .behavior_gate_passed = false,
+        .force_spike_gate_passed = false,
+        .force_spike_hidden_repartition_passed = true,
+        .force_spike_live_selects = false,
+        .live_force_spike_preserved = false,
+        .one_open_payable_selects_pass = true,
+        .payable_force_spike_selects_pass = true,
+        .five_open_force_spike_selects_pass = true,
+        .redundant_counter_selects_pass = true,
+        .intervening_counter_selects_opposing_counter = true,
+        .sick_bear_growth_selects_pass = true,
+        .opponent_growth_excluded = false,
+        .braingeyser_x_zero_excluded = true,
+        .failures_exact = true,
+    };
+}
+
 old_school::BotBenchmarkSummary selector_summary(
     std::size_t wins) {
     old_school::BotBenchmarkSummary summary;
@@ -401,6 +425,76 @@ void test_full_control_gate_is_conjunctive() {
     }
 }
 
+void test_full_child_safety_signature_is_exact() {
+    const auto passing =
+        passing_full_child_safety_signature();
+    expect(
+        trust::full_child_safety_signature_exact(passing),
+        "exact observed alpha-one safety signature did not pass");
+
+    constexpr std::array<
+        bool trust::FullChildSafetySignatureInputs::*, 12>
+        expected_true{
+            &trust::FullChildSafetySignatureInputs::
+                frozen_dev_passed,
+            &trust::FullChildSafetySignatureInputs::
+                ancestral_passed,
+            &trust::FullChildSafetySignatureInputs::
+                descriptor_order_passed,
+            &trust::FullChildSafetySignatureInputs::
+                force_spike_hidden_repartition_passed,
+            &trust::FullChildSafetySignatureInputs::
+                one_open_payable_selects_pass,
+            &trust::FullChildSafetySignatureInputs::
+                payable_force_spike_selects_pass,
+            &trust::FullChildSafetySignatureInputs::
+                five_open_force_spike_selects_pass,
+            &trust::FullChildSafetySignatureInputs::
+                redundant_counter_selects_pass,
+            &trust::FullChildSafetySignatureInputs::
+                intervening_counter_selects_opposing_counter,
+            &trust::FullChildSafetySignatureInputs::
+                sick_bear_growth_selects_pass,
+            &trust::FullChildSafetySignatureInputs::
+                braingeyser_x_zero_excluded,
+            &trust::FullChildSafetySignatureInputs::
+                failures_exact,
+        };
+    for (const auto member : expected_true) {
+        auto mutation = passing;
+        mutation.*member = false;
+        expect(
+            !trust::full_child_safety_signature_exact(
+                mutation),
+            "missing required alpha-one safety fact was accepted");
+    }
+
+    constexpr std::array<
+        bool trust::FullChildSafetySignatureInputs::*, 6>
+        expected_false{
+            &trust::FullChildSafetySignatureInputs::
+                model_gate_passed,
+            &trust::FullChildSafetySignatureInputs::
+                behavior_gate_passed,
+            &trust::FullChildSafetySignatureInputs::
+                force_spike_gate_passed,
+            &trust::FullChildSafetySignatureInputs::
+                force_spike_live_selects,
+            &trust::FullChildSafetySignatureInputs::
+                live_force_spike_preserved,
+            &trust::FullChildSafetySignatureInputs::
+                opponent_growth_excluded,
+        };
+    for (const auto member : expected_false) {
+        auto mutation = passing;
+        mutation.*member = true;
+        expect(
+            !trust::full_child_safety_signature_exact(
+                mutation),
+            "unexpected alpha-one safety fact was accepted");
+    }
+}
+
 void test_first_pass_selection_and_stop_semantics() {
     const std::array<bool, 0> none{};
     expect(
@@ -590,10 +684,11 @@ int main() {
         test_interpolation_endpoints_validation_and_isolation();
         test_arm_gate_is_conjunctive();
         test_full_control_gate_is_conjunctive();
+        test_full_child_safety_signature_is_exact();
         test_first_pass_selection_and_stop_semantics();
         test_selector_manual_gate_and_all_deck_floors();
         std::cout
-            << "6 action-Q Priority trust-region tests passed\n";
+            << "7 action-Q Priority trust-region tests passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr

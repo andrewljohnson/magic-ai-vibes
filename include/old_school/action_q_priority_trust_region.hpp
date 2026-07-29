@@ -86,6 +86,33 @@ struct FullControlGateInputs {
     bool operator==(const FullControlGateInputs&) const = default;
 };
 
+// Exact observed safety signature of the frozen, already-rejected OP1 child.
+// This is reconstruction evidence only. Proper trust-region arms still use
+// the unchanged complete ModelGateReport::gate_passed() candidate gate.
+struct FullChildSafetySignatureInputs {
+    bool model_gate_passed = false;
+    bool frozen_dev_passed = false;
+    bool ancestral_passed = false;
+    bool descriptor_order_passed = false;
+    bool behavior_gate_passed = false;
+    bool force_spike_gate_passed = false;
+    bool force_spike_hidden_repartition_passed = false;
+    bool force_spike_live_selects = false;
+    bool live_force_spike_preserved = false;
+    bool one_open_payable_selects_pass = false;
+    bool payable_force_spike_selects_pass = false;
+    bool five_open_force_spike_selects_pass = false;
+    bool redundant_counter_selects_pass = false;
+    bool intervening_counter_selects_opposing_counter = false;
+    bool sick_bear_growth_selects_pass = false;
+    bool opponent_growth_excluded = false;
+    bool braingeyser_x_zero_excluded = false;
+    bool failures_exact = false;
+
+    bool operator==(
+        const FullChildSafetySignatureInputs&) const = default;
+};
+
 struct FullControlReport {
     ArmEvaluation arm;
     bool endpoint_pointer_exact = false;
@@ -103,6 +130,8 @@ struct FullControlReport {
 bool arm_gate_passed(const ArmGateInputs& inputs);
 bool full_control_gate_passed(
     const FullControlGateInputs& inputs);
+bool full_child_safety_signature_exact(
+    const FullChildSafetySignatureInputs& inputs);
 
 // Interpolates only the outer Priority tensors. Alpha zero and one return the
 // exact endpoint pointers. The child must differ from the warm parent only in

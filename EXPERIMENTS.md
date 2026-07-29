@@ -20646,6 +20646,34 @@ The implementation boundary is:
    descending stop-on-first-pass protocol continues. Any other mismatch is a
    new void; do not patch around it in flight.
 
+AQ4-OP2-I1 implementation result, completed 2026-07-29 03:39 PDT:
+**GO; one same-coordinate retry is licensed**. The repair factors the complete
+18-boolean alpha-one signature into a pure predicate and maps the live
+`ModelGateReport` directly into it. The exact rejected-child signature passes;
+independently flipping each of its 12 required-true and six required-false
+facts fails. In particular, the reconstruction control now requires both
+`live_force_spike_preserved=false` and
+`opponent_growth_excluded=false`. The proper-arm
+`ArmEvaluation::gate_passed` implementation is unchanged and still delegates
+to the complete `ModelGateReport::gate_passed()`, so a trust-region candidate
+must restore both controls and every other shared model-only safety check.
+
+Verification:
+
+- focused release suite: 7/7 passed;
+- focused AddressSanitizer/UndefinedBehaviorSanitizer suite: 7/7 passed;
+- `make -j4 test`: exit 0, including engine 183/183, trust-region 7/7,
+  web 124/124, certification 48/48, CLI/capture/clean/incremental contracts,
+  and the representative simulator smoke;
+- `git diff --check`: clean.
+
+No proper alpha, selector seed, candidate artifact, or deterministic temporary
+was opened during implementation or testing. The first-run evidence therefore
+remains an infrastructure void, and exactly one retry of the sealed command is
+licensed after commit plus post-commit identity review. `REVIEW.md` was reread
+through its newest 03:29 cycle before this result; it had observed the original
+run's exit but had not yet classified the void or repair.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
