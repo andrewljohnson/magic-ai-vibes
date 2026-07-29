@@ -22807,6 +22807,75 @@ That stronger question requires the separately declared action-conditioned
 or newly trainable representation named as the next step. This clarification
 changes no parameter, target, loss, gate, identifier, or conditional seed.
 
+###### AQ12-DBC3-RANK-HIDDEN result — REJECT at offline gate
+
+Recorded 2026-07-29 09:40 PDT after rereading `REVIEW.md` through its newest
+09:29 PDT cycle. That independent entry countersigned DBC3 as the missing
+factorial cell and required this family to close on failure. The
+implementation, 10/10 DBC3 tests, 8/8 DBC2 regressions, and 20/20 cache tests
+were independently reviewed, then frozen and pushed as commit `faa5fac`
+before the fit tag was opened. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-boundary-rank-hidden --run
+```
+
+The command loaded the exact frozen cache and C16 identities declared above.
+The deterministic repeat fit produced candidate
+`947bfb2769fb63f48d5a2f1b5287443b1701b901bcfcd32b048a1f7ba320ea48`;
+all 32 authorized hidden-output coordinates moved. Parent immutability,
+independent binary64 delta replay, frozen trunks/output biases/direct paths/
+context paths/policy heads, actual-model identity, and zero surrogate/engine
+error all passed. The regularized objective fell from `0.978292717` to
+`0.978205369`, fitted delta L2 was `0.041556354`, and no production step
+clipped. Runtime was 1.54 seconds real / 1.49 user / 0.04 sys.
+
+Aggregate actual-model results:
+
+| split | metric | C16 | DBC3 |
+| --- | --- | ---: | ---: |
+| TRAIN | listwise CE | 0.978292717 | 0.978119022 |
+| TRAIN | teacher regret | 0.016914708 | 0.016870550 |
+| TRAIN | top-one agreement | 0.525000000 | 0.525000000 |
+| TRAIN | stable-pair agreement | 0.700000000 | 0.700000000 |
+| TRAIN | successor BCE | 0.650133769 | 0.649946894 |
+| DEV | listwise CE | 1.089425767 | 1.089351284 |
+| DEV | teacher regret | 0.023696003 | 0.025884969 |
+| DEV | top-one agreement | 0.553125000 | 0.540625000 |
+| DEV | stable-pair agreement | 0.826296296 | 0.822962963 |
+| DEV | successor BCE | 0.566231869 | 0.566010274 |
+
+DEV per-deck results:
+
+| deck | listwise CE C16 → DBC3 | regret C16 → DBC3 | top one C16 → DBC3 | stable pair C16 → DBC3 | BCE C16 → DBC3 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Green | 0.996072490 → 0.996069183 | 0.021999539 → 0.021999539 | 0.484375000 → 0.484375000 | 1.000000000 → 1.000000000 | 0.575646907 → 0.575577555 |
+| Red | 0.968726317 → 0.968604415 | 0.015785999 → 0.015785999 | 0.562500000 → 0.562500000 | 0.925925926 → 0.925925926 | 0.605692918 → 0.604849978 |
+| Blue | 0.974288962 → 0.974283703 | 0.009117605 → 0.009117605 | 0.687500000 → 0.687500000 | 1.000000000 → 1.000000000 | 0.503932634 → 0.503720082 |
+| White | 1.329804509 → 1.329467164 | 0.050950738 → 0.050950738 | 0.468750000 → 0.468750000 | 0.222222222 → 0.222222222 | 0.503638027 → 0.503168202 |
+| RU Aggro | 1.178236555 → 1.178331954 | 0.020626133 → 0.031570962 | 0.562500000 → 0.500000000 | 0.983333333 → 0.966666667 | 0.642248859 → 0.642735551 |
+
+Decision: **REJECT**. TRAIN listwise CE and regret both improved, and DEV
+listwise CE and successor BCE improved slightly, but the primary DEV regret
+condition failed. DEV top-one and stable-pair agreement fell, and RU Aggro
+regret rose by `0.010944829`, beyond its fixed guard. The mechanism battery
+and fresh selector remained unopened, so this candidate used zero gameplay
+evaluation seeds and licenses no pilot, artifact, or web deployment.
+
+The cross-treatment result is more informative than either rejection alone:
+DBC2's 674-coordinate raw-linear residual and DBC3's independent 32-coordinate
+nonlinear readout produced **exactly the same aggregate DEV regret, top-one,
+stable-pair, and RU regret/top-one/stable-pair outcomes**, despite different
+candidate values and fingerprints. The frozen critic-output family is closed;
+do not tune its optimizer, loss temperature, tether, steps, width, seed, or
+leaf sharing. The next bot must condition explicitly on the legal action as
+well as the state—using the existing owner-safe 893-feature state/action rows
+or a separately learned action representation—so source, target, X, phase,
+priority context, and public stack/board can interact directly. It remains a
+general learned policy/value change, not a card, stack, target, or combat
+exception.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
