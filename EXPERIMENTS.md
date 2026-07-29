@@ -21580,6 +21580,18 @@ the root actor's own information. At real gameplay each seat independently
 roots the same procedure, so the policy remains symmetric. Simulation truth
 alone supplies future draws and library order.
 
+Freeze one public-combat exception explicitly. When the root observer is the
+defender, its sequential tree choices fix the complete block assignment; the
+opposing attacker's remaining damage-order choice is then enumerated exactly
+and the order with maximum C16 attacker value is used. This is an exact
+public best response, not the production seeded shuffle and not a shared
+opponent PUCT node. When the root observer is instead the attacker, an
+intervening opponent defender still uses the full production C16 sampled
+block assignment and production seeded attacker damage-order procedure
+described above. Both paths resolve through the authoritative combat rules;
+the distinction is fixed before the seed because it materially changes the
+combat model.
+
 This root-observer restriction is deliberate. Merely hiding fields from an
 all-actor tree's key, prior, or critic would be insufficient: an opponent edge
 whose backed return is repeatedly computed on the root actor's real hand can

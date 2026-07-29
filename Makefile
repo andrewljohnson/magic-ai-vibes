@@ -44,7 +44,9 @@ program_config_relink = $(if \
 		$(call same_link_objects,$(2),\
 			$(call recorded_program_link_objects,$(1)))),\
 	,FORCE)
-ENGINE_SOURCE := src/game.cpp
+# The engine's public search/evaluation seams call the exact public combat
+# transition, so every engine consumer links that implementation as one unit.
+ENGINE_SOURCE := src/game.cpp src/exact_combat_subgame.cpp
 INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
 PROBE_SOURCE := src/probes.cpp src/dvr1_replay.cpp
@@ -107,6 +109,10 @@ ACTION_Q_NESTED_ACTOR_ANCHOR_SOURCE := src/action_q_nested_actor_anchor.cpp
 ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_SOURCE := src/action_q_nested_actor_broad_distill.cpp
 ACTION_Q_ON_POLICY_SUCCESSOR_SOURCE := src/action_q_on_policy_successor.cpp
 ACTION_Q_PRIORITY_TRUST_REGION_SOURCE := src/action_q_priority_trust_region.cpp
+ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE := src/action_q_recursive_policy_improvement.cpp
+CONSERVATIVE_POLICY_IMPROVEMENT_SOURCE := src/conservative_policy_improvement.cpp
+INFORMATION_SET_PUCT_SOURCE := src/information_set_puct.cpp
+INFORMATION_SET_PUCT_PREFLIGHT_SOURCE := src/information_set_puct_preflight.cpp
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE := src/fq4_dev_background_diagnostic.cpp
 FQ4_DEV_COVERAGE_CENSUS_SOURCE := src/fq4_dev_coverage_census.cpp
 FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
@@ -210,6 +216,14 @@ ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-on-
 ACTION_Q_ON_POLICY_SUCCESSOR := $(BUILD_DIR)/old-school-action-q-on-policy-successor
 ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-priority-trust-region-tests
 ACTION_Q_PRIORITY_TRUST_REGION := $(BUILD_DIR)/old-school-action-q-priority-trust-region
+ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-recursive-policy-improvement-tests
+ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT := $(BUILD_DIR)/old-school-action-q-recursive-policy-improvement
+CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER := $(BUILD_DIR)/old-school-conservative-policy-improvement-tests
+EXACT_COMBAT_SUBGAME_TEST_RUNNER := $(BUILD_DIR)/old-school-exact-combat-subgame-tests
+INFORMATION_SET_PUCT_TEST_RUNNER := $(BUILD_DIR)/old-school-information-set-puct-tests
+LEARNED_GENERATIVE_SEARCH_TEST_RUNNER := $(BUILD_DIR)/old-school-learned-generative-search-tests
+INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER := $(BUILD_DIR)/old-school-information-set-puct-preflight-tests
+INFORMATION_SET_PUCT_PREFLIGHT := $(BUILD_DIR)/old-school-information-set-puct-preflight
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic-tests
 FQ4_DEV_BACKGROUND_DIAGNOSTIC := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic
 FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev4-coverage-census-tests
@@ -265,6 +279,8 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-action-q-broad-distill action-q-broad-distill-preflight action-q-broad-distill-census action-q-broad-distill-run
 .PHONY: test-action-q-on-policy-successor action-q-on-policy-successor-census action-q-on-policy-successor-run
 .PHONY: test-action-q-priority-trust-region action-q-priority-trust-region-run
+.PHONY: test-action-q-recursive-policy-improvement action-q-recursive-policy-improvement-run
+.PHONY: test-conservative-policy-improvement test-exact-combat-subgame test-information-set-puct test-learned-generative-search test-information-set-puct-preflight
 
 all: $(SIMULATOR)
 
@@ -408,6 +424,8 @@ ACTION_Q_NESTED_ACTOR_ANCHOR_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_EARLY_STOP_
 ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_DISTILL_LINK_SOURCES) $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_SOURCE)
 ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES) $(ACTION_Q_ON_POLICY_SUCCESSOR_SOURCE)
 ACTION_Q_PRIORITY_TRUST_REGION_LINK_SOURCES := $(ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES) $(ACTION_Q_PRIORITY_TRUST_REGION_SOURCE)
+ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_LINK_SOURCES := $(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE) $(CONSERVATIVE_POLICY_IMPROVEMENT_SOURCE)
+INFORMATION_SET_PUCT_PREFLIGHT_LINK_SOURCES := $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_LINK_SOURCES) $(INFORMATION_SET_PUCT_SOURCE) $(INFORMATION_SET_PUCT_PREFLIGHT_SOURCE)
 FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
 FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
@@ -521,6 +539,22 @@ $(eval $(call link_program,$(ACTION_Q_ON_POLICY_SUCCESSOR),$(ACTION_Q_ON_POLICY_
 $(eval $(call link_program,$(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER),$(ACTION_Q_PRIORITY_TRUST_REGION_LINK_SOURCES) tests/test_action_q_priority_trust_region.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_PRIORITY_TRUST_REGION),$(ACTION_Q_PRIORITY_TRUST_REGION_LINK_SOURCES) $(FQ4_DEV_CANDIDATE_ARTIFACT_SOURCE) src/action_q_priority_trust_region_main.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER),$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_LINK_SOURCES) tests/test_action_q_recursive_policy_improvement.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT),$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_LINK_SOURCES) src/action_q_recursive_policy_improvement_main.cpp))
+
+$(eval $(call link_program,$(CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER),$(CONSERVATIVE_POLICY_IMPROVEMENT_SOURCE) tests/test_conservative_policy_improvement.cpp))
+
+$(eval $(call link_program,$(EXACT_COMBAT_SUBGAME_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_exact_combat_subgame.cpp))
+
+$(eval $(call link_program,$(INFORMATION_SET_PUCT_TEST_RUNNER),$(INFORMATION_SET_PUCT_SOURCE) tests/test_information_set_puct.cpp))
+
+$(eval $(call link_program,$(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) tests/test_learned_generative_search.cpp))
+
+$(eval $(call link_program,$(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER),$(INFORMATION_SET_PUCT_PREFLIGHT_LINK_SOURCES) tests/test_information_set_puct_preflight.cpp))
+
+$(eval $(call link_program,$(INFORMATION_SET_PUCT_PREFLIGHT),$(INFORMATION_SET_PUCT_PREFLIGHT_LINK_SOURCES) src/information_set_puct_preflight_main.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER),$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES) tests/test_fq4_dev_background_diagnostic.cpp))
 
@@ -651,6 +685,8 @@ test: $(ACTION_Q_NESTED_ACTOR_ANCHOR_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_ANCHOR
 test: $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL)
 test: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 test: $(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER) $(ACTION_Q_PRIORITY_TRUST_REGION)
+test: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
+test: $(CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(EXACT_COMBAT_SUBGAME_TEST_RUNNER) $(INFORMATION_SET_PUCT_TEST_RUNNER) $(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER) $(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER) $(INFORMATION_SET_PUCT_PREFLIGHT)
 test: $(FQ4_WORK0_CACHE_TEST_RUNNER)
 test: test-fq4-work0-firewall
 
@@ -774,6 +810,26 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-priority-trust-region --run' >/dev/null
+	./$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER)
+	./$(CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER)
+	./$(EXACT_COMBAT_SUBGAME_TEST_RUNNER)
+	./$(INFORMATION_SET_PUCT_TEST_RUNNER)
+	./$(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER)
+	./$(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER)
+	@set +e; output=`./$(INFORMATION_SET_PUCT_PREFLIGHT) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'ISP0 preflight accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+	@set +e; output=`./$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ5-RPI0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
 	@set +e; output=`./$(ACTION_Q_MULTISCALE_EXPLORE) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
 			printf '%s\n' "$$output"; \
@@ -1657,6 +1713,41 @@ test-action-q-priority-trust-region: $(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNE
 
 action-q-priority-trust-region-run: $(ACTION_Q_PRIORITY_TRUST_REGION)
 	./$(ACTION_Q_PRIORITY_TRUST_REGION) --run
+
+test-action-q-recursive-policy-improvement: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
+	./$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER)
+	@set +e; output=`./$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ5-RPI0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+
+action-q-recursive-policy-improvement-run: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
+	./$(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT) --run
+
+test-conservative-policy-improvement: $(CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER)
+	./$(CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER)
+
+test-exact-combat-subgame: $(EXACT_COMBAT_SUBGAME_TEST_RUNNER)
+	./$(EXACT_COMBAT_SUBGAME_TEST_RUNNER)
+
+test-information-set-puct: $(INFORMATION_SET_PUCT_TEST_RUNNER)
+	./$(INFORMATION_SET_PUCT_TEST_RUNNER)
+
+test-learned-generative-search: $(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER)
+	./$(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER)
+
+test-information-set-puct-preflight: $(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER) $(INFORMATION_SET_PUCT_PREFLIGHT)
+	./$(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER)
+	@set +e; output=`./$(INFORMATION_SET_PUCT_PREFLIGHT) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'ISP0 preflight accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
 
 test-fq4-dev-background-diagnostic: $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC)
 	./$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER)

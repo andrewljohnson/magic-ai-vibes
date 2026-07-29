@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace old_school {
@@ -571,6 +572,11 @@ enum class LearnedContinuationController : std::uint8_t {
     PublicStackPassV1,
 };
 
+enum class LearnedContinuationSearchScope : std::uint8_t {
+    PriorityOnly,
+    AllDecisions,
+};
+
 inline constexpr std::size_t kBotKindCount = 5;
 inline constexpr std::size_t kBotMatchupCount =
     kBotKindCount * (kBotKindCount - 1) / 2;
@@ -593,6 +599,22 @@ inline constexpr std::size_t
 inline constexpr std::string_view
     kLearnedValueActorLocalSearchRequiredFingerprint =
         "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
+// AQ5-RPI0 reuses the exact AQ4-P1 Priority recipe. Combat roots use the
+// latency-first K2/H4 recipe and permit one K1/H4 actor-local continuation
+// layer before candidate continuations become depth zero.
+inline constexpr std::size_t
+    kLearnedValueRecursivePolicyImprovementCombatWorlds = 2;
+inline constexpr std::size_t
+    kLearnedValueRecursivePolicyImprovementCombatRolloutsPerWorld = 1;
+inline constexpr std::size_t
+    kLearnedValueRecursivePolicyImprovementCombatHorizonTurns = 4;
+inline constexpr std::size_t
+    kLearnedValueRecursivePolicyImprovementCombatEvaluationThreads = 1;
+inline constexpr std::size_t
+    kLearnedValueRecursivePolicyImprovementCombatContinuationWorlds = 1;
+inline constexpr std::string_view
+    kLearnedValueRecursivePolicyImprovementRequiredFingerprint =
+        kLearnedValueActorLocalSearchRequiredFingerprint;
 
 class LearnedModel;
 class LearnedPolicyRecorder;
@@ -636,6 +658,10 @@ struct BotConfig {
     // actor-local K2/H4 Value continuations. Validation binds this switch to
     // the frozen C16 model and rejects every other research treatment.
     bool value_actor_local_search = false;
+    // Default-off AQ5-RPI0 extension of actor-local search to Priority,
+    // attacker, and blocker microdecisions. It is valid only with the exact
+    // frozen C16 recipe; false preserves AQ4-P1 as Priority-only.
+    bool value_recursive_policy_improvement = false;
     // Versioned, continuation-only controller for Learned Value. Legacy is
     // the exact historical behavior. PublicStackPassV1 is applied only in
     // depth-zero Value-mirror continuations, never at a real root.
@@ -679,6 +705,15 @@ struct GameConfig {
     // Root value search is one ply. Continuations set this to zero explicitly
     // so mirror play remains bounded rather than recursively searching.
     std::size_t learned_search_depth = 1;
+    // AQ5-RPI0 evaluation sentinel, independent of ordinary Value search
+    // depth. Zero permits one actor-local Priority/Attack/Block search.
+    // Candidate clones inherit one, which disables RPI for every later
+    // decision and makes accidental recursive entry fail closed.
+    std::size_t recursive_policy_improvement_evaluation_depth = 0;
+    // Evaluation-only AQ6 propagation bit. A treated information-set
+    // evaluator carries exact combat completion through every nested H4
+    // Priority/Attack/Block decision. Ordinary games and AQ5 leave it false.
+    bool learned_evaluation_exact_combat_subgame = false;
     // Training-only sink. The concrete recorder is intentionally opaque so
     // runtime callers cannot inspect or provide hidden game state.
     std::shared_ptr<LearnedPolicyRecorder> learned_policy_recorder;
@@ -836,12 +871,48 @@ struct LearnedSearchConfig {
     // Value root search over this many worlds; inner continuations stay at
     // depth zero.
     std::size_t value_continuation_search_worlds = 0;
+    // AQ4-P1 remains Priority-only. AQ5-RPI0 explicitly widens the same
+    // bounded continuation search to attacker and blocker microdecisions.
+    LearnedContinuationSearchScope value_continuation_search_scope =
+        LearnedContinuationSearchScope::PriorityOnly;
+    // Evaluation-only AQ6 seam. When enabled for Priority samples, retain
+    // the unchanged Value critic after the candidate's rules-resolved
+    // immediate consequence in the same candidate/world/rollout shape as
+    // q_samples. It never participates in selection or continuation play.
+    // Kept last so existing aggregate initialization retains its meaning.
+    bool capture_settled_boundary_samples = false;
+    // Evaluation-only AQ6 seam. Complete combat plans are enumerated through
+    // the public rules transition, with the defender choosing blocks and the
+    // attacker choosing damage order. The default preserves every historical
+    // Attack and Block sampler path exactly.
+    bool use_exact_combat_subgame = false;
 };
+
+inline constexpr std::size_t
+    kLearnedExactCombatMaximumAttackers = 8;
+inline constexpr std::size_t
+    kLearnedExactCombatMaximumBlockers = 8;
+inline constexpr std::size_t
+    kLearnedExactCombatMaximumBlockAssignments = 6'561;
+inline constexpr std::size_t
+    kLearnedExactCombatMaximumDamageOrdersPerAssignment = 40'320;
+inline constexpr std::size_t
+    kLearnedExactCombatMaximumCompletedPlans = 65'536;
 
 // The only licensed AQ4-P1 search recipe. The inner H4/R1 behavior is the
 // unchanged production Learned Value search used by each K2 continuation
 // actor; this config controls the K8/R1/H8 outer search.
 LearnedSearchConfig learned_value_actor_local_search_config(
+    std::uint64_t seed);
+
+// The two licensed AQ5-RPI0 real-root recipes. Priority retains AQ4-P1's
+// K8/H8 outer search with K2/H4 all-decision continuations. Combat uses a
+// latency-first K2/H4 outer search with K1/H4 all-decision continuations.
+LearnedSearchConfig
+learned_value_recursive_policy_improvement_priority_config(
+    std::uint64_t seed);
+LearnedSearchConfig
+learned_value_recursive_policy_improvement_combat_config(
     std::uint64_t seed);
 
 struct LearnedPriorityH0Boundary {
@@ -928,11 +999,269 @@ advance_learned_priority_macro_transition(
     std::shared_ptr<const LearnedModel> model,
     std::uint64_t seed);
 
+// Evaluation-only generative seam used by AQ7 information-set tree search.
+// A search particle owns one complete sampled rules state, but a shared tree
+// observes only decisions belonging to `root_observer`. Decisions belonging
+// to the other player are selected on a fresh actor-local determinization and
+// applied to the particle through the same authoritative rules transitions;
+// they are never exposed as shared tree nodes.
+enum class LearnedGenerativeDecisionKind : std::uint8_t {
+    Priority,
+    Attack,
+    Block,
+};
+
+struct LearnedGenerativePriorityDecision {
+    LearnedDecisionContext context;
+
+    bool operator==(
+        const LearnedGenerativePriorityDecision&) const = default;
+};
+
+struct LearnedGenerativeAttackDecision {
+    std::size_t attacking_player = 0;
+    std::vector<PermanentId> selected_attackers;
+    PermanentId subject = 0;
+    std::vector<PermanentId> remaining_attackers;
+
+    bool operator==(
+        const LearnedGenerativeAttackDecision&) const = default;
+};
+
+struct LearnedGenerativeBlockDecision {
+    std::size_t attacking_player = 0;
+    std::vector<PermanentId> attackers;
+    std::vector<std::pair<PermanentId, PermanentId>>
+        selected_blocks;
+    PermanentId subject_blocker = 0;
+    std::vector<PermanentId> remaining_blockers;
+
+    bool operator==(
+        const LearnedGenerativeBlockDecision&) const = default;
+};
+
+using LearnedGenerativeDecision = std::variant<
+    LearnedGenerativePriorityDecision,
+    LearnedGenerativeAttackDecision,
+    LearnedGenerativeBlockDecision>;
+
+struct LearnedGenerativePosition {
+    // This state is the simulation particle. Actor-local determinizations are
+    // returned as temporary values and never overwrite it.
+    GameState truth;
+    std::array<std::vector<CardId>, 2> original_decks;
+    std::size_t root_observer = 0;
+    LearnedGenerativeDecision decision;
+
+    bool operator==(
+        const LearnedGenerativePosition&) const = default;
+};
+
+struct LearnedGenerativeAttackAction {
+    PermanentId subject = 0;
+    bool include = false;
+
+    bool operator==(
+        const LearnedGenerativeAttackAction&) const = default;
+};
+
+struct LearnedGenerativeBlockAction {
+    PermanentId blocker = 0;
+    std::optional<PermanentId> attacker;
+
+    bool operator==(
+        const LearnedGenerativeBlockAction&) const = default;
+};
+
+using LearnedGenerativeActionPayload = std::variant<
+    PriorityAction,
+    LearnedGenerativeAttackAction,
+    LearnedGenerativeBlockAction>;
+
+struct LearnedGenerativeAction {
+    std::string stable_key;
+    LearnedGenerativeActionPayload payload;
+
+    bool operator==(
+        const LearnedGenerativeAction&) const = default;
+};
+
+struct LearnedGenerativeActionPrior {
+    LearnedGenerativeAction action;
+    double successor_value = 0.5;
+    double prior = 0.0;
+
+    bool operator==(
+        const LearnedGenerativeActionPrior&) const = default;
+};
+
+struct LearnedGenerativeObservation {
+    std::size_t actor = 0;
+    LearnedGenerativeDecisionKind kind =
+        LearnedGenerativeDecisionKind::Priority;
+    PlayerObservation observation;
+    std::string information_set_key;
+    std::string legal_signature;
+    std::vector<LearnedGenerativeActionPrior> actions;
+    double fpu_leaf_value = 0.5;
+
+    bool operator==(
+        const LearnedGenerativeObservation&) const = default;
+};
+
+struct LearnedGenerativeOpponentDecisionWitness {
+    std::size_t actor = 0;
+    LearnedGenerativeDecisionKind kind =
+        LearnedGenerativeDecisionKind::Priority;
+    std::string information_set_key;
+    std::string legal_signature;
+    std::vector<LearnedGenerativeActionPrior> actions;
+    std::string selected_stable_key;
+    std::uint64_t search_seed = 0;
+    std::uint64_t tie_seed = 0;
+
+    bool operator==(
+        const LearnedGenerativeOpponentDecisionWitness&) const =
+        default;
+};
+
+enum class LearnedGenerativeDisposition : std::uint8_t {
+    DecisionBoundary,
+    Terminal,
+    Bound,
+};
+
+enum class LearnedGenerativeBound : std::uint8_t {
+    None,
+    MacroAction,
+    MacroPhaseTransition,
+    MacroTurnAdvance,
+    ExactCombat,
+};
+
+struct LearnedGenerativeWitness {
+    std::optional<PriorityAction> applied_priority_action;
+    std::size_t priority_actions_applied = 0;
+    std::size_t opponent_decisions_applied = 0;
+    std::vector<LearnedGenerativeOpponentDecisionWitness>
+        opponent_decisions;
+    std::size_t stack_size_before = 0;
+    std::size_t stack_size_after = 0;
+    bool stack_settled = false;
+    bool exact_combat_completed = false;
+    std::size_t exact_combat_completed_plan_count = 0;
+    bool exact_combat_contains_pure_chump = false;
+    std::vector<std::pair<PermanentId, PermanentId>>
+        completed_damage_ordered_blocks;
+
+    bool operator==(
+        const LearnedGenerativeWitness&) const = default;
+};
+
+struct LearnedGenerativeTransition {
+    LearnedGenerativeDisposition disposition =
+        LearnedGenerativeDisposition::Bound;
+    LearnedGenerativeBound exhausted_bound =
+        LearnedGenerativeBound::None;
+    std::optional<LearnedGenerativePosition> position;
+    std::optional<GameResult> terminal_result;
+    LearnedGenerativeWitness witness;
+    std::size_t actions_applied = 0;
+    std::size_t phase_transitions = 0;
+    std::size_t turn_advances = 0;
+
+    bool operator==(
+        const LearnedGenerativeTransition&) const = default;
+};
+
+struct LearnedGenerativeLeafEvaluation {
+    double value = 0.5;
+    bool terminal = false;
+    bool exact_combat_completed = false;
+    std::size_t exact_combat_completed_plan_count = 0;
+    bool exact_combat_contains_pure_chump = false;
+    std::vector<std::pair<PermanentId, PermanentId>>
+        completed_damage_ordered_blocks;
+
+    bool operator==(
+        const LearnedGenerativeLeafEvaluation&) const = default;
+};
+
+LearnedGenerativePosition
+make_learned_generative_priority_position(
+    const GameState& truth,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t root_observer,
+    const LearnedDecisionContext& context);
+
+LearnedGenerativePosition
+make_learned_generative_attack_position(
+    const GameState& truth,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t root_observer, std::size_t attacking_player,
+    const std::vector<PermanentId>& selected_attackers,
+    PermanentId subject,
+    const std::vector<PermanentId>& remaining_attackers);
+
+LearnedGenerativePosition
+make_learned_generative_block_position(
+    const GameState& truth,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t root_observer, std::size_t attacking_player,
+    const std::vector<PermanentId>& attackers,
+    const std::vector<std::pair<PermanentId, PermanentId>>&
+        selected_blocks,
+    PermanentId subject_blocker,
+    const std::vector<PermanentId>& remaining_blockers);
+
+std::size_t learned_generative_actor(
+    const LearnedGenerativePosition& position);
+LearnedGenerativeDecisionKind learned_generative_decision_kind(
+    const LearnedGenerativePosition& position);
+
+// Returns a fresh world consistent with the acting player's information set.
+// The input position is const so the simulation particle cannot be
+// accidentally overwritten by a temporary determinization.
+GameState learned_generative_actor_determinization(
+    const LearnedGenerativePosition& position,
+    std::uint64_t seed);
+
+LearnedGenerativeObservation observe_learned_generative_position(
+    const LearnedGenerativePosition& position,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed);
+
+// Applies `stable_action_key` to the authoritative particle. By default,
+// opponent decisions are hidden behind fresh actor-local frozen-C16 choices
+// until the root observer acts again. Setting `advance_opponent` false is an
+// evaluation-only one-edge seam used to form priors and focused tests.
+LearnedGenerativeTransition advance_learned_generative_position(
+    const LearnedGenerativePosition& position,
+    std::string_view stable_action_key,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed,
+    bool advance_opponent = true);
+
+// A depth/node-bound leaf is always rules-complete. An Attack or Block prefix
+// is completed exactly while preserving every already-fixed choice before
+// the frozen critic is queried.
+LearnedGenerativeLeafEvaluation
+evaluate_learned_generative_leaf(
+    const LearnedGenerativePosition& position,
+    std::size_t perspective,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed);
+
 struct LearnedActionSamples {
     // Outer order matches the caller's candidate order. Inner samples are
     // flattened world-major, then rollout-major, and are paired across every
     // candidate.
     std::vector<std::vector<double>> q_samples;
+    // Same shape and order as q_samples. One marks an exact terminal
+    // outcome; zero marks a learned bootstrap. Bytes, rather than
+    // vector<bool>, keep parallel writes to distinct cells independent.
+    std::vector<std::vector<std::uint8_t>>
+        terminal_evaluation_flags;
     // Priority-only components of q_samples in the exact same outer and
     // inner order. Together they expose the deployed blend inputs without
     // changing its arithmetic; an optional action-wide Priority residual is
@@ -942,6 +1271,24 @@ struct LearnedActionSamples {
         priority_shallow_prior_samples;
     std::vector<std::vector<double>>
         priority_continuation_samples;
+    // Present only when capture_settled_boundary_samples is enabled.
+    // Candidate/world/rollout order exactly matches q_samples. Priority
+    // observes the rules-resolved immediate consequence; exact Attack and
+    // Block observe the actor's post-combat End Combat value in that actor's
+    // sampled information-set world. These values are evaluation-only: they
+    // never alter q_samples or aggregate scores.
+    std::vector<std::vector<double>>
+        settled_boundary_samples;
+    // Evaluation-only exact-combat witnesses, in q_samples shape. A pure-
+    // chump byte marks a selected completed plan in which at least one
+    // blocker dies while its attacker survives. A bound-fallback byte marks
+    // that exact enumeration exhausted only a declared cardinality bound and
+    // the cell therefore retained the unchanged legacy C16 completion.
+    // Both matrices are empty for Priority, legacy combat, and defaults.
+    std::vector<std::vector<std::uint8_t>>
+        exact_combat_pure_chump_flags;
+    std::vector<std::vector<std::uint8_t>>
+        exact_combat_bound_fallback_flags;
     // Priority-only aggregate scores, in caller candidate order. These
     // reproduce the deployed Learned Value arithmetic exactly: aggregate
     // the shallow observations first, then the continuation observations,
@@ -963,6 +1310,16 @@ struct LearnedActionSamples {
         priority_inner_search_invocations;
     std::vector<std::vector<std::size_t>>
         priority_inner_search_max_depth;
+    // Attack- and Block-sampler nested actor-search accounting. These
+    // matrices are absent for depth-zero combat continuations; otherwise
+    // they have the exact q_samples shape and cross-sum to the generic
+    // inner-search totals below.
+    std::vector<std::vector<std::size_t>>
+        combat_inner_rollout_evaluations;
+    std::vector<std::vector<std::size_t>>
+        combat_inner_search_invocations;
+    std::vector<std::vector<std::size_t>>
+        combat_inner_search_max_depth;
     std::size_t inner_rollout_evaluations = 0;
     std::size_t inner_search_invocations = 0;
     std::size_t inner_search_max_depth = 0;
@@ -982,6 +1339,16 @@ struct LearnedValueBinaryBlockScores {
     // Canonical order: No Block, Block.
     std::array<double, 2> scores = {0.0, 0.0};
     // The deployed selector retains row zero on an exact tie.
+    std::size_t selected_candidate = 0;
+};
+
+struct LearnedValueBlockChoiceScores {
+    // Canonical row zero is No Block; row i + 1 assigns the subject blocker
+    // to legal_attackers[i].
+    std::vector<PermanentId> legal_attackers;
+    std::vector<double> scores;
+    // Matches the deployed joint selector: the earliest canonical branch is
+    // retained on an exact tie.
     std::size_t selected_candidate = 0;
 };
 
@@ -1012,6 +1379,20 @@ LearnedValueBinaryBlockScores learned_value_binary_block_scores(
     const GameState& state, std::size_t defending_player,
     PermanentId attacker, PermanentId blocker,
     std::shared_ptr<const LearnedModel> model);
+
+// Evaluation-only immediate view of the deployed Value joint blocker
+// selector, conditioned on an already-fixed blocker prefix and the current
+// subject. Each current choice is scored after the unchanged C16 selector
+// completes the remaining blocker suffix.
+LearnedValueBlockChoiceScores learned_value_block_choice_scores(
+    const GameState& state, std::size_t defending_player,
+    const std::vector<PermanentId>& attackers,
+    const std::vector<std::pair<PermanentId, PermanentId>>&
+        selected_blocks,
+    PermanentId subject_blocker,
+    const std::vector<PermanentId>& remaining_blockers,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed);
 
 LearnedActionSamples learned_priority_action_samples(
     const GameState& state,
@@ -1045,6 +1426,30 @@ LearnedActionSamples learned_binary_block_samples(
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t defending_player, PermanentId attacker,
     PermanentId blocker,
+    std::shared_ptr<const LearnedModel> model,
+    LearnedSearchConfig config);
+
+struct LearnedBlockChoiceSamples {
+    // q_samples row zero is No Block. Row i + 1 assigns the subject blocker
+    // to legal_attackers[i], preserving this canonical engine order.
+    std::vector<PermanentId> legal_attackers;
+    LearnedActionSamples samples;
+};
+
+// Evaluates one full-context blocker microdecision. `attackers` is the
+// complete declared attack, `selected_blocks` preserves the already-fixed
+// blocker prefix as (attacker, blocker), and `remaining_blockers` is the
+// canonical suffix after `subject_blocker`. Every candidate completes and
+// resolves the full combat before it is scored.
+LearnedBlockChoiceSamples learned_block_choice_samples(
+    const GameState& state,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t defending_player,
+    const std::vector<PermanentId>& attackers,
+    const std::vector<std::pair<PermanentId, PermanentId>>&
+        selected_blocks,
+    PermanentId subject_blocker,
+    const std::vector<PermanentId>& remaining_blockers,
     std::shared_ptr<const LearnedModel> model,
     LearnedSearchConfig config);
 
@@ -1252,6 +1657,13 @@ class Game {
         int consecutive_passes, const PriorityAction& action,
         std::shared_ptr<const LearnedModel> model,
         std::uint64_t seed);
+    friend LearnedGenerativeTransition
+    advance_learned_generative_position(
+        const LearnedGenerativePosition& position,
+        std::string_view stable_action_key,
+        std::shared_ptr<const LearnedModel> model,
+        std::uint64_t seed,
+        bool advance_opponent);
     friend LearnedActionSamples learned_binary_attack_samples(
         const GameState& state,
         const std::array<std::vector<CardId>, 2>& original_decks,
@@ -1266,6 +1678,27 @@ class Game {
         const std::array<std::vector<CardId>, 2>& original_decks,
         std::size_t defending_player, PermanentId attacker,
         PermanentId blocker,
+        std::shared_ptr<const LearnedModel> model,
+        LearnedSearchConfig config);
+    friend LearnedValueBlockChoiceScores
+    learned_value_block_choice_scores(
+        const GameState& state, std::size_t defending_player,
+        const std::vector<PermanentId>& attackers,
+        const std::vector<std::pair<PermanentId, PermanentId>>&
+            selected_blocks,
+        PermanentId subject_blocker,
+        const std::vector<PermanentId>& remaining_blockers,
+        std::shared_ptr<const LearnedModel> model,
+        std::uint64_t seed);
+    friend LearnedBlockChoiceSamples learned_block_choice_samples(
+        const GameState& state,
+        const std::array<std::vector<CardId>, 2>& original_decks,
+        std::size_t defending_player,
+        const std::vector<PermanentId>& attackers,
+        const std::vector<std::pair<PermanentId, PermanentId>>&
+            selected_blocks,
+        PermanentId subject_blocker,
+        const std::vector<PermanentId>& remaining_blockers,
         std::shared_ptr<const LearnedModel> model,
         LearnedSearchConfig config);
     friend std::vector<double> handcrafted_priority_scores(
