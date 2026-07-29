@@ -20409,6 +20409,78 @@ base scores; the narrower domain-scope correction above resolves that issue
 and both final implementation reviews returned GO. The exact retry remains
 blocked only on commit plus post-commit identity review.
 
+AQ4-OP1 scientific retry result, completed 2026-07-29:
+**REJECT candidate at the offline safety gate; selector unopened**.
+
+After commit `637c04c` was pushed, two post-commit identity reviews returned
+explicit GO for the single same-coordinate retry. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-action-q-on-policy-successor --run
+```
+
+The run completed the frozen 480-TRAIN/160-DEV corpus, both deterministic
+fits, all metric evaluations, and the model-only safety battery in 1,775.99
+seconds (`user 4519.13`, `sys 29.43`). Corpus digest:
+`985026631f56dceba5c42bc4c7247757640d092f92a3d030759f607cd5b8c5df`.
+Warm parent:
+`d0d46d2b4b365686d0c7109df8b32c6ec0b8229b5df9fb43f304c5f33e1003f8`.
+Candidate:
+`a4cdb8a7cf53cea58d79a7591eafd76c8b4724bce457c8d0ab7e533ba19b036f`.
+The fit used exactly 480 examples / 1,568 options and seed
+`12262988820247274425`.
+
+TRAIN metrics:
+
+| Deck | Warm agreement | Child agreement | Warm regret | Child regret | Regret delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Green | 0.677083 | 0.854167 | 0.0137359 | 0.00340555 | -0.0103304 |
+| Red | 0.677083 | 0.802083 | 0.0147794 | 0.00439805 | -0.0103813 |
+| Blue | 0.739583 | 0.916667 | 0.0173938 | 0.00239406 | -0.0149997 |
+| White | 0.635417 | 0.750000 | 0.0357961 | 0.00677594 | -0.0290202 |
+| RU Aggro | 0.708333 | 0.822917 | 0.0212647 | 0.00447082 | -0.0167939 |
+| Equal-deck | 0.687500 | 0.829167 | 0.0205940 | 0.00428888 | -0.0163051 |
+
+Whole-game-disjoint DEV metrics:
+
+| Deck | Warm agreement | Child agreement | Warm regret | Child regret | Regret delta | +0.01 guard |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Green | 0.812500 | 0.593750 | 0.00781700 | 0.0151703 | +0.00735328 | PASS |
+| Red | 0.625000 | 0.562500 | 0.0290237 | 0.0160534 | -0.0129703 | PASS |
+| Blue | 0.812500 | 0.687500 | 0.0163449 | 0.0181058 | +0.00176094 | PASS |
+| White | 0.843750 | 0.687500 | 0.0198949 | 0.0151424 | -0.00475245 | PASS |
+| RU Aggro | 0.875000 | 0.812500 | 0.0118342 | 0.0105065 | -0.00132775 | PASS |
+| Equal-deck | 0.793750 | 0.668750 | 0.0169829 | 0.0149957 | -0.00198725 | PASS |
+
+The preregistered mechanism hypothesis is supported descriptively: child
+regret strictly improved on TRAIN and aggregate untouched DEV, every deck had
+nonzero parent signal, and no DEV deck exceeded the +0.01 regret guard. The
+DEV aggregate regret reduction was about 11.7%, although top-one agreement
+fell and Green/Blue regret worsened within the declared tolerance.
+
+The full candidate gate nevertheless failed, correctly. Identity, census,
+digest, preflight, Priority-only isolation, targets, descriptor order,
+redundant-Counterspell, productive Braingeyser/Ancestral targeting, and
+sick-Bear Giant Growth all passed. The reported live Force Spike selection
+control failed (`force_spike=0`);
+the aggregate output does not expose the separate payable-control booleans.
+This produced
+`offline_failure="shared model-only safety battery failed"`. Therefore this
+candidate is **rejected**, no artifact or web policy is licensed, and selector
+seed `202607290111` remains unopened. This is not gameplay-strength evidence
+and C16 remains champion.
+
+Per the original declaration, close OP1 rather than sweep caps, schedules,
+K/H, optimizer, epochs, temperature, residual, or seeds. The next experiment
+will be separately preregistered after the independent postmortem: a
+card-agnostic safety-preserving policy update (for example a parent-anchored
+trust-region/distillation operator across all legal actions), judged on fresh
+whole-game-disjoint data and the complete model-only battery. It may not train
+on Force Spike or any authored fixture; the goal is to retain the real DEV
+regret gain without globally moving the head enough to break a previously
+safe decision class.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
