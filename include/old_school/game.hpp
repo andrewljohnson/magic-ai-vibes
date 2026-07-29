@@ -580,6 +580,19 @@ inline constexpr std::size_t
     kLearnedValueSearchRolloutsPerWorld = 1;
 inline constexpr bool
     kLearnedValueSearchBlendsShallowPrior = true;
+inline constexpr std::size_t
+    kLearnedValueActorLocalSearchWorlds = 8;
+inline constexpr std::size_t
+    kLearnedValueActorLocalSearchRolloutsPerWorld = 1;
+inline constexpr std::size_t
+    kLearnedValueActorLocalSearchHorizonTurns = 8;
+inline constexpr std::size_t
+    kLearnedValueActorLocalSearchEvaluationThreads = 4;
+inline constexpr std::size_t
+    kLearnedValueActorLocalSearchContinuationWorlds = 2;
+inline constexpr std::string_view
+    kLearnedValueActorLocalSearchRequiredFingerprint =
+        "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f";
 
 class LearnedModel;
 class LearnedPolicyRecorder;
@@ -618,6 +631,11 @@ struct BotConfig {
     // sampled legal block sets. True instead uses their minimum
     // attacker-perspective value, without changing which blocks are sampled.
     bool value_adversarial_blocks = false;
+    // Default-off AQ4-P1 Priority treatment. It evaluates every real-root
+    // action with the exact hidden-safe K8/H8 sampler and symmetric
+    // actor-local K2/H4 Value continuations. Validation binds this switch to
+    // the frozen C16 model and rejects every other research treatment.
+    bool value_actor_local_search = false;
     // Versioned, continuation-only controller for Learned Value. Legacy is
     // the exact historical behavior. PublicStackPassV1 is applied only in
     // depth-zero Value-mirror continuations, never at a real root.
@@ -819,6 +837,12 @@ struct LearnedSearchConfig {
     // depth zero.
     std::size_t value_continuation_search_worlds = 0;
 };
+
+// The only licensed AQ4-P1 search recipe. The inner H4/R1 behavior is the
+// unchanged production Learned Value search used by each K2 continuation
+// actor; this config controls the K8/R1/H8 outer search.
+LearnedSearchConfig learned_value_actor_local_search_config(
+    std::uint64_t seed);
 
 struct LearnedPriorityH0Boundary {
     GameState state;

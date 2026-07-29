@@ -127,56 +127,77 @@ void test_names_parse_strictly() {
     std::size_t generations = 0;
     bool adversarial_blocks = true;
     bool pass_dominance = true;
+    bool actor_local_search = true;
     expect(parse_opponent_bot(
                "learned-value-c16", variant, generations,
-               adversarial_blocks, pass_dominance) ==
+               adversarial_blocks, pass_dominance,
+               actor_local_search) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                !adversarial_blocks &&
-               !pass_dominance,
+               !pass_dominance &&
+               !actor_local_search,
            "Learned Value C16 did not parse");
+    expect(parse_opponent_bot(
+               "learned-value-c16-actor-local-search",
+               variant, generations, adversarial_blocks,
+               pass_dominance, actor_local_search) ==
+               BotKind::Learned &&
+               variant ==
+                   LearnedVariant::ValueSearchChampion &&
+               generations == 16 &&
+               !adversarial_blocks &&
+               !pass_dominance &&
+               actor_local_search,
+           "AQ4 actor-local-search pilot did not parse");
     expect(parse_opponent_bot(
                "learned-value-c16-stack-discipline",
                variant, generations, adversarial_blocks,
-               pass_dominance) ==
+               pass_dominance, actor_local_search) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                adversarial_blocks &&
-               pass_dominance,
+               pass_dominance &&
+               !actor_local_search,
            "stack-discipline diagnostic did not parse");
     expect(parse_opponent_bot(
                "learned-value-c16-adversarial-blocks",
                variant, generations, adversarial_blocks,
-               pass_dominance) ==
+               pass_dominance, actor_local_search) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 16 &&
                adversarial_blocks &&
-               !pass_dominance,
+               !pass_dominance &&
+               !actor_local_search,
            "best-response attack challenger did not parse");
     expect(parse_opponent_bot(
                "learned-value-g0", variant, generations,
-               adversarial_blocks, pass_dominance) ==
+               adversarial_blocks, pass_dominance,
+               actor_local_search) ==
                BotKind::Learned &&
                variant ==
                    LearnedVariant::ValueSearchChampion &&
                generations == 0 &&
                !adversarial_blocks &&
-               !pass_dominance,
+               !pass_dominance &&
+               !actor_local_search,
            "Learned Value G0 did not parse");
     expect(parse_opponent_bot(
                "learned-actor", variant, generations,
-               adversarial_blocks, pass_dominance) ==
+               adversarial_blocks, pass_dominance,
+               actor_local_search) ==
                BotKind::Learned &&
                variant == LearnedVariant::UnifiedActor &&
                generations == 0 &&
                !adversarial_blocks &&
-               !pass_dominance,
+               !pass_dominance &&
+               !actor_local_search,
            "Learned Actor did not parse");
 
     bool bad_deck = false;
@@ -469,6 +490,96 @@ void test_adversarial_challenger_maps_only_the_attack_flag() {
     expect(
         rejected && search_output.str().empty(),
         "stack-discipline web policy accepted non-K8 search");
+}
+
+void test_actor_local_search_maps_only_the_exact_pilot_flag() {
+    auto pilot = fast_config();
+    pilot.opponent_bot = old_school::BotKind::Learned;
+    pilot.learned_variant =
+        old_school::LearnedVariant::ValueSearchChampion;
+    pilot.learned_generations = 16;
+    pilot.training_games = 800;
+    pilot.training_seed = 424242;
+    pilot.learned_rollouts = 8;
+
+    const auto canonical_bot =
+        old_school::web::make_opponent_bot_config(
+            pilot, nullptr);
+    pilot.value_actor_local_search = true;
+    const auto actor_local_bot =
+        old_school::web::make_opponent_bot_config(
+            pilot, nullptr);
+    expect(
+        actor_local_bot.kind == canonical_bot.kind &&
+            actor_local_bot.learned_variant ==
+                canonical_bot.learned_variant &&
+            actor_local_bot.rollouts_per_action ==
+                canonical_bot.rollouts_per_action &&
+            actor_local_bot.exploration_rate ==
+                canonical_bot.exploration_rate &&
+            actor_local_bot.value_continuation_epsilon ==
+                canonical_bot.value_continuation_epsilon &&
+            actor_local_bot.value_priority_residual_weight ==
+                canonical_bot.value_priority_residual_weight &&
+            actor_local_bot.value_pass_dominance ==
+                canonical_bot.value_pass_dominance &&
+            actor_local_bot
+                    .value_resolved_shallow_prior_weight ==
+                canonical_bot
+                    .value_resolved_shallow_prior_weight &&
+            actor_local_bot.value_adversarial_blocks ==
+                canonical_bot.value_adversarial_blocks &&
+            actor_local_bot.value_continuation_controller ==
+                canonical_bot.value_continuation_controller &&
+            actor_local_bot.training_games ==
+                canonical_bot.training_games &&
+            actor_local_bot.learned_model ==
+                canonical_bot.learned_model &&
+            actor_local_bot.value_actor_local_search &&
+            !canonical_bot.value_actor_local_search,
+        "AQ4 pilot changed more than the actor-local-search flag");
+
+    const auto rejected_with =
+        [](old_school::web::BridgeConfig config,
+           std::string_view required_text) {
+            std::istringstream input(passive_responses(1));
+            std::ostringstream output;
+            bool rejected = false;
+            try {
+                static_cast<void>(
+                    old_school::web::run_bridge_session(
+                        input, output, config));
+            } catch (const std::invalid_argument& error) {
+                rejected =
+                    std::string_view(error.what()).find(
+                        required_text) != std::string_view::npos;
+            }
+            return rejected && output.str().empty();
+        };
+
+    auto invalid = fast_config();
+    invalid.value_actor_local_search = true;
+    expect(
+        rejected_with(
+            invalid,
+            "actor-local search requires frozen Learned Value C16"),
+        "non-C16 web policy accepted actor-local search");
+
+    invalid = pilot;
+    invalid.learned_rollouts = 7;
+    expect(
+        rejected_with(
+            invalid,
+            "requires frozen C16 K8/H8 plus inner K2/H4 search"),
+        "AQ4 web policy accepted non-K8 root search");
+
+    invalid = pilot;
+    invalid.value_adversarial_blocks = true;
+    expect(
+        rejected_with(
+            invalid,
+            "cannot be combined with another Learned Value treatment"),
+        "AQ4 web policy accepted a second Learned Value treatment");
 }
 
 void test_g0_status_exposes_actual_model_identity() {
@@ -954,6 +1065,8 @@ int main() {
                test_c16_rejects_noncanonical_training_identity);
     runner.run("adversarial challenger changes only attacks",
                test_adversarial_challenger_maps_only_the_attack_flag);
+    runner.run("AQ4 actor-local pilot maps exactly",
+               test_actor_local_search_maps_only_the_exact_pilot_flag);
     runner.run("G0 status exposes model identity",
                test_g0_status_exposes_actual_model_identity);
     runner.run("passive client reaches terminal result",

@@ -11321,6 +11321,116 @@ TEST(resolved_shallow_prior_default_off_is_rng_identity) {
     CHECK(implicit_game.state() == explicit_game.state());
 }
 
+TEST(value_actor_local_search_recipe_is_exact_and_default_off) {
+    CHECK(!old_school::BotConfig{}.value_actor_local_search);
+    constexpr std::uint64_t kSeed = 0xA04F0E51ULL;
+    const auto recipe =
+        old_school::learned_value_actor_local_search_config(
+            kSeed);
+    CHECK(recipe.seed == kSeed);
+    CHECK(recipe.worlds ==
+          old_school::kLearnedValueActorLocalSearchWorlds);
+    CHECK(recipe.worlds == 8);
+    CHECK(recipe.rollouts_per_world == 1);
+    CHECK(recipe.horizon_turns == 8);
+    CHECK(recipe.continuation_variant ==
+          old_school::LearnedVariant::ValueSearchChampion);
+    CHECK(recipe.value_continuation_epsilon == 0.0);
+    CHECK(!recipe.blend_shallow_prior);
+    CHECK(recipe.value_resolved_shallow_prior_weight == 0.0);
+    CHECK(recipe.value_priority_residual_weight == 0.0);
+    CHECK(!recipe.value_pass_dominance);
+    CHECK(recipe.value_continuation_controller ==
+          old_school::LearnedContinuationController::Legacy);
+    CHECK(recipe.evaluation_threads == 4);
+    CHECK(!recipe.capture_priority_h0_boundaries);
+    CHECK(recipe.value_continuation_search_worlds == 2);
+}
+
+TEST(value_actor_local_search_fails_closed_and_off_is_rng_identity) {
+    const auto model = small_value_model();
+    old_school::BotConfig treatment = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action =
+            old_school::kLearnedValueActorLocalSearchWorlds,
+        .value_actor_local_search = true,
+        .learned_model = model,
+    };
+    const auto construct =
+        [&](const old_school::BotConfig& bot,
+            std::size_t search_depth = 1) {
+            old_school::GameConfig config;
+            config.max_turns = 1;
+            config.learned_search_depth = search_depth;
+            config.bots[0] = bot;
+            config.learned_model = model;
+            old_school::Game game(
+                old_school::blue_deck(),
+                old_school::red_deck(), 1, config);
+            static_cast<void>(game);
+        };
+    CHECK(throws_with_text(
+        [&] { construct(treatment); },
+        "exact frozen C16"));
+
+    auto wrong_k = treatment;
+    wrong_k.rollouts_per_action = 7;
+    CHECK(throws_with_text(
+        [&] { construct(wrong_k); },
+        "exact AQ4-P1"));
+    auto combined = treatment;
+    combined.value_priority_residual_weight = 0.10;
+    CHECK(throws_with_text(
+        [&] { construct(combined); },
+        "exact AQ4-P1"));
+    auto actor = treatment;
+    actor.learned_variant =
+        old_school::LearnedVariant::UnifiedActor;
+    actor.learned_model = small_actor_model();
+    CHECK(throws_with_text(
+        [&] { construct(actor); },
+        "exact AQ4-P1"));
+
+    old_school::GameConfig implicit;
+    implicit.max_turns = 3;
+    implicit.starting_player = 0;
+    implicit.learned_model = model;
+    implicit.bots = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 1,
+            .learned_model = model,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 1,
+            .learned_model = model,
+        },
+    };
+    auto explicit_off = implicit;
+    for (auto& bot : explicit_off.bots) {
+        bot.value_actor_local_search = false;
+    }
+    old_school::Game implicit_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0xA04F0FFULL, implicit);
+    old_school::Game explicit_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0xA04F0FFULL, explicit_off);
+    CHECK(implicit_game.run() == explicit_game.run());
+    CHECK(implicit_game.state() == explicit_game.state());
+}
+
 TEST(benchmark_policy_identity_includes_value_adversarial_blocks) {
     const auto model = small_value_model();
     const old_school::BotConfig control = {

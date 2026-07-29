@@ -57,6 +57,7 @@ void print_help(std::ostream& output) {
         << "  --opponent-deck-cards ID,ID,... (exactly 40)\n"
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
            "handcrafted|learned-value-c16|"
+           "learned-value-c16-actor-local-search|"
            "learned-value-c16-adversarial-blocks|"
            "learned-value-c16-stack-discipline|"
            "learned-value-g0|learned-actor\n"
@@ -195,7 +196,8 @@ int main(int argc, char** argv) {
                         value, config.learned_variant,
                         config.learned_generations,
                         config.value_adversarial_blocks,
-                        config.value_pass_dominance);
+                        config.value_pass_dominance,
+                        config.value_actor_local_search);
             } else if (option == "--seed") {
                 config.game_seed = parse_u64(option, value);
             } else if (option == "--train-games") {

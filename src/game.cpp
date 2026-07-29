@@ -378,6 +378,24 @@ void validate_bot_research_config(const BotConfig& bot) {
         throw std::invalid_argument(
             "Value adversarial blocks requires Learned Value");
     }
+    if (bot.value_actor_local_search &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion ||
+         bot.rollouts_per_action !=
+             kLearnedValueActorLocalSearchWorlds ||
+         bot.exploration_rate != 0.0 ||
+         bot.value_continuation_epsilon != 0.0 ||
+         bot.value_priority_residual_weight != 0.0 ||
+         bot.value_pass_dominance ||
+         bot.value_resolved_shallow_prior_weight != 0.0 ||
+         bot.value_adversarial_blocks ||
+         bot.value_continuation_controller !=
+             LearnedContinuationController::Legacy)) {
+        throw std::invalid_argument(
+            "Value actor-local search requires the exact AQ4-P1 "
+            "Learned Value K8 recipe without another treatment");
+    }
     if (bot.value_continuation_controller !=
             LearnedContinuationController::Legacy &&
         (bot.kind != BotKind::Learned ||
@@ -12740,6 +12758,17 @@ Game::Game(std::vector<CardId> player_zero_deck,
                 throw std::invalid_argument(
                     "Learned bot model does not match its variant");
             }
+            if (config_.bots[player]
+                    .value_actor_local_search &&
+                (config_.learned_search_depth != 1 ||
+                 config_.learned_policy_recorder ||
+                 config_.human_controllers[player].has_value() ||
+                 learned_model_fingerprint(model) !=
+                     kLearnedValueActorLocalSearchRequiredFingerprint)) {
+                throw std::invalid_argument(
+                    "Value actor-local search requires exact frozen "
+                    "C16 at a real unrecorded AQ4-P1 root");
+            }
         }
     }
 }
@@ -13204,6 +13233,74 @@ PriorityAction Game::choose_priority_action(
         return choose_handcrafted_action(actions, player, phase);
     }
     if (bot.kind == BotKind::Learned) {
+        if (bot.value_actor_local_search) {
+            const LearnedActionSamples samples =
+                learned_priority_action_samples(
+                    state_, decks_, player, sorcery_actions,
+                    phase, consecutive_passes, actions,
+                    learned_model_for(player),
+                    learned_value_actor_local_search_config(
+                        random_()));
+            const auto& scores =
+                samples.exact_priority_aggregate_scores;
+            if (samples.sampled_worlds !=
+                    kLearnedValueActorLocalSearchWorlds ||
+                samples.rollout_evaluations !=
+                    actions.size() *
+                        kLearnedValueActorLocalSearchWorlds ||
+                samples.terminal_evaluations >
+                    samples.rollout_evaluations ||
+                samples.bootstrapped_evaluations !=
+                    samples.rollout_evaluations -
+                        samples.terminal_evaluations ||
+                samples.inner_search_max_depth > 1 ||
+                (samples.inner_search_invocations == 0) !=
+                    (samples.inner_rollout_evaluations == 0) ||
+                (samples.inner_search_invocations == 0) !=
+                    (samples.inner_search_max_depth == 0) ||
+                scores.size() != actions.size() ||
+                !std::all_of(
+                    scores.begin(), scores.end(),
+                    [](double score) {
+                        return std::isfinite(score) &&
+                               score >= 0.0 && score <= 1.0;
+                    })) {
+                throw std::logic_error(
+                    "AQ4-P1 actor-local search returned invalid "
+                    "scores or accounting");
+            }
+            if (samples.rollout_evaluations >
+                std::numeric_limits<std::size_t>::max() -
+                    samples.inner_rollout_evaluations) {
+                throw std::overflow_error(
+                    "AQ4-P1 combined rollout accounting overflow");
+            }
+            const std::size_t rollout_evaluations =
+                samples.rollout_evaluations +
+                samples.inner_rollout_evaluations;
+            if (state_.stats[player].monte_carlo_rollouts >
+                std::numeric_limits<std::size_t>::max() -
+                    rollout_evaluations) {
+                throw std::overflow_error(
+                    "AQ4-P1 rollout total overflow");
+            }
+            state_.stats[player].monte_carlo_rollouts +=
+                rollout_evaluations;
+
+            const double best =
+                *std::max_element(scores.begin(), scores.end());
+            std::vector<std::size_t> best_actions;
+            for (std::size_t index = 0;
+                 index < scores.size(); ++index) {
+                if (scores[index] == best) {
+                    best_actions.push_back(index);
+                }
+            }
+            std::uniform_int_distribution<std::size_t> break_tie(
+                0, best_actions.size() - 1);
+            return actions[
+                best_actions[break_tie(random_)]];
+        }
         if (bot.learned_variant ==
                 LearnedVariant::ValueSearchChampion &&
             config_.learned_policy_recorder &&
@@ -21919,6 +22016,35 @@ double blend_evaluation_score(
 
 } // namespace
 
+LearnedSearchConfig learned_value_actor_local_search_config(
+    std::uint64_t seed) {
+    static_assert(
+        kLearnedValueSearchHorizonTurns == 4 &&
+        kLearnedValueSearchRolloutsPerWorld == 1);
+    return {
+        .seed = seed,
+        .worlds = kLearnedValueActorLocalSearchWorlds,
+        .rollouts_per_world =
+            kLearnedValueActorLocalSearchRolloutsPerWorld,
+        .horizon_turns =
+            kLearnedValueActorLocalSearchHorizonTurns,
+        .continuation_variant =
+            LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon = 0.0,
+        .blend_shallow_prior = false,
+        .value_resolved_shallow_prior_weight = 0.0,
+        .value_priority_residual_weight = 0.0,
+        .value_pass_dominance = false,
+        .value_continuation_controller =
+            LearnedContinuationController::Legacy,
+        .evaluation_threads =
+            kLearnedValueActorLocalSearchEvaluationThreads,
+        .capture_priority_h0_boundaries = false,
+        .value_continuation_search_worlds =
+            kLearnedValueActorLocalSearchContinuationWorlds,
+    };
+}
+
 std::uint64_t learned_search_world_seed(
     std::uint64_t root_seed, std::size_t world) {
     return indexed_search_seed(
@@ -23933,6 +24059,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
               baseline.value_resolved_shallow_prior_weight &&
           challenger.value_adversarial_blocks ==
               baseline.value_adversarial_blocks &&
+          challenger.value_actor_local_search ==
+              baseline.value_actor_local_search &&
           challenger.value_continuation_controller ==
               baseline.value_continuation_controller &&
           !distinct_explicit_models));

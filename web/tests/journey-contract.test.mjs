@@ -169,6 +169,7 @@ async function runFullJourney(harness, config) {
     learnedGenerations:
       [
         "learned-value-c16",
+        "learned-value-c16-actor-local-search",
         "learned-value-c16-adversarial-blocks",
         "learned-value-c16-stack-discipline",
       ].includes(config.players[1].policyId)
@@ -280,6 +281,7 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
       "deep-monte-carlo",
       "handcrafted",
       "learned-value-c16",
+      "learned-value-c16-actor-local-search",
       "learned-value-c16-adversarial-blocks",
       "learned-value-c16-stack-discipline",
       "learned-value-g0",

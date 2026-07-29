@@ -27,7 +27,10 @@ if (opponentPolicy?.startsWith("learned-")) {
           : "learned-value",
       generation,
       searchWorlds: Number(valueAfter("--learned-rollouts") ?? "1"),
-      horizonTurns: 4,
+      horizonTurns:
+        opponentPolicy === "learned-value-c16-actor-local-search"
+          ? 8
+          : 4,
       source: generation === 16 ? "frozen-artifact" : "trained-for-match",
       fingerprint:
         generation === 16

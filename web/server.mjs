@@ -15,6 +15,7 @@ const MAX_LOG_ENTRIES = 2_000;
 const FROZEN_C16_GENERATIONS = 16;
 const FROZEN_C16_TRAIN_GAMES = 800;
 const FROZEN_C16_TRAIN_SEED = "424242";
+const FROZEN_C16_SEARCH_WORLDS = 8;
 const EVOLUTION_TIMEOUT_MS = 120_000;
 const MAX_EVOLUTION_OUTPUT_BYTES = 512 * 1024;
 const MAX_EVOLUTION_RESULTS = 32;
@@ -170,6 +171,16 @@ export const POLICIES = Object.freeze([
     lifecycle: "Research control · not promoted over Handcoded Policy",
   },
   {
+    id: "learned-value-c16-actor-local-search",
+    label: "Learned C16 · Foresight Search (AQ4)",
+    name: "Learned C16 · Foresight Search (AQ4)",
+    description:
+      "Exact frozen C16 critic with outer K8/H8 search and symmetric actor-local inner K2/H4 search. Changes Priority decisions only; attack and block selection still use C16.",
+    versionDate: "2026-07-28",
+    versionDateLabel: "Manual pilot introduced",
+    lifecycle: "Manual diagnostic · not promoted",
+  },
+  {
     id: "learned-value-c16-adversarial-blocks",
     label: "Learned C16 · Best-Response Attacks",
     name: "Learned C16 · Best-Response Attacks",
@@ -217,6 +228,7 @@ const DECK_IDS = new Set(DECKS.map(({ id }) => id));
 const POLICY_IDS = new Set(POLICIES.map(({ id }) => id));
 const FROZEN_C16_POLICY_IDS = new Set([
   "learned-value-c16",
+  "learned-value-c16-actor-local-search",
   "learned-value-c16-adversarial-blocks",
   "learned-value-c16-stack-discipline",
 ]);
@@ -236,7 +248,7 @@ const DEFAULT_CONFIG = Object.freeze({
   bluffMode: false,
   rollouts: 2,
   deepRollouts: 8,
-  learnedRollouts: 8,
+  learnedRollouts: FROZEN_C16_SEARCH_WORLDS,
   learnedGenerations: FROZEN_C16_GENERATIONS,
 });
 
@@ -561,12 +573,23 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
   if (
     normalizedOpponentPolicy ===
       "learned-value-c16-stack-discipline" &&
-    learnedRollouts !== 8
+    learnedRollouts !== FROZEN_C16_SEARCH_WORLDS
   ) {
     throw new ApiError(
       400,
       "invalid_config",
       "learned-value-c16-stack-discipline requires learnedRollouts=8",
+    );
+  }
+  if (
+    normalizedOpponentPolicy ===
+      "learned-value-c16-actor-local-search" &&
+    learnedRollouts !== FROZEN_C16_SEARCH_WORLDS
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_config",
+      "learned-value-c16-actor-local-search requires learnedRollouts=8",
     );
   }
 

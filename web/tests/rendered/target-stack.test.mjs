@@ -231,6 +231,7 @@ async function configureFrozenC16Match(page) {
     ),
     [
       "learned-value-c16",
+      "learned-value-c16-actor-local-search",
       "learned-value-c16-adversarial-blocks",
       "learned-value-c16-stack-discipline",
       "learned-value-g0",
@@ -494,7 +495,7 @@ function assertStackControllerCues(cues, expected) {
 }
 
 test(
-  "setup dates and distinguishes all five Learned policy lineages",
+  "setup dates and distinguishes all six Learned policy choices",
   { timeout: 60_000 },
   async (t) => {
     const { server, url } = await startFixture();
@@ -522,6 +523,29 @@ test(
       await provenance.locator("time").getAttribute("datetime"),
       "2026-07-26",
     );
+
+    await policy.selectOption("learned-value-c16-actor-local-search");
+    assert.match(await description.innerText(), /outer K8\/H8/);
+    assert.match(await description.innerText(), /actor-local inner K2\/H4/);
+    assert.match(await description.innerText(), /Priority decisions only/);
+    assert.match(
+      await description.innerText(),
+      /attack and block selection still use C16/,
+    );
+    assert.match(await provenance.innerText(), /Manual diagnostic/);
+    assert.match(await provenance.innerText(), /not promoted/);
+    assert.match(
+      await provenance.innerText(),
+      /Manual pilot introduced Jul 28, 2026/,
+    );
+    assert.equal(
+      await provenance.locator("time").getAttribute("datetime"),
+      "2026-07-28",
+    );
+    assert.equal(await numberInputs.nth(1).inputValue(), "800");
+    assert.equal(await numberInputs.nth(2).inputValue(), "424242");
+    assert.equal(await numberInputs.nth(1).isEditable(), false);
+    assert.equal(await numberInputs.nth(2).isEditable(), false);
 
     await policy.selectOption("learned-value-c16-adversarial-blocks");
     assert.match(await description.innerText(), /Exact frozen C16 critic/);
@@ -622,8 +646,8 @@ test(
     );
 
     t.diagnostic(
-      "1280x720 setup rendered C16 artifact and G0/Actor recipe dates, " +
-        "lineages, and lifecycle labels without horizontal overflow",
+      "1280x720 setup rendered C16/AQ4 diagnostic and G0/Actor recipe " +
+        "dates, policy scope, and lifecycle labels without horizontal overflow",
     );
   },
 );

@@ -304,6 +304,44 @@ smoke complete; human behavior play-test in progress**
   identified as the opponent. Human behavior validation remains explicitly
   open.
 
+#### Preregistered actor-local foresight diagnostic exposure slice
+
+Hypothesis: exposing the already passing AQ4-D1 nested information-set search
+directly at live Priority roots will let human play-testing exercise its four
+general strategic repairs without the one-shot distillation overfit that
+rejected AQ4-G4B.
+
+Status: **implementation, contract gates, live-server restart, and rendered
+smoke complete; human strategic play-test in progress; not promoted**
+
+- The stable ID is `learned-value-c16-actor-local-search`, displayed as
+  `Learned C16 · Foresight Search (AQ4)`.
+- It loads the exact frozen C16 critic, uses outer K8/R1/H8 search with
+  symmetric actor-local K2/R1/H4 continuation search, and bounds nesting at
+  one. It changes Priority choices only; attacks and blocks remain canonical
+  C16.
+- Metadata dates the pilot `2026-07-28` and labels it a manual diagnostic,
+  not a promoted model. Neither the four tactical controls nor manual
+  exposure constitutes a gameplay-strength claim.
+- The Node boundary treats it exactly like frozen C16 for generation,
+  training-game, training-seed, and K8 identity. The C++ boundary enables only
+  the new default-off actor-local-search treatment and fails closed on another
+  Learned treatment, variant, generation, or search-world count.
+- Acceptance requires focused parser/config and normalization tests, the
+  complete five-deck × ten-policy journey matrix, `make test-web-ui`,
+  `make test-web`, and a rendered 1280 × 720 setup/match smoke that verifies
+  the exact search description and non-promotion status. One real bridge
+  response must finish inside the existing 120-second action timeout.
+- Evidence on 2026-07-28: engine 183/183, bridge 20/20, focused web UI
+  102/102, and complete web 124/124 passed. The 50-case journey matrix covers
+  all five decks and ten policies. A real 1280 × 720 in-app-browser smoke
+  selected the AQ4 policy, rendered the exact budget/date/non-promotion and
+  Priority-only caveat, reported `K8/H8` in REPRO, started a seed-42 RU Aggro
+  mirror in 267 ms, and
+  completed a real opponent turn well inside the 120-second timeout. The
+  rebuilt server is running at `http://127.0.0.1:4173`; setup was left open
+  with AQ4 selected for the owner's next match.
+
 Acceptance criteria:
 
 - At 1200–1800 px wide, hand, both battlefields, life totals, phase, stack, and

@@ -128,6 +128,9 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     /Force Spike/,
   );
   const c16 = body.policies.find(({ id }) => id === "learned-value-c16");
+  const foresight = body.policies.find(
+    ({ id }) => id === "learned-value-c16-actor-local-search",
+  );
   const bestResponse = body.policies.find(
     ({ id }) => id === "learned-value-c16-adversarial-blocks",
   );
@@ -149,6 +152,24 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     },
   );
   assert.match(c16?.description ?? "", /16 bootstrapped self-play generations/);
+  assert.deepEqual(
+    {
+      name: foresight?.name,
+      versionDate: foresight?.versionDate,
+      versionDateLabel: foresight?.versionDateLabel,
+      lifecycle: foresight?.lifecycle,
+    },
+    {
+      name: "Learned C16 · Foresight Search (AQ4)",
+      versionDate: "2026-07-28",
+      versionDateLabel: "Manual pilot introduced",
+      lifecycle: "Manual diagnostic · not promoted",
+    },
+  );
+  assert.match(foresight?.description ?? "", /outer K8\/H8/);
+  assert.match(foresight?.description ?? "", /actor-local inner K2\/H4/);
+  assert.match(foresight?.description ?? "", /Priority decisions only/);
+  assert.match(foresight?.description ?? "", /attack and block selection still use C16/);
   assert.deepEqual(
     {
       name: bestResponse?.name,
@@ -442,6 +463,44 @@ test("stack discipline reuses exact frozen C16 identity", async (t) => {
   });
 });
 
+test("AQ4 foresight search reuses exact frozen C16 identity", async (t) => {
+  const { request } = await startTestServer(t);
+  const policyId = "learned-value-c16-actor-local-search";
+  const { response, body } = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        players: [
+          { deckId: "blue", policyId: "human" },
+          { deckId: "blue", policyId },
+        ],
+        seed: 42,
+        trainGames: 800,
+        trainSeed: 424242,
+        learnedRollouts: 8,
+        learnedGenerations: 16,
+      }),
+    }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(body.game.config.players[1].policyId, policyId);
+  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
+  assert.equal(body.game.snapshot.received.trainGames, "800");
+  assert.equal(body.game.snapshot.received.trainSeed, "424242");
+  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
+  assert.deepEqual(body.game.model, {
+    family: "learned-value",
+    generation: 16,
+    searchWorlds: 8,
+    horizonTurns: 8,
+    source: "frozen-artifact",
+    fingerprint:
+      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
+  });
+});
+
 test("rejects stale and illegal choices before progressing a valid game", async (t) => {
   const { request } = await startTestServer(t);
   await request("/api/games", {
@@ -655,6 +714,16 @@ test("rejects malformed config without spawning a game", async (t) => {
         {
           deckId: "blue",
           policyId: "learned-value-c16-stack-discipline",
+        },
+      ],
+      learnedRollouts: 7,
+    },
+    {
+      players: [
+        { deckId: "green", policyId: "human" },
+        {
+          deckId: "blue",
+          policyId: "learned-value-c16-actor-local-search",
         },
       ],
       learnedRollouts: 7,

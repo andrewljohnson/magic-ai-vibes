@@ -263,7 +263,8 @@ void write_evolution_stats(std::ostream& output,
 void write_model_status(
     std::ostream& output, std::string_view message,
     std::string_view family, std::size_t generation,
-    std::size_t learned_rollouts, std::string_view source,
+    std::size_t learned_rollouts, std::size_t horizon_turns,
+    std::string_view source,
     std::string_view fingerprint) {
     output << "{\"type\":\"status\",\"message\":";
     write_json_string(output, message);
@@ -271,8 +272,7 @@ void write_model_status(
     write_json_string(output, family);
     output << ",\"generation\":" << generation
            << ",\"searchWorlds\":" << learned_rollouts
-           << ",\"horizonTurns\":"
-           << kLearnedValueSearchHorizonTurns
+           << ",\"horizonTurns\":" << horizon_turns
            << ",\"source\":";
     write_json_string(output, source);
     output << ",\"fingerprint\":";
@@ -1470,7 +1470,9 @@ BotKind parse_opponent_bot(
     LearnedVariant& learned_variant,
     std::size_t& learned_generations,
     bool& value_adversarial_blocks,
-    bool& value_pass_dominance) {
+    bool& value_pass_dominance,
+    bool& value_actor_local_search) {
+    value_actor_local_search = false;
     if (value == "random") {
         value_adversarial_blocks = false;
         value_pass_dominance = false;
@@ -1505,6 +1507,15 @@ BotKind parse_opponent_bot(
         learned_generations = kFrozenWebC16Generations;
         value_adversarial_blocks = true;
         value_pass_dominance = false;
+        return BotKind::Learned;
+    }
+    if (value ==
+        "learned-value-c16-actor-local-search") {
+        learned_variant = LearnedVariant::ValueSearchChampion;
+        learned_generations = kFrozenWebC16Generations;
+        value_adversarial_blocks = false;
+        value_pass_dominance = false;
+        value_actor_local_search = true;
         return BotKind::Learned;
     }
     if (value == "learned-value-c16" ||
@@ -1551,6 +1562,8 @@ BotConfig make_opponent_bot_config(
             config.value_pass_dominance,
         .value_adversarial_blocks =
             config.value_adversarial_blocks,
+        .value_actor_local_search =
+            config.value_actor_local_search,
         .training_games = config.training_games,
         .learned_model = std::move(learned_model),
     };
@@ -1627,6 +1640,29 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         throw std::invalid_argument(
             "stack discipline requires frozen C16 K8/H4 search");
     }
+    if (config.value_actor_local_search &&
+        (config.opponent_bot != BotKind::Learned ||
+         config.learned_variant !=
+             LearnedVariant::ValueSearchChampion ||
+         config.learned_generations !=
+             kFrozenWebC16Generations)) {
+        throw std::invalid_argument(
+            "actor-local search requires frozen Learned Value C16");
+    }
+    if (config.value_actor_local_search &&
+        (config.value_adversarial_blocks ||
+         config.value_pass_dominance)) {
+        throw std::invalid_argument(
+            "actor-local search cannot be combined with another "
+            "Learned Value treatment");
+    }
+    if (config.value_actor_local_search &&
+        config.learned_rollouts !=
+            kFrozenWebC16SearchWorlds) {
+        throw std::invalid_argument(
+            "actor-local search requires frozen C16 K8/H8 plus "
+            "inner K2/H4 search");
+    }
     const std::vector<CardId> human_cards =
         configured_deck_cards(
             config.human_deck, config.human_deck_cards,
@@ -1657,7 +1693,9 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             write_model_status(
                 output, "Learned Actor G0 ready",
                 "learned-actor", 0,
-                config.learned_rollouts, "trained-for-match",
+                config.learned_rollouts,
+                kLearnedValueSearchHorizonTurns,
+                "trained-for-match",
                 learned_model_fingerprint(learned_model));
         } else if (config.learned_generations == 0) {
             learned_model = train_learned_value_champion(
@@ -1665,7 +1703,9 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             write_model_status(
                 output, "Learned Value G0 ready",
                 "learned-value", 0,
-                config.learned_rollouts, "trained-for-match",
+                config.learned_rollouts,
+                kLearnedValueSearchHorizonTurns,
+                "trained-for-match",
                 learned_model_fingerprint(learned_model));
         } else {
             const std::string artifact_path =
@@ -1681,7 +1721,11 @@ int run_bridge_session(std::istream& input, std::ostream& output,
                 output, "Frozen Learned Value C16 loaded",
                 "learned-value",
                 kFrozenWebC16Generations,
-                config.learned_rollouts, "frozen-artifact",
+                config.learned_rollouts,
+                config.value_actor_local_search
+                    ? kLearnedValueActorLocalSearchHorizonTurns
+                    : kLearnedValueSearchHorizonTurns,
+                "frozen-artifact",
                 learned_model_fingerprint(learned_model));
         }
     }

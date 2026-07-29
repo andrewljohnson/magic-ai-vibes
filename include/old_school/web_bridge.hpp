@@ -40,6 +40,7 @@ struct BridgeConfig {
     bool bluff_mode = false;
     bool value_adversarial_blocks = false;
     bool value_pass_dominance = false;
+    bool value_actor_local_search = false;
 
     bool operator==(const BridgeConfig&) const = default;
 };
@@ -66,7 +67,8 @@ BotKind parse_opponent_bot(std::string_view value,
                            LearnedVariant& learned_variant,
                            std::size_t& learned_generations,
                            bool& value_adversarial_blocks,
-                           bool& value_pass_dominance);
+                           bool& value_pass_dominance,
+                           bool& value_actor_local_search);
 EvolutionPilot parse_evolution_pilot(std::string_view value);
 
 // Parses the bridge's transport-only representation of an exact custom deck.

@@ -20008,6 +20008,87 @@ on-policy multi-generation follow-up. P1 neither supplies labels nor changes
 that learner; it gets the proven search operator into the owner's hands while
 the distillation loop is rebuilt.
 
+###### AQ4-P1 implementation and live-pilot result
+
+Completed 2026-07-28 after rereading `REVIEW.md` through its newest 23:44 PDT
+entry, which independently countersigned the G4B rejection and endorsed
+deploying the true operator as a slower manual pilot.
+
+Implementation: one default-off `BotConfig::value_actor_local_search` branch
+now calls the existing hidden-safe sampler with the exact frozen recipe:
+outer K8/R1/H8, four evaluation workers, no shallow blend, symmetric
+actor-local K2/R1/H4 Value continuations, and maximum nesting depth one. The
+constructor binds the treatment to the exact C16 fingerprint, Value variant,
+K8 root budget, real unrecorded root, and no other treatment. The selector
+uses the sampler's exact aggregate scores and seeded exact-tie behavior, and
+charges both outer and inner rollout evaluations with overflow checks. The
+field-off path remains unchanged and is covered by fixed-seed result/state
+identity.
+
+Exact tactical and safety replay:
+
+```sh
+make -j4 build/old-school-action-q-broad-distill
+/usr/bin/time -p \
+  ./build/old-school-action-q-broad-distill --preflight
+```
+
+- PASS; frozen digest
+  `8a5800dc3ebd7cfad3c8cc893e3aa7e5795f38cb63fcf10442f7bb6588fd950d`;
+- redundant Counterspell selected Pass, margin `0.0239755`;
+- Braingeyser selected X=1 self-draw, nearest excluded margin
+  `0.011807108792996901`;
+- summoning-sick Bear Giant Growth selected Pass, margin
+  `0.053277592122571188`;
+- live Force Spike selected Force Spike, margin
+  `0.093079049467473085`;
+- every fixture retained nonvacuous hidden-repartition and reversed-order
+  identity, and all nested searches reported maximum depth one;
+- runtime: 6.55 seconds real, 22.44 user, 0.06 sys.
+
+Verification:
+
+```sh
+make -B -j4 build/old-school-tests
+./build/old-school-tests
+make test-web-ui
+make test-web
+```
+
+- engine: 183/183 passed, including exact recipe, fail-closed configuration,
+  and default-off RNG/state identity; the benchmark policy-identity
+  comparison also binds the new treatment bit;
+- bridge: 20/20 passed;
+- focused web UI: 102/102 passed, including all 50 five-deck × ten-policy
+  journeys;
+- complete web suite: 124/124 passed, including a real-engine AQ4 session
+  identity check;
+- a fresh AddressSanitizer/UndefinedBehaviorSanitizer build of the complete
+  engine suite passed 183/183 with leak detection disabled and undefined
+  behavior configured to halt; the previously passing AQ4 helper sanitizer
+  controls remain unchanged.
+
+Live rendered smoke at `http://127.0.0.1:4173`, 1280 × 720, seed 42:
+the setup displayed all ten policies, exact K8/H8 + inner K2/H4 text, the
+2026-07-28 date, `Manual diagnostic · not promoted`, and the Priority-only
+combat caveat. Starting an RU Aggro mirror took 267 ms. Playing Island and
+allowing the authoritative auto-pass flow exercised a real opponent turn; the
+AQ4 bot played Island, declared no attackers, and returned control on turn 3
+well inside the 120-second action timeout. The server was restarted with the
+new build and the setup was left open with AQ4 selected for owner play.
+Final independent review caught that the structured REPRO model status still
+reported C16's inner H4 for this policy. Before commit, the bridge was changed
+to report AQ4's effective outer H8 while legacy policies remain H4; the exact
+live bridge status now reads `searchWorlds:8, horizonTurns:8`. The rereview
+returned GO with no blocking engine or web findings.
+
+Decision: **accept AQ4-P1 for manual diagnostic exposure only**. This is not a
+strength acceptance, a new champion, or evidence that Learned is king. C16
+remains champion and P1 intentionally leaves C16 attack/block selection
+unchanged. Owner field feedback is the next P1 gate. The next learner
+experiment remains the preregistered on-policy multi-generation
+search-as-teacher loop; do not reopen one-shot fixed-corpus distillation.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

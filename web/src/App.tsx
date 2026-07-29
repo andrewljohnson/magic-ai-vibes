@@ -97,6 +97,15 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
     lifecycle: "Research control · not promoted over Handcoded Policy",
   },
   {
+    id: "learned-value-c16-actor-local-search",
+    name: "Learned C16 · Foresight Search (AQ4)",
+    description:
+      "Exact frozen C16 critic with outer K8/H8 search and symmetric actor-local inner K2/H4 search. Changes Priority decisions only; attack and block selection still use C16.",
+    versionDate: "2026-07-28",
+    versionDateLabel: "Manual pilot introduced",
+    lifecycle: "Manual diagnostic · not promoted",
+  },
+  {
     id: "learned-value-c16-adversarial-blocks",
     name: "Learned C16 · Best-Response Attacks",
     description:
@@ -138,6 +147,7 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
 
 const FROZEN_C16_POLICY_IDS = new Set([
   "learned-value-c16",
+  "learned-value-c16-actor-local-search",
   "learned-value-c16-adversarial-blocks",
   "learned-value-c16-stack-discipline",
 ]);
