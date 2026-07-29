@@ -102,6 +102,7 @@ ACTION_Q_MULTISCALE_EXPLORE_SOURCE := src/action_q_multiscale_explore.cpp
 ACTION_Q_LONG_HORIZON_DIAGNOSTIC_SOURCE := src/action_q_long_horizon_diagnostic.cpp
 ACTION_Q_NESTED_ACTOR_DIAGNOSTIC_SOURCE := src/action_q_nested_actor_diagnostic.cpp
 ACTION_Q_NESTED_ACTOR_DISTILL_SOURCE := src/action_q_nested_actor_distill.cpp
+ACTION_Q_NESTED_ACTOR_EARLY_STOP_SOURCE := src/action_q_nested_actor_early_stop.cpp
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE := src/fq4_dev_background_diagnostic.cpp
 FQ4_DEV_COVERAGE_CENSUS_SOURCE := src/fq4_dev_coverage_census.cpp
 FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
@@ -195,6 +196,8 @@ ACTION_Q_NESTED_ACTOR_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q
 ACTION_Q_NESTED_ACTOR_DIAGNOSTIC := $(BUILD_DIR)/old-school-action-q-nested-actor-diagnostic
 ACTION_Q_NESTED_ACTOR_DISTILL_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-nested-actor-distill-tests
 ACTION_Q_NESTED_ACTOR_DISTILL := $(BUILD_DIR)/old-school-action-q-nested-actor-distill
+ACTION_Q_NESTED_ACTOR_EARLY_STOP_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-nested-actor-early-stop-tests
+ACTION_Q_NESTED_ACTOR_EARLY_STOP := $(BUILD_DIR)/old-school-action-q-nested-actor-early-stop
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic-tests
 FQ4_DEV_BACKGROUND_DIAGNOSTIC := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic
 FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev4-coverage-census-tests
@@ -245,6 +248,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-action-q-long-horizon-diagnostic action-q-long-horizon-diagnose
 .PHONY: test-action-q-nested-actor-diagnostic action-q-nested-actor-diagnose
 .PHONY: test-action-q-nested-actor-distill action-q-nested-actor-distill-census action-q-nested-actor-distill-run
+.PHONY: test-action-q-nested-actor-early-stop action-q-nested-actor-early-stop-run
 
 all: $(SIMULATOR)
 
@@ -376,6 +380,7 @@ ACTION_Q_MULTISCALE_EXPLORE_LINK_SOURCES := $(ACTION_Q_OFFLINE_GATE_LINK_SOURCES
 ACTION_Q_LONG_HORIZON_DIAGNOSTIC_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_SOURCE)
 ACTION_Q_NESTED_ACTOR_DIAGNOSTIC_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ACTION_Q_NESTED_ACTOR_DIAGNOSTIC_SOURCE)
 ACTION_Q_NESTED_ACTOR_DISTILL_LINK_SOURCES := $(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) $(ACTION_Q_NESTED_ACTOR_DIAGNOSTIC_SOURCE) $(ACTION_Q_NESTED_ACTOR_DISTILL_SOURCE)
+ACTION_Q_NESTED_ACTOR_EARLY_STOP_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_DISTILL_LINK_SOURCES) $(ACTION_Q_NESTED_ACTOR_EARLY_STOP_SOURCE)
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE)
 FQ4_DEV_COVERAGE_CENSUS_LINK_SOURCES := $(FQ4_DEV_GENERATOR_LINK_SOURCES)
 FQ4_NEUTRAL_SUPPLEMENT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(FQ4_DEV_BUNDLE_LINK_SOURCES) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE)
@@ -476,6 +481,10 @@ $(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_DIAGNOSTIC),$(ACTION_Q_NESTED
 $(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_DISTILL_TEST_RUNNER),$(ACTION_Q_NESTED_ACTOR_DISTILL_LINK_SOURCES) tests/test_action_q_nested_actor_distill.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_DISTILL),$(ACTION_Q_NESTED_ACTOR_DISTILL_LINK_SOURCES) src/action_q_nested_actor_distill_main.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_EARLY_STOP_TEST_RUNNER),$(ACTION_Q_NESTED_ACTOR_EARLY_STOP_LINK_SOURCES) tests/test_action_q_nested_actor_early_stop.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_EARLY_STOP),$(ACTION_Q_NESTED_ACTOR_EARLY_STOP_LINK_SOURCES) src/action_q_nested_actor_early_stop_main.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER),$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES) tests/test_fq4_dev_background_diagnostic.cpp))
 
@@ -601,6 +610,7 @@ test: $(ACTION_Q_MULTISCALE_TEACHER_TEST_RUNNER) $(ACTION_Q_MULTISCALE_EXPLORE_T
 test: $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC_TEST_RUNNER) $(ACTION_Q_LONG_HORIZON_DIAGNOSTIC)
 test: $(ACTION_Q_NESTED_ACTOR_DIAGNOSTIC_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_DIAGNOSTIC)
 test: $(ACTION_Q_NESTED_ACTOR_DISTILL_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_DISTILL)
+test: $(ACTION_Q_NESTED_ACTOR_EARLY_STOP_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_EARLY_STOP)
 test: $(FQ4_WORK0_CACHE_TEST_RUNNER)
 test: test-fq4-work0-firewall
 
@@ -684,6 +694,14 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-nested-actor-distill (--census|--run)' >/dev/null
+	./$(ACTION_Q_NESTED_ACTOR_EARLY_STOP_TEST_RUNNER)
+	@set +e; output=`./$(ACTION_Q_NESTED_ACTOR_EARLY_STOP) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ4-G2 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-nested-actor-early-stop --run' >/dev/null
 	@set +e; output=`./$(ACTION_Q_MULTISCALE_EXPLORE) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
 			printf '%s\n' "$$output"; \
@@ -1493,6 +1511,19 @@ action-q-nested-actor-distill-census: $(ACTION_Q_NESTED_ACTOR_DISTILL)
 
 action-q-nested-actor-distill-run: $(ACTION_Q_NESTED_ACTOR_DISTILL)
 	./$(ACTION_Q_NESTED_ACTOR_DISTILL) --run
+
+test-action-q-nested-actor-early-stop: $(ACTION_Q_NESTED_ACTOR_EARLY_STOP_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_EARLY_STOP)
+	./$(ACTION_Q_NESTED_ACTOR_EARLY_STOP_TEST_RUNNER)
+	@set +e; output=`./$(ACTION_Q_NESTED_ACTOR_EARLY_STOP) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ4-G2 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-nested-actor-early-stop --run' >/dev/null
+
+action-q-nested-actor-early-stop-run: $(ACTION_Q_NESTED_ACTOR_EARLY_STOP)
+	./$(ACTION_Q_NESTED_ACTOR_EARLY_STOP) --run
 
 test-fq4-dev-background-diagnostic: $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC)
 	./$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER)

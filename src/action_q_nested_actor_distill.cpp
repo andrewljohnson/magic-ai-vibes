@@ -1210,6 +1210,14 @@ Metrics evaluate(
 FitReport fit(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent) {
+    return fit_with_optimizer(
+        corpus, std::move(parent), optimizer_config());
+}
+
+FitReport fit_with_optimizer(
+    const Corpus& corpus,
+    std::shared_ptr<const LearnedModel> parent,
+    LearnedValuePriorityHeadUpdateConfig optimizer) {
     require_parent(parent);
     validate_corpus(corpus);
     require_frozen_census(corpus.census);
@@ -1224,7 +1232,7 @@ FitReport fit(
         learned_model_fingerprint(parent);
     report.parent_components =
         learned_model_component_fingerprints(parent);
-    report.optimizer = optimizer_config();
+    report.optimizer = optimizer;
     report.fit_examples = corpus.fit.size();
     std::vector<LearnedValuePriorityTrainingExample>
         examples;
@@ -1418,13 +1426,14 @@ namespace {
 void validate_selector(
     const BotBenchmarkSummary& summary,
     const std::shared_ptr<const LearnedModel>& parent,
-    const std::shared_ptr<const LearnedModel>& candidate) {
+    const std::shared_ptr<const LearnedModel>& candidate,
+    std::uint64_t expected_seed) {
     const auto accounted =
         [](const auto& stats) {
             return stats.games ==
                 stats.wins + stats.losses + stats.draws;
         };
-    if (summary.evaluation_seed != kSelectorSeed ||
+    if (summary.evaluation_seed != expected_seed ||
         summary.learned_training_seed != 424242 ||
         summary.repetitions_per_deck_pairing !=
             kSelectorRepetitions ||
@@ -1544,6 +1553,26 @@ void validate_selector(
 
 } // namespace
 
+BotConfig selector_bot_config(
+    std::shared_ptr<const LearnedModel> model,
+    double residual_weight) {
+    return selector_bot(
+        std::move(model), residual_weight);
+}
+
+void validate_selector_summary(
+    const BotBenchmarkSummary& summary,
+    const std::shared_ptr<const LearnedModel>& parent,
+    const std::shared_ptr<const LearnedModel>& candidate,
+    std::uint64_t expected_seed) {
+    if (expected_seed == 0) {
+        throw std::invalid_argument(
+            "AQ4 selector expected seed is zero");
+    }
+    validate_selector(
+        summary, parent, candidate, expected_seed);
+}
+
 BotBenchmarkSummary run_selector(
     std::shared_ptr<const LearnedModel> parent,
     std::shared_ptr<const LearnedModel> candidate,
@@ -1583,7 +1612,8 @@ BotBenchmarkSummary run_selector(
                 kCandidateResidualWeight),
             selector_bot(parent, 0.0),
             game, false);
-    validate_selector(summary, parent, candidate);
+    validate_selector(
+        summary, parent, candidate, kSelectorSeed);
     return summary;
 }
 

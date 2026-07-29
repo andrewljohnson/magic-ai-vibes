@@ -233,6 +233,10 @@ Metrics evaluate(
 FitReport fit(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent);
+FitReport fit_with_optimizer(
+    const Corpus& corpus,
+    std::shared_ptr<const LearnedModel> parent,
+    LearnedValuePriorityHeadUpdateConfig optimizer);
 OfflineReport evaluate_offline(
     const Corpus& corpus, const FitReport& fit,
     std::shared_ptr<const LearnedModel> parent,
@@ -240,6 +244,14 @@ OfflineReport evaluate_offline(
 
 SelectorDisposition classify_selector(
     const BotBenchmarkSummary& summary);
+BotConfig selector_bot_config(
+    std::shared_ptr<const LearnedModel> model,
+    double residual_weight);
+void validate_selector_summary(
+    const BotBenchmarkSummary& summary,
+    const std::shared_ptr<const LearnedModel>& parent,
+    const std::shared_ptr<const LearnedModel>& candidate,
+    std::uint64_t expected_seed);
 BotBenchmarkSummary run_selector(
     std::shared_ptr<const LearnedModel> parent,
     std::shared_ptr<const LearnedModel> candidate,
