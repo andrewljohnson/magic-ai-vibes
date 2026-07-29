@@ -18449,6 +18449,117 @@ do not add data or start MCTS—the next experiment must improve the
 information-set backup/leaf signal first. No fit, artifact, benchmark, or
 gameplay seed is licensed by AQ1-D0.
 
+##### AQ1-D0 direct-teacher direction diagnostic result
+
+Completed 2026-07-28 from frozen implementation commit `50648a4`, after the
+focused harness passed 8/8, the full repository suite passed (engine 181/181,
+web 118/118, certification 48/48), focused ASan/UBSan passed 8/8, and an
+independent source review returned GO. `REVIEW.md` was reread through its
+newest 19:04 PDT verification addendum before the run. Exact command:
+
+```sh
+./build/old-school-action-q-bellman-explore --diagnose-teacher
+```
+
+The command exited one with complete descriptive evidence and no fit, corpus,
+gameplay, or artifact path. It used root seed `202607281913`, the four
+declared derived fixture seeds, exact frozen C16
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+and unchanged AQ1 K4/K4. Every fixture was nonvacuously hidden-repartition
+bit-identical and reversed-action bit-identical; all root/successor accounting
+cross-summed.
+
+| Fixture | Required direction | Teacher values / support | Result |
+| --- | --- | --- | --- |
+| Intervening Counterspell | counter opposing Counterspell > Pass | `0.5192291056 > 0.4698180923`; exact support also contains the equally productive counter of the original Air Elemental | PASS |
+| Braingeyser | neither X=0 action in exact-max support | X=0 opponent `0.4918783341` is the unique maximum; Pass `0.4891643870` | **FAIL** |
+| Sick-Bear Giant Growth | Pass > Growth | `0.4503618885 > 0.4360428266` | PASS |
+| Live Force Spike | Force Spike > Pass | `0.4602854623 > 0.4261461215` | PASS |
+
+Verdict: **reject the complete AQ1 teacher hypothesis**. The result separates
+the two AQ1 candidate misses. Counter-war composition is a coverage or
+distillation miss because the raw teacher has the correct direction.
+Braingeyser X=0 is an operator/leaf miss because the raw teacher itself makes
+the same mistake. Scaling AQ1 alone or putting this leaf into a deeper tree
+would amplify a known bad target. C16 remains champion.
+
+##### AQ2-MS0 multiscale TD action-Q declaration
+
+Declared 2026-07-28 after the complete AQ1-D0 result and before changing the
+teacher, collecting a new source corpus, fitting a model, or opening gameplay.
+Collection root seed `202607281935` and conditional selector seed
+`202607281945` were searched in source, tests, notebook, review, Makefile, and
+Git history and were unused before declaration.
+
+AQ0 and AQ1 now provide complementary general evidence. The immediate
+resolved-consequence teacher excluded Braingeyser X=0 and selected the useful
+intervening counter, but could not price Growth expiring before future combat.
+The temporal Bellman teacher prices the Growth correctly and selects the
+counter, but its next-boundary leaf treats opponent-targeted X=0 Braingeyser
+as best by only `0.002714`. This is not evidence for a card rule. It is
+evidence for a standard multistep target: retain the temporal backup as the
+primary signal and add an immediate settled-consequence auxiliary that makes
+spent-card cost visible.
+
+Falsifiable hypothesis: a fixed TD-style target
+
+`M(a) = 0.75 * Bellman(a) + 0.25 * Resolved(a)`
+
+will have the correct direction on all four AQ1-D0 controls, and a Priority
+head trained on a broader balanced corpus will retain AQ1's temporal repair,
+recover AQ0's free-spell/counter composition repairs, and improve untouched
+all-five-deck ranking enough to beat C16 in the 60-game selector. The 0.75/0.25
+weights are fixed now as a temporal-primary auxiliary blend; no weight sweep
+is licensed.
+
+Use exact Environment-v3 C16 as parent. The source is the existing 40-game,
+all-five-deck balanced C16 mirror schedule in FIT block zero and CHECK block
+one, with root seed `202607281935`, the same source turn cap, K8/H4/R1 base,
+and no exploration/residual/PD0/adversarial blocks. Retain at most eight
+evenly spaced nontrivial Priority roots per actor-game without inspecting
+actions or values. Measure and freeze the actual root/option census before
+fitting; do not guess or tune a quota from it.
+
+At each retained root, AQ1 Bellman values use unchanged common K4 root worlds
+and independent K4/K4 successor banks. Resolved values use those exact same
+four root determinization seeds, force each authoritative legal action through
+the engine's resolved-consequence seam, and evaluate exact terminal outcome or
+the unchanged C16 critic immediately after settlement. Average each action's
+four resolved samples, then form `M` in binary64 action order. Convert `M`
+through the existing temperature-0.10, 90%-soft/10%-uniform distribution.
+Train all legal actions with equal deck loss mass, the same 32-unit
+action-conditioned Priority head, Adam configuration, 64 epochs, and residual
+bound 0.10 as AQ1. Only Priority may change. Card names, hand-authored values,
+Handcrafted play, opponent hidden identities, and authored control fixtures
+are forbidden from training.
+
+Before source collection, the exact already-open D0 fixture coordinates must
+show all four multiscale directions passing, including no Braingeyser X=0 in
+exact-max support and Pass over sick-Bear Growth. A failure stops AQ2 before
+collection. The census command creates no model. The run command must exactly
+reconstruct the frozen census and pass, conjunctively:
+
+- repeat-fit, parent immutability, Priority-only isolation, hidden
+  repartition, descriptor order, and complete AQ1 plus resolved-sample
+  accounting;
+- on untouched CHECK, equal-deck multiscale regret strictly improves,
+  expected top-one agreement does not fall, and no deck's regret rises by
+  more than 0.01;
+- frozen dev-v3 pooled and Blue regret do not worsen and no stable parent
+  agreement is lost;
+- all prior focused behaviors pass: Ancestral self target, live and five-open
+  Force Spike, redundant and intervening Counterspell, sick-Bear and
+  opponent-target Giant Growth, and Braingeyser X=0; and
+- focused, full, and ASan/UBSan tests pass.
+
+Only a complete offline pass may run treatment-first selector seed
+`202607281945`: exactly 60 balanced games, 12 per challenger deck, AQ2
+residual 0.10 versus exact C16 residual zero, otherwise identical K8/H4/R1.
+Strictly more than 30 wins is a fast manual-pilot selector, not a strength
+claim. Artifact publication and web deployment remain a separate checkpoint.
+The executable is a separate no-knob
+`old-school-action-q-multiscale-explore` with only `--census` and `--run`.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
