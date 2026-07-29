@@ -19128,6 +19128,68 @@ census through the fail-closed run boundary, then execute the single
 predeclared AQ4-G1 preflight/label/fit/offline/conditional-selector run without
 a retry or K/H sweep.
 
+##### AQ4-G1 nested-actor distillation result
+
+Completed 2026-07-28 from frozen census commit `29fe6fa`. `REVIEW.md` was
+reread through its newest 20:59 PDT entry before and after the run. Exact
+command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-action-q-nested-actor-distill --run
+```
+
+The command exited one after 520.78 seconds. It reconstructed the exact
+40-game/639-root census, then the K8/H8 preflight passed every fixed
+direction, hidden repartition, reversed-action, actor-local noninterference,
+and depth-one gate:
+
+| Preflight | Preferred action | Preferred / comparison | Result |
+| --- | --- | ---: | --- |
+| Redundant Counterspell | Pass | `0.4894980` vs original-target counter `0.4655225` and own-counter target `0.0907180` | PASS |
+| Braingeyser | X=1 self | `0.1466293`; best X=0 `0.1348222` | PASS |
+| Sick-Bear Growth | Pass | `0.2126966` vs Growth `0.1594190` | PASS |
+| Live Force Spike | Force Spike | `0.1664525` vs Pass `0.0733735` | PASS |
+
+The actor-local control was nonvacuous and bit-identical across the Red
+observation pair. Direct fixture accounting was 32 sampled worlds, 96 outer
+action rollouts, 14 terminal leaves, 82 critic bootstraps, 10,534 inner
+rollouts, 1,822 inner searches, and maximum nesting depth one.
+
+The deterministic fit created candidate fingerprint
+`e0217302d83a4949950af84ab754e38be6ebbd6c2adac6a4193f05f70b7a1376`
+from 320 FIT roots / 1,023 options; CHECK held out 319 roots / 1,018
+options:
+
+| Split | Policy | Equal-deck top-1 agreement | Mean teacher regret |
+| --- | --- | ---: | ---: |
+| FIT | C16 | 0.668750 | 0.01805075 |
+| FIT | AQ4-G1 | 0.821875 | 0.00627356 |
+| CHECK | C16 | 0.727282 | 0.01580498 |
+| CHECK | AQ4-G1 | 0.698760 | 0.01468854 |
+
+CHECK mean-regret deltas by owner deck were Green `-0.00373552`, Red
+`+0.00062439`, Blue `-0.00329250`, White `-0.00226943`, and RU Aggro
+`+0.00309085`; all remained inside the preregistered `+0.01` guard. Parent
+immutability, repeat-fit identity, Priority-only isolation, FIT improvement,
+CHECK improvement, descriptor/action-order identity, redundant Counterspell,
+Braingeyser X=0, and sick-Bear Growth all passed. The report-only Ancestral
+control also improved in the required direction: self `0.9881474` versus
+opponent `0.7381213`, with opponent targeting absent from exact-max support.
+
+However, the ordinary fast candidate **failed the live Force Spike
+preservation gate**. Therefore the conjunctive offline result is **REJECT**.
+The failure occurred before gameplay; selector seed `202607282041` was never
+opened, no artifact was published, and no Handcrafted comparison ran.
+
+Interpretation: the AQ4 teacher signal transfers strongly and improves
+held-out mean regret, but the 64-epoch one-shot fit changes too much of the
+shared head: CHECK top-1 agreement falls 2.85 points and one rare, already
+correct tactical behavior is forgotten. This is not evidence against the
+representation or actor-local search; the exact teacher preflight again
+passed all four controls. Next: make one preregistered, card-agnostic
+retention correction to the fit, not a K/H or card-specific fixture sweep.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
