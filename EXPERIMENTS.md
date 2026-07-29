@@ -20481,6 +20481,80 @@ on Force Spike or any authored fixture; the goal is to retain the real DEV
 regret gain without globally moving the head enough to break a previously
 safe decision class.
 
+##### AQ4-OP2 Priority trust-region development sweep declaration
+
+Declared 2026-07-29 02:38 PDT, after closing OP1 and rereading
+`REVIEW.md` through its newest 02:29 PDT entry, before changing bot logic,
+reconstructing either frozen corpus, fitting another OP1 child, evaluating a
+new interpolation, or opening selector seed `202607290211`. C16 remains the
+champion. This is a deliberately fast development experiment meant to create
+a genuinely different bot for manual play; because it reuses OP1's already
+opened TRAIN and DEV roots, neither its offline metrics nor its 60-game
+selector can promote a model or support a Learned-is-king claim.
+
+Falsifiable hypothesis: OP1's labels contain useful card-agnostic policy
+signal, but applying the complete 64-epoch Priority-head displacement was too
+large and forgot a rare safe behavior. Scaling that same tensor displacement
+toward its frozen warm parent should retain strict equal-deck TRAIN and DEV
+regret improvement while restoring every shared model-only safety control. At
+least one proper shrinkage arm is expected to pass those gates, and the
+largest passing arm is expected to win at least 31 of a fresh 60 paired games
+against C16 with at least 3 wins in each 12-game challenger-deck slice.
+
+The experiment is sealed as follows:
+
+1. Reconstruct exact C16, exact G4B warm parent
+   `d0d46d2b...003f8`, OP1 census
+   `2900062d...aef7`, OP1 corpus
+   `98502663...5df`, and the rejected full OP1 child
+   `a4cdb8a7...036f` using the already frozen code, seeds, schedules, search
+   recipes, labels, optimizer, and fit order. No new training or teacher
+   coordinate is opened. The alpha-1 arm must be bit-identical to that child
+   and reproduce its recorded TRAIN/DEV metrics and failed live-Force-Spike
+   control; otherwise the experiment is an infrastructure error.
+2. Change only the outer Priority tensors. For each scalar in exact stored
+   tensor order, construct
+   `warm + alpha * (full_child - warm)` with binary64 `std::lerp`, using the
+   fixed arm set and order `alpha={0.25, 0.50, 0.75, 1.00}`. Alpha zero is
+   the exact warm parent and is reported only as the common control. Every
+   arm must retain the warm parent's critic, Attack, Block, and DamageOrder
+   component fingerprints bit-for-bit. Repeated construction must be
+   bit-identical.
+3. Report equal-deck and all-five-deck TRAIN and whole-game-disjoint DEV
+   agreement/regret plus every individual shared model-only safety boolean
+   for all four arms. An arm is offline-eligible only if TRAIN and DEV
+   equal-deck regret both strictly improve over the warm parent, every DEV
+   deck remains within the frozen `+0.01` regret guard, and the complete
+   descriptor-order/redundant-Counterspell/productive-Braingeyser/
+   sick-Bear-Growth/live-Force-Spike/Ancestral model-only battery passes.
+   Agreement is descriptive and is not optimized.
+4. The selection rule is mechanical: choose the numerically largest
+   offline-eligible alpha. This favors the greatest teacher step without
+   adaptively optimizing any observed DEV metric. If no arm is eligible,
+   reject the step-size hypothesis, leave the selector unopened, and move to
+   a separately declared general parent-KL/replay anchor. Do not add an alpha,
+   change a threshold, train on a fixture, or sweep an optimizer in response.
+5. Only the selected arm may open exactly
+   `run_bot_benchmark(1, 202607290211, selected_config, c16_config,
+   max_turns=500, verbose=false)`, with both policies using the exact
+   K8/H4/R1 Value-search deployment and their declared Priority residuals
+   (selected `0.10`, C16 `0`). Report the aggregate and all five challenger
+   deck slices. At least 31/60 wins and 3/12 per deck licenses only a dated
+   experimental artifact and manual web pilot; any weaker result rejects the
+   pilot. Handcrafted, mixed-field lift, the fixed evaluation panel, and
+   every promotion seed remain unopened.
+6. No card identity, card-specific rule, authored fixture, Handcrafted
+   policy, opponent private card identity, or gameplay result enters the
+   fit or interpolation. The controls remain evaluation-only. Any candidate
+   artifact must be an exact Priority-only delta against frozen C16 with
+   complete corpus/fit/alpha/deployment provenance, and publication is
+   conditional on the manual-pilot gate.
+
+This development sweep intentionally spends the reused DEV set to answer a
+single operator question quickly. A passing pilot must later be rebuilt and
+judged on fresh whole-game-disjoint roots plus the AGENTS.md milestone gates
+before it can challenge C16.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
