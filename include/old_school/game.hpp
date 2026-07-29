@@ -815,6 +815,14 @@ struct ValueContextAliasDiagnostic {
 
 ValueContextAliasDiagnostic diagnose_value_context_aliases();
 
+// Terminal utilities used by evaluation-only learned search. ExactOutcome
+// preserves the historical win/draw/loss backup. C16DiscountedAbsoluteTurn
+// uses the same absolute-turn discount as frozen C16 training labels.
+enum class LearnedTerminalUtilityMode : std::uint8_t {
+    ExactOutcome,
+    C16DiscountedAbsoluteTurn,
+};
+
 // Configuration for evaluation-only information-set action scoring. Worlds
 // are sampled once from the root player's observation, then every candidate
 // is evaluated with the same world and continuation-seed matrix. Nested root
@@ -859,10 +867,11 @@ struct LearnedSearchConfig {
     // concurrently; sample order, seeds, scores, and accounting remain
     // unchanged. Binary-attack samples remain serial.
     std::size_t evaluation_threads = 1;
-    // Evaluation-only AC1 seam. When enabled on a Priority search with
-    // horizon zero, retain the exact terminal or prepared-next-turn boundary
-    // already produced by each candidate/world/rollout evaluation. The
-    // default leaves the historical result schema and execution untouched.
+    // Evaluation-only AC1/DBC seam. Retain the first terminal-before-boundary
+    // or prepared-next-turn First Main boundary already produced by each
+    // Priority candidate/world/rollout trajectory. The rollout still runs to
+    // its configured horizon; the default leaves historical execution
+    // untouched.
     bool capture_priority_h0_boundaries = false;
     // Evaluation-only symmetric policy-improvement seam. Kept last so the
     // default-zero extension does not perturb existing aggregate
@@ -886,6 +895,10 @@ struct LearnedSearchConfig {
     // attacker choosing damage order. The default preserves every historical
     // Attack and Block sampler path exactly.
     bool use_exact_combat_subgame = false;
+    // Evaluation-only terminal backup semantics. Kept last so every existing
+    // aggregate initializer and default search remains exact bit-for-bit.
+    LearnedTerminalUtilityMode terminal_utility_mode =
+        LearnedTerminalUtilityMode::ExactOutcome;
 };
 
 inline constexpr std::size_t
@@ -1009,14 +1022,6 @@ enum class LearnedGenerativeDecisionKind : std::uint8_t {
     Priority,
     Attack,
     Block,
-};
-
-// Terminal utilities used by evaluation-only generative search. ExactOutcome
-// preserves the historical win/draw/loss backup. C16DiscountedAbsoluteTurn
-// uses the same absolute-turn discount as frozen C16 training labels.
-enum class LearnedTerminalUtilityMode : std::uint8_t {
-    ExactOutcome,
-    C16DiscountedAbsoluteTurn,
 };
 
 double learned_generative_terminal_utility(
@@ -1789,7 +1794,10 @@ class Game {
         bool terminal = false;
     };
     LearnedHorizonEvaluation finish_learned_evaluation_horizon(
-        std::size_t perspective, std::size_t horizon_turns);
+        std::size_t perspective, std::size_t horizon_turns,
+        LearnedTerminalUtilityMode terminal_utility_mode,
+        std::optional<LearnedPriorityH0Boundary>*
+            first_prepared_boundary = nullptr);
     PriorityAction
     choose_priority_action(const std::vector<PriorityAction>& actions,
                            std::size_t player, bool sorcery_actions,

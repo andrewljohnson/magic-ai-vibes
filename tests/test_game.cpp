@@ -6586,6 +6586,9 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
             old_school::LearnedVariant::UnifiedActor,
         .blend_shallow_prior = false,
     };
+    CHECK(actor_config.terminal_utility_mode ==
+          old_school::LearnedTerminalUtilityMode::
+              ExactOutcome);
     const auto actor_samples =
         old_school::learned_priority_action_samples(
             state, decks, 0, false,
@@ -6600,6 +6603,33 @@ TEST(generic_priority_samples_resolve_stack_and_bound_horizon) {
     CHECK(actor_samples.q_samples.size() == 1);
     CHECK(actor_samples.q_samples[0] ==
           std::vector<double>({0.0, 0.0, 0.0, 0.0}));
+
+    old_school::LearnedSearchConfig aligned_config =
+        actor_config;
+    aligned_config.worlds = 1;
+    aligned_config.rollouts_per_world = 1;
+    aligned_config.terminal_utility_mode =
+        old_school::LearnedTerminalUtilityMode::
+            C16DiscountedAbsoluteTurn;
+    const auto aligned_samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, false,
+            old_school::TurnPhase::BeginCombat, 1, actions,
+            small_actor_model(), aligned_config);
+    old_school::GameResult aligned_loss;
+    aligned_loss.winner = 1;
+    aligned_loss.turns = state.turn_number;
+    const double aligned_loss_target =
+        old_school::learned_discounted_terminal_target(
+            aligned_loss, 0);
+    CHECK(std::bit_cast<std::uint64_t>(
+              aligned_samples.q_samples[0][0]) ==
+          std::bit_cast<std::uint64_t>(
+              aligned_loss_target));
+    CHECK(aligned_samples.q_samples[0][0] > 0.0);
+    CHECK(aligned_samples.q_samples[0][0] < 0.5);
+    CHECK(aligned_samples.terminal_evaluations == 1);
+    CHECK(aligned_samples.bootstrapped_evaluations == 0);
 
     old_school::LearnedSearchConfig value_config = actor_config;
     value_config.worlds = 1;
@@ -6798,8 +6828,19 @@ TEST(priority_h0_boundary_capture_is_bit_inert_ordered_and_thread_exact) {
             CHECK(left.bootstrapped_evaluations ==
                   right.bootstrapped_evaluations);
         };
+    auto explicit_exact_config = default_off;
+    explicit_exact_config.terminal_utility_mode =
+        old_school::LearnedTerminalUtilityMode::
+            ExactOutcome;
+    const auto explicit_exact =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, explicit_exact_config);
     check_scoring_bits(before, captured);
     check_scoring_bits(before, subsequent_default);
+    check_scoring_bits(before, explicit_exact);
+    CHECK(explicit_exact.priority_h0_boundaries.empty());
     CHECK(before.priority_h0_boundaries.empty());
     CHECK(subsequent_default.priority_h0_boundaries.empty());
     CHECK(captured.priority_h0_boundaries.size() ==
@@ -6990,18 +7031,53 @@ TEST(priority_h0_boundary_prepares_exact_next_turn_without_acting) {
     CHECK(extra_boundary.state.players[0].lands.empty());
     CHECK(extra_boundary.state.stats[0].decisions == 0);
 
-    auto invalid = capture;
-    invalid.horizon_turns = 1;
-    CHECK(throws_with_text(
-        [&] {
-            static_cast<void>(
-                old_school::learned_priority_action_samples(
-                    state, decks, 0, true,
-                    old_school::TurnPhase::SecondMain, 1,
-                    {old_school::PriorityAction::pass()},
-                    model, invalid));
-        },
-        "requires horizon zero"));
+    auto horizon_eight = capture;
+    horizon_eight.horizon_turns = 8;
+    const auto long_samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            {old_school::PriorityAction::pass()},
+            model, horizon_eight);
+    CHECK(long_samples.q_samples.size() == 1);
+    CHECK(long_samples.q_samples[0].size() == 1);
+    CHECK(long_samples.priority_h0_boundaries.size() == 1);
+    CHECK(long_samples.priority_h0_boundaries[0].size() == 1);
+    const auto& long_boundary =
+        long_samples.priority_h0_boundaries[0][0];
+    CHECK(!long_boundary.terminal);
+    CHECK(long_boundary.state == boundary.state);
+    CHECK(long_boundary.context == boundary.context);
+    CHECK(std::bit_cast<std::uint64_t>(
+              long_boundary.continuation_score) ==
+          std::bit_cast<std::uint64_t>(
+              boundary.continuation_score));
+    CHECK(long_samples.q_samples[0][0] == 0.0);
+    CHECK(std::bit_cast<std::uint64_t>(
+              long_boundary.continuation_score) !=
+          std::bit_cast<std::uint64_t>(
+              long_samples.q_samples[0][0]));
+    CHECK(long_samples.terminal_evaluations == 1);
+    CHECK(long_samples.bootstrapped_evaluations == 0);
+
+    const auto repeated_long_samples =
+        old_school::learned_priority_action_samples(
+            state, decks, 0, true,
+            old_school::TurnPhase::SecondMain, 1,
+            {old_school::PriorityAction::pass()},
+            model, horizon_eight);
+    CHECK(repeated_long_samples.q_samples ==
+          long_samples.q_samples);
+    CHECK(repeated_long_samples.terminal_evaluation_flags ==
+          long_samples.terminal_evaluation_flags);
+    CHECK(repeated_long_samples.priority_h0_boundaries ==
+          long_samples.priority_h0_boundaries);
+    CHECK(repeated_long_samples.rollout_evaluations ==
+          long_samples.rollout_evaluations);
+    CHECK(repeated_long_samples.terminal_evaluations ==
+          long_samples.terminal_evaluations);
+    CHECK(repeated_long_samples.bootstrapped_evaluations ==
+          long_samples.bootstrapped_evaluations);
 }
 
 TEST(priority_h0_boundary_preserves_early_and_next_draw_terminals) {

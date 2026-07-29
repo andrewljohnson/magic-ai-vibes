@@ -14629,7 +14629,10 @@ Game::finish_turn_after_priority_phase(TurnPhase phase) {
 
 Game::LearnedHorizonEvaluation
 Game::finish_learned_evaluation_horizon(
-    std::size_t perspective, std::size_t horizon_turns) {
+    std::size_t perspective, std::size_t horizon_turns,
+    LearnedTerminalUtilityMode terminal_utility_mode,
+    std::optional<LearnedPriorityH0Boundary>*
+        first_prepared_boundary) {
     if (perspective >= state_.players.size()) {
         throw std::out_of_range(
             "Learned evaluation perspective must be 0 or 1");
@@ -14640,13 +14643,59 @@ Game::finish_learned_evaluation_horizon(
             "Learned evaluation has no frozen model");
     }
     const auto result_score =
-        [perspective](const GameResult& result) {
-            return result.winner < 0
-                       ? 0.5
-                       : (result.winner ==
-                                  static_cast<int>(perspective)
-                              ? 1.0
-                              : 0.0);
+        [perspective, terminal_utility_mode](
+            const GameResult& result) {
+            return learned_generative_terminal_utility(
+                result, perspective, terminal_utility_mode);
+        };
+    const LearnedDecisionContext first_main_context = {
+        .valid = true,
+        .phase = TurnPhase::FirstMain,
+        .decision_player = 0,
+        .consecutive_passes = 0,
+        .sorcery_actions = true,
+    };
+    const auto capture_terminal_before_boundary =
+        [&](const GameResult& result) {
+            if (first_prepared_boundary == nullptr) {
+                return;
+            }
+            if (first_prepared_boundary->has_value()) {
+                throw std::logic_error(
+                    "first prepared boundary was captured twice");
+            }
+            first_prepared_boundary->emplace(
+                LearnedPriorityH0Boundary{
+                    .state = state_,
+                    .context = {},
+                    .continuation_score =
+                        result_score(result),
+                    .terminal = true,
+                });
+        };
+    const auto capture_first_prepared_boundary =
+        [&]() -> double {
+            LearnedDecisionContext context =
+                first_main_context;
+            context.decision_player =
+                state_.active_player;
+            const double score =
+                predict_learned_critic_with_context(
+                    model, state_, perspective, context);
+            if (first_prepared_boundary != nullptr) {
+                if (first_prepared_boundary->has_value()) {
+                    throw std::logic_error(
+                        "first prepared boundary was captured twice");
+                }
+                first_prepared_boundary->emplace(
+                    LearnedPriorityH0Boundary{
+                        .state = state_,
+                        .context = context,
+                        .continuation_score = score,
+                        .terminal = false,
+                    });
+            }
+            return score;
         };
     const auto prepare_next_turn =
         [&]() -> std::optional<GameResult> {
@@ -14692,22 +14741,20 @@ Game::finish_learned_evaluation_horizon(
 
     if (const auto result = prepare_next_turn();
         result.has_value()) {
+        capture_terminal_before_boundary(*result);
         return {
             .score = result_score(*result),
             .terminal = true,
         };
     }
+    const double first_prepared_score =
+        horizon_turns == 0 ||
+                first_prepared_boundary != nullptr
+            ? capture_first_prepared_boundary()
+            : 0.5;
     if (horizon_turns == 0) {
         return {
-            .score = predict_learned_critic_with_context(
-                model, state_, perspective,
-                {
-                    .valid = true,
-                    .phase = TurnPhase::FirstMain,
-                    .decision_player = state_.active_player,
-                    .consecutive_passes = 0,
-                    .sorcery_actions = true,
-                }),
+            .score = first_prepared_score,
             .terminal = false,
         };
     }
@@ -22807,6 +22854,9 @@ constexpr std::size_t kMaximumEvaluationRolloutsPerWorld = 256;
 constexpr std::size_t kMaximumEvaluationHorizonTurns = 128;
 constexpr std::size_t kMaximumEvaluationThreads = 64;
 
+void validate_terminal_utility_mode(
+    LearnedTerminalUtilityMode mode);
+
 std::uint64_t mix_search_seed(std::uint64_t value) {
     value += 0x9E3779B97F4A7C15ULL;
     value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
@@ -22939,11 +22989,8 @@ void validate_search_config(
         throw std::invalid_argument(
             "Learned search evaluation threads must be in [1, 64]");
     }
-    if (config.capture_priority_h0_boundaries &&
-        config.horizon_turns != 0) {
-        throw std::invalid_argument(
-            "Priority H0 boundary capture requires horizon zero");
-    }
+    validate_terminal_utility_mode(
+        config.terminal_utility_mode);
 }
 
 std::size_t checked_rollout_evaluations(
@@ -26145,12 +26192,30 @@ LearnedActionSamples learned_priority_action_samples(
 
         double continuation = 0.0;
         bool terminal_evaluation = terminal.has_value();
+        std::optional<LearnedPriorityH0Boundary> h0_boundary;
         if (terminal_evaluation) {
-            continuation = learned_result_value(*terminal, player);
+            continuation =
+                learned_generative_terminal_utility(
+                    *terminal, player,
+                    config.terminal_utility_mode);
+            if (config.capture_priority_h0_boundaries) {
+                h0_boundary =
+                    LearnedPriorityH0Boundary{
+                        .state = simulation.state_,
+                        .context = {},
+                        .continuation_score =
+                            continuation,
+                        .terminal = true,
+                    };
+            }
         } else {
             const auto horizon_evaluation =
                 simulation.finish_learned_evaluation_horizon(
-                    player, config.horizon_turns);
+                    player, config.horizon_turns,
+                    config.terminal_utility_mode,
+                    config.capture_priority_h0_boundaries
+                        ? &h0_boundary
+                        : nullptr);
             continuation = horizon_evaluation.score;
             terminal_evaluation = horizon_evaluation.terminal;
         }
@@ -26160,25 +26225,12 @@ LearnedActionSamples learned_priority_action_samples(
         if (config.value_priority_residual_weight != 0.0) {
             score += priority_residuals[action_index];
         }
-        std::optional<LearnedPriorityH0Boundary> h0_boundary;
         if (config.capture_priority_h0_boundaries) {
-            LearnedDecisionContext context;
-            if (!terminal_evaluation) {
-                context = {
-                    .valid = true,
-                    .phase = TurnPhase::FirstMain,
-                    .decision_player =
-                        simulation.state_.active_player,
-                    .consecutive_passes = 0,
-                    .sorcery_actions = true,
-                };
+            if (!h0_boundary.has_value()) {
+                throw std::logic_error(
+                    "Priority boundary capture produced no "
+                    "first prepared boundary");
             }
-            h0_boundary = LearnedPriorityH0Boundary{
-                .state = simulation.state_,
-                .context = context,
-                .continuation_score = continuation,
-                .terminal = terminal_evaluation,
-            };
         }
         const std::size_t inner_rollouts_after =
             rollout_count();
@@ -27100,7 +27152,9 @@ LearnedActionSamples learned_binary_attack_samples(
                         simulation
                             .finish_learned_evaluation_horizon(
                                 attacking_player,
-                                config.horizon_turns);
+                                config.horizon_turns,
+                                LearnedTerminalUtilityMode::
+                                    ExactOutcome);
                     continuation = horizon_evaluation.score;
                     terminal_evaluation =
                         horizon_evaluation.terminal;
@@ -27432,7 +27486,9 @@ LearnedActionSamples learned_binary_block_samples(
                         simulation
                             .finish_learned_evaluation_horizon(
                                 defending_player,
-                                config.horizon_turns);
+                                config.horizon_turns,
+                                LearnedTerminalUtilityMode::
+                                    ExactOutcome);
                     continuation = horizon_evaluation.score;
                     terminal_evaluation =
                         horizon_evaluation.terminal;
@@ -27929,7 +27985,9 @@ LearnedBlockChoiceSamples learned_block_choice_samples(
                         simulation
                             .finish_learned_evaluation_horizon(
                                 defending_player,
-                                config.horizon_turns);
+                                config.horizon_turns,
+                                LearnedTerminalUtilityMode::
+                                    ExactOutcome);
                     continuation = horizon_evaluation.score;
                     terminal_evaluation =
                         horizon_evaluation.terminal;
