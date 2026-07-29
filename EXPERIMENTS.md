@@ -20096,7 +20096,9 @@ Declared 2026-07-29 at exact result commit `1227712`, after rereading
 before reconstructing a new source game, opening any OP1 search coordinate,
 or changing training code. C16 remains champion. The direct AQ4-P1 policy
 remains a separate manual diagnostic; neither it nor any authored fixture is
-training data.
+training data. Before commit `4be55b0`, both new seeds were searched in the
+repository source, notebook, and review history and were absent; they first
+appear in this declaration.
 
 Falsifiable hypothesis: G4B's whole-game-disjoint reversal came from fitting a
 single fixed C16 state distribution. Starting from the exact rejected G4B
@@ -20136,8 +20138,10 @@ The sole OP1 coordinate is:
   warm parent's residual `0.10` active at the root and for both continuation
   seats;
 - targets are the unchanged soft all-action transform of teacher scores.
-  Each actor-game contributes total weight one and each deck total weight one
-  per split;
+  Preserve G4B's exact normalization: each of a deck's 16 actor-games
+  contributes total weight `1/16`, each retained root has weight
+  `1/(16 * retained_roots_in_actor_game)`, and each deck contributes total
+  weight one per split;
 - initialize from the immutable warm parent and fit TRAIN only with the
   unchanged G4B 64-epoch Adam recipe: batch 64, learning rate `0.003`,
   beta1 `0.9`, beta2 `0.999`, epsilon `1e-8`, global norm clip `5.0`, fit seed
@@ -20147,9 +20151,13 @@ The sole OP1 coordinate is:
 Follow the same measured-first seal as G4B. `--census` may reconstruct the
 warm parent and report the immutable TRAIN/DEV game, actor-game, nontrivial
 root, retained root, option, and per-deck counts plus an owner-safe manifest
-hash. It must not label a root or fit a model. Freeze that exact census in a
-notebook-only commit before `--run`; no count may be guessed or changed after
-inspection.
+hash. Because G4B published no artifact, warm-parent reconstruction
+necessarily replays its already-frozen labels and fit; this old-coordinate
+replay is permitted only to reproduce and verify `d0d46...003f8`. Report the
+old G4B labels replayed separately from `OP1 labels opened`, which must remain
+zero in `--census`. No G4B row may enter the OP1 child fit. Freeze the exact
+OP1 census in a notebook-only commit before `--run`; no count may be guessed
+or changed after inspection.
 
 `--run` must reconstruct the frozen census bit-exactly, label it once, and fit
 twice from the same immutable warm parent. Before any selector opens, require:
@@ -20167,17 +20175,24 @@ twice from the same immutable warm parent. Before any selector opens, require:
 6. `action_q_offline_gate::evaluate_model_gates(warm, child)` passes, including
    redundant Counterspell, productive Braingeyser/Ancestral targeting,
    sick-Bear Giant Growth, live/payable Force Spike, frozen-probe, and hidden
-   repartition guards. These authored checks remain evaluation-only.
+   repartition guards. This legacy helper deliberately scores its parent at
+   residual zero, so its parent side is an extra C16-equivalent frozen-probe
+   safety guard, not the OP1 parent comparison. The OP1 TRAIN/DEV metrics above
+   are the required warm-residual-`0.10` versus child-residual-`0.10`
+   comparison. These authored checks remain evaluation-only.
 
 Any failure rejects OP1 and leaves selector seed `202607290111` unopened. If
 all offline gates pass, run exactly one 60-game paired all-five-deck manual
 screen against exact C16: child uses K8/R1/H4 plus residual `0.10`; C16 uses
-the identical recipe with residual zero. At least 31/60 child wins and at
-least 3/12 wins on every challenger deck licenses only a dated manual web
-pilot and an internal immutable artifact. It is not a strength claim, an MDE
-screen, or promotion. Anything less rejects OP1. No Handcrafted policy,
-opponent hidden identity, card-name branch, or authored fixture may enter
-source play, labeling, or fitting.
+the identical recipe with residual zero. Invoke exactly
+`run_bot_benchmark(1, 202607290111, child_config, c16_config,
+GameConfig{.max_turns = 500}, false)`, with the child and exact C16 model
+fingerprints bound into the local authorization check. At least 31/60 child
+wins and at least 3/12 wins on every challenger deck licenses only a dated
+manual web pilot and an internal immutable artifact. It is not a strength
+claim, an MDE screen, or promotion. Anything less rejects OP1. No Handcrafted
+policy, opponent hidden identity, card-name branch, or authored fixture may
+enter source play, labeling, or fitting.
 
 If OP1 passes, a separately declared OP2 may collect from its frozen child.
 If it fails, stop this branch rather than sweeping caps, schedules, K/H,
