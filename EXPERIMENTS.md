@@ -18328,6 +18328,127 @@ not a bot-strength result. Freeze that identity in source, reconstruct exactly
 once, fit the single preregistered Priority head, and apply every conjunctive
 offline gate. Gameplay seed `202607281831` remains unopened.
 
+##### AQ1-BL0 fit and offline result
+
+Completed 2026-07-28 from frozen census commit `fc2be95`. `REVIEW.md` was
+reread through its newest 18:44 PDT entry after the census and immediately
+before this run; it added no constraint. Exact command:
+
+```sh
+./build/old-school-action-q-bellman-explore --run
+```
+
+The command reconstructed census identity
+`95faba06e569aa66e33feae18b719ad3809aa8a29fe10fc4f771a9a8fac16503`
+exactly, fit one Priority-only candidate with seed `308293352764668211`, and
+produced candidate fingerprint
+`adada95eed00bae27a3b8f335cd5debb5ca7055015b57978477bb4eba3d0d819`.
+Collection took 87.0237 seconds, the repeated deterministic fit 4.38481
+seconds, and all offline gates 4.16472 seconds. Parent immutability,
+repeat-fit identity, Priority-only component isolation, complete Bellman
+accounting, descriptor-order identity, and nonvacuous hidden-repartition
+identity all passed.
+
+Bellman-ranking metrics:
+
+| Split / deck | C16 top-one | AQ1 top-one | Delta | C16 regret | AQ1 regret | Delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| FIT pooled | 0.590625 | 0.759375 | +0.168750 | 0.0181129 | 0.00399285 | -0.0141200 |
+| FIT Green | 0.562500 | 0.734375 | +0.171875 | 0.0248158 | 0.00448724 | -0.0203285 |
+| FIT Red | 0.546875 | 0.687500 | +0.140625 | 0.0181844 | 0.00530935 | -0.0128750 |
+| FIT Blue | 0.765625 | 0.875000 | +0.109375 | 0.00885645 | 0.00170735 | -0.00714910 |
+| FIT White | 0.562500 | 0.703125 | +0.140625 | 0.0141638 | 0.00206512 | -0.0120987 |
+| FIT RU Aggro | 0.515625 | 0.796875 | +0.281250 | 0.0245440 | 0.00639517 | -0.0181489 |
+| CHECK pooled | 0.5703125 | 0.5687500 | **-0.0015625** | 0.0228792 | 0.0202971 | -0.00258214 |
+| CHECK Green | 0.484375 | 0.515625 | +0.031250 | 0.0337094 | 0.0195437 | -0.0141657 |
+| CHECK Red | 0.656250 | 0.578125 | -0.078125 | 0.0242066 | 0.0280062 | +0.00379961 |
+| CHECK Blue | 0.578125 | 0.625000 | +0.046875 | 0.0196309 | 0.0172488 | -0.00238212 |
+| CHECK White | 0.6171875 | 0.546875 | -0.0703125 | 0.00738301 | 0.0112122 | +0.00382915 |
+| CHECK RU Aggro | 0.515625 | 0.578125 | +0.062500 | 0.0294661 | 0.0254745 | -0.00399163 |
+
+Thus the temporal teacher strongly fit and lowered untouched equal-deck
+regret, including substantial Green improvement and smaller Blue/RU
+improvements. Every per-deck regret increase stayed below the declared
+`+0.01` bound. But pooled CHECK expected top-one fell by `0.0015625`, so the
+conjunctive CHECK gate failed exactly as written; the large Red and White
+top-one losses cannot be excused by the tiny pooled difference.
+
+The frozen dev-v3 reference did not regress in the declared quantities:
+pooled top-one remained `0.95`, pooled regret remained
+`0.0039171609804370868`, Blue regret remained exactly zero, and none of the
+12 stable parent agreements was lost. Both 20-probe hidden-repartition
+checks passed and the 276,387-byte frozen label cache remained SHA-identical
+at `949ea2fda448fa76b31a61927721629cfba9e6addee2da383cfbb68450b04770`.
+The critic Brier, log loss, bias, and ECE were bit-identical, as required for
+a Priority-only change.
+
+Focused behavior:
+
+- captured Ancestral self-target scored `0.93636922987963478` versus
+  opponent-target `0.92847100175714503`; opponent-target was absent from the
+  one-action exact support;
+- live Force Spike was selected; five-open Force Spike and redundant
+  Counterspell selected Pass; opponent-target Growth selected Pass;
+- most importantly, the temporal treatment fixed the reported
+  summoning-sick-Bear mistake: it selected Pass instead of Giant Growth;
+- the intervening-counter fixture still selected **Pass**, not the
+  Counterspell targeting the opposing Counterspell; and
+- the Braingeyser fixture selected **X=0 targeting the opponent**, so the
+  no-value spell regression remained.
+
+Verdict: **REJECT AQ1-BL0 at the offline gate**. The result is useful but is
+not a candidate promotion: the general temporal direction repairs the delayed
+Growth cost and lowers held-out regret, while one shallow Bellman distillation
+still misses counter-war composition and free-card expenditure and narrowly
+loses held-out top-one. Per preregistration, selector seed `202607281831`
+was not opened, no gameplay was run, and no artifact or web policy was
+published. C16 remains champion. Do not sweep AQ1 epochs, residual, or
+K4 counts around this result.
+
+##### AQ1-D0 direct-teacher direction diagnostic declaration
+
+Declared 2026-07-28 after the complete AQ1-BL0 offline rejection and before
+changing the teacher, fit, data cap, feature schema, tree depth, or opening a
+new gameplay seed. Seed root `202607281913` was searched in source, notebook,
+review, and the Git-visible worktree and was unused before declaration. This
+is a fast descriptive diagnostic of the immutable AQ1 teacher, not another
+fit or a candidate.
+
+The rejection leaves one decisive ambiguity: the Bellman teacher may itself
+give the wrong direction on the counter-war and Braingeyser controls, or it
+may give the right direction that a 320-root head failed to distill. Those
+lead to different next moves. More data or another policy-iteration
+generation is justified only in the latter case; a wrong teacher must be
+repaired before it is scaled or placed inside POMCP.
+
+Falsifiable hypothesis: exact frozen-C16 AQ1 K4/K4 teacher scores have the
+right action direction on the four fixed controls below even though the
+distilled candidate missed two of them:
+
+1. `control.blue.counter-same-target-after-intervening-counter.v1`:
+   `counter-opponent-counterspell` strictly exceeds Pass;
+2. `control.blue.braingeyser-x0.v1`: neither X=0 action belongs to exact-max
+   support;
+3. `field.green.second-main-sick-bear-growth.v1`: Pass strictly exceeds the
+   summoning-sick Giant Growth; and
+4. `control.blue.force-spike-live-gray-ogre.v1`: Force Spike strictly exceeds
+   Pass.
+
+Fixture root seeds are exactly
+`derive_seed(202607281913, PrioritySearch, fixture_index, 0, 0)` in the order
+above. Score every engine-authoritative legal action with the unchanged AQ1
+K4 common root worlds and independent A/B K4 successor banks. Print typed
+action descriptors, target values, exact-max support, required pair margins,
+root/successor accounting, and the hidden-repartition and reversed-action
+bit-identity result for every fixture. Retain no state or hidden payload.
+
+If all four directions pass, the next experiment is a frozen-corpus coverage
+census followed by one iterated search-as-teacher generation; do not change
+the leaf/operator. If either failing AQ1 behavior also fails at the teacher,
+do not add data or start MCTS—the next experiment must improve the
+information-set backup/leaf signal first. No fit, artifact, benchmark, or
+gameplay seed is licensed by AQ1-D0.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
