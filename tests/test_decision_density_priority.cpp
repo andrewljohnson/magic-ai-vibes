@@ -296,9 +296,21 @@ void test_fixed_recipe_and_cli() {
     expect(
         priority::kRequiredCensusManifest ==
                 "7de71c44a3d1d1fa20eb1b738bc8c675e83c4336f284e95f7401a4b79ea345cc" &&
+            priority::kRequiredSelectionManifest ==
+                "967bd44bfb444fa84e8b52df2652d090410a3ce6bda57bda6c353b5fb34d6576" &&
             priority::kRequiredTrainRoots == 3597 &&
-            priority::kRequiredDevRoots == 1687,
-        "AQ16 source identity drifted");
+            priority::kRequiredDevRoots == 1687 &&
+            priority::kRequiredSelectedTrainOptions ==
+                1088 &&
+            priority::kRequiredSelectedDevOptions == 513 &&
+            priority::kRequiredSelectedTrainPairs == 2293 &&
+            priority::kRequiredSelectedDevPairs == 811 &&
+            priority::kRequiredAliasGroups == 53 &&
+            priority::kRequiredAliasPairs == 91 &&
+            priority::kRequiredPhysicalGames == 120 &&
+            priority::kRequiredMaximumRootsPerActorGame ==
+                3,
+        "AQ16/S0 frozen production identity drifted");
     expect(
         priority::kTrainRootsPerCell == 20 &&
             priority::kDevRootsPerCell == 10 &&
@@ -548,6 +560,79 @@ void test_selector_rejects_capacity_and_authentication_drift() {
         "noncanonical source order was accepted");
 }
 
+void test_selected_population_projection_is_authenticated() {
+    const auto population = synthetic_population();
+    const priority::SelectionManifest manifest =
+        select_synthetic(population);
+    const auto selected =
+        priority::testing::project_selected_population(
+            manifest, population);
+    expect(
+        selected.size() ==
+            manifest.selected_roots.size(),
+        "selected projection root count drifted");
+    for (std::size_t index = 0;
+         index < selected.size(); ++index) {
+        expect(
+            selected[index].source_root ==
+                manifest.selected_roots[index]
+                    .source_root,
+            "selected projection order or identity drifted");
+    }
+
+    auto missing = population;
+    const std::string missing_id =
+        manifest.selected_roots.front()
+            .source_root.stable_root_id;
+    std::erase_if(
+        missing,
+        [&](const priority::PopulationRoot& root) {
+            return root.source_root.stable_root_id ==
+                   missing_id;
+        });
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                priority::testing::
+                    project_selected_population(
+                        manifest, missing));
+        },
+        "projection accepted a missing selected root");
+
+    auto mutated = population;
+    const auto selected_root =
+        std::find_if(
+            mutated.begin(), mutated.end(),
+            [&](const priority::PopulationRoot& root) {
+                return
+                    root.source_root.stable_root_id ==
+                    missing_id;
+            });
+    expect(
+        selected_root != mutated.end(),
+        "selected projection mutation fixture is absent");
+    selected_root->option_rows.front().front() += 1.0;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                priority::testing::
+                    project_selected_population(
+                        manifest, mutated));
+        },
+        "projection accepted mutated selected features");
+
+    auto duplicated = population;
+    duplicated.push_back(population.front());
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                priority::testing::
+                    project_selected_population(
+                        manifest, duplicated));
+        },
+        "projection accepted duplicate population identity");
+}
+
 void test_manifest_mutation_sensitivity() {
     const auto population = synthetic_population();
     const priority::SelectionManifest baseline =
@@ -603,12 +688,15 @@ int main() {
         test_selector_rejects_capacity_and_authentication_drift();
         std::cout
             << "ok - capacity and authentication rejection\n";
+        test_selected_population_projection_is_authenticated();
+        std::cout
+            << "ok - authenticated selected projection\n";
         test_manifest_mutation_sensitivity();
         std::cout
             << "ok - selected manifest mutation sensitivity\n";
         std::cout
             << "All decision-density priority tests passed "
-               "(5/5).\n";
+               "(6/6).\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

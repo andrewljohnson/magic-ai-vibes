@@ -25,8 +25,18 @@ inline constexpr std::uint64_t kSelectionSeed =
     202607291811ULL;
 inline constexpr std::string_view kRequiredCensusManifest =
     "7de71c44a3d1d1fa20eb1b738bc8c675e83c4336f284e95f7401a4b79ea345cc";
+inline constexpr std::string_view kRequiredSelectionManifest =
+    "967bd44bfb444fa84e8b52df2652d090410a3ce6bda57bda6c353b5fb34d6576";
 inline constexpr std::size_t kRequiredTrainRoots = 3597;
 inline constexpr std::size_t kRequiredDevRoots = 1687;
+inline constexpr std::size_t kRequiredSelectedTrainOptions = 1088;
+inline constexpr std::size_t kRequiredSelectedDevOptions = 513;
+inline constexpr std::size_t kRequiredSelectedTrainPairs = 2293;
+inline constexpr std::size_t kRequiredSelectedDevPairs = 811;
+inline constexpr std::size_t kRequiredAliasGroups = 53;
+inline constexpr std::size_t kRequiredAliasPairs = 91;
+inline constexpr std::size_t kRequiredPhysicalGames = 120;
+inline constexpr std::size_t kRequiredMaximumRootsPerActorGame = 3;
 inline constexpr std::size_t kTrainRootsPerCell = 20;
 inline constexpr std::size_t kDevRootsPerCell = 10;
 inline constexpr std::size_t kWidthStrata = 3;
@@ -133,6 +143,16 @@ struct RunReport {
     std::size_t source_collections = 0;
 };
 
+// Exact production reconstruction used by AQ18. The source census and
+// selected population contain only owner-safe identities, public actions,
+// and actor-local feature rows; no live GameState or hidden deck payload is
+// retained.
+struct FrozenSelectionReplay {
+    density::Census source_census;
+    SelectionManifest manifest;
+    std::vector<PopulationRoot> selected_population;
+};
+
 std::optional<Command> parse_command(
     std::span<const std::string_view> arguments);
 void print_usage(std::ostream& output);
@@ -149,6 +169,8 @@ std::string canonical_manifest_hash(
 void validate_manifest(
     const SelectionManifest& manifest);
 
+FrozenSelectionReplay reconstruct_frozen_selection(
+    std::shared_ptr<const LearnedModel> parent);
 RunReport run(std::shared_ptr<const LearnedModel> parent);
 void print_report(
     std::ostream& output, const RunReport& report);
@@ -161,6 +183,9 @@ SelectionManifest select_population(
     std::span<const PopulationRoot> population,
     std::size_t train_quota_per_cell,
     std::size_t dev_quota_per_cell);
+std::vector<PopulationRoot> project_selected_population(
+    const SelectionManifest& manifest,
+    std::span<const PopulationRoot> population);
 bool rows_bit_identical(
     std::span<const double> left,
     std::span<const double> right);

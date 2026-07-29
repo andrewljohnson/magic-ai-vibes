@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -102,6 +103,14 @@ static_assert(!HasOpponentHandMember<density::ManifestRoot>);
 static_assert(!HasOpponentLibraryMember<density::ManifestRoot>);
 static_assert(!HasOptionRowsMember<density::ManifestRoot>);
 static_assert(!HasActionsMember<density::ManifestRoot>);
+static_assert(std::is_reference_v<
+              decltype(std::declval<
+                           density::AuthenticatedReplayRootView>()
+                           .trace_point)>);
+static_assert(std::is_reference_v<
+              decltype(std::declval<
+                           density::AuthenticatedReplayRootView>()
+                           .original_decks)>);
 
 density::Split split_for_block(std::size_t block) {
     return block == density::kDevBlock
@@ -432,6 +441,35 @@ void test_action_feature_hash_is_mutation_sensitive() {
         "ordered action mutation was not detected");
 }
 
+void test_frozen_replay_gate_and_transient_api() {
+    const density::Census frozen = synthetic_census();
+    density::testing::validate_frozen_replay_root(
+        frozen, 0, frozen.roots.front());
+
+    expect_rejected(
+        [&] {
+            density::testing::validate_frozen_replay_root(
+                frozen, frozen.roots.size(),
+                frozen.roots.front());
+        },
+        "out-of-range frozen replay position was accepted");
+    expect_rejected(
+        [&] {
+            density::testing::validate_frozen_replay_root(
+                frozen, 0, frozen.roots[1]);
+        },
+        "out-of-order frozen replay root was accepted");
+
+    const density::AuthenticatedReplayRootVisitor empty;
+    expect_rejected(
+        [&] {
+            static_cast<void>(
+                density::replay_frozen_census(
+                    nullptr, frozen, empty));
+        },
+        "empty authenticated replay visitor was accepted");
+}
+
 void test_all_priority_descriptor_kinds_round_trip() {
     const auto schedule =
         iteration::balanced_schedule(
@@ -540,10 +578,14 @@ void test_live_hidden_repartition_and_owner_mutations() {
         "public-state mutation was not detected");
     point.state = state;
     const auto hidden =
+        density::make_actor_local_hidden_repartition(
+            point.state, 0);
+    const auto testing_hidden =
         density::testing::hidden_repartition(
             point.state, 0);
     expect(
         hidden.has_value() &&
+            hidden == testing_hidden &&
             *hidden != point.state &&
             old_school::observe_game_state(
                 point.state, 0) ==
@@ -801,6 +843,9 @@ int main() {
     run(
         "action-feature hash is mutation sensitive",
         test_action_feature_hash_is_mutation_sensitive);
+    run(
+        "frozen replay gate and transient API",
+        test_frozen_replay_gate_and_transient_api);
     run(
         "all priority descriptor kinds round trip",
         test_all_priority_descriptor_kinds_round_trip);

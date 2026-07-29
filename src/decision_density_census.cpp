@@ -1537,11 +1537,27 @@ void validate_census(const Census& census) {
 
 Collection collect_census_impl(
     std::shared_ptr<const LearnedModel> parent,
-    const AuthenticatedRootVisitor* visitor) {
+    const AuthenticatedRootVisitor* visitor,
+    const AuthenticatedReplayRootVisitor* replay_visitor,
+    const Census* frozen) {
     require_parent(parent);
+    if ((replay_visitor == nullptr) != (frozen == nullptr) ||
+        (visitor != nullptr && replay_visitor != nullptr)) {
+        throw std::invalid_argument(
+            "AQ16-DBC6 replay visitor configuration is invalid");
+    }
+    if (frozen != nullptr) {
+        validate_census(*frozen);
+        if (frozen->parent_fingerprint !=
+            learned_model_fingerprint(parent)) {
+            throw std::invalid_argument(
+                "AQ16-DBC6 frozen replay parent differs");
+        }
+    }
     std::vector<ManifestRoot> roots;
     bool hidden_witness = false;
     std::string hidden_witness_root_id;
+    std::size_t replay_position = 0;
 
     for (const std::size_t block : all_blocks()) {
         const Split split = split_for_block(block);
@@ -1616,8 +1632,21 @@ Collection collect_census_impl(
                     LiveRootMaterial material =
                         make_live_material(
                             point, coordinate);
+                    if (frozen != nullptr) {
+                        if (replay_position >=
+                                frozen->roots.size() ||
+                            material.manifest !=
+                                frozen->roots[
+                                    replay_position]) {
+                            throw std::runtime_error(
+                                "AQ16-DBC6 replay root differs "
+                                "from frozen census");
+                        }
+                    }
                     bool root_hidden_witness = false;
-                    if (!hidden_witness || visitor != nullptr) {
+                    if (!hidden_witness ||
+                        visitor != nullptr ||
+                        replay_visitor != nullptr) {
                         const auto hidden =
                             hidden_repartition_impl(
                                 point.state, actor);
@@ -1650,6 +1679,21 @@ Collection collect_census_impl(
                                 root_hidden_witness,
                         });
                     }
+                    if (replay_visitor != nullptr) {
+                        (*replay_visitor)({
+                            .manifest = material.manifest,
+                            .observation =
+                                material.observation,
+                            .actions = material.actions,
+                            .option_rows =
+                                material.option_rows,
+                            .trace_point = point,
+                            .original_decks = decks,
+                            .hidden_repartition_witness =
+                                root_hidden_witness,
+                        });
+                        ++replay_position;
+                    }
                     roots.push_back(
                         std::move(material.manifest));
                 }
@@ -1664,6 +1708,12 @@ Collection collect_census_impl(
         testing::make_census(
             learned_model_fingerprint(parent),
             std::move(roots));
+    if (frozen != nullptr &&
+        (replay_position != frozen->roots.size() ||
+         census != *frozen)) {
+        throw std::runtime_error(
+            "AQ16-DBC6 frozen replay census drifted");
+    }
     return {
         .census = std::move(census),
         .hidden_repartition_witness =
@@ -1676,7 +1726,7 @@ Collection collect_census_impl(
 Collection collect_census(
     std::shared_ptr<const LearnedModel> parent) {
     return collect_census_impl(
-        std::move(parent), nullptr);
+        std::move(parent), nullptr, nullptr, nullptr);
 }
 
 Collection collect_census(
@@ -1687,7 +1737,25 @@ Collection collect_census(
             "AQ16-DBC6 authenticated visitor is empty");
     }
     return collect_census_impl(
-        std::move(parent), &visitor);
+        std::move(parent), &visitor, nullptr, nullptr);
+}
+
+Collection replay_frozen_census(
+    std::shared_ptr<const LearnedModel> parent,
+    const Census& frozen,
+    const AuthenticatedReplayRootVisitor& visitor) {
+    if (!visitor) {
+        throw std::invalid_argument(
+            "AQ16-DBC6 authenticated replay visitor is empty");
+    }
+    validate_census(frozen);
+    return collect_census_impl(
+        std::move(parent), nullptr, &visitor, &frozen);
+}
+
+std::optional<GameState> make_actor_local_hidden_repartition(
+    const GameState& state, std::size_t observer) {
+    return hidden_repartition_impl(state, observer);
 }
 
 RunReport run(std::shared_ptr<const LearnedModel> parent) {
@@ -1861,9 +1929,22 @@ Census make_census(
     return census;
 }
 
+void validate_frozen_replay_root(
+    const Census& frozen, std::size_t position,
+    const ManifestRoot& replayed) {
+    validate_census(frozen);
+    validate_manifest_root(replayed);
+    if (position >= frozen.roots.size() ||
+        replayed != frozen.roots[position]) {
+        throw std::invalid_argument(
+            "AQ16-DBC6 replay root differs from frozen census");
+    }
+}
+
 std::optional<GameState> hidden_repartition(
     const GameState& state, std::size_t observer) {
-    return hidden_repartition_impl(state, observer);
+    return make_actor_local_hidden_repartition(
+        state, observer);
 }
 
 ManifestRoot make_live_manifest_root(

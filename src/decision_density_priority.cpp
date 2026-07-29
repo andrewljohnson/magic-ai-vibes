@@ -705,6 +705,119 @@ SelectionManifest select_population_impl(
     return manifest;
 }
 
+std::vector<PopulationRoot>
+project_selected_population_impl(
+    const SelectionManifest& manifest,
+    std::span<const PopulationRoot> population) {
+    validate_manifest(manifest);
+    std::map<std::string, const PopulationRoot*>
+        population_by_id;
+    for (const PopulationRoot& root : population) {
+        authenticate_population_root(root);
+        if (!population_by_id.emplace(
+                 root.source_root.stable_root_id,
+                 &root)
+                 .second) {
+            throw std::invalid_argument(
+                "AQ17-DBC6 projection population has duplicate roots");
+        }
+    }
+
+    std::vector<PopulationRoot> selected;
+    selected.reserve(manifest.selected_roots.size());
+    std::size_t options = 0;
+    for (const SelectedRoot& expected :
+         manifest.selected_roots) {
+        const auto found =
+            population_by_id.find(
+                expected.source_root.stable_root_id);
+        if (found == population_by_id.end() ||
+            found->second->source_root !=
+                expected.source_root) {
+            throw std::invalid_argument(
+                "AQ17-DBC6 selected projection root is absent or drifted");
+        }
+        checked_add(
+            options,
+            found->second->source_root.legal_action_count,
+            "projected option count");
+        selected.push_back(*found->second);
+    }
+    if (selected.size() !=
+            manifest.selected_roots.size() ||
+        options != manifest.selected_options) {
+        throw std::invalid_argument(
+            "AQ17-DBC6 selected projection cross-sum drifted");
+    }
+    return selected;
+}
+
+void require_frozen_selection(
+    const density::Census& source,
+    const SelectionManifest& manifest) {
+    density::validate_census(source);
+    validate_manifest(manifest);
+    std::array<std::size_t, 2> options{};
+    std::array<std::size_t, 2> pairs{};
+    for (const CellCensus& cell : manifest.cells) {
+        const std::size_t split =
+            density::split_index(cell.split);
+        checked_add(
+            options[split], cell.selected_options,
+            "required split option count");
+        checked_add(
+            pairs[split],
+            cell.selected_potential_pairs,
+            "required split pair count");
+    }
+    if (source.manifest_hash !=
+            kRequiredCensusManifest ||
+        source.parent_fingerprint !=
+            density::kRequiredParentFingerprint ||
+        source.root_seed !=
+            density::kCollectionRootSeed ||
+        source.splits[0].roots !=
+            kRequiredTrainRoots ||
+        source.splits[1].roots !=
+            kRequiredDevRoots ||
+        manifest.source_manifest_hash !=
+            source.manifest_hash ||
+        manifest.manifest_hash !=
+            kRequiredSelectionManifest ||
+        manifest.train_roots !=
+            kExpectedTrainRoots ||
+        manifest.dev_roots !=
+            kExpectedDevRoots ||
+        manifest.selected_roots.size() !=
+            kExpectedTrainRoots +
+                kExpectedDevRoots ||
+        options[0] !=
+            kRequiredSelectedTrainOptions ||
+        options[1] !=
+            kRequiredSelectedDevOptions ||
+        pairs[0] !=
+            kRequiredSelectedTrainPairs ||
+        pairs[1] !=
+            kRequiredSelectedDevPairs ||
+        manifest.selected_options !=
+            kRequiredSelectedTrainOptions +
+                kRequiredSelectedDevOptions ||
+        manifest.selected_potential_pairs !=
+            kRequiredSelectedTrainPairs +
+                kRequiredSelectedDevPairs ||
+        manifest.alias_groups.size() !=
+            kRequiredAliasGroups ||
+        manifest.collision_pairs !=
+            kRequiredAliasPairs ||
+        manifest.distinct_physical_games !=
+            kRequiredPhysicalGames ||
+        manifest.max_roots_per_actor_game !=
+            kRequiredMaximumRootsPerActorGame) {
+        throw std::runtime_error(
+            "AQ17-DBC6 frozen S0 selection drifted");
+    }
+}
+
 } // namespace
 
 std::optional<Command> parse_command(
@@ -1240,7 +1353,8 @@ void validate_manifest(
     }
 }
 
-RunReport run(std::shared_ptr<const LearnedModel> parent) {
+FrozenSelectionReplay reconstruct_frozen_selection(
+    std::shared_ptr<const LearnedModel> parent) {
     require_parent(parent);
     std::vector<PopulationRoot> population;
     population.reserve(
@@ -1261,7 +1375,7 @@ RunReport run(std::shared_ptr<const LearnedModel> parent) {
                     view.hidden_repartition_witness,
             });
         };
-    const density::Collection source =
+    density::Collection source =
         density::collect_census(parent, visitor);
     density::validate_census(source.census);
     if (source.census.manifest_hash !=
@@ -1305,18 +1419,37 @@ RunReport run(std::shared_ptr<const LearnedModel> parent) {
         throw std::runtime_error(
             "AQ17-DBC6 repeated pure selector drifted");
     }
-
-    std::set<std::string> selected_ids;
-    for (const SelectedRoot& root :
-         first.selected_roots) {
-        selected_ids.insert(
-            root.source_root.stable_root_id);
+    require_frozen_selection(source.census, first);
+    auto selected_population =
+        project_selected_population_impl(
+            first, population);
+    if (std::none_of(
+            selected_population.begin(),
+            selected_population.end(),
+            [](const PopulationRoot& root) {
+                return
+                    root.hidden_repartition_witness;
+            })) {
+        throw std::runtime_error(
+            "AQ17-DBC6 frozen selection has no hidden witness");
     }
+
+    return {
+        .source_census = std::move(source.census),
+        .manifest = first,
+        .selected_population =
+            std::move(selected_population),
+    };
+}
+
+RunReport run(std::shared_ptr<const LearnedModel> parent) {
+    FrozenSelectionReplay frozen =
+        reconstruct_frozen_selection(
+            std::move(parent));
     std::string hidden_witness_root_id;
-    for (const PopulationRoot& root : population) {
-        if (root.hidden_repartition_witness &&
-            selected_ids.contains(
-                root.source_root.stable_root_id)) {
+    for (const PopulationRoot& root :
+         frozen.selected_population) {
+        if (root.hidden_repartition_witness) {
             hidden_witness_root_id =
                 root.source_root.stable_root_id;
             break;
@@ -1327,7 +1460,7 @@ RunReport run(std::shared_ptr<const LearnedModel> parent) {
             "AQ17-DBC6 selected hidden witness was vacuous");
     }
     return {
-        .manifest = first,
+        .manifest = std::move(frozen.manifest),
         .repeated_selector_bit_identical = true,
         .hidden_repartition_witness = true,
         .hidden_witness_root_id =
@@ -1475,6 +1608,13 @@ SelectionManifest select_population(
         std::move(source_manifest_hash),
         population, train_quota_per_cell,
         dev_quota_per_cell);
+}
+
+std::vector<PopulationRoot> project_selected_population(
+    const SelectionManifest& manifest,
+    std::span<const PopulationRoot> population) {
+    return project_selected_population_impl(
+        manifest, population);
 }
 
 bool rows_bit_identical(

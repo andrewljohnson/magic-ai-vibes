@@ -189,6 +189,23 @@ struct AuthenticatedRootView {
 using AuthenticatedRootVisitor =
     std::function<void(const AuthenticatedRootView&)>;
 
+// A production-only replay seam for consumers that must evaluate an already
+// frozen source root. Every reference remains valid only for the duration of
+// the callback. The frozen Census and returned Collection continue to retain
+// no GameState, trace, original deck vector, or hidden-zone payload.
+struct AuthenticatedReplayRootView {
+    const ManifestRoot& manifest;
+    std::span<const double> observation;
+    std::span<const PriorityAction> actions;
+    std::span<const std::vector<double>> option_rows;
+    const LearnedDecisionTracePoint& trace_point;
+    const std::array<std::vector<CardId>, 2>& original_decks;
+    bool hidden_repartition_witness = false;
+};
+
+using AuthenticatedReplayRootVisitor =
+    std::function<void(const AuthenticatedReplayRootView&)>;
+
 struct RunReport {
     Census census;
     bool repeated_collection_bit_identical = false;
@@ -227,6 +244,16 @@ Collection collect_census(
 Collection collect_census(
     std::shared_ptr<const LearnedModel> parent,
     const AuthenticatedRootVisitor& visitor);
+Collection replay_frozen_census(
+    std::shared_ptr<const LearnedModel> parent,
+    const Census& frozen,
+    const AuthenticatedReplayRootVisitor& visitor);
+
+// Evaluation-only hidden-information witness. The returned state differs
+// solely by a repartition of the opponent's hand/library and is guaranteed
+// to preserve the observer's complete game observation.
+std::optional<GameState> make_actor_local_hidden_repartition(
+    const GameState& state, std::size_t observer);
 RunReport run(std::shared_ptr<const LearnedModel> parent);
 void print_report(
     std::ostream& output, const RunReport& report);
@@ -243,6 +270,9 @@ ManifestRoot make_manifest_root(
 Census make_census(
     std::string parent_fingerprint,
     std::vector<ManifestRoot> roots);
+void validate_frozen_replay_root(
+    const Census& frozen, std::size_t position,
+    const ManifestRoot& replayed);
 std::optional<GameState> hidden_repartition(
     const GameState& state, std::size_t observer);
 ManifestRoot make_live_manifest_root(
