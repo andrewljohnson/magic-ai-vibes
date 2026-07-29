@@ -1535,8 +1535,9 @@ void validate_census(const Census& census) {
     }
 }
 
-Collection collect_census(
-    std::shared_ptr<const LearnedModel> parent) {
+Collection collect_census_impl(
+    std::shared_ptr<const LearnedModel> parent,
+    const AuthenticatedRootVisitor* visitor) {
     require_parent(parent);
     std::vector<ManifestRoot> roots;
     bool hidden_witness = false;
@@ -1615,7 +1616,8 @@ Collection collect_census(
                     LiveRootMaterial material =
                         make_live_material(
                             point, coordinate);
-                    if (!hidden_witness) {
+                    bool root_hidden_witness = false;
+                    if (!hidden_witness || visitor != nullptr) {
                         const auto hidden =
                             hidden_repartition_impl(
                                 point.state, actor);
@@ -1627,11 +1629,26 @@ Collection collect_census(
                                     "AQ16-DBC6 hidden repartition "
                                     "changed owner-safe root material");
                             }
-                            hidden_witness = true;
-                            hidden_witness_root_id =
-                                material.manifest
-                                    .stable_root_id;
+                            root_hidden_witness = true;
+                            if (!hidden_witness) {
+                                hidden_witness = true;
+                                hidden_witness_root_id =
+                                    material.manifest
+                                        .stable_root_id;
+                            }
                         }
+                    }
+                    if (visitor != nullptr) {
+                        (*visitor)({
+                            .manifest = material.manifest,
+                            .observation =
+                                material.observation,
+                            .actions = material.actions,
+                            .option_rows =
+                                material.option_rows,
+                            .hidden_repartition_witness =
+                                root_hidden_witness,
+                        });
                     }
                     roots.push_back(
                         std::move(material.manifest));
@@ -1654,6 +1671,23 @@ Collection collect_census(
         .hidden_witness_root_id =
             std::move(hidden_witness_root_id),
     };
+}
+
+Collection collect_census(
+    std::shared_ptr<const LearnedModel> parent) {
+    return collect_census_impl(
+        std::move(parent), nullptr);
+}
+
+Collection collect_census(
+    std::shared_ptr<const LearnedModel> parent,
+    const AuthenticatedRootVisitor& visitor) {
+    if (!visitor) {
+        throw std::invalid_argument(
+            "AQ16-DBC6 authenticated visitor is empty");
+    }
+    return collect_census_impl(
+        std::move(parent), &visitor);
 }
 
 RunReport run(std::shared_ptr<const LearnedModel> parent) {

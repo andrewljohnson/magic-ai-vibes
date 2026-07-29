@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -173,6 +174,21 @@ struct Collection {
     bool operator==(const Collection&) const = default;
 };
 
+// These references and spans are non-owning and remain valid only for the
+// duration of an AuthenticatedRootVisitor call. The callback is a research
+// replay seam; Collection and the frozen AQ16 manifest continue to retain no
+// actions, feature rows, GameState, or hidden cards.
+struct AuthenticatedRootView {
+    const ManifestRoot& manifest;
+    std::span<const double> observation;
+    std::span<const PriorityAction> actions;
+    std::span<const std::vector<double>> option_rows;
+    bool hidden_repartition_witness = false;
+};
+
+using AuthenticatedRootVisitor =
+    std::function<void(const AuthenticatedRootView&)>;
+
 struct RunReport {
     Census census;
     bool repeated_collection_bit_identical = false;
@@ -208,6 +224,9 @@ void validate_census(const Census& census);
 
 Collection collect_census(
     std::shared_ptr<const LearnedModel> parent);
+Collection collect_census(
+    std::shared_ptr<const LearnedModel> parent,
+    const AuthenticatedRootVisitor& visitor);
 RunReport run(std::shared_ptr<const LearnedModel> parent);
 void print_report(
     std::ostream& output, const RunReport& report);
