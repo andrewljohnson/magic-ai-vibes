@@ -19949,6 +19949,65 @@ generation's deployed Priority residual active in both source play and its
 actor-local teacher. Compare each frozen child against its frozen parent and
 stop at the first disjoint-DEV regression rather than selecting retrospectively.
 
+##### AQ4-P1 direct actor-local-search pilot declaration
+
+Declared 2026-07-28 at exact result commit `8606220`, after AQ4-G4B rejected
+and before changing the production policy, web bridge, or client. `REVIEW.md`
+was reread through its newest 23:34 PDT verification addendum. C16 remains
+champion; P1 is a deliberately slower human-play diagnostic, not a promoted
+model or a Learned-is-king claim.
+
+Falsifiable hypothesis: applying the already-passing AQ4-D1 search operator
+directly at live Learned Value Priority roots will preserve its general
+strategic repairs without the supervised-projection overfit that rejected
+G1--G4B, while remaining usable in an interactive match. This is one
+card-agnostic algorithm switch, not Counterspell, target, stack, phase,
+combat, or card-name policy logic.
+
+Add one default-off `BotConfig` treatment whose only allowed initial recipe is:
+
+- exact frozen C16 model, Value variant, K8 root worlds / R1 / H8, four
+  evaluation workers, no outer shallow-prior blend;
+- symmetric actor-local Value continuation search at K2 / R1 / the existing
+  production H4, with maximum nesting depth one;
+- zero residual, exploration, continuation epsilon, Pass dominance, resolved
+  prior, adversarial blocks, and non-Legacy continuation controller.
+
+The live selector must call the same hidden-safe
+`learned_priority_action_samples` implementation proven by AQ4-D1, use its
+complete exact aggregate scores, and retain ordinary seeded exact-tie
+behavior. The field-off path must remain bit-identical. Account both outer
+and inner rollouts without overflow. Fail closed if P1 is combined with a
+different model/variant, K, or another treatment; combinations can be tested
+later as separate policies.
+
+Before web exposure:
+
+1. prove field-off fixed-seed game identity;
+2. prove the production helper selects Pass for redundant Counterspell,
+   X=1 self for Braingeyser, Pass for sick-Bear Giant Growth, and live Force
+   Spike on the four frozen AQ4 coordinates;
+3. retain the existing hidden-repartition, reversed-order, four-worker,
+   actor-local noninterference, and depth-one controls;
+4. pass the engine, web bridge, and web UI suites; and
+5. complete one fixed real-bridge match/prompt smoke without exceeding the
+   existing 120-second child-process action timeout.
+
+If those gates pass, expose the exact policy as
+`learned-value-c16-actor-local-search`, labeled
+**Learned C16 · Foresight Search (AQ4)** with the current date, explicit
+K8/H8 + inner K2/H4 description, “manual diagnostic / not promoted”
+lifecycle, and a note that this treatment changes Priority decisions only;
+attack and block selection still use C16. Do not run a 60-game selector
+before manual latency/behavior feedback: at the measured preflight cost it
+would spend substantial compute while answering a less useful first question
+than whether the owner can still reproduce any of the reported blunders.
+
+The learned-policy research path remains the separately declared
+on-policy multi-generation follow-up. P1 neither supplies labels nor changes
+that learner; it gets the proven search operator into the owner's hands while
+the distillation loop is rebuilt.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
