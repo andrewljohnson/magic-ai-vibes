@@ -113,6 +113,7 @@ DECISION_BOUNDARY_RANK_DIRECT_SOURCE := src/decision_boundary_rank_direct.cpp
 DECISION_BOUNDARY_RANK_HIDDEN_SOURCE := src/decision_boundary_rank_hidden.cpp
 DECISION_BOUNDARY_ACTION_PAIR_SOURCE := src/decision_boundary_action_pair.cpp
 DECISION_BOUNDARY_ADAPTIVE_TRUNK_SOURCE := src/decision_boundary_adaptive_trunk.cpp
+DECISION_DENSITY_CENSUS_SOURCE := src/decision_density_census.cpp
 ACTION_Q_ON_POLICY_SUCCESSOR_SOURCE := src/action_q_on_policy_successor.cpp
 ACTION_Q_PRIORITY_TRUST_REGION_SOURCE := src/action_q_priority_trust_region.cpp
 ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE := src/action_q_recursive_policy_improvement.cpp
@@ -229,6 +230,8 @@ DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-bo
 DECISION_BOUNDARY_ACTION_PAIR := $(BUILD_DIR)/old-school-decision-boundary-action-pair
 DECISION_BOUNDARY_ADAPTIVE_TRUNK_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-boundary-adaptive-trunk-tests
 DECISION_BOUNDARY_ADAPTIVE_TRUNK := $(BUILD_DIR)/old-school-decision-boundary-adaptive-trunk
+DECISION_DENSITY_CENSUS_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-density-census-tests
+DECISION_DENSITY_CENSUS := $(BUILD_DIR)/old-school-decision-density-census
 ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-on-policy-successor-tests
 ACTION_Q_ON_POLICY_SUCCESSOR := $(BUILD_DIR)/old-school-action-q-on-policy-successor
 ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-priority-trust-region-tests
@@ -301,6 +304,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-decision-boundary-rank-hidden decision-boundary-rank-hidden-run
 .PHONY: test-decision-boundary-action-pair decision-boundary-action-pair-run
 .PHONY: test-decision-boundary-adaptive-trunk decision-boundary-adaptive-trunk-run
+.PHONY: test-decision-density-census old-school-decision-density-census decision-density-census
 .PHONY: test-action-q-on-policy-successor action-q-on-policy-successor-census action-q-on-policy-successor-run
 .PHONY: test-action-q-priority-trust-region action-q-priority-trust-region-run
 .PHONY: test-action-q-recursive-policy-improvement action-q-recursive-policy-improvement-run
@@ -456,6 +460,7 @@ DECISION_BOUNDARY_RANK_DIRECT_LINK_SOURCES := $(DECISION_BOUNDARY_CRITIC_LINK_SO
 DECISION_BOUNDARY_RANK_HIDDEN_LINK_SOURCES := $(DECISION_BOUNDARY_RANK_DIRECT_LINK_SOURCES) $(DECISION_BOUNDARY_RANK_HIDDEN_SOURCE)
 DECISION_BOUNDARY_ACTION_PAIR_LINK_SOURCES := $(DECISION_BOUNDARY_RANK_DIRECT_LINK_SOURCES) $(DECISION_BOUNDARY_ACTION_PAIR_SOURCE)
 DECISION_BOUNDARY_ADAPTIVE_TRUNK_LINK_SOURCES := $(DECISION_BOUNDARY_ACTION_PAIR_LINK_SOURCES) $(DECISION_BOUNDARY_ADAPTIVE_TRUNK_SOURCE)
+DECISION_DENSITY_CENSUS_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(DECISION_DENSITY_CENSUS_SOURCE)
 FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
 FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
@@ -581,6 +586,10 @@ $(eval $(call link_program,$(DECISION_BOUNDARY_ACTION_PAIR),$(DECISION_BOUNDARY_
 $(eval $(call link_program,$(DECISION_BOUNDARY_ADAPTIVE_TRUNK_TEST_RUNNER),$(DECISION_BOUNDARY_ADAPTIVE_TRUNK_LINK_SOURCES) tests/test_decision_boundary_adaptive_trunk.cpp))
 
 $(eval $(call link_program,$(DECISION_BOUNDARY_ADAPTIVE_TRUNK),$(DECISION_BOUNDARY_ADAPTIVE_TRUNK_LINK_SOURCES) src/decision_boundary_adaptive_trunk_main.cpp))
+
+$(eval $(call link_program,$(DECISION_DENSITY_CENSUS_TEST_RUNNER),$(DECISION_DENSITY_CENSUS_LINK_SOURCES) tests/test_decision_density_census.cpp))
+
+$(eval $(call link_program,$(DECISION_DENSITY_CENSUS),$(DECISION_DENSITY_CENSUS_LINK_SOURCES) src/decision_density_census_main.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER),$(ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES) tests/test_action_q_on_policy_successor.cpp))
 
@@ -742,6 +751,7 @@ test: $(DECISION_BOUNDARY_RANK_DIRECT_TEST_RUNNER) $(DECISION_BOUNDARY_RANK_DIRE
 test: $(DECISION_BOUNDARY_RANK_HIDDEN_TEST_RUNNER) $(DECISION_BOUNDARY_RANK_HIDDEN)
 test: $(DECISION_BOUNDARY_ACTION_PAIR_TEST_RUNNER) $(DECISION_BOUNDARY_ACTION_PAIR)
 test: $(DECISION_BOUNDARY_ADAPTIVE_TRUNK_TEST_RUNNER) $(DECISION_BOUNDARY_ADAPTIVE_TRUNK)
+test: $(DECISION_DENSITY_CENSUS_TEST_RUNNER) $(DECISION_DENSITY_CENSUS)
 test: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 test: $(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER) $(ACTION_Q_PRIORITY_TRUST_REGION)
 test: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
@@ -893,6 +903,14 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-adaptive-trunk --run' >/dev/null
+	./$(DECISION_DENSITY_CENSUS_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_DENSITY_CENSUS) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ16-DBC6 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-density-census --census' >/dev/null
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
 	@set +e; output=`./$(ACTION_Q_ON_POLICY_SUCCESSOR) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
@@ -1864,6 +1882,21 @@ test-decision-boundary-adaptive-trunk: $(DECISION_BOUNDARY_ADAPTIVE_TRUNK_TEST_R
 
 decision-boundary-adaptive-trunk-run: $(DECISION_BOUNDARY_ADAPTIVE_TRUNK)
 	./$(DECISION_BOUNDARY_ADAPTIVE_TRUNK) --run
+
+test-decision-density-census: $(DECISION_DENSITY_CENSUS_TEST_RUNNER) $(DECISION_DENSITY_CENSUS)
+	./$(DECISION_DENSITY_CENSUS_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_DENSITY_CENSUS) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ16-DBC6 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-density-census --census' >/dev/null
+
+old-school-decision-density-census: $(DECISION_DENSITY_CENSUS)
+
+decision-density-census: $(DECISION_DENSITY_CENSUS)
+	./$(DECISION_DENSITY_CENSUS) --census
 
 test-action-q-on-policy-successor: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
