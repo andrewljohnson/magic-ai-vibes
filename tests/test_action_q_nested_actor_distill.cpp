@@ -209,7 +209,9 @@ void test_cli_recipe_and_optimizer_are_frozen() {
             aq::kFastGoWins == 37 &&
             aq::kManualOnlyWins == 31 &&
             aq::kMinimumDeckWins == 3 &&
-            aq::kFrozenCensusManifestHash.empty() &&
+            aq::kFrozenCensusManifestHash ==
+                "c67d345dba6f2ea1c59014aefd56aadfbf6560daa610445f"
+                "f686a9fe0999d80b" &&
             base.seed == 123 &&
             base.worlds == 8 &&
             base.rollouts_per_world == 1 &&

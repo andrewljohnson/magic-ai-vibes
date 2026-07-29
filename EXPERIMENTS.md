@@ -19093,6 +19093,41 @@ independent gameplay coordinate. The 37-win tail calculation assumes binary
 outcomes, so any turn-limit draw makes that threshold conservative rather
 than literally exact. The threshold itself remains frozen.
 
+##### AQ4-G1 frozen source census
+
+Completed 2026-07-28 from immutable implementation commit `df96d6d`, after
+the full repository gate, focused 7/7 AQ4-G1 and 4/4 AQ4-D1 tests, focused
+ASan/UBSan 7/7, and independent implementation review returned GO. The exact
+command was:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-action-q-nested-actor-distill --census
+```
+
+The source-only census exited 0 in 34.11 seconds and produced 40 games, 639
+retained roots, and owner-safe manifest SHA-256
+`c67d345dba6f2ea1c59014aefd56aadfbf6560daa610445ff686a9fe0999d80b`.
+Exact per-deck counts were:
+
+| Owner deck | Actor-games | Nontrivial roots | FIT roots/options | CHECK roots/options |
+| --- | ---: | ---: | ---: | ---: |
+| Green | 16 | 337 | 64 / 169 | 64 / 176 |
+| Red | 16 | 311 | 64 / 219 | 64 / 219 |
+| Blue | 16 | 310 | 64 / 159 | 64 / 173 |
+| White | 16 | 430 | 64 / 210 | 64 / 199 |
+| RU Aggro | 16 | 298 | 64 / 266 | 63 / 251 |
+
+Decision: **accept and freeze the census identity**. Both FIT and CHECK cover
+all five decks; the one-root RU CHECK difference is a descriptive consequence
+of cap-before-inspection retention and is handled by the preregistered
+inverse-count equal-deck weights. The census reported `model_created=0`,
+`reserved_seed_opened=0`, and `artifact_published=0`; it did not score AQ4,
+fit a model, or open the selector. Next: commit this exact hash, reproduce the
+census through the fail-closed run boundary, then execute the single
+predeclared AQ4-G1 preflight/label/fit/offline/conditional-selector run without
+a retry or K/H sweep.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

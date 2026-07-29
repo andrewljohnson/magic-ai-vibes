@@ -50,7 +50,9 @@ inline constexpr std::string_view kRequiredParentFingerprint =
 
 // Filled only after `--census` has been recorded. An empty value makes
 // `--run` fail before any AQ4 preflight or teacher coordinate is opened.
-inline constexpr std::string_view kFrozenCensusManifestHash = "";
+inline constexpr std::string_view kFrozenCensusManifestHash =
+    "c67d345dba6f2ea1c59014aefd56aadfbf6560daa610445f"
+    "f686a9fe0999d80b";
 
 enum class Command {
     Census,
