@@ -19190,6 +19190,102 @@ representation or actor-local search; the exact teacher preflight again
 passed all four controls. Next: make one preregistered, card-agnostic
 retention correction to the fit, not a K/H or card-specific fixture sweep.
 
+##### AQ4-G2 bounded early-stop retention declaration
+
+Declared 2026-07-28 after the complete G1 rejection was committed at
+`3d12320`, before changing fit code, reconstructing a teacher label, fitting
+another model, or opening a new gameplay seed. `REVIEW.md` was reread through
+its newest 21:14 PDT entry. Fresh selector seed `202607282131` was searched
+across source, tests, notebook, Makefile, review-excluded worktree, and Git
+history and was unused.
+
+Falsifiable hypothesis: G1 failed because 64 epochs over-updated a shared
+Priority head, not because its actor-local teacher or 893-feature
+representation was bad. At least one exact earlier prefix of the same Adam
+trajectory will:
+
+1. pass every original G1 offline gate;
+2. preserve the now field-observed Ancestral self-target direction too; and
+3. win at least 31/60 against exact C16 in one fresh all-five-deck selector.
+
+This is one bounded development model-selection ladder, not four confirmatory
+experiments. Reconstruct the exact frozen G1 corpus once in memory using
+census hash
+`c67d345dba6f2ea1c59014aefd56aadfbf6560daa610445ff686a9fe0999d80b`
+and the already-open, deterministic G1 teacher coordinates. This is an
+explicit protocol supersession: G1 did not persist its safe scalar labels, so
+the immutable teacher computation must be replayed, but it supplies no new
+teacher hypothesis or independent evidence. Compute and print a canonical
+owner-safe digest over every manifest row, base/teacher/target binary64 value,
+weight, and accounting field; retain no `GameState`, hidden zone, or sampled
+world.
+
+Before testing prefixes, refit the exact 64-epoch G1 control from this single
+in-memory corpus. Require candidate fingerprint
+`e0217302d83a4949950af84ab754e38be6ebbd6c2adac6a4193f05f70b7a1376`
+and bit-exact reproduction of these aggregate metrics:
+
+| Split | Policy | Agreement | Regret |
+| --- | --- | ---: | ---: |
+| FIT | parent | `0.66874999999999996` | `0.018050745526697963` |
+| FIT | epoch 64 | `0.82187500000000002` | `0.0062735556307336555` |
+| DEV (formerly CHECK) | parent | `0.727281746031746` | `0.015804978455738215` |
+| DEV (formerly CHECK) | epoch 64 | `0.69875992063492065` | `0.014688536185484463` |
+
+Any mismatch rejects G2 before model selection or selector. This binds the
+replayed labels and fitter to the actual G1 result rather than merely trusting
+shared seeds.
+
+Fit exact epoch prefixes `{4, 8, 16, 32}` independently from frozen C16.
+Every other optimizer, target, deck weight, model, residual, and deployment
+setting remains G1-identical, including fit seed
+`12262988820247274425`. Thus candidate E is exactly the first E epochs of the
+same shuffled Adam trajectory whose epoch-64 endpoint G1 tested. Do not test
+48, another epoch count, a new learning rate, residual, K/H budget, or seed.
+
+For every prefix, print fingerprint plus FIT and DEV pooled/per-deck
+agreement and regret. Eligibility is conjunctive:
+
+- parent immutable, repeated fit bit-identical, and only Priority changed;
+- FIT regret strictly improves, DEV equal-deck regret strictly improves, and
+  no DEV deck regret rises by more than `0.01`;
+- descriptor order/hidden-repartition identity passes;
+- ordinary K8/H4 residual-0.10 deployment passes redundant Counterspell,
+  Braingeyser X=0 exclusion, sick-Bear Growth, and live Force Spike; and
+- the complete existing Ancestral target gate passes, including self strictly
+  above opponent, opponent absent from exact-max support, and hidden identity.
+
+Among eligible prefixes, select the lowest DEV equal-deck regret; exact ties
+select fewer epochs. CHECK has now been observed at epoch 64 and is
+prospectively used for model selection, so rename it DEV and make no held-out
+or strength claim from it. If no prefix is eligible, reject the entire
+early-stop family without a fit-knob follow-up and move to a separately
+declared, broad parent-behavior/KL neutral anchor.
+
+Only the selected eligible prefix may open
+`run_bot_benchmark(1, 202607282131, selected, C16, max_turns=500, false)`.
+Use the same exact 60-game/all-five-deck/quadrant/joint-matchup contract and
+interpretation as G1: FAST_GO at at least 37 wins plus 3/12 every deck,
+MANUAL_ONLY at 31--36 with the same deck floor, otherwise REJECT. This fresh
+selector is the only independent G2 readout and remains a quick/manual-pilot
+screen, not a champion or Learned-is-king claim.
+
+Exact CLI:
+
+```sh
+./build/old-school-action-q-nested-actor-early-stop --run
+```
+
+The 21:14 review favored jumping directly to neutral anchors based on the
+earlier DEV1-to-DEV5 precedent. I am deliberately testing bounded early
+stopping first: unlike DEV1's repair-positive-only 88 rows, G1 already has
+320 deck-balanced broad FIT roots; the observed failure is specifically a
+64-epoch endpoint with a much larger FIT than DEV gain, while a proximal
+anchor would introduce a new coefficient and optimizer geometry. The
+four-prefix ladder tests that exact symptom nearly for free after one label
+replay. If it fails, the review's neutral-anchor route becomes next by
+predeclaration rather than being silently ignored.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
