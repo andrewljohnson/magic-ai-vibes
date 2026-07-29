@@ -17626,6 +17626,92 @@ Report all five deck rows, runtime, decisions, and rollouts. This remains a
 rapid selector, not a strength or Learned-is-king claim, and it is not
 composed with EXPLORE-6.
 
+##### FQ4-EXPLORE-9 result — rejected
+
+Run 2026-07-28 after the exact qualification, focused/frozen-recipe suites,
+180/180 engine tests, and 180/180 ASan/UBSan engine tests passed. The
+implementation was committed and pushed as `60bfa6b` before the reserved seed
+was opened. `REVIEW.md` was reread through its newest 16:59 entry immediately
+before the run.
+
+Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-fq4-blend-explore --resolved-prior
+```
+
+Exact frozen coordinates: seed `202607281711`; 60 balanced games; 12 per
+challenger deck; treatment first; exact frozen C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+K8/H4/R1; zero root/continuation exploration; zero Priority residual; PD0
+off; AdversarialBlocks off; Legacy continuation controller.
+
+| Challenger deck | Wins | Losses | Draws |
+| --- | ---: | ---: | ---: |
+| Green | 4 | 8 | 0 |
+| Red | 6 | 6 | 0 |
+| Blue | 6 | 6 | 0 |
+| White | 6 | 6 | 0 |
+| RU Aggro | 5 | 7 | 0 |
+| **Aggregate** | **27** | **33** | **0** |
+
+Treatment win rate was `45.0%`; quartet-CR1 95% interval
+`[36.4460%, 53.5540%]`. The runner reported `8.9991s`, 2,735 decisions, and
+67,656 rollouts; `/usr/bin/time` reported `real 9.06`, `user 80.61`,
+`sys 0.17`.
+
+The predeclared `wins > 30` selector failed. EXPLORE-9 is **rejected** and is
+not exposed on the web. The target-choice mechanism repair is real, but fully
+replacing the historical unresolved observation loses too much broad
+sequencing strength in this small selector. C16 remains champion.
+
+##### FQ4-EXPLORE-10 dual-boundary alpha-0.50 declaration
+
+Declared 2026-07-28 before replacing the boolean experiment coordinate with a
+bounded weight or opening fresh gameplay seed `202607281722`. Repository and
+Git-history search found that seed unused.
+
+Falsifiable hypothesis: the resolved boundary contains the missing action
+consequence, while the historical unresolved boundary contains useful
+pre-resolution sequencing calibration. Averaging the two shallow critic
+observations will preserve enough of C16's broad strength to win strictly
+more than 30/60 against C16 while retaining the exact target correction.
+
+The weight is fixed once, not swept. Alpha `0.50` is the smallest simple
+round value above both exact captured-root flip thresholds: resolved weight
+`> .4233` makes self-target outrank opponent-target and `> .4500` makes
+self-target outrank Pass. From the already frozen unresolved/resolved means,
+the preregistered alpha-0.50 shallow values are:
+
+| Action | Alpha-0.50 shallow value | Exact K8 aggregate when continuations are 1 |
+| --- | ---: | ---: |
+| Ancestral Recall targeting self | .8908196258 | .9878688473 |
+| Pass | .8886615963 | .9876290663 |
+| Ancestral Recall targeting opponent | .8854773166 | .9872752574 |
+
+Implement one bounded, finite `[0,1]` resolved-observation weight in place of
+the experiment boolean: zero is exact historical C16; one is bit-identical to
+EXPLORE-9; intermediate values are `lerp(unresolved, resolved, alpha)` for
+only the one shallow observation. Actual K8/H4 continuations, legal actions,
+worlds, seeds, controller, reward, model weights, and hidden-information
+boundary remain unchanged. No card/action name or policy heuristic enters
+the implementation.
+
+Engineering gates: exact alpha endpoints; default-zero RNG identity; exact
+captured alpha-0.50 values and corrected ordering; hidden-repartition
+identity; unchanged continuation samples/accounting/legal actions; Value-only
+and bounded-weight validation; old frozen recipes require exact zero; focused
+tests, full engine tests, and sanitizers green.
+
+Then run alpha-0.50 treatment first against ordinary C16 on fresh seed
+`202607281722` for exactly one balanced repetition: 60 games, 12 per
+challenger deck, exact frozen model, K8/H4/R1, zero residual/exploration,
+PD0/AdversarialBlocks off, Legacy controller. Strictly more than 30 treatment
+wins advances to a labeled web pilot; 30 or fewer rejects. Report all five
+rows, runtime, decisions, and rollouts. This is a rapid selector, not a
+strength claim, and is not composed with another treatment.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
