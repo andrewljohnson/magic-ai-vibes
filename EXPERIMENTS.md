@@ -24777,6 +24777,210 @@ using only that fixed recurrence signal and untouched DEV as its first
 candidate-generalization gate. Do not tune term count, recurrence floor,
 coefficient scale, or inspect DEV before that declaration.
 
+##### AQ21-DBC6-S8-STABLE-CROSS-TOP1 declaration
+
+Declared 2026-07-29 at exact rejected-AQ20 commit `d460a62`, after rereading
+`REVIEW.md` through its newest 15:44 PDT cycle and before implementing or
+scoring an AQ21 candidate. Source plus full-history searches found identifier
+`AQ21-DBC6-S8-STABLE-CROSS-TOP1`, schema
+`old-school-aq21-stable-cross-top1-v1`, fit tag `202607292101`, and selector
+seeds `202607292111` / `202607292112` unused. C16 remains champion; AQ19
+remains only a dated manual challenger. No AQ21 candidate, DEV-candidate,
+counter-control, selector, or gameplay value has opened.
+
+**Falsifiable hypothesis.** AQ20 established that a sparse cross model can
+move 89/300 decisions, but its all-pairs probability loss spent capacity on
+ordering already-suboptimal actions: OOF pair BCE/listwise/stable-pair
+improved while exact-max regret and top-one worsened. The eight coordinates
+that independently recurred in at least three of four AQ20 fold fits contain
+general decision-boundary signal. Fitting only teacher-best-versus-lower
+comparisons in those fixed directions will convert that signal into lower
+exact-max regret without lowering top-one agreement on candidate-unopened DEV
+while preserving every one of Green, Red, Blue, White, and RU Aggro.
+
+This is one deliberately quick combined challenger, not a sweep. A rejection
+falsifies this exact stable-coordinate / best-versus-lower / one-step recipe;
+it does not reject all sparse learners. Because coordinate recurrence consumed
+all four AQ20 TRAIN folds, **AQ21 candidate OOF predictions are prohibited**:
+they may not be computed, reported, or used as evidence. Existing frozen
+C16/AQ19 OOF facts remain provenance only. AQ19's already published DEV
+comparators may be authenticated, but candidate DEV values stay unopened
+until the complete TRAIN precondition passes.
+
+**Fixed representation and fit.** Use the exact AQ18 cache/corpus, C16 base,
+AQ19 comparators, physical groups, S0 support table/digest, and 674-state /
+219-action owner-safe features. Whitelist exactly these eight coordinates in
+this fixed order:
+
+1. `(2,187)`
+2. `(3,198)`
+3. `(6,177)`
+4. `(8,177)`
+5. `(1,179)`
+6. `(1,187)`
+7. `(6,181)`
+8. `(181,13)`
+
+The first tier recurred 4/4 and the second 3/4; ordering within each tier is
+lexicographic. There is no coordinate selection, replacement, sign
+substitution, or reordering. Each sigma is exactly the square root of that
+coordinate's frozen full-TRAIN S0 weighted energy. An ineligible,
+sign-duplicate under AQ20's exact full-TRAIN standardized-column positive/
+negative byte identity, nonfinite, or identity-drifted coordinate rejects
+before fitting rather than relaxing a floor.
+
+For root `r`, action `i`, and term `m`:
+
+```text
+phi[r,i,m] = state[r,p_m] *
+             (action[r,i,q_m] - canonical_action_mean[r,q_m]) / sigma[m]
+z[r,i]     = sum_m beta[m] * phi[r,i,m]
+c[r,i]     = z[r,i] - canonical_action_mean[r,z]
+rho[r,i]   = 0.10 * tanh(c[r,i])
+score[r,i] = C16_base[r,i] + rho[r,i]
+```
+
+Let `B` be every action at the exact maximum teacher score `t*`. Compare each
+`b in B` only with every strictly lower action `j`. With
+`gap[j] = t* - teacher[j]` and
+`Z = |B| * sum_(k not in B) gap[k]`:
+
+```text
+target[b,j] = sigmoid(gap[j] / 0.10)
+logit[b,j]  = (score[b] - score[j]) / 0.10
+weight[b,j] = (1 / (15 * roots_in_deck_width_cell)) * gap[j] / Z
+```
+
+The objective is weighted binary cross-entropy over only those pairs;
+all-tied roots contribute zero. Loser-versus-loser pairs do not exist in this
+loss. This is card-agnostic and reads only the same owner-safe rows and frozen
+teacher outcomes as AQ20.
+
+Process each fixed coordinate exactly once. At the current nonlinear residual,
+compute the analytic gradient `g` and positive Gauss-Newton diagonal `h`, then
+apply exactly:
+
+```text
+beta = clamp(-0.25 * g / h, -1, +1)
+```
+
+Every stage must have finite positive `h`, applied quadratic gain
+`I = -(g * beta + 0.5 * h * beta^2) > 0`,
+and strictly lower the actual complete best-versus-lower objective after its
+one update. There is no line search, revisit, alternate order, optimizer
+change, coefficient-scale change, early acceptance, or retry. Repeat the
+identical fit only to prove bit identity.
+
+**TRAIN precondition before candidate DEV opens.** All cache/corpus/fold/S0
+and comparator identities, label-blind coordinate/sigma preparation, exact
+eight-stage completion, repeated canonical bytes/SHA and scores, analytic
+runtime replay, positive-zero control, finite bounded residuals, action
+permutation, hidden repartition, shared mirror continuation, parent
+immutability, and treatment mutual exclusion are conjunctive. The final
+best-versus-lower objective must be strictly lower than both frozen C16 and
+AQ19. In addition:
+
+- equal-deck regret must be at most `0.017608270406560753`, exactly AQ19
+  `0.018108270406560753` minus the inherited `0.0005` material threshold;
+- top-one must be at least `0.68000000000000005`;
+- every deck's regret must be no higher than its better C16/AQ19 comparator:
+  Green `.013038174994677269`, Red `.024711634806538169`, Blue
+  `.013099042185603772`, White `.0071829827867596731`, RU Aggro
+  `.0325095172592249`;
+- every deck's top-one must be at least Green `.68333333333333335`, Red
+  `.6166666666666667`, Blue `.76666666666666672`, White `.75`, and RU Aggro
+  `.58333333333333337`;
+- regret must strictly improve on at least three decks, including at least two
+  of Blue/White/RU; and
+- at least 6/300 exact-max choices must differ from AQ19, defining a choice as
+  the first exact-max row in existing `canonical_option_order`.
+
+Pair BCE, listwise CE, and stable-pair agreement remain mandatory aggregate
+and per-deck reports but are deliberately not gates: AQ20 proved those
+surrogates can improve while actual selections worsen. Any TRAIN miss is
+`REJECT stage=train`; candidate DEV, counter controls, selectors, and gameplay
+remain unopened.
+
+**First and only offline candidate-generalization gate.** Only after the full
+TRAIN precondition passes, score the one fixed full-TRAIN AQ21 object once on
+the existing DEV rows. Require:
+
+- aggregate regret at most `0.019852653974269084`, exactly the better AQ19
+  comparator `.020352653974269084` minus `0.0005`;
+- aggregate top-one at least `.64666666666666672`;
+- at least 3/150 canonical-first exact-max choices different from AQ19;
+- strict regret improvement on at least three decks, including at least two
+  of Blue/White/RU; and
+- the following all-five-deck regret ceilings and top-one floors:
+
+| Deck | Maximum regret | Minimum top-one |
+| --- | ---: | ---: |
+| Green | `.022600880109329907` | `.76666666666666672` |
+| Red | `.040843404069568108` | `.56666666666666665` |
+| Blue | `.0065795741372808398` | `.73333333333333328` |
+| White | `.014111532193467153` | `.53333333333333333` |
+| RU Aggro | `.017627879361699406` | `.6333333333333333` |
+
+Again report but do not gate on pair BCE/listwise/stable-pair. Any miss is
+`REJECT stage=dev`; nothing later opens. DEV is candidate-unopened but not
+globally virgin, so even a pass can license only the later fast checks and a
+manual pilot, never a strength/champion claim.
+
+**Conditional field gate and selectors.** Only after DEV passes, run the
+existing frozen general stack-composition pair through the exact production
+K8 policy with the same immutable AQ21 object installed in both Learned-mirror
+continuation seats—not merely `C16 root score + residual`. Require exact
+singleton score-argmax support `{pass}` for
+`control.blue.counter-redundant-same-target.v1` and exact singleton support
+`{counter-opponent-counterspell}` for
+`control.blue.counter-same-target-after-intervening-counter.v1`, plus
+descriptor-order and hidden-repartition bit identity. For each fixture derive
+the one immutable K8 world sample as
+`probe_runner::reference_seed_for_probe("aq21-counter-controls-v1",
+stable_id, probe_runner::kProbeProductionPolicySeed)`; the original,
+descriptor permutation, and hidden clone reuse that identical derived seed.
+No retry or favorable seed selection is allowed. Failure is
+`REJECT stage=counter`.
+
+Only after that gate passes, open seed `202607292111` for 60 balanced games
+against exact C16: 12 per challenger deck, six play/six draw, and three in
+each seat-by-play/draw quadrant. Require more than 30/60 wins and at least
+3/12 on every deck. Failure leaves the AQ19 selector seed unopened. On pass,
+open seed `202607292112` for the same mutually exclusive selector against
+exact AQ19 with identical thresholds. Two passes license only an immutable,
+dated **Learned C16 · Stable Cross AQ21** manual web pilot. `FAST_GO` requires
+at least 37/60 in both selectors. No Handcoded, 2,000-game, champion,
+Learned-is-king, or lift claim opens here.
+
+**Implementation boundary.** Preserve AQ20's exact 16-term schema, canonical
+bytes, SHA, scoring, and rejection disposition. Reuse the single sparse-cross
+`BotConfig` slot with an explicit recipe tag: the existing one-argument
+runtime remains exact AQ20-compatible, while AQ21 requires exactly eight
+terms under its distinct schema/fit tag. AQ20 retains its byte-for-byte legacy
+encoding with an implicit AQ20 recipe; only AQ21's new encoding contains its
+explicit recipe tag. Recipe participates in the object digest and semantic
+equivalence. Do not pad eight terms to sixteen or add another treatment slot.
+Before any AQ21 evidence, replay frozen AQ20 and require term SHA
+`7016571c1b268c574961081209871587b7851a6c536abd25966f17e12711af4e`,
+all metrics, and `REJECT stage=oof` unchanged.
+
+The only production evidence command is fixed as:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-stable-cross --offline-report
+```
+
+Focused tests must cover AQ20 byte/replay preservation; AQ21 exact-eight
+validation, schema separation, canonical round trip, reference forward,
+permutation/hidden safety, symmetric continuation, and mutual exclusion;
+best-only pair enumeration including tied maxima, gap/root/cell weights, and
+explicit loser-pair exclusion; analytic gradient and positive diagonal;
+one-step actual loss decrease; fixed whitelist/order and no candidate-DEV
+read before authorization; TRAIN/DEV NaN fail-closed conjunctions; exact
+production counter continuation; conditional selector authorization and
+five-deck/seat/play-draw balance.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
