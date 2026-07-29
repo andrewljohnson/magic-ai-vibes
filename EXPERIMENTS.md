@@ -20571,6 +20571,81 @@ candidate set, thresholds, selector, or manual-only status. Top-one agreement
 remains descriptive; no new KL metric or infrastructure gate is introduced
 for this fast first test.
 
+AQ4-OP2 first-run result, completed 2026-07-29 03:28 PDT:
+**infrastructure-control void; no proper alpha or selector coordinate
+opened**.
+
+Exact command:
+
+```sh
+./build/old-school-action-q-priority-trust-region --run
+```
+
+The process reconstructed the exact frozen coordinate before returning 1:
+C16 `68126afc...3e2f`, warm parent `d0d46d2b...003f8`, full OP1 child
+`a4cdb8a7...036f`, G4B corpus `91ef011c...a51`, and OP1 corpus
+`98502663...5df`. Every aggregate and all-five-deck TRAIN/DEV metric printed
+for alpha 0 and alpha 1 reproduced the recorded OP1 values exactly, including
+binary64 aggregate seals, and every DEV deck guard passed. The alpha-1 model
+gate also reproduced frozen DEV, Ancestral, descriptor-order, hidden
+repartition, five-open Force Spike, redundant/intervening Counterspell,
+summoning-sick Growth, and Braingeyser controls.
+
+The new detailed safety output exposed a control that OP1's compact line had
+not reported. The rejected full child had
+`live_force_spike_preserved=0` **and**
+`opponent_growth_excluded=0`; its only group-level failure remained
+`"focused behavior gate failed"`. OP2's alpha-1 transcription expected the
+known Spike failure but incorrectly guessed that the unreported opponent
+Growth control had passed. Therefore `safety_signature=0` and the runner
+failed closed immediately after alpha 1.00. No `0.75`, `0.50`, or `0.25`
+model was constructed or evaluated; selector seed `202607290211` remained
+unopened; the candidate artifact and deterministic temporary remained absent;
+and the exact C16 artifact stayed 3,111,437 bytes with SHA-256
+`53aeb904...44ca`. This is neither evidence for nor against the trust-region
+hypothesis. It also independently reproduces the owner's earlier field report
+that Learned can Giant Growth an opposing creature.
+
+`REVIEW.md` was reread through its newest 03:29 cycle before this record. It
+observed that the process had exited and was awaiting the write-up, but did
+not yet classify the result. A separate code audit confirmed the throw is
+before the candidate-arm loop and classified the run as an infrastructure
+void with a same-coordinate retry available after a narrowly declared repair.
+
+##### AQ4-OP2-I1 full-child signature transcription repair declaration
+
+Declared 2026-07-29 03:31 PDT, after the void above and before editing the
+signature predicate, constructing a proper alpha arm, or opening any selector
+coordinate. The scientific declaration, candidate direction, alpha order,
+stop rule, corpora, fits, metrics, safety battery, thresholds, seed,
+publication contract, and C16 champion status remain frozen.
+
+Falsifiable infrastructure hypothesis: changing the alpha-1 control's exact
+expectation from `opponent_growth_excluded=true` to the now-observed
+`opponent_growth_excluded=false` will make the bit-identical rejected child
+pass its reconstruction control without admitting any other safety signature.
+This is a transcription repair, not a relaxed candidate gate: every proper
+alpha must still have `opponent_growth_excluded=true` through the unchanged
+complete model-only battery.
+
+The implementation boundary is:
+
+1. In the alpha-1 expected-signature predicate only, invert the opponent
+   Growth expectation. Do not change `ArmEvaluation::gate_passed`,
+   `BehavioralGate::gate_passed`, any model score, or any candidate check.
+2. Add a pure test seam for the complete expected alpha-1 signature. A
+   synthetic record matching all observed booleans, including both known
+   false controls, must pass; independently mutating either false control or
+   any required true control must fail. Production must construct this seam
+   directly from the live shared `ModelGateReport`.
+3. Re-run the focused release and ASan/UBSan suites, full `make -j4 test`,
+   diff check, and post-commit identity review. Confirm C16, candidate, and
+   temporary paths before retry.
+4. If and only if those gates pass, retry exactly the same `--run` command
+   once. Alpha 1 must reproduce the full signature and then the original
+   descending stop-on-first-pass protocol continues. Any other mismatch is a
+   new void; do not patch around it in flight.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
