@@ -17920,14 +17920,16 @@ rules remain bit-identical. Fixed optimizer: Adam, batch 64, 64 epochs, rate
 0.003, beta1 0.9, beta2 0.999, epsilon `1e-8`, global norm clip 5, residual
 bound 0.10, and the fit seed above.
 
-Exact binary64 equality defines a tied maximum. The deployed selected index is
-the lowest engine-order index in its exact-max support. Per-root regret is
-`max_a T_a - T_selected`; top-one agreement is one exactly when that selected
-action is in the teacher exact-max support, otherwise zero. Pooled metrics are
-the arithmetic mean of the five deck means. Descriptor-order invariance
-compares action-keyed values and support after mapping the permuted list back
-to the original action identities; an exact tie need not preserve the
-order-dependent selected index.
+Exact binary64 equality defines a tied maximum. Production Learned Value
+samples uniformly among all indices in the policy exact-max support. Per-root
+regret is `max_a T_a` minus the mean teacher score over that support; expected
+top-one agreement is the fraction of policy-support actions also in the
+teacher exact-max support. Pooled metrics are the arithmetic mean of the five
+deck means. Descriptor-order invariance compares action-keyed values and
+support after mapping the permuted list back to the original action
+identities. This corrects a pre-census reviewer suggestion that Priority used
+the Attack selector's first-on-tie rule; direct inspection of the production
+Priority selector showed its uniform exact-max sampling instead.
 
 Collection is two-step to obey the census rule. The first command may only
 collect and print both frozen blocks: exact games, retained roots/options by
