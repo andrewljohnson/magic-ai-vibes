@@ -23087,6 +23087,62 @@ called `FAST_GO`. It remains neither a strength nor Learned-is-king claim and
 licenses no champion replacement, 200-game smoke, 2,000-game milestone, fixed
 panel, or web deployment otherwise.
 
+AQ13-DBC4-ACTION-PAIR result, completed 2026-07-29 10:20 PDT from pushed
+implementation commit `4d63ec4`, after the focused 11/11 suite, inherited
+DBC1 20/20, DBC2 8/8, and DBC3 10/10 suites passed `-Werror`-clean and an
+independent read-only review returned GO:
+
+```sh
+/usr/bin/time -p ./build/old-school-decision-boundary-action-pair --run
+```
+
+The exact frozen cache, fit tag `202607291601`, 80 TRAIN roots, 80 DEV roots,
+and four whole-game OOF folds were used. The fit completed all 256 full-batch
+Adam updates in 1.86 seconds wall time. Its immutable fingerprint was
+`4da124ae1ac8abd9293967cf0085f61d7f032506f156ff61fd9db60a5b4f50c9`;
+all 32 allowed Priority readout coordinates changed. Parent immutability,
+positive-zero precondition, exact model/surrogate agreement, Priority-only
+isolation, repeat determinism, cache/census/fold invariants, and bit-identical
+successor predictions and metrics all passed.
+
+Aggregate ranking results:
+
+| split | pair BCE parent -> candidate | listwise CE parent -> candidate | regret parent -> candidate | top-one parent -> candidate | stable-pair parent -> candidate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TRAIN | 0.674486823 -> 0.673490030 | 0.978292717 -> 0.977392431 | 0.016914708 -> 0.014459190 | 0.525000000 -> 0.525000000 | 0.700000000 -> 0.731250000 |
+| grouped OOF | 0.674486823 -> 0.673868344 | 0.978292717 -> 0.977728253 | 0.016914708 -> 0.014768675 | 0.525000000 -> 0.537500000 | 0.700000000 -> 0.731250000 |
+| reused DEV | 0.611686293 -> 0.611074664 | 1.089425767 -> 1.088669177 | 0.023696003 -> 0.026626351 | 0.553125000 -> 0.562500000 | 0.826296296 -> 0.822962963 |
+
+The exact per-deck regret gate was:
+
+| deck | OOF parent -> candidate | OOF gate | DEV parent -> candidate | DEV gate |
+| --- | ---: | --- | ---: | --- |
+| Green | 0.021988774 -> 0.013927177 | pass | 0.021999539 -> 0.025284540 | fail |
+| Red | 0.020646901 -> 0.021886729 | fail | 0.015785999 -> 0.010607150 | pass |
+| Blue | 0.019434697 -> 0.018503713 | pass | 0.009117605 -> 0.010671550 | fail |
+| White | 0.010196090 -> 0.011002314 | fail | 0.050950738 -> 0.055881603 | fail |
+| RU Aggro | 0.012307078 -> 0.008523442 | pass | 0.020626133 -> 0.030686913 | fail |
+
+Decision: **REJECT at the offline gate**. Pair BCE and listwise CE improved
+on TRAIN, OOF, and DEV, and aggregate OOF regret improved, so the
+action-conditioned signal is real. It nevertheless failed the conjunctive
+gate because OOF Red and White regret increased, aggregate DEV regret
+worsened by `0.002930348`, DEV stable-pair agreement decreased, and four of
+five DEV deck-regret guards failed. RU again supplied the largest held-out
+regression (`+0.010060780`). The existing model fixture battery, selector
+seed `202607291611`, and every gameplay/pilot coordinate remained unopened;
+C16 remains champion.
+
+Interpretation: the frozen 893-to-32 Priority trunk plus a newly fitted
+32-scalar readout can fit and cross-fit the small TRAIN sample, but does not
+transfer to the whole-game-disjoint DEV distribution. This is not evidence
+for tuning its temperature, tether, optimizer, steps, residual scale, seed,
+or thresholds. The next experiment must change the action representation
+itself—for example, learning directly from the complete owner-safe 893-wide
+state/action row—while retaining the fast cache, grouped whole-game OOF,
+five-deck guards, symmetric Learned continuations, and conditional gameplay
+gate. Its exact recipe will be declared separately after independent review.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
