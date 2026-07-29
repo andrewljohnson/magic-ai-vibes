@@ -20201,6 +20201,66 @@ If OP1 passes, a separately declared OP2 may collect from its frozen child.
 If it fails, stop this branch rather than sweeping caps, schedules, K/H,
 optimizer, epochs, temperature, residual, or seeds.
 
+AQ4-OP1 source-census result, completed 2026-07-29:
+**PASS; exact census frozen, training remains unopened**.
+
+Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-action-q-on-policy-successor --census
+```
+
+The committed sealed implementation at `2fe5b01` reconstructed exact G4B
+warm parent `d0d46d2b...003f8`, replaying 478 old G4B TRAIN labels and 160
+old G4B DEV labels solely to reproduce that parent. It then played the
+predeclared 40 TRAIN plus 40 DEV source games and opened zero OP1 label
+coordinates. Wall time was 730.05 seconds (`user 1596.28`, `sys 5.44`).
+The immutable owner-safe manifest hash is
+`2900062d0df381463663de6d7f25ce562197bfac0d859949ca0803e48b14aef7`.
+
+Exact split counts:
+
+| Split | Games | Actor-games | Nontrivial roots | Retained roots | Retained options |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TRAIN | 40 | 80 | 2,079 | 480 | 1,568 |
+| DEV | 40 | 80 | 2,442 | 160 | 436 |
+
+Exact per-deck counts:
+
+| Split | Deck | Actor-games | Nontrivial roots | Retained roots | Retained options |
+| --- | --- | ---: | ---: | ---: | ---: |
+| TRAIN | Green | 16 | 330 | 96 | 241 |
+| TRAIN | Red | 16 | 393 | 96 | 323 |
+| TRAIN | Blue | 16 | 386 | 96 | 223 |
+| TRAIN | White | 16 | 583 | 96 | 307 |
+| TRAIN | RU Aggro | 16 | 387 | 96 | 474 |
+| DEV | Green | 16 | 425 | 32 | 77 |
+| DEV | Red | 16 | 418 | 32 | 101 |
+| DEV | Blue | 16 | 368 | 32 | 73 |
+| DEV | White | 16 | 811 | 32 | 93 |
+| DEV | RU Aggro | 16 | 420 | 32 | 92 |
+
+The executable reported `result=PASS disposition=CENSUS_ONLY`,
+`op1_label_coordinates_opened=0`, `op1_model_created=0`,
+`selector_opened=0`, and `artifact_published=0`. Decision: accept only this
+source census and freeze the hash plus every aggregate/per-deck count above
+as conjunctive source seals. This is not evidence for the OP1 hypothesis and
+does not accept a model. After the freeze compiles, reproduces the census
+bit-exactly, passes tests, is committed, and receives independent review,
+the single preregistered `--run` becomes eligible.
+
+Sealed-census reproduction, completed 2026-07-29 with the exact command
+above: **PASS, bit-exact**. With the hash and every count populated in source,
+the executable reproduced the same manifest hash, both split aggregates, and
+all ten per-deck rows, now reporting `source_count_seal_frozen=1`. It again
+reported 478+160 old G4B replay labels and zero OP1 labels, model, selector,
+or artifact. Wall time was 729.05 seconds (`user 1594.29`, `sys 6.70`).
+Focused release tests passed 5/5, and two independent read-only reviews
+cross-summed every row and returned GO to commit this exact freeze. The
+single OP1 run remains unopened pending commit plus post-commit identity
+review.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

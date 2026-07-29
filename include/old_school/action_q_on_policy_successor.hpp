@@ -54,7 +54,8 @@ inline constexpr std::string_view kRequiredWarmParentFingerprint =
 // source and the notebook. The hash and every measured count are independent
 // conjunctive seals; leaving either empty keeps `--run` from opening a single
 // OP1 label or selector coordinate.
-inline constexpr std::string_view kFrozenCensusManifestHash = "";
+inline constexpr std::string_view kFrozenCensusManifestHash =
+    "2900062d0df381463663de6d7f25ce562197bfac0d859949ca0803e48b14aef7";
 
 enum class Command {
     Census,
@@ -94,7 +95,88 @@ struct CensusCountSeal {
     bool operator==(const CensusCountSeal&) const = default;
 };
 
-inline constexpr CensusCountSeal kFrozenCensusCounts{};
+inline constexpr CensusCountSeal kFrozenCensusCounts{
+    .splits = {{
+        SplitCountSeal{
+            .games = 40,
+            .actor_games = 80,
+            .nontrivial_roots = 2079,
+            .retained_roots = 480,
+            .retained_options = 1568,
+            .decks = {{
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 330,
+                    .retained_roots = 96,
+                    .retained_options = 241,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 393,
+                    .retained_roots = 96,
+                    .retained_options = 323,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 386,
+                    .retained_roots = 96,
+                    .retained_options = 223,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 583,
+                    .retained_roots = 96,
+                    .retained_options = 307,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 387,
+                    .retained_roots = 96,
+                    .retained_options = 474,
+                },
+            }},
+        },
+        SplitCountSeal{
+            .games = 40,
+            .actor_games = 80,
+            .nontrivial_roots = 2442,
+            .retained_roots = 160,
+            .retained_options = 436,
+            .decks = {{
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 425,
+                    .retained_roots = 32,
+                    .retained_options = 77,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 418,
+                    .retained_roots = 32,
+                    .retained_options = 101,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 368,
+                    .retained_roots = 32,
+                    .retained_options = 73,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 811,
+                    .retained_roots = 32,
+                    .retained_options = 93,
+                },
+                DeckCensus{
+                    .actor_games = 16,
+                    .nontrivial_roots = 420,
+                    .retained_roots = 32,
+                    .retained_options = 92,
+                },
+            }},
+        },
+    }},
+};
 
 std::optional<Command> parse_command(
     std::span<const std::string_view> arguments);

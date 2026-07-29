@@ -527,11 +527,49 @@ void test_census_validation_and_mutations() {
         }
     }
     expect(
-        !op1::frozen_census_seal_populated(),
-        "empty hash/count placeholders must keep science sealed");
+        op1::frozen_census_seal_populated(),
+        "measured hash/count source seals must be populated");
+    expect(
+        op1::kFrozenCensusManifestHash ==
+                "2900062d0df381463663de6d7f25ce562197bfac0d859949ca0803e48b14aef7" &&
+            op1::kFrozenCensusCounts.splits[0].games == 40 &&
+            op1::kFrozenCensusCounts.splits[0].actor_games == 80 &&
+            op1::kFrozenCensusCounts.splits[0].nontrivial_roots == 2079 &&
+            op1::kFrozenCensusCounts.splits[0].retained_roots == 480 &&
+            op1::kFrozenCensusCounts.splits[0].retained_options == 1568 &&
+            op1::kFrozenCensusCounts.splits[1].games == 40 &&
+            op1::kFrozenCensusCounts.splits[1].actor_games == 80 &&
+            op1::kFrozenCensusCounts.splits[1].nontrivial_roots == 2442 &&
+            op1::kFrozenCensusCounts.splits[1].retained_roots == 160 &&
+            op1::kFrozenCensusCounts.splits[1].retained_options == 436,
+        "source seals must bind the measured split census exactly");
+    const std::array<
+        std::array<op1::DeckCensus, old_school::kDeckCount>, 2>
+        expected_frozen_decks{{
+            {{
+                {16, 330, 96, 241},
+                {16, 393, 96, 323},
+                {16, 386, 96, 223},
+                {16, 583, 96, 307},
+                {16, 387, 96, 474},
+            }},
+            {{
+                {16, 425, 32, 77},
+                {16, 418, 32, 101},
+                {16, 368, 32, 73},
+                {16, 811, 32, 93},
+                {16, 420, 32, 92},
+            }},
+        }};
+    expect(
+        op1::kFrozenCensusCounts.splits[0].decks ==
+                expected_frozen_decks[0] &&
+            op1::kFrozenCensusCounts.splits[1].decks ==
+                expected_frozen_decks[1],
+        "source seals must bind all ten measured split/deck rows");
     expect_rejected(
         [&] { op1::require_frozen_census(census); },
-        "empty source seal must keep run closed");
+        "a synthetic census must differ from the frozen source seal");
 
     std::ostringstream printed;
     op1::print_census(printed, census, 12, 4);
