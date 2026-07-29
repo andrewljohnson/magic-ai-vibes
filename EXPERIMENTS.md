@@ -18852,6 +18852,11 @@ accounting field bit-exactly. Add a decisive actor-local noninterference
 control at Red's Priority response after an X=0 Braingeyser is put on the
 stack: two physical states have the same complete Red observation, Red hand,
 public state, and legal actions but different Blue hand/library identities.
+Make it action-nonvacuous: before casting, Blue holds Braingeyser plus another
+card so a post-cast Blue hand/library identity can be swapped, while Red
+explicitly holds Lightning Bolt and enough untapped red mana. Require the two
+authoritative Red action sets to be exactly equal and contain at least Pass
+plus one Bolt action.
 With the same inner K2 seed, Red's complete score vector, selected action, and
 accounting must be bit-identical. This proves the improved opponent response
 is a function of its own information set rather than the outer root's hidden
@@ -18860,7 +18865,11 @@ hand.
 Any failure of the actor-local invariant, root hidden/reverse identity,
 complete legal-action accounting, one-level nesting bound, or
 terminal/bootstrap/inner-rollout cross-sum is invalid evidence. The exact
-four directions are a conjunctive gate. If all pass, collect one cap-eight
+runtime accounting must include inner-search invocations and rollout
+evaluations per outer cell and prove a maximum active search nesting depth of
+one whenever the treatment is enabled; explicit zero must be bit-identical to
+the legacy path. The exact four directions are a conjunctive gate. If all
+pass, collect one cap-eight
 all-five-deck generation from this improved symmetric continuation and
 distill all-action soft targets into the existing Priority head before a
 60-game selector/manual web pilot. If X=0 still fails, do not tune K or H:
