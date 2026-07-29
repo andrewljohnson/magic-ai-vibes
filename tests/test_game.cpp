@@ -4682,6 +4682,55 @@ TEST(value_priority_head_adam_is_deterministic_isolated_and_bounded) {
                       residual.centered_policy_logits[index]));
     }
 
+    auto reversed_actions = actions;
+    std::reverse(
+        reversed_actions.begin(), reversed_actions.end());
+    const auto reversed_residual =
+        old_school::diagnose_learned_value_priority_residual(
+            state, 0, true, old_school::TurnPhase::FirstMain, 1,
+            reversed_actions, candidate, 0.10);
+    double caller_order_total = 0.0;
+    double reversed_caller_order_total = 0.0;
+    for (const double logit : residual.policy_logits) {
+        caller_order_total += logit;
+    }
+    for (const double logit :
+         reversed_residual.policy_logits) {
+        reversed_caller_order_total += logit;
+    }
+    CHECK(std::bit_cast<std::uint64_t>(
+              caller_order_total) !=
+          std::bit_cast<std::uint64_t>(
+              reversed_caller_order_total));
+    CHECK(std::bit_cast<std::uint64_t>(
+              residual.mean_legal_logit) ==
+          std::bit_cast<std::uint64_t>(
+              reversed_residual.mean_legal_logit));
+    for (std::size_t index = 0;
+         index < actions.size(); ++index) {
+        const std::size_t reversed_index =
+            actions.size() - index - 1;
+        CHECK(actions[index] ==
+              reversed_actions[reversed_index]);
+        CHECK(std::bit_cast<std::uint64_t>(
+                  residual.policy_logits[index]) ==
+              std::bit_cast<std::uint64_t>(
+                  reversed_residual
+                      .policy_logits[reversed_index]));
+        CHECK(std::bit_cast<std::uint64_t>(
+                  residual
+                      .centered_policy_logits[index]) ==
+              std::bit_cast<std::uint64_t>(
+                  reversed_residual
+                      .centered_policy_logits[
+                          reversed_index]));
+        CHECK(std::bit_cast<std::uint64_t>(
+                  residual.residuals[index]) ==
+              std::bit_cast<std::uint64_t>(
+                  reversed_residual
+                      .residuals[reversed_index]));
+    }
+
     const auto hidden = hidden_repartition(state, 0);
     const auto hidden_residual =
         old_school::diagnose_learned_value_priority_residual(

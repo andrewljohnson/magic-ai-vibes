@@ -10109,9 +10109,33 @@ value_priority_residual_unchecked(
         priority_policy_logits_for_model(
             state, player, candidates, sorcery_actions, phase,
             consecutive_passes, model);
+
+    // Floating-point addition is order-sensitive. Reduce in the
+    // engine-authoritative typed-action order so a caller permutation cannot
+    // change the common centering term. Filtering that canonical legal list
+    // preserves the historical reduction order for production's default
+    // complete list and for its order-preserving candidate subsets.
+    const std::vector<PriorityAction> canonical_actions =
+        legal_priority_actions(state, player, sorcery_actions);
     double total = 0.0;
-    for (const double logit : diagnostic.policy_logits) {
-        total += logit;
+    std::size_t summed = 0;
+    for (const PriorityAction& canonical_action :
+         canonical_actions) {
+        const auto candidate = std::find(
+            candidates.begin(), candidates.end(),
+            canonical_action);
+        if (candidate == candidates.end()) {
+            continue;
+        }
+        const std::size_t index =
+            static_cast<std::size_t>(
+                std::distance(candidates.begin(), candidate));
+        total += diagnostic.policy_logits[index];
+        ++summed;
+    }
+    if (summed != candidates.size()) {
+        throw std::logic_error(
+            "Priority residual candidates are not a canonical legal subset");
     }
     diagnostic.mean_legal_logit =
         total /
