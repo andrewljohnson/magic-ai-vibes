@@ -21685,6 +21685,81 @@ depth, PUCT constant, prior temperature, leaf value, or tie policy on this
 seed. A pass licenses only the latency/test ladder and a dated manual web
 pilot, not an all-five-deck strength claim or champion replacement.
 
+AQ7-ISP0 result, completed 2026-07-29 after commit `01771cb` was pushed and
+after independent review gave an explicit GO: **REJECT, 8/12 strategic
+directions and two additional evidence-gate failures**. C16 remains champion;
+ISP0 is not licensed for the web pilot, gameplay strength screens, artifact
+publication, or deployment. The reserved seed was opened exactly once with
+the declared command:
+
+```sh
+./build/old-school-information-set-puct-preflight --run-isp0
+```
+
+The run used seed `202607291001`, frozen parent
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+64 simulations/root, maximum eight searched decision plies, and the unchanged
+twelve-root manifest. It exited 1 after approximately 32 seconds. The exact
+root census was:
+
+| Root | Selected | Expected | Strategic | Root gate |
+|---|---|---|---:|---:|
+| redundant Counter | Pass | Pass | PASS | PASS |
+| intervening Counter | Counter underlying Air Elemental | Counter opposing Counterspell | FAIL | FAIL |
+| Braingeyser X choice | Pass | X=1 self | FAIL | FAIL |
+| Ancestral target | Pass | self | FAIL | FAIL |
+| sick-Bear Growth | Pass | Pass | PASS | PASS |
+| productive Growth | own Ironroot Treefolk | own Ironroot Treefolk | PASS | PASS |
+| live Force Spike | Force Spike Gray Ogre | same | PASS | PASS |
+| payable Force Spike | Force Spike Gray Ogre | Pass | FAIL | FAIL |
+| life-20 RU block | No Blocks | No Blocks | PASS | PASS |
+| life-four RU block | Flying Men blocks Air Elemental | same | PASS | PASS |
+| Flying Men attack | No Attack | No Attack | PASS | PASS |
+| Blue first blocker | No Block | No Block | PASS | FAIL |
+
+Every strategically failing root nevertheless passed the printed per-root
+coverage, prior, exact root accounting, deterministic replay, reversed-input,
+hidden-clone, shared-successor, Counter-PV, and combat flags. The Blue
+multi-block root selected the required first `No Block` but failed the
+nonvacuous exact-combat-completion witness (`combat=0`). The separate
+opponent-rollout noninterference aggregate also failed; isolation/default-off
+passed. These two failures independently reject ISP0 even if its four
+strategic misses are ignored. The preflight output correctly reported
+`result=REJECT hypothesis_passed=0 web_licensed=0 artifact_published=0`.
+
+The action evidence explains why this is not merely a root-prior tie:
+
+- Braingeyser self-X=1 had 10 visits and Q `0.260731`, while Pass had 22
+  visits and Q `0.331859`.
+- Ancestral-self had the best immediate successor value (`0.935288`) but its
+  backed Q (`0.904442`) still lost to Pass (`0.918041`), so continuation
+  value reversed a locally correct prior.
+- payable Force Spike retained the parent's wrong direction: 37 visits and Q
+  `0.296901` versus Pass at 27 visits and Q `0.268270`.
+- in the intervening-Counter root, targeting the underlying Air Elemental had
+  23 visits/Q `0.496159`, versus 17/Q `0.465695` for targeting the opposing
+  Counterspell.
+
+Mechanism interpretation: a real information-set tree is now working and
+does repair several field failures without card-specific policy code, but the
+first 64-simulation tree mostly expanded fresh information sets (58-65 nodes
+on most roots). It therefore did not establish that more tree reuse can
+overcome the frozen critic/continuation errors. Conversely, the clear Q
+separations mean this run does not support simply promoting the current
+search. Per the declaration, do not tune simulation count, depth, PUCT
+constant, prior temperature, leaf value, or tie policy on seed
+`202607291001`.
+
+Next: first repair and test the two *measurement/transition* failures without
+changing a policy choice: expose every opponent-noninterference subfield and
+make its accounting stop at the witnessed opponent decision rather than
+including any later root-private continuation; make the Blue exact-combat PV
+witness prove the actual completed cutoff path. Then preregister a fresh-seed,
+small search-budget mechanism diagnostic over the four failed strategic roots
+plus fixed controls. That diagnostic must distinguish “64 simulations never
+revisited enough nodes” from “the frozen C16 critic converges confidently to
+the wrong move.” It cannot retroactively accept ISP0.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
