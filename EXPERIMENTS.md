@@ -19513,6 +19513,101 @@ research axis is then a genuinely broader/iterated actor-local teacher corpus,
 because early stopping and the independent parent-retention treatment will
 both have failed to package the same fixed labels.
 
+##### AQ4-G3 broad parent-behavior anchor result
+
+Run 2026-07-28 from implementation-freeze commit `73adcf6`, after
+`make -j4 test` passed the complete repository gate (including 181/181 engine
+tests, AQ4-G1 7/7, AQ4-G2 7/7, AQ4-G3 9/9, 118/118 web tests, and 48/48
+certification tests). The independently run focused
+AddressSanitizer/UndefinedBehaviorSanitizer AQ4-G3 gate also passed 9/9.
+`REVIEW.md` was reread through its newest 22:14 PDT entry immediately before
+opening science.
+
+Exact command:
+
+```sh
+/usr/bin/time -p ./build/old-school-action-q-nested-actor-anchor --run
+```
+
+The command exited 1 after 526.52 seconds (`user 1496.20`, `sys 7.17`), the
+sealed scientific rejection status. All immutable inputs reproduced:
+
+- G1 corpus digest
+  `3b1fa739cbe5ece28f581f7361bc7ba22e9bc0d6f90f39addce783f1e7df346b`;
+- exact C16 SHA-256
+  `53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`;
+- exact neutral artifact SHA-256
+  `47d94823f043971f6f9f0aa5f552bfae210af9615d8f6dc7392e52dad3eaa105`;
+- exact neutral selected-order SHA-256
+  `c0925e709daaeefdb7d7714db6b07e68bd70b60f0a201d1626ee0fde28f61b7b`;
+  and
+- exact omitted-anchor G1 control fingerprint
+  `e0217302d83a4949950af84ab754e38be6ebbd6c2adac6a4193f05f70b7a1376`,
+  with corpus, fingerprint, and all four aggregate metric bit patterns exact.
+
+The treatment batch was exactly 320 teacher rows / 1,023 options followed by
+160 anchor rows / 439 options. Its digest was
+`a94352444913750be749a55348a1ff0db086b2cf46f0b597cb858efcde6878a0`.
+Teacher and anchor loss mass were each exactly one in Green, Red, Blue,
+White, and RU Aggro. The resulting candidate fingerprint was
+`ccfde29785117007d38dcc030aa729d124587e556e6739aca84484b9901965a4`.
+
+The complete teacher comparison was:
+
+| Split / deck | C16 agreement | G3 agreement | C16 regret | G3 regret | G3 − C16 regret |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| FIT equal-deck | 0.668750 | 0.787500 | 0.01805075 | 0.00776980 | -0.01028094 |
+| DEV equal-deck | 0.727282 | 0.689385 | 0.01580498 | 0.01600275 | +0.00019777 |
+| FIT Green | 0.640625 | 0.828125 | 0.01826824 | 0.00498870 | -0.01327953 |
+| DEV Green | 0.750000 | 0.640625 | 0.01448321 | 0.01326185 | -0.00122137 |
+| FIT Red | 0.734375 | 0.703125 | 0.02030503 | 0.01015712 | -0.01014791 |
+| DEV Red | 0.671875 | 0.640625 | 0.02056503 | 0.02153666 | +0.00097164 |
+| FIT Blue | 0.671875 | 0.812500 | 0.02708572 | 0.01393901 | -0.01314671 |
+| DEV Blue | 0.796875 | 0.812500 | 0.01718114 | 0.01470512 | -0.00247602 |
+| FIT White | 0.640625 | 0.796875 | 0.00959978 | 0.00308597 | -0.00651381 |
+| DEV White | 0.687500 | 0.750000 | 0.00905381 | 0.00875275 | -0.00030106 |
+| FIT RU Aggro | 0.656250 | 0.796875 | 0.01499496 | 0.00667822 | -0.00831674 |
+| DEV RU Aggro | 0.730159 | 0.603175 | 0.01774170 | 0.02175736 | +0.00401567 |
+
+Thus the regularized candidate learned the training teacher strongly, but
+failed the preregistered aggregate G1 DEV-improvement gate; Red and especially
+RU Aggro regressed enough to outweigh Green, Blue, and White improvements.
+
+The complete card-agnostic field controls were mixed. Descriptor/order
+identity, redundant Counterspell, and sick-Bear Giant Growth all passed.
+Productive Braingeyser and live Force Spike failed. The complete Ancestral
+gate passed: self `0.97521432988961398` exceeded opponent
+`0.92283930280315085`, opponent was absent from exact-max support, and legal
+actions, fingerprint, and hidden-repartition controls were exact.
+
+Neutral DEV retention also failed:
+
+| Deck | Unanchored G1 KL | Anchored G3 KL | Unanchored support changes | Anchored support changes |
+| --- | ---: | ---: | ---: | ---: |
+| Green | 0.02308145 | 0.01507741 | 19 | 17 |
+| Red | 0.02612418 | 0.01477554 | 10 | 11 |
+| Blue | 0.01307791 | 0.00876761 | 13 | 16 |
+| White | 0.01150299 | 0.00309899 | 13 | 14 |
+| RU Aggro | 0.03011220 | 0.02259916 | 18 | 15 |
+| Equal-deck / pooled support | 0.02077974 | 0.01286374 | 73 | 73 |
+
+The anchor reduced equal-deck KL by 38.1%, not the required at-least 50%.
+Exact-support changes did not decrease at all, and Red, Blue, and White
+violated the per-deck support nonworsening requirement. Therefore the original
+G1 offline gate, per-deck neutral gate, pooled KL-halving gate, and pooled
+support-halving gate all rejected.
+
+Decision: **reject AQ4-G3 and close the complete fixed-label packaging
+family**. Reserved selector seed `202607282201` remained unopened, no 60-game
+screen ran, no model artifact was published, and no web policy changed. C16
+remains champion. Early stopping showed that fewer passes cannot package this
+repair-dense teacher; the independent 1:1 parent-behavior treatment now shows
+that simply anchoring the same labels cannot either. Per the declaration, do
+not sweep anchor weight, epoch count, learning rate, residual, optimizer seed,
+or neutral subset. The next bot experiment must broaden and iterate the
+actor-local search-teacher corpus so ordinary decisions receive improved
+targets rather than only a penalty for departing from C16.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
