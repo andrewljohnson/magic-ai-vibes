@@ -22793,6 +22793,20 @@ may be called `FAST_GO`. It remains neither a strength nor Learned-is-king
 claim, and licenses no champion replacement, 200-game smoke, 2,000-game
 milestone, fixed panel, or deployment otherwise.
 
+###### AQ12-DBC3-I0 representation-scope clarification
+
+Recorded 2026-07-29 after an independent read-only declaration review and
+before implementation exposed a hidden activation or any fit ran. DBC3 is a
+**fixed nonlinear-feature readout**, not a newly learned state
+representation: the 674-wide observation and both C16 input-to-hidden trunks
+remain frozen. “Next representation rung” above means that the ranking loss
+can use the existing tanh interaction basis instead of only the raw linear
+coordinates. A rejection closes this frozen-hidden-output treatment; it does
+not prove that the actor-local observation is intrinsically insufficient.
+That stronger question requires the separately declared action-conditioned
+or newly trainable representation named as the next step. This clarification
+changes no parameter, target, loss, gate, identifier, or conditional seed.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
