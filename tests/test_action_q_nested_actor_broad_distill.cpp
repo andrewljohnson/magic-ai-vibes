@@ -394,7 +394,8 @@ void test_cli_recipe_and_search_constants_are_sealed() {
             aq::kActorGamesPerDeckAndSplit == 16 &&
             aq::kFrozenPreflightDigest ==
                 "8a5800dc3ebd7cfad3c8cc893e3aa7e5795f38cb63fcf10442f7bb6588fd950d" &&
-            aq::kFrozenCensusManifestHash.empty() &&
+            aq::kFrozenCensusManifestHash ==
+                "8954d6b98075a588fe6000efb387c264b661608d6c8a46f9a750074a87ce838f" &&
             recipe == g1_recipe &&
             base.seed == 123 &&
             base.worlds == 8 &&

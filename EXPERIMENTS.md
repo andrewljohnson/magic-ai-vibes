@@ -19840,6 +19840,48 @@ no selector, and published no artifact. The digest is now frozen in source;
 the census hash remains empty, so `--run` is still sealed. The next and only
 licensed action after committing/reviewing this freeze is `--census`.
 
+###### AQ4-G4B source-census result and manifest freeze
+
+Completed 2026-07-28 from preflight-freeze commit `486088d`, after an
+independent replay reproduced the exact preflight digest and returned GO.
+Before recording this result, `REVIEW.md` was reread through its newest
+23:14 PDT cycle; it contained no conflicting result.
+
+Exact command:
+
+```sh
+/usr/bin/time -p ./build/old-school-action-q-broad-distill --census
+```
+
+Result: **PASS / CENSUS_ONLY**, with owner-safe manifest SHA-256
+`8954d6b98075a588fe6000efb387c264b661608d6c8a46f9a750074a87ce838f`
+and runtime 68.50 seconds real / 67.82 user / 0.25 sys. The exact census was
+80 games: 40 TRAIN and 40 whole-game-disjoint DEV. TRAIN retained 478 roots;
+DEV retained its ceiling of 160.
+
+| Split | Deck | Actor-games | Nontrivial roots | Retained roots | Retained options |
+| --- | --- | ---: | ---: | ---: | ---: |
+| TRAIN | Green | 16 | 351 | 94 | 234 |
+| TRAIN | Red | 16 | 314 | 96 | 338 |
+| TRAIN | Blue | 16 | 341 | 96 | 238 |
+| TRAIN | White | 16 | 559 | 96 | 295 |
+| TRAIN | RU Aggro | 16 | 323 | 96 | 274 |
+| DEV | Green | 16 | 287 | 32 | 94 |
+| DEV | Red | 16 | 324 | 32 | 119 |
+| DEV | Blue | 16 | 291 | 32 | 84 |
+| DEV | White | 16 | 412 | 32 | 102 |
+| DEV | RU Aggro | 16 | 281 | 32 | 151 |
+
+Green TRAIN was two roots below its 96-root ceiling because at least one
+actor-game had fewer than six nontrivial roots; the census does not infer a
+more specific distribution. The registered per-actor-game weight still gives
+every actor-game mass `1/16` and every deck mass one.
+The census created no model, opened zero G4B AQ4 label coordinates, scored
+zero candidate roots, opened no selector, and published no artifact. The
+manifest hash is now frozen in source. After committing and reviewing that
+freeze, the single predeclared `--run` may reconstruct both boundaries and
+open the G4B teacher coordinates.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

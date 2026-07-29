@@ -58,7 +58,8 @@ inline constexpr std::string_view kFrozenPreflightDigest =
 
 // Filled only after the source-only `--census` result is recorded. Keeping
 // this empty seals `--run` before any G4B search coordinate can be opened.
-inline constexpr std::string_view kFrozenCensusManifestHash = "";
+inline constexpr std::string_view kFrozenCensusManifestHash =
+    "8954d6b98075a588fe6000efb387c264b661608d6c8a46f9a750074a87ce838f";
 
 enum class Command {
     Preflight,
