@@ -19608,6 +19608,185 @@ or neutral subset. The next bot experiment must broaden and iterate the
 actor-local search-teacher corpus so ordinary decisions receive improved
 targets rather than only a penalty for departing from C16.
 
+##### AQ4-G4B broad game-disjoint actor-teacher declaration
+
+Declared 2026-07-28 at exact parent/result commit `af39aa5`, after AQ4-G3
+closed the fixed-label packaging family and before changing G4B code,
+executing a new source game, observing a new root census, scoring a new root
+with AQ4, fitting a model, or opening either fresh seed below. `REVIEW.md` was
+reread through its newest 22:29 PDT cycle. It countersigns the conclusion that
+ordinary decisions need improved actor-teacher targets. C16 remains champion
+and deployed on the web.
+
+Fresh collection root `202607282301` and selector seed `202607282311` were
+searched across source-visible code, tests, the notebook, and Git history and
+were unused.
+
+Falsifiable hypothesis: the passing AQ4-D1 actor-local teacher can be
+distilled into a generally stronger fast policy if its all-action targets are
+collected from a broader, trajectory-balanced corpus with a whole-game-
+disjoint DEV split. One fixed G4B fit will:
+
+1. strictly reduce equal-deck AQ4 teacher regret from C16 on the frozen,
+   game-disjoint DEV corpus, with no deck worsening by more than `0.01`;
+2. pass the redundant Counterspell, productive Braingeyser, sick-Bear Giant
+   Growth, live Force Spike, complete Ancestral, hidden-information, and
+   component-isolation gates; and
+3. win at least 31/60 against exact C16 with at least 3/12 wins on each of
+   Green, Red, Blue, White, and RU Aggro.
+
+This is one fresh-corpus model and one conditional selector, not a fit,
+architecture, K/H, seed, or row-selection sweep. It adds no card name,
+hand-authored score, combat score, Handcrafted signal, opponent hidden
+identity, or G1/G2/G3 training row. The existing 893-input/32-hidden Priority
+head is held fixed because AQ4-D1 already proved it can represent all observed
+strategic directions at the search level; G4B tests the newly diagnosed
+corpus/generalization bottleneck first.
+
+`REVIEW.md` noted that the WORK0 machinery could make broader collection
+cheap. A read-only implementation audit found that only its codec/builder seam
+exists: there is no authenticated loader, publisher, or cache artifact, and
+its own contract forbids evaluator consumption. Direct one-time in-memory use
+could be prospectively authorized only by permanently burning the
+reconstruction coordinate and sacrificing replayability. G4B therefore
+disagrees with using WORK0 as the vehicle, not with the review's corpus
+diagnosis: it leaves the unexecuted WORK0 protocol untouched and uses a fresh,
+small, reproducible corpus at essentially G1's already-measured label budget.
+
+###### Frozen source schedule and census boundary
+
+Both source seats are exact frozen C16 mirrors: artifact 3,111,437 bytes /
+SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+model fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+`K8/R1/H4`, historical shallow blend, Legacy continuation, and zero Priority
+residual, epsilon, Pass dominance, resolved prior, and adversarial blocks.
+The turn cap is 128.
+
+TRAIN is exactly
+`balanced_schedule(202607282301, generation=0, block=0)`: 40 games covering
+all ten unordered deck pairs, both seat assignments, and both starting
+players. For each of its 80 actor-games, enumerate chronological nontrivial
+Priority roots and retain at most six through
+`evenly_spaced_retained_indices` before inspecting any action, score, outcome,
+phase, stack, or candidate. Every retained TRAIN root trains.
+
+DEV is exactly the disjoint
+`balanced_schedule(202607282301, generation=0, block=1)`, with the same
+40-game balance. Retain at most two chronological nontrivial Priority roots
+per actor-game by the same blind rule. Every retained DEV root evaluates and
+none may train. TRAIN and DEV game seeds, root coordinates, and owner-safe
+manifest identities must be disjoint. Any rootless actor-game, missing deck,
+schedule imbalance, or cross-split collision rejects the census. Thus the
+pre-observation ceilings are 480 TRAIN and 160 DEV roots; actual root and
+option counts are descriptive and must be measured, recorded, and frozen
+before labeling rather than guessed.
+
+Within each split, each actor-game's retained roots share total weight exactly
+`1/16`: a root in an actor-game retaining `r` roots has weight
+`1 / (16 * r)`. Every owner deck has exactly 16 actor-games and therefore
+exact total loss/evaluation mass one, matching G1/G3's optimizer scale while
+remaining independent of root count or action width. This prevents root-rich
+long games or White control trajectories from dominating.
+
+The two-step fixed CLI is:
+
+```sh
+./build/old-school-action-q-broad-distill --census
+./build/old-school-action-q-broad-distill --run
+```
+
+`--census` may execute only the 80 deterministic source games, retain roots,
+and print the owner-safe manifest hash plus exact per-split/per-deck
+games/roots/options. It cannot open an AQ4 PrioritySearch coordinate, fit a
+model, score a candidate, open the selector, or publish an artifact. After
+that exact census is recorded and its hash frozen in source, commit and review
+the freeze before `--run`. The run must reconstruct the identical manifest
+before opening any teacher coordinate.
+
+No retained type, manifest, digest, or report may contain `GameState`,
+opponent-hand/library identities, library order, source outcome, or sampled
+world. It contains only stable coordinates, complete typed legal actions and
+descriptors, owner-safe 893-feature rows, scalar scores/targets/accounting, and
+weights.
+
+###### Teacher, fit, and offline gate
+
+Before corpus labeling, replay G1's already-open exact K8 preflight
+coordinates as deterministic controls—no fresh preflight randomness:
+
+1. redundant Counterspell seed `17325739327377847697`;
+2. Braingeyser seed `7290531001140838622`;
+3. sick-Bear Growth seed `14289136244687689594`;
+4. live Force Spike seed `18147400410803436980`; and
+5. actor-local noninterference seed `855487582482885674`.
+
+Use outer `K8/R1/H8`, four workers, no outer shallow blend, and symmetric
+actor-local inner `K2/R1/H4` with its historical shallow blend. All five
+directions plus reversed-order, hidden-repartition, complete
+action/accounting, and maximum-nesting-depth-one gates must pass bit-exactly
+to their frozen G1 evidence. Do not change K, H, or a seed if this control
+replay fails.
+
+For a retained root, pair residual-free C16 base `K8/R1/H4` and AQ4 teacher
+`K8/R1/H8 + actor-local K2/R1/H4` on the same first eight common worlds. Its
+search seed is exactly:
+
+```text
+derive_seed(
+  202607282301, PrioritySearch,
+  split, schedule_index,
+  (actor << 32) | nontrivial_ordinal)
+```
+
+where `split=0` for TRAIN and `1` for DEV. Require complete legal-action,
+world, terminal/bootstrap, inner-search, nesting, feature, descriptor, and
+action-order cross-sums. Convert every complete teacher mean vector through
+the existing temperature-0.10, 90%-softmax/10%-uniform target.
+
+Fit only TRAIN in canonical schedule/actor/retained order with one call to the
+unchanged Priority-head Adam optimizer: batch 64, 64 epochs, learning rate
+`0.003`, betas `0.9/0.999`, epsilon `1e-8`, global gradient clip 5, fit seed
+`12262988820247274425`, deployed residual `0.10`, and policy temperature
+`0.10`. Repeat from C16 and require bit-identical candidate fingerprint and
+components; C16 must remain immutable and only Priority may change. A
+canonical digest binds source schedules/manifests, split/deck/actor-game,
+order, every feature/base/teacher/target/weight bit, recipe, optimizer, and
+parent component.
+
+Offline eligibility is conjunctive:
+
+- TRAIN equal-deck teacher regret strictly improves over C16;
+- DEV equal-deck teacher regret strictly improves over C16;
+- every DEV deck's candidate regret is at most C16 regret plus `0.01`;
+- C16's mean teacher regret is strictly greater than zero within every TRAIN
+  and DEV deck, and every target is finite and normalized;
+- the candidate passes descriptor/order identity, redundant Counterspell,
+  productive Braingeyser, sick-Bear Growth, live Force Spike, and the complete
+  Ancestral self-target/legal-set/fingerprint/hidden-repartition gate; and
+- all census, digest, repeat-fit, parent-immutability, Priority-only,
+  actor-local hidden-safety, and accounting gates pass.
+
+Report TRAIN and DEV agreement/regret in aggregate and for all five decks.
+The DEV block is a development screen, not powered milestone evidence.
+
+Only one complete offline-passing candidate may open
+`run_bot_benchmark(1, 202607282311, G4B, C16, max_turns=500, false)`.
+Both policies use ordinary fast `K8/R1/H4` deployment; C16 has residual zero
+and G4B uses its learned residual `0.10`. Reuse the exact 60-game validator:
+FAST_GO at at least 37 wins plus at least 3/12 per deck, MANUAL_ONLY at 31--36
+with the same deck floor, otherwise REJECT. This selector is only a quick
+manual-pilot gate, never a strength or Learned-is-king claim.
+
+If G4B fails offline or selector, retain the result and close this
+one-generation broad-corpus coordinate without changing cap, split, K/H,
+network width, optimizer, epochs, temperature, residual, or seed. The next
+experiment is a true on-policy multi-generation loop with disjoint whole-game
+TRAIN/DEV schedules and the previous generation's deployed Priority residual
+active in its next actor-local teacher; merely passing a Priority-only child
+into the current residual-zero teacher would be a no-op, not iteration.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
