@@ -22610,6 +22610,72 @@ otherwise reject as an implementation mismatch. The already-declared global
 gradient-norm clipping at `5.0`, DEV stable-pair nondecrease, and DEV
 successor-cell BCE `+0.005` guard are mandatory, not optional diagnostics.
 
+###### AQ11-DBC2-RANK-DIRECT result — REJECT at offline gate
+
+Recorded 2026-07-29 09:14 PDT after rereading the newest independent review
+entry, `2026-07-29 09:03 PDT`, which countersigned this exact experiment. The
+reviewed runner was frozen and pushed as commit `95dc3bf` before the fit
+identifier was opened. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-boundary-rank-direct --run
+```
+
+The command loaded the exact 25,886,525-byte cache with SHA-256
+`9234b10d7181d566d4dacb972fbb32bf20d2961eb34c4d95d7e92ece1622a4a4`,
+the 1,824-example source digest
+`28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58`,
+and C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+The deterministic 256-update fit produced candidate
+`133d7f275cb2b4dfeab93a303e660b528fd4f4858803a7bb6b206e28b6d7b232`
+twice, changed 158 stored direct coordinates, and passed the recipe,
+replay, exact-model, parent-immutability, shared-treatment, context-freeze,
+policy-head-freeze, and zero-surrogate-error witnesses. Optimizer objective
+fell from `0.978292717` to `0.977871443`; fitted delta L2 was
+`0.090618170`. No gradient step clipped. Runtime was 2.94 seconds real.
+
+Aggregate actual-model results:
+
+| split | metric | C16 | DBC2 |
+| --- | --- | ---: | ---: |
+| TRAIN | listwise CE | 0.978292717 | 0.977460861 |
+| TRAIN | teacher regret | 0.016914708 | 0.016830149 |
+| TRAIN | top-one agreement | 0.525000000 | 0.537500000 |
+| TRAIN | stable-pair agreement | 0.700000000 | 0.706250000 |
+| TRAIN | successor BCE | 0.650133769 | 0.650877545 |
+| DEV | listwise CE | 1.089425767 | 1.089136229 |
+| DEV | teacher regret | 0.023696003 | 0.025884969 |
+| DEV | top-one agreement | 0.553125000 | 0.540625000 |
+| DEV | stable-pair agreement | 0.826296296 | 0.822962963 |
+| DEV | successor BCE | 0.566231869 | 0.565172135 |
+
+DEV per-deck results:
+
+| deck | listwise CE C16 → DBC2 | regret C16 → DBC2 | top one C16 → DBC2 | stable pair C16 → DBC2 | BCE C16 → DBC2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Green | 0.996072490 → 0.996294053 | 0.021999539 → 0.021999539 | 0.484375000 → 0.484375000 | 1.000000000 → 1.000000000 | 0.575646907 → 0.577577728 |
+| Red | 0.968726317 → 0.967387633 | 0.015785999 → 0.015785999 | 0.562500000 → 0.562500000 | 0.925925926 → 0.925925926 | 0.605692918 → 0.597947418 |
+| Blue | 0.974288962 → 0.973941903 | 0.009117605 → 0.009117605 | 0.687500000 → 0.687500000 | 1.000000000 → 1.000000000 | 0.503932634 → 0.497412472 |
+| White | 1.329804509 → 1.329433274 | 0.050950738 → 0.050950738 | 0.468750000 → 0.468750000 | 0.222222222 → 0.222222222 | 0.503638027 → 0.505457389 |
+| RU Aggro | 1.178236555 → 1.178624283 | 0.020626133 → 0.031570962 | 0.562500000 → 0.500000000 | 0.983333333 → 0.966666667 | 0.642248859 → 0.647465668 |
+
+Decision: **REJECT**. Although listwise CE improved by a small amount on
+TRAIN and DEV, the predeclared primary DEV teacher-regret condition failed,
+DEV top-one and stable-pair agreement both fell, and RU Aggro regret rose by
+`0.010944829`, exceeding the per-deck guard. The mechanism battery and fresh
+selector were correctly left unopened, so this run used zero gameplay
+evaluation seeds and licenses no pilot or deployment.
+
+The result falsifies the hypothesis that one shared linear observation
+residual is sufficient. It can fit the training rankings and slightly improve
+average DEV distribution matching, but it cannot condition its correction
+enough to preserve RU's already-correct choices. The next candidate must be a
+separately declared nonlinear state-conditional ranker using the same frozen
+owner-safe corpus; no DBC2 learning-rate, temperature, regularization,
+step-count, or seed retry is licensed.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
