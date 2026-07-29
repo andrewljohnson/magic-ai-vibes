@@ -92,6 +92,9 @@ FQ4_DEV_CANDIDATE_PUBLISHER_SOURCE := src/fq4_dev_candidate_publisher.cpp
 FQ4_DEV1_GAMEPLAY_SOURCE := src/fq4_dev1_gameplay.cpp
 FQ4_DEV5_GAMEPLAY_SOURCE := src/fq4_dev5_gameplay.cpp
 FQ4_BLEND_EXPLORE_SOURCE := src/fq4_blend_explore.cpp
+ACTION_Q_EXPLORE_SOURCE := src/action_q_explore.cpp
+ACTION_Q_FIELD_GATE_SOURCE := src/action_q_field_gate.cpp
+ACTION_Q_OFFLINE_GATE_SOURCE := src/action_q_offline_gate.cpp
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE := src/fq4_dev_background_diagnostic.cpp
 FQ4_DEV_COVERAGE_CENSUS_SOURCE := src/fq4_dev_coverage_census.cpp
 FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
@@ -169,6 +172,10 @@ FQ4_DEV5_GAMEPLAY_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev5-gameplay-tests
 FQ4_DEV5_GAMEPLAY := $(BUILD_DIR)/old-school-fq4-dev5-gameplay
 FQ4_BLEND_EXPLORE_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-blend-explore-tests
 FQ4_BLEND_EXPLORE := $(BUILD_DIR)/old-school-fq4-blend-explore
+ACTION_Q_EXPLORE_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-explore-tests
+ACTION_Q_FIELD_GATE_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-field-gate-tests
+ACTION_Q_OFFLINE_GATE_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-offline-gate-tests
+ACTION_Q_EXPLORE := $(BUILD_DIR)/old-school-action-q-explore
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic-tests
 FQ4_DEV_BACKGROUND_DIAGNOSTIC := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic
 FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev4-coverage-census-tests
@@ -213,6 +220,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 
 .PHONY: FORCE all test test-build-graph test-capture test-certify test-clean-contract test-learned-iteration test-probes attack-regression test-audit-common test-artifact-integrity test-fq0-rusage-guard fq0-quarantine-supervisor test-terminal-weight-eval test-joint-c17-eval test-joint-c17-runner test-joint-c17-execution test-joint-c17-training test-joint-c17-orchestration test-turn-alignment-audit test-target-factorial-audit test-replay-weight-audit test-rb0-mechanical-preflight rb0-mechanical-preflight test-dvr2-harvest dvr2-harvest test-dvr2-replay-bundle test-output-calibration test-output-calibration-artifact test-output-calibration-runner output-calibration test-oc1-action-eval test-oc1-action-scoring test-oc1-action-regression oc1-action-regression test-ac1-teacher-audit ac1-teacher-audit test-fq0 test-fq0-information-set test-fq0-bellman test-fq0-dominance test-fq0-dominance-transition test-fq0-bellman-science test-fq0-bellman-audit test-fq0-bellman-run fq0-bellman-audit test-fq0-sequence-projection test-fq0-causal-quotient test-fq0-causal-quotient-production fq0-causal-quotient test-fq4-priority-math test-fq4-priority-collection test-fq4-dev-bundle test-fq4-dev-generator test-fq4-dev-evaluator fq4-dev-evaluator test-fq4-dev-candidate-artifact test-fq4-dev-candidate-publisher fq4-dev-candidate-publish test-fq4-dev1-gameplay test-fq4-dev5-gameplay fq4-dev5-gameplay-smoke test-fq4-blend-explore fq4-blend-explore test-fq4-dev-background-diagnostic fq4-dev-background-diagnostic test-fq4-dev-coverage-census fq4-dev-coverage-census test-fq4-neutral-candidate-publisher fq4-neutral-candidate-publish test-fq4-priority-fit fq4-priority-fit test-fq4-priority-fit-d0b fq4-priority-fit-d0b test-fq4-d1-field-gate fq4-d1-census test-fq4-d1-treatment fq4-d1-treatment test-fq4-dev-schedule fq4-dev-schedule test-web test-web-ui test-web-rendered web web-target-stack web-interaction web-journey web-delayed-journey web-build benchmark benchmark-deep benchmark-learned benchmark-challenger stability evolve run clean
 .PHONY: test-fq4-work0-cache test-fq4-work0-firewall
+.PHONY: test-action-q-explore test-action-q-field-gate test-action-q-offline-gate action-q-census action-q-run
 
 all: $(SIMULATOR)
 
@@ -335,6 +343,8 @@ FQ4_DEV_CANDIDATE_PUBLISHER_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(
 FQ4_DEV1_GAMEPLAY_LINK_SOURCES := $(FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES) $(FQ4_DEV1_GAMEPLAY_SOURCE)
 FQ4_DEV5_GAMEPLAY_LINK_SOURCES := $(FQ4_DEV_CANDIDATE_ARTIFACT_LINK_SOURCES) $(FQ4_DEV5_GAMEPLAY_SOURCE)
 FQ4_BLEND_EXPLORE_LINK_SOURCES := $(FQ4_DEV5_GAMEPLAY_LINK_SOURCES) $(FQ4_BLEND_EXPLORE_SOURCE)
+ACTION_Q_EXPLORE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ACTION_Q_EXPLORE_SOURCE) $(ACTION_Q_FIELD_GATE_SOURCE)
+ACTION_Q_OFFLINE_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(ACTION_Q_EXPLORE_SOURCE) $(ACTION_Q_FIELD_GATE_SOURCE) $(ACTION_Q_OFFLINE_GATE_SOURCE)
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES := $(FQ4_DEV_EVALUATOR_LINK_SOURCES) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE)
 FQ4_DEV_COVERAGE_CENSUS_LINK_SOURCES := $(FQ4_DEV_GENERATOR_LINK_SOURCES)
 FQ4_NEUTRAL_SUPPLEMENT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(FQ4_DEV_BUNDLE_LINK_SOURCES) $(FQ4_DEV_SCHEDULE_SOURCE) $(FQ4_NEUTRAL_SUPPLEMENT_SOURCE)
@@ -403,6 +413,14 @@ $(eval $(call link_program,$(FQ4_DEV5_GAMEPLAY),$(FQ4_DEV5_GAMEPLAY_LINK_SOURCES
 $(eval $(call link_program,$(FQ4_BLEND_EXPLORE_TEST_RUNNER),$(FQ4_BLEND_EXPLORE_LINK_SOURCES) tests/test_fq4_blend_explore.cpp))
 
 $(eval $(call link_program,$(FQ4_BLEND_EXPLORE),$(FQ4_BLEND_EXPLORE_LINK_SOURCES) src/fq4_blend_explore_main.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_EXPLORE_TEST_RUNNER),$(ACTION_Q_EXPLORE_LINK_SOURCES) tests/test_action_q_explore.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_FIELD_GATE_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(ACTION_Q_FIELD_GATE_SOURCE) tests/test_action_q_field_gate.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_OFFLINE_GATE_TEST_RUNNER),$(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) tests/test_action_q_offline_gate.cpp))
+
+$(eval $(call link_program,$(ACTION_Q_EXPLORE),$(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) src/action_q_explore_main.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER),$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES) tests/test_fq4_dev_background_diagnostic.cpp))
 
@@ -522,6 +540,7 @@ $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 
 test: $(FQ4_DEV5_GAMEPLAY_TEST_RUNNER) $(FQ4_DEV5_GAMEPLAY)
 test: $(FQ4_BLEND_EXPLORE_TEST_RUNNER) $(FQ4_BLEND_EXPLORE)
+test: $(ACTION_Q_EXPLORE_TEST_RUNNER) $(ACTION_Q_FIELD_GATE_TEST_RUNNER) $(ACTION_Q_OFFLINE_GATE_TEST_RUNNER) $(ACTION_Q_EXPLORE)
 test: $(FQ4_WORK0_CACHE_TEST_RUNNER)
 test: test-fq4-work0-firewall
 
@@ -574,6 +593,16 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 	./$(FQ4_DEV1_GAMEPLAY_TEST_RUNNER)
 	./$(FQ4_DEV5_GAMEPLAY_TEST_RUNNER)
 	./$(FQ4_BLEND_EXPLORE_TEST_RUNNER)
+	./$(ACTION_Q_EXPLORE_TEST_RUNNER)
+	./$(ACTION_Q_FIELD_GATE_TEST_RUNNER)
+	./$(ACTION_Q_OFFLINE_GATE_TEST_RUNNER)
+	@set +e; output=`./$(ACTION_Q_EXPLORE) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-explore (--census|--run)' >/dev/null
 	@set +e; output=`./$(FQ4_DEV5_GAMEPLAY) unexpected 2>&1`; status=$$?; set -e; \
 	if [ $$status -ne 2 ]; then \
 		printf '%s\n' "$$output"; \
@@ -1260,6 +1289,28 @@ test-fq4-blend-explore: $(FQ4_BLEND_EXPLORE_TEST_RUNNER) $(FQ4_BLEND_EXPLORE)
 
 fq4-blend-explore: $(FQ4_BLEND_EXPLORE)
 	./$(FQ4_BLEND_EXPLORE)
+
+test-action-q-explore: $(ACTION_Q_EXPLORE_TEST_RUNNER) $(ACTION_Q_EXPLORE)
+	./$(ACTION_Q_EXPLORE_TEST_RUNNER)
+	@set +e; output=`./$(ACTION_Q_EXPLORE) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-explore (--census|--run)' >/dev/null
+
+test-action-q-field-gate: $(ACTION_Q_FIELD_GATE_TEST_RUNNER)
+	./$(ACTION_Q_FIELD_GATE_TEST_RUNNER)
+
+test-action-q-offline-gate: $(ACTION_Q_OFFLINE_GATE_TEST_RUNNER)
+	./$(ACTION_Q_OFFLINE_GATE_TEST_RUNNER)
+
+action-q-census: $(ACTION_Q_EXPLORE)
+	./$(ACTION_Q_EXPLORE) --census
+
+action-q-run: $(ACTION_Q_EXPLORE)
+	./$(ACTION_Q_EXPLORE) --run
 
 test-fq4-dev-background-diagnostic: $(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER) $(FQ4_DEV_BACKGROUND_DIAGNOSTIC)
 	./$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER)

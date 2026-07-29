@@ -18052,6 +18052,80 @@ freezes these counts without changing any quota. It licenses exactly the
 declared `--run` fit/offline command; the fresh gameplay seed remains
 conditionally unopened.
 
+##### AQ0 fit and offline result
+
+Completed 2026-07-28 with `REVIEW.md` reread through the newest 18:04 PDT
+verification addendum. The exact command was:
+
+```sh
+./build/old-school-action-q-explore --run
+```
+
+The command reconstructed the exact frozen census above, fit once with the
+declared seed and optimizer, and returned exit status one with
+`result=REJECT stage=OFFLINE gameplay_seed_opened=0 artifact_published=0`.
+The reserved gameplay seed `202607281801` was not opened.
+
+Identity/isolation passed. The parent remained
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+the ephemeral candidate was
+`326fa3de5fdbe1da949bf7509ab31d6b7aada23434b0d2e54b79ddd18ca393c3`.
+Only Priority changed (`32dc6688...` to `0ba28b11...`); critic, Attack,
+Block, and DamageOrder were bit-identical, and the repeated fit was
+bit-identical. Collection, fit, and offline scoring took 107.346, 8.254, and
+4.130 seconds respectively.
+
+On FIT, expected top-one agreement improved from `0.679167` to `0.828125`
+and equal-deck regret fell from `0.011214` to `0.002566`. The untouched CHECK
+block did not support the full hypothesis: regret improved modestly from
+`0.009255` to `0.008427`, but top-one agreement fell from `0.701562` to
+`0.675000`, failing the conjunctive gate. CHECK regret by deck was:
+
+| Deck | C16 | AQ0 | Delta |
+|---|---:|---:|---:|
+| Green | 0.011747 | 0.004089 | -0.007658 |
+| Red | 0.013734 | 0.016414 | +0.002680 |
+| Blue | 0.004146 | 0.005273 | +0.001127 |
+| White | 0.003768 | 0.003864 | +0.000097 |
+| RU Aggro | 0.012878 | 0.012494 | -0.000384 |
+
+All five absolute `+0.01` regret guards held, but aggregate top-one did not.
+Against the frozen 20-root K64/H8 dev-v3 cache, top-one fell
+`0.95 -> 0.90`, stable-pair agreement fell `0.945455 -> 0.836364`, and
+regret worsened `0.003917 -> 0.011803`. One of 12 stable parent agreements
+was lost. The concentrated failure was Blue, whose four-probe regret changed
+from zero to `0.039431`; pooled no-worse regret therefore failed.
+
+The behavioral evidence was mixed and informative. AQ0 placed the Ancestral
+self-target score above the opponent target (`1.007944 > 0.949725`) and
+excluded the opponent target from selected support. It passed live and
+five-open payable Force Spike, redundant Counterspell, intervening
+Counterspell, opponent-target Giant Growth exclusion, and Braingeyser X=0
+exclusion. It still selected
+`growth-own-summoning-sick-grizzly-bears` instead of Pass, directly retaining
+one of the user's reported mistakes. All hidden-repartition checks passed,
+including both models on all eight focused roots. Reversing descriptor order
+preserved selected support but did not preserve every score bit-for-bit, so
+the strict score-order gate also failed; the cause of that exact-bit mismatch
+has not yet been assigned.
+
+Verdict: **REJECT AQ0**. The experiment proves that immediate resolved
+consequences are a useful but incomplete general teacher: they produce a
+large in-sample ranking signal and fix several independent card-usage errors,
+yet a 32-unit outer head trained only against the frozen state critic
+overfits that signal, harms Blue on the independent deep reference, and
+cannot price wasting Giant Growth before combat. Do not sweep AQ0 epochs,
+residual weights, or the reserved gameplay seed.
+
+Next experiment: keep the card-agnostic action-conditioned architecture, but
+replace the one-step critic-only label with an outcome-grounded temporal
+target that observes the selected action's downstream cost. The rapid
+successor should use a fresh deterministic split, train all legal actions,
+and require the sick-Bear Growth error plus Blue's frozen-dev regression to
+clear before any gameplay. This is the smallest evidence-led step toward
+information-set tree search: MCTS/POMCP still needs a leaf/action estimator
+that values cards after they are spent.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
