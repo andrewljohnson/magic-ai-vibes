@@ -1,5 +1,6 @@
 #include "old_school/action_q_bellman_explore.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -17,11 +18,25 @@ void expect(bool condition, std::string_view message) {
     }
 }
 
+template <typename Function>
+void expect_rejected(
+    Function function, std::string_view message) {
+    try {
+        function();
+    } catch (const std::exception&) {
+        return;
+    }
+    throw std::runtime_error(std::string(message));
+}
+
 void test_cli_accepts_only_declared_modes() {
     const std::vector<std::string_view> census{
         "--census",
     };
     const std::vector<std::string_view> run{"--run"};
+    const std::vector<std::string_view> diagnose{
+        "--diagnose-teacher",
+    };
     const std::vector<std::string_view> empty;
     const std::vector<std::string_view> extra{
         "--census",
@@ -34,6 +49,8 @@ void test_cli_accepts_only_declared_modes() {
         aq::parse_command(census) ==
                 aq::Command::Census &&
             aq::parse_command(run) == aq::Command::Run &&
+            aq::parse_command(diagnose) ==
+                aq::Command::DiagnoseTeacher &&
             !aq::parse_command(empty).has_value() &&
             !aq::parse_command(extra).has_value() &&
             !aq::parse_command(unknown).has_value(),
@@ -44,7 +61,7 @@ void test_cli_accepts_only_declared_modes() {
     expect(
         usage.str() ==
             "Usage: old-school-action-q-bellman-explore "
-            "(--census|--run)\n",
+            "(--census|--run|--diagnose-teacher)\n",
         "AQ1 CLI usage text drifted");
 }
 
@@ -250,6 +267,242 @@ void test_model_gate_output_is_quantitative() {
         "AQ1 model-gate output omitted quantitative evidence");
 }
 
+void test_teacher_diagnostic_manifest_and_seeds_are_frozen() {
+    const auto manifest =
+        aq::teacher_diagnostic_manifest();
+    constexpr std::array<std::string_view, 4> kIds = {
+        "control.blue.counter-same-target-after-intervening-"
+        "counter.v1",
+        "control.blue.braingeyser-x0.v1",
+        "field.green.second-main-sick-bear-growth.v1",
+        "control.blue.force-spike-live-gray-ogre.v1",
+    };
+    constexpr std::array<std::uint64_t, 4> kSeeds = {
+        13755611371498319020ULL,
+        2589590173959096294ULL,
+        4410279927652125381ULL,
+        118189991942941696ULL,
+    };
+    bool exact = manifest.size() == kIds.size();
+    for (std::size_t index = 0;
+         index < manifest.size(); ++index) {
+        exact =
+            exact &&
+            manifest[index].fixture_index == index &&
+            manifest[index].stable_id == kIds[index] &&
+            manifest[index].expected_seed ==
+                kSeeds[index] &&
+            aq::teacher_diagnostic_seed(index) ==
+                kSeeds[index];
+    }
+    expect(
+        exact &&
+            aq::kTeacherDiagnosticRootSeed ==
+                202607281913ULL &&
+            manifest[0].kind ==
+                aq::TeacherDiagnosticKind::StrictPair &&
+            manifest[0].positive_key ==
+                "counter-opponent-counterspell" &&
+            manifest[0].negative_key == "pass" &&
+            manifest[1].kind ==
+                aq::TeacherDiagnosticKind::ExcludeXZero &&
+            manifest[1].excluded_keys[0] ==
+                "braingeyser-x0-self" &&
+            manifest[1].excluded_keys[1] ==
+                "braingeyser-x0-opponent" &&
+            manifest[2].positive_key == "pass" &&
+            manifest[2].negative_key ==
+                "growth-own-summoning-sick-grizzly-bears" &&
+            manifest[3].positive_key ==
+                "force-spike-gray-ogre" &&
+            manifest[3].negative_key == "pass",
+        "AQ1-D0 fixture manifest or seed schedule drifted");
+    expect_rejected(
+        [] {
+            static_cast<void>(
+                aq::teacher_diagnostic_seed(4));
+        },
+        "AQ1-D0 accepted an undeclared fixture index");
+}
+
+void test_teacher_direction_gates_are_exact() {
+    const auto manifest =
+        aq::teacher_diagnostic_manifest();
+    std::vector<aq::TeacherDiagnosticAction> pair{
+        {
+            .probe_key = "pass",
+            .typed_descriptor = "pass",
+            .action =
+                old_school::PriorityAction::pass(),
+            .value = 0.4,
+        },
+        {
+            .probe_key =
+                "counter-opponent-counterspell",
+            .typed_descriptor = "counterspell-stack-1",
+            .action =
+                old_school::PriorityAction::
+                    cast_counterspell(1),
+            .value = 0.6,
+        },
+    };
+    const aq::TeacherDirectionSummary pair_direction =
+        aq::evaluate_teacher_direction(
+            manifest[0], pair);
+    expect(
+        pair_direction.passed &&
+            std::abs(
+                pair_direction.required_margin - 0.2) <
+                1.0e-15 &&
+            pair_direction.exact_max_support ==
+                std::vector<std::string>{
+                    "counter-opponent-counterspell",
+                },
+        "AQ1-D0 strict-pair direction is not exact");
+
+    pair[0].value = 0.6;
+    expect(
+        !aq::evaluate_teacher_direction(
+             manifest[0], pair)
+             .passed,
+        "AQ1-D0 accepted a tied strict pair");
+
+    std::vector<aq::TeacherDiagnosticAction> x_zero{
+        {
+            .probe_key = "pass",
+            .typed_descriptor = "pass",
+            .action =
+                old_school::PriorityAction::pass(),
+            .value = 0.8,
+        },
+        {
+            .probe_key = "braingeyser-x0-self",
+            .typed_descriptor =
+                "braingeyser-x0-player-0",
+            .action =
+                old_school::PriorityAction::
+                    cast_braingeyser(
+                        0,
+                        old_school::Target::
+                            player_target(0)),
+            .value = 0.4,
+        },
+        {
+            .probe_key = "braingeyser-x0-opponent",
+            .typed_descriptor =
+                "braingeyser-x0-player-1",
+            .action =
+                old_school::PriorityAction::
+                    cast_braingeyser(
+                        0,
+                        old_school::Target::
+                            player_target(1)),
+            .value = 0.7,
+        },
+    };
+    const aq::TeacherDirectionSummary excluded =
+        aq::evaluate_teacher_direction(
+            manifest[1], x_zero);
+    expect(
+        excluded.passed &&
+            excluded.excluded_margins[0] >
+                excluded.excluded_margins[1] &&
+            excluded.required_margin > 0.0 &&
+            excluded.exact_max_support ==
+                std::vector<std::string>{"pass"},
+        "AQ1-D0 X=0 support exclusion is not exact");
+    x_zero[2].value = 0.8;
+    expect(
+        !aq::evaluate_teacher_direction(
+             manifest[1], x_zero)
+             .passed,
+        "AQ1-D0 accepted an X=0 exact-max tie");
+}
+
+void test_teacher_diagnostic_gate_and_output_contract() {
+    const auto spec =
+        aq::teacher_diagnostic_manifest()[0];
+    aq::TeacherDiagnosticFixtureReport fixture;
+    fixture.spec = spec;
+    fixture.seed = spec.expected_seed;
+    fixture.information_set_fingerprint =
+        "information-fingerprint";
+    fixture.actions = {
+        {
+            .probe_key = "pass",
+            .typed_descriptor = "pass",
+            .action =
+                old_school::PriorityAction::pass(),
+            .value = 0.4,
+        },
+        {
+            .probe_key =
+                "counter-opponent-counterspell",
+            .typed_descriptor = "counterspell-stack-1",
+            .action =
+                old_school::PriorityAction::
+                    cast_counterspell(1),
+            .value = 0.6,
+            .exact_max = true,
+        },
+    };
+    fixture.direction =
+        aq::evaluate_teacher_direction(
+            fixture.spec, fixture.actions);
+    fixture.hidden_repartition_nonvacuous = true;
+    fixture.hidden_repartition_bit_identical = true;
+    fixture.reversed_action_bit_identical = true;
+    fixture.accounting.root_actions = 2;
+    fixture.accounting.root_determinizations = 4;
+    fixture.accounting.root_terminal_particles = 8;
+    fixture.accounting.root_macros.transitions = 8;
+    expect(
+        fixture.gate_passed(),
+        "AQ1-D0 rejected complete direction evidence");
+
+    aq::TeacherDiagnosticReport report;
+    report.parent_fingerprint =
+        std::string(aq::kRequiredParentFingerprint);
+    report.fixtures = {fixture};
+    report.direction_passed[0] = true;
+    report.hypothesis_passed = true;
+    std::ostringstream output;
+    aq::print_teacher_diagnostic_report(
+        output, report);
+    const std::string text = output.str();
+    expect(
+        text.find(
+            "schema=old-school-action-q-aq1-d0-teacher-v1") !=
+                std::string::npos &&
+            text.find(
+                "stable_id=control.blue.counter-same-target-"
+                "after-intervening-counter.v1") !=
+                std::string::npos &&
+            text.find(
+                "probe_key=counter-opponent-counterspell "
+                "typed_descriptor=counterspell-stack-1") !=
+                std::string::npos &&
+            text.find("value=0.59999999999999998") !=
+                std::string::npos &&
+            text.find(
+                "keys=counter-opponent-counterspell") !=
+                std::string::npos &&
+            text.find("required_margin=") !=
+                std::string::npos &&
+            text.find("root_actions=2") !=
+                std::string::npos &&
+            text.find("fit_performed=0 corpus_collected=0") !=
+                std::string::npos &&
+            text.find("gameplay_seed_opened=0") !=
+                std::string::npos,
+        "AQ1-D0 output omitted sealed evidence");
+
+    fixture.reversed_action_bit_identical = false;
+    expect(
+        !fixture.gate_passed(),
+        "AQ1-D0 accepted action-order drift");
+}
+
 } // namespace
 
 int main() {
@@ -279,8 +532,17 @@ int main() {
     run(
         "model_gate_output_is_quantitative",
         test_model_gate_output_is_quantitative);
+    run(
+        "teacher_diagnostic_manifest_and_seeds_are_frozen",
+        test_teacher_diagnostic_manifest_and_seeds_are_frozen);
+    run(
+        "teacher_direction_gates_are_exact",
+        test_teacher_direction_gates_are_exact);
+    run(
+        "teacher_diagnostic_gate_and_output_contract",
+        test_teacher_diagnostic_gate_and_output_contract);
     std::cout
         << "action-Q Bellman experiment tests: "
-        << passed << "/5 passed\n";
+        << passed << "/8 passed\n";
     return 0;
 }

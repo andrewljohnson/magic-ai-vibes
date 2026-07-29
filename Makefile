@@ -619,7 +619,7 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			printf 'AQ1 accepted an arbitrary mode\n' >&2; \
 			exit 1; \
 		fi; \
-		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-bellman-explore (--census|--run)' >/dev/null
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-bellman-explore (--census|--run|--diagnose-teacher)' >/dev/null
 	@set +e; output=`./$(ACTION_Q_EXPLORE) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
 			printf '%s\n' "$$output"; \
@@ -1347,7 +1347,7 @@ test-action-q-bellman-explore: $(ACTION_Q_BELLMAN_EXPLORE_TEST_RUNNER) $(ACTION_
 			printf 'AQ1 accepted an arbitrary mode\n' >&2; \
 			exit 1; \
 		fi; \
-		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-bellman-explore (--census|--run)' >/dev/null
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-bellman-explore (--census|--run|--diagnose-teacher)' >/dev/null
 
 action-q-bellman-census: $(ACTION_Q_BELLMAN_EXPLORE)
 	./$(ACTION_Q_BELLMAN_EXPLORE) --census

@@ -271,6 +271,15 @@ int run_experiment() {
     return 0;
 }
 
+int run_teacher_diagnostic() {
+    const auto parent = load_parent();
+    const aq::TeacherDiagnosticReport report =
+        aq::diagnose_teacher(parent);
+    aq::print_teacher_diagnostic_report(
+        std::cout, report);
+    return report.gate_passed() ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -287,7 +296,10 @@ int main(int argc, char* argv[]) {
         if (*command == aq::Command::Census) {
             return run_census();
         }
-        return run_experiment();
+        if (*command == aq::Command::Run) {
+            return run_experiment();
+        }
+        return run_teacher_diagnostic();
     } catch (const std::exception& error) {
         std::cerr
             << "result=ERROR"

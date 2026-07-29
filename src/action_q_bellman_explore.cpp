@@ -2,6 +2,7 @@
 
 #include "old_school/artifact_integrity.hpp"
 #include "old_school/learned_iteration.hpp"
+#include "old_school/probe_runner.hpp"
 #include "old_school/probes.hpp"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <sstream>
@@ -625,6 +627,136 @@ std::string census_payload(const Corpus& corpus) {
     return output.str();
 }
 
+void require_no_probe_errors(
+    std::span<const std::string> errors,
+    std::string_view corpus_name) {
+    if (!errors.empty()) {
+        throw std::runtime_error(
+            "AQ1-D0 " + std::string(corpus_name) +
+            " fixture validation failed: " + errors.front());
+    }
+}
+
+probes::DecisionProbe unique_probe(
+    const std::vector<probes::DecisionProbe>& corpus,
+    std::string_view stable_id) {
+    const auto found = std::find_if(
+        corpus.begin(), corpus.end(),
+        [stable_id](const probes::DecisionProbe& probe) {
+            return probe.stable_id == stable_id;
+        });
+    if (found == corpus.end() ||
+        std::find_if(
+            std::next(found), corpus.end(),
+            [stable_id](const probes::DecisionProbe& probe) {
+                return probe.stable_id == stable_id;
+            }) != corpus.end()) {
+        throw std::runtime_error(
+            "AQ1-D0 fixture is missing or duplicated: " +
+            std::string(stable_id));
+    }
+    return *found;
+}
+
+std::vector<probes::DecisionProbe>
+load_teacher_diagnostic_probes() {
+    const auto counter =
+        probes::make_counter_composition_controls_v1();
+    const auto braingeyser =
+        probes::make_braingeyser_x_zero_control_v1();
+    const auto field =
+        probes::make_field_regressions_v1();
+    const auto spike =
+        probes::make_force_spike_policy_controls_v1();
+    require_no_probe_errors(
+        probes::validate_counter_composition_controls_v1(
+            counter),
+        probes::kCounterCompositionControlsV1);
+    require_no_probe_errors(
+        probes::validate_braingeyser_x_zero_control_v1(
+            braingeyser),
+        probes::kBraingeyserXZeroControlV1);
+    require_no_probe_errors(
+        probes::validate_field_regressions_v1(field),
+        probes::kFieldRegressionsV1);
+    require_no_probe_errors(
+        probes::validate_force_spike_policy_controls_v1(
+            spike),
+        probes::kForceSpikePolicyControlsV1);
+
+    const auto manifest = teacher_diagnostic_manifest();
+    return {
+        unique_probe(counter, manifest[0].stable_id),
+        unique_probe(braingeyser, manifest[1].stable_id),
+        unique_probe(field, manifest[2].stable_id),
+        unique_probe(spike, manifest[3].stable_id),
+    };
+}
+
+LearnedDecisionContext diagnostic_context(
+    const probes::DecisionProbe& probe) {
+    return {
+        .valid = true,
+        .phase = probe.phase,
+        .decision_player = probe.root_player,
+        .consecutive_passes =
+            probe.consecutive_passes,
+        .sorcery_actions =
+            probe.phase == TurnPhase::FirstMain ||
+            probe.phase == TurnPhase::SecondMain,
+    };
+}
+
+const probes::Candidate& candidate_for_action(
+    const probes::DecisionProbe& probe,
+    const PriorityAction& action) {
+    const probes::Candidate* found = nullptr;
+    for (const probes::Candidate& candidate :
+         probe.candidates) {
+        if (!std::holds_alternative<PriorityAction>(
+                candidate.action) ||
+            std::get<PriorityAction>(candidate.action) !=
+                action) {
+            continue;
+        }
+        if (found != nullptr) {
+            throw std::runtime_error(
+                "AQ1-D0 probe action mapping is ambiguous");
+        }
+        found = &candidate;
+    }
+    if (found == nullptr) {
+        throw std::runtime_error(
+            "AQ1-D0 authoritative action has no probe key");
+    }
+    return *found;
+}
+
+std::vector<PriorityAction> authoritative_actions(
+    const probes::DecisionProbe& probe) {
+    if (probe.decision_kind !=
+            probes::DecisionKind::Priority ||
+        probe.root_player >= 2) {
+        throw std::runtime_error(
+            "AQ1-D0 fixture is not a Priority decision");
+    }
+    const LearnedDecisionContext context =
+        diagnostic_context(probe);
+    const std::vector<PriorityAction> actions =
+        legal_priority_actions(
+            probe.state, probe.root_player,
+            context.sorcery_actions);
+    if (actions.size() != probe.candidates.size()) {
+        throw std::runtime_error(
+            "AQ1-D0 probe omits an authoritative legal action");
+    }
+    for (const PriorityAction& action : actions) {
+        static_cast<void>(
+            candidate_for_action(probe, action));
+    }
+    return actions;
+}
+
 } // namespace
 
 DeckId RootExample::owner_deck() const {
@@ -686,13 +818,16 @@ std::optional<Command> parse_command(
     if (arguments.front() == "--run") {
         return Command::Run;
     }
+    if (arguments.front() == "--diagnose-teacher") {
+        return Command::DiagnoseTeacher;
+    }
     return std::nullopt;
 }
 
 void print_usage(std::ostream& output) {
     output
         << "Usage: old-school-action-q-bellman-explore "
-           "(--census|--run)\n";
+           "(--census|--run|--diagnose-teacher)\n";
 }
 
 std::uint64_t root_search_seed(
@@ -736,6 +871,355 @@ LearnedValuePriorityHeadUpdateConfig optimizer_config() {
         .residual_weight = kCandidateResidualWeight,
         .policy_temperature = kTeacherTemperature,
     };
+}
+
+std::uint64_t teacher_diagnostic_seed(
+    std::size_t fixture_index) {
+    if (fixture_index >=
+        kTeacherDiagnosticFixtureCount) {
+        throw std::out_of_range(
+            "AQ1-D0 fixture index is outside the manifest");
+    }
+    return learned_iteration::derive_seed(
+        kTeacherDiagnosticRootSeed,
+        learned_iteration::SeedDomain::PrioritySearch,
+        fixture_index, 0, 0);
+}
+
+std::array<
+    TeacherDiagnosticSpec,
+    kTeacherDiagnosticFixtureCount>
+teacher_diagnostic_manifest() {
+    const std::array<
+        TeacherDiagnosticSpec,
+        kTeacherDiagnosticFixtureCount>
+        manifest{{
+            {
+                .fixture_index = 0,
+                .stable_id =
+                    "control.blue.counter-same-target-after-"
+                    "intervening-counter.v1",
+                .kind =
+                    TeacherDiagnosticKind::StrictPair,
+                .positive_key =
+                    "counter-opponent-counterspell",
+                .negative_key = "pass",
+                .expected_seed =
+                    13755611371498319020ULL,
+            },
+            {
+                .fixture_index = 1,
+                .stable_id =
+                    "control.blue.braingeyser-x0.v1",
+                .kind =
+                    TeacherDiagnosticKind::ExcludeXZero,
+                .excluded_keys = {
+                    "braingeyser-x0-self",
+                    "braingeyser-x0-opponent",
+                },
+                .expected_seed =
+                    2589590173959096294ULL,
+            },
+            {
+                .fixture_index = 2,
+                .stable_id =
+                    "field.green.second-main-sick-bear-growth.v1",
+                .kind =
+                    TeacherDiagnosticKind::StrictPair,
+                .positive_key = "pass",
+                .negative_key =
+                    "growth-own-summoning-sick-grizzly-bears",
+                .expected_seed =
+                    4410279927652125381ULL,
+            },
+            {
+                .fixture_index = 3,
+                .stable_id =
+                    "control.blue.force-spike-live-gray-ogre.v1",
+                .kind =
+                    TeacherDiagnosticKind::StrictPair,
+                .positive_key = "force-spike-gray-ogre",
+                .negative_key = "pass",
+                .expected_seed =
+                    118189991942941696ULL,
+            },
+        }};
+    for (std::size_t index = 0;
+         index < manifest.size(); ++index) {
+        if (manifest[index].fixture_index != index ||
+            manifest[index].stable_id.empty() ||
+            manifest[index].expected_seed !=
+                teacher_diagnostic_seed(index)) {
+            throw std::logic_error(
+                "AQ1-D0 frozen manifest seed drifted");
+        }
+    }
+    return manifest;
+}
+
+TeacherDirectionSummary evaluate_teacher_direction(
+    const TeacherDiagnosticSpec& spec,
+    std::span<const TeacherDiagnosticAction> actions) {
+    if (actions.empty()) {
+        throw std::invalid_argument(
+            "AQ1-D0 direction requires legal actions");
+    }
+    double best = -std::numeric_limits<double>::infinity();
+    for (std::size_t index = 0;
+         index < actions.size(); ++index) {
+        if (actions[index].probe_key.empty() ||
+            actions[index].typed_descriptor.empty() ||
+            !probability(actions[index].value) ||
+            std::find_if(
+                actions.begin(), actions.begin() + index,
+                [&](const TeacherDiagnosticAction& earlier) {
+                    return earlier.probe_key ==
+                               actions[index].probe_key ||
+                           earlier.action ==
+                               actions[index].action;
+                }) != actions.begin() + index) {
+            throw std::invalid_argument(
+                "AQ1-D0 action rows are invalid or duplicated");
+        }
+        best = std::max(best, actions[index].value);
+    }
+    const auto value_for =
+        [&actions](std::string_view key) {
+            const auto found = std::find_if(
+                actions.begin(), actions.end(),
+                [key](const TeacherDiagnosticAction& action) {
+                    return action.probe_key == key;
+                });
+            if (found == actions.end()) {
+                throw std::invalid_argument(
+                    "AQ1-D0 required probe key is absent");
+            }
+            return found->value;
+        };
+
+    TeacherDirectionSummary result;
+    for (const TeacherDiagnosticAction& action : actions) {
+        if (action.value == best) {
+            result.exact_max_support.push_back(
+                action.probe_key);
+        }
+    }
+    if (spec.kind ==
+        TeacherDiagnosticKind::StrictPair) {
+        if (spec.positive_key.empty() ||
+            spec.negative_key.empty() ||
+            spec.positive_key == spec.negative_key) {
+            throw std::invalid_argument(
+                "AQ1-D0 strict-pair manifest is invalid");
+        }
+        result.positive_value =
+            value_for(spec.positive_key);
+        result.negative_value =
+            value_for(spec.negative_key);
+        result.required_margin =
+            result.positive_value -
+            result.negative_value;
+        result.passed = result.required_margin > 0.0;
+        return result;
+    }
+    if (spec.kind !=
+            TeacherDiagnosticKind::ExcludeXZero ||
+        spec.excluded_keys[0].empty() ||
+        spec.excluded_keys[1].empty() ||
+        spec.excluded_keys[0] ==
+            spec.excluded_keys[1]) {
+        throw std::invalid_argument(
+            "AQ1-D0 X=0 manifest is invalid");
+    }
+    const double first =
+        value_for(spec.excluded_keys[0]);
+    const double second =
+        value_for(spec.excluded_keys[1]);
+    result.positive_value = best;
+    result.negative_value = std::max(first, second);
+    result.excluded_margins = {
+        best - first,
+        best - second,
+    };
+    result.required_margin =
+        std::min(
+            result.excluded_margins[0],
+            result.excluded_margins[1]);
+    result.passed =
+        result.excluded_margins[0] > 0.0 &&
+        result.excluded_margins[1] > 0.0;
+    return result;
+}
+
+bool TeacherDiagnosticFixtureReport::gate_passed() const {
+    if (spec.fixture_index >=
+            kTeacherDiagnosticFixtureCount ||
+        seed != spec.expected_seed ||
+        seed != teacher_diagnostic_seed(
+                    spec.fixture_index) ||
+        information_set_fingerprint.empty() ||
+        actions.empty() ||
+        !direction.passed ||
+        !hidden_repartition_nonvacuous ||
+        !hidden_repartition_bit_identical ||
+        !reversed_action_bit_identical ||
+        !owner_partition_complete(
+            accounting, actions.size())) {
+        return false;
+    }
+    try {
+        if (evaluate_teacher_direction(spec, actions) !=
+            direction) {
+            return false;
+        }
+    } catch (const std::exception&) {
+        return false;
+    }
+    for (const TeacherDiagnosticAction& action :
+         actions) {
+        const bool expected =
+            std::find(
+                direction.exact_max_support.begin(),
+                direction.exact_max_support.end(),
+                action.probe_key) !=
+            direction.exact_max_support.end();
+        if (action.exact_max != expected) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TeacherDiagnosticReport::gate_passed() const {
+    if (parent_fingerprint !=
+            kRequiredParentFingerprint ||
+        fixtures.size() !=
+            kTeacherDiagnosticFixtureCount) {
+        return false;
+    }
+    bool all_directions = true;
+    for (std::size_t index = 0;
+         index < fixtures.size(); ++index) {
+        if (fixtures[index].spec.fixture_index != index ||
+            fixtures[index].spec !=
+                teacher_diagnostic_manifest()[index] ||
+            direction_passed[index] !=
+                fixtures[index].direction.passed ||
+            !fixtures[index].gate_passed()) {
+            return false;
+        }
+        all_directions =
+            all_directions &&
+            direction_passed[index];
+    }
+    return hypothesis_passed == all_directions &&
+           hypothesis_passed;
+}
+
+TeacherDiagnosticReport diagnose_teacher(
+    std::shared_ptr<const LearnedModel> parent) {
+    require_parent(parent);
+    const auto manifest = teacher_diagnostic_manifest();
+    const std::vector<probes::DecisionProbe> probes =
+        load_teacher_diagnostic_probes();
+    if (probes.size() != manifest.size()) {
+        throw std::logic_error(
+            "AQ1-D0 fixture loader changed size");
+    }
+
+    TeacherDiagnosticReport report;
+    report.parent_fingerprint =
+        learned_model_fingerprint(parent);
+    bool all_directions = true;
+    for (std::size_t index = 0;
+         index < manifest.size(); ++index) {
+        const probes::DecisionProbe& probe = probes[index];
+        const TeacherDiagnosticSpec& spec =
+            manifest[index];
+        if (probe.stable_id != spec.stable_id) {
+            throw std::logic_error(
+                "AQ1-D0 fixture order drifted");
+        }
+        const LearnedDecisionContext context =
+            diagnostic_context(probe);
+        const std::vector<PriorityAction> actions =
+            authoritative_actions(probe);
+        const std::uint64_t seed =
+            teacher_diagnostic_seed(index);
+        const teacher::RootTargets direct =
+            teacher::score_priority_root(
+                probe.state, probe.original_decks,
+                context, actions, parent, seed);
+        teacher::validate_root_targets(direct);
+
+        auto reversed_actions = actions;
+        std::reverse(
+            reversed_actions.begin(),
+            reversed_actions.end());
+        const teacher::RootTargets reversed =
+            teacher::score_priority_root(
+                probe.state, probe.original_decks,
+                context, reversed_actions, parent, seed);
+
+        const GameState hidden_state =
+            probe_runner::hidden_repartition_clone(probe);
+        const std::vector<PriorityAction> hidden_actions =
+            legal_priority_actions(
+                hidden_state, probe.root_player,
+                context.sorcery_actions);
+        const teacher::RootTargets hidden =
+            teacher::score_priority_root(
+                hidden_state, probe.original_decks,
+                context, hidden_actions, parent, seed);
+
+        TeacherDiagnosticFixtureReport fixture;
+        fixture.spec = spec;
+        fixture.seed = seed;
+        fixture.information_set_fingerprint =
+            direct.root_information_set_fingerprint;
+        fixture.accounting = direct.accounting;
+        fixture.hidden_repartition_nonvacuous =
+            hidden_state != probe.state;
+        fixture.hidden_repartition_bit_identical =
+            direct == hidden;
+        fixture.reversed_action_bit_identical =
+            direct == reversed;
+        for (const teacher::RootActionTarget& target :
+             direct.actions) {
+            const probes::Candidate& candidate =
+                candidate_for_action(
+                    probe, target.action);
+            fixture.actions.push_back({
+                .probe_key = candidate.descriptor,
+                .typed_descriptor = target.descriptor,
+                .action = target.action,
+                .value = target.value,
+            });
+        }
+        fixture.direction =
+            evaluate_teacher_direction(
+                spec, fixture.actions);
+        for (TeacherDiagnosticAction& action :
+             fixture.actions) {
+            action.exact_max =
+                std::find(
+                    fixture.direction
+                        .exact_max_support.begin(),
+                    fixture.direction
+                        .exact_max_support.end(),
+                    action.probe_key) !=
+                fixture.direction
+                    .exact_max_support.end();
+        }
+        report.direction_passed[index] =
+            fixture.direction.passed;
+        all_directions =
+            all_directions &&
+            fixture.direction.passed;
+        report.fixtures.push_back(std::move(fixture));
+    }
+    report.hypothesis_passed = all_directions;
+    return report;
 }
 
 bool owner_partition_complete(
@@ -1668,6 +2152,161 @@ void print_model_gate_report(
     print_keys(
         "behavior_braingeyser_selection",
         report.behavior.braingeyser_selected_keys);
+}
+
+void print_teacher_diagnostic_report(
+    std::ostream& output,
+    const TeacherDiagnosticReport& report) {
+    const auto print_macro =
+        [&output](
+            std::string_view prefix,
+            const teacher::MacroAccounting& accounting) {
+            output
+                << ' ' << prefix << "_transitions="
+                << accounting.transitions
+                << ' ' << prefix << "_terminal="
+                << accounting.terminal_transitions
+                << ' ' << prefix << "_boundary="
+                << accounting.boundary_transitions
+                << ' ' << prefix << "_critic_leaves="
+                << accounting.critic_leaves
+                << ' ' << prefix << "_actions="
+                << accounting.actions_applied
+                << ' ' << prefix << "_priority_actions="
+                << accounting.priority_actions_applied
+                << ' ' << prefix << "_phases="
+                << accounting.phase_transitions
+                << ' ' << prefix << "_turns="
+                << accounting.turn_advances;
+        };
+    output
+        << "schema=old-school-action-q-aq1-d0-teacher-v1\n"
+        << "mode=diagnose-teacher\n"
+        << "parent_fingerprint="
+        << report.parent_fingerprint << '\n'
+        << "diagnostic_root_seed="
+        << kTeacherDiagnosticRootSeed
+        << " root_worlds=" << teacher::kRootWorlds
+        << " successor_banks=2"
+        << " successor_worlds_per_bank="
+        << teacher::kSuccessorWorlds
+        << " fit_performed=0 corpus_collected=0"
+        << " gameplay_seed_opened=0"
+        << " artifact_published=0\n";
+    for (const TeacherDiagnosticFixtureReport& fixture :
+         report.fixtures) {
+        output
+            << std::setprecision(17)
+            << "fixture index="
+            << fixture.spec.fixture_index
+            << " stable_id=" << fixture.spec.stable_id
+            << " seed=" << fixture.seed
+            << " information_set_fingerprint="
+            << fixture.information_set_fingerprint
+            << " legal_actions="
+            << fixture.actions.size()
+            << " hidden_nonvacuous="
+            << fixture.hidden_repartition_nonvacuous
+            << " hidden_bit_identical="
+            << fixture.hidden_repartition_bit_identical
+            << " reversed_bit_identical="
+            << fixture.reversed_action_bit_identical
+            << " direction_passed="
+            << fixture.direction.passed
+            << " required_margin="
+            << fixture.direction.required_margin
+            << " positive_value="
+            << fixture.direction.positive_value
+            << " negative_value="
+            << fixture.direction.negative_value
+            << " excluded_margin_first="
+            << fixture.direction.excluded_margins[0]
+            << " excluded_margin_second="
+            << fixture.direction.excluded_margins[1]
+            << '\n';
+        for (const TeacherDiagnosticAction& action :
+             fixture.actions) {
+            output
+                << "diagnostic_action fixture="
+                << fixture.spec.fixture_index
+                << " probe_key=" << action.probe_key
+                << " typed_descriptor="
+                << action.typed_descriptor
+                << " value=" << action.value
+                << " exact_max=" << action.exact_max
+                << '\n';
+        }
+        output
+            << "diagnostic_support fixture="
+            << fixture.spec.fixture_index
+            << " keys=";
+        for (std::size_t support = 0;
+             support <
+                 fixture.direction
+                     .exact_max_support.size();
+             ++support) {
+            if (support != 0) {
+                output << ',';
+            }
+            output
+                << fixture.direction
+                       .exact_max_support[support];
+        }
+        output << '\n';
+
+        const auto& accounting = fixture.accounting;
+        output
+            << "diagnostic_accounting fixture="
+            << fixture.spec.fixture_index
+            << " root_actions="
+            << accounting.root_actions
+            << " root_determinizations="
+            << accounting.root_determinizations
+            << " root_terminal_particles="
+            << accounting.root_terminal_particles
+            << " root_boundary_particles="
+            << accounting.root_boundary_particles
+            << " successor_groups="
+            << accounting.successor_group_occurrences
+            << " same_owner_groups="
+            << accounting.same_owner_group_occurrences
+            << " opponent_owner_groups="
+            << accounting.opponent_owner_group_occurrences
+            << " same_owner_particles="
+            << accounting.same_owner_root_particles
+            << " opponent_owner_particles="
+            << accounting.opponent_owner_root_particles
+            << " unique_successor_information_sets="
+            << accounting
+                   .unique_successor_information_sets
+            << " successor_actions="
+            << accounting.successor_actions
+            << " successor_determinizations="
+            << accounting.successor_determinizations;
+        print_macro("root_macro", accounting.root_macros);
+        print_macro(
+            "successor_macro",
+            accounting.successor_macros);
+        output << '\n';
+    }
+    output << "directions";
+    for (std::size_t index = 0;
+         index < report.direction_passed.size();
+         ++index) {
+        output << " fixture_" << index << '='
+               << report.direction_passed[index];
+    }
+    output
+        << " hypothesis_passed="
+        << report.hypothesis_passed
+        << " diagnostic_gate_passed="
+        << report.gate_passed() << '\n'
+        << "result="
+        << (report.gate_passed() ? "PASS" : "REJECT")
+        << " stage=TEACHER_DIAGNOSTIC"
+        << " fit_performed=0 corpus_collected=0"
+        << " gameplay_seed_opened=0"
+        << " artifact_published=0\n";
 }
 
 } // namespace old_school::action_q_bellman_explore

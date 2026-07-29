@@ -37,6 +37,9 @@ inline constexpr std::uint64_t kFitSeed =
     308293352764668211ULL;
 inline constexpr std::string_view kRequiredParentFingerprint =
     action_q_explore::kRequiredParentFingerprint;
+inline constexpr std::uint64_t kTeacherDiagnosticRootSeed =
+    202607281913ULL;
+inline constexpr std::size_t kTeacherDiagnosticFixtureCount = 4;
 
 // Filled only after --census has completed and its exact identity has been
 // recorded in EXPERIMENTS.md.  An empty value makes --run fail closed.
@@ -148,9 +151,76 @@ struct OfflineReport {
     std::vector<std::string> failures() const;
 };
 
+enum class TeacherDiagnosticKind {
+    StrictPair,
+    ExcludeXZero,
+};
+
+struct TeacherDiagnosticSpec {
+    std::size_t fixture_index = 0;
+    std::string_view stable_id;
+    TeacherDiagnosticKind kind =
+        TeacherDiagnosticKind::StrictPair;
+    std::string_view positive_key;
+    std::string_view negative_key;
+    std::array<std::string_view, 2> excluded_keys{};
+    std::uint64_t expected_seed = 0;
+
+    bool operator==(const TeacherDiagnosticSpec&) const =
+        default;
+};
+
+struct TeacherDiagnosticAction {
+    std::string probe_key;
+    std::string typed_descriptor;
+    PriorityAction action;
+    double value = 0.0;
+    bool exact_max = false;
+
+    bool operator==(const TeacherDiagnosticAction&) const =
+        default;
+};
+
+struct TeacherDirectionSummary {
+    bool passed = false;
+    double required_margin = 0.0;
+    double positive_value = 0.0;
+    double negative_value = 0.0;
+    std::array<double, 2> excluded_margins{};
+    std::vector<std::string> exact_max_support;
+
+    bool operator==(const TeacherDirectionSummary&) const =
+        default;
+};
+
+struct TeacherDiagnosticFixtureReport {
+    TeacherDiagnosticSpec spec;
+    std::uint64_t seed = 0;
+    std::string information_set_fingerprint;
+    std::vector<TeacherDiagnosticAction> actions;
+    action_q_bellman_teacher::TeacherAccounting accounting;
+    TeacherDirectionSummary direction;
+    bool hidden_repartition_nonvacuous = false;
+    bool hidden_repartition_bit_identical = false;
+    bool reversed_action_bit_identical = false;
+
+    bool gate_passed() const;
+};
+
+struct TeacherDiagnosticReport {
+    std::string parent_fingerprint;
+    std::vector<TeacherDiagnosticFixtureReport> fixtures;
+    std::array<bool, kTeacherDiagnosticFixtureCount>
+        direction_passed{};
+    bool hypothesis_passed = false;
+
+    bool gate_passed() const;
+};
+
 enum class Command {
     Census,
     Run,
+    DiagnoseTeacher,
 };
 
 std::optional<Command> parse_command(
@@ -162,6 +232,20 @@ std::uint64_t root_search_seed(
     std::size_t actor, std::size_t nontrivial_ordinal);
 std::uint64_t fit_seed();
 LearnedValuePriorityHeadUpdateConfig optimizer_config();
+std::uint64_t teacher_diagnostic_seed(
+    std::size_t fixture_index);
+std::array<
+    TeacherDiagnosticSpec,
+    kTeacherDiagnosticFixtureCount>
+teacher_diagnostic_manifest();
+TeacherDirectionSummary evaluate_teacher_direction(
+    const TeacherDiagnosticSpec& spec,
+    std::span<const TeacherDiagnosticAction> actions);
+TeacherDiagnosticReport diagnose_teacher(
+    std::shared_ptr<const LearnedModel> parent);
+void print_teacher_diagnostic_report(
+    std::ostream& output,
+    const TeacherDiagnosticReport& report);
 
 bool owner_partition_complete(
     const action_q_bellman_teacher::TeacherAccounting&
