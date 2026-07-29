@@ -23944,6 +23944,77 @@ if failure follows the atomic link, leaves the valid cache quarantined from
 all consumers until separately audited. No candidate fit is licensed by this
 declaration alone.
 
+##### AQ18-DBC6-L1-DEEP-LABEL-CACHE result
+
+Completed 2026-07-29 from implementation commit `cc9d085`, after the focused
+release and AddressSanitizer/UndefinedBehaviorSanitizer suites each passed
+4/4, the full repository gate passed, and two independent source reviews
+returned GO. `REVIEW.md` was reread through its newest 12:44 PDT cycle before
+the run and again after it completed; that entry verified the implementation,
+described the executing teacher pass, and contained no contrary result.
+
+The three declared capture/artifact paths were absent before the exact
+production command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-labels --publish \
+  > /private/tmp/aq18-dbc6-l1.stdout \
+  2> /private/tmp/aq18-dbc6-l1.stderr
+```
+
+Result: **PASS / CACHE_ONLY** in 577.77 seconds real / 1,393.29 user /
+1.44 sys. The atomic strict-reload artifact is 13,006,842 bytes:
+
+```text
+cache SHA-256  591498b82d352c870c786289f54b4e5c197f1c972b06d4f74c7a3ca7731916e8
+corpus digest  519ebe666adaf567ac3b4fdf7a1e2096cf96ccc70ad23e55b5db7f45c37c3f3f
+parent         68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+AQ16 manifest  7de71c44a3d1d1fa20eb1b738bc8c675e83c4336f284e95f7401a4b79ea345cc
+S0 manifest    967bd44bfb444fa84e8b52df2652d090410a3ce6bda57bda6c353b5fb34d6576
+```
+
+All 300 TRAIN and 150 whole-game-disjoint DEV roots were retained, with
+1,088/513 options and exactly 12,808 common-world action cells in each arm.
+The five deck sentinels, the nonvacuous actor-local hidden repartition,
+in-memory round trip, strict post-publication reload, and parent immutability
+were bit-identical. The command reported zero candidate scores, model
+creations, optimizer steps, and gameplay games.
+
+Equal-width-cell descriptive metrics by deck were:
+
+| Split | Deck | base/teacher exact-max agreement | teacher regret |
+| --- | --- | ---: | ---: |
+| TRAIN | Green | 0.666667 | 0.013165205 |
+| TRAIN | Red | 0.600000 | 0.026226565 |
+| TRAIN | Blue | 0.766667 | 0.013099042 |
+| TRAIN | White | 0.750000 | 0.007182983 |
+| TRAIN | RU Aggro | 0.583333 | 0.032509517 |
+| DEV | Green | 0.766667 | 0.022600880 |
+| DEV | Red | 0.533333 | 0.042331709 |
+| DEV | Blue | 0.700000 | 0.007263855 |
+| DEV | White | 0.533333 | 0.014111532 |
+| DEV | RU Aggro | 0.633333 | 0.017627879 |
+
+The equal-deck TRAIN/DEV regrets were respectively `0.018436662452262116`
+and `0.020787171201295095`. Every split × deck had strictly positive regret
+and differing base/teacher behavior, so the preregistered teacher-signal
+hypothesis passed. DEV Green B2 alone had zero top-choice regret, but the
+other two predeclared Green width cells supplied positive game-disjoint
+signal; the gate was split × deck, not every individual width cell.
+
+The representation precheck also passed decisively: all 91 frozen alias
+pairs were evaluated, with **zero material conflicts and exactly zero maximum
+absolute required-correction gap**. The 893-feature input is therefore
+licensed for the next fit; no action identity, card-specific feature, or
+other representation augmentation is justified by this corpus.
+
+Decision: freeze and accept the cache as reusable training evidence. This is
+not a bot-strength result and publishes no challenger. C16 remains champion.
+Next: preregister one small rank-2 state-by-action residual fit against this
+fixed cache, use grouped TRAIN out-of-fold and untouched DEV metrics across
+all five decks, and open a gameplay seed only if those offline gates pass.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
