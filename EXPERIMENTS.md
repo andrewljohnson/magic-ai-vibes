@@ -21930,6 +21930,101 @@ hidden-information safe, and be preregistered on a fresh seed before any run.
 In particular it must predict improvements on the Ancestral, Braingeyser, and
 Blue no-chump decisions without forgetting the two Force Spike directions.
 
+##### AQ9-TS1 C16-scale terminal-backup declaration
+
+Declared 2026-07-29 after recording ISP1, rereading `REVIEW.md` through its
+07:17 PDT cycle, and before changing terminal utility, implementing the TS1
+runner, or opening seed `202607291201`. C16 remains champion. This is one
+paired 64-simulation backup-semantics candidate, not a new search budget,
+horizon, prior blend, target-label recipe, or card-specific policy.
+
+Falsifiable hypothesis: ISP1 backs two incompatible scalar objectives through
+one tree. Its frozen C16 nonterminal leaves approximate the canonical training
+target
+
+```text
+draw = 0.5
+win/loss = 0.5 +/- 0.5 * 0.985^final_absolute_turn
+```
+
+while a tree branch that reaches the same game outcome backs raw `1/0`.
+Around final turn 20, for example, the winning values are approximately
+`0.870` and `1.000`. As simulations replace critic cutoffs with terminal
+leaves, this discontinuity can change an edge's Q for reasons unrelated to
+the quality of its move. Removing only that discontinuity will improve the
+four remaining ISP1 strategic errors while preserving the five directions it
+already gets right.
+
+Add an evaluation-only terminal-utility mode with exactly two values:
+`ExactOutcome`, the untouched default, and
+`C16DiscountedAbsoluteTurn`. The treatment must use
+`learned_discounted_terminal_target(result, perspective)` consistently at
+all three terminal surfaces: immediate-terminal action priors, rules-complete
+generative leaf evaluation, and PUCT transition backup. For tree backup,
+convert the root-observer treatment value once to an explicit player-zero
+scalar; do not negate by ply. Draws remain exactly `0.5`. The terminal
+`GameResult.turns` must be the authoritative absolute final turn already
+carried by the engine transition. Nonterminal critic values, features, C16
+weights, prior formula, information-set keys, opponent policy,
+re-determinization, PUCT selection, absolute-player-zero backup, root choice,
+and every macro/combat bound remain unchanged. The existing API and every
+ordinary game retain `ExactOutcome` bit-for-bit.
+
+Focused tests must reject nonfinite or out-of-range explicit terminal values;
+prove win/loss complement and exact draw behavior at final turns 1, 20, and
+500; prove an explicit terminal and an equal-valued critic leaf back up equal
+Q in a pure fake tree; prove the three engine terminal surfaces agree; and
+preserve the legacy PUCT/generative/preflight goldens. Treatment evidence
+must still pass direct replay, reversed root-action input, hidden
+repartition, opponent noninterference, root-observer-only tree, accounting,
+prior-formula, macro-bound, and exact-combat tests.
+
+Run exactly:
+
+```sh
+./build/old-school-information-set-puct-budget-diagnostic --run-ts1
+```
+
+on the same immutable nine-root ISP1 manifest. Compare `ExactOutcome` and
+`C16DiscountedAbsoluteTurn` at exactly 64 simulations each using seed base
+`202607291201`; simulation-index particle and transition seeds must be common
+between arms. The four registered repair directions are self-X=1
+Braingeyser, self Ancestral Recall, Pass for payable Force Spike, and the
+Blue completed block plan with first No Block, later Air-Elemental trade, and
+no pure Flying-Men chump. The five controls are redundant-Counter Pass, one
+needed Counter with no own-Counter target and a settled protected outcome,
+productive Growth on the actor's Treefolk, casting live Force Spike, and
+life-20 No Blocks with completed exact combat.
+
+For each root and arm report selected semantic result, every root action's
+prior/visits/Q and terminal-transition count, total terminal/observation/depth
+leaves, exact-combat witness, wall time, and all invariants. Report the
+treatment terminal value used and its raw-exact alternative whenever the
+tree reaches a terminal so the scale change is nonvacuous and auditable.
+Require a nonzero exact-versus-treatment terminal delta somewhere; otherwise
+the coordinate is inconclusive rather than a pass.
+
+The result rule is fixed:
+
+- treatment correct on all four repairs, all five controls correct in both
+  arms, every invariant green, no exact-correct repair regressing, and a
+  nonvacuous terminal-scale delta: mechanism and candidate pass, licensing
+  only a latency check and dated manual web pilot;
+- treatment correct on exactly three repairs, with at least two explicit
+  exact-wrong to treatment-correct transitions, zero repair regressions, all
+  controls/invariants green, and a nonvacuous delta: mechanism support but
+  candidate reject; do not deploy;
+- an exact arm already correct on all four repairs: inconclusive coordinate,
+  no candidate claim or deployment;
+- any other outcome, including two or fewer repairs, a repair regression,
+  control regression, invariant failure, or vacuous scale delta: reject and
+  close terminal-backup alignment.
+
+Run this coordinate once. Regardless of result, do not tune `0.985`, substitute
+remaining-turn discount, retry 512 simulations, or change a leaf/prior blend.
+Failure moves directly to a decision-boundary critic trained and evaluated on
+one consistent utility, not another search-parameter screen.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
