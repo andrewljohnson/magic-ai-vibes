@@ -851,6 +851,66 @@ int run_learned_stack_combat_exploration(
     return 0;
 }
 
+int run_resolved_prior_exploration(
+    const gameplay::FixedDeployment& deployment,
+    std::ostream& output) {
+    const auto bots =
+        make_resolved_prior_bots(deployment.parent);
+    output
+        << "FQ4 resolved-consequence shallow-prior exploration"
+        << " parent="
+        << deployment.parent_model_fingerprint
+        << '\n'
+        << "plan mode=ResolvedPrior seed="
+        << kResolvedPriorSeed
+        << " repetitions=" << kResolvedPriorRepetitions
+        << " treatment=C16+ResolvedPrior"
+        << " baseline=ordinary-C16"
+        << " pass_dominance=off"
+        << " adversarial_blocks=off"
+        << " priority_residual=off"
+        << " continuation_controller=Legacy"
+        << " qualification=general_target_correction"
+        << " advance=treatment_wins_gt_30"
+        << " runtime=descriptive\n";
+    output.flush();
+
+    output
+        << "running mode=ResolvedPrior"
+        << " variant=C16+ResolvedPrior"
+        << " model="
+        << deployment.parent_model_fingerprint
+        << " resolved_shallow_prior=on\n";
+    output.flush();
+    const TimedResult treatment = run_one(
+        bots[0], bots[1],
+        kResolvedPriorRepetitions,
+        kResolvedPriorSeed, false);
+    print_result(
+        output, "E0", "C16+ResolvedPrior",
+        0.0, treatment);
+    const CandidateScore score{
+        .alpha = 0.0,
+        .wins = treatment.summary.challenger_stats.wins,
+        .losses = treatment.summary.challenger_stats.losses,
+        .draws = treatment.summary.challenger_stats.draws,
+    };
+    const bool advances = resolved_prior_advances(score);
+    output
+        << (advances ? "advance" : "stop")
+        << " mode=ResolvedPrior"
+        << " variant=C16+ResolvedPrior"
+        << " treatment_wins=" << score.wins
+        << " treatment_losses=" << score.losses
+        << " treatment_draws=" << score.draws;
+    if (!advances) {
+        output << " reason=treatment_not_more_than_30_wins";
+    }
+    output << '\n';
+    output.flush();
+    return 0;
+}
+
 } // namespace
 
 std::shared_ptr<const LearnedModel> blend_priority_heads(
@@ -1089,10 +1149,41 @@ std::array<BotConfig, 3> make_learned_stack_combat_bots(
     };
 }
 
+bool resolved_prior_advances(
+    const CandidateScore& treatment) {
+    constexpr std::size_t kExpectedGames =
+        60 * kResolvedPriorRepetitions;
+    if (treatment.wins + treatment.losses +
+            treatment.draws !=
+        kExpectedGames) {
+        throw std::invalid_argument(
+            "ResolvedPrior selection requires the exact "
+            "60-game schedule");
+    }
+    return treatment.wins > kExpectedGames / 2;
+}
+
+std::array<BotConfig, 2> make_resolved_prior_bots(
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model) {
+        throw std::invalid_argument(
+            "ResolvedPrior requires a frozen model");
+    }
+    BotConfig treatment =
+        make_exploratory_bot(model, false, false, true);
+    BotConfig baseline =
+        make_exploratory_bot(
+            std::move(model), false, false, false);
+    treatment.value_priority_residual_weight = 0.0;
+    baseline.value_priority_residual_weight = 0.0;
+    return {std::move(treatment), std::move(baseline)};
+}
+
 BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
     bool pass_dominance,
-    bool adversarial_blocks) {
+    bool adversarial_blocks,
+    bool resolved_shallow_prior) {
     if (!model) {
         throw std::invalid_argument(
             "exploratory bot requires a frozen model");
@@ -1102,6 +1193,8 @@ BotConfig make_exploratory_bot(
             std::move(model));
     bot.value_pass_dominance = pass_dominance;
     bot.value_adversarial_blocks = adversarial_blocks;
+    bot.value_resolved_shallow_prior =
+        resolved_shallow_prior;
     return bot;
 }
 
@@ -1112,7 +1205,7 @@ int run_cli(
         "Usage: old-school-fq4-blend-explore"
         " [--pd0|--adversarial-blocks|"
         "--adversarial-composition|--stack-discipline|"
-        "--learned-stack-combat]\n";
+        "--learned-stack-combat|--resolved-prior]\n";
     const bool valid_arguments =
         argv != nullptr && argv[0] != nullptr &&
         (argc == 1 ||
@@ -1125,7 +1218,9 @@ int run_cli(
            std::string_view(argv[1]) ==
                "--stack-discipline" ||
            std::string_view(argv[1]) ==
-               "--learned-stack-combat")));
+               "--learned-stack-combat" ||
+           std::string_view(argv[1]) ==
+               "--resolved-prior")));
     if (!valid_arguments) {
         error << kUsage;
         return 2;
@@ -1151,6 +1246,11 @@ int run_cli(
             if (std::string_view(argv[1]) ==
                 "--learned-stack-combat") {
                 return run_learned_stack_combat_exploration(
+                    deployment, output);
+            }
+            if (std::string_view(argv[1]) ==
+                "--resolved-prior") {
+                return run_resolved_prior_exploration(
                     deployment, output);
             }
             return run_adversarial_blocks_exploration(

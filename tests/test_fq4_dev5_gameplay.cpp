@@ -880,6 +880,15 @@ void test_all_five_deck_accounting_and_mutations() {
             gameplay::kCandidateModelFingerprint,
             gameplay::kParentModelFingerprint),
         "adversarial-block policy drift was accepted");
+    policy_drift = summary;
+    policy_drift.challenger.value_resolved_shallow_prior = true;
+    expect(
+        !gameplay::testing::benchmark_accounting_exact(
+            policy_drift, expected_challenger,
+            expected_baseline,
+            gameplay::kCandidateModelFingerprint,
+            gameplay::kParentModelFingerprint),
+        "resolved-prior policy drift was accepted");
 
     auto broken_row = summary;
     bool row_swapped = false;

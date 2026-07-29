@@ -287,6 +287,8 @@ std::size_t advance_turn_player(GameState& state);
 struct PriorityState {
     std::size_t player = 0;
     int consecutive_passes = 0;
+
+    bool operator==(const PriorityState&) const = default;
 };
 
 enum class TurnPhase : std::uint8_t {
@@ -480,6 +482,30 @@ enum class PriorityPassResult : std::uint8_t {
 PriorityPassResult pass_priority(GameState& state,
                                  PriorityState& priority);
 
+// Rules-only immediate-consequence transition used by evaluators that need
+// to observe what a Priority action actually does, rather than the unresolved
+// object it may first place on the stack. No opposing response is chosen:
+// only Pass is taken until the object created by `action` (or the current top
+// object when `action` is Pass) leaves the stack. Empty-stack actions stop
+// after their immediate application.
+struct ResolvedPriorityActionConsequence {
+    GameState state;
+    PriorityState priority;
+    bool window_ended = false;
+    bool terminal = false;
+    int winner = -1;
+    std::size_t priority_passes = 0;
+    std::size_t stack_resolutions = 0;
+
+    bool operator==(
+        const ResolvedPriorityActionConsequence&) const = default;
+};
+
+std::optional<ResolvedPriorityActionConsequence>
+resolve_priority_action_consequence(
+    const GameState& state, std::size_t player, bool sorcery_actions,
+    int consecutive_passes, const PriorityAction& action);
+
 // A deterministic, rules-only proof that a legal Priority action is strictly
 // worse than Pass. Both branches are force-passed until the current
 // stack/window settles. Malformed or nonsettling comparisons fail closed by
@@ -581,6 +607,11 @@ struct BotConfig {
     // choices. It changes neither legal actions nor any other policy. False
     // preserves the historical selector and RNG stream bit-for-bit.
     bool value_pass_dominance = false;
+    // Value-only root shallow prior evaluated after the selected action's
+    // immediate rules consequence resolves. False preserves the historical
+    // unresolved shallow observation bit-for-bit. This never changes the
+    // real continuation policy or filters a legal action.
+    bool value_resolved_shallow_prior = false;
     // Value-only attack-set aggregation. False averages over the existing
     // sampled legal block sets. True instead uses their minimum
     // attacker-perspective value, without changing which blocks are sampled.
@@ -677,6 +708,7 @@ struct LearnedValuePriorityDiagnostic {
     std::vector<double> scores;
     std::size_t sampled_worlds = 0;
     std::size_t rollout_evaluations = 0;
+    bool value_resolved_shallow_prior = false;
     std::size_t selected = 0;
     PriorityAction selected_action;
 
@@ -749,6 +781,10 @@ struct LearnedSearchConfig {
     // Reproduces the deployed Value selector's one aggregate shallow-prior
     // observation blended with all continuation samples.
     bool blend_shallow_prior = false;
+    // Replaces only that one shallow observation with the rules-engine
+    // consequence after the root stack object resolves. Continuation worlds,
+    // seeds, policies, and samples are unchanged.
+    bool value_resolved_shallow_prior = false;
     // Applied at the evaluated root and propagated symmetrically to both
     // Value-mirror continuation seats. It is invalid for Unified Actor
     // continuations.
@@ -1009,7 +1045,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     double value_priority_residual_weight = 0.0,
     bool value_pass_dominance = false,
     LearnedContinuationController value_continuation_controller =
-        LearnedContinuationController::Legacy);
+        LearnedContinuationController::Legacy,
+    bool value_resolved_shallow_prior = false);
 
 // Evaluation-only seam for the continuation controller. `scores` follows
 // `legal_actions` order and is otherwise opaque to the controller.
@@ -1150,7 +1187,8 @@ class Game {
         double value_priority_residual_weight,
         bool value_pass_dominance,
         LearnedContinuationController
-            value_continuation_controller);
+            value_continuation_controller,
+        bool value_resolved_shallow_prior);
     friend LearnedActionSamples learned_priority_action_samples(
         const GameState& state,
         const std::array<std::vector<CardId>, 2>& original_decks,
@@ -1247,7 +1285,8 @@ class Game {
         const PriorityAction& action, std::size_t player,
         bool sorcery_actions, TurnPhase phase,
         int consecutive_passes,
-        const GameState& sampled_state) const;
+        const GameState& sampled_state,
+        bool resolve_immediate_consequence = false) const;
     std::optional<GameResult>
     finish_turn_after_priority_phase(TurnPhase phase);
     std::shared_ptr<const LearnedModel>

@@ -52,6 +52,9 @@ inline constexpr std::uint64_t kLearnedStackCombatSeed =
     202607280810ULL;
 inline constexpr std::size_t kLearnedStackCombatRepetitions = 1;
 inline constexpr double kLearnedStackCombatBlendAlpha = 0.50;
+inline constexpr std::uint64_t kResolvedPriorSeed =
+    202607281711ULL;
+inline constexpr std::size_t kResolvedPriorRepetitions = 1;
 
 struct CandidateScore {
     double alpha = 0.0;
@@ -122,12 +125,22 @@ std::array<BotConfig, 3> make_learned_stack_combat_bots(
     std::shared_ptr<const LearnedModel> blended_model,
     std::shared_ptr<const LearnedModel> baseline_model);
 
+// EXPLORE-8 advances only when the resolved-consequence treatment wins
+// strictly against exact ordinary C16.
+bool resolved_prior_advances(const CandidateScore& treatment);
+
+// Returns resolved-consequence C16 and ordinary C16 in that order. The
+// frozen model and every other deployment setting are identical.
+std::array<BotConfig, 2> make_resolved_prior_bots(
+    std::shared_ptr<const LearnedModel> model);
+
 // Returns the exact K8/H4/R1 C16 deployment recipe with only the explicit
 // exploratory switches selected by the caller.
 BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
     bool pass_dominance,
-    bool adversarial_blocks = false);
+    bool adversarial_blocks = false,
+    bool resolved_shallow_prior = false);
 
 int run_cli(
     int argc, char* argv[], std::ostream& output,

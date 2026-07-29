@@ -935,6 +935,12 @@ void test_accounting_accepts_unequal_production_summary() {
         !gameplay::testing::benchmark_accounting_exact(
             policy_drift, spec, handcrafted, random, {}, {}),
         "adversarial-block policy drift was accepted");
+    policy_drift = production;
+    policy_drift.challenger.value_resolved_shallow_prior = true;
+    expect(
+        !gameplay::testing::benchmark_accounting_exact(
+            policy_drift, spec, handcrafted, random, {}, {}),
+        "resolved-prior policy drift was accepted");
 
     const auto row_totals =
         [](const old_school::BotBenchmarkSummary& value,

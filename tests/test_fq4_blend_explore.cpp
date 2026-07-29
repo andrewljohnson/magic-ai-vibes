@@ -1,4 +1,5 @@
 #include "old_school/fq4_blend_explore.hpp"
+#include "old_school/fq4_dev1_gameplay.hpp"
 
 #include <array>
 #include <cmath>
@@ -13,6 +14,7 @@
 #include <vector>
 
 namespace explore = old_school::fq4_blend_explore;
+namespace gameplay = old_school::fq4_dev1_gameplay;
 
 namespace {
 
@@ -143,6 +145,14 @@ void test_frozen_schedule() {
             explore::kLearnedStackCombatRepetitions == 1 &&
             explore::kLearnedStackCombatBlendAlpha == 0.50,
         "LearnedStackCombat exploration schedule drifted");
+    expect(
+        explore::kResolvedPriorSeed ==
+                202607281711ULL &&
+            explore::kResolvedPriorRepetitions == 1 &&
+            gameplay::kWorldsPerAction == 8 &&
+            gameplay::kRolloutsPerWorld == 1 &&
+            gameplay::kHorizonTurns == 4,
+        "ResolvedPrior exploration schedule drifted");
 }
 
 void test_blend_endpoints_and_isolation() {
@@ -712,6 +722,86 @@ void test_learned_stack_combat_config_isolation() {
         "LearnedStackCombat accepted a missing baseline");
 }
 
+void test_resolved_prior_selection_and_config_isolation() {
+    expect(
+        explore::resolved_prior_advances({
+            .wins = 31,
+            .losses = 29,
+        }),
+        "ResolvedPrior rejected a strict win");
+    expect(
+        !explore::resolved_prior_advances({
+            .wins = 30,
+            .losses = 30,
+        }),
+        "ResolvedPrior advanced a tie");
+    expect(
+        !explore::resolved_prior_advances({
+            .wins = 30,
+            .losses = 20,
+            .draws = 10,
+        }),
+        "ResolvedPrior relaxed the more-than-30 gate");
+    expect_rejected(
+        [] {
+            static_cast<void>(
+                explore::resolved_prior_advances({
+                    .wins = 31,
+                    .losses = 28,
+                }));
+        },
+        "ResolvedPrior accepted a non-60-game result");
+
+    const auto model = parent_model();
+    const auto bots =
+        explore::make_resolved_prior_bots(model);
+    const auto& treatment = bots[0];
+    const auto& baseline = bots[1];
+    expect(
+        treatment.kind == baseline.kind &&
+            treatment.learned_variant ==
+                baseline.learned_variant &&
+            treatment.learned_variant ==
+                old_school::LearnedVariant::
+                    ValueSearchChampion &&
+            treatment.rollouts_per_action ==
+                baseline.rollouts_per_action &&
+            treatment.rollouts_per_action == 8 &&
+            treatment.exploration_rate ==
+                baseline.exploration_rate &&
+            treatment.exploration_rate == 0.0 &&
+            treatment.value_continuation_epsilon ==
+                baseline.value_continuation_epsilon &&
+            treatment.value_continuation_epsilon == 0.0 &&
+            treatment.value_priority_residual_weight ==
+                baseline.value_priority_residual_weight &&
+            treatment.value_priority_residual_weight == 0.0 &&
+            !treatment.value_pass_dominance &&
+            !baseline.value_pass_dominance &&
+            !treatment.value_adversarial_blocks &&
+            !baseline.value_adversarial_blocks &&
+            treatment.value_resolved_shallow_prior &&
+            !baseline.value_resolved_shallow_prior &&
+            treatment.value_continuation_controller ==
+                baseline.value_continuation_controller &&
+            treatment.value_continuation_controller ==
+                old_school::LearnedContinuationController::
+                    Legacy &&
+            treatment.training_games ==
+                baseline.training_games &&
+            treatment.training_games == 800 &&
+            treatment.learned_model == model &&
+            baseline.learned_model == model,
+        "ResolvedPrior changed more than the shallow "
+        "observation boundary");
+    expect_rejected(
+        [] {
+            static_cast<void>(
+                explore::make_resolved_prior_bots(nullptr));
+        },
+        "ResolvedPrior accepted a missing frozen model");
+}
+
 void test_adversarial_block_aggregation_changes_ranking() {
     const std::vector<std::vector<double>> block_scores{
         {1.0, 1.0, 1.0, 0.0},
@@ -763,7 +853,8 @@ void test_cli_rejects_arguments_without_loading_models() {
                 " [--pd0|--adversarial-blocks|"
                 "--adversarial-composition|"
                 "--stack-discipline|"
-                "--learned-stack-combat]\n",
+                "--learned-stack-combat|"
+                "--resolved-prior]\n",
         "CLI argument rejection was not concise");
 }
 
@@ -811,6 +902,9 @@ int main() {
     runner.run(
         "LearnedStackCombat config isolation",
         test_learned_stack_combat_config_isolation);
+    runner.run(
+        "ResolvedPrior selection and config isolation",
+        test_resolved_prior_selection_and_config_isolation);
     runner.run(
         "AdversarialBlocks synthetic aggregation",
         test_adversarial_block_aggregation_changes_ranking);

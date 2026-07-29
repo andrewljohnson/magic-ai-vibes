@@ -193,6 +193,47 @@ DeterminizationFixture determinization_fixture() {
     return fixture;
 }
 
+DeterminizationFixture ancestral_target_fixture() {
+    DeterminizationFixture fixture{
+        .state = {},
+        .decks = {
+            old_school::blue_deck(),
+            old_school::red_deck(),
+        },
+    };
+    auto& state = fixture.state;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.turn_number = 6;
+    state.next_stack_object_id = 1;
+    state.players[0].hand = {
+        old_school::CardId::AncestralRecall,
+    };
+    state.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    state.players[0].library = fixture.decks[0];
+    remove_fixture_card(
+        state.players[0].library,
+        old_school::CardId::AncestralRecall);
+    remove_fixture_card(
+        state.players[0].library,
+        old_school::CardId::Island);
+
+    state.players[1].hand = {
+        old_school::CardId::LightningBolt,
+        old_school::CardId::Mountain,
+    };
+    state.players[1].library = fixture.decks[1];
+    remove_fixture_card(
+        state.players[1].library,
+        old_school::CardId::LightningBolt);
+    remove_fixture_card(
+        state.players[1].library,
+        old_school::CardId::Mountain);
+    return fixture;
+}
+
 std::vector<old_school::CardId>
 physical_cards(const old_school::GameState& state, std::size_t player) {
     std::vector<old_school::CardId> cards;
@@ -11164,6 +11205,71 @@ TEST(benchmark_policy_identity_includes_value_pass_dominance) {
     CHECK(!result.baseline.value_pass_dominance);
 }
 
+TEST(benchmark_policy_identity_includes_resolved_shallow_prior) {
+    const auto model = small_value_model();
+    const old_school::BotConfig control = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action = 0,
+        .training_games = 1,
+        .learned_model = model,
+    };
+    CHECK(!control.value_resolved_shallow_prior);
+    old_school::BotConfig treatment = control;
+    treatment.value_resolved_shallow_prior = true;
+    old_school::GameConfig bounded;
+    bounded.max_turns = 1;
+    bounded.learned_model = model;
+
+    const auto result = old_school::run_bot_benchmark(
+        1, 0x5E771ED501ULL, treatment, control, bounded);
+    CHECK(result.total_games == 60);
+    CHECK(result.challenger.value_resolved_shallow_prior);
+    CHECK(!result.baseline.value_resolved_shallow_prior);
+}
+
+TEST(resolved_shallow_prior_default_off_is_rng_identity) {
+    const auto model = small_value_model();
+    old_school::GameConfig implicit;
+    implicit.max_turns = 4;
+    implicit.starting_player = 0;
+    implicit.learned_model = model;
+    implicit.bots = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 1,
+            .learned_model = model,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 1,
+            .learned_model = model,
+        },
+    };
+    old_school::GameConfig explicit_off = implicit;
+    for (auto& bot : explicit_off.bots) {
+        bot.value_resolved_shallow_prior = false;
+    }
+
+    old_school::Game implicit_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0x5E771ED0FFULL, implicit);
+    old_school::Game explicit_game(
+        old_school::blue_deck(),
+        old_school::ru_aggro_deck(),
+        0x5E771ED0FFULL, explicit_off);
+    CHECK(implicit_game.run() == explicit_game.run());
+    CHECK(implicit_game.state() == explicit_game.state());
+}
+
 TEST(benchmark_policy_identity_includes_value_adversarial_blocks) {
     const auto model = small_value_model();
     const old_school::BotConfig control = {
@@ -11360,6 +11466,37 @@ TEST(value_adversarial_blocks_rejects_non_value_bots) {
             rejected = true;
         }
         CHECK(rejected);
+    }
+}
+
+TEST(resolved_shallow_prior_rejects_non_value_bots) {
+    const std::array<old_school::BotConfig, 2> invalid = {
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Random,
+            .rollouts_per_action = 1,
+            .value_resolved_shallow_prior = true,
+        },
+        old_school::BotConfig{
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::UnifiedActor,
+            .rollouts_per_action = 0,
+            .value_resolved_shallow_prior = true,
+        },
+    };
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::Handcrafted,
+        .rollouts_per_action = 1,
+    };
+    for (const auto& challenger : invalid) {
+        CHECK(throws_with_text(
+            [&] {
+                static_cast<void>(
+                    old_school::run_bot_benchmark(
+                        1, 0xBAD5E771EDULL,
+                        challenger, baseline));
+            },
+            "resolved shallow prior requires Learned Value"));
     }
 }
 
@@ -12629,6 +12766,307 @@ TEST(priority_root_trace_records_the_selected_legal_action_without_changing_play
                   legal.begin(), legal.end(),
                   *root.selected_priority_action) == 1);
     }
+}
+
+TEST(resolved_priority_consequence_observes_rules_effects_without_responses) {
+    old_school::GameState land_state;
+    land_state.active_player = 0;
+    land_state.players[0].hand = {
+        old_school::CardId::Forest,
+    };
+    const auto land =
+        old_school::resolve_priority_action_consequence(
+            land_state, 0, true, 0,
+            old_school::PriorityAction::play_land(
+                old_school::CardId::Forest));
+    CHECK(land.has_value());
+    CHECK(land->state.stack.empty());
+    CHECK(land->state.players[0].hand.empty());
+    CHECK(land->state.players[0].lands.size() == 1);
+    CHECK(land->state.players[0].lands.front().card ==
+          old_school::CardId::Forest);
+    CHECK((land->priority ==
+           old_school::PriorityState{
+               .player = 0,
+               .consecutive_passes = 0,
+           }));
+    CHECK(land->priority_passes == 0);
+    CHECK(land->stack_resolutions == 0);
+    CHECK(!land->window_ended);
+    CHECK(!land->terminal);
+
+    old_school::GameState draw_state;
+    draw_state.active_player = 0;
+    draw_state.next_stack_object_id = 9;
+    draw_state.players[0].hand = {
+        old_school::CardId::AncestralRecall,
+    };
+    draw_state.players[0].library = {
+        old_school::CardId::FlyingMen,
+        old_school::CardId::Counterspell,
+        old_school::CardId::Island,
+    };
+    draw_state.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    const auto draw =
+        old_school::resolve_priority_action_consequence(
+            draw_state, 0, false, 0,
+            old_school::PriorityAction::cast_ancestral_recall(
+                old_school::Target::player_target(0)));
+    CHECK(draw.has_value());
+    CHECK(draw->state.stack.empty());
+    CHECK(draw->state.players[0].library.empty());
+    CHECK(draw->state.players[0].hand.size() == 3);
+    CHECK(draw->state.players[0].graveyard ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::AncestralRecall});
+    CHECK((draw->priority ==
+           old_school::PriorityState{
+               .player = 0,
+               .consecutive_passes = 0,
+           }));
+    CHECK(draw->priority_passes == 2);
+    CHECK(draw->stack_resolutions == 1);
+    CHECK(!draw->terminal);
+
+    old_school::GameState lethal_state;
+    lethal_state.active_player = 0;
+    lethal_state.players[1].life = 3;
+    lethal_state.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 17,
+            .card = old_school::CardId::LightningBolt,
+            .controller = 0,
+            .target =
+                old_school::Target::player_target(1),
+        },
+    };
+    const auto lethal =
+        old_school::resolve_priority_action_consequence(
+            lethal_state, 1, false, 1,
+            old_school::PriorityAction::pass());
+    CHECK(lethal.has_value());
+    CHECK(lethal->state.stack.empty());
+    CHECK(lethal->state.players[1].life == 0);
+    CHECK(lethal->priority_passes == 1);
+    CHECK(lethal->stack_resolutions == 1);
+    CHECK(lethal->terminal);
+    CHECK(lethal->winner == 0);
+
+    old_school::GameState precedence_state;
+    // Engine terminal checks give failed draws precedence over life totals.
+    precedence_state.active_player = 0;
+    precedence_state.failed_draw[0] = true;
+    precedence_state.players[1].life = 0;
+    const auto precedence =
+        old_school::resolve_priority_action_consequence(
+            precedence_state, 0, true, 0,
+            old_school::PriorityAction::pass());
+    CHECK(precedence.has_value());
+    CHECK(precedence->terminal);
+    CHECK(precedence->winner == 1);
+
+    old_school::GameState counter_war;
+    counter_war.active_player = 1;
+    counter_war.next_stack_object_id = 3;
+    counter_war.players[0].hand = {
+        old_school::CardId::Counterspell,
+    };
+    counter_war.players[0].lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    counter_war.stack = {
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 1,
+            .card = old_school::CardId::FlyingMen,
+            .controller = 0,
+        },
+        {
+            .kind = old_school::StackObjectKind::Spell,
+            .id = 2,
+            .card = old_school::CardId::Counterspell,
+            .controller = 1,
+            .spell_target = 1,
+        },
+    };
+    const auto counter =
+        old_school::resolve_priority_action_consequence(
+            counter_war, 0, false, 0,
+            old_school::PriorityAction::cast_counterspell(2));
+    CHECK(counter.has_value());
+    CHECK(counter->state.stack.size() == 1);
+    CHECK(counter->state.stack.front().id == 1);
+    CHECK(counter->state.stack.front().card ==
+          old_school::CardId::FlyingMen);
+    CHECK(counter->state.players[0].graveyard ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::Counterspell});
+    CHECK(counter->state.players[1].graveyard ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::Counterspell});
+    CHECK(counter->state.stats[0].spells_countered == 1);
+    CHECK(counter->priority_passes == 2);
+    CHECK(counter->stack_resolutions == 1);
+
+    const std::array<std::vector<old_school::CardId>, 2>
+        counter_war_decks = {
+            std::vector<old_school::CardId>{
+                old_school::CardId::Counterspell,
+                old_school::CardId::Island,
+                old_school::CardId::Island,
+                old_school::CardId::FlyingMen,
+            },
+            std::vector<old_school::CardId>{
+                old_school::CardId::Counterspell,
+            },
+        };
+    const auto counter_war_actions =
+        old_school::legal_priority_actions(
+            counter_war, 0, false);
+    const auto counter_war_diagnostic =
+        old_school::diagnose_learned_value_priority(
+            counter_war, counter_war_decks, 0, false,
+            old_school::TurnPhase::FirstMain, 0,
+            small_value_model(), 0, 0xC0A17E2ULL,
+            0.0, 0.0, false,
+            old_school::LearnedContinuationController::Legacy,
+            true);
+    CHECK(counter_war_diagnostic.value_resolved_shallow_prior);
+    CHECK(counter_war_diagnostic.legal_actions ==
+          counter_war_actions);
+    CHECK(counter_war_diagnostic.actions ==
+          counter_war_actions);
+    CHECK(counter_war_diagnostic.pass_dominated_actions.empty());
+
+    old_school::GameState empty_pass;
+    empty_pass.active_player = 0;
+    const auto passed =
+        old_school::resolve_priority_action_consequence(
+            empty_pass, 0, true, 0,
+            old_school::PriorityAction::pass());
+    CHECK(passed.has_value());
+    CHECK((passed->priority ==
+           old_school::PriorityState{
+               .player = 1,
+               .consecutive_passes = 1,
+           }));
+    CHECK(passed->priority_passes == 1);
+    CHECK(passed->stack_resolutions == 0);
+    CHECK(!passed->window_ended);
+}
+
+TEST(resolved_shallow_prior_changes_only_the_paired_root_observation) {
+    const auto fixture = ancestral_target_fixture();
+    const auto model = small_value_model();
+    const auto actions =
+        old_school::legal_priority_actions(
+            fixture.state, 0, true);
+    const auto self_draw_position =
+        std::find(
+            actions.begin(), actions.end(),
+            old_school::PriorityAction::cast_ancestral_recall(
+                old_school::Target::player_target(0)));
+    CHECK(self_draw_position != actions.end());
+    const std::size_t self_draw =
+        static_cast<std::size_t>(
+            std::distance(
+                actions.begin(), self_draw_position));
+    const auto opponent_draw_position =
+        std::find(
+            actions.begin(), actions.end(),
+            old_school::PriorityAction::cast_ancestral_recall(
+                old_school::Target::player_target(1)));
+    CHECK(opponent_draw_position != actions.end());
+    const std::size_t opponent_draw =
+        static_cast<std::size_t>(
+            std::distance(
+                actions.begin(), opponent_draw_position));
+
+    old_school::LearnedSearchConfig control{
+        .seed = 0xA11CE5701ULL,
+        .worlds = 2,
+        .rollouts_per_world = 2,
+        .horizon_turns = 0,
+        .continuation_variant =
+            old_school::LearnedVariant::
+                ValueSearchChampion,
+        .blend_shallow_prior = true,
+    };
+    auto treatment = control;
+    treatment.value_resolved_shallow_prior = true;
+    const auto before =
+        old_school::learned_priority_action_samples(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, control);
+    const auto after =
+        old_school::learned_priority_action_samples(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, treatment);
+
+    CHECK(before.sampled_worlds == after.sampled_worlds);
+    CHECK(before.rollout_evaluations ==
+          after.rollout_evaluations);
+    CHECK(before.terminal_evaluations ==
+          after.terminal_evaluations);
+    CHECK(before.bootstrapped_evaluations ==
+          after.bootstrapped_evaluations);
+    CHECK(before.priority_continuation_samples ==
+          after.priority_continuation_samples);
+    CHECK(before.priority_shallow_prior_samples !=
+          after.priority_shallow_prior_samples);
+    CHECK(after.priority_shallow_prior_samples[self_draw] !=
+          after.priority_shallow_prior_samples[opponent_draw]);
+    CHECK(after.priority_shallow_prior_samples[self_draw].front() >
+          after.priority_shallow_prior_samples[opponent_draw]
+                                              .front());
+
+    const auto hidden =
+        old_school::learned_priority_action_samples(
+            hidden_repartition(fixture.state, 0),
+            fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, treatment);
+    CHECK(hidden.q_samples == after.q_samples);
+    CHECK(hidden.priority_shallow_prior_samples ==
+          after.priority_shallow_prior_samples);
+    CHECK(hidden.priority_continuation_samples ==
+          after.priority_continuation_samples);
+    CHECK(hidden.exact_priority_aggregate_scores ==
+          after.exact_priority_aggregate_scores);
+    CHECK(hidden.rollout_evaluations ==
+          after.rollout_evaluations);
+
+    auto unblended = treatment;
+    unblended.blend_shallow_prior = false;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_priority_action_samples(
+                    fixture.state, fixture.decks, 0, true,
+                    old_school::TurnPhase::FirstMain, 0,
+                    actions, model, unblended));
+        },
+        "requires shallow-prior blending"));
+
+    auto actor_search = treatment;
+    actor_search.continuation_variant =
+        old_school::LearnedVariant::UnifiedActor;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::learned_priority_action_samples(
+                    fixture.state, fixture.decks, 0, true,
+                    old_school::TurnPhase::FirstMain, 0,
+                    actions, small_actor_model(),
+                    actor_search));
+        },
+        "requires a Value-mirror search"));
 }
 
 TEST(contextual_shallow_value_uses_each_live_priority_successor) {

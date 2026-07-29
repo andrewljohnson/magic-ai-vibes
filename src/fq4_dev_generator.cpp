@@ -343,6 +343,7 @@ bool source_config_exact(
             !same_double(
                 bot.value_priority_residual_weight, 0.0) ||
             bot.value_pass_dominance ||
+            bot.value_resolved_shallow_prior ||
             bot.value_adversarial_blocks ||
             bot.value_continuation_controller !=
                 LearnedContinuationController::Legacy ||

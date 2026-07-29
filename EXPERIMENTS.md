@@ -17548,6 +17548,84 @@ stronger observed localization: the unchanged critic already represents the
 right consequence ordering, so fix where the generic action prior observes
 the rules transition rather than asserting a hand-authored resource order.
 
+##### FQ4-EXPLORE-8 engineering result — stopped before gameplay
+
+Recorded 2026-07-28 after rereading `REVIEW.md` through its newest 16:49
+verification addendum. The implementation is default-off, card-agnostic, and
+uses the engine's legal action plus ordinary stack resolution on the sampled
+shallow clone. The existing continuation is not given the treatment switch.
+Focused runner tests passed 17/17 and the independently repeated engine suite
+passed 180/180.
+
+The exact frozen-root check was run without opening gameplay seed
+`202607281702`:
+
+```sh
+c++ -Iinclude -std=c++20 -O3 -Wall -Wextra -Wpedantic -Werror \
+  /private/tmp/ancestral_pd0.cpp \
+  build/obj/a8cd4fb6e4a7d834212c735d9b8e2b56e1122ff6e8bb12abbc7a3c6b37893c6b/src/game.o \
+  build/obj/a8cd4fb6e4a7d834212c735d9b8e2b56e1122ff6e8bb12abbc7a3c6b37893c6b/src/learned_iteration.o \
+  -o /private/tmp/ancestral_pd0_resolved
+/private/tmp/ancestral_pd0_resolved --settled-only
+```
+
+It loaded exact frozen C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`
+and reproduced the declared 64-world settled critic means bit for bit:
+self-target `.9123858834`, Pass `.8886615963`, opponent-target
+`.8722254509`. With the resolved prior and exact K8/H4 aggregation, the three
+relevant legal options ranked:
+
+| Action | Resolved-prior aggregate |
+| --- | ---: |
+| Ancestral Recall targeting self | .9888771023 |
+| Pass | .9876290663 |
+| Ancestral Recall targeting opponent | .9858028279 |
+
+The harmful target ordering is therefore corrected. However, the full legal
+argmax was `CastArtifact` for the Sol Ring also present in the captured hand,
+not Ancestral Recall targeting self. EXPLORE-8 gate 2 literally preregistered
+a full-root `opponent-target -> self-target` selection change. That
+over-specific gate **failed** despite the more general correction, so
+EXPLORE-8 is rejected/stopped and its reserved gameplay seed remains
+unopened. This does not refute the treatment; it exposes an unforeseen third
+legal action that the original gate incorrectly excluded.
+
+##### FQ4-EXPLORE-9 resolved-consequence general correction declaration
+
+Declared 2026-07-28 16:57 PDT before changing the EXPLORE runner schedule or
+opening gameplay seed `202607281711`. Repository and Git-history search found
+that seed unused. This successor preserves the exact EXPLORE-8 implementation
+and all of its isolation gates; it changes only the over-specific engineering
+qualification and uses a fresh gameplay seed.
+
+The already observed, now immutable qualification facts are:
+
+1. the exact 64-world settled means reproduce
+   `.9123858834 > .8886615963 > .8722254509`;
+2. on the complete legal-action root, the treatment does not select Ancestral
+   Recall targeting the opponent;
+3. Ancestral Recall targeting self scores strictly above Ancestral Recall
+   targeting the opponent; and
+4. no action identity is named or preferred by the implementation itself.
+
+The remaining engineering requirements are unchanged: default-off RNG
+identity; hidden-repartition identity; complete legal-action retention;
+bit-identical sampled worlds, continuation samples, and accounting; generic
+spell, Pass, non-stack, terminal, and counter-war regressions; exact old
+recipe predicates rejecting accidental activation; `-Werror`, full tests,
+and sanitizer checks.
+
+After those gates, run treatment-first on fresh seed `202607281711` against
+ordinary C16 for exactly one balanced repetition: 60 games total, 12 per
+challenger deck, exact K8/H4/R1, identical frozen C16 model, no PD0,
+AdversarialBlocks, Priority residual, alternative continuation controller, or
+exploration on either arm. Strictly more than 30 treatment wins advances it
+to a clearly labeled web pilot for owner play-testing; 30 or fewer stops it.
+Report all five deck rows, runtime, decisions, and rollouts. This remains a
+rapid selector, not a strength or Learned-is-king claim, and it is not
+composed with EXPLORE-6.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

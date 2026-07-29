@@ -334,6 +334,8 @@ bool same_bot(
                second.value_priority_residual_weight) &&
            first.value_pass_dominance ==
                second.value_pass_dominance &&
+           first.value_resolved_shallow_prior ==
+               second.value_resolved_shallow_prior &&
            first.value_adversarial_blocks ==
                second.value_adversarial_blocks &&
            first.value_continuation_controller ==

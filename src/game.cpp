@@ -291,6 +291,13 @@ void validate_bot_research_config(const BotConfig& bot) {
         throw std::invalid_argument(
             "Value Pass dominance requires Learned Value");
     }
+    if (bot.value_resolved_shallow_prior &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion)) {
+        throw std::invalid_argument(
+            "resolved shallow prior requires Learned Value");
+    }
     if (bot.value_adversarial_blocks &&
         (bot.kind != BotKind::Learned ||
          bot.learned_variant !=
@@ -11283,6 +11290,105 @@ PriorityPassResult pass_priority(GameState& state,
     return PriorityPassResult::StackObjectResolved;
 }
 
+std::optional<ResolvedPriorityActionConsequence>
+resolve_priority_action_consequence(
+    const GameState& state, std::size_t player, bool sorcery_actions,
+    int consecutive_passes, const PriorityAction& action) {
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "resolved Priority consequence player must be 0 or 1");
+    }
+    if (consecutive_passes < 0 || consecutive_passes > 1) {
+        throw std::out_of_range(
+            "resolved Priority consequence pass count must be zero or one");
+    }
+
+    ResolvedPriorityActionConsequence result{
+        .state = state,
+        .priority = {
+            .player = player,
+            .consecutive_passes = consecutive_passes,
+        },
+    };
+    std::optional<StackObjectId> object_to_resolve;
+    if (action.kind == PriorityActionKind::Pass) {
+        if (!result.state.stack.empty()) {
+            object_to_resolve = result.state.stack.back().id;
+        }
+    } else {
+        const std::size_t stack_size = result.state.stack.size();
+        if (!apply_priority_action(
+                result.state, player, action, sorcery_actions)) {
+            return std::nullopt;
+        }
+        result.priority = {
+            .player = player,
+            .consecutive_passes = 0,
+        };
+        if (result.state.stack.size() > stack_size) {
+            object_to_resolve = result.state.stack.back().id;
+        }
+    }
+
+    const auto update_terminal =
+        [&]() {
+            if (result.state.failed_draw[0] ||
+                result.state.failed_draw[1]) {
+                result.terminal = true;
+                result.winner =
+                    result.state.failed_draw[0] ==
+                            result.state.failed_draw[1]
+                        ? -1
+                        : (result.state.failed_draw[0] ? 1 : 0);
+                return;
+            }
+            const bool zero_lost =
+                result.state.players[0].life <= 0;
+            const bool one_lost =
+                result.state.players[1].life <= 0;
+            result.terminal = zero_lost || one_lost;
+            if (!result.terminal || zero_lost == one_lost) {
+                result.winner = -1;
+            } else {
+                result.winner = zero_lost ? 1 : 0;
+            }
+        };
+    const auto take_pass =
+        [&]() {
+            const PriorityPassResult pass =
+                pass_priority(result.state, result.priority);
+            ++result.priority_passes;
+            if (pass == PriorityPassResult::WindowEnded) {
+                result.window_ended = true;
+            } else if (
+                pass == PriorityPassResult::StackObjectResolved) {
+                ++result.stack_resolutions;
+                update_terminal();
+            }
+        };
+
+    if (action.kind == PriorityActionKind::Pass) {
+        take_pass();
+    }
+    constexpr std::size_t kMaximumConsequencePasses = 1024;
+    while (object_to_resolve.has_value() &&
+           !result.terminal &&
+           std::any_of(
+               result.state.stack.begin(),
+               result.state.stack.end(),
+               [&](const StackObject& object) {
+                   return object.id == *object_to_resolve;
+               })) {
+        if (result.priority_passes >=
+            kMaximumConsequencePasses) {
+            return std::nullopt;
+        }
+        take_pass();
+    }
+    update_terminal();
+    return result;
+}
+
 namespace {
 
 enum class PassDominanceSourceKind : std::uint8_t {
@@ -13328,7 +13434,8 @@ PriorityAction Game::choose_priority_action(
                         learned_value_shallow_action_score(
                             actions[action_index], player,
                             sorcery_actions, phase,
-                            consecutive_passes, world.state));
+                            consecutive_passes, world.state,
+                            bot.value_resolved_shallow_prior));
                 }
                 aggregate.average_shallow(worlds.size());
             }
@@ -13599,8 +13706,47 @@ double Game::learned_value_shallow_action_score(
     const PriorityAction& action, std::size_t player,
     bool sorcery_actions, TurnPhase phase,
     int consecutive_passes,
-    const GameState& sampled_state) const {
+    const GameState& sampled_state,
+    bool resolve_immediate_consequence) const {
     const auto model = learned_model_for(player);
+    if (resolve_immediate_consequence) {
+        const auto consequence =
+            resolve_priority_action_consequence(
+                sampled_state, player, sorcery_actions,
+                consecutive_passes, action);
+        if (!consequence.has_value()) {
+            return -std::numeric_limits<double>::infinity();
+        }
+        if (consequence->terminal) {
+            return consequence->winner < 0
+                       ? 0.5
+                       : (consequence->winner ==
+                                  static_cast<int>(player)
+                              ? 1.0
+                              : 0.0);
+        }
+        if (consequence->window_ended &&
+            model->critic_schema() ==
+                LearnedCriticSchema::DecisionContextV1) {
+            return 0.5;
+        }
+        if (consequence->window_ended) {
+            return model->predict(
+                learned_features(
+                    consequence->state, player));
+        }
+        return predict_learned_critic_with_context(
+            model, consequence->state, player,
+            {
+                .valid = true,
+                .phase = phase,
+                .decision_player =
+                    consequence->priority.player,
+                .consecutive_passes =
+                    consequence->priority.consecutive_passes,
+                .sorcery_actions = sorcery_actions,
+            });
+    }
     GameState successor = sampled_state;
     PriorityState priority = {
         .player = player,
@@ -21451,6 +21597,17 @@ void validate_search_config(
         throw std::invalid_argument(
             "Value Pass dominance requires a Value-mirror search");
     }
+    if (config.value_resolved_shallow_prior &&
+        config.continuation_variant !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "resolved shallow prior requires a Value-mirror search");
+    }
+    if (config.value_resolved_shallow_prior &&
+        !config.blend_shallow_prior) {
+        throw std::invalid_argument(
+            "resolved shallow prior requires shallow-prior blending");
+    }
     if (config.value_continuation_controller !=
             LearnedContinuationController::Legacy &&
         config.continuation_variant !=
@@ -21904,7 +22061,8 @@ LearnedActionSamples learned_priority_action_samples(
             config.blend_shallow_prior
                 ? simulation.learned_value_shallow_action_score(
                       action, player, sorcery_actions, phase,
-                      consecutive_passes, world.state)
+                      consecutive_passes, world.state,
+                      config.value_resolved_shallow_prior)
                 : 0.0;
         PriorityState priority{
             .player = player,
@@ -22850,7 +23008,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     double value_priority_residual_weight,
     bool value_pass_dominance,
     LearnedContinuationController
-        value_continuation_controller) {
+        value_continuation_controller,
+    bool value_resolved_shallow_prior) {
     if (!model) {
         throw std::invalid_argument(
             "Learned Value diagnostic requires a frozen model");
@@ -22869,6 +23028,12 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
         value_priority_residual_weight);
     validate_value_continuation_controller(
         value_continuation_controller);
+    if (value_resolved_shallow_prior &&
+        model->variant() !=
+            LearnedVariant::ValueSearchChampion) {
+        throw std::invalid_argument(
+            "resolved shallow prior requires Learned Value");
+    }
 
     GameConfig config;
     config.learned_model = model;
@@ -22885,6 +23050,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .value_priority_residual_weight =
                 value_priority_residual_weight,
             .value_pass_dominance = value_pass_dominance,
+            .value_resolved_shallow_prior =
+                value_resolved_shallow_prior,
             .value_continuation_controller =
                 value_continuation_controller,
             .learned_model = model,
@@ -22899,6 +23066,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .value_priority_residual_weight =
                 value_priority_residual_weight,
             .value_pass_dominance = value_pass_dominance,
+            .value_resolved_shallow_prior =
+                value_resolved_shallow_prior,
             .value_continuation_controller =
                 value_continuation_controller,
             .learned_model = model,
@@ -22910,6 +23079,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     evaluator.state_ = state;
 
     LearnedValuePriorityDiagnostic diagnostic;
+    diagnostic.value_resolved_shallow_prior =
+        value_resolved_shallow_prior;
     diagnostic.legal_actions =
         legal_priority_actions(state, player, sorcery_actions);
     diagnostic.actions = diagnostic.legal_actions;
@@ -22963,7 +23134,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
                         diagnostic.actions[action_index], player,
                         sorcery_actions, phase,
                         consecutive_passes,
-                        world.state));
+                        world.state,
+                        value_resolved_shallow_prior));
             }
             aggregate.average_shallow(worlds.size());
         }
@@ -23288,6 +23460,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
               baseline.value_priority_residual_weight &&
           challenger.value_pass_dominance ==
               baseline.value_pass_dominance &&
+          challenger.value_resolved_shallow_prior ==
+              baseline.value_resolved_shallow_prior &&
           challenger.value_adversarial_blocks ==
               baseline.value_adversarial_blocks &&
           challenger.value_continuation_controller ==
