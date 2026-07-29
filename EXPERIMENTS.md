@@ -22328,6 +22328,65 @@ Learned-is-king, or champion claim. Any other result rejects the candidate.
 Do not run 200 or 2,000 games unless a later declaration promotes a
 field-validated pilot to a milestone candidate.
 
+##### AQ10-DBC1 successor-boundary calibration result
+
+Completed 2026-07-29 after rereading `REVIEW.md` through its newest 08:34
+PDT cycle. That review independently reproduced the implementation gates,
+confirmed the champion's 137th bit-identical lift reading, and recommended
+letting the registered run speak. The exact command was:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-boundary-critic --run
+```
+
+The command returned normally after 649.98 seconds real / 1657.64 user /
+4.04 sys. It authenticated frozen C16, the complete G4B source, and frozen
+DBC0 subset; collected 80 TRAIN and 80 whole-game-disjoint DEV roots with
+K8/R1/H8 and nested K2/R1/H4; and produced 1,824 weighted TRAIN successor
+examples. The owner-safe corpus digest was
+`28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58`.
+The direct repeat and nonvacuous hidden-repartition collection were both
+bit-identical. All 34 authorized output scalars moved, the fixed optimizer
+stopped after three iterations, the parent remained immutable, a repeated
+fit was bit-identical, and replaying the 34 fitted scalars onto C16 reproduced
+candidate `91ecdf2e47f0f1d94127d5bc2a33a71e52c5a8ecb6e0ef9c01d039e562815efb`.
+
+The fixed output-only treatment improved TRAIN BCE but failed its primary
+action-ranking prediction and did not generalize:
+
+| Split | Deck | BCE C16 -> DBC1 | regret C16 -> DBC1 | top-one C16 -> DBC1 |
+| --- | --- | ---: | ---: | ---: |
+| TRAIN | Green | .648673 -> .636677 | .021989 -> .021989 | .5313 -> .5313 |
+| TRAIN | Red | .689019 -> .682476 | .020647 -> .021403 | .4375 -> .3750 |
+| TRAIN | Blue | .626481 -> .614630 | .019435 -> .019525 | .4688 -> .4688 |
+| TRAIN | White | .622792 -> .619951 | .010196 -> .009219 | .5625 -> .6875 |
+| TRAIN | RU Aggro | .663704 -> .655204 | .012307 -> .016169 | .6250 -> .5625 |
+| TRAIN | **equal-deck** | **.650134 -> .641787** | **.016915 -> .017661** | **.5250 -> .5250** |
+| DEV | Green | .575647 -> .564175 | .022000 -> .022000 | .4844 -> .4844 |
+| DEV | Red | .605693 -> .620907 | .015786 -> .015786 | .5625 -> .5625 |
+| DEV | Blue | .503933 -> .491748 | .009118 -> .009118 | .6875 -> .6875 |
+| DEV | White | .503638 -> .512143 | .050951 -> .055712 | .4688 -> .4688 |
+| DEV | RU Aggro | .642249 -> .644460 | .020626 -> .031859 | .5625 -> .4375 |
+| DEV | **equal-deck** | **.566232 -> .566687** | **.023696 -> .026895** | **.5531 -> .5281** |
+
+Decision: **REJECT at the offline gate**. TRAIN regret did not strictly
+improve; DEV BCE and regret worsened; DEV top-one agreement fell; and RU
+Aggro exceeded the `+0.01` regret guard. The result is diagnostically sharp:
+the successor target contains useful calibration signal (TRAIN BCE and
+Green/Blue DEV BCE improved), but a 34-scalar global output remapping is too
+blunt to express the action-relative corrections. It improves some regions
+only by moving Red, White, and RU in the wrong direction. The aligned
+nine-root battery and fresh selector seed `202607291311` remained unopened;
+C16 remains champion and no model was deployed.
+
+Next experiment: preserve this exact owner-safe labeled coordinate once, then
+test a separately declared higher-capacity critic update that can change the
+state representation and is selected by action regret rather than calibration
+loss alone. The cache is justified only to avoid paying this 10.8-minute
+labeling cost for every candidate; it may not change a row, target, split,
+weight, or gate, and it is not evidence by itself.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
