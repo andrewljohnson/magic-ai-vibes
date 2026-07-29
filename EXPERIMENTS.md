@@ -19690,20 +19690,34 @@ exact total loss/evaluation mass one, matching G1/G3's optimizer scale while
 remaining independent of root count or action width. This prevents root-rich
 long games or White control trajectories from dominating.
 
-The two-step fixed CLI is:
+The fixed CLI sequence is:
 
 ```sh
+./build/old-school-action-q-broad-distill --preflight
 ./build/old-school-action-q-broad-distill --census
 ./build/old-school-action-q-broad-distill --run
 ```
 
-`--census` may execute only the 80 deterministic source games, retain roots,
-and print the owner-safe manifest hash plus exact per-split/per-deck
-games/roots/options. It cannot open an AQ4 PrioritySearch coordinate, fit a
-model, score a candidate, open the selector, or publish an artifact. After
-that exact census is recorded and its hash frozen in source, commit and review
-the freeze before `--run`. The run must reconstruct the identical manifest
-before opening any teacher coordinate.
+The historical G1 record froze every preflight seed, recipe coordinate,
+direction, and rounded mean, but did not retain a canonical bit-level digest
+of the complete `PreflightReport`; rounded notebook values are insufficient
+to invent one. Therefore `--preflight` is a control-only replay of the five
+already-open G1 coordinates. It binds the complete recipe, parent identity,
+fixture/action order, typed actions/descriptors, every sample and mean bit,
+exact-max support, direction fields, hidden/reversal/noninterference fields,
+and all outer/inner accounting into one SHA-256. It may run no source game,
+G4B root coordinate, fit, candidate score, selector, or publication. Record
+that digest, freeze it in source, and commit/review the freeze before
+`--census`; `--run` must require exact reproduction.
+
+`--census` may then execute only the 80 deterministic source games, retain
+roots, and print the owner-safe manifest hash plus exact
+per-split/per-deck games/roots/options. It cannot open a G4B AQ4
+PrioritySearch coordinate, fit a model, score a candidate, open the selector,
+or publish an artifact. After that exact census is recorded and its hash
+frozen in source, commit and review the freeze before `--run`. The run must
+reconstruct the identical manifest and preflight digest before opening any
+teacher coordinate.
 
 No retained type, manifest, digest, or report may contain `GameState`,
 opponent-hand/library identities, library order, source outcome, or sampled
@@ -19786,6 +19800,15 @@ experiment is a true on-policy multi-generation loop with disjoint whole-game
 TRAIN/DEV schedules and the previous generation's deployed Priority residual
 active in its next actor-local teacher; merely passing a Priority-only child
 into the current residual-zero teacher would be a no-op, not iteration.
+
+Implementation clarification: the control-only `--preflight` stage above was
+added after the public G4B types were drafted but before a G4B implementation
+compiled, before any preflight/census/science command ran, and before any new
+seed opened. It changes no seed, target, corpus, model, optimizer, threshold,
+or scientific gate. It closes an exactness ambiguity prospectively: the
+declaration required bit-exact G1 replay, while the old notebook retained only
+rounded scalar displays. Capturing the complete already-open control report
+once and freezing its digest is stricter than relaxing that requirement.
 
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
