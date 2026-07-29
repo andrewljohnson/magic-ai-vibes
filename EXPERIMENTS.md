@@ -22435,6 +22435,43 @@ truncation, trailing data, schema drift, wrong-parent loading, or any
 replication mismatch fails closed and publishes nothing. Record the final
 file byte count and SHA-256 before freezing them for consumers.
 
+AQ10-DBC1-CACHE result, completed 2026-07-29 09:09 PDT:
+**PASS; owner-safe corpus frozen**. `REVIEW.md` was reread through its newest
+09:03 PDT cycle before recording this result. That entry independently
+verified the 20/20 cache suite, the unchanged 138th C16 lift reading, and the
+publication protocol, and countersigned DBC2.
+
+The exact one-shot command was:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-boundary-critic --cache
+```
+
+It completed in 644.82 seconds real / 1667.31 user / 3.00 sys and reproduced
+the complete prior DBC1 coordinate: parent, source/subset, corpus digest,
+1,824 TRAIN examples, every collection/hidden-repartition/accounting gate,
+the three-iteration 34-scalar fit, candidate
+`91ecdf2e47f0f1d94127d5bc2a33a71e52c5a8ecb6e0ef9c01d039e562815efb`,
+and the same five-failure offline rejection. Prepublication codec roundtrip
+and postpublication load reproduced examples, parent predictions, and parent
+metrics bit-for-bit.
+
+The publish-once artifact is now frozen:
+
+```text
+path   build/model-cache/old-school-aq10-dbc1-owner-safe-corpus-v1.bin
+bytes  25886525
+sha256 9234b10d7181d566d4dacb972fbb32bf20d2961eb34c4d95d7e92ece1622a4a4
+digest 28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58
+roots  TRAIN 80 / DEV 80
+```
+
+External `shasum -a 256` and `stat` readings matched the publisher. The
+artifact contains no `GameState` and no opponent hidden identity. A second
+publication cannot replace it. This is a preservation result only, not new
+bot evidence; it licenses the exact DBC2 consumer declared below.
+
 ##### AQ11-DBC2-RANK-DIRECT state-conditional ranking critic declaration
 
 Declared 2026-07-29 08:46 PDT after the cache declaration above, after

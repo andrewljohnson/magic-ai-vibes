@@ -130,6 +130,7 @@ void test_fixed_recipe_and_owner_safe_shape() {
     const rank::OptimizerConfig recipe;
     expect(
         recipe.fit_tag == 202607291401ULL &&
+            rank::kSelectorSeed == 202607291411ULL &&
             recipe.steps == 256 &&
             recipe.learning_rate == 0.001 &&
             recipe.beta_one == 0.9 &&

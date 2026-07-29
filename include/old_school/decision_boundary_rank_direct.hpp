@@ -19,6 +19,8 @@ inline constexpr std::size_t kFeatureCount =
 inline constexpr std::size_t kLeafCount = 2;
 inline constexpr std::uint64_t kFitTag =
     202607291401ULL;
+inline constexpr std::uint64_t kSelectorSeed =
+    202607291411ULL;
 inline constexpr std::size_t kAdamSteps = 256;
 inline constexpr double kAdamLearningRate = 0.001;
 inline constexpr double kAdamBetaOne = 0.9;
