@@ -22676,6 +22676,123 @@ separately declared nonlinear state-conditional ranker using the same frozen
 owner-safe corpus; no DBC2 learning-rate, temperature, regularization,
 step-count, or seed retry is licensed.
 
+##### AQ12-DBC3-RANK-HIDDEN nonlinear ranking critic declaration
+
+Declared 2026-07-29 09:18 PDT at exact DBC2 result commit `8185c1f`, after
+rereading `REVIEW.md` through its newest 09:03 PDT cycle, and before exposing
+a hidden activation, adding the treatment seam, fitting, scoring, or opening
+fresh selector seed `202607291511`. Repository and Git-history searches found
+fresh fit tag `202607291501`, selector seed `202607291511`, and identifier
+`DBC3-RANK-HIDDEN` unused. C16 remains champion.
+
+This is one candidate on the next representation rung, not a learning-rate,
+temperature, regularization, optimizer, seed, width, or interpolation sweep.
+The immutable parent results define a small factorial diagnosis:
+
+- DBC1 changed 34 existing hidden-output/bias scalars with independent
+  successor BCE and improved TRAIN BCE but worsened TRAIN and DEV action
+  regret;
+- DBC2 used the action-ranking loss on 674 raw linear observation coordinates
+  and improved TRAIN regret, but worsened DEV regret and RU ranking; and
+- the untested combination is action-ranking supervision through C16's
+  existing nonlinear hidden representation.
+
+Falsifiable hypothesis: the two frozen 16-unit tanh critic trunks already
+encode useful interactions among life, mana, own hand identities, public
+permanents, graveyards, exile, and stack/target state, but DBC1's independent
+calibration objective and DBC2's raw linear path could not use those
+interactions safely. Fitting only 32 hidden-to-output residuals with the
+root-listwise loss will strictly improve TRAIN and whole-game-disjoint DEV
+teacher regret without reducing DEV ranking agreement or violating any deck
+guard. Failure closes this frozen-critic-output family and sends the next bot
+to an explicitly action-conditioned representation; it does not license
+nearby optimizer or regularization retries.
+
+###### Exact treatment and optimizer
+
+Load exact C16 and only the frozen DBC1 owner-safe cache:
+
+```text
+path   build/model-cache/old-school-aq10-dbc1-owner-safe-corpus-v1.bin
+bytes  25886525
+sha256 9234b10d7181d566d4dacb972fbb32bf20d2961eb34c4d95d7e92ece1622a4a4
+digest 28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58
+```
+
+For critic leaf `l` and its exact frozen 16-vector
+`h_l(x) = tanh(W_l x + b_l)`, fit an independent additive
+hidden-to-output vector `delta_l[0..15]`. There are exactly 32 trainable
+binary64 scalars. Initialize all to exact zero. For a nonterminal cached
+successor cell:
+
+```text
+V_delta(x) =
+  0.5 * sum_l sigmoid(logit(V_parent,l(x)) + dot(delta_l, h_l(x)))
+```
+
+Terminal-before-boundary cells retain their exact aligned terminal utility.
+The two leaf trunks, hidden biases, output biases, 674-wide direct paths,
+context paths, ensemble topology, and every Priority, Attack, Block, and
+DamageOrder policy tensor remain frozen. Hidden-unit indices are local to
+their leaf, so the two 16-vectors are deliberately independent rather than
+incorrectly sharing coordinates across unrelated trunks. Applying exact zero
+must reproduce C16 bit-for-bit.
+
+Use DBC2's listwise target and candidate distributions without alteration:
+
+```text
+t = 0.90 * softmax(Q_teacher / 0.10) + 0.10 / N
+p = 0.90 * softmax(Q_candidate / 0.10) + 0.10 / N
+```
+
+Minimize equal-root/equal-deck
+`cross_entropy(t, p) + 0.5 * 0.10 * sum_l sum_j(delta_lj^2)` over TRAIN
+only. Use deterministic full-batch Adam for exactly 256 updates, learning
+rate `0.001`, betas `0.9/0.999`, epsilon `1e-8`, global gradient-norm clip
+`5.0`, and fit tag `202607291501`. There is no random initialization,
+mini-batch, early stopping, arm selection, trust interpolation, or DEV-driven
+choice.
+
+Repeat from exact C16 and require identical 32-vectors and candidate
+fingerprint. Applying each stored delta as binary64
+`candidate_output[l][j] = parent_output[l][j] + delta_l[j]` must reproduce
+the immutable candidate. Between one and 32 stored coordinates may change.
+All other tensors and every policy component must be bit-identical, and the
+parent must remain immutable. All gate metrics come from the actual applied
+model. The analytic surrogate and engine must agree on every nonterminal
+cached cell within `1e-12`.
+
+###### Offline and conditional gameplay gates
+
+Report TRAIN and DEV equal-deck and per-deck listwise cross-entropy, teacher
+regret, exact-max top-one agreement, stable-pair agreement, and successor
+BCE/Brier/bias/ECE. Eligibility is the same conjunctive DBC2 gate:
+
+1. TRAIN listwise cross-entropy and teacher regret both strictly improve;
+2. DEV listwise cross-entropy and teacher regret both strictly improve;
+3. DEV exact-max top-one and stable-pair agreement do not decrease;
+4. no DEV deck's teacher regret exceeds C16 by more than `0.01`;
+5. DEV successor BCE does not exceed C16 by more than `0.005`; and
+6. cache identity, fixed recipe, repeat fit, exact replay, parent
+   immutability, 32-coordinate boundary, component isolation, and
+   surrogate/engine agreement all pass.
+
+An offline failure rejects DBC3 immediately, opens no gameplay coordinate,
+and closes hidden-output tuning on this cache. A complete pass alone licenses
+the already-open nine-root 64-simulation IS-PUCT mechanism battery at its
+exact DBC1/DBC2 settings and reject-only seed `202607291201`. Require all four
+repairs and all five controls/invariants before opening the selector; three
+repairs is mechanism support but still rejects the candidate.
+
+Only a 4/4-repair, 5/5-control mechanism pass may open the exact 60-game,
+five-deck, seat/play-draw-balanced C16 selector at fresh seed
+`202607291511`, ordinary Learned Value `K8/R1/H4` in both arms, and the
+immutable DBC3 model. More than 30/60 wins plus at least 3/12 on Green, Red,
+Blue, White, and RU Aggro licenses a dated manual web pilot; at least 37/60
+may be called `FAST_GO`. It remains neither a strength nor Learned-is-king
+claim, and licenses no champion replacement, 200-game smoke, 2,000-game
+milestone, fixed panel, or deployment otherwise.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
