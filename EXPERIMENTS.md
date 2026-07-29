@@ -23742,6 +23742,208 @@ newest 11:44 PDT cycle. It had explicitly countersigned S0 and requested the
 teacher-labeling declaration next; no newer contrary feedback was present.
 C16 remains champion.
 
+##### AQ18-DBC6-L1-DEEP-LABEL-CACHE declaration
+
+Declared 2026-07-29 at exact accepted-selection commit `5632700`, after
+rereading `REVIEW.md` through its newest 11:59 PDT cycle. That independent
+entry reproduced the strict build/tests, accepted all 30 balanced S0 cells
+and the 2.93% alias census, and explicitly requested the deep-label
+declaration next. Repository/source/history searches found seed base
+`202607291802`, identifier `AQ18-DBC6-L1-DEEP-LABEL-CACHE`, schema
+`old-school-aq18-dbc6-label-cache-v1`, and the fixed destination below unused.
+The destination is absent before implementation. C16 remains champion.
+
+This is one expensive teacher pass and a reusable data-only cache, not a
+candidate, architecture comparison, optimizer run, gameplay screen, or model
+artifact. Its falsifiable scientific hypothesis is that the proven
+actor-local AQ4 teacher supplies nonzero correction signal for every deck in
+both TRAIN and whole-game-disjoint DEV, and that the current 893-feature
+representation has no materially resolved *required-correction* conflict
+inside its 91 already-frozen alias pairs. If the first condition fails, do not
+fit a policy from this corpus. If the second fails, retain the cache but
+require a generic representation augmentation before fitting any 893-only
+policy.
+
+An independent pre-implementation review returned GO for this cache-only
+stage and NO-GO for fitting in the same command. It specifically confirmed
+ExactOutcome for both arms: the C16-discounted outer setting does not
+currently propagate into the nested K2 actor-local searches, so calling that
+alternative fully aligned would be false. It also required distinct root
+seeds, 12,808 cells per arm, safe opaque grouping identities, atomic
+publication/reload, and zero model/optimizer/gameplay work; those requirements
+are incorporated below.
+
+###### Frozen source and one replay
+
+Load exact C16 artifact 3,111,437 bytes / SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+model fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+and unchanged component fingerprints. Reconstruct exact AQ16 and exact S0
+with:
+
+```text
+AQ16 manifest       7de71c44a3d1d1fa20eb1b738bc8c675e83c4336f284e95f7401a4b79ea345cc
+S0 manifest         967bd44bfb444fa84e8b52df2652d090410a3ce6bda57bda6c353b5fb34d6576
+selection seed      202607291811
+TRAIN               300 roots / 1,088 options / 2,293 pairs
+DEV                 150 roots /   513 options /   811 pairs
+```
+
+The selection reconstruction may retain only S0's owner-safe identities,
+actions, descriptors, and 893-feature rows. A second deterministic source
+replay may pass each selected live trace point and original decklists to the
+teacher only for the duration of its callback. Require exact canonical S0
+order and equality of every selected source row, legal action, descriptor,
+information/action fingerprint, stable root, selection key, and feature bit.
+No `GameState`, trace point, source outcome, deck vector, sampled world,
+opponent hand/library identity, or library order may escape that callback or
+enter the cache. The persisted projection uses only split/deck/width, stable
+root and selection identities, and domain-separated opaque physical/actor-game
+group hashes; it does not persist a reconstructible game seed or full source
+coordinate. No third source reconstruction is licensed.
+
+Before opening a new root-label seed, replay the five already-open AQ4-G1
+control coordinates and require exact frozen complete-report digest
+`8a5800dc3ebd7cfad3c8cc893e3aa7e5795f38cb63fcf10442f7bb6588fd950d`,
+including redundant Counterspell, productive Braingeyser, sick-Bear Growth,
+live Force Spike, actor-local hidden repartition, action-order reversal, and
+maximum nested depth one.
+
+###### Paired base and teacher labels
+
+For selected root `r`, derive exactly:
+
+```text
+derive_seed(
+  202607291802, PrioritySearch,
+  split_index(r.split),
+  (r.block_index << 32) | r.schedule_index,
+  (r.actor << 32) | r.nontrivial_ordinal)
+```
+
+after rejecting every component that does not fit its assigned 32-bit field.
+Require all 450 derived seeds distinct. Use the same seed for both arms so
+their first eight actor-information worlds and rollout seeds are common. The
+fixed aggregate census is exactly 12,808 base and 12,808 teacher
+action-world cells.
+
+The base arm is exact deployed residual-free C16 Priority search:
+`K8/R1/H4`, four deterministic workers, historical shallow blend, zero
+resolved-prior weight, zero Priority residual, zero epsilon, no Pass
+dominance, Legacy Value-mirror continuations, no nested search, and
+`ExactOutcome`. The teacher is exact proven AQ4:
+outer `K8/R1/H8`, four workers, no outer shallow blend, zero residual and
+epsilon, Legacy Value-mirror continuation, symmetric actor-local inner
+Priority search `K2/R1/H4`, maximum nesting depth one, and `ExactOutcome`.
+Attack and Block are not widened inside this label coordinate.
+
+`ExactOutcome` is intentional: it preserves the frozen AQ4 control teacher
+and the production base-score semantics used by the eventual bounded
+residual. The separately tested C16-discounted terminal arm was not a general
+improvement: TS1 repaired Ancestral but regressed payable Force Spike and was
+rejected. This experiment does not reopen that closed utility comparison.
+
+For each root retain:
+
+- its safe projected selected identity, split/deck/width, opaque grouping
+  hashes, typed public legal actions, descriptors, and 893 binary64 option
+  rows; descriptors authenticate engine order and are not candidate inputs;
+- all paired eight-world base and teacher Q samples plus terminal flags,
+  exact aggregate score vectors, soft targets, and complete outer/inner
+  accounting;
+- exact soft targets from teacher aggregates at temperature `0.10` with
+  90% teacher softmax plus 10% uniform; and
+- weight `1/60` for every TRAIN root or `1/30` for every DEV root, giving
+  every deck mass one and every deck × width cell mass one-third.
+
+Repeat the complete label call immediately on the first canonical selected
+TRAIN root of each deck and require all samples, aggregates, targets, and
+accounting bit-identical. On the first nonvacuous eligible sentinel, repartition
+only the opponent's hidden hand/library and require actor observation, legal
+actions, option rows, samples, aggregates, targets, and accounting
+bit-identical. These five duplicate labels and one hidden control are the only
+extra teacher calls.
+
+###### Representation and signal diagnostics
+
+Report base-versus-teacher exact-max agreement, stable-pair agreement,
+listwise cross-entropy, and teacher regret for all 30 split × deck × width
+cells plus equal-deck TRAIN and DEV. Every split × deck must have strictly
+positive base teacher regret and at least one root whose base behavior differs
+from its teacher target; otherwise the signal hypothesis fails.
+
+For every one of S0's 91 exact-feature alias pairs, define the action's
+required correction as `teacher_aggregate - base_aggregate`. Report its
+within-pair correction gap, the eight common-world paired differences, sample
+standard error, target-probability gap, and maximum absolute gap by
+split/deck/width. The paired world value for action `a` is
+`teacher_q(a,w) - base_q(a,w)`, so the pair statistic measures the correction
+that an identical residual row cannot express; raw teacher difference alone
+would falsely flag a distinction already supplied by the production base.
+A pair is a material resolved conflict only when:
+
+```text
+abs(correction gap) >= 0.01
+and the ordinary mean +/- 1.96 * paired standard error excludes zero.
+```
+
+The cache remains valid data if such a conflict exists, but a nonzero material
+count prohibits the planned 893-input candidate. No threshold may be changed
+after seeing the labels.
+
+###### Strict reusable cache
+
+Publish exactly once, by temporary `O_EXCL` file, file `fsync`, no-replace
+hard link, temporary unlink, and directory `fsync`, to:
+
+```text
+build/model-cache/old-school-aq18-dbc6-label-cache-v1.bin
+```
+
+The bounded little-endian binary envelope must bind the cache schema/version;
+C16 artifact/model/components; AQ16/S0 identities and safe projected selected
+rows;
+both complete search configs; label seed derivation; every feature, sample,
+flag, aggregate, target, weight and accounting bit; all signal/alias
+diagnostics; payload byte count; payload SHA-256; and canonical corpus digest.
+It must contain neither a model nor a source/hidden state. In-memory
+encode/decode, post-publication strict load, all training projections, metrics,
+and canonical digest must be bit-identical. Reject truncation, trailing bytes,
+noncanonical enum/size/bool, NaN/range/count/order/hash/accounting mutation,
+oversize input, destination replacement, or any temporary left behind.
+
+Focused strict tests must cover configs/seeds, synthetic selected replay,
+type-level data-only fields, action/row/fingerprint mutation, target/weight/
+accounting rejection, zero and material alias cases, codec corruption, atomic
+first-write/second-write rejection, and bad CLI. Tests and ordinary
+`make test` may not reconstruct the fixed source, open seed `202607291802`, or
+create the fixed artifact. Run the focused release and
+AddressSanitizer/UndefinedBehaviorSanitizer suites plus `git diff --check` and
+obtain an independent implementation review before the production command.
+Synthetic tests must also prove legal-action-order equivariance while the
+canonical persisted order remains authenticated.
+
+Capture the report from the start, as requested by the independent review:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-labels --publish \
+  > /private/tmp/aq18-dbc6-l1.stdout \
+  2> /private/tmp/aq18-dbc6-l1.stderr
+```
+
+Both capture paths and the fixed artifact must be absent first. The report is
+compact: exactly one result row, 30 cell rows, and one alias summary; detailed
+per-root/pair evidence lives only in the authenticated cache. A passing run
+freezes the artifact SHA-256, corpus digest, metrics, and alias disposition in
+source/history before any consumer can fit a candidate. It must report
+`candidate_scores=0`, `model_created=0`, `optimizer_steps=0`,
+`gameplay_games=0`, and `artifact_published=1`. Failure publishes nothing or,
+if failure follows the atomic link, leaves the valid cache quarantined from
+all consumers until separately audited. No candidate fit is licensed by this
+declaration alone.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
