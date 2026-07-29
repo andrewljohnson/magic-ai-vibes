@@ -18126,6 +18126,138 @@ clear before any gameplay. This is the smallest evidence-led step toward
 information-set tree search: MCTS/POMCP still needs a leaf/action estimator
 that values cards after they are spent.
 
+##### AQ1-BL0 lightweight information-set Bellman action-Q declaration
+
+Declared 2026-07-28 after the complete AQ0 offline rejection and before
+opening any new collection or gameplay seed. `REVIEW.md` was reread through
+its newest 18:04 PDT verification addendum; that entry predates AQ0's result,
+so there is not yet an independent post-result review to incorporate. C16
+remains champion.
+
+AQ0's failure is now localized rather than treated as a capacity failure.
+Its 32-unit Priority head strongly fit the immediate teacher, while that
+teacher evaluated a temporary Giant Growth before cleanup and regressed Blue
+on the independent reference. The action features already encode phase,
+target ownership, target summoning sickness, mana, own hand, and public
+zones. The prior registered FQ0 information-set Bellman operator, using the
+same feature surface, preferred Pass over the sick-Bear Growth by
+`+0.01317849` at K64 with a positive lower bound, 8/8 positive blocks, and
+64/64 rules-level next-boundary dominance. That is direct evidence for a
+temporal backup rather than another AQ0 epoch/residual sweep.
+
+The old H0 next-turn critic and longer ordinary C16 rollouts are not the
+treatment: H0 already selected the sick-Bear Growth, and some longer
+continuations became terminally saturated or healed a delayed action. AQ1
+instead applies one explicit information-set Bellman improvement step. This
+is the smallest useful precursor to POMCP/RIS-MCTS: a tree is still deferred
+until its action/leaf signal passes an offline gate.
+
+Falsifiable hypothesis: fitting the otherwise unchanged AQ0 action head to a
+small, correctly perspectived two-boundary Bellman target will improve fresh
+held-out all-action ranking without AQ0's Blue regression, select Pass over
+the summoning-sick second-main Growth, and preserve the successful Ancestral,
+Force Spike, Counterspell, and X=0 controls. If those offline gates pass, the
+candidate will win more than 30 of 60 balanced games against exact C16.
+
+Frozen parent and deployment remain exact Environment-v3 C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+Collection root seed `202607281821` was searched in the notebook, review,
+source, tests, Makefile, and Git-visible worktree and was unused before this
+declaration. Generation zero block zero is FIT and block one is untouched
+CHECK. Each block is the existing 40-game, all-five-deck balanced schedule
+with C16 K8/H4/R1 mirrors, zero exploration/residual, PD0 and adversarial
+blocks off, Legacy continuations, and turn cap 128. Retain at most four
+evenly spaced nontrivial Priority roots per actor-game, without inspecting an
+action, score, outcome, phase, or stack. Keep every legal action at every
+retained root. Root seeds use the same candidate-independent coordinate
+formula as AQ0 with the new root seed.
+
+For each root action, the teacher uses four common root determinizations. It
+forces that action through the engine-owned
+`advance_learned_priority_macro_transition`, including rules processing,
+forced singleton Priority choices, cleanup, combat, and frozen C16
+non-Priority decisions, and stops at terminal or the next multi-action
+Priority boundary. Terminal particles contribute exact root-owner
+`0/0.5/1`. Nonterminal particles are grouped *before maximization* by the
+next decision owner's complete hidden-safe information/action identity.
+
+For each successor information set, enumerate every legal action and evaluate
+two independent banks of four common successor-owner determinizations. Each
+successor action is forced through the same macro transition to terminal or
+the following multi-action Priority boundary. Terminal leaves contribute
+exact successor-owner outcomes; nonterminal leaves use the unchanged
+Legacy-state-only C16 critic from the successor owner's perspective. The
+group value is the existing symmetric cross-fit estimator: bank A chooses
+exact-max support evaluated by bank B, bank B chooses support evaluated by A,
+then the two selected values are averaged. A same-owner group contributes
+that value to the root owner; an opponent-owned group contributes its
+complement. Mass-weighted terminal and grouped particles divided by four
+produce the root action target.
+
+Candidate identity never enters a world or macro seed. Root actions share the
+same root worlds and macro seeds; successor actions share bank/world seeds
+derived from the root coordinate, successor information fingerprint, and
+bank. Opponent hand identities never enter a feature, group identity, target
+coordinate, or retained record. The implementation must reject incomplete
+macro transitions, invalid particle partitions, unequal action banks,
+nonfinite values, or owner-perspective drift. It stores only owner-safe
+features, typed actions, scalar target rows, accounting, and coordinates—not
+`GameState` or hidden-zone payloads.
+
+The base score remains exact production C16 K8/H4/R1. The target transform,
+equal-deck root weights, outer Priority-only architecture, and optimizer are
+unchanged from AQ0: temperature `0.10`, 90%-softmax/10%-uniform, Adam batch
+64, 64 epochs, rate `0.003`, beta1 `0.9`, beta2 `0.999`, epsilon `1e-8`,
+gradient clip `5`, and deployment residual bound `0.10`. The fit seed is the
+unchanged `derive_seed(root_seed, PolicyFit, 0, 0, 0)` formula with the new
+root seed. No epoch, width, world-count, target blend, or residual sweep is
+licensed.
+
+Before collection, fix the unrelated AQ0 descriptor-order defect
+mechanically: `mean_legal_logit` currently sums logits in caller action order,
+so reversed actions can differ by an ULP. Sum action-keyed logits in canonical
+typed-action order and map residuals back. Default action order, choices, and
+RNG must remain bit-identical. A focused permutation test must fail on the old
+reduction and pass after the repair. This is a determinism correction, not an
+AQ1 treatment.
+
+Collection remains two-step. The no-fit command
+`./build/old-school-action-q-bellman-explore --census` must print and freeze
+the actual FIT/CHECK games, actor games, roots, options, root and successor
+transitions, terminal/critic leaves, successor groups, group-owner counts,
+nonzero-spread roots, per-deck counts, and derived fit seed. Counts are not
+guessed here and no quota may change after seeing them. Only after those
+immutable measurements are recorded may
+`./build/old-school-action-q-bellman-explore --run` reconstruct the exact
+corpus, fit in memory, and evaluate it.
+
+The offline gate is conjunctive:
+
+- parent immutability, repeated-fit identity, only-Priority component change,
+  complete particle/accounting cross-sums, descriptor-order identity, and a
+  nonvacuous hidden-repartition identity all pass;
+- on untouched CHECK, equal-deck Bellman regret strictly improves, expected
+  top-one agreement does not fall, and no deck's mean regret rises by more
+  than `0.01`;
+- on frozen K64/H8 dev-v3 labels, pooled regret does not worsen, no stable
+  parent agreement is lost, and Blue's mean regret does not exceed C16's;
+- the captured Ancestral root ranks self-target strictly above
+  opponent-target and excludes opponent-target from support; live Force Spike
+  remains selected; five-open payable Force Spike and redundant
+  Counterspell select Pass; the intervening-counter fixture selects the
+  counter targeting the opposing Counterspell; sick-Bear Growth selects
+  Pass; opponent-target Growth and Braingeyser X=0 are excluded; and
+- focused tests, the full test suite, and ASan/UBSan pass.
+
+Any offline failure rejects AQ1-BL0 without gameplay or tuning. Only a full
+offline pass may open fresh selector seed `202607281831`: treatment first,
+one balanced repetition, exactly 60 games and 12 per challenger deck, AQ1
+with residual `0.10` versus exact C16 with residual zero, otherwise identical
+K8/H4/R1 configuration. Strictly more than 30 wins advances to a dated manual
+web pilot; 30 or fewer rejects. This is a fast selector, not a strength or
+Learned-is-king claim. Artifact publication and web deployment require a
+separate result-dependent checkpoint.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
