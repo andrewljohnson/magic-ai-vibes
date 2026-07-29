@@ -24507,6 +24507,160 @@ grouped OOF, use reused DEV only as a reject-only veto, then require the
 frozen redundant-counter/intervening-counter pair before opening any gameplay
 selector.
 
+##### AQ20-DBC6-S16-SPARSE-CROSS declaration
+
+Declared 2026-07-29 at exact S0 result commit `e97ba18`, after rereading
+`REVIEW.md` through its 14:59 review cycle and before reading a new teacher
+gradient, selected coordinate, fitted coefficient, candidate score, tactical
+result, or gameplay result. Repository and all-history searches found
+identifier `AQ20-DBC6-S16-SPARSE-CROSS`, runtime/artifact schema
+`old-school-aq20-sparse-cross-v1`, fit identity tag `202607292001`, and
+selector seeds `202607292011` / `202607292012` unused. The fit is fully
+deterministic and has no training RNG. C16 remains champion.
+
+Falsifiable hypothesis: AQ19's two shared low-rank action directions explain
+its tiny 2/300 grouped-OOF decision footprint and Red-heavy 31-29 selector.
+Sixteen independently selected, well-supported state-by-action coordinates
+will materially improve all-five-deck grouped-OOF action ranking over exact
+AQ19 while preserving every deck, then repair the frozen redundant-counter
+composition pair and beat both C16 and AQ19 in separate fast selectors.
+Failure closes this exact recipe; there is no term-count, step, scale, clip,
+seed, or residual-bound sweep.
+
+###### Frozen inputs and fold-local columns
+
+Require exact C16 fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+the AQ18 13,006,842-byte cache/SHA/corpus digest, AQ19 fold manifest
+`51852e6fa7fee97edf809e7f29cf5859cca7fd0e1575a388053d5d2b042c7765`,
+and the complete S0 result: TRAIN active/eligible 8,384/353; fold complements
+7,865/175, 7,739/176, 7,777/193, and 7,938/194; five table SHAs recorded
+above; cross digest
+`b6a321bc76d137550ddf74e9afa2dfa03874124c47b9af879f0b63e551f8a4a7`.
+The S0 floors remain immutable: at least 24 roots, at least 12 physical groups,
+and no group above 10% energy leverage. C16 and AQ19 are comparators only.
+No Handcoded Policy output, field label, opponent hidden identity, or
+card-specific rule enters training.
+
+Every full/fold fit independently recomputes eligibility from its fit
+partition before reading its teacher values. For canonical root `r`, action
+`i`, state coordinate `p`, and action coordinate `q`:
+
+```text
+d[r,i,q]   = action[r,i,q] - canonical_mean_i(action[r,i,q])
+x[r,i,p,q] = state[r,p] * d[r,i,q]
+sigma[p,q] = sqrt(S0 equal-cell weighted energy[p,q])
+phi        = x / sigma
+```
+
+DEV never contributes to eligibility, scale, deduplication, selection, or
+fit. Canonicalize every numerical zero to positive zero. Deduplicate exact or
+sign-equivalent complete standardized columns before labels are used: the
+equivalence identity is the lexicographically smaller canonical IEEE-754
+little-endian byte stream of `phi` and `-phi`; collision-check full bytes and
+retain the smallest `(p,q)` representative. Fewer than 16 representatives in
+any fit partition rejects the candidate.
+
+###### Model and fixed 16-stage fit
+
+For the sixteen selected terms in selection order:
+
+```text
+z[i]     = sum_m beta[m] * phi[i,m]
+c[i]     = z[i] - canonical_mean_i(z[i])
+rho[i]   = 0.10 * tanh(c[i])
+score[i] = C16/AQ18 base aggregate[i] + rho[i]
+```
+
+The deployed runtime stores exactly sixteen `(p,q,sigma,beta)` terms and uses
+the ordinary hidden-safe C16 K8/R1/H4 aggregate as its base. It changes only
+Priority action scoring: critic, Attack, Block, DamageOrder, features, and
+search stay exact C16. One immutable residual object propagates to both
+Learned-mirror continuation seats. AQ20 is mutually exclusive with AQ19 and
+every other Priority treatment. An empty object returns exact positive-zero
+residuals and bit-identical C16 actions.
+
+Use AQ19's exact eligible action pairs, temperature 0.10, teacher-gap weights,
+and equal 15-cell root weights. There is no L2, Adam, shuffle, refit,
+early-stop, or seed. Start empty. At each of 16 stages, for every unused
+representative compute the current pair-loss gradient `g` and positive
+Gauss-Newton diagonal `h`. With
+`v[i] = 0.10 * (1 - tanh(c[i])^2) * (phi[i] - mean(phi))` and pair derivative
+`u = (v[i]-v[j])/0.10`, accumulate the exact declared weighted
+`g += w*(P-y)*u` and `h += w*P*(1-P)*u^2`. Require finite `h > 0`. Apply
+`b = clamp(-0.25*g/h, -1, +1)` and rank coordinates by the actual applied
+quadratic improvement `I = -(g*b + 0.5*h*b*b)`, not the unclipped proposal.
+Select the largest strictly positive finite `I`, breaking exact ties by
+smaller `(p,q)`; set the new term's `beta=b`, remove its equivalence class,
+and never revisit earlier coefficients. A stage without a positive valid
+gain rejects the candidate.
+
+Repeat all four fold fits and the full fit from zero; term order, scales,
+coefficients, residuals, canonical bytes, and digests must be bit-identical.
+Report each selected term's S0 support/leverage and whether its step clipped,
+plus maximum `|c|` and the fraction of TRAIN roots having any action with
+`|c| >= 1`. The saturation census is descriptive only and addresses the
+reviewer's magnitude question without changing a gate.
+
+###### Conditional evidence ladder
+
+1. **TRAIN/grouped-OOF primary gate, DEV candidate unopened.** Reproduce exact
+   C16 and AQ19 comparator fields first. TRAIN pair BCE and regret must be
+   strictly below AQ19; listwise must not increase and top-one/stable-pair
+   must not decrease. On grouped OOF, candidate pair BCE must improve over
+   AQ19 by at least `0.000025` and regret by at least `0.0005`; listwise must
+   be no higher and top-one/stable-pair no lower than both AQ19 and C16.
+   Candidate regret must be no higher than AQ19 in all four held-out folds
+   and strictly lower in at least three. Per-deck OOF regret must be no higher
+   than `min(C16,AQ19)` for Green, Red, Blue, White, and RU Aggro, strictly
+   lower on at least four decks, including at least two of Blue/White/RU.
+   The exact-max selected action must differ from AQ19 on at least 6/300
+   roots. Every physical game stays in one fold and every TRAIN root receives
+   exactly one OOF prediction. Any miss is `REJECT stage=oof`, leaves DEV
+   candidate values and all later coordinates unopened, and permits no retry.
+
+2. **Reused DEV reject-only veto.** Only after OOF passes, score the
+   full-TRAIN AQ20 once on the existing DEV roots. Aggregate pair BCE,
+   listwise cross-entropy, and regret must be no higher than
+   `min(C16,AQ19)`; top-one and stable-pair must be no lower than
+   `max(C16,AQ19)`. Each deck's regret must be no higher than its better
+   comparator. DEV can veto but cannot create a pass. Any miss is
+   `REJECT stage=dev` with tactical/gameplay seeds unopened.
+
+3. **Invariant and field-derived reject-only gate.** Cache/S0/fold/pair
+   identities, comparator reproduction, repeated fits, runtime replay,
+   positive-zero equivalence, finite bounded output, action permutation,
+   hidden repartition, symmetric continuation, parent immutability, and
+   Priority-only/mutual-exclusion checks are conjunctive. Then score only the
+   already frozen general stack-composition pair from
+   `make_counter_composition_controls_v1`: select exact `pass` on
+   `control.blue.counter-redundant-same-target.v1`, and exact
+   `counter-opponent-counterspell` on
+   `control.blue.counter-same-target-after-intervening-counter.v1`, with
+   descriptor-order and hidden-repartition identity. These fixtures are
+   reject-only and never training data. Failure is `REJECT stage=counter`.
+
+4. **Sequential 60-game selectors.** Only after all earlier gates pass, open
+   seed `202607292011` for AQ20 versus exact C16: 12 games per challenger
+   deck, six play/six draw, and three in each seat-by-play/draw quadrant.
+   Require more than 30/60 wins and at least 3/12 on every deck. Failure leaves
+   the AQ19 selector seed unopened. On pass, open the identical mutually
+   exclusive AQ20-versus-exact-AQ19 selector at seed `202607292012`, with the
+   same thresholds. Both passes license only a dated
+   **Learned C16 · Sparse Cross AQ20** manual pilot and immutable artifact.
+   `FAST_GO` requires at least 37/60 in both selectors. No Handcoded,
+   champion, 2,000-game, or Learned-is-king claim opens here.
+
+Implementation stays separate: a tiny immutable
+`learned_priority_sparse_cross` runtime plus a research-only
+`decision_density_sparse_cross` fitter/runner. Reuse AQ19 corpus projection,
+folds, and metrics; consume the S0 report; reuse the frozen counter fixtures;
+do not clone rules or labels. Tests must include finite-difference gradient,
+positive diagonal, a clipped-step actual-gain ordering case, fold-local
+selection/scale isolation, sign deduplication, S0 drift rejection, exact
+positive zero, permutation/hidden identity, symmetric propagation,
+treatment mutual exclusion, repeat identity, and unopened conditional paths.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
