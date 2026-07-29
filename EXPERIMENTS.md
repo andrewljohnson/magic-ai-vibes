@@ -18560,6 +18560,94 @@ claim. Artifact publication and web deployment remain a separate checkpoint.
 The executable is a separate no-knob
 `old-school-action-q-multiscale-explore` with only `--census` and `--run`.
 
+##### AQ2-MS0 multiscale preflight result
+
+Completed 2026-07-28 from immutable implementation commit `372fe9e`, after
+the teacher and harness focused suites passed `5/5 + 7/7`, the full
+repository suite passed (including engine `181/181`, web `118/118`, and
+certification `48/48`), both focused suites passed
+AddressSanitizer/UndefinedBehaviorSanitizer, and two independent read-only
+reviews returned GO with no P0/P1 findings. `REVIEW.md` was reread through
+its newest 19:29 PDT cycle before the run. Exact command:
+
+```sh
+./build/old-school-action-q-multiscale-explore --census
+```
+
+The command exited one in 0.05 seconds at the mandatory four-fixture
+preflight. It did not collect either corpus block, create or fit a model,
+open selector seed `202607281945`, or publish an artifact. Exact C16
+fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+All fixtures were nonvacuously hidden-repartition bit-identical and
+reversed-action bit-identical; all AQ1 and resolved accounting cross-summed.
+
+| Fixture | Composite direction | Bellman / resolved / composite evidence | Result |
+| --- | --- | --- | --- |
+| Intervening Counterspell | counter opposing Counterspell > Pass | counter `0.5192291 / 0.4771328 / 0.5087050`; Pass `0.4698181 / 0.4471135 / 0.4641420` | PASS |
+| Braingeyser | neither X=0 action in exact-max support | X=0 opponent `0.4918783 / 0.4251211 / 0.4751890` was the unique max; Pass composite `0.4731009`; best non-X=0 composite `0.4704233` | **FAIL** |
+| Sick-Bear Giant Growth | Pass > Growth | Pass `0.4503619 / 0.4468663 / 0.4494880`; Growth `0.4360428 / 0.4784789 / 0.4466518` | PASS |
+| Live Force Spike | Spike > Pass | Spike `0.4602855 / 0.3563212 / 0.4342944`; Pass `0.4261461 / 0.2943030 / 0.3931853` | PASS |
+
+The negative is stronger than “0.25 was the wrong knob.” On these exact
+common worlds, a global convex blend cannot satisfy both failed mechanism
+classes. Sick-Bear Pass requires Bellman weight greater than
+`0.6882527433`; making the best non-X=0 Braingeyser action (X=1 self) beat
+X=0 opponent requires Bellman weight less than `0.3847260490`. Pass itself
+is worse than X=0 opponent on both component teachers. There is no
+overlapping scalar interval.
+
+Verdict: **reject AQ2-MS0 before collection exactly as declared**. Do not
+sweep the 0.75/0.25 blend. The state/action representation can express both
+decisions, but the frozen critic supplies incompatible local rankings at two
+different temporal scales. The next measurement must replace critic-only
+local blending with an outcome-grounded continuation target.
+
+##### AQ3-D0 long-horizon root-sampled action-Q declaration
+
+Declared 2026-07-28 after the complete AQ2 preflight rejection and before
+opening any new teacher seed, changing the model, or training a candidate.
+Root seed `202607281951` was searched in source, tests, notebook, review,
+Makefile, and the Git-visible worktree and was unused before declaration.
+This is a rapid descriptive teacher diagnostic, not a fit or another
+hyperparameter screen.
+
+Falsifiable hypothesis: a card-agnostic, hidden-safe 32-turn C16-mirror
+continuation value will give the correct action direction on all four
+already-open D0 controls:
+
+1. countering the opponent's intervening Counterspell strictly exceeds Pass;
+2. neither Braingeyser X=0 action belongs to exact-max support;
+3. Pass strictly exceeds Giant Growth on the summoning-sick Bear; and
+4. live Force Spike strictly exceeds Pass.
+
+For each fixture, use exact C16 and
+`derive_seed(202607281951, PrioritySearch, fixture_index, 0, 0)`. Enumerate
+the complete engine-authoritative legal action set. Score every action on 64
+common root determinizations with one continuation per world and exactly 32
+complete future turns. Use ValueSearchChampion mirrors for both seats,
+Legacy continuation control, zero continuation exploration, zero Priority
+residual, no Pass dominance, no resolved shallow prior, and **no shallow
+prior blend**. Each continuation policy receives only its own information
+state; the root action is averaged across the observer's sampled hidden
+worlds. Terminal leaves contribute exact `0/0.5/1`; only a continuation
+still live after 32 turns may bootstrap from unchanged C16. Use four
+evaluation threads without changing indexed sample order.
+
+Print every typed action, mean continuation value, exact-max support,
+terminal/bootstrap counts, the four required margins, and aggregate
+accounting. Repeat with reversed legal-action input and a nonvacuous opponent
+hidden-zone repartition; both complete results must be bit-identical.
+Retain no sampled `GameState` or hidden-zone payload.
+
+If all four directions pass, the next experiment is one cap-eight,
+all-five-deck action-head generation trained from the same H32 operator with
+a separately frozen K8 corpus. If any direction fails, do not sweep horizon
+or world count and do not build a tree around the bad target: use the
+terminal/bootstrap census to choose between terminal-to-completion
+information-set rollouts and critic retraining. No corpus, fit, artifact,
+benchmark, or gameplay seed is licensed by AQ3-D0.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
