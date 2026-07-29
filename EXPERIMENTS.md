@@ -20674,6 +20674,82 @@ licensed after commit plus post-commit identity review. `REVIEW.md` was reread
 through its newest 03:29 cycle before this result; it had observed the original
 run's exit but had not yet classified the void or repair.
 
+AQ4-OP2 retry result, completed 2026-07-29 04:12 PDT:
+**scientific REJECT; no scalar trust-region arm is safe**. Exact committed
+revision `249082f`, command:
+
+```sh
+./build/old-school-action-q-priority-trust-region --run
+```
+
+The repaired alpha-one control passed in full. It reproduced exact C16
+`68126afc...3e2f`, warm parent `d0d46d2...003f8`, full child
+`a4cdb8a7...036f`, G4B corpus `91ef011c...a51`, OP1 corpus
+`98502663...5df`, all recorded 480-TRAIN/160-DEV metrics, and the complete
+observed rejected-child safety signature. The proper descending arms then
+ran exactly once each.
+
+Aggregate metrics:
+
+| Alpha | Fingerprint | TRAIN agreement | TRAIN regret | DEV agreement | DEV regret | Strict TRAIN/DEV regret gain |
+| ---: | --- | ---: | ---: | ---: | ---: | --- |
+| 0 warm | `d0d46d2...003f8` | 0.687500 | 0.020593980 | 0.793750 | 0.016982920 | control |
+| 0.75 | `ab217b3...9c46f` | 0.806250 | 0.005672675 | 0.712500 | 0.012635119 | PASS |
+| 0.50 | `08da025...3fc40` | 0.772917 | 0.009584852 | 0.743750 | 0.015378196 | PASS |
+| 0.25 | `268e92a...b0bc` | 0.737500 | 0.014007657 | 0.800000 | 0.013950076 | PASS |
+
+Whole-game-disjoint DEV metrics, with regret delta relative to warm:
+
+| Alpha | Green | Red | Blue | White | RU Aggro | All five +0.01 guards |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0.75 | 0.014634893 (+0.006817889) | 0.007473562 (-0.021550092) | 0.015925620 (-0.000419249) | 0.016700036 (-0.003194825) | 0.008441483 (-0.003392727) | PASS |
+| 0.50 | 0.012828119 (+0.005011114) | 0.016682380 (-0.012341274) | 0.016973076 (+0.000628207) | 0.021965920 (+0.002071059) | 0.008441483 (-0.003392727) | PASS |
+| 0.25 | 0.007817004 (+0.000000000) | 0.016695006 (-0.012328649) | 0.016567376 (+0.000222507) | 0.020229512 (+0.000334651) | 0.008441483 (-0.003392727) | PASS |
+
+Every arm therefore retained aggregate TRAIN/DEV signal and all five deck
+guards. The complete safety battery rejected all three:
+
+| Alpha | Frozen DEV | Live Spike | Opponent Growth excluded | Intervening Counter | Other model-only controls | Offline gate |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 0.75 | FAIL | FAIL | FAIL | PASS | PASS | FAIL |
+| 0.50 | PASS | PASS | FAIL | PASS | PASS | FAIL |
+| 0.25 | FAIL | PASS | FAIL | FAIL | PASS | FAIL |
+
+All arms preserved Priority-only isolation, repeated-construction identity,
+Ancestral self-targeting, descriptor/action-order identity, hidden
+repartition, payable/five-open Force Spike behavior, redundant Counterspell
+Pass, summoning-sick Growth Pass, and Braingeyser X=0 exclusion. Alpha 0.50
+was the closest feasible point, but it still selected Giant Growth on an
+opposing creature. Alpha 0.25 did not repair that error and additionally
+crossed the intervening-Counterspell and frozen-DEV boundaries. The response
+is therefore non-monotone enough that another scalar or threshold would be
+post-result shopping, not a principled repair.
+
+Final line:
+`result=REJECT disposition=OFFLINE_REJECT attempted_arms=3
+selector_opened=0 artifact_published=0`. Selector seed `202607290211`
+remained unopened; candidate artifact and temporary remain absent; exact C16
+remains 3,111,437 bytes with SHA-256 `53aeb904...44ca`.
+
+Decision: reject OP2's scalar-shrinkage hypothesis and close the
+Priority-head projection branch for the immediate manual-pilot objective.
+The declaration anticipated a general parent-KL/replay anchor next. That
+remains a possible later distillation treatment, but the new result plus the
+prior G3 parent-behavior-anchor failure show that another shared Priority-head
+fit is unlikely to produce the fast, broadly strategic bot the owner asked
+to play-test, and it cannot address combat at all. The next experiment will
+instead be separately preregistered direct actor-local information-set policy
+improvement across Priority, attack, and block choices, keeping exact C16
+weights and using one general re-rooted search mechanism. This choice follows
+the strongest existing mechanism evidence: AQ4-D1 repaired the Priority
+errors without changing representation, while direct combat search can cover
+the independently observed attack/block failures.
+
+`REVIEW.md` was reread through its newest 03:59 cycle before this conclusion.
+It observed the licensed retry in progress and did not yet contain its result;
+its earlier I1 review agreed that both rare-behavior erosions must be visible
+and all proper-arm safety gates remain strict.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
