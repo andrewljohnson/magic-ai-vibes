@@ -40,7 +40,8 @@ inline constexpr std::string_view kRequiredParentFingerprint =
 
 // Filled only after --census has completed and its exact identity has been
 // recorded in EXPERIMENTS.md.  An empty value makes --run fail closed.
-inline constexpr std::string_view kFrozenCensusIdentity = "";
+inline constexpr std::string_view kFrozenCensusIdentity =
+    "95faba06e569aa66e33feae18b719ad3809aa8a29fe10fc4f771a9a8fac16503";
 
 struct RootCoordinate {
     std::size_t block = 0;

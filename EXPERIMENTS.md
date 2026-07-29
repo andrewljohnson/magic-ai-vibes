@@ -18258,6 +18258,76 @@ web pilot; 30 or fewer rejects. This is a fast selector, not a strength or
 Learned-is-king claim. Artifact publication and web deployment require a
 separate result-dependent checkpoint.
 
+##### AQ1-BL0 frozen census result
+
+Completed 2026-07-28 from immutable implementation commit `984e4e4`, after
+the Bellman teacher, harness, and offline-gate focused suites passed
+`5/5 + 5/5 + 7/7`, the full repository test suite passed, focused
+AddressSanitizer/UndefinedBehaviorSanitizer passed the same `17/17`, and an
+independent pre-census review returned GO. `REVIEW.md` was reread through its
+newest 18:44 PDT entry immediately before the run; it reported no new
+constraint. Exact command:
+
+```sh
+./build/old-school-action-q-bellman-explore --census
+```
+
+The command used root seed `202607281821`, generation zero, FIT block zero,
+CHECK block one, exact C16 parent fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`,
+and derived fit seed `308293352764668211`. Both blocks contained 40 balanced
+source games and 80 actor-games, exactly 16 actor-games and 64 retained roots
+per deck. It created no model and opened no gameplay seed.
+
+Global census:
+
+| Split | Nontrivial roots | Retained roots | Options | Spread roots | Base rollouts | Base terminal / bootstrap | Root terminal / boundary | Groups same / opponent | Particles same / opponent | Successor info sets / actions | Successor terminal / critic leaves |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| FIT | 1,878 | 320 | 1,136 | 282 | 9,088 | 3,184 / 5,904 | 245 / 4,299 | 756 / 1,547 | 2,576 / 1,723 | 2,171 / 9,742 | 2,825 / 75,111 |
+| CHECK | 1,872 | 320 | 1,026 | 287 | 8,208 | 2,871 / 5,337 | 359 / 3,745 | 616 / 1,501 | 1,953 / 1,792 | 2,014 / 8,253 | 3,321 / 62,703 |
+
+The exact aggregate transition accounting also cross-summed. FIT had 1,280
+root determinizations, 4,544 root macro transitions, 17,368 successor
+determinizations, and 77,936 successor macro transitions. CHECK had 1,280,
+4,104, 16,112, and 66,024 respectively. Terminal plus boundary root particles
+equaled `root actions * 4`; same-owner plus opponent-owner groups equaled all
+successor groups; same-owner plus opponent-owner particle mass equaled every
+boundary particle; and terminal plus both owner masses equaled every root
+particle.
+
+FIT per-deck census:
+
+| Deck | Nontrivial | Roots | Options | Spread | Width | Root T / B | Groups S / O | Particles S / O | Successor sets / actions | Leaves T / C |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Green | 329 | 64 | 163 | 58 | 2–10 | 48 / 604 | 80 / 267 | 302 / 302 | 299 / 1,576 | 723 / 11,885 |
+| Red | 378 | 64 | 272 | 60 | 2–15 | 36 / 1,052 | 158 / 406 | 579 / 473 | 560 / 2,285 | 740 / 17,540 |
+| Blue | 317 | 64 | 146 | 53 | 2–4 | 78 / 506 | 100 / 179 | 310 / 196 | 278 / 945 | 241 / 7,319 |
+| White | 532 | 64 | 171 | 55 | 2–6 | 37 / 647 | 145 / 262 | 367 / 280 | 407 / 2,319 | 608 / 17,944 |
+| RU Aggro | 322 | 64 | 384 | 56 | 2–110 | 46 / 1,490 | 273 / 433 | 1,018 / 472 | 627 / 2,617 | 513 / 20,423 |
+
+CHECK per-deck census:
+
+| Deck | Nontrivial | Roots | Options | Spread | Width | Root T / B | Groups S / O | Particles S / O | Successor sets / actions | Leaves T / C |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Green | 359 | 64 | 163 | 62 | 2–6 | 28 / 624 | 87 / 272 | 328 / 296 | 343 / 1,523 | 1,313 / 10,871 |
+| Red | 325 | 64 | 227 | 59 | 2–10 | 93 / 815 | 108 / 362 | 388 / 427 | 468 / 1,765 | 752 / 13,368 |
+| Blue | 353 | 64 | 159 | 55 | 2–6 | 78 / 558 | 144 / 145 | 397 / 161 | 287 / 953 | 289 / 7,335 |
+| White | 488 | 64 | 188 | 54 | 2–8 | 56 / 696 | 172 / 236 | 444 / 252 | 408 / 1,700 | 320 / 13,280 |
+| RU Aggro | 347 | 64 | 289 | 57 | 2–71 | 104 / 1,052 | 105 / 486 | 396 / 656 | 508 / 2,312 | 647 / 17,849 |
+
+The nonzero-spread prediction is strongly nonvacuous in every deck and on the
+untouched CHECK split. Hidden repartition, descriptor-order identity, and
+owner-perspective accounting all passed before collection. The canonical
+SHA-256 identity over every retained coordinate, information-set fingerprint,
+typed action, 893-feature row, base/teacher/target/weight bit pattern, and
+complete accounting is
+`95faba06e569aa66e33feae18b719ad3809aa8a29fe10fc4f771a9a8fac16503`.
+
+Decision: **accept and freeze the census only**. This is descriptive evidence,
+not a bot-strength result. Freeze that identity in source, reconstruct exactly
+once, fit the single preregistered Priority head, and apply every conjunctive
+offline gate. Gameplay seed `202607281831` remains unopened.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
