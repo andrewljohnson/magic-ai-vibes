@@ -1432,6 +1432,51 @@ Census collect_census(
            const std::array<std::vector<CardId>, 2>&) {});
 }
 
+Census replay_frozen_source_roots(
+    std::shared_ptr<const LearnedModel> parent,
+    const Census& frozen_census,
+    const AuthenticatedSourceRootVisitor& visitor) {
+    require_parent(parent);
+    require_frozen_census(frozen_census);
+    if (!visitor) {
+        throw std::invalid_argument(
+            "AQ4-G4B authenticated replay requires a visitor");
+    }
+    if (learned_model_fingerprint(parent) !=
+        frozen_census.parent_fingerprint) {
+        throw std::invalid_argument(
+            "AQ4-G4B authenticated replay parent differs from census");
+    }
+
+    std::size_t manifest_position = 0;
+    const Census reconstructed =
+        visit_source_roots(
+            parent,
+            [&](const ManifestRoot& root,
+                const LearnedDecisionTracePoint& point,
+                const std::array<
+                    std::vector<CardId>, 2>& decks) {
+                if (manifest_position >=
+                        frozen_census.roots.size() ||
+                    root !=
+                        frozen_census.roots[
+                            manifest_position]) {
+                    throw std::runtime_error(
+                        "AQ4-G4B authenticated replay root differs "
+                        "from frozen census");
+                }
+                visitor(root, point, decks);
+                ++manifest_position;
+            });
+    if (manifest_position !=
+            frozen_census.roots.size() ||
+        reconstructed != frozen_census) {
+        throw std::runtime_error(
+            "AQ4-G4B authenticated replay census is not bit-exact");
+    }
+    return reconstructed;
+}
+
 std::string canonical_corpus_digest(
     const Corpus& corpus) {
     std::string payload;

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -280,6 +281,20 @@ void require_frozen_census(const Census& census);
 void validate_corpus(const Corpus& corpus);
 
 Census collect_census(std::shared_ptr<const LearnedModel> parent);
+
+// Reconstructs the exact frozen source after `frozen_census` has already
+// authenticated its complete manifest. Each callback is invoked only after
+// the live root has matched the corresponding frozen manifest row. The
+// transient trace point and original decks never enter either manifest.
+using AuthenticatedSourceRootVisitor = std::function<void(
+    const ManifestRoot&,
+    const LearnedDecisionTracePoint&,
+    const std::array<std::vector<CardId>, 2>&)>;
+Census replay_frozen_source_roots(
+    std::shared_ptr<const LearnedModel> parent,
+    const Census& frozen_census,
+    const AuthenticatedSourceRootVisitor& visitor);
+
 Corpus collect_corpus(
     std::shared_ptr<const LearnedModel> parent,
     const Census& frozen_census,

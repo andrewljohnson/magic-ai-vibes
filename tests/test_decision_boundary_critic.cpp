@@ -3,10 +3,12 @@
 #include "old_school/probes.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -196,6 +198,145 @@ dbc::Census make_valid_census() {
         std::move(splits), std::move(roots));
 }
 
+old_school::LearnedModelComponentFingerprints
+make_components() {
+    return {
+        .critic = hex_identity(4001),
+        .priority = hex_identity(4002),
+        .attack = hex_identity(4003),
+        .block = hex_identity(4004),
+        .damage_order = hex_identity(4005),
+    };
+}
+
+dbc::RootExample make_example(
+    const dbc::ManifestRoot& manifest,
+    bool terminal_first_cell = false) {
+    constexpr std::size_t action_count = 2;
+    expect(
+        manifest.actions.size() == action_count,
+        "synthetic manifest action count drifted");
+    dbc::RootExample result{
+        .manifest = manifest,
+        .teacher_samples = {
+            std::vector<double>(
+                dbc::kTeacherWorlds, 0.8),
+            std::vector<double>(
+                dbc::kTeacherWorlds, 0.2),
+        },
+        .accounting = {
+            .sampled_worlds = dbc::kTeacherWorlds,
+            .rollout_evaluations =
+                action_count * dbc::kTeacherWorlds,
+            .terminal_evaluations =
+                terminal_first_cell ? 1U : 0U,
+            .bootstrapped_evaluations =
+                action_count * dbc::kTeacherWorlds -
+                (terminal_first_cell ? 1U : 0U),
+            .eligible_cells =
+                action_count * dbc::kTeacherWorlds -
+                (terminal_first_cell ? 1U : 0U),
+            .terminal_before_boundary_cells =
+                terminal_first_cell ? 1U : 0U,
+            .inner_rollout_evaluations = 32,
+            .inner_search_invocations = 4,
+            .inner_search_max_depth = 1,
+        },
+    };
+    const double cell_weight =
+        1.0 /
+        static_cast<double>(
+            old_school::kDeckCount *
+            dbc::kExpectedRootsPerDeckAndSplit *
+            result.accounting.eligible_cells);
+    for (std::size_t action = 0;
+         action < action_count; ++action) {
+        for (std::size_t world = 0;
+             world < dbc::kTeacherWorlds; ++world) {
+            const bool terminal =
+                terminal_first_cell &&
+                action == 0 && world == 0;
+            const double target =
+                result.teacher_samples[action][world];
+            result.cells.push_back({
+                .action_index = action,
+                .world_index = world,
+                .teacher_target = target,
+                .parent_prediction =
+                    terminal ? target : 0.5,
+                .weight =
+                    terminal ? 0.0 : cell_weight,
+                .terminal_before_boundary = terminal,
+                .observation =
+                    terminal
+                        ? std::vector<double>{}
+                        : std::vector<double>(
+                              dbc::kCriticFeatureCount,
+                              static_cast<double>(
+                                  action + world) /
+                                  100.0),
+                .boundary_state =
+                    terminal
+                        ? std::optional<
+                              old_school::GameState>{}
+                        : std::optional<
+                              old_school::GameState>{
+                              old_school::GameState{}},
+            });
+        }
+    }
+    return result;
+}
+
+dbc::Corpus make_valid_corpus(
+    bool terminal_first_cell = false) {
+    dbc::Census census = make_valid_census();
+    std::vector<dbc::RootExample> train;
+    std::vector<dbc::RootExample> dev;
+    for (const auto& root : census.roots) {
+        auto example =
+            make_example(root, terminal_first_cell);
+        if (root.coordinate.split ==
+            dbc::Split::Train) {
+            train.push_back(std::move(example));
+        } else {
+            dev.push_back(std::move(example));
+        }
+    }
+    return dbc::testing::make_corpus(
+        std::move(census), make_components(),
+        std::move(train), std::move(dev));
+}
+
+std::vector<dbc::RootPrediction> make_predictions(
+    const std::vector<dbc::RootExample>& examples,
+    bool rank_teacher) {
+    std::vector<dbc::RootPrediction> result;
+    result.reserve(examples.size());
+    for (const auto& root : examples) {
+        dbc::RootPrediction prediction{
+            .stable_root_id =
+                root.manifest.stable_root_id,
+            .action_samples =
+                root.teacher_samples,
+        };
+        for (const auto& cell : root.cells) {
+            if (cell.terminal_before_boundary) {
+                continue;
+            }
+            prediction.action_samples
+                [cell.action_index][cell.world_index] =
+                    rank_teacher
+                        ? cell.teacher_target
+                        : (cell.action_index == 0
+                               ? 0.3
+                               : 0.7);
+        }
+        result.push_back(std::move(prediction));
+    }
+    return result;
+}
+
 } // namespace
 
 int main() {
@@ -334,6 +475,251 @@ int main() {
             report.find("labels_scored=0") !=
                 std::string::npos,
             "label firewall is absent");
+    });
+
+    test("teacher recipe and coordinate seeds are fixed", [] {
+        const dbc::Census census = make_valid_census();
+        const auto first =
+            dbc::teacher_search_seed(
+                census.roots.front().coordinate);
+        const auto repeated =
+            dbc::teacher_search_seed(
+                census.roots.front().coordinate);
+        auto changed_coordinate =
+            census.roots.front().coordinate;
+        ++changed_coordinate.nontrivial_ordinal;
+        const auto changed =
+            dbc::teacher_search_seed(
+                changed_coordinate);
+        expect(first == repeated, "teacher seed drifted");
+        expect(first != changed, "teacher coordinate aliased");
+        const auto config =
+            dbc::teacher_search_config(first);
+        expect(
+            config.worlds == 8 &&
+                config.rollouts_per_world == 1 &&
+                config.horizon_turns == 8 &&
+                config.evaluation_threads == 4 &&
+                config.value_continuation_search_worlds ==
+                    2 &&
+                config.capture_priority_h0_boundaries &&
+                config.terminal_utility_mode ==
+                    old_school::LearnedTerminalUtilityMode::
+                        C16DiscountedAbsoluteTurn,
+            "teacher recipe drifted");
+    });
+
+    test("successor corpus validates equal deck and root weights", [] {
+        const dbc::Corpus corpus =
+            make_valid_corpus(true);
+        dbc::validate_corpus(corpus);
+        const auto examples =
+            dbc::training_examples(corpus);
+        expect(
+            examples.size() ==
+                dbc::kExpectedRootsPerSplit *
+                    (2 * dbc::kTeacherWorlds - 1),
+            "terminal cells entered TRAIN projection");
+        double total_weight = 0.0;
+        for (const auto& example : examples) {
+            total_weight += example.weight;
+        }
+        expect(
+            std::abs(total_weight - 1.0) < 1.0e-12,
+            "TRAIN example weights did not sum to one");
+    });
+
+    test("corpus digest excludes transient boundary state", [] {
+        dbc::Corpus first = make_valid_corpus();
+        dbc::Corpus second = first;
+        second.train.front()
+            .cells.front()
+            .boundary_state
+            ->players[1]
+            .hand.push_back(
+                old_school::CardId::LightningBolt);
+        expect(
+            dbc::canonical_corpus_digest(first) ==
+                dbc::canonical_corpus_digest(second),
+            "transient hidden state entered corpus digest");
+        expect(
+            first != second,
+            "repeated-collection seam ignored live state");
+    });
+
+    test("hidden repartition is nonvacuous and owner-safe", [] {
+        old_school::GameState state;
+        state.players[0].library = {
+            old_school::CardId::Forest,
+            old_school::CardId::GrizzlyBears,
+        };
+        state.players[1].hand = {
+            old_school::CardId::LightningBolt,
+            old_school::CardId::Mountain,
+        };
+        state.players[1].library = {
+            old_school::CardId::IronclawOrcs,
+            old_school::CardId::HillGiant,
+        };
+        const old_school::GameState clone =
+            dbc::testing::hidden_repartition(state, 0);
+        expect(
+            clone != state,
+            "hidden repartition was vacuous");
+        expect(
+            old_school::observe_game_state(state, 0) ==
+                old_school::observe_game_state(clone, 0),
+            "hidden repartition changed owner observation");
+    });
+
+    test("metrics reward calibrated action ranking", [] {
+        const dbc::Corpus corpus =
+            make_valid_corpus(true);
+        const auto poor_predictions =
+            make_predictions(corpus.dev, false);
+        const auto good_predictions =
+            make_predictions(corpus.dev, true);
+        const dbc::Metrics poor =
+            dbc::evaluate(
+                corpus.dev, poor_predictions);
+        const dbc::Metrics good =
+            dbc::evaluate(
+                corpus.dev, good_predictions);
+        expect(
+            good.equal_deck_weighted_bce <
+                poor.equal_deck_weighted_bce,
+            "better calibration did not lower BCE");
+        expect(
+            good.equal_deck_weighted_brier <
+                poor.equal_deck_weighted_brier,
+            "better calibration did not lower Brier");
+        expect(
+            poor.equal_deck_mean_regret > 0.5 &&
+                good.equal_deck_mean_regret == 0.0,
+            "teacher regret did not reflect action ordering");
+        expect(
+            poor.equal_deck_top_one_expected_agreement ==
+                    0.0 &&
+                good.equal_deck_top_one_expected_agreement ==
+                    1.0,
+            "exact-max top-one agreement drifted");
+        expect(
+            poor.stable_pairs > 0 &&
+                poor.equal_deck_stable_pair_agreement ==
+                    0.0 &&
+                good.equal_deck_stable_pair_agreement ==
+                    1.0,
+            "stable-pair agreement drifted");
+        for (const auto& deck : good.decks) {
+            expect(
+                deck.roots ==
+                        dbc::kExpectedRootsPerDeckAndSplit &&
+                    std::abs(deck.weight_mass - 0.2) <
+                        1.0e-12,
+                "per-deck metric mass drifted");
+        }
+    });
+
+    test("metrics retain terminal utilities in action scores", [] {
+        const dbc::Corpus corpus =
+            make_valid_corpus(true);
+        auto predictions =
+            make_predictions(corpus.dev, true);
+        predictions.front()
+            .action_samples.front().front() = 0.5;
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    dbc::evaluate(
+                        corpus.dev, predictions));
+            },
+            "terminal action utility was replaceable");
+    });
+
+    test("corpus validation rejects cell weight drift", [] {
+        dbc::Corpus corpus = make_valid_corpus();
+        corpus.train.front().cells.front().weight *= 2.0;
+        corpus = dbc::testing::make_corpus(
+            corpus.census, corpus.parent_components,
+            corpus.train, corpus.dev);
+        expect_rejected(
+            [&] { dbc::validate_corpus(corpus); },
+            "cell weight mutation was accepted");
+    });
+
+    test("offline gate applies every metric conjunct", [] {
+        const dbc::Corpus corpus =
+            make_valid_corpus();
+        const dbc::Metrics parent_train =
+            dbc::evaluate(
+                corpus.train,
+                make_predictions(corpus.train, false));
+        const dbc::Metrics candidate_train =
+            dbc::evaluate(
+                corpus.train,
+                make_predictions(corpus.train, true));
+        const dbc::Metrics parent_dev =
+            dbc::evaluate(
+                corpus.dev,
+                make_predictions(corpus.dev, false));
+        const dbc::Metrics candidate_dev =
+            dbc::evaluate(
+                corpus.dev,
+                make_predictions(corpus.dev, true));
+        dbc::FitReport fit{
+            .optimizer = {
+                .example_count =
+                    corpus.train.size() * 2 *
+                    dbc::kTeacherWorlds,
+                .leaf_count =
+                    old_school::
+                        kLearnedOutputCalibrationLeafCount,
+                .iterations = 32,
+                .converged = true,
+                .total_weight = 1.0,
+                .before_weighted_bce = 0.7,
+                .after_weighted_bce = 0.6,
+                .max_parameter_delta = 0.1,
+            },
+            .authorized_output_parameters =
+                dbc::kOutputParameterCount,
+            .changed_output_parameters = 10,
+            .parent_immutable = true,
+            .repeated_fit_bit_identical = true,
+            .parameter_replay_bit_identical = true,
+            .only_output_layer_changed = true,
+        };
+        const dbc::OfflineGate gate =
+            dbc::evaluate_offline_gate(
+                corpus, fit,
+                parent_train, candidate_train,
+                parent_dev, candidate_dev,
+                true, true);
+        expect(
+            gate.failures ==
+                std::vector<std::string>{
+                    "source or frozen subset identity failed"},
+            "offline conjuncts failed beyond the synthetic "
+            "unfrozen source");
+
+        dbc::Metrics regressed = candidate_dev;
+        regressed.equal_deck_top_one_expected_agreement =
+            -1.0;
+        regressed.equal_deck_mean_regret =
+            parent_dev.equal_deck_mean_regret + 1.0;
+        regressed.decks[0].mean_regret =
+            parent_dev.decks[0].mean_regret + 1.0;
+        const dbc::OfflineGate rejected =
+            dbc::evaluate_offline_gate(
+                corpus, fit,
+                parent_train, candidate_train,
+                parent_dev, regressed,
+                true, true);
+        expect(
+            !rejected.dev_regret_strictly_improved &&
+                !rejected.dev_top_one_non_decreasing &&
+                !rejected.dev_deck_regret_guard[0],
+            "DEV regression escaped conjunctive gate");
     });
 
     std::cout << passed

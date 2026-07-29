@@ -8,10 +8,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
 #include <iterator>
 #include <limits>
+#include <numeric>
+#include <optional>
 #include <ostream>
 #include <set>
+#include <sstream>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -426,6 +430,1620 @@ void print_census(
         << " selector_opened=0 artifact_published=0\n";
 }
 
+namespace {
+
+constexpr std::string_view kCorpusSchema =
+    "old-school-aq10-dbc1-successor-boundary-v1";
+constexpr double kProbabilityClamp = 1.0e-12;
+constexpr double kStablePairMinimumDelta = 0.03;
+constexpr double kNormal95CriticalValue = 1.96;
+constexpr double kMetricTolerance = 1.0e-12;
+
+bool probability(double value) {
+    return std::isfinite(value) &&
+           value >= 0.0 && value <= 1.0;
+}
+
+double clamped_probability(double value) {
+    return std::clamp(
+        value, kProbabilityClamp,
+        1.0 - kProbabilityClamp);
+}
+
+void append_double(
+    std::string& output, double value) {
+    append_u64(
+        output, std::bit_cast<std::uint64_t>(value));
+}
+
+void append_bool(
+    std::string& output, bool value) {
+    append_u64(output, value ? 1U : 0U);
+}
+
+void append_components(
+    std::string& output,
+    const LearnedModelComponentFingerprints& components) {
+    append_string(output, components.critic);
+    append_string(output, components.priority);
+    append_string(output, components.attack);
+    append_string(output, components.block);
+    append_string(output, components.damage_order);
+}
+
+void append_accounting(
+    std::string& output,
+    const RootAccounting& accounting) {
+    append_size(output, accounting.sampled_worlds);
+    append_size(output, accounting.rollout_evaluations);
+    append_size(output, accounting.terminal_evaluations);
+    append_size(output, accounting.bootstrapped_evaluations);
+    append_size(output, accounting.eligible_cells);
+    append_size(
+        output,
+        accounting.terminal_before_boundary_cells);
+    append_size(
+        output, accounting.inner_rollout_evaluations);
+    append_size(
+        output, accounting.inner_search_invocations);
+    append_size(output, accounting.inner_search_max_depth);
+}
+
+void append_example(
+    std::string& output,
+    const RootExample& example) {
+    append_string(output, example.manifest.stable_root_id);
+    append_string(
+        output,
+        example.manifest.information_action_fingerprint);
+    append_size(output, example.teacher_samples.size());
+    for (const auto& row : example.teacher_samples) {
+        append_size(output, row.size());
+        for (const double value : row) {
+            append_double(output, value);
+        }
+    }
+    append_size(output, example.cells.size());
+    for (const BoundaryCell& cell : example.cells) {
+        append_size(output, cell.action_index);
+        append_size(output, cell.world_index);
+        append_double(output, cell.teacher_target);
+        append_double(output, cell.parent_prediction);
+        append_double(output, cell.weight);
+        append_bool(
+            output, cell.terminal_before_boundary);
+        append_size(output, cell.observation.size());
+        for (const double feature : cell.observation) {
+            append_double(output, feature);
+        }
+    }
+    append_accounting(output, example.accounting);
+}
+
+GameState hidden_repartition_clone(
+    const GameState& state, std::size_t observer) {
+    if (observer >= state.players.size()) {
+        throw std::out_of_range(
+            "AQ10-DBC1 hidden-repartition observer is invalid");
+    }
+    GameState clone = state;
+    std::reverse(
+        clone.players[observer].library.begin(),
+        clone.players[observer].library.end());
+
+    PlayerState& hidden =
+        clone.players[1U - observer];
+    const std::size_t hand_size = hidden.hand.size();
+    std::vector<CardId> hidden_cards = hidden.hand;
+    hidden_cards.insert(
+        hidden_cards.end(),
+        hidden.library.begin(), hidden.library.end());
+    if (hidden_cards.size() > 1) {
+        std::rotate(
+            hidden_cards.begin(),
+            hidden_cards.begin() + 1,
+            hidden_cards.end());
+        std::reverse(
+            hidden_cards.begin(), hidden_cards.end());
+    }
+    const auto hand_end =
+        hidden_cards.begin() +
+        static_cast<std::ptrdiff_t>(hand_size);
+    hidden.hand.assign(
+        hidden_cards.begin(), hand_end);
+    hidden.library.assign(
+        hand_end, hidden_cards.end());
+    if (observe_game_state(state, observer) !=
+        observe_game_state(clone, observer)) {
+        throw std::logic_error(
+            "AQ10-DBC1 hidden repartition changed owner information");
+    }
+    if (clone == state) {
+        throw std::runtime_error(
+            "AQ10-DBC1 hidden repartition witness is vacuous");
+    }
+    return clone;
+}
+
+void validate_root_example(
+    const RootExample& example,
+    const ManifestRoot& expected) {
+    if (example.manifest != expected ||
+        example.teacher_samples.size() !=
+            expected.actions.size() ||
+        example.cells.size() !=
+            expected.actions.size() *
+                kTeacherWorlds ||
+        example.accounting.sampled_worlds !=
+            kTeacherWorlds ||
+        example.accounting.rollout_evaluations !=
+            example.cells.size() ||
+        example.accounting.terminal_evaluations +
+                example.accounting.bootstrapped_evaluations !=
+            example.accounting.rollout_evaluations ||
+        example.accounting.inner_search_max_depth > 1 ||
+        example.accounting.eligible_cells == 0 ||
+        example.accounting.eligible_cells +
+                example.accounting
+                    .terminal_before_boundary_cells !=
+            example.cells.size() ||
+        example.accounting.inner_rollout_evaluations == 0 ||
+        example.accounting.inner_search_invocations == 0 ||
+        example.accounting.inner_search_max_depth != 1) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 root shape or accounting is invalid");
+    }
+
+    std::size_t eligible = 0;
+    std::size_t terminal_before = 0;
+    double weight_sum = 0.0;
+    for (std::size_t action = 0;
+         action < expected.actions.size(); ++action) {
+        const auto& samples =
+            example.teacher_samples[action];
+        if (samples.size() != kTeacherWorlds ||
+            !std::all_of(
+                samples.begin(), samples.end(),
+                probability)) {
+            throw std::invalid_argument(
+                "AQ10-DBC1 teacher sample row is invalid");
+        }
+        for (std::size_t world = 0;
+             world < kTeacherWorlds; ++world) {
+            const BoundaryCell& cell =
+                example.cells[
+                    action * kTeacherWorlds + world];
+            if (cell.action_index != action ||
+                cell.world_index != world ||
+                cell.teacher_target != samples[world] ||
+                !probability(cell.teacher_target) ||
+                !probability(cell.parent_prediction)) {
+                throw std::invalid_argument(
+                    "AQ10-DBC1 boundary cell identity is invalid");
+            }
+            if (cell.terminal_before_boundary) {
+                ++terminal_before;
+                if (!cell.observation.empty() ||
+                    cell.boundary_state.has_value() ||
+                    cell.weight != 0.0 ||
+                    cell.parent_prediction !=
+                        cell.teacher_target) {
+                    throw std::invalid_argument(
+                        "AQ10-DBC1 terminal cell retained a critic input");
+                }
+                continue;
+            }
+            ++eligible;
+            if (cell.observation.size() !=
+                    kCriticFeatureCount ||
+                !cell.boundary_state.has_value() ||
+                !std::all_of(
+                    cell.observation.begin(),
+                    cell.observation.end(),
+                    [](double value) {
+                        return std::isfinite(value);
+                    }) ||
+                !std::isfinite(cell.weight) ||
+                cell.weight <= 0.0) {
+                throw std::invalid_argument(
+                    "AQ10-DBC1 successor critic example is invalid");
+            }
+            weight_sum += cell.weight;
+        }
+    }
+    const double expected_root_mass =
+        1.0 /
+        static_cast<double>(
+            kDeckCount *
+            kExpectedRootsPerDeckAndSplit);
+    if (eligible != example.accounting.eligible_cells ||
+        terminal_before !=
+            example.accounting
+                .terminal_before_boundary_cells ||
+        std::abs(weight_sum - expected_root_mass) >
+            kMetricTolerance) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 root eligibility weight does not cross-sum");
+    }
+}
+
+RootExample label_root(
+    const ManifestRoot& manifest,
+    const LearnedDecisionTracePoint& point,
+    const std::array<std::vector<CardId>, 2>& decks,
+    const std::shared_ptr<const LearnedModel>& parent,
+    bool repartition_hidden) {
+    const auto& coordinate = manifest.coordinate;
+    if (!point.context.valid ||
+        point.context.decision_player !=
+            coordinate.actor) {
+        throw std::logic_error(
+            "AQ10-DBC1 live replay context drifted");
+    }
+    GameState source_state =
+        repartition_hidden
+            ? hidden_repartition_clone(
+                  point.state, coordinate.actor)
+            : point.state;
+    const auto live_actions =
+        legal_priority_actions(
+            source_state, coordinate.actor,
+            point.context.sorcery_actions);
+    if (live_actions != manifest.actions) {
+        throw std::logic_error(
+            "AQ10-DBC1 live replay legal actions drifted");
+    }
+
+    const LearnedActionSamples samples =
+        learned_priority_action_samples(
+            source_state, decks, coordinate.actor,
+            point.context.sorcery_actions,
+            point.context.phase,
+            point.context.consecutive_passes,
+            manifest.actions, parent,
+            teacher_search_config(
+                teacher_search_seed(coordinate)));
+    const std::size_t expected_cells =
+        manifest.actions.size() * kTeacherWorlds;
+    if (samples.sampled_worlds != kTeacherWorlds ||
+        samples.rollout_evaluations != expected_cells ||
+        samples.q_samples.size() !=
+            manifest.actions.size() ||
+        samples.priority_shallow_prior_samples.size() !=
+            manifest.actions.size() ||
+        samples.priority_continuation_samples.size() !=
+            manifest.actions.size() ||
+        samples.priority_h0_boundaries.size() !=
+            manifest.actions.size() ||
+        samples.terminal_evaluation_flags.size() !=
+            manifest.actions.size() ||
+        samples.terminal_evaluations +
+                samples.bootstrapped_evaluations !=
+            samples.rollout_evaluations ||
+        samples.inner_search_max_depth > 1) {
+        throw std::logic_error(
+            "AQ10-DBC1 teacher accounting drifted");
+    }
+
+    RootExample result;
+    result.manifest = manifest;
+    result.teacher_samples = samples.q_samples;
+    result.accounting = {
+        .sampled_worlds = samples.sampled_worlds,
+        .rollout_evaluations =
+            samples.rollout_evaluations,
+        .terminal_evaluations =
+            samples.terminal_evaluations,
+        .bootstrapped_evaluations =
+            samples.bootstrapped_evaluations,
+        .eligible_cells = 0,
+        .terminal_before_boundary_cells = 0,
+        .inner_rollout_evaluations =
+            samples.inner_rollout_evaluations,
+        .inner_search_invocations =
+            samples.inner_search_invocations,
+        .inner_search_max_depth =
+            samples.inner_search_max_depth,
+    };
+    result.cells.reserve(expected_cells);
+    for (std::size_t action = 0;
+         action < manifest.actions.size(); ++action) {
+        if (samples.q_samples[action].size() !=
+                kTeacherWorlds ||
+            samples.priority_shallow_prior_samples[action].size() !=
+                kTeacherWorlds ||
+            samples.priority_continuation_samples[action].size() !=
+                kTeacherWorlds ||
+            samples.priority_h0_boundaries[action].size() !=
+                kTeacherWorlds ||
+            samples.terminal_evaluation_flags[action].size() !=
+                kTeacherWorlds) {
+            throw std::logic_error(
+                "AQ10-DBC1 teacher cell row drifted");
+        }
+        for (std::size_t world = 0;
+             world < kTeacherWorlds; ++world) {
+            const double target =
+                samples.q_samples[action][world];
+            const auto& boundary =
+                samples.priority_h0_boundaries[action][world];
+            if (samples.priority_shallow_prior_samples
+                    [action][world] != 0.0 ||
+                samples.priority_continuation_samples
+                    [action][world] != target ||
+                (boundary.terminal &&
+                 samples.terminal_evaluation_flags
+                         [action][world] != 1U) ||
+                (boundary.terminal &&
+                 boundary.continuation_score != target)) {
+                throw std::logic_error(
+                    "AQ10-DBC1 target components or boundary "
+                    "terminal identity drifted");
+            }
+            BoundaryCell cell{
+                .action_index = action,
+                .world_index = world,
+                .teacher_target = target,
+                .parent_prediction =
+                    boundary.terminal
+                        ? target
+                        : boundary.continuation_score,
+                .weight = 0.0,
+                .terminal_before_boundary =
+                    boundary.terminal,
+            };
+            if (boundary.terminal) {
+                ++result.accounting
+                      .terminal_before_boundary_cells;
+            } else {
+                if (!boundary.context.valid ||
+                    boundary.context.phase !=
+                        TurnPhase::FirstMain ||
+                    boundary.context.decision_player !=
+                        boundary.state.active_player) {
+                    throw std::logic_error(
+                        "AQ10-DBC1 captured boundary context drifted");
+                }
+                cell.observation =
+                    learned_observation(
+                        boundary.state,
+                        coordinate.actor);
+                cell.boundary_state = boundary.state;
+                const double direct =
+                    learned_critic_value(
+                        boundary.state,
+                        coordinate.actor, parent);
+                if (direct !=
+                    boundary.continuation_score) {
+                    throw std::logic_error(
+                        "AQ10-DBC1 captured parent prediction drifted");
+                }
+                ++result.accounting.eligible_cells;
+            }
+            result.cells.push_back(std::move(cell));
+        }
+    }
+    if (result.accounting.eligible_cells == 0) {
+        throw std::runtime_error(
+            "AQ10-DBC1 root has no successor critic example");
+    }
+    const double cell_weight =
+        1.0 /
+        static_cast<double>(
+            kDeckCount *
+            kExpectedRootsPerDeckAndSplit *
+            result.accounting.eligible_cells);
+    for (BoundaryCell& cell : result.cells) {
+        if (!cell.terminal_before_boundary) {
+            cell.weight = cell_weight;
+        }
+    }
+    validate_root_example(result, manifest);
+    return result;
+}
+
+Corpus empty_corpus(
+    const Census& subset,
+    const std::shared_ptr<const LearnedModel>& parent) {
+    return {
+        .census = subset,
+        .parent_components =
+            learned_model_component_fingerprints(parent),
+    };
+}
+
+void append_labeled_root(
+    Corpus& corpus, RootExample example) {
+    if (example.manifest.coordinate.split ==
+        Split::Train) {
+        corpus.train.push_back(std::move(example));
+    } else {
+        corpus.dev.push_back(std::move(example));
+    }
+}
+
+void finalize_collected_corpus(Corpus& corpus) {
+    corpus.digest =
+        canonical_corpus_digest(corpus);
+    validate_corpus(corpus);
+}
+
+Corpus collect_corpus_from_authenticated_source(
+    const std::shared_ptr<const LearnedModel>& parent,
+    const Census& subset,
+    const source::Census& full,
+    bool hidden_repartition_source) {
+    Corpus result = empty_corpus(subset, parent);
+    std::size_t subset_position = 0;
+    const source::Census replayed =
+        source::replay_frozen_source_roots(
+            parent, full,
+            [&](const ManifestRoot& root,
+                const LearnedDecisionTracePoint& point,
+                const std::array<
+                    std::vector<CardId>, 2>& decks) {
+                if (root.coordinate.retained_position != 0) {
+                    return;
+                }
+                if (subset_position >=
+                        subset.roots.size() ||
+                    root !=
+                        subset.roots[
+                            subset_position]) {
+                    throw std::runtime_error(
+                        "AQ10-DBC1 live subset root drifted");
+                }
+                append_labeled_root(
+                    result,
+                    label_root(
+                        root, point, decks, parent,
+                        hidden_repartition_source));
+                ++subset_position;
+            });
+    if (replayed != full ||
+        subset_position != subset.roots.size()) {
+        throw std::runtime_error(
+            "AQ10-DBC1 authenticated replay did not cross-sum");
+    }
+    finalize_collected_corpus(result);
+    return result;
+}
+
+std::array<Corpus, 3> collect_run_corpora(
+    const std::shared_ptr<const LearnedModel>& parent,
+    const Census& subset,
+    const source::Census& full) {
+    std::array<Corpus, 3> result{
+        empty_corpus(subset, parent),
+        empty_corpus(subset, parent),
+        empty_corpus(subset, parent),
+    };
+    std::size_t subset_position = 0;
+    const source::Census replayed =
+        source::replay_frozen_source_roots(
+            parent, full,
+            [&](const ManifestRoot& root,
+                const LearnedDecisionTracePoint& point,
+                const std::array<
+                    std::vector<CardId>, 2>& decks) {
+                if (root.coordinate.retained_position != 0) {
+                    return;
+                }
+                if (subset_position >=
+                        subset.roots.size() ||
+                    root !=
+                        subset.roots[
+                            subset_position]) {
+                    throw std::runtime_error(
+                        "AQ10-DBC1 repeated live subset root drifted");
+                }
+                append_labeled_root(
+                    result[0],
+                    label_root(
+                        root, point, decks, parent, false));
+                append_labeled_root(
+                    result[1],
+                    label_root(
+                        root, point, decks, parent, false));
+                append_labeled_root(
+                    result[2],
+                    label_root(
+                        root, point, decks, parent, true));
+                ++subset_position;
+            });
+    if (replayed != full ||
+        subset_position != subset.roots.size()) {
+        throw std::runtime_error(
+            "AQ10-DBC1 repeated authenticated replay did not "
+            "cross-sum");
+    }
+    for (Corpus& corpus : result) {
+        finalize_collected_corpus(corpus);
+    }
+    return result;
+}
+
+std::size_t calibration_bin(double prediction) {
+    if (prediction >= 1.0) {
+        return kCalibrationBinCount - 1;
+    }
+    return std::min(
+        static_cast<std::size_t>(
+            prediction *
+            static_cast<double>(kCalibrationBinCount)),
+        kCalibrationBinCount - 1);
+}
+
+double sample_standard_error(
+    const std::vector<double>& samples) {
+    if (samples.size() < 2) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 stable pair needs paired samples");
+    }
+    const double mean =
+        std::accumulate(
+            samples.begin(), samples.end(), 0.0) /
+        static_cast<double>(samples.size());
+    double squared = 0.0;
+    for (const double value : samples) {
+        const double delta = value - mean;
+        squared += delta * delta;
+    }
+    return std::sqrt(
+        squared /
+        static_cast<double>(
+            samples.size() *
+            (samples.size() - 1)));
+}
+
+std::vector<std::size_t> exact_max_support(
+    std::span<const double> values) {
+    if (values.empty()) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 exact maximum requires values");
+    }
+    const double maximum =
+        *std::max_element(values.begin(), values.end());
+    std::vector<std::size_t> support;
+    for (std::size_t index = 0;
+         index < values.size(); ++index) {
+        if (values[index] == maximum) {
+            support.push_back(index);
+        }
+    }
+    return support;
+}
+
+struct MetricAccumulator {
+    std::size_t roots = 0;
+    std::size_t eligible_cells = 0;
+    std::size_t stable_pairs = 0;
+    double weight_mass = 0.0;
+    double bce_sum = 0.0;
+    double brier_sum = 0.0;
+    double bias_sum = 0.0;
+    double top_one_sum = 0.0;
+    double stable_pair_sum = 0.0;
+    double regret_sum = 0.0;
+    std::array<double, kCalibrationBinCount>
+        bin_weights{};
+    std::array<double, kCalibrationBinCount>
+        bin_prediction_sums{};
+    std::array<double, kCalibrationBinCount>
+        bin_target_sums{};
+};
+
+DeckMetrics finalize_metrics(
+    const MetricAccumulator& source,
+    DeckId deck) {
+    if (source.roots == 0 ||
+        source.eligible_cells == 0 ||
+        source.weight_mass <= 0.0) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 metric deck is empty");
+    }
+    DeckMetrics result{
+        .deck = deck,
+        .roots = source.roots,
+        .eligible_cells = source.eligible_cells,
+        .stable_pairs = source.stable_pairs,
+        .weight_mass = source.weight_mass,
+        .weighted_bce =
+            source.bce_sum / source.weight_mass,
+        .weighted_brier =
+            source.brier_sum / source.weight_mass,
+        .weighted_bias =
+            source.bias_sum / source.weight_mass,
+        .weighted_ece = 0.0,
+        .top_one_expected_agreement =
+            source.top_one_sum /
+            static_cast<double>(source.roots),
+        .stable_pair_agreement =
+            source.stable_pairs == 0
+                ? 0.0
+                : source.stable_pair_sum /
+                      static_cast<double>(
+                          source.stable_pairs),
+        .mean_regret =
+            source.regret_sum /
+            static_cast<double>(source.roots),
+    };
+    for (std::size_t bin = 0;
+         bin < kCalibrationBinCount; ++bin) {
+        if (source.bin_weights[bin] == 0.0) {
+            continue;
+        }
+        const double prediction =
+            source.bin_prediction_sums[bin] /
+            source.bin_weights[bin];
+        const double target =
+            source.bin_target_sums[bin] /
+            source.bin_weights[bin];
+        result.weighted_ece +=
+            source.bin_weights[bin] *
+            std::abs(prediction - target);
+    }
+    result.weighted_ece /= source.weight_mass;
+    return result;
+}
+
+void add_gate(
+    bool condition, std::string_view failure,
+    OfflineGate& gate) {
+    if (!condition) {
+        gate.failures.emplace_back(failure);
+    }
+}
+
+bool output_parameters_equal(
+    const LearnedOutputCalibrationParameters& left,
+    const LearnedOutputCalibrationParameters& right) {
+    return left == right;
+}
+
+std::size_t changed_output_parameter_count(
+    const LearnedOutputCalibrationParameters& parent,
+    const LearnedOutputCalibrationParameters& candidate) {
+    std::size_t changed = 0;
+    for (std::size_t leaf = 0;
+         leaf < parent.leaves.size(); ++leaf) {
+        for (std::size_t parameter = 0;
+             parameter < parent.leaves[leaf].size();
+             ++parameter) {
+            changed +=
+                std::bit_cast<std::uint64_t>(
+                    parent.leaves[leaf][parameter]) !=
+                std::bit_cast<std::uint64_t>(
+                    candidate.leaves[leaf][parameter])
+                    ? 1U
+                    : 0U;
+        }
+    }
+    return changed;
+}
+
+} // namespace
+
+std::uint64_t teacher_search_seed(
+    const source::RootCoordinate& coordinate) {
+    if (coordinate.schedule_index >=
+            source::kGamesPerSplit ||
+        coordinate.actor >= 2 ||
+        coordinate.nontrivial_ordinal >
+            std::numeric_limits<std::uint32_t>::max()) {
+        throw std::out_of_range(
+            "AQ10-DBC1 teacher seed coordinate is invalid");
+    }
+    const std::uint64_t subindex =
+        (static_cast<std::uint64_t>(
+             coordinate.actor)
+         << 32) |
+        static_cast<std::uint64_t>(
+            coordinate.nontrivial_ordinal);
+    return learned_iteration::derive_seed(
+        kTeacherSeed,
+        learned_iteration::SeedDomain::PrioritySearch,
+        source::split_index(coordinate.split),
+        coordinate.schedule_index, subindex);
+}
+
+LearnedSearchConfig teacher_search_config(
+    std::uint64_t seed) {
+    LearnedSearchConfig config =
+        learned_value_actor_local_search_config(seed);
+    if (config.worlds != kTeacherWorlds ||
+        config.rollouts_per_world !=
+            kTeacherRolloutsPerWorld ||
+        config.horizon_turns !=
+            kTeacherHorizonTurns ||
+        config.evaluation_threads !=
+            kTeacherThreads ||
+        config.value_continuation_search_worlds !=
+            kInnerWorlds ||
+        kLearnedValueSearchHorizonTurns !=
+            kInnerHorizonTurns ||
+        config.continuation_variant !=
+            LearnedVariant::ValueSearchChampion ||
+        config.value_continuation_epsilon != 0.0 ||
+        config.blend_shallow_prior ||
+        config.value_resolved_shallow_prior_weight != 0.0 ||
+        config.value_priority_residual_weight != 0.0 ||
+        config.value_pass_dominance ||
+        config.value_continuation_controller !=
+            LearnedContinuationController::Legacy ||
+        config.value_continuation_search_scope !=
+            LearnedContinuationSearchScope::PriorityOnly) {
+        throw std::logic_error(
+            "AQ10-DBC1 inherited AQ4-D1 recipe drifted");
+    }
+    config.capture_priority_h0_boundaries = true;
+    config.terminal_utility_mode =
+        LearnedTerminalUtilityMode::
+            C16DiscountedAbsoluteTurn;
+    return config;
+}
+
+std::string canonical_corpus_digest(
+    const Corpus& corpus) {
+    std::string payload;
+    append_string(payload, kCorpusSchema);
+    append_u64(payload, kTeacherSeed);
+    append_size(payload, kTeacherWorlds);
+    append_size(payload, kTeacherRolloutsPerWorld);
+    append_size(payload, kTeacherHorizonTurns);
+    append_size(payload, kTeacherThreads);
+    append_size(payload, kInnerWorlds);
+    append_size(payload, kInnerHorizonTurns);
+    append_string(payload, corpus.census.subset_hash);
+    append_components(
+        payload, corpus.parent_components);
+    append_size(payload, corpus.train.size());
+    for (const RootExample& example : corpus.train) {
+        append_example(payload, example);
+    }
+    append_size(payload, corpus.dev.size());
+    for (const RootExample& example : corpus.dev) {
+        append_example(payload, example);
+    }
+    return artifact_integrity::sha256_string(payload);
+}
+
+void validate_corpus(const Corpus& corpus) {
+    validate_census(corpus.census);
+    if (corpus.parent_components.critic.size() != 64 ||
+        corpus.parent_components.priority.size() != 64 ||
+        corpus.parent_components.attack.size() != 64 ||
+        corpus.parent_components.block.size() != 64 ||
+        corpus.parent_components.damage_order.size() != 64 ||
+        corpus.digest.size() != 64 ||
+        corpus.digest != canonical_corpus_digest(corpus)) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 corpus identity is invalid");
+    }
+
+    std::array<std::size_t, 2> positions{};
+    std::array<
+        std::array<double, kDeckCount>, 2>
+        deck_mass{};
+    for (const ManifestRoot& expected :
+         corpus.census.roots) {
+        const std::size_t split =
+            source::split_index(
+                expected.coordinate.split);
+        const auto& examples =
+            expected.coordinate.split == Split::Train
+                ? corpus.train
+                : corpus.dev;
+        if (positions[split] >= examples.size()) {
+            throw std::invalid_argument(
+                "AQ10-DBC1 corpus omitted a census root");
+        }
+        const RootExample& example =
+            examples[positions[split]++];
+        validate_root_example(example, expected);
+        const std::size_t deck =
+            deck_index(
+                expected.coordinate.owner_deck());
+        for (const BoundaryCell& cell : example.cells) {
+            deck_mass[split][deck] += cell.weight;
+        }
+    }
+    if (positions[0] != corpus.train.size() ||
+        positions[1] != corpus.dev.size()) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 corpus has unaccounted examples");
+    }
+    const double expected_deck_mass =
+        1.0 / static_cast<double>(kDeckCount);
+    for (const auto& split : deck_mass) {
+        for (const double mass : split) {
+            if (std::abs(
+                    mass - expected_deck_mass) >
+                kMetricTolerance) {
+                throw std::invalid_argument(
+                    "AQ10-DBC1 equal-deck weight drifted");
+            }
+        }
+    }
+}
+
+Corpus collect_corpus(
+    std::shared_ptr<const LearnedModel> parent,
+    const Census& frozen_subset,
+    bool hidden_repartition_source) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            kRequiredParentFingerprint ||
+        learned_critic_schema(parent) !=
+            LearnedCriticSchema::LegacyStateOnly) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 requires exact frozen C16");
+    }
+    require_frozen_census(frozen_subset);
+    const source::Census full =
+        source::collect_census(parent);
+    if (project_frozen_census(full) !=
+        frozen_subset) {
+        throw std::runtime_error(
+            "AQ10-DBC1 projected source census drifted");
+    }
+    return collect_corpus_from_authenticated_source(
+        parent, frozen_subset, full,
+        hidden_repartition_source);
+}
+
+std::vector<LearnedWeightedCriticTrainingExample>
+training_examples(const Corpus& corpus) {
+    validate_corpus(corpus);
+    std::vector<LearnedWeightedCriticTrainingExample>
+        result;
+    std::size_t eligible = 0;
+    for (const RootExample& root : corpus.train) {
+        eligible += root.accounting.eligible_cells;
+    }
+    result.reserve(eligible);
+    for (const RootExample& root : corpus.train) {
+        for (const BoundaryCell& cell : root.cells) {
+            if (cell.terminal_before_boundary) {
+                continue;
+            }
+            result.push_back({
+                .features = cell.observation,
+                .target = cell.teacher_target,
+                .weight = cell.weight,
+            });
+        }
+    }
+    if (result.size() != eligible) {
+        throw std::logic_error(
+            "AQ10-DBC1 TRAIN projection drifted");
+    }
+    return result;
+}
+
+std::vector<RootPrediction> score(
+    std::span<const RootExample> examples,
+    std::shared_ptr<const LearnedModel> model) {
+    if (!model || examples.empty()) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 scoring requires examples and a model");
+    }
+    std::vector<RootPrediction> result;
+    result.reserve(examples.size());
+    for (const RootExample& root : examples) {
+        RootPrediction prediction{
+            .stable_root_id =
+                root.manifest.stable_root_id,
+            .action_samples =
+                root.teacher_samples,
+        };
+        for (const BoundaryCell& cell : root.cells) {
+            if (cell.terminal_before_boundary) {
+                continue;
+            }
+            prediction.action_samples
+                [cell.action_index][cell.world_index] =
+                    learned_critic_value(
+                        *cell.boundary_state,
+                        root.manifest.coordinate.actor,
+                        model);
+        }
+        result.push_back(std::move(prediction));
+    }
+    return result;
+}
+
+Metrics evaluate(
+    std::span<const RootExample> examples,
+    std::span<const RootPrediction> predictions) {
+    if (examples.empty() ||
+        examples.size() != predictions.size()) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 metric inputs are not aligned");
+    }
+    std::array<MetricAccumulator, kDeckCount>
+        accumulators{};
+    for (std::size_t root_index = 0;
+         root_index < examples.size(); ++root_index) {
+        const RootExample& root =
+            examples[root_index];
+        const RootPrediction& prediction =
+            predictions[root_index];
+        if (prediction.stable_root_id !=
+                root.manifest.stable_root_id ||
+            prediction.action_samples.size() !=
+                root.teacher_samples.size()) {
+            throw std::invalid_argument(
+                "AQ10-DBC1 prediction root identity drifted");
+        }
+        const std::size_t deck =
+            deck_index(
+                root.manifest.coordinate.owner_deck());
+        MetricAccumulator& metrics =
+            accumulators[deck];
+        ++metrics.roots;
+        std::vector<double> teacher_action_scores;
+        std::vector<double> predicted_action_scores;
+        teacher_action_scores.reserve(
+            root.teacher_samples.size());
+        predicted_action_scores.reserve(
+            root.teacher_samples.size());
+        for (std::size_t action = 0;
+             action < root.teacher_samples.size();
+             ++action) {
+            const auto& teacher =
+                root.teacher_samples[action];
+            const auto& predicted =
+                prediction.action_samples[action];
+            if (predicted.size() != teacher.size() ||
+                !std::all_of(
+                    predicted.begin(), predicted.end(),
+                    probability)) {
+                throw std::invalid_argument(
+                    "AQ10-DBC1 prediction cell row is invalid");
+            }
+            for (std::size_t world = 0;
+                 world < teacher.size(); ++world) {
+                const BoundaryCell& cell =
+                    root.cells[
+                        action * kTeacherWorlds + world];
+                if (cell.terminal_before_boundary) {
+                    if (predicted[world] !=
+                        teacher[world]) {
+                        throw std::invalid_argument(
+                            "AQ10-DBC1 terminal action score was "
+                            "replaced by a critic");
+                    }
+                    continue;
+                }
+                const double target = teacher[world];
+                const double value = predicted[world];
+                const double clamped =
+                    clamped_probability(value);
+                const double error = value - target;
+                metrics.weight_mass += cell.weight;
+                metrics.bce_sum +=
+                    cell.weight *
+                    (-target * std::log(clamped) -
+                     (1.0 - target) *
+                         std::log(1.0 - clamped));
+                metrics.brier_sum +=
+                    cell.weight * error * error;
+                metrics.bias_sum +=
+                    cell.weight * error;
+                const std::size_t bin =
+                    calibration_bin(value);
+                metrics.bin_weights[bin] +=
+                    cell.weight;
+                metrics.bin_prediction_sums[bin] +=
+                    cell.weight * value;
+                metrics.bin_target_sums[bin] +=
+                    cell.weight * target;
+                ++metrics.eligible_cells;
+            }
+            teacher_action_scores.push_back(
+                std::accumulate(
+                    teacher.begin(), teacher.end(), 0.0) /
+                static_cast<double>(teacher.size()));
+            predicted_action_scores.push_back(
+                std::accumulate(
+                    predicted.begin(), predicted.end(), 0.0) /
+                static_cast<double>(predicted.size()));
+        }
+
+        const auto teacher_support =
+            exact_max_support(teacher_action_scores);
+        const auto predicted_support =
+            exact_max_support(predicted_action_scores);
+        std::size_t overlap = 0;
+        double selected_teacher = 0.0;
+        for (const std::size_t action :
+             predicted_support) {
+            selected_teacher +=
+                teacher_action_scores[action];
+            overlap +=
+                std::find(
+                    teacher_support.begin(),
+                    teacher_support.end(), action) !=
+                        teacher_support.end()
+                    ? 1U
+                    : 0U;
+        }
+        metrics.top_one_sum +=
+            static_cast<double>(overlap) /
+            static_cast<double>(
+                predicted_support.size());
+        selected_teacher /=
+            static_cast<double>(
+                predicted_support.size());
+        metrics.regret_sum +=
+            teacher_action_scores[
+                teacher_support.front()] -
+            selected_teacher;
+
+        for (std::size_t first = 0;
+             first < root.teacher_samples.size();
+             ++first) {
+            for (std::size_t second = first + 1;
+                 second < root.teacher_samples.size();
+                 ++second) {
+                std::vector<double> differences;
+                differences.reserve(kTeacherWorlds);
+                for (std::size_t world = 0;
+                     world < kTeacherWorlds; ++world) {
+                    differences.push_back(
+                        root.teacher_samples[first][world] -
+                        root.teacher_samples[second][world]);
+                }
+                const double delta =
+                    teacher_action_scores[first] -
+                    teacher_action_scores[second];
+                const double uncertainty =
+                    kNormal95CriticalValue *
+                    sample_standard_error(differences);
+                if (std::abs(delta) <
+                        kStablePairMinimumDelta ||
+                    std::abs(delta) <= uncertainty) {
+                    continue;
+                }
+                ++metrics.stable_pairs;
+                const double predicted_delta =
+                    predicted_action_scores[first] -
+                    predicted_action_scores[second];
+                if (predicted_delta == 0.0) {
+                    metrics.stable_pair_sum += 0.5;
+                } else if (
+                    (predicted_delta > 0.0) ==
+                    (delta > 0.0)) {
+                    metrics.stable_pair_sum += 1.0;
+                }
+            }
+        }
+    }
+
+    Metrics result;
+    for (std::size_t deck = 0;
+         deck < kDeckCount; ++deck) {
+        result.decks[deck] =
+            finalize_metrics(
+                accumulators[deck],
+                static_cast<DeckId>(deck));
+        const DeckMetrics& row =
+            result.decks[deck];
+        result.roots += row.roots;
+        result.eligible_cells +=
+            row.eligible_cells;
+        result.stable_pairs += row.stable_pairs;
+        result.weight_mass += row.weight_mass;
+        result.equal_deck_weighted_bce +=
+            row.weighted_bce /
+            static_cast<double>(kDeckCount);
+        result.equal_deck_weighted_brier +=
+            row.weighted_brier /
+            static_cast<double>(kDeckCount);
+        result.equal_deck_weighted_bias +=
+            row.weighted_bias /
+            static_cast<double>(kDeckCount);
+        result.equal_deck_weighted_ece +=
+            row.weighted_ece /
+            static_cast<double>(kDeckCount);
+        result.equal_deck_top_one_expected_agreement +=
+            row.top_one_expected_agreement /
+            static_cast<double>(kDeckCount);
+        result.equal_deck_stable_pair_agreement +=
+            row.stable_pair_agreement /
+            static_cast<double>(kDeckCount);
+        result.equal_deck_mean_regret +=
+            row.mean_regret /
+            static_cast<double>(kDeckCount);
+    }
+    if (std::abs(result.weight_mass - 1.0) >
+        kMetricTolerance) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 metric weight does not cross-sum");
+    }
+    return result;
+}
+
+FitReport fit(
+    const Corpus& corpus,
+    std::shared_ptr<const LearnedModel> parent) {
+    validate_corpus(corpus);
+    require_frozen_census(corpus.census);
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            corpus.census.parent_fingerprint ||
+        learned_model_component_fingerprints(parent) !=
+            corpus.parent_components) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 fit parent differs from corpus");
+    }
+    const std::string parent_before =
+        learned_model_fingerprint(parent);
+    const auto parent_components =
+        learned_model_component_fingerprints(parent);
+    const auto parent_tensors =
+        learned_critic_tensor_fingerprints(parent);
+    const auto parent_parameters =
+        learned_output_calibration_parameters(parent);
+    const auto examples = training_examples(corpus);
+    const LearnedOutputCalibrationConfig optimizer{
+        .max_iterations = 32,
+        .l2_tether = 0.01,
+        .gradient_tolerance = 1e-10,
+    };
+    const auto first =
+        calibrate_learned_value_output_layer(
+            parent, examples, optimizer);
+    const auto second =
+        calibrate_learned_value_output_layer(
+            parent, examples, optimizer);
+    if (!first.model || !second.model) {
+        throw std::runtime_error(
+            "AQ10-DBC1 calibration returned no candidate");
+    }
+    const auto candidate_parameters =
+        learned_output_calibration_parameters(
+            first.model);
+    const auto replay_parameters =
+        learned_output_calibration_parameters(
+            second.model);
+    const auto parameter_replay =
+        with_learned_output_calibration_parameters(
+            parent, candidate_parameters);
+
+    FitReport result{
+        .candidate = first.model,
+        .optimizer = first.diagnostics,
+        .parent_fingerprint_before = parent_before,
+        .parent_fingerprint_after =
+            learned_model_fingerprint(parent),
+        .candidate_fingerprint =
+            learned_model_fingerprint(first.model),
+        .parent_components = parent_components,
+        .candidate_components =
+            learned_model_component_fingerprints(
+                first.model),
+        .parent_critic_tensors = parent_tensors,
+        .candidate_critic_tensors =
+            learned_critic_tensor_fingerprints(
+                first.model),
+        .authorized_output_parameters =
+            kOutputParameterCount,
+        .changed_output_parameters =
+            changed_output_parameter_count(
+                parent_parameters,
+                candidate_parameters),
+    };
+    result.parent_immutable =
+        result.parent_fingerprint_before ==
+        result.parent_fingerprint_after;
+    result.repeated_fit_bit_identical =
+        result.candidate_fingerprint ==
+            learned_model_fingerprint(second.model) &&
+        output_parameters_equal(
+            candidate_parameters, replay_parameters) &&
+        first.diagnostics == second.diagnostics;
+    result.parameter_replay_bit_identical =
+        parameter_replay &&
+        result.candidate_fingerprint ==
+            learned_model_fingerprint(
+                parameter_replay) &&
+        output_parameters_equal(
+            candidate_parameters,
+            learned_output_calibration_parameters(
+                parameter_replay));
+    result.only_output_layer_changed =
+        result.authorized_output_parameters ==
+            kOutputParameterCount &&
+        result.changed_output_parameters > 0 &&
+        result.changed_output_parameters <=
+            kOutputParameterCount &&
+        result.parent_critic_tensors.input_hidden ==
+            result.candidate_critic_tensors.input_hidden &&
+        result.parent_critic_tensors.direct_paths ==
+            result.candidate_critic_tensors.direct_paths &&
+        result.parent_critic_tensors.output_layer !=
+            result.candidate_critic_tensors.output_layer &&
+        result.parent_components.critic !=
+            result.candidate_components.critic &&
+        result.parent_components.priority ==
+            result.candidate_components.priority &&
+        result.parent_components.attack ==
+            result.candidate_components.attack &&
+        result.parent_components.block ==
+            result.candidate_components.block &&
+        result.parent_components.damage_order ==
+            result.candidate_components.damage_order;
+    return result;
+}
+
+bool OfflineGate::passed() const {
+    return failures.empty();
+}
+
+OfflineGate evaluate_offline_gate(
+    const Corpus& corpus,
+    const FitReport& fit_report,
+    const Metrics& parent_train,
+    const Metrics& candidate_train,
+    const Metrics& parent_dev,
+    const Metrics& candidate_dev,
+    bool repeated_collection_bit_identical,
+    bool hidden_repartition_bit_identical) {
+    std::size_t expected_fit_examples = 0;
+    for (const RootExample& root : corpus.train) {
+        expected_fit_examples +=
+            root.accounting.eligible_cells;
+    }
+    const bool fit_accounting_exact =
+        fit_report.optimizer.example_count ==
+            expected_fit_examples &&
+        fit_report.optimizer.leaf_count ==
+            kLearnedOutputCalibrationLeafCount &&
+        fit_report.optimizer.iterations <= 32 &&
+        std::abs(
+            fit_report.optimizer.total_weight - 1.0) <=
+            kMetricTolerance &&
+        std::isfinite(
+            fit_report.optimizer.before_weighted_bce) &&
+        std::isfinite(
+            fit_report.optimizer.after_weighted_bce) &&
+        std::isfinite(
+            fit_report.optimizer.max_parameter_delta) &&
+        fit_report.optimizer.max_parameter_delta > 0.0;
+    OfflineGate gate{
+        .repeated_collection_bit_identical =
+            repeated_collection_bit_identical,
+        .hidden_repartition_bit_identical =
+            hidden_repartition_bit_identical,
+        .source_and_subset_exact =
+            corpus.census.subset_hash ==
+                kFrozenSubsetHash &&
+            corpus.census.source_manifest_hash ==
+                kRequiredSourceManifestHash &&
+            corpus.digest ==
+                canonical_corpus_digest(corpus),
+        .accounting_exact = true,
+        .parent_immutable =
+            fit_report.parent_immutable,
+        .repeated_fit_bit_identical =
+            fit_report.repeated_fit_bit_identical,
+        .exact_output_component_isolation =
+            fit_report.only_output_layer_changed &&
+            fit_report.parameter_replay_bit_identical &&
+            fit_accounting_exact &&
+            fit_report.authorized_output_parameters ==
+                kOutputParameterCount,
+        .train_bce_strictly_improved =
+            candidate_train.equal_deck_weighted_bce <
+            parent_train.equal_deck_weighted_bce,
+        .train_regret_strictly_improved =
+            candidate_train.equal_deck_mean_regret <
+            parent_train.equal_deck_mean_regret,
+        .dev_bce_strictly_improved =
+            candidate_dev.equal_deck_weighted_bce <
+            parent_dev.equal_deck_weighted_bce,
+        .dev_regret_strictly_improved =
+            candidate_dev.equal_deck_mean_regret <
+            parent_dev.equal_deck_mean_regret,
+        .dev_top_one_non_decreasing =
+            candidate_dev
+                    .equal_deck_top_one_expected_agreement >=
+            parent_dev
+                .equal_deck_top_one_expected_agreement,
+    };
+    try {
+        validate_corpus(corpus);
+    } catch (const std::exception&) {
+        gate.accounting_exact = false;
+    }
+    for (std::size_t deck = 0;
+         deck < kDeckCount; ++deck) {
+        gate.dev_deck_regret_guard[deck] =
+            candidate_dev.decks[deck].mean_regret <=
+            parent_dev.decks[deck].mean_regret +
+                kMaximumDevDeckRegretIncrease;
+        gate.parent_train_regret_nonzero[deck] =
+            parent_train.decks[deck].mean_regret > 0.0;
+        gate.parent_dev_regret_nonzero[deck] =
+            parent_dev.decks[deck].mean_regret > 0.0;
+    }
+
+    add_gate(
+        gate.repeated_collection_bit_identical,
+        "repeated collection was not bit-identical", gate);
+    add_gate(
+        gate.hidden_repartition_bit_identical,
+        "hidden-repartition collection changed evidence", gate);
+    add_gate(
+        gate.source_and_subset_exact,
+        "source or frozen subset identity failed", gate);
+    add_gate(
+        gate.accounting_exact,
+        "corpus accounting failed", gate);
+    add_gate(
+        gate.parent_immutable,
+        "frozen parent changed", gate);
+    add_gate(
+        gate.repeated_fit_bit_identical,
+        "repeated fit changed candidate", gate);
+    add_gate(
+        gate.exact_output_component_isolation,
+        "candidate changed outside the 34-parameter output surface",
+        gate);
+    add_gate(
+        gate.train_bce_strictly_improved,
+        "TRAIN BCE did not strictly improve", gate);
+    add_gate(
+        gate.train_regret_strictly_improved,
+        "TRAIN regret did not strictly improve", gate);
+    add_gate(
+        gate.dev_bce_strictly_improved,
+        "DEV BCE did not strictly improve", gate);
+    add_gate(
+        gate.dev_regret_strictly_improved,
+        "DEV regret did not strictly improve", gate);
+    add_gate(
+        gate.dev_top_one_non_decreasing,
+        "DEV top-one agreement decreased", gate);
+    for (std::size_t deck = 0;
+         deck < kDeckCount; ++deck) {
+        const std::string name(
+            deck_name(static_cast<DeckId>(deck)));
+        add_gate(
+            gate.dev_deck_regret_guard[deck],
+            "DEV " + name +
+                " regret exceeded the 0.01 guard",
+            gate);
+        add_gate(
+            gate.parent_train_regret_nonzero[deck],
+            "TRAIN " + name +
+                " parent regret was zero",
+            gate);
+        add_gate(
+            gate.parent_dev_regret_nonzero[deck],
+            "DEV " + name +
+                " parent regret was zero",
+            gate);
+    }
+    return gate;
+}
+
+RunReport run(
+    std::shared_ptr<const LearnedModel> parent) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            kRequiredParentFingerprint ||
+        learned_critic_schema(parent) !=
+            LearnedCriticSchema::LegacyStateOnly) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 run requires exact frozen C16");
+    }
+    const source::Census full =
+        source::collect_census(parent);
+    const Census subset =
+        project_frozen_census(full);
+    const auto corpora =
+        collect_run_corpora(
+            parent, subset, full);
+    const Corpus& direct = corpora[0];
+    const Corpus& repeated_direct = corpora[1];
+    const Corpus& repartitioned = corpora[2];
+    const bool repeated =
+        direct == repeated_direct;
+    const bool hidden_invariant =
+        direct.digest ==
+            repartitioned.digest;
+    const FitReport fitted = fit(direct, parent);
+    const auto parent_train_predictions =
+        score(direct.train, parent);
+    const auto candidate_train_predictions =
+        score(direct.train, fitted.candidate);
+    const auto parent_dev_predictions =
+        score(direct.dev, parent);
+    const auto candidate_dev_predictions =
+        score(direct.dev, fitted.candidate);
+    const Metrics parent_train =
+        evaluate(
+            direct.train, parent_train_predictions);
+    const Metrics candidate_train =
+        evaluate(
+            direct.train, candidate_train_predictions);
+    const Metrics parent_dev =
+        evaluate(
+            direct.dev, parent_dev_predictions);
+    const Metrics candidate_dev =
+        evaluate(
+            direct.dev, candidate_dev_predictions);
+    return {
+        .corpus = direct,
+        .fit = fitted,
+        .parent_train = parent_train,
+        .candidate_train = candidate_train,
+        .parent_dev = parent_dev,
+        .candidate_dev = candidate_dev,
+        .gate = evaluate_offline_gate(
+            direct, fitted,
+            parent_train, candidate_train,
+            parent_dev, candidate_dev,
+            repeated, hidden_invariant),
+    };
+}
+
+void print_run(
+    std::ostream& output,
+    const RunReport& report) {
+    validate_corpus(report.corpus);
+    output << std::fixed << std::setprecision(9);
+    output
+        << "schema=old-school-aq10-dbc1-run-v1\n"
+        << "mode=run"
+        << " parent_fingerprint="
+        << report.fit.parent_fingerprint_before
+        << " candidate_fingerprint="
+        << report.fit.candidate_fingerprint
+        << " subset_hash="
+        << report.corpus.census.subset_hash
+        << " corpus_digest="
+        << report.corpus.digest
+        << " teacher_seed=" << kTeacherSeed
+        << " outer=K8/R1/H8"
+        << " threads=" << kTeacherThreads
+        << " inner=K2/R1/H4"
+        << " terminal_mode=c16-discounted-absolute-turn\n";
+    output
+        << "fit examples="
+        << report.fit.optimizer.example_count
+        << " authorized_output_parameters="
+        << report.fit.authorized_output_parameters
+        << " changed_output_parameters="
+        << report.fit.changed_output_parameters
+        << " iterations="
+        << report.fit.optimizer.iterations
+        << " parent_immutable="
+        << report.fit.parent_immutable
+        << " repeated_fit_bit_identical="
+        << report.fit.repeated_fit_bit_identical
+        << " parameter_replay_bit_identical="
+        << report.fit.parameter_replay_bit_identical
+        << " only_output_layer_changed="
+        << report.fit.only_output_layer_changed
+        << '\n';
+    const auto print_split =
+        [&](std::string_view split,
+            const Metrics& parent,
+            const Metrics& candidate) {
+            output
+                << "metrics split=" << split
+                << " roots=" << parent.roots
+                << " eligible_cells="
+                << parent.eligible_cells
+                << " stable_pairs="
+                << parent.stable_pairs
+                << " parent_bce="
+                << parent.equal_deck_weighted_bce
+                << " candidate_bce="
+                << candidate.equal_deck_weighted_bce
+                << " parent_brier="
+                << parent.equal_deck_weighted_brier
+                << " candidate_brier="
+                << candidate.equal_deck_weighted_brier
+                << " parent_bias="
+                << parent.equal_deck_weighted_bias
+                << " candidate_bias="
+                << candidate.equal_deck_weighted_bias
+                << " parent_ece="
+                << parent.equal_deck_weighted_ece
+                << " candidate_ece="
+                << candidate.equal_deck_weighted_ece
+                << " parent_top1="
+                << parent
+                       .equal_deck_top_one_expected_agreement
+                << " candidate_top1="
+                << candidate
+                       .equal_deck_top_one_expected_agreement
+                << " parent_stable_pair="
+                << parent
+                       .equal_deck_stable_pair_agreement
+                << " candidate_stable_pair="
+                << candidate
+                       .equal_deck_stable_pair_agreement
+                << " parent_regret="
+                << parent.equal_deck_mean_regret
+                << " candidate_regret="
+                << candidate.equal_deck_mean_regret
+                << '\n';
+            for (std::size_t deck = 0;
+                 deck < kDeckCount; ++deck) {
+                const auto& p = parent.decks[deck];
+                const auto& c = candidate.decks[deck];
+                output
+                    << "metrics_deck split=" << split
+                    << " deck="
+                    << deck_name(
+                           static_cast<DeckId>(deck))
+                    << " roots=" << p.roots
+                    << " eligible_cells="
+                    << p.eligible_cells
+                    << " stable_pairs="
+                    << p.stable_pairs
+                    << " parent_bce="
+                    << p.weighted_bce
+                    << " candidate_bce="
+                    << c.weighted_bce
+                    << " parent_brier="
+                    << p.weighted_brier
+                    << " candidate_brier="
+                    << c.weighted_brier
+                    << " parent_bias="
+                    << p.weighted_bias
+                    << " candidate_bias="
+                    << c.weighted_bias
+                    << " parent_ece="
+                    << p.weighted_ece
+                    << " candidate_ece="
+                    << c.weighted_ece
+                    << " parent_top1="
+                    << p.top_one_expected_agreement
+                    << " candidate_top1="
+                    << c.top_one_expected_agreement
+                    << " parent_stable_pair="
+                    << p.stable_pair_agreement
+                    << " candidate_stable_pair="
+                    << c.stable_pair_agreement
+                    << " parent_regret="
+                    << p.mean_regret
+                    << " candidate_regret="
+                    << c.mean_regret << '\n';
+            }
+        };
+    print_split(
+        "TRAIN", report.parent_train,
+        report.candidate_train);
+    print_split(
+        "DEV", report.parent_dev,
+        report.candidate_dev);
+    for (const std::string& failure :
+         report.gate.failures) {
+        output << "failure=" << failure << '\n';
+    }
+    output
+        << "result="
+        << (report.gate.passed() ? "PASS" : "REJECT")
+        << " disposition="
+        << (report.gate.passed()
+                ? "OFFLINE_ELIGIBLE"
+                : "OFFLINE_REJECT")
+        << " repeated_collection_bit_identical="
+        << report.gate
+               .repeated_collection_bit_identical
+        << " hidden_repartition_bit_identical="
+        << report.gate.hidden_repartition_bit_identical
+        << " strength_claim=0 champion_replaced=0"
+        << " deployment_licensed=0\n";
+}
+
 namespace testing {
 
 std::vector<ManifestRoot> select_position_zero(
@@ -447,6 +2065,28 @@ Census make_census(
     census.subset_hash =
         canonical_subset_hash(census);
     return census;
+}
+
+Corpus make_corpus(
+    Census census,
+    LearnedModelComponentFingerprints parent_components,
+    std::vector<RootExample> train,
+    std::vector<RootExample> dev) {
+    Corpus corpus{
+        .census = std::move(census),
+        .parent_components =
+            std::move(parent_components),
+        .train = std::move(train),
+        .dev = std::move(dev),
+    };
+    corpus.digest =
+        canonical_corpus_digest(corpus);
+    return corpus;
+}
+
+GameState hidden_repartition(
+    const GameState& state, std::size_t observer) {
+    return hidden_repartition_clone(state, observer);
 }
 
 } // namespace testing
