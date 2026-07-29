@@ -28,6 +28,10 @@ struct Edge {
     long double actor_value_sum = 0.0L;
     bool expanded = false;
     std::size_t terminal_transitions = 0;
+    std::size_t terminal_path_backups = 0;
+    long double terminal_player_zero_utility_sum = 0.0L;
+    long double terminal_exact_player_zero_utility_sum = 0.0L;
+    long double terminal_absolute_utility_delta_sum = 0.0L;
     std::map<std::string, std::size_t> successors;
 };
 
@@ -352,7 +356,7 @@ double player_zero_leaf_value(
                : 1.0 - observation.fpu_leaf_value;
 }
 
-double player_zero_terminal_value(
+double player_zero_exact_terminal_value(
     const Terminal& terminal) {
     if (!terminal.winner.has_value()) {
         return 0.5;
@@ -363,6 +367,23 @@ double player_zero_terminal_value(
             "ISP0 terminal winner is not player zero or one");
     }
     return *terminal.winner == 0 ? 1.0 : 0.0;
+}
+
+double player_zero_terminal_value(
+    const Terminal& terminal) {
+    const double exact =
+        player_zero_exact_terminal_value(terminal);
+    if (!terminal.player_zero_utility.has_value()) {
+        return exact;
+    }
+    if (!std::isfinite(*terminal.player_zero_utility) ||
+        *terminal.player_zero_utility < 0.0 ||
+        *terminal.player_zero_utility > 1.0) {
+        fail(
+            FailureCode::InvalidTerminal,
+            "ISP0 explicit terminal utility is invalid");
+    }
+    return *terminal.player_zero_utility;
 }
 
 void backup(
@@ -401,6 +422,17 @@ std::size_t sum_edge_visits(const Node& node) {
         std::size_t{0},
         [](std::size_t total, const Edge& edge) {
             return total + edge.visits;
+        });
+}
+
+std::size_t sum_edge_terminal_path_backups(
+    const Node& node) {
+    return std::accumulate(
+        node.edges.begin(),
+        node.edges.end(),
+        std::size_t{0},
+        [](std::size_t total, const Edge& edge) {
+            return total + edge.terminal_path_backups;
         });
 }
 
@@ -629,15 +661,40 @@ SearchResult search(
             }
             if (const auto* terminal =
                     std::get_if<Terminal>(&transition)) {
+                const double exact_player_zero_value =
+                    player_zero_exact_terminal_value(
+                        *terminal);
+                const double player_zero_value =
+                    player_zero_terminal_value(*terminal);
                 ++nodes[current_index]
-                       .edges[edge_index]
-                       .terminal_transitions;
+                      .edges[edge_index]
+                      .terminal_transitions;
+                for (const PathStep& step : path) {
+                    Edge& backed_edge =
+                        nodes[step.node_index]
+                            .edges[step.edge_index];
+                    ++backed_edge.terminal_path_backups;
+                    backed_edge
+                        .terminal_player_zero_utility_sum +=
+                        static_cast<long double>(
+                            player_zero_value);
+                    backed_edge
+                        .terminal_exact_player_zero_utility_sum +=
+                        static_cast<long double>(
+                            exact_player_zero_value);
+                    backed_edge
+                        .terminal_absolute_utility_delta_sum +=
+                        std::abs(
+                            static_cast<long double>(
+                                player_zero_value) -
+                            static_cast<long double>(
+                                exact_player_zero_value));
+                }
                 backup(
                     nodes,
                     visited_nodes,
                     path,
-                    player_zero_terminal_value(
-                        *terminal));
+                    player_zero_value);
                 ++accounting.terminal_leaves;
                 break;
             }
@@ -694,6 +751,9 @@ SearchResult search(
             simulation_count ||
         sum_edge_visits(nodes[root_index]) !=
             simulation_count ||
+        sum_edge_terminal_path_backups(
+            nodes[root_index]) !=
+            accounting.terminal_leaves ||
         accounting.node_count > kMaximumNodeCount ||
         accounting.expanded_edge_count >
             kMaximumExpandedEdgeCount ||
@@ -764,6 +824,20 @@ SearchResult search(
                 .expanded = edge.expanded,
                 .terminal_transitions =
                     edge.terminal_transitions,
+                .terminal_path_backups =
+                    edge.terminal_path_backups,
+                .terminal_player_zero_utility_sum =
+                    static_cast<double>(
+                        edge
+                            .terminal_player_zero_utility_sum),
+                .terminal_exact_player_zero_utility_sum =
+                    static_cast<double>(
+                        edge
+                            .terminal_exact_player_zero_utility_sum),
+                .terminal_absolute_utility_delta_sum =
+                    static_cast<double>(
+                        edge
+                            .terminal_absolute_utility_delta_sum),
             };
             edge_evidence.successors.reserve(
                 edge.successors.size());

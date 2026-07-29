@@ -22,6 +22,8 @@ inline constexpr std::uint64_t kDiagnosticSeed =
 inline constexpr std::size_t kRootCount = 9;
 inline constexpr std::size_t kSmallBudget = 64;
 inline constexpr std::size_t kLargeBudget = 512;
+inline constexpr std::uint64_t kTerminalScaleSeed =
+    UINT64_C(202607291201);
 
 enum class RootRole {
     PrimaryMiss,
@@ -107,6 +109,89 @@ DiagnosticReport run_diagnostic(
 std::string_view verdict_name(Verdict verdict);
 void print_report(
     const DiagnosticReport& report,
+    std::ostream& output);
+
+enum class TerminalScaleArm {
+    ExactOutcome,
+    C16DiscountedAbsoluteTurn,
+};
+
+enum class TerminalScaleVerdict {
+    MechanismAndCandidatePass,
+    MechanismSupportCandidateReject,
+    InconclusiveExactAlreadyPerfect,
+    RejectCloseTerminalScaleAxis,
+};
+
+struct TerminalScaleRootReport {
+    std::string stable_id;
+    bool repair = false;
+    isp0::RootReport evidence;
+    double wall_seconds = 0.0;
+    bool semantic_direction_passed = false;
+    bool invariant_gate_passed = false;
+    std::size_t direct_terminal_transitions = 0;
+    std::size_t terminal_path_backups = 0;
+    double terminal_player_zero_utility_sum = 0.0;
+    double terminal_exact_player_zero_utility_sum = 0.0;
+    double terminal_absolute_utility_delta_sum = 0.0;
+
+    bool terminal_scale_nonvacuous() const;
+};
+
+struct TerminalScaleArmReport {
+    TerminalScaleArm arm = TerminalScaleArm::ExactOutcome;
+    std::vector<TerminalScaleRootReport> roots;
+    isp0::OpponentNoninterferenceReport
+        opponent_noninterference;
+    std::size_t repairs_correct = 0;
+    std::size_t controls_correct = 0;
+    bool exact_nine_root_census = false;
+    bool all_invariants_green = false;
+    bool all_controls_green = false;
+    bool terminal_scale_nonvacuous = false;
+};
+
+struct TerminalScaleDiagnosticReport {
+    std::uint64_t seed = kTerminalScaleSeed;
+    std::string parent_fingerprint;
+    TerminalScaleArmReport exact;
+    TerminalScaleArmReport aligned;
+    bool exact_configuration = false;
+    bool common_seed_contract = false;
+    bool no_repair_regression = false;
+    std::size_t repair_improvements = 0;
+    TerminalScaleVerdict verdict =
+        TerminalScaleVerdict::
+            RejectCloseTerminalScaleAxis;
+
+    bool gate_passed() const;
+};
+
+struct TerminalScaleDiagnosticApi {
+    std::function<TimedRootEvidence(
+        const aq5::PreparedRoot&,
+        LearnedTerminalUtilityMode)>
+        run_root;
+    std::function<isp0::OpponentNoninterferenceReport(
+        const std::vector<aq5::PreparedRoot>&,
+        LearnedTerminalUtilityMode)>
+        check_opponent_noninterference;
+};
+
+bool terminal_scale_repair_root(
+    std::string_view stable_id);
+TerminalScaleDiagnosticReport
+assemble_terminal_scale_diagnostic(
+    std::string parent_fingerprint,
+    const TerminalScaleDiagnosticApi& api);
+TerminalScaleDiagnosticReport
+run_terminal_scale_diagnostic(
+    std::shared_ptr<const LearnedModel> parent);
+std::string_view terminal_scale_verdict_name(
+    TerminalScaleVerdict verdict);
+void print_terminal_scale_report(
+    const TerminalScaleDiagnosticReport& report,
     std::ostream& output);
 
 } // namespace old_school::information_set_puct_budget_diagnostic

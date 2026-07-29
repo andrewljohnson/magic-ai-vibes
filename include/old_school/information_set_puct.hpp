@@ -44,6 +44,10 @@ struct Observation {
 struct Terminal {
     // No winner is a draw. Otherwise the only valid players are zero and one.
     std::optional<std::uint8_t> winner;
+    // When present, this is the terminal utility backed up by the tree in
+    // absolute player-zero perspective. The winner remains independently
+    // validated and is retained as the raw exact-outcome witness.
+    std::optional<double> player_zero_utility;
 
     bool operator==(const Terminal&) const = default;
 };
@@ -123,7 +127,15 @@ struct EdgeEvidence {
     // this is exactly the node's frozen FPU value.
     double actor_q = 0.5;
     bool expanded = false;
+    // Terminal transitions reached directly by this edge. This preserves the
+    // original ISP0 evidence semantics.
     std::size_t terminal_transitions = 0;
+    // Terminal backups whose selected path contains this edge. Root-edge
+    // totals therefore partition every terminal leaf by root action.
+    std::size_t terminal_path_backups = 0;
+    double terminal_player_zero_utility_sum = 0.0;
+    double terminal_exact_player_zero_utility_sum = 0.0;
+    double terminal_absolute_utility_delta_sum = 0.0;
     std::vector<SuccessorEvidence> successors;
 
     bool operator==(const EdgeEvidence&) const = default;

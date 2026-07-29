@@ -23887,6 +23887,18 @@ double generative_terminal_value(
                : 0.0;
 }
 
+void validate_terminal_utility_mode(
+    LearnedTerminalUtilityMode mode) {
+    switch (mode) {
+    case LearnedTerminalUtilityMode::ExactOutcome:
+    case LearnedTerminalUtilityMode::
+        C16DiscountedAbsoluteTurn:
+        return;
+    }
+    throw std::invalid_argument(
+        "invalid learned terminal utility mode");
+}
+
 struct GenerativeExactChoice {
     GameState state;
     std::size_t completed_plan_count = 0;
@@ -24212,6 +24224,28 @@ std::size_t generative_damage_order_decisions(
 
 } // namespace
 
+double learned_generative_terminal_utility(
+    const GameResult& result,
+    std::size_t perspective,
+    LearnedTerminalUtilityMode mode) {
+    validate_terminal_utility_mode(mode);
+    if (perspective >= 2) {
+        throw std::out_of_range(
+            "generative perspective must be 0 or 1");
+    }
+    switch (mode) {
+    case LearnedTerminalUtilityMode::ExactOutcome:
+        return generative_terminal_value(
+            result, perspective);
+    case LearnedTerminalUtilityMode::
+        C16DiscountedAbsoluteTurn:
+        return learned_discounted_terminal_target(
+            result, perspective);
+    }
+    throw std::logic_error(
+        "validated terminal utility mode was not handled");
+}
+
 std::size_t learned_generative_actor(
     const LearnedGenerativePosition& position) {
     if (const auto* priority =
@@ -24351,9 +24385,23 @@ evaluate_learned_generative_leaf(
     std::size_t perspective,
     std::shared_ptr<const LearnedModel> model,
     std::uint64_t seed) {
+    return evaluate_learned_generative_leaf(
+        position, perspective, std::move(model), seed,
+        LearnedTerminalUtilityMode::ExactOutcome);
+}
+
+LearnedGenerativeLeafEvaluation
+evaluate_learned_generative_leaf(
+    const LearnedGenerativePosition& position,
+    std::size_t perspective,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
     validate_learned_model(
         model, LearnedVariant::ValueSearchChampion);
     validate_generative_position_common(position);
+    validate_terminal_utility_mode(
+        terminal_utility_mode);
     if (perspective >= 2) {
         throw std::out_of_range(
             "generative leaf perspective must be 0 or 1");
@@ -24367,8 +24415,9 @@ evaluate_learned_generative_leaf(
             generative_terminal_result(completed);
         terminal.has_value()) {
         result.value =
-            generative_terminal_value(
-                *terminal, perspective);
+            learned_generative_terminal_utility(
+                *terminal, perspective,
+                terminal_utility_mode);
         result.terminal = true;
         return result;
     }
@@ -24435,8 +24484,9 @@ evaluate_learned_generative_leaf(
             generative_terminal_result(completed);
         terminal.has_value()) {
         result.value =
-            generative_terminal_value(
-                *terminal, perspective);
+            learned_generative_terminal_utility(
+                *terminal, perspective,
+                terminal_utility_mode);
         result.terminal = true;
         return result;
     }
@@ -25738,9 +25788,21 @@ LearnedGenerativeObservation observe_learned_generative_position(
     const LearnedGenerativePosition& position,
     std::shared_ptr<const LearnedModel> model,
     std::uint64_t seed) {
+    return observe_learned_generative_position(
+        position, std::move(model), seed,
+        LearnedTerminalUtilityMode::ExactOutcome);
+}
+
+LearnedGenerativeObservation observe_learned_generative_position(
+    const LearnedGenerativePosition& position,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
     validate_learned_model(
         model, LearnedVariant::ValueSearchChampion);
     validate_generative_position_common(position);
+    validate_terminal_utility_mode(
+        terminal_utility_mode);
     const std::size_t actor =
         learned_generative_actor(position);
     if (actor != position.root_observer) {
@@ -25798,8 +25860,10 @@ LearnedGenerativeObservation observe_learned_generative_position(
                 throw std::logic_error(
                     "terminal prior has no result");
             }
-            value = generative_terminal_value(
-                *transition.terminal_result, actor);
+            value =
+                learned_generative_terminal_utility(
+                    *transition.terminal_result, actor,
+                    terminal_utility_mode);
         } else {
             if (!transition.position.has_value()) {
                 throw std::logic_error(
@@ -25810,7 +25874,8 @@ LearnedGenerativeObservation observe_learned_generative_position(
                         indexed_search_seed(
                             seed,
                             0x5052494F524C4541ULL,
-                            index))
+                            index),
+                        terminal_utility_mode)
                         .value;
         }
         if (!std::isfinite(value) ||
@@ -25869,7 +25934,8 @@ LearnedGenerativeObservation observe_learned_generative_position(
         evaluate_learned_generative_leaf(
             local, actor, model,
             indexed_search_seed(
-                seed, 0x4650554C45414656ULL, 0))
+                seed, 0x4650554C45414656ULL, 0),
+            terminal_utility_mode)
             .value;
     if (!std::isfinite(result.fpu_leaf_value) ||
         result.fpu_leaf_value < 0.0 ||

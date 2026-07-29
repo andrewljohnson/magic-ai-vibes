@@ -1011,6 +1011,19 @@ enum class LearnedGenerativeDecisionKind : std::uint8_t {
     Block,
 };
 
+// Terminal utilities used by evaluation-only generative search. ExactOutcome
+// preserves the historical win/draw/loss backup. C16DiscountedAbsoluteTurn
+// uses the same absolute-turn discount as frozen C16 training labels.
+enum class LearnedTerminalUtilityMode : std::uint8_t {
+    ExactOutcome,
+    C16DiscountedAbsoluteTurn,
+};
+
+double learned_generative_terminal_utility(
+    const GameResult& result,
+    std::size_t perspective,
+    LearnedTerminalUtilityMode mode);
+
 struct LearnedGenerativePriorityDecision {
     LearnedDecisionContext context;
 
@@ -1247,6 +1260,12 @@ LearnedGenerativeObservation observe_learned_generative_position(
     std::shared_ptr<const LearnedModel> model,
     std::uint64_t seed);
 
+LearnedGenerativeObservation observe_learned_generative_position(
+    const LearnedGenerativePosition& position,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed,
+    LearnedTerminalUtilityMode terminal_utility_mode);
+
 // Applies `stable_action_key` to the authoritative particle. By default,
 // opponent decisions are hidden behind fresh actor-local frozen-C16 choices
 // until the root observer acts again. Setting `advance_opponent` false is an
@@ -1267,6 +1286,14 @@ evaluate_learned_generative_leaf(
     std::size_t perspective,
     std::shared_ptr<const LearnedModel> model,
     std::uint64_t seed);
+
+LearnedGenerativeLeafEvaluation
+evaluate_learned_generative_leaf(
+    const LearnedGenerativePosition& position,
+    std::size_t perspective,
+    std::shared_ptr<const LearnedModel> model,
+    std::uint64_t seed,
+    LearnedTerminalUtilityMode terminal_utility_mode);
 
 struct LearnedActionSamples {
     // Outer order matches the caller's candidate order. Inner samples are

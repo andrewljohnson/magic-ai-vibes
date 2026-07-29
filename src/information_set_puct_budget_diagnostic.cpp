@@ -72,6 +72,10 @@ bool intervening_counter_completed(
 bool blue_block_completed(
     const isp0::RootReport& evidence) {
     const auto& pv = evidence.principal_variation;
+    const auto air_trade = std::find(
+        pv.completed_damage_ordered_blocks.begin(),
+        pv.completed_damage_ordered_blocks.end(),
+        std::pair<PermanentId, PermanentId>{2, 3});
     return selected(evidence, "no-block") &&
            pv.completed_cutoff_path &&
            pv.completed_cutoff_simulation.has_value() &&
@@ -79,7 +83,8 @@ bool blue_block_completed(
            pv.exact_combat_completed_at_cutoff &&
            pv.exact_combat_completed_plan_count > 0 &&
            !pv.exact_combat_contains_pure_chump &&
-           !pv.completed_damage_ordered_blocks.empty();
+           air_trade !=
+               pv.completed_damage_ordered_blocks.end();
 }
 
 BudgetReport run_budget(
@@ -666,6 +671,645 @@ void print_report(
         << report.primary_improvements
         << " candidate_accepted="
         << report.gate_passed()
+        << " strength_claim=0 champion_replaced=0\n";
+}
+
+namespace {
+
+LearnedTerminalUtilityMode terminal_mode(
+    TerminalScaleArm arm) {
+    switch (arm) {
+    case TerminalScaleArm::ExactOutcome:
+        return LearnedTerminalUtilityMode::ExactOutcome;
+    case TerminalScaleArm::C16DiscountedAbsoluteTurn:
+        return LearnedTerminalUtilityMode::
+            C16DiscountedAbsoluteTurn;
+    }
+    throw std::logic_error(
+        "TS1 terminal-scale arm is invalid");
+}
+
+TerminalScaleArmReport run_terminal_scale_arm(
+    const std::vector<aq5::PreparedRoot>& roots,
+    TerminalScaleArm arm,
+    const TerminalScaleDiagnosticApi& api) {
+    TerminalScaleArmReport report{
+        .arm = arm,
+    };
+    const LearnedTerminalUtilityMode mode =
+        terminal_mode(arm);
+    report.roots.reserve(roots.size());
+    std::set<std::string> seen;
+    for (const aq5::PreparedRoot& root : roots) {
+        TimedRootEvidence measured =
+            api.run_root(root, mode);
+        if (measured.evidence.stable_id !=
+                root.stable_id ||
+            measured.evidence.family != root.family ||
+            measured.evidence.requested_simulations !=
+                kSmallBudget ||
+            measured.evidence.terminal_utility_mode !=
+                mode ||
+            !std::isfinite(measured.wall_seconds) ||
+            measured.wall_seconds < 0.0) {
+            throw std::logic_error(
+                "TS1 root callback changed sealed identity, "
+                "budget, or timing");
+        }
+        TerminalScaleRootReport root_report{
+            .stable_id = root.stable_id,
+            .repair =
+                terminal_scale_repair_root(
+                    root.stable_id),
+            .evidence = std::move(measured.evidence),
+            .wall_seconds = measured.wall_seconds,
+        };
+        root_report.semantic_direction_passed =
+            semantic_direction_passed(
+                root.stable_id,
+                root_report.evidence);
+        root_report.invariant_gate_passed =
+            root_report.evidence.evidence_gate_passed();
+        for (const isp0::RootActionEvidence& action :
+             root_report.evidence.actions) {
+            root_report.direct_terminal_transitions +=
+                action.terminal_transitions;
+            root_report.terminal_path_backups +=
+                action.terminal_path_backups;
+            root_report
+                .terminal_player_zero_utility_sum +=
+                action
+                    .terminal_player_zero_utility_sum;
+            root_report
+                .terminal_exact_player_zero_utility_sum +=
+                action
+                    .terminal_exact_player_zero_utility_sum;
+            root_report
+                .terminal_absolute_utility_delta_sum +=
+                action
+                    .terminal_absolute_utility_delta_sum;
+        }
+        if (root_report.repair &&
+            root_report.semantic_direction_passed) {
+            ++report.repairs_correct;
+        }
+        if (!root_report.repair &&
+            root_report.semantic_direction_passed) {
+            ++report.controls_correct;
+        }
+        report.terminal_scale_nonvacuous =
+            report.terminal_scale_nonvacuous ||
+            root_report.terminal_scale_nonvacuous();
+        seen.insert(root.stable_id);
+        report.roots.push_back(
+            std::move(root_report));
+    }
+
+    report.opponent_noninterference =
+        api.check_opponent_noninterference(
+            roots, mode);
+    report.opponent_noninterference
+        .no_shared_opponent_node_or_q_update =
+        report.opponent_noninterference
+            .no_shared_opponent_node_or_q_update &&
+        std::all_of(
+            report.roots.begin(), report.roots.end(),
+            [](const TerminalScaleRootReport& root) {
+                return root.evidence
+                           .root_observer_only_nodes &&
+                       root.evidence.opponent_nodes_absent;
+            });
+    report.exact_nine_root_census =
+        report.roots.size() == kRootCount &&
+        seen.size() == kRootCount;
+    report.all_invariants_green =
+        report.exact_nine_root_census &&
+        report.opponent_noninterference.gate_passed() &&
+        std::all_of(
+            report.roots.begin(), report.roots.end(),
+            [](const TerminalScaleRootReport& root) {
+                return root.invariant_gate_passed;
+            });
+    report.all_controls_green =
+        report.controls_correct == 5;
+    return report;
+}
+
+const TerminalScaleRootReport& terminal_root_for(
+    const TerminalScaleArmReport& report,
+    std::string_view stable_id) {
+    const auto found = std::find_if(
+        report.roots.begin(), report.roots.end(),
+        [&](const TerminalScaleRootReport& root) {
+            return root.stable_id == stable_id;
+        });
+    if (found == report.roots.end()) {
+        throw std::logic_error(
+            "TS1 arm omitted a sealed root");
+    }
+    return *found;
+}
+
+} // namespace
+
+bool TerminalScaleRootReport::
+terminal_scale_nonvacuous() const {
+    return terminal_path_backups > 0 &&
+           std::isfinite(
+               terminal_absolute_utility_delta_sum) &&
+           terminal_absolute_utility_delta_sum > 0.0;
+}
+
+bool TerminalScaleDiagnosticReport::gate_passed() const {
+    return seed == kTerminalScaleSeed &&
+           parent_fingerprint ==
+               isp0::kRequiredParentFingerprint &&
+           exact_configuration &&
+           common_seed_contract &&
+           no_repair_regression &&
+           exact.all_invariants_green &&
+           aligned.all_invariants_green &&
+           exact.all_controls_green &&
+           aligned.all_controls_green &&
+           aligned.terminal_scale_nonvacuous &&
+           aligned.repairs_correct == 4 &&
+           verdict ==
+               TerminalScaleVerdict::
+                   MechanismAndCandidatePass;
+}
+
+bool terminal_scale_repair_root(
+    std::string_view stable_id) {
+    if (stable_id == kBraingeyser ||
+        stable_id == kAncestral ||
+        stable_id == kPayableSpike ||
+        stable_id == kBlueBlock) {
+        return true;
+    }
+    if (stable_id == kRedundantCounter ||
+        stable_id == kInterveningCounter ||
+        stable_id == kGrowth ||
+        stable_id == kLiveSpike ||
+        stable_id == kLife20Block) {
+        return false;
+    }
+    throw std::invalid_argument(
+        "TS1 root is outside the sealed census");
+}
+
+TerminalScaleDiagnosticReport
+assemble_terminal_scale_diagnostic(
+    std::string parent_fingerprint,
+    const TerminalScaleDiagnosticApi& api) {
+    if (!api.run_root ||
+        !api.check_opponent_noninterference) {
+        throw std::invalid_argument(
+            "TS1 diagnostic API is incomplete");
+    }
+    const std::vector<aq5::PreparedRoot> roots =
+        diagnostic_roots();
+    TerminalScaleDiagnosticReport report{
+        .parent_fingerprint =
+            std::move(parent_fingerprint),
+        .exact =
+            run_terminal_scale_arm(
+                roots,
+                TerminalScaleArm::ExactOutcome,
+                api),
+        .aligned =
+            run_terminal_scale_arm(
+                roots,
+                TerminalScaleArm::
+                    C16DiscountedAbsoluteTurn,
+                api),
+        .exact_configuration =
+            information_set_puct::kSimulationCount ==
+                kSmallBudget &&
+            information_set_puct::kMaximumDecisionPlies == 8 &&
+            information_set_puct::kMaximumNodeCount == 513 &&
+            information_set_puct::
+                    kMaximumExpandedEdgeCount ==
+                512 &&
+            information_set_puct::kExplorationConstant ==
+                1.0,
+    };
+
+    report.common_seed_contract = true;
+    for (const std::string_view id : kRootIds) {
+        const auto& exact =
+            terminal_root_for(
+                report.exact, id).evidence;
+        const auto& aligned =
+            terminal_root_for(
+                report.aligned, id).evidence;
+        report.common_seed_contract =
+            report.common_seed_contract &&
+            exact.requested_simulations ==
+                kSmallBudget &&
+            aligned.requested_simulations ==
+                kSmallBudget &&
+            exact.search_seed != 0 &&
+            exact.tie_seed != 0 &&
+            exact.search_seed ==
+                aligned.search_seed &&
+            exact.tie_seed ==
+                aligned.tie_seed &&
+            isp0::transition_seed(
+                exact.search_seed, 0, 0) ==
+                isp0::transition_seed(
+                    aligned.search_seed, 0, 0) &&
+            isp0::transition_seed(
+                exact.search_seed,
+                kSmallBudget - 1, 0) ==
+                isp0::transition_seed(
+                    aligned.search_seed,
+                    kSmallBudget - 1, 0);
+    }
+
+    report.no_repair_regression = true;
+    for (const std::string_view id :
+         {kBraingeyser, kAncestral,
+          kPayableSpike, kBlueBlock}) {
+        const bool exact_correct =
+            terminal_root_for(
+                report.exact, id)
+                .semantic_direction_passed;
+        const bool aligned_correct =
+            terminal_root_for(
+                report.aligned, id)
+                .semantic_direction_passed;
+        if (exact_correct && !aligned_correct) {
+            report.no_repair_regression = false;
+        }
+        if (!exact_correct && aligned_correct) {
+            ++report.repair_improvements;
+        }
+    }
+
+    const bool infrastructure_green =
+        report.parent_fingerprint ==
+            isp0::kRequiredParentFingerprint &&
+        report.exact_configuration &&
+        report.common_seed_contract &&
+        report.no_repair_regression &&
+        report.exact.all_invariants_green &&
+        report.aligned.all_invariants_green &&
+        report.exact.all_controls_green &&
+        report.aligned.all_controls_green &&
+        report.aligned.terminal_scale_nonvacuous;
+    if (!infrastructure_green) {
+        report.verdict =
+            TerminalScaleVerdict::
+                RejectCloseTerminalScaleAxis;
+    } else if (report.exact.repairs_correct == 4) {
+        report.verdict =
+            TerminalScaleVerdict::
+                InconclusiveExactAlreadyPerfect;
+    } else if (report.aligned.repairs_correct == 4) {
+        report.verdict =
+            TerminalScaleVerdict::
+                MechanismAndCandidatePass;
+    } else if (
+        report.aligned.repairs_correct == 3 &&
+        report.repair_improvements >= 2) {
+        report.verdict =
+            TerminalScaleVerdict::
+                MechanismSupportCandidateReject;
+    } else {
+        report.verdict =
+            TerminalScaleVerdict::
+                RejectCloseTerminalScaleAxis;
+    }
+    return report;
+}
+
+TerminalScaleDiagnosticReport
+run_terminal_scale_diagnostic(
+    std::shared_ptr<const LearnedModel> parent) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            isp0::kRequiredParentFingerprint) {
+        throw std::invalid_argument(
+            "TS1 requires exact frozen C16");
+    }
+    TerminalScaleDiagnosticApi api{
+        .run_root =
+            [parent](
+                const aq5::PreparedRoot& root,
+                LearnedTerminalUtilityMode mode) {
+                const auto start =
+                    std::chrono::steady_clock::now();
+                isp0::RootReport evidence =
+                    isp0::run_root_evidence(
+                        root, parent,
+                        kTerminalScaleSeed,
+                        kSmallBudget, mode);
+                const auto stop =
+                    std::chrono::steady_clock::now();
+                return TimedRootEvidence{
+                    .evidence = std::move(evidence),
+                    .wall_seconds =
+                        std::chrono::duration<double>(
+                            stop - start)
+                            .count(),
+                };
+            },
+        .check_opponent_noninterference =
+            [parent](
+                const std::vector<aq5::PreparedRoot>& roots,
+                LearnedTerminalUtilityMode mode) {
+                return isp0::
+                    run_opponent_noninterference_evidence(
+                        roots, parent,
+                        kTerminalScaleSeed, mode);
+            },
+    };
+    return assemble_terminal_scale_diagnostic(
+        learned_model_fingerprint(parent), api);
+}
+
+std::string_view terminal_scale_verdict_name(
+    TerminalScaleVerdict verdict) {
+    switch (verdict) {
+    case TerminalScaleVerdict::
+            MechanismAndCandidatePass:
+        return "MECHANISM_AND_CANDIDATE_PASS";
+    case TerminalScaleVerdict::
+            MechanismSupportCandidateReject:
+        return "MECHANISM_SUPPORT_CANDIDATE_REJECT";
+    case TerminalScaleVerdict::
+            InconclusiveExactAlreadyPerfect:
+        return "INCONCLUSIVE_EXACT_ALREADY_PERFECT";
+    case TerminalScaleVerdict::
+            RejectCloseTerminalScaleAxis:
+        return "REJECT_CLOSE_TERMINAL_SCALE_AXIS";
+    }
+    return "INVALID";
+}
+
+void print_terminal_scale_report(
+    const TerminalScaleDiagnosticReport& report,
+    std::ostream& output) {
+    output << std::fixed << std::setprecision(6);
+    output
+        << "AQ9-TS1 C16-scale terminal-backup diagnostic\n"
+        << "seed=" << report.seed
+        << " parent=" << report.parent_fingerprint
+        << " config=" << report.exact_configuration
+        << " common-seeds="
+        << report.common_seed_contract << '\n';
+    for (const TerminalScaleArmReport* arm :
+         {&report.exact, &report.aligned}) {
+        output
+            << "arm="
+            << (arm->arm ==
+                        TerminalScaleArm::ExactOutcome
+                    ? "exact"
+                    : "c16-aligned")
+            << " repairs=" << arm->repairs_correct
+            << "/4 controls=" << arm->controls_correct
+            << "/5 invariants="
+            << arm->all_invariants_green
+            << " terminal-scale-nonvacuous="
+            << arm->terminal_scale_nonvacuous
+            << " opponent-isolation="
+            << arm->opponent_noninterference.gate_passed()
+            << '\n';
+        for (const TerminalScaleRootReport& root :
+             arm->roots) {
+            const auto& evidence = root.evidence;
+            const auto& accounting = evidence.accounting;
+            const auto& pv = evidence.principal_variation;
+            output
+                << "  root=" << root.stable_id
+                << " role="
+                << (root.repair
+                        ? "repair"
+                        : "control")
+                << " selected=" << evidence.selected_key
+                << " semantic="
+                << root.semantic_direction_passed
+                << " invariants="
+                << root.invariant_gate_passed
+                << " wall-seconds=" << root.wall_seconds
+                << " search-seed="
+                << evidence.search_seed
+                << " tie-seed=" << evidence.tie_seed
+                << '\n'
+                << "    accounting visits="
+                << accounting.simulations_completed
+                << " nodes=" << accounting.node_count
+                << " edges="
+                << accounting.expanded_edge_count
+                << " depth=" << accounting.maximum_depth
+                << " leaves="
+                << accounting.terminal_leaves << '/'
+                << accounting.observation_leaves << '/'
+                << accounting.depth_leaves
+                << " direct-terminal-transitions="
+                << root.direct_terminal_transitions
+                << " terminal-path-backups="
+                << root.terminal_path_backups
+                << " terminal-p0-used-sum="
+                << root
+                       .terminal_player_zero_utility_sum
+                << " terminal-p0-exact-sum="
+                << root
+                       .terminal_exact_player_zero_utility_sum
+                << " terminal-delta="
+                << (root
+                        .terminal_player_zero_utility_sum -
+                    root
+                        .terminal_exact_player_zero_utility_sum)
+                << " terminal-absolute-delta="
+                << root
+                       .terminal_absolute_utility_delta_sum
+                << '\n'
+                << "    pv";
+            for (const std::string& action : pv.actions) {
+                output << " [" << action << ']';
+            }
+            output
+                << " completed=" << pv.completed_trace
+                << " cutoff=" << pv.completed_cutoff_path
+                << " cutoff-sim=";
+            if (pv.completed_cutoff_simulation.has_value()) {
+                output
+                    << *pv.completed_cutoff_simulation;
+            } else {
+                output << '-';
+            }
+            output
+                << " counterspells="
+                << pv.root_actor_counterspells
+                << " own-counter-targets="
+                << pv
+                       .root_actor_counters_targeting_own_counter
+                << " underlying-countered="
+                << pv
+                       .initial_opposing_non_counter_spells_countered
+                << " stack-settled=" << pv.stack_settled
+                << " exact-combat="
+                << pv.exact_combat_completed
+                << " cutoff-combat="
+                << pv.exact_combat_completed_at_cutoff
+                << " plans="
+                << pv.exact_combat_completed_plan_count
+                << " pure-chump="
+                << pv.exact_combat_contains_pure_chump
+                << " blocks=";
+            for (const auto& [attacker, blocker] :
+                 pv.completed_damage_ordered_blocks) {
+                output
+                    << '[' << attacker << '-' << blocker
+                    << ']';
+            }
+            output
+                << '\n'
+                << "    invariants coverage="
+                << evidence.complete_legal_choice_coverage
+                << " prior="
+                << evidence.finite_positive_normalized_priors
+                << " prior-formula="
+                << evidence.exact_successor_value_prior_formula
+                << " accounting="
+                << evidence.root_visit_accounting_exact
+                << " tree-bound="
+                << evidence.bounded_tree_accounting
+                << " macro-bound="
+                << evidence.bounded_macro_accounting
+                << " combat-bound="
+                << evidence.no_combat_bound_fallback
+                << " replay="
+                << evidence.deterministic_replay_bit_identical
+                << " reverse="
+                << evidence
+                       .reversed_input_full_evidence_bit_identical
+                << " hidden-repartition="
+                << evidence.hidden_repartition_nonvacuous
+                << " hidden-root="
+                << evidence
+                       .hidden_root_observation_bit_identical
+                << " hidden-full="
+                << evidence.hidden_full_evidence_bit_identical
+                << " opponent-actions="
+                << evidence
+                       .opponent_action_accounting_consistent
+                << " root-only="
+                << evidence.root_observer_only_nodes
+                << " opponent-nodes-absent="
+                << evidence.opponent_nodes_absent
+                << " actor-hand="
+                << evidence.actor_hand_preserved
+                << " public-state="
+                << evidence.public_state_preserved
+                << " truth-immutable="
+                << evidence
+                       .truth_immutable_during_redeterminization
+                << " legal-signature="
+                << evidence.legal_signature_preserved
+                << " transition-seed="
+                << evidence
+                       .transition_seed_candidate_independent
+                << " shared-successor="
+                << evidence.required_shared_successor
+                << " counter-pv="
+                << evidence
+                       .required_counter_principal_variation
+                << " exact-combat-gate="
+                << evidence.required_exact_combat_completion
+                << " exact-leaf="
+                << evidence.partial_combat_leaf_completed_exactly
+                << '\n';
+            for (const isp0::RootActionEvidence& action :
+                 evidence.actions) {
+                output
+                    << "    action="
+                    << action.fixture_key
+                    << " visits=" << action.visits
+                    << " q=" << action.actor_q
+                    << " prior=" << action.prior
+                    << " successor="
+                    << action.successor_value
+                    << " terminals="
+                    << action.terminal_transitions
+                    << " terminal-path-backups="
+                    << action.terminal_path_backups
+                    << " terminal-p0-used-sum="
+                    << action
+                           .terminal_player_zero_utility_sum
+                    << " terminal-p0-exact-sum="
+                    << action
+                           .terminal_exact_player_zero_utility_sum
+                    << " terminal-absolute-delta="
+                    << action
+                           .terminal_absolute_utility_delta_sum
+                    << '\n';
+            }
+        }
+        const auto& opponent =
+            arm->opponent_noninterference;
+        output
+            << "  opponent-subfields fixture="
+            << opponent.fixture_id
+            << " scored-actions="
+            << opponent.scored_action_count
+            << " selected-membership="
+            << opponent.selected_action_membership_count
+            << " repartition="
+            << opponent.nonvacuous_private_repartition
+            << " observation="
+            << opponent.opponent_observation_bit_identical
+            << " legal="
+            << opponent.legal_signature_bit_identical
+            << " scores="
+            << opponent.c16_scores_bit_identical
+            << " selected="
+            << opponent.selected_action_bit_identical
+            << " local-accounting="
+            << opponent.local_accounting_bit_identical
+            << " no-node-q="
+            << opponent.no_shared_opponent_node_or_q_update
+            << " accounting-original="
+            << opponent.original_accounting_through_decision
+                   .actions_applied
+            << '/'
+            << opponent.original_accounting_through_decision
+                   .phase_transitions
+            << '/'
+            << opponent.original_accounting_through_decision
+                   .turn_advances
+            << '/'
+            << opponent.original_accounting_through_decision
+                   .opponent_decisions_applied
+            << " accounting-repartitioned="
+            << opponent.repartitioned_accounting_through_decision
+                   .actions_applied
+            << '/'
+            << opponent.repartitioned_accounting_through_decision
+                   .phase_transitions
+            << '/'
+            << opponent.repartitioned_accounting_through_decision
+                   .turn_advances
+            << '/'
+            << opponent.repartitioned_accounting_through_decision
+                   .opponent_decisions_applied
+            << '\n';
+    }
+    output
+        << "result="
+        << terminal_scale_verdict_name(report.verdict)
+        << " no-repair-regression="
+        << report.no_repair_regression
+        << " repair-improvements="
+        << report.repair_improvements
+        << " candidate_accepted="
+        << report.gate_passed()
+        << " latency_check_licensed="
+        << report.gate_passed()
+        << " manual_web_pilot_licensed="
+        << report.gate_passed()
+        << " deployment_licensed=0"
         << " strength_claim=0 champion_replaced=0\n";
 }
 

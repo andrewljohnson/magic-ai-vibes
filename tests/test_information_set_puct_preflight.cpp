@@ -1,10 +1,12 @@
 #include "old_school/information_set_puct_preflight.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -505,6 +507,102 @@ void test_report_exposes_opponent_subfields() {
     }
 }
 
+void test_terminal_bridge_and_evidence_fail_closed() {
+    old_school::GameResult win{
+        .winner = 0,
+        .reason = old_school::EndReason::LifeTotal,
+        .turns = 20,
+    };
+    const auto exact =
+        isp0::puct_terminal_from_game_result(
+            win,
+            old_school::LearnedTerminalUtilityMode::
+                ExactOutcome);
+    const auto aligned =
+        isp0::puct_terminal_from_game_result(
+            win,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    expect(
+        exact.winner ==
+                std::optional<std::uint8_t>{0} &&
+            !exact.player_zero_utility.has_value() &&
+            aligned.winner == exact.winner &&
+            aligned.player_zero_utility ==
+                std::optional<double>(
+                    old_school::
+                        learned_discounted_terminal_target(
+                            win, 0)),
+        "engine adapter did not preserve exact mode or "
+        "carry aligned C16 utility");
+
+    old_school::GameResult draw = win;
+    draw.winner = -1;
+    const auto aligned_draw =
+        isp0::puct_terminal_from_game_result(
+            draw,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    expect(
+        !aligned_draw.winner.has_value() &&
+            aligned_draw.player_zero_utility ==
+                std::optional<double>{0.5},
+        "engine adapter did not preserve aligned draw utility");
+
+    old_school::GameResult invalid = win;
+    invalid.winner = 2;
+    expect_rejected(
+        [&invalid] {
+            static_cast<void>(
+                isp0::puct_terminal_from_game_result(
+                    invalid,
+                    old_school::
+                        LearnedTerminalUtilityMode::
+                            ExactOutcome));
+        },
+        "engine adapter accepted an invalid winner");
+
+    const auto fixture =
+        aq5::build_fixture_roots().front();
+    auto valid = passing_root(fixture);
+    valid.terminal_utility_mode =
+        old_school::LearnedTerminalUtilityMode::
+            C16DiscountedAbsoluteTurn;
+    valid.accounting.terminal_leaves = 1;
+    --valid.accounting.observation_leaves;
+    auto& action = valid.actions.front();
+    action.terminal_path_backups = 1;
+    action.terminal_player_zero_utility_sum = 0.875;
+    action.terminal_exact_player_zero_utility_sum = 1.0;
+    action.terminal_absolute_utility_delta_sum = 0.125;
+    expect(
+        valid.evidence_gate_passed(),
+        "valid aligned terminal evidence was rejected");
+
+    auto nonfinite = valid;
+    nonfinite.actions.front()
+        .terminal_absolute_utility_delta_sum =
+        std::numeric_limits<double>::quiet_NaN();
+    expect(
+        !nonfinite.evidence_gate_passed(),
+        "nonfinite terminal evidence passed");
+
+    auto wrong_mode = valid;
+    wrong_mode.terminal_utility_mode =
+        old_school::LearnedTerminalUtilityMode::
+            ExactOutcome;
+    expect(
+        !wrong_mode.evidence_gate_passed(),
+        "exact mode accepted a softened terminal backup");
+
+    auto missing_descendant = valid;
+    missing_descendant.actions.front()
+        .terminal_path_backups = 0;
+    expect(
+        !missing_descendant.evidence_gate_passed(),
+        "root evidence omitted a terminal leaf");
+}
+
 } // namespace
 
 int main() {
@@ -517,6 +615,7 @@ int main() {
         test_opponent_accounting_stops_at_witnessed_decision();
         test_pv_witness_requires_an_actual_completed_cutoff();
         test_report_exposes_opponent_subfields();
+        test_terminal_bridge_and_evidence_fail_closed();
     } catch (const std::exception& error) {
         std::cerr
             << "information-set PUCT preflight tests failed: "
@@ -525,6 +624,6 @@ int main() {
     }
     std::cout
         << "information-set PUCT preflight tests passed: "
-           "8/8 groups\n";
+           "9/9 groups\n";
     return 0;
 }

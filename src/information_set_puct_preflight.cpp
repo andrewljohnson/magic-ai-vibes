@@ -298,9 +298,21 @@ public:
         std::shared_ptr<const LearnedModel> parent,
         std::uint64_t search_seed,
         std::size_t simulation_count)
+        : EngineEnvironment(
+              std::move(root), std::move(parent),
+              search_seed, simulation_count,
+              LearnedTerminalUtilityMode::ExactOutcome) {}
+
+    EngineEnvironment(
+        aq5::PreparedRoot root,
+        std::shared_ptr<const LearnedModel> parent,
+        std::uint64_t search_seed,
+        std::size_t simulation_count,
+        LearnedTerminalUtilityMode terminal_utility_mode)
         : root_(std::move(root)),
           parent_(std::move(parent)),
           search_seed_(search_seed),
+          terminal_utility_mode_(terminal_utility_mode),
           observation_seed_(indexed_seed(
               search_seed_,
               UINT64_C(0x4e4f44454f425356))),
@@ -308,7 +320,8 @@ public:
           root_engine_observation_(
               observe_learned_generative_position(
                   root_position_, parent_,
-                  observation_seed_)),
+                  observation_seed_,
+                  terminal_utility_mode_)),
           root_actions_(
               map_root_actions(
                   root_, root_engine_observation_)),
@@ -524,21 +537,9 @@ public:
                 throw std::logic_error(
                     "ISP0 terminal transition has no result");
             }
-            const int winner =
-                transition.terminal_result->winner;
-            if (winner < 0) {
-                return puct::Terminal{
-                    .winner = std::nullopt,
-                };
-            }
-            if (winner > 1) {
-                throw std::logic_error(
-                    "ISP0 terminal winner is invalid");
-            }
-            return puct::Terminal{
-                .winner =
-                    static_cast<std::uint8_t>(winner),
-            };
+            return puct_terminal_from_game_result(
+                *transition.terminal_result,
+                terminal_utility_mode_);
         }
         if (!transition.position.has_value()) {
             throw std::logic_error(
@@ -549,7 +550,8 @@ public:
         const LearnedGenerativeObservation engine_observation =
             observe_learned_generative_position(
                 particle->position, parent_,
-                observation_seed_);
+                observation_seed_,
+                terminal_utility_mode_);
         const bool recurrent_root =
             engine_observation.information_set_key ==
             root_engine_observation_.information_set_key;
@@ -566,7 +568,8 @@ public:
                     observation_seed_,
                     UINT64_C(0x534944454c454146),
                     particle->simulation,
-                    particle->depth));
+                    particle->depth),
+                terminal_utility_mode_);
         traces_[particle->simulation].push_back({
             .safe = std::move(safe),
             .truth_before = truth_before,
@@ -684,6 +687,8 @@ private:
     aq5::PreparedRoot root_;
     std::shared_ptr<const LearnedModel> parent_;
     std::uint64_t search_seed_ = 0;
+    LearnedTerminalUtilityMode terminal_utility_mode_ =
+        LearnedTerminalUtilityMode::ExactOutcome;
     std::uint64_t observation_seed_ = 0;
     LearnedGenerativePosition root_position_;
     LearnedGenerativeObservation
@@ -1012,9 +1017,69 @@ bool exact_root_visit_accounting(
            const puct::EdgeEvidence& edge) {
             return sum + edge.visits;
         });
+    const std::size_t terminal_path_backups =
+        std::accumulate(
+            root.edges.begin(), root.edges.end(),
+            std::size_t{0},
+            [](std::size_t sum,
+               const puct::EdgeEvidence& edge) {
+                return sum +
+                       edge.terminal_path_backups;
+            });
+    const bool terminal_evidence_valid =
+        std::all_of(
+            root.edges.begin(), root.edges.end(),
+            [](const puct::EdgeEvidence& edge) {
+                const double count =
+                    static_cast<double>(
+                        edge.terminal_path_backups);
+                const double tolerance =
+                    64.0 *
+                    std::numeric_limits<double>::epsilon() *
+                    std::max(1.0, count);
+                return edge.terminal_transitions <=
+                           edge.terminal_path_backups &&
+                       edge.terminal_path_backups <=
+                           edge.visits &&
+                       std::isfinite(
+                           edge
+                               .terminal_player_zero_utility_sum) &&
+                       std::isfinite(
+                           edge
+                               .terminal_exact_player_zero_utility_sum) &&
+                       std::isfinite(
+                           edge
+                               .terminal_absolute_utility_delta_sum) &&
+                       edge
+                               .terminal_player_zero_utility_sum >=
+                           0.0 &&
+                       edge
+                               .terminal_player_zero_utility_sum <=
+                           count &&
+                       edge
+                               .terminal_exact_player_zero_utility_sum >=
+                           0.0 &&
+                       edge
+                               .terminal_exact_player_zero_utility_sum <=
+                           count &&
+                       edge
+                               .terminal_absolute_utility_delta_sum +
+                               tolerance >=
+                           std::abs(
+                               edge
+                                   .terminal_player_zero_utility_sum -
+                               edge
+                                   .terminal_exact_player_zero_utility_sum) &&
+                       edge
+                               .terminal_absolute_utility_delta_sum <=
+                           count;
+            });
     return search.root_visits == simulation_count &&
            root.visits == simulation_count &&
            edge_visits == simulation_count &&
+           terminal_path_backups ==
+               search.accounting.terminal_leaves &&
+           terminal_evidence_valid &&
            search.accounting.simulations_started ==
                simulation_count &&
            search.accounting.simulations_completed ==
@@ -1110,20 +1175,23 @@ RootReport run_engine_root(
     const aq5::PreparedRoot& root,
     const std::shared_ptr<const LearnedModel>& parent,
     std::uint64_t experiment_seed,
-    std::size_t simulation_count) {
+    std::size_t simulation_count,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
     ++g_engine_search_invocations;
     const std::uint64_t search_seed =
         root_search_seed(experiment_seed, root);
     const std::uint64_t tie_seed =
         root_tie_seed(experiment_seed, root);
     EngineEnvironment direct(
-        root, parent, search_seed, simulation_count);
+        root, parent, search_seed, simulation_count,
+        terminal_utility_mode);
     const puct::SearchResult direct_search =
         puct::search(
             direct, tie_seed, simulation_count);
 
     EngineEnvironment replay(
-        root, parent, search_seed, simulation_count);
+        root, parent, search_seed, simulation_count,
+        terminal_utility_mode);
     const puct::SearchResult replay_search =
         puct::search(
             replay, tie_seed, simulation_count);
@@ -1132,7 +1200,7 @@ RootReport run_engine_root(
         aq5::reverse_candidate_order(root);
     EngineEnvironment reversed(
         reversed_root, parent, search_seed,
-        simulation_count);
+        simulation_count, terminal_utility_mode);
     const puct::SearchResult reversed_search =
         puct::search(
             reversed, tie_seed, simulation_count);
@@ -1141,7 +1209,7 @@ RootReport run_engine_root(
         aq5::make_hidden_repartition_clone(root);
     EngineEnvironment hidden(
         hidden_root, parent, search_seed,
-        simulation_count);
+        simulation_count, terminal_utility_mode);
     const puct::SearchResult hidden_search =
         puct::search(
             hidden, tie_seed, simulation_count);
@@ -1157,6 +1225,8 @@ RootReport run_engine_root(
             direct_search.selected_action_key,
         .requested_simulations =
             simulation_count,
+        .terminal_utility_mode =
+            terminal_utility_mode,
         .search_seed = search_seed,
         .tie_seed = tie_seed,
         .accounting = direct_search.accounting,
@@ -1181,6 +1251,19 @@ RootReport run_engine_root(
             .prior = edge.prior,
             .visits = edge.visits,
             .actor_q = edge.actor_q,
+            .terminal_transitions =
+                edge.terminal_transitions,
+            .terminal_path_backups =
+                edge.terminal_path_backups,
+            .terminal_player_zero_utility_sum =
+                edge
+                    .terminal_player_zero_utility_sum,
+            .terminal_exact_player_zero_utility_sum =
+                edge
+                    .terminal_exact_player_zero_utility_sum,
+            .terminal_absolute_utility_delta_sum =
+                edge
+                    .terminal_absolute_utility_delta_sum,
         });
     }
 
@@ -1363,7 +1446,8 @@ OpponentNoninterferenceReport
 check_engine_opponent_noninterference(
     const std::vector<aq5::PreparedRoot>& roots,
     const std::shared_ptr<const LearnedModel>& parent,
-    std::uint64_t experiment_seed) {
+    std::uint64_t experiment_seed,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
     const auto selected_root = std::find_if(
         roots.begin(), roots.end(),
         [](const aq5::PreparedRoot& root) {
@@ -1399,7 +1483,8 @@ check_engine_opponent_noninterference(
         observe_learned_generative_position(
             original, parent,
             indexed_seed(
-                seed, UINT64_C(0x524f4f544f425356)));
+                seed, UINT64_C(0x524f4f544f425356)),
+            terminal_utility_mode);
     const std::string pass =
         pass_engine_key(root, root_observation);
     const LearnedGenerativeTransition first =
@@ -1601,9 +1686,18 @@ bool valid_root_action_evidence(
     if (report.actions.empty()) {
         return false;
     }
+    switch (report.terminal_utility_mode) {
+    case LearnedTerminalUtilityMode::ExactOutcome:
+    case LearnedTerminalUtilityMode::
+            C16DiscountedAbsoluteTurn:
+        break;
+    default:
+        return false;
+    }
     std::vector<std::string> keys;
     keys.reserve(report.actions.size());
     std::size_t visit_sum = 0;
+    std::size_t terminal_sum = 0;
     long double prior_sum = 0.0L;
     std::size_t selected_count = 0;
     for (const RootActionEvidence& action :
@@ -1617,11 +1711,66 @@ bool valid_root_action_evidence(
             action.prior <= 0.0 ||
             !std::isfinite(action.actor_q) ||
             action.actor_q < 0.0 ||
-            action.actor_q > 1.0) {
+            action.actor_q > 1.0 ||
+            action.terminal_transitions >
+                action.terminal_path_backups ||
+            action.terminal_path_backups >
+                action.visits ||
+            !std::isfinite(
+                action
+                    .terminal_player_zero_utility_sum) ||
+            !std::isfinite(
+                action
+                    .terminal_exact_player_zero_utility_sum) ||
+            !std::isfinite(
+                action
+                    .terminal_absolute_utility_delta_sum)) {
+            return false;
+        }
+        const double terminal_count =
+            static_cast<double>(
+                action.terminal_path_backups);
+        const double terminal_tolerance =
+            64.0 *
+            std::numeric_limits<double>::epsilon() *
+            std::max(1.0, terminal_count);
+        if (action
+                    .terminal_player_zero_utility_sum <
+                0.0 ||
+            action
+                    .terminal_player_zero_utility_sum >
+                terminal_count ||
+            action
+                    .terminal_exact_player_zero_utility_sum <
+                0.0 ||
+            action
+                    .terminal_exact_player_zero_utility_sum >
+                terminal_count ||
+            action
+                    .terminal_absolute_utility_delta_sum +
+                    terminal_tolerance <
+                std::abs(
+                    action
+                        .terminal_player_zero_utility_sum -
+                    action
+                        .terminal_exact_player_zero_utility_sum) ||
+            action
+                    .terminal_absolute_utility_delta_sum >
+                terminal_count ||
+            (report.terminal_utility_mode ==
+                 LearnedTerminalUtilityMode::ExactOutcome &&
+             (action
+                      .terminal_player_zero_utility_sum !=
+                  action
+                      .terminal_exact_player_zero_utility_sum ||
+              action
+                      .terminal_absolute_utility_delta_sum !=
+                  0.0))) {
             return false;
         }
         keys.push_back(action.fixture_key);
         visit_sum += action.visits;
+        terminal_sum += action.terminal_path_backups;
         prior_sum +=
             static_cast<long double>(action.prior);
         if (action.fixture_key ==
@@ -1637,6 +1786,8 @@ bool valid_root_action_evidence(
            report.requested_simulations <=
                puct::kMaximumSimulationCount &&
            visit_sum == report.requested_simulations &&
+           terminal_sum ==
+               report.accounting.terminal_leaves &&
            std::abs(prior_sum - 1.0L) <= 1.0e-12L &&
            successor_value_prior_formula_holds(
                report.actions) &&
@@ -1646,6 +1797,39 @@ bool valid_root_action_evidence(
 }
 
 } // namespace
+
+puct::Terminal puct_terminal_from_game_result(
+    const GameResult& result,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
+    if (result.winner > 1) {
+        throw std::invalid_argument(
+            "ISP terminal winner is invalid");
+    }
+    std::optional<double> player_zero_utility;
+    switch (terminal_utility_mode) {
+    case LearnedTerminalUtilityMode::ExactOutcome:
+        break;
+    case LearnedTerminalUtilityMode::
+            C16DiscountedAbsoluteTurn:
+        player_zero_utility =
+            learned_generative_terminal_utility(
+                result, 0, terminal_utility_mode);
+        break;
+    default:
+        throw std::invalid_argument(
+            "ISP terminal utility mode is invalid");
+    }
+    return {
+        .winner =
+            result.winner < 0
+                ? std::nullopt
+                : std::optional<std::uint8_t>(
+                      static_cast<std::uint8_t>(
+                          result.winner)),
+        .player_zero_utility =
+            player_zero_utility,
+    };
+}
 
 PrincipalVariationWitness build_principal_variation_witness(
     const std::vector<std::string>& principal_variation,
@@ -2049,14 +2233,18 @@ PreflightReport run_preflight(
                 const aq5::PreparedRoot& root) {
                 return run_engine_root(
                     root, parent, kPreflightSeed,
-                    puct::kSimulationCount);
+                    puct::kSimulationCount,
+                    LearnedTerminalUtilityMode::
+                        ExactOutcome);
             },
         .check_opponent_noninterference =
             [parent](
                 const std::vector<aq5::PreparedRoot>&
                     roots) {
                 return check_engine_opponent_noninterference(
-                    roots, parent, kPreflightSeed);
+                    roots, parent, kPreflightSeed,
+                    LearnedTerminalUtilityMode::
+                        ExactOutcome);
             },
         .check_default_off_identity =
             [parent, default_off_before]() {
@@ -2078,6 +2266,18 @@ RootReport run_root_evidence(
     std::shared_ptr<const LearnedModel> parent,
     std::uint64_t experiment_seed,
     std::size_t simulation_count) {
+    return run_root_evidence(
+        root, std::move(parent), experiment_seed,
+        simulation_count,
+        LearnedTerminalUtilityMode::ExactOutcome);
+}
+
+RootReport run_root_evidence(
+    const aq5::PreparedRoot& root,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed,
+    std::size_t simulation_count,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
     if (!parent ||
         learned_model_fingerprint(parent) !=
             kRequiredParentFingerprint) {
@@ -2086,7 +2286,7 @@ RootReport run_root_evidence(
     }
     return run_engine_root(
         root, parent, experiment_seed,
-        simulation_count);
+        simulation_count, terminal_utility_mode);
 }
 
 OpponentNoninterferenceReport
@@ -2094,6 +2294,17 @@ run_opponent_noninterference_evidence(
     const std::vector<aq5::PreparedRoot>& roots,
     std::shared_ptr<const LearnedModel> parent,
     std::uint64_t experiment_seed) {
+    return run_opponent_noninterference_evidence(
+        roots, std::move(parent), experiment_seed,
+        LearnedTerminalUtilityMode::ExactOutcome);
+}
+
+OpponentNoninterferenceReport
+run_opponent_noninterference_evidence(
+    const std::vector<aq5::PreparedRoot>& roots,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed,
+    LearnedTerminalUtilityMode terminal_utility_mode) {
     if (!parent ||
         learned_model_fingerprint(parent) !=
             kRequiredParentFingerprint) {
@@ -2101,7 +2312,8 @@ run_opponent_noninterference_evidence(
             "ISP opponent evidence requires exact frozen C16");
     }
     return check_engine_opponent_noninterference(
-        roots, parent, experiment_seed);
+        roots, parent, experiment_seed,
+        terminal_utility_mode);
 }
 
 void print_report(

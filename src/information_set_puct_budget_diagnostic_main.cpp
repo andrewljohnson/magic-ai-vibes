@@ -17,7 +17,7 @@ namespace isp1 =
     old_school::information_set_puct_budget_diagnostic;
 
 std::shared_ptr<const old_school::LearnedModel>
-load_parent() {
+load_parent(std::string_view experiment) {
     const auto snapshot =
         old_school::artifact_integrity::
             snapshot_regular_file(
@@ -27,8 +27,8 @@ load_parent() {
         snapshot.sha256 !=
             isp0::kRequiredParentSha256) {
         throw std::runtime_error(
-            "ISP1 frozen C16 artifact bytes or SHA-256 "
-            "drifted");
+            std::string(experiment) +
+            " frozen C16 artifact bytes or SHA-256 drifted");
     }
     const auto artifact =
         old_school::
@@ -39,7 +39,8 @@ load_parent() {
     if (old_school::learned_model_fingerprint(parent) !=
         isp0::kRequiredParentFingerprint) {
         throw std::runtime_error(
-            "ISP1 frozen C16 model fingerprint drifted");
+            std::string(experiment) +
+            " frozen C16 model fingerprint drifted");
     }
     return parent;
 }
@@ -47,19 +48,43 @@ load_parent() {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc != 2 ||
-        std::string_view(argv[1]) != "--run-isp1") {
+    if (argc != 2) {
         std::cerr
             << "Usage: "
             << (argc > 0
                     ? argv[0]
                     : "old-school-information-set-puct-"
                       "budget-diagnostic")
-            << " --run-isp1\n";
+            << " {--run-isp1|--run-ts1}\n";
+        return 2;
+    }
+    const std::string_view mode(argv[1]);
+    if (mode != "--run-isp1" &&
+        mode != "--run-ts1") {
+        std::cerr
+            << "Usage: "
+            << (argc > 0
+                    ? argv[0]
+                    : "old-school-information-set-puct-"
+                      "budget-diagnostic")
+            << " {--run-isp1|--run-ts1}\n";
         return 2;
     }
     try {
-        const auto parent = load_parent();
+        const auto parent =
+            load_parent(
+                mode == "--run-isp1"
+                    ? "ISP1"
+                    : "TS1");
+        if (mode == "--run-ts1") {
+            const isp1::TerminalScaleDiagnosticReport
+                report =
+                    isp1::run_terminal_scale_diagnostic(
+                        parent);
+            isp1::print_terminal_scale_report(
+                report, std::cout);
+            return report.gate_passed() ? 0 : 1;
+        }
         const isp1::DiagnosticReport report =
             isp1::run_diagnostic(parent);
         isp1::print_report(report, std::cout);
@@ -67,7 +92,10 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& error) {
         std::cerr
             << "result=ERROR"
-            << " reason=isp1_budget_diagnostic_failed"
+            << " reason="
+            << (mode == "--run-isp1"
+                    ? "isp1_budget_diagnostic_failed"
+                    : "ts1_terminal_scale_diagnostic_failed")
             << " message=" << error.what() << '\n';
         return 1;
     }

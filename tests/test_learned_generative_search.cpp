@@ -149,6 +149,11 @@ void test_priority_observation_and_hidden_safety() {
     const auto observation =
         old_school::observe_learned_generative_position(
             position, model(), 91);
+    const auto explicit_exact_observation =
+        old_school::observe_learned_generative_position(
+            position, model(), 91,
+            old_school::LearnedTerminalUtilityMode::
+                ExactOutcome);
     const double prior_sum = std::accumulate(
         observation.actions.begin(),
         observation.actions.end(), 0.0,
@@ -169,7 +174,8 @@ void test_priority_observation_and_hidden_safety() {
             std::exp(action.successor_value - maximum);
     }
     expect(
-        observation.actor == 0 &&
+        explicit_exact_observation == observation &&
+            observation.actor == 0 &&
             !observation.information_set_key.empty() &&
             !observation.legal_signature.empty() &&
             std::abs(prior_sum - 1.0) < 1.0e-12 &&
@@ -219,6 +225,204 @@ void test_priority_observation_and_hidden_safety() {
         hidden_observation == observation,
         "opponent repartition or telemetry entered the root "
         "observation");
+}
+
+void test_terminal_utility_modes_and_legacy_identity() {
+    for (const std::size_t turn :
+         {std::size_t{1}, std::size_t{20},
+          std::size_t{500}}) {
+        const old_school::GameResult outcome{
+            .winner = 0,
+            .reason = old_school::EndReason::LifeTotal,
+            .turns = turn,
+        };
+        const double win =
+            old_school::learned_generative_terminal_utility(
+                outcome, 0,
+                old_school::LearnedTerminalUtilityMode::
+                    C16DiscountedAbsoluteTurn);
+        const double loss =
+            old_school::learned_generative_terminal_utility(
+                outcome, 1,
+                old_school::LearnedTerminalUtilityMode::
+                    C16DiscountedAbsoluteTurn);
+        const double expected =
+            0.5 + 0.5 * std::pow(0.985, turn);
+        expect(
+            std::abs(win - expected) < 1.0e-15 &&
+                win + loss == 1.0,
+            "C16 terminal win/loss did not complement at "
+            "the registered absolute turn");
+    }
+
+    old_school::GameResult decisive{
+        .winner = 0,
+        .reason = old_school::EndReason::LifeTotal,
+        .turns = 10,
+    };
+    const double exact_zero =
+        old_school::learned_generative_terminal_utility(
+            decisive, 0,
+            old_school::LearnedTerminalUtilityMode::
+                ExactOutcome);
+    const double exact_one =
+        old_school::learned_generative_terminal_utility(
+            decisive, 1,
+            old_school::LearnedTerminalUtilityMode::
+                ExactOutcome);
+    const double soft_zero =
+        old_school::learned_generative_terminal_utility(
+            decisive, 0,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    const double soft_one =
+        old_school::learned_generative_terminal_utility(
+            decisive, 1,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    const double expected_soft_zero =
+        0.5 +
+        0.5 * std::pow(0.985, decisive.turns);
+    expect(
+        exact_zero == 1.0 && exact_one == 0.0 &&
+            std::abs(soft_zero - expected_soft_zero) <
+                1.0e-15 &&
+            soft_zero + soft_one == 1.0,
+        "terminal utility modes lost exact outcome, absolute "
+        "turn discount, or player complement");
+
+    old_school::GameResult draw{
+        .winner = -1,
+        .reason = old_school::EndReason::TurnLimit,
+    };
+    for (const std::size_t turn :
+         {std::size_t{1}, std::size_t{20},
+          std::size_t{500}}) {
+        draw.turns = turn;
+        for (std::size_t perspective = 0;
+             perspective < 2; ++perspective) {
+            expect(
+                old_school::
+                        learned_generative_terminal_utility(
+                            draw, perspective,
+                            old_school::
+                                LearnedTerminalUtilityMode::
+                                    C16DiscountedAbsoluteTurn) ==
+                    0.5,
+                "draw utility changed at a registered "
+                "absolute turn or perspective");
+        }
+    }
+
+    bool invalid_mode_rejected = false;
+    try {
+        static_cast<void>(
+            old_school::learned_generative_terminal_utility(
+                decisive, 0,
+                static_cast<
+                    old_school::LearnedTerminalUtilityMode>(
+                    255)));
+    } catch (const std::invalid_argument&) {
+        invalid_mode_rejected = true;
+    }
+    expect(
+        invalid_mode_rejected,
+        "invalid terminal utility mode was accepted");
+
+    const std::array<std::vector<old_school::CardId>, 2>
+        decks = {
+            old_school::red_deck(),
+            old_school::red_deck(),
+        };
+    old_school::GameState terminal_state;
+    terminal_state.turn_number = decisive.turns;
+    terminal_state.players[1].life = 0;
+    const old_school::LearnedGenerativePosition
+        terminal_position{
+            .truth = terminal_state,
+            .original_decks = decks,
+            .root_observer = 0,
+            .decision =
+                old_school::LearnedGenerativePriorityDecision{
+                    .context = {
+                        .valid = true,
+                        .phase =
+                            old_school::TurnPhase::FirstMain,
+                        .decision_player = 0,
+                        .consecutive_passes = 0,
+                        .sorcery_actions = true,
+                    },
+                },
+        };
+    const auto legacy_leaf =
+        old_school::evaluate_learned_generative_leaf(
+            terminal_position, 0, model(), 119);
+    const auto explicit_exact_leaf =
+        old_school::evaluate_learned_generative_leaf(
+            terminal_position, 0, model(), 119,
+            old_school::LearnedTerminalUtilityMode::
+                ExactOutcome);
+    const auto soft_leaf =
+        old_school::evaluate_learned_generative_leaf(
+            terminal_position, 0, model(), 119,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    expect(
+        legacy_leaf == explicit_exact_leaf &&
+            legacy_leaf.terminal &&
+            legacy_leaf.value == 1.0 &&
+            soft_leaf.terminal &&
+            soft_leaf.value == soft_zero,
+        "legacy terminal leaf changed or treatment failed "
+        "to use C16 utility");
+
+    old_school::GameState pending = terminal_state;
+    pending.players[1].life = 3;
+    pending.stack = {{
+        .kind = old_school::StackObjectKind::Spell,
+        .id = 1,
+        .card = old_school::CardId::LightningBolt,
+        .controller = 0,
+        .target =
+            old_school::Target::player_target(1),
+    }};
+    pending.next_stack_object_id = 2;
+    finish_hidden(pending, decks);
+    const auto pending_position =
+        old_school::make_learned_generative_priority_position(
+            pending, decks, 0,
+            {
+                .valid = true,
+                .phase = old_school::TurnPhase::FirstMain,
+                .decision_player = 0,
+                .consecutive_passes = 1,
+                .sorcery_actions = true,
+            });
+    const auto legacy_observation =
+        old_school::observe_learned_generative_position(
+            pending_position, model(), 120);
+    const auto exact_observation =
+        old_school::observe_learned_generative_position(
+            pending_position, model(), 120,
+            old_school::LearnedTerminalUtilityMode::
+                ExactOutcome);
+    const auto soft_observation =
+        old_school::observe_learned_generative_position(
+            pending_position, model(), 120,
+            old_school::LearnedTerminalUtilityMode::
+                C16DiscountedAbsoluteTurn);
+    expect(
+        legacy_observation == exact_observation &&
+            legacy_observation.actions.size() == 1 &&
+            legacy_observation.actions.front()
+                    .successor_value ==
+                1.0 &&
+            soft_observation.actions.size() == 1 &&
+            soft_observation.actions.front()
+                    .successor_value ==
+                soft_zero,
+        "immediate-terminal prior did not preserve legacy "
+        "identity or align with C16 utility");
 }
 
 void test_priority_and_counter_transition() {
@@ -593,13 +797,15 @@ int main() {
     try {
         test_priority_observation_and_hidden_safety();
         std::cout << "priority observation: pass\n";
+        test_terminal_utility_modes_and_legacy_identity();
+        std::cout << "terminal utility modes: pass\n";
         test_priority_and_counter_transition();
         std::cout << "counter transition: pass\n";
         test_attack_block_exact_completion_and_bound();
         std::cout << "combat completion/bound: pass\n";
         test_hidden_opponent_full_block_accounting();
         std::cout << "opponent full Block accounting: pass\n";
-        std::cout << "4 learned generative groups passed\n";
+        std::cout << "5 learned generative groups passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "learned generative test failed: "

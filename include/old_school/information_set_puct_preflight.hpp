@@ -39,6 +39,11 @@ struct RootActionEvidence {
     double prior = 0.0;
     std::size_t visits = 0;
     double actor_q = 0.5;
+    std::size_t terminal_transitions = 0;
+    std::size_t terminal_path_backups = 0;
+    double terminal_player_zero_utility_sum = 0.0;
+    double terminal_exact_player_zero_utility_sum = 0.0;
+    double terminal_absolute_utility_delta_sum = 0.0;
 
     bool operator==(const RootActionEvidence&) const = default;
 };
@@ -108,6 +113,8 @@ struct RootReport {
     std::vector<RootActionEvidence> actions;
     std::size_t requested_simulations =
         puct::kSimulationCount;
+    LearnedTerminalUtilityMode terminal_utility_mode =
+        LearnedTerminalUtilityMode::ExactOutcome;
     std::uint64_t search_seed = 0;
     std::uint64_t tie_seed = 0;
     puct::Accounting accounting;
@@ -201,6 +208,9 @@ std::uint64_t transition_seed(
     std::uint64_t root_seed,
     std::size_t simulation_index,
     std::size_t searched_decision_ply);
+puct::Terminal puct_terminal_from_game_result(
+    const GameResult& result,
+    LearnedTerminalUtilityMode terminal_utility_mode);
 
 // Fakeable orchestration seam used by focused preflight tests. Production
 // binds all callbacks to the engine adapter below.
@@ -230,11 +240,25 @@ RootReport run_root_evidence(
     std::uint64_t experiment_seed,
     std::size_t simulation_count);
 
+RootReport run_root_evidence(
+    const aq5::PreparedRoot& root,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed,
+    std::size_t simulation_count,
+    LearnedTerminalUtilityMode terminal_utility_mode);
+
 OpponentNoninterferenceReport
 run_opponent_noninterference_evidence(
     const std::vector<aq5::PreparedRoot>& roots,
     std::shared_ptr<const LearnedModel> parent,
     std::uint64_t experiment_seed);
+
+OpponentNoninterferenceReport
+run_opponent_noninterference_evidence(
+    const std::vector<aq5::PreparedRoot>& roots,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed,
+    LearnedTerminalUtilityMode terminal_utility_mode);
 
 void print_report(
     const PreflightReport& report,

@@ -255,8 +255,180 @@ void test_fixed_accounting_draw_and_replay() {
     const puct::EdgeEvidence& draw =
         find_edge(root, "draw");
     expect(
-        draw.visits > 0 && draw.actor_q == 0.5,
+        draw.visits > 0 && draw.actor_q == 0.5 &&
+            draw.terminal_transitions == draw.visits &&
+            draw.terminal_path_backups == draw.visits &&
+            draw.terminal_player_zero_utility_sum ==
+                0.5 *
+                    static_cast<double>(draw.visits) &&
+            draw.terminal_exact_player_zero_utility_sum ==
+                draw.terminal_player_zero_utility_sum &&
+            draw.terminal_absolute_utility_delta_sum == 0.0,
         "terminal draw did not back up exact one-half");
+}
+
+void test_explicit_terminal_utility_and_evidence() {
+    std::map<std::string, GraphNode> graph = {
+        {
+            "root",
+            {
+                .legal_signature =
+                    "root/exact-win-soft-loss",
+                .actor = 0,
+                .value = 0.5,
+                .actions = {
+                    {"exact-win", 0.5},
+                    {"exact-loss", 0.5},
+                },
+                .outcomes = {
+                    {"exact-win",
+                     puct::Terminal{
+                         .winner = std::uint8_t{0},
+                         .player_zero_utility = 0.2,
+                     }},
+                    {"exact-loss",
+                     puct::Terminal{
+                         .winner = std::uint8_t{1},
+                         .player_zero_utility = 0.8,
+                     }},
+                },
+            },
+        },
+    };
+    GraphEnvironment environment(
+        "root", std::move(graph));
+    const puct::SearchResult result =
+        puct::search(environment, UINT64_C(713902));
+    const puct::NodeEvidence& root =
+        find_node(result, "root");
+    const puct::EdgeEvidence& soft_win =
+        find_edge(root, "exact-loss");
+    const puct::EdgeEvidence& soft_loss =
+        find_edge(root, "exact-win");
+
+    expect(
+        result.selected_action_key == "exact-loss" &&
+            std::abs(soft_win.actor_q - 0.8) <
+                1.0e-15 &&
+            std::abs(soft_loss.actor_q - 0.2) <
+                1.0e-15,
+        "explicit player-zero terminal utility was not "
+        "backed up");
+    expect(
+        soft_win.terminal_transitions ==
+                soft_win.visits &&
+            soft_win.terminal_path_backups ==
+                soft_win.visits &&
+            soft_loss.terminal_transitions ==
+                soft_loss.visits &&
+            soft_loss.terminal_path_backups ==
+                soft_loss.visits &&
+            std::abs(
+                soft_win
+                        .terminal_player_zero_utility_sum -
+                    0.8 * static_cast<double>(
+                              soft_win.visits)) <
+                1.0e-12 &&
+            soft_win
+                    .terminal_exact_player_zero_utility_sum ==
+                0.0 &&
+            std::abs(
+                soft_loss
+                        .terminal_player_zero_utility_sum -
+                    0.2 * static_cast<double>(
+                              soft_loss.visits)) <
+                1.0e-12 &&
+            soft_loss
+                    .terminal_exact_player_zero_utility_sum ==
+                static_cast<double>(soft_loss.visits) &&
+            std::abs(
+                soft_win
+                        .terminal_absolute_utility_delta_sum -
+                    0.8 * static_cast<double>(
+                              soft_win.visits)) <
+                1.0e-12 &&
+            std::abs(
+                soft_loss
+                        .terminal_absolute_utility_delta_sum -
+                    0.8 * static_cast<double>(
+                              soft_loss.visits)) <
+                1.0e-12,
+        "terminal evidence did not separate used and exact "
+        "player-zero utility");
+}
+
+void test_explicit_terminal_matches_equal_critic_leaf() {
+    std::map<std::string, GraphNode> graph = {
+        {
+            "root",
+            {
+                .legal_signature = "root/terminal-critic",
+                .actor = 0,
+                .value = 0.5,
+                .actions = {
+                    {"terminal", 0.5},
+                    {"critic", 0.5},
+                },
+                .outcomes = {
+                    {"terminal",
+                     puct::Terminal{
+                         .winner = std::uint8_t{0},
+                         .player_zero_utility = 0.7,
+                     }},
+                    {"critic", std::string("critic-leaf")},
+                },
+            },
+        },
+        {
+            "critic-leaf",
+            {
+                .legal_signature = "critic-leaf/finish",
+                .actor = 0,
+                .value = 0.7,
+                .actions = {{"finish", 1.0}},
+                .outcomes = {
+                    {"finish",
+                     puct::Terminal{
+                         .winner = std::uint8_t{0},
+                         .player_zero_utility = 0.7,
+                     }},
+                },
+            },
+        },
+    };
+    GraphEnvironment environment(
+        "root", std::move(graph));
+    const puct::SearchResult result =
+        puct::search(environment, UINT64_C(559104));
+    const puct::NodeEvidence& root =
+        find_node(result, "root");
+    const puct::EdgeEvidence& terminal =
+        find_edge(root, "terminal");
+    const puct::EdgeEvidence& critic =
+        find_edge(root, "critic");
+    const puct::NodeEvidence& critic_node =
+        find_node(result, "critic-leaf");
+    const puct::EdgeEvidence& finish =
+        find_edge(critic_node, "finish");
+    expect(
+        terminal.visits > 0 && critic.visits > 0 &&
+            std::abs(terminal.actor_q - 0.7) <
+                1.0e-15 &&
+            std::abs(critic.actor_q - 0.7) <
+                1.0e-15 &&
+            terminal.actor_q == critic.actor_q &&
+            critic.terminal_transitions == 0 &&
+            critic.terminal_path_backups > 0 &&
+            critic.terminal_path_backups ==
+                finish.terminal_transitions &&
+            finish.terminal_transitions ==
+                finish.terminal_path_backups &&
+            critic
+                    .terminal_absolute_utility_delta_sum >
+                0.0,
+        "equal explicit terminal and critic-leaf values "
+        "backed up different Q or lost descendant terminal "
+        "evidence");
 }
 
 void test_explicit_64_is_legacy_bit_identical() {
@@ -776,6 +948,40 @@ void test_malformed_inputs_and_bounds_fail_closed() {
             },
             "invalid terminal winner was accepted");
     }
+    for (const double utility :
+         {
+             -0.01,
+             1.01,
+             std::numeric_limits<double>::infinity(),
+             std::numeric_limits<double>::quiet_NaN(),
+         }) {
+        SingleObservationEnvironment environment(
+            valid_single_observation(),
+            puct::Terminal{
+                .winner = std::uint8_t{0},
+                .player_zero_utility = utility,
+            });
+        expect_failure(
+            puct::FailureCode::InvalidTerminal,
+            [&environment]() {
+                (void)puct::search(environment, 0);
+            },
+            "invalid explicit terminal utility was accepted");
+    }
+    {
+        SingleObservationEnvironment environment(
+            valid_single_observation(),
+            puct::Terminal{
+                .winner = std::uint8_t{2},
+                .player_zero_utility = 0.5,
+            });
+        expect_failure(
+            puct::FailureCode::InvalidTerminal,
+            [&environment]() {
+                (void)puct::search(environment, 0);
+            },
+            "explicit utility bypassed winner validation");
+    }
 }
 
 class CycleEnvironment final : public puct::Environment {
@@ -875,6 +1081,8 @@ void test_sealed_depth_bound() {
 int main() {
     try {
         test_fixed_accounting_draw_and_replay();
+        test_explicit_terminal_utility_and_evidence();
+        test_explicit_terminal_matches_equal_critic_leaf();
         test_explicit_64_is_legacy_bit_identical();
         test_explicit_larger_budget_replay_and_accounting();
         test_invalid_simulation_budgets_fail_closed();
@@ -893,6 +1101,6 @@ int main() {
         return 1;
     }
     std::cout
-        << "information-set PUCT tests passed: 12/12 groups\n";
+        << "information-set PUCT tests passed: 14/14 groups\n";
     return 0;
 }

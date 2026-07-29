@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -240,6 +241,13 @@ const std::set<std::string> kAllMisses = {
     "control.blue.force-spike-payable-five-open-gray-ogre.aq0.v1",
 };
 
+const std::set<std::string> kAllTerminalScaleRepairs = {
+    "control.blue.braingeyser-x0.v1",
+    "field.blue.ancestral-opponent-seed24.aq0.v1",
+    "control.blue.force-spike-payable-five-open-gray-ogre.aq0.v1",
+    std::string(aq5::kNewBlueBlockFixtureId),
+};
+
 void test_manifest_and_semantic_controls() {
     const auto roots = isp1::diagnostic_roots();
     expect(
@@ -259,6 +267,18 @@ void test_manifest_and_semantic_controls() {
             "ISP1 rejected a correct semantic witness");
     }
     expect(misses == 3, "ISP1 role census drifted");
+
+    auto wrong_blue_plan =
+        passing_evidence(
+            roots.back(), isp1::kSmallBudget, true);
+    wrong_blue_plan.principal_variation
+        .completed_damage_ordered_blocks = {{2, 1}};
+    expect(
+        !isp1::semantic_direction_passed(
+            aq5::kNewBlueBlockFixtureId,
+            wrong_blue_plan),
+        "TS1 accepted a non-chump block without the "
+        "registered Air-Elemental trade");
 }
 
 void test_precommitted_verdict_rules() {
@@ -465,6 +485,318 @@ void test_invariants_and_output_fail_closed() {
     }
 }
 
+isp1::TerminalScaleDiagnosticApi fake_terminal_scale_api(
+    std::set<std::string> exact_correct,
+    std::set<std::string> aligned_correct,
+    bool aligned_nonvacuous = true,
+    std::string failed_invariant = {}) {
+    return {
+        .run_root =
+            [exact_correct = std::move(exact_correct),
+             aligned_correct = std::move(aligned_correct),
+             aligned_nonvacuous,
+             failed_invariant =
+                 std::move(failed_invariant)](
+                const aq5::PreparedRoot& root,
+                old_school::LearnedTerminalUtilityMode mode) {
+                const bool repair =
+                    isp1::terminal_scale_repair_root(
+                        root.stable_id);
+                const bool aligned =
+                    mode ==
+                    old_school::
+                        LearnedTerminalUtilityMode::
+                            C16DiscountedAbsoluteTurn;
+                const bool correct =
+                    !repair ||
+                    (aligned
+                         ? aligned_correct.contains(
+                               root.stable_id)
+                         : exact_correct.contains(
+                               root.stable_id));
+                auto evidence =
+                    passing_evidence(
+                        root, isp1::kSmallBudget,
+                        correct);
+                evidence.terminal_utility_mode = mode;
+                if (!evidence.actions.empty()) {
+                    auto& action = evidence.actions.front();
+                    action.terminal_path_backups = 1;
+                    action
+                        .terminal_exact_player_zero_utility_sum =
+                        1.0;
+                    action
+                        .terminal_player_zero_utility_sum =
+                        aligned &&
+                                aligned_nonvacuous
+                            ? 0.875
+                            : 1.0;
+                    action
+                        .terminal_absolute_utility_delta_sum =
+                        aligned &&
+                                aligned_nonvacuous
+                            ? 0.125
+                            : 0.0;
+                    evidence.accounting.terminal_leaves = 1;
+                    --evidence.accounting.observation_leaves;
+                }
+                if (root.stable_id ==
+                    failed_invariant) {
+                    evidence
+                        .hidden_full_evidence_bit_identical =
+                        false;
+                }
+                return isp1::TimedRootEvidence{
+                    .evidence = std::move(evidence),
+                    .wall_seconds = 0.25,
+                };
+            },
+        .check_opponent_noninterference =
+            [](const std::vector<aq5::PreparedRoot>&,
+               old_school::LearnedTerminalUtilityMode) {
+                return passing_opponent();
+            },
+    };
+}
+
+void test_terminal_scale_verdict_and_report() {
+    const std::string fingerprint(
+        isp0::kRequiredParentFingerprint);
+    const auto pass =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint,
+            fake_terminal_scale_api(
+                {}, kAllTerminalScaleRepairs));
+    expect(
+        pass.verdict ==
+                isp1::TerminalScaleVerdict::
+                    MechanismAndCandidatePass &&
+            pass.repair_improvements == 4 &&
+            pass.gate_passed(),
+        "TS1 did not pass four genuine repairs");
+
+    std::set<std::string> three =
+        kAllTerminalScaleRepairs;
+    three.erase(three.begin());
+    const auto support =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint,
+            fake_terminal_scale_api({}, three));
+    expect(
+        support.verdict ==
+                isp1::TerminalScaleVerdict::
+                    MechanismSupportCandidateReject &&
+            support.repair_improvements == 3 &&
+            !support.gate_passed(),
+        "TS1 did not classify three repairs as support/reject");
+
+    const auto inconclusive =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint,
+            fake_terminal_scale_api(
+                kAllTerminalScaleRepairs,
+                kAllTerminalScaleRepairs));
+    expect(
+        inconclusive.verdict ==
+            isp1::TerminalScaleVerdict::
+                InconclusiveExactAlreadyPerfect,
+        "TS1 did not reject an already-perfect exact arm as "
+        "inconclusive");
+
+    std::set<std::string> regressed =
+        kAllTerminalScaleRepairs;
+    regressed.erase(regressed.begin());
+    const auto regression =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint,
+            fake_terminal_scale_api(
+                kAllTerminalScaleRepairs,
+                regressed));
+    expect(
+        !regression.no_repair_regression &&
+            regression.verdict ==
+                isp1::TerminalScaleVerdict::
+                    RejectCloseTerminalScaleAxis,
+        "TS1 did not reject a repair regression");
+
+    const auto vacuous =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint,
+            fake_terminal_scale_api(
+                {}, kAllTerminalScaleRepairs,
+                false));
+    expect(
+        !vacuous.aligned.terminal_scale_nonvacuous &&
+            vacuous.verdict ==
+                isp1::TerminalScaleVerdict::
+                    RejectCloseTerminalScaleAxis,
+        "TS1 accepted a vacuous terminal-scale treatment");
+
+    auto cancelling_api =
+        fake_terminal_scale_api(
+            {}, kAllTerminalScaleRepairs,
+            false);
+    const auto cancelling_runner =
+        cancelling_api.run_root;
+    cancelling_api.run_root =
+        [cancelling_runner](
+            const aq5::PreparedRoot& root,
+            old_school::LearnedTerminalUtilityMode mode) {
+            auto measured =
+                cancelling_runner(root, mode);
+            if (mode ==
+                old_school::
+                    LearnedTerminalUtilityMode::
+                        C16DiscountedAbsoluteTurn) {
+                auto& action =
+                    measured.evidence.actions.front();
+                if (root.stable_id ==
+                    "control.blue.braingeyser-x0.v1") {
+                    action
+                        .terminal_player_zero_utility_sum =
+                        0.875;
+                    action
+                        .terminal_exact_player_zero_utility_sum =
+                        1.0;
+                    action
+                        .terminal_absolute_utility_delta_sum =
+                        0.125;
+                } else if (
+                    root.stable_id ==
+                    "field.blue.ancestral-opponent-"
+                    "seed24.aq0.v1") {
+                    action
+                        .terminal_player_zero_utility_sum =
+                        0.125;
+                    action
+                        .terminal_exact_player_zero_utility_sum =
+                        0.0;
+                    action
+                        .terminal_absolute_utility_delta_sum =
+                        0.125;
+                }
+            }
+            return measured;
+        };
+    const auto cancelling =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint, cancelling_api);
+    expect(
+        cancelling.aligned.terminal_scale_nonvacuous &&
+            cancelling.gate_passed(),
+        "TS1 lost nonvacuous opposite terminal deltas "
+        "through signed cancellation");
+
+    auto nan_api =
+        fake_terminal_scale_api(
+            {}, kAllTerminalScaleRepairs);
+    const auto finite_runner = nan_api.run_root;
+    nan_api.run_root =
+        [finite_runner](
+            const aq5::PreparedRoot& root,
+            old_school::LearnedTerminalUtilityMode mode) {
+            auto measured =
+                finite_runner(root, mode);
+            if (mode ==
+                    old_school::
+                        LearnedTerminalUtilityMode::
+                            C16DiscountedAbsoluteTurn &&
+                root.stable_id ==
+                    "control.blue.braingeyser-x0.v1") {
+                measured.evidence.actions.front()
+                    .terminal_absolute_utility_delta_sum =
+                    std::numeric_limits<double>::
+                        quiet_NaN();
+            }
+            return measured;
+        };
+    const auto nonfinite =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint, nan_api);
+    expect(
+        !nonfinite.aligned.all_invariants_green &&
+            nonfinite.verdict ==
+                isp1::TerminalScaleVerdict::
+                    RejectCloseTerminalScaleAxis,
+        "TS1 accepted nonfinite terminal evidence");
+
+    auto wrong_mode_api =
+        fake_terminal_scale_api(
+            {}, kAllTerminalScaleRepairs);
+    const auto correct_mode_runner =
+        wrong_mode_api.run_root;
+    wrong_mode_api.run_root =
+        [correct_mode_runner](
+            const aq5::PreparedRoot& root,
+            old_school::LearnedTerminalUtilityMode mode) {
+            auto measured =
+                correct_mode_runner(root, mode);
+            if (mode ==
+                old_school::
+                    LearnedTerminalUtilityMode::
+                        C16DiscountedAbsoluteTurn) {
+                measured.evidence.terminal_utility_mode =
+                    old_school::
+                        LearnedTerminalUtilityMode::
+                            ExactOutcome;
+            }
+            return measured;
+        };
+    bool wrong_mode_rejected = false;
+    try {
+        static_cast<void>(
+            isp1::assemble_terminal_scale_diagnostic(
+                fingerprint, wrong_mode_api));
+    } catch (const std::logic_error&) {
+        wrong_mode_rejected = true;
+    }
+    expect(
+        wrong_mode_rejected,
+        "TS1 accepted an arm mislabeled as exact utility");
+
+    const auto invariant =
+        isp1::assemble_terminal_scale_diagnostic(
+            fingerprint,
+            fake_terminal_scale_api(
+                {}, kAllTerminalScaleRepairs,
+                true,
+                "control.blue.counter-redundant-"
+                "same-target.v1"));
+    expect(
+        !invariant.aligned.all_invariants_green &&
+            invariant.verdict ==
+                isp1::TerminalScaleVerdict::
+                    RejectCloseTerminalScaleAxis,
+        "TS1 ignored an aligned-arm invariant failure");
+
+    std::ostringstream output;
+    isp1::print_terminal_scale_report(pass, output);
+    const std::string text = output.str();
+    for (const std::string_view token : {
+             "AQ9-TS1",
+             "arm=exact",
+             "arm=c16-aligned",
+             "repairs=4/4",
+             "controls=5/5",
+             "direct-terminal-transitions=",
+             "terminal-path-backups=",
+             "terminal-p0-used-sum=",
+             "terminal-p0-exact-sum=",
+             "terminal-delta=",
+             "terminal-absolute-delta=",
+             "blocks=[2-3]",
+             "opponent-subfields",
+             "repair-improvements=4",
+             "latency_check_licensed=1",
+             "manual_web_pilot_licensed=1",
+             "deployment_licensed=0",
+         }) {
+        expect(
+            text.find(token) != std::string::npos,
+            "TS1 report omitted required evidence");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -472,6 +804,7 @@ int main() {
         test_manifest_and_semantic_controls();
         test_precommitted_verdict_rules();
         test_invariants_and_output_fail_closed();
+        test_terminal_scale_verdict_and_report();
     } catch (const std::exception& error) {
         std::cerr
             << "information-set PUCT budget diagnostic "
@@ -481,6 +814,6 @@ int main() {
     }
     std::cout
         << "information-set PUCT budget diagnostic tests "
-           "passed: 3/3 groups\n";
+           "passed: 4/4 groups\n";
     return 0;
 }
