@@ -22137,6 +22137,181 @@ or repeated hash rejects the source rather than changing selection. This
 census reuses only previously opened source coordinates and licenses no
 scientific conclusion by itself.
 
+##### AQ10-DBC0 source-census result
+
+Completed 2026-07-29 after the focused strict suite passed 8/8 plus its CLI
+fail-closed check. `REVIEW.md` was reread through its newest 08:02 PDT cycle
+before recording the result; that entry independently accepted TS1's
+decision-boundary conclusion and recommended connecting the next learner to
+the AQ4/OP1 search-supervision lineage.
+
+The authenticated command was run twice, once by the implementation agent and
+once independently:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-boundary-critic --census
+```
+
+Both runs returned the identical subset SHA-256
+`850fe865b474b6b49e0794dc5dff5e917b322cc7fdabcf0ab673858a3e43c76a`.
+The independent run took 70.65 seconds real / 69.01 user / 0.54 sys. Exact
+C16 and complete G4B manifest identities, 893-wide neutral policy features,
+stable root/action identities, 80 roots per split, and 16 roots per deck per
+split all passed. No label, fit, candidate, selector, or artifact was opened.
+
+| Split | Deck | Roots | Legal options |
+| --- | --- | ---: | ---: |
+| TRAIN | Green | 16 | 40 |
+| TRAIN | Red | 16 | 55 |
+| TRAIN | Blue | 16 | 41 |
+| TRAIN | White | 16 | 50 |
+| TRAIN | RU Aggro | 16 | 42 |
+| TRAIN | **total** | **80** | **228** |
+| DEV | Green | 16 | 48 |
+| DEV | Red | 16 | 50 |
+| DEV | Blue | 16 | 45 |
+| DEV | White | 16 | 65 |
+| DEV | RU Aggro | 16 | 71 |
+| DEV | **total** | **80** | **279** |
+
+Decision: accept and freeze only this owner-safe source census. It is not
+model evidence. The exact subset is small enough to label once in minutes,
+while preserving whole-game-disjoint, equal-deck DEV evidence.
+
+##### AQ10-DBC1 successor-boundary calibration declaration
+
+Declared 2026-07-29 after the DBC0 census above, after repository and Git
+history searches confirmed fresh seeds `202607291301` and `202607291311`
+were absent, and before changing terminal handling in the action sampler,
+capturing an H8 boundary, opening either seed, fitting a model, or scoring a
+candidate. C16 remains champion. This is one output-layer candidate and one
+conditional 60-game manual-pilot selector, not an architecture, optimizer,
+search-budget, horizon, target-temperature, or seed sweep.
+
+Falsifiable hypothesis: C16's neutral observation already contains the
+relevant own-hand and public state, but its terminal-outcome training does
+not assign credit to the next decision state caused by an action. Teaching
+the critic directly from those successor states will improve unseen
+all-five-deck action ranking and make aligned 64-simulation IS-PUCT correct
+on at least three of the four registered repair roots without forgetting any
+of its five controls. The treatment is general: no card name, authored
+fixture, Handcrafted score, opponent hidden identity, stack rule, combat
+rule, or target preference enters collection or fitting.
+
+###### One consistent target and paired trajectory
+
+Add `LearnedSearchConfig::terminal_utility_mode` last, defaulting to
+`ExactOutcome`, and thread it through every terminal surface in the ordinary
+Priority action sampler and its bounded horizon. The default path and all
+existing experiments must remain bit-identical. DBC1 alone uses
+`C16DiscountedAbsoluteTurn`, so both terminal outcomes and nonterminal C16
+leaves use the same frozen C16 utility
+`0.5 +/- 0.5 * 0.985^final_absolute_turn`. This is a shared labeling
+substrate, not a TS1 candidate arm; parent and candidate always use the same
+mode.
+
+Generalize the existing default-off H0 boundary-capture seam so an H8 sample
+may retain the first prepared First Main boundary from the *same* trajectory.
+Immediately after the sampler completes the root action/current turn and
+prepares the next turn, but before playing it, store:
+
+- the actor-local rules state and First Main decision context;
+- the frozen C16 prediction at that boundary; and
+- whether the game ended before such a boundary existed.
+
+The enclosing H8 sample then continues normally and supplies the paired
+teacher label. Thus one action/world cell, not two assumed-identical calls,
+produces both `x = successor boundary` and `y = H8 return`. Existing H0
+capture bytes and behavior remain unchanged.
+
+Reconstruct and authenticate the full frozen G4B manifest, then visit only
+the frozen DBC0 position-zero subset. A narrow source replay callback may
+pass each live trace point and its original decks in memory; no `GameState`
+may enter the census hash, stdout, persisted artifact, or web path. For each
+of the exact 160 roots, score every legal action on eight common actor-local
+worlds with:
+
+- outer K8/R1/H8, four fixed workers, no shallow blend or residual;
+- symmetric Learned Value mirror continuations with inner K2/R1/H4,
+  maximum nesting depth one, and the unchanged Priority-only AQ4-D1 scope;
+- terminal utility `C16DiscountedAbsoluteTurn`; and
+- search seeds derived from fresh base `202607291301`, split,
+  schedule, actor, and frozen nontrivial ordinal.
+
+For every cell whose game survives to the captured boundary, create one
+weighted example from `learned_observation(boundary.state, actor)` to that
+same cell's H8 return. A terminal-before-boundary cell is excluded from the
+critic fit because no critic is queried there, but its aligned terminal
+utility remains in root action scoring. Each deck has total mass `1/5`, each
+of its 16 roots mass `1/(5*16)`, and a root divides its mass equally across
+its eligible cells. Fail closed if a root has no eligible cell. DEV receives
+the identical descriptive weighting but never enters a gradient.
+
+All action order, sampled-world, terminal/bootstrap, boundary, outer/inner
+rollout, nesting, seed, finite/range, root/deck weight, owner observation,
+hidden-repartition, and source-manifest accounting must cross-sum exactly.
+Repeated collection must be bit-identical without opening a different seed.
+
+###### Fixed candidate and offline gate
+
+Fit exact C16 once with the existing deterministic output calibration:
+
+```text
+max iterations = 32
+L2 tether       = 0.01
+gradient tol.   = 1e-10
+```
+
+Only the two critic leaves' 16 hidden-to-output weights plus output bias may
+change: exactly 34 scalar parameters. The critic input trunk, direct state
+path, all four policy heads, topology/schema, and parent remain bit-identical.
+Repeat the fit from C16 and require the same fingerprint. This intentionally
+tests the successor-boundary target with minimal capacity first; it does not
+repeat OC1's terminal-outcome labels.
+
+On TRAIN and untouched whole-game-disjoint DEV, report weighted BCE, Brier,
+bias/calibration, exact-max top-one agreement, stable-pair agreement, and
+teacher regret, equal-deck and for Green, Red, Blue, White, and RU Aggro.
+Rebuild a root action value by averaging the candidate's captured-boundary
+predictions and the aligned utilities of terminal-before-boundary cells in
+their original eight-world order. Offline eligibility requires conjunctively:
+
+1. TRAIN weighted BCE and equal-deck teacher regret both strictly improve;
+2. DEV weighted BCE and equal-deck teacher regret both strictly improve;
+3. DEV top-one agreement does not decrease;
+4. no DEV deck's regret exceeds C16 by more than `0.01`;
+5. every deck has nonzero parent regret in TRAIN and DEV; and
+6. every identity, isolation, repeatability, accounting, and exact-34-
+   parameter component gate passes.
+
+Failure at TRAIN is a target/capacity rejection and licenses only a separately
+declared wider critic. TRAIN pass with DEV failure is a generalization
+rejection. Do not change the optimizer, add context, widen the net, change
+K/H, or retry a seed inside DBC1.
+
+Only an offline-passing candidate may enter the existing nine-root IS-PUCT
+battery, at exactly 64 simulations, maximum eight decision plies, and aligned
+terminal utility. Reuse the already-open TS1 battery seed `202607291201` as a
+reject-only paired control; no authored root enters training. Require all
+five controls: redundant-Counter Pass, exactly one needed Counter with no
+own-Counter target and a settled protected outcome, productive Growth on the
+actor's Treefolk, live Force Spike, and life-20 No Blocks. Require no
+regression of a parent-correct repair and at least three of the four repairs:
+self-X=1 Braingeyser, self Ancestral Recall, Pass for payable Force Spike, and
+the Blue first-No-Block/later-Air-Elemental-trade plan with no pure
+Flying-Men chump. Exactly three repairs is mechanism support but no
+deployment. Four repairs plus five controls licenses the selector only.
+
+The conditional selector uses fresh seed `202607291311` and exactly
+`run_bot_benchmark(1, seed, DBC1, C16, max_turns=500, false)`: 60 paired
+games, 12 per DBC1 challenger deck, both seats and play/draw. More than
+30/60 wins and at least 3/12 on every deck licenses a dated manual web pilot
+only; 37/60 may be described as `FAST_GO`. It is never a strength,
+Learned-is-king, or champion claim. Any other result rejects the candidate.
+Do not run 200 or 2,000 games unless a later declaration promotes a
+field-validated pilot to a milestone candidate.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

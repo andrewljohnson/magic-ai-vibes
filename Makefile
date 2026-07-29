@@ -107,6 +107,7 @@ ACTION_Q_NESTED_ACTOR_DISTILL_SOURCE := src/action_q_nested_actor_distill.cpp
 ACTION_Q_NESTED_ACTOR_EARLY_STOP_SOURCE := src/action_q_nested_actor_early_stop.cpp
 ACTION_Q_NESTED_ACTOR_ANCHOR_SOURCE := src/action_q_nested_actor_anchor.cpp
 ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_SOURCE := src/action_q_nested_actor_broad_distill.cpp
+DECISION_BOUNDARY_CRITIC_SOURCE := src/decision_boundary_critic.cpp
 ACTION_Q_ON_POLICY_SUCCESSOR_SOURCE := src/action_q_on_policy_successor.cpp
 ACTION_Q_PRIORITY_TRUST_REGION_SOURCE := src/action_q_priority_trust_region.cpp
 ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE := src/action_q_recursive_policy_improvement.cpp
@@ -213,6 +214,8 @@ ACTION_Q_NESTED_ACTOR_ANCHOR_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-nes
 ACTION_Q_NESTED_ACTOR_ANCHOR := $(BUILD_DIR)/old-school-action-q-nested-actor-anchor
 ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-broad-distill-tests
 ACTION_Q_NESTED_ACTOR_BROAD_DISTILL := $(BUILD_DIR)/old-school-action-q-broad-distill
+DECISION_BOUNDARY_CRITIC_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-boundary-critic-tests
+DECISION_BOUNDARY_CRITIC := $(BUILD_DIR)/old-school-decision-boundary-critic
 ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-on-policy-successor-tests
 ACTION_Q_ON_POLICY_SUCCESSOR := $(BUILD_DIR)/old-school-action-q-on-policy-successor
 ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-priority-trust-region-tests
@@ -280,6 +283,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-action-q-nested-actor-early-stop action-q-nested-actor-early-stop-run
 .PHONY: test-action-q-nested-actor-anchor action-q-nested-actor-anchor-run
 .PHONY: test-action-q-broad-distill action-q-broad-distill-preflight action-q-broad-distill-census action-q-broad-distill-run
+.PHONY: test-decision-boundary-critic old-school-decision-boundary-critic decision-boundary-critic-census
 .PHONY: test-action-q-on-policy-successor action-q-on-policy-successor-census action-q-on-policy-successor-run
 .PHONY: test-action-q-priority-trust-region action-q-priority-trust-region-run
 .PHONY: test-action-q-recursive-policy-improvement action-q-recursive-policy-improvement-run
@@ -425,6 +429,7 @@ FQ4_NEUTRAL_EVALUATOR_RUNNER_LINK_SOURCES := $(FQ4_NEUTRAL_EVALUATOR_LINK_SOURCE
 FQ4_NEUTRAL_CANDIDATE_PUBLISHER_LINK_SOURCES := $(FQ4_NEUTRAL_EVALUATOR_LINK_SOURCES) $(FQ4_NEUTRAL_CANDIDATE_PUBLISHER_SOURCE)
 ACTION_Q_NESTED_ACTOR_ANCHOR_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_EARLY_STOP_LINK_SOURCES) $(filter-out $(ACTION_Q_NESTED_ACTOR_EARLY_STOP_LINK_SOURCES),$(FQ4_NEUTRAL_EVALUATOR_LINK_SOURCES)) $(ACTION_Q_NESTED_ACTOR_ANCHOR_SOURCE)
 ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_DISTILL_LINK_SOURCES) $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_SOURCE)
+DECISION_BOUNDARY_CRITIC_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES) $(DECISION_BOUNDARY_CRITIC_SOURCE)
 ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES) $(ACTION_Q_ON_POLICY_SUCCESSOR_SOURCE)
 ACTION_Q_PRIORITY_TRUST_REGION_LINK_SOURCES := $(ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES) $(ACTION_Q_PRIORITY_TRUST_REGION_SOURCE)
 ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_LINK_SOURCES := $(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE) $(CONSERVATIVE_POLICY_IMPROVEMENT_SOURCE)
@@ -535,6 +540,10 @@ $(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_ANCHOR),$(ACTION_Q_NESTED_ACT
 $(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_TEST_RUNNER),$(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES) tests/test_action_q_nested_actor_broad_distill.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL),$(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LINK_SOURCES) src/action_q_nested_actor_broad_distill_main.cpp))
+
+$(eval $(call link_program,$(DECISION_BOUNDARY_CRITIC_TEST_RUNNER),$(DECISION_BOUNDARY_CRITIC_LINK_SOURCES) tests/test_decision_boundary_critic.cpp))
+
+$(eval $(call link_program,$(DECISION_BOUNDARY_CRITIC),$(DECISION_BOUNDARY_CRITIC_LINK_SOURCES) src/decision_boundary_critic_main.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER),$(ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES) tests/test_action_q_on_policy_successor.cpp))
 
@@ -691,6 +700,7 @@ test: $(ACTION_Q_NESTED_ACTOR_DISTILL_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_DISTI
 test: $(ACTION_Q_NESTED_ACTOR_EARLY_STOP_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_EARLY_STOP)
 test: $(ACTION_Q_NESTED_ACTOR_ANCHOR_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_ANCHOR)
 test: $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL)
+test: $(DECISION_BOUNDARY_CRITIC_TEST_RUNNER) $(DECISION_BOUNDARY_CRITIC)
 test: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 test: $(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER) $(ACTION_Q_PRIORITY_TRUST_REGION)
 test: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
@@ -802,6 +812,14 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage: old-school-action-q-broad-distill (--preflight|--census|--run)' >/dev/null
+	./$(DECISION_BOUNDARY_CRITIC_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_BOUNDARY_CRITIC) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ10-DBC0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-critic --census' >/dev/null
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
 	@set +e; output=`./$(ACTION_Q_ON_POLICY_SUCCESSOR) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
@@ -1700,6 +1718,21 @@ action-q-broad-distill-census: $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL)
 
 action-q-broad-distill-run: $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL)
 	./$(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL) --run
+
+test-decision-boundary-critic: $(DECISION_BOUNDARY_CRITIC_TEST_RUNNER) $(DECISION_BOUNDARY_CRITIC)
+	./$(DECISION_BOUNDARY_CRITIC_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_BOUNDARY_CRITIC) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ10-DBC0 accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-boundary-critic --census' >/dev/null
+
+old-school-decision-boundary-critic: $(DECISION_BOUNDARY_CRITIC)
+
+decision-boundary-critic-census: $(DECISION_BOUNDARY_CRITIC)
+	./$(DECISION_BOUNDARY_CRITIC) --census
 
 test-action-q-on-policy-successor: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
