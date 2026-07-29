@@ -23552,6 +23552,118 @@ Ancestral Recall, X-spell, and Giant Growth choices, but public stack order
 and same-card target topology remain a generic possible alias class that must
 be measured rather than assumed away.
 
+##### AQ17-DBC6-S0-DENSITY-SELECT declaration
+
+Declared 2026-07-29 at exact accepted-census commit `b1850c7`, after rereading
+`REVIEW.md` through its newest 11:32 PDT cycle. That independent entry
+reproduced AQ15's complete tests, the density suite, and the 140th
+bit-identical lift reading, and explicitly made label-free dense selection
+the next action. Repository/source/history searches found selection seed
+`202607291811`, identifier `AQ17-DBC6-S0-DENSITY-SELECT`, and schema
+`old-school-aq17-dbc6-select-v1` unused. C16 remains champion.
+
+This is a source-only selection experiment, not a model or fit. Its
+falsifiable hypothesis is that the frozen AQ16 population has enough support
+in every split × owner-deck × decision-width cell to select a substantially
+larger, game-diverse, exactly balanced policy corpus without inspecting a
+teacher, outcome, candidate, phase, card name, stack tactic, combat tactic, or
+hidden opponent card. Any insufficient cell rejects S0; quotas are not
+adapted after seeing capacity.
+
+###### Immutable source and width strata
+
+Load exact C16 and reconstruct AQ16 once with its unchanged source recipe.
+Require exact equality to:
+
+```text
+parent fingerprint 68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+AQ16 manifest      7de71c44a3d1d1fa20eb1b738bc8c675e83c4336f284e95f7401a4b79ea345cc
+root seed          202607291801
+generation         15
+TRAIN blocks       0, 1
+DEV block          2
+TRAIN roots        3,597
+DEV roots          1,687
+```
+
+The three strata are fixed only by engine-authoritative legal-action count:
+
+```text
+B2     exactly 2 actions
+B3     exactly 3 actions
+B4+    at least 4 actions
+```
+
+For every owner deck independently, select exactly 20 roots from each TRAIN
+stratum and ten roots from each DEV stratum. The resulting fixed target is
+300 TRAIN / 150 DEV roots, exactly 60/30 per deck and 100/50 per width
+stratum. TRAIN and DEV remain whole-physical-game disjoint. These quotas are
+below every already-recorded TRAIN cell—the smallest is Blue B4+ at 46—but
+the previously clipped DEV deck × width capacities are intentionally not
+invented. S0 measures and gates them before labels.
+
+###### Deterministic game-diverse selector
+
+For root `r`, derive one key from canonical length-prefixed serialization of:
+
+```text
+schema = old-school-aq17-dbc6-select-v1
+AQ16 manifest hash
+selection seed = 202607291811
+r.stable_root_id
+```
+
+using SHA-256. Reject duplicate keys. Within each split × owner-deck × width
+cell:
+
+1. group roots by exact physical actor-game coordinate;
+2. sort each actor-game's roots by the key;
+3. round zero offers only each actor-game's first root, globally ordered by
+   key, and admits until the cell quota is full;
+4. only if quota remains, round one similarly offers the second root from
+   each actor-game; and
+5. reject rather than use a third root from one actor-game.
+
+Thus one actor-game contributes at most two roots to one width stratum and at
+most six roots total. Each cell must select from at least half its quota in
+distinct actor-games: ten for TRAIN and five for DEV. Restore selected roots
+to canonical AQ16 source order before hashing or later replay. No source
+outcome or chronological position may break a selection tie.
+
+###### Label-free representation and manifest report
+
+For selected live roots, reconstruct legal actions and the exact 893-wide
+actor-local option rows solely to authenticate the existing AQ16
+information/action fingerprints. Before discarding the rows, report every
+within-root pair of descriptor-distinct actions whose 893 binary64 rows are
+bit-identical. Report collision groups and option-pair denominators by split,
+deck, and width stratum. This is a representation census only; without deep
+targets it makes no claim that an alias is harmful.
+
+The selected-manifest hash must bind the complete AQ16 identity, selection
+schema/seed, quotas, width rule, actor-game cap, canonical selected root
+records, per-cell roots/options/potential pairs/distinct actor-games,
+seat/play-draw marginals, maximum roots per actor-game, and feature-alias
+census. Repeat the pure selector on the authenticated population and require
+bit-identical records, order, counts, keys, and hash. A nonvacuous hidden
+hand/library repartition must preserve one selected root's observation,
+actions, all option rows, stratum, key, and selected identity bit-for-bit.
+
+The sole licensed command is:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-priority --select
+```
+
+It must report `teacher_labels=0`, `candidate_scores=0`, `model_created=0`,
+`selector_opened=0`, and `artifact_published=0`. Tests and ordinary
+`make test` may run only synthetic selection/collision cases and the bad-CLI
+path; they must never open this source coordinate. A complete S0 pass freezes
+only the selected manifest/counts. Commit and review that hash before a
+separate deep-label/cache declaration. A failure stops without changing bins,
+quotas, seed, or game cap.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
