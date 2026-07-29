@@ -20900,6 +20900,779 @@ underpowered gameplay screen. No strength, promotion, or Learned-is-king
 verdict is permitted before that all-five selector and the normal later
 gates.
 
+##### AQ5-RPI0 preflight result: mechanism partially supported, pilot rejected
+
+Run 2026-07-29 after implementing the exact declared Priority/Attack/Block
+samplers, rereading `REVIEW.md` through its newest independent 04:20 cycle,
+and before any bridge or web option was opened. Exact command:
+
+```sh
+./build/old-school-action-q-recursive-policy-improvement --run
+```
+
+The command used frozen parent C16 at 3,111,437 bytes, artifact SHA-256
+`53aeb904bd87311b37201859317f05ab066bdfe134c72460cf94bff6d1f944ca`,
+model fingerprint `68126afc...13e2f`, preflight/search seed
+`202607290401`, Priority `K8/R1/H8` with later `K2/R1/H4`, and combat
+`K2/R1/H4` with later `K1/R1/H4`. It completed in approximately 25 seconds.
+No gameplay evaluation seed, bridge, web option, or artifact was opened.
+
+All three family-invariant reports passed: exact family census Priority 8,
+Attack 1, Block 3; complete authoritative legal-choice coverage; finite
+rules-settled samples; reversed candidate-order identity; nonvacuous hidden
+repartition with bit-identical observation, scores, choice, and accounting;
+and maximum nested-search depth exactly one. Isolation passed, including the
+fixed-seed treatment-off identity. A focused test review found that an
+earlier pure gate could accept a duplicate fixture group while retaining
+twelve total roots; production and tests now require every exact manifest
+slot plus the exact 8/1/3 family census. Seven focused protocol/gate groups
+pass, including the new fail-closed regression.
+
+Untreated C16 descriptive choices and exact selected margins, captured before
+any RPI score:
+
+| Root | Untreated choice | Margin |
+| --- | --- | ---: |
+| redundant same-target Counterspell | Pass | 0.004617 |
+| intervening opposing Counterspell | counter opponent Counterspell | 0.000651 |
+| Braingeyser | X=0 opponent | 0.003414 |
+| Ancestral field root | opponent | 0.003356 |
+| summoning-sick Bear Growth | Pass | 0.006989 |
+| begin-combat opponent Growth | Growth opponent Air | 0.002286 |
+| live Force Spike | Spike | 0.060364 |
+| five-open Force Spike | Pass | 0.000906 |
+| life-20 Flying Men block | no block | 0.033362 |
+| life-4 Flying Men block | block | 0.162373 |
+| Flying Men attack into Air | no attack | 0.002088 |
+| Blue multi-choice first blocker | Flying Men assignment | 0.211445 |
+
+RPI directional results:
+
+| Group | Result | Exact selected behavior / score |
+| --- | --- | --- |
+| Counter composition | FAIL | redundant Pass 0.526486; intervening Pass 0.587671, both counter branches 0.562001 |
+| Braingeyser target/X | PASS | X=1 self 0.200350; X=0 self 0.171050, opponent 0.172258 |
+| Ancestral target | FAIL | land-development action and both Ancestral targets tied at 1.000000 |
+| Growth timing/target | PASS | sick-Bear Pass 0.210785; productive own Treefolk Growth 1.000000, opponent Growth 0.733152 |
+| Force Spike tax | PASS | live Spike 0.146107 over Pass 0.119632; payable Pass 0.095669 over Spike 0.056651 |
+| life-sensitive block | FAIL | life 20 chose block 0.163168 over 0.149989; life 4 tied both at zero and seeded tie chose block |
+| avoid bad Flying attack | FAIL | attack 0.272549 over no attack 0.215730 |
+| Blue multi-choice block | FAIL under declared gate | Flying-first 0.775011 over no-block-first 0.556567 |
+
+Decision: **REJECT AQ5-RPI0** before bridge/web exposure. Final disposition:
+`result=REJECT hypothesis_passed=0 web_licensed=0 artifact_published=0`.
+C16 remains champion.
+
+Mechanism interpretation: direct recursive search is the first single clean
+operator to repair Braingeyser X=0, both observed Giant Growth classes, and
+live/payable Force Spike together without a shared fitted head or any card
+knowledge. This supports the general search direction. It does not yet supply
+reliable stack composition, target discrimination under saturated terminal
+values, or combat valuation. The intervening Counterspell failure is a real
+policy failure. The Ancestral gate also reveals value saturation: three
+materially different actions all reach exact 1.0 within the continuation.
+
+The multi-choice blocker failure requires a trace before it can be used as a
+strategic label. In that exact state, choosing Flying Men first does not imply
+the reported pure chump: the suffix may also block with Air Elemental, letting
+the opponent assign one damage to Flying Men and three to Air, so the defender
+can lose Flying Men while preserving its Air and killing the attacking Air.
+That can be stronger than the declared Air-for-Air trade. The next coordinate
+must expose the completed attack/block plan and resulting public state, and
+must distinguish a pure Flying-Men chump from this double-block line rather
+than training toward the declaration's possibly incorrect first-step label.
+
+Next experiment: separately preregister a fast AQ5-DIAG trace over the five
+failed groups. It will not tune K/H or use card-specific policy. It will
+record complete plan completion, stack resolution, terminal/bootstrap source,
+and per-turn value trajectory for each common-world cell, then propose one
+general next operator only after separating (a) incorrect continuation
+choice, (b) exact terminal saturation/critic aliasing, and (c) a mislabeled
+microdecision whose completed plan is strategically sound.
+
+##### AQ5-DIAG result: backup saturation plus one combat-transition defect
+
+Recorded 2026-07-29 after the rejected RPI0 preflight and before changing its
+selection or rollout semantics. This diagnosis reused only the frozen twelve
+roots, already-published RPI samples, existing exact transition witnesses, and
+rules-level reconstruction. It opened no gameplay seed, changed no model, and
+does not revise the RPI0 rejection. `REVIEW.md` was reread through its newest
+04:20 PDT cycle; that review supports direct actor-local search but had not yet
+seen the RPI0 result.
+
+The earlier RPI0 interpretation called Pass in the intervening-Counterspell
+root a real policy failure. That label is withdrawn. The frozen mechanical
+witness already proves that countering the original Air Elemental and
+countering the intervening Counterspell both settle to the same owner-visible
+consequence hash. Pass is a third legal route to that plan: after the
+intervening Counterspell resolves, priority returns and the held Counterspell
+can still counter the Air Elemental. The semantically relevant field failure
+is the redundant root with no intervening spell, and RPI0 repairs it:
+Pass `.526486` over the unnecessary second Counterspell `.380448`. Future
+stack gates must judge the completed plan—whether the threatening spell
+resolves and whether an unnecessary Counterspell is spent—not prescribe one
+immediate target descriptor.
+
+The Ancestral failure is exact terminal saturation, not a legality, target
+encoding, or state-capacity failure. Island development, self-target
+Ancestral, and opponent-target Ancestral all return exact `1.0` because the
+position wins during the current turn. The previously frozen engine-settled
+critic values on this exact root order the material consequences correctly:
+self `.912386` > Pass `.888662` > opponent `.872225`. Wider or deeper
+terminal-only search cannot recover an ordering that its scalar backup has
+discarded.
+
+The life-20 and life-4 one-blocker labels are sound and have no hidden suffix.
+At life 20, no block takes four and preserves Flying Men; the chump loses it.
+At life four, no block loses immediately and the chump survives the turn.
+RPI0's life-four `0/0` is another terminal-horizon alias: both sampled plans
+eventually lose even though one is the uniquely legal survival line. The
+Flying-Men attack label is also sound if the nested defender takes its legal
+Air-Elemental block; the missing distinction is whether RPI0 modeled that
+best response or exploited a weak continuation.
+
+The Blue first-blocker gate was incorrectly stated and also exposed a real
+sampler defect. Flying-first may complete as a pure chump or as a double
+block. Under the sampler's insertion order, the double block assigns one
+damage to Flying Men and three to the defending Air Elemental, kills the
+attacking Air, and preserves the defending Air. That explains its high value.
+Production Magic does not give the defender this order: the attacker chooses
+damage assignment order. Both `learned_block_choice_samples` and the untreated
+joint blocker evaluator currently call `resolve_combat` directly in block
+insertion order and therefore bypass the production DamageOrder decision.
+With attacker-optimal order, double-block and Air-only can reach the same
+public result. A valid gate forbids only a completed pure Flying-Men chump; it
+cannot require No-Block-first strictly above Flying-first.
+
+Diagnosis: AQ5 is already a shallow information-set search. Its immediate
+bottlenecks are the scalar backup/objective and an incomplete combat
+transition, not UCT allocation. Full ISMCTS remains a later scaling step.
+More simulations with the same binary terminal backup would reinforce the
+Ancestral and life-four aliases, and combat simulations through the current
+blocker-owned damage order are invalid evidence.
+
+##### AQ6-RB0 conservative rules-boundary search declaration
+
+Declared 2026-07-29 after the AQ5-DIAG result, before changing search
+selection, correcting the combat sampler, or opening root seed
+`202607290601`. Exact C16 remains champion. This is a fast no-training
+challenger and potential manual pilot, not a strength or Learned-is-king
+claim.
+
+Falsifiable hypothesis: retaining C16 as a safe policy prior, accepting an
+actor-local recursive-search deviation only when paired common-world evidence
+supports it, and using the engine-settled learned value only when the long
+return is completely terminal-saturated will preserve AQ5's general Priority
+repairs without its low-sample combat regressions. Routing combat evaluation
+through the complete alternating rules subgame—defender block plan followed
+by attacker damage order—will remove weak-opponent exploitation and the
+blocker-owned-order defect without a combat score or card rule.
+
+This is explicitly not another resolved/long scalar blend. EXPLORE-9 through
+EXPLORE-11 closed that axis. The long return remains primary:
+
+1. Score every legal root choice with AQ5's same common information-set
+   worlds, continuations, actor-local re-determinization, and K/H budgets.
+2. Retain exact untreated C16's choice as the fallback. A different choice is
+   eligible only if its paired long-return difference versus the fallback is
+   nonnegative in every common-world cell and positive in at least one. No
+   margin, card, phase, target, or result-dependent threshold is tunable.
+3. If every candidate in the root has every long-return cell terminal and all
+   candidate long-return means are the same exact `0`, `.5`, or `1`, the long
+   return is declared uninformative. Only in that case compare the unchanged
+   C16 critic at each action's first engine-settled public consequence. A
+   strict secondary maximum may replace the parent; an exact secondary tie
+   retains the parent.
+4. Priority settlement resolves the candidate/top stack consequence through
+   authoritative rules without an opponent-private observation. Combat
+   settlement must use a complete legal plan. Enumerate the remaining attack
+   choices, all legal blocker assignments, and every relevant per-attacker
+   damage order under explicit fail-closed bounds. The attacker maximizes its
+   attack suffix and damage order; the defender maximizes its complete block
+   plan, equivalently minimizing the attacker's value. Apply ordinary
+   `resolve_combat` only after that order is fixed. The learned
+   settled-boundary value and unchanged long continuation are evaluated after
+   combat, never on a partial declaration.
+5. Keep the exact C16 model and AQ5 maximum search nesting one. The fallback
+   and gate consume only the actor's observation, legal actions, common-world
+   samples, and model values. Opponent hand identities, Handcrafted,
+   card-specific switches, authored material/combat values, and fixture
+   labels are forbidden.
+
+The first run is the same twelve-root preflight with root seed
+`202607290601`. Before any live option, report parent choice, complete selected
+plan, paired long-return differences, terminal/bootstrap census,
+settled-boundary value, and whether the decision was Parent, Dominating
+Search, or Saturated-Boundary. The corrected conjunctive behavior gate is:
+
+- preserve Pass on the true redundant-Counterspell root; on the intervening
+  root require the completed plan to stop the Air Elemental while spending no
+  redundant Counterspell, without prescribing the first response;
+- preserve X=1 self Braingeyser, both Giant Growth directions, and live versus
+  payable Force Spike;
+- exclude opponent-target Ancestral and require self strictly above opponent,
+  while allowing a different productive sequencing action to win the full
+  root;
+- life 20 selects no block and life four selects block;
+- Flying Men does not attack into the ready Air Elemental;
+- the Blue multi-block selected complete plan is not the pure Flying-Men
+  chump, and every multiply blocked line uses an attacker-selected damage
+  order.
+
+Require exact legal coverage, reversed-candidate identity, nonvacuous hidden
+repartition identity for samples/settled values/choice/accounting, bounded
+enumeration, maximum nesting one, and default-off game identity. A failed
+direction or invariant rejects RB0; do not tune K/H, the dominance rule, or a
+boundary weight on this coordinate.
+
+Only a complete preflight pass licenses three real decision latency smokes
+under the existing 120-second limit, focused release plus ASan/UBSan tests,
+and full `make -j4 test`. Those gates may expose one dated web option labeled
+**Learned C16 · Conservative Foresight (AQ6)**,
+`manual diagnostic / not promoted`. It must not replace C16 or support a
+strength claim until a fresh all-five-deck selector is separately declared.
+
+##### AQ6-RB0 result: parent-safe but overconservative; rejected
+
+Run 2026-07-29 after implementing the default-off settled-boundary capture
+and the pure conservative selector, rereading `REVIEW.md` through its newest
+04:20 PDT cycle, and before integrating the exact combat transition into live
+search. Exact command:
+
+```sh
+./build/old-school-action-q-recursive-policy-improvement \
+  --run-conservative
+```
+
+The frozen C16 fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+root seed was `202607290601`; Priority remained K8/R1/H8 with actor-local
+K2/R1/H4 continuations and combat remained K2/R1/H4 with K1/R1/H4
+continuations. Runtime was approximately 7.7 seconds. No gameplay, bridge, or
+web seed was opened.
+
+The rule behaved conservatively. It retained C16's correct Pass on redundant
+Counterspell, productive response on intervening Counterspell, Pass on
+summoning-sick Growth, both Force Spike directions, life-20 no block,
+life-four block, and no Flying-Men attack. It accepted the general productive
+Growth repair because own Treefolk Growth returned exact `1` in all eight
+paired cells while the parent opponent-target action did not.
+
+Two required Priority directions failed:
+
+- Braingeyser X=1 self had the best mean, `.286518` versus parent X=0
+  opponent `.246642`, but three of eight paired cells were lower. Exact
+  componentwise dominance therefore retained the wrong parent.
+- In the Ancestral root, Sol Ring development and self-target Ancestral both
+  returned exact `1` in all eight cells and both dominated the opponent-target
+  parent. The selector's exact-best-tie fallback nevertheless retained the
+  inferior parent. Their settled means were self `.911711` and Sol Ring
+  `.906001`, while opponent-target was `.872225`.
+
+Decision: **REJECT AQ6-RB0**. Its componentwise rule is too conservative for
+noisy common-world estimates, and whole-root saturation is too narrow when an
+exact saturated winning frontier sits above other nonsaturated actions. The
+settled capture and selector validation remain useful infrastructure; they do
+not license a bot. The isolated exact combat module separately passed three
+focused groups under O0, O3, and ASan/UBSan, including the four legal block
+assignments, five damage-order outcomes, attacker-optimal Air-first order,
+defender Air-only choice, pure-chump classification, source immutability, and
+fail-closed enumeration bounds.
+
+##### AQ6-RB1 paired-LCB frontier declaration
+
+Declared 2026-07-29 after recording RB0 and before implementing a different
+selection statistic, integrating exact combat into the rollout path, or
+opening root seed `202607290701`. RB0's twelve-root rows are development
+evidence and cannot promote RB1. C16 remains champion.
+
+Falsifiable hypothesis: a fixed paired one-standard-error lower bound is a
+less brittle conservative-policy-improvement test than componentwise
+dominance at K8, while still requiring an estimated advantage larger than its
+common-world sampling error. Restricting settled-boundary selection to an
+exact top frontier whose action vectors are the same saturated terminal
+outcome repairs the Ancestral information loss without reopening the rejected
+global scalar-blend axis. The exact alternating combat transition removes the
+remaining invalid damage-order evidence.
+
+For paired candidate-minus-parent differences `d_i`, require at least two
+cells and compute the ordinary sample mean, Bessel-corrected sample variance,
+and standard error `s/sqrt(n)`. A nonparent candidate is eligible only when
+`mean(d) - SE(d) > 0`. Choose the eligible candidate with the largest lower
+bound; then largest mean; an exact remaining tie is resolved from stable
+action keys and the preregistered domain-derived choice seed, never input
+order. If no candidate qualifies, retain C16.
+
+Before that LCB rule, identify an exact saturated top frontier only when:
+
+- at least two actions share the exact maximum long-return mean;
+- every sample of every action in that support is the same shared exact
+  terminal scalar `0`, `.5`, or `1`; and
+- every frontier cell is classified terminal.
+
+Within that support only, a unique largest mean engine-settled C16 value
+selects the action and reports `SaturatedFrontier`; a settled tie retains the
+parent if present or uses the same key-based choice seed. Nontop actions never
+enter this boundary comparison. No scalar mixes the two horizons.
+
+Use root seed `202607290701`, unchanged AQ5 K/H/nesting, exact C16, and the
+same twelve fixtures. Integrate the exact combat enumerator with fixed
+fail-closed limits of eight attackers, eight blockers, 6,561 block
+assignments, 40,320 damage orders per assignment, and 65,536 completed plans.
+For each fixed attack suffix the defender chooses its complete block plan,
+with every plan evaluated under the attacker's best damage-order response;
+the defender then maximizes over those response-adjusted plans. This is
+backward induction over Magic's actual declaration order, not permission for
+the attacker to choose damage order before blocks are declared. Post-combat
+learned value is evaluated only after this authoritative transition. The live
+and evaluation paths must use the same completion. Bound exhaustion retains
+C16 rather than using partial evidence.
+
+This is not a long-horizon minimax tree over every combat plan. For each root
+candidate and sampled world, remaining attacker choices, complete block
+assignments, and damage orders are completed by the unchanged immediate C16
+actor-local boundary critic; the selected authoritative resulting state then
+starts the unchanged H4 continuation whose return enters the paired RB1
+selector. That division is fixed before the seed is opened.
+
+RB1 passes only if the corrected behavior battery from RB0 passes
+conjunctively, including X=1 self Braingeyser, self-over-opponent Ancestral,
+both Growth and Force Spike directions, C16's valid life-sensitive
+block/attack directions, no completed pure Flying-Men chump in the Blue
+multi-block root, and the completed-plan Counterspell semantics. Require
+input-order/key identity, hidden-repartition identity, finite paired/variance
+arithmetic, exact frontier terminal census, exact combat cardinality/order
+witnesses, default-off identity, and focused tests.
+
+Any failure rejects RB1 without tuning the one-SE multiplier, K/H, frontier,
+or combat limits on this coordinate. A pass licenses only the previously
+declared latency/test ladder and possible manual web pilot, never a strength
+claim.
+
+##### AQ6-RB1 result: 11/12 behaviors pass; life-20 horizon failure rejects
+
+Run 2026-07-29 after the explicit conjunctive gate, sampled actor-local combat
+boundary evidence, exact-combat nested propagation, bound fallback, and
+focused transition tests were complete. `REVIEW.md` was reread through its
+newest 04:20 PDT cycle immediately before the run. Exact command:
+
+```sh
+./build/old-school-action-q-recursive-policy-improvement \
+  --run-conservative-rb1
+```
+
+The frozen C16 fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+root seed was `202607290701`; runtime was 16.61 seconds. The executable
+returned 1 with `result=REJECT`. No gameplay, bridge, web, artifact, or
+all-five-deck evaluation seed was opened.
+
+Eleven of twelve behavior roots passed:
+
+- redundant Counterspell retained Pass;
+- the intervening-Counterspell root retained the equivalent one-card Pass
+  completion and rejected countering its own Counterspell;
+- Braingeyser selected X=1 self by paired LCB;
+- Ancestral selected self from the exact terminal top frontier;
+- summoning-sick Giant Growth retained Pass, while the productive combat
+  Growth selected own Ironroot Treefolk;
+- live Force Spike retained the counter and payable Force Spike retained
+  Pass;
+- life-four retained the necessary Flying Men chump;
+- Flying Men did not attack into Air Elemental;
+- the Blue multi-block root selected the no-Flying-block prefix, completed
+  with no sampled pure chump, and passed the exact four-assignment/five-plan
+  damage-order witness.
+
+All twelve roots passed untreated capture, complete evidence, finite paired
+arithmetic, reverse-action-key identity, nonvacuous hidden-repartition
+observation/score/choice/accounting identity, zero bound fallbacks, and
+maximum nesting one. Default-off identity and the Ancestral frontier census
+also passed.
+
+The sole failure was
+`field.ru.life20-flying-men-chump-air.v1`. C16's valid parent was No Block at
+long return `.165618`; the exact H4 continuation scored the Flying Men chump
+`.197563`, paired difference `+.031945`, SE `.017588`, and one-SE lower bound
+`+.014357`, so RB1 selected the chump. Both sampled completed plans were pure
+chumps. Importantly, the same sampled immediate actor-local boundary critic
+ranked No Block `.151193` above the chump `.117832`. This is direct evidence
+of a horizon/continuation-policy reversal rather than damage-order corruption
+or hidden-information leakage.
+
+Decision: **REJECT AQ6-RB1** and do not deploy it. Do not tune the one-SE
+multiplier, K/H, frontier rule, or combat limits on this coordinate. The
+mechanism result is still strong: the general operator repaired every
+Priority error and the Blue multi-block error under full isolation, leaving
+one precisely measured short-horizon blocker failure. The next experiment
+must target that general horizon/continuation disagreement without a
+card-name, life-total, pure-chump, or combat-specific policy exception.
+
+##### AQ6-RB2-TC0 two-timescale concordance declaration
+
+Declared 2026-07-29 after recording RB1 and before implementing the TC0
+selector, changing a search horizon, or opening root seed `202607290801`.
+`REVIEW.md` was reread through its newest 04:20 PDT cycle. C16 remains
+champion; RB1 is rejected development evidence and cannot be deployed.
+
+Falsifiable hypothesis: RB1's one remaining failure is a time-inconsistent H4
+continuation improvement, not a need for a card, target, life-total, chump, or
+combat exception. A candidate that is genuinely better than C16 should clear
+the same paired one-SE improvement test both after the normal continuation and
+at the engine's next-turn critic boundary. Requiring concordance across those
+two independently meaningful time scales will veto the life-20 chump while
+preserving RB1's nonterminal Priority repairs and Blue multi-block repair.
+
+For every frozen root, score two complete, common-world action matrices:
+
+- **Primary** is exact RB1: Priority K8/R1/H8, combat K2/R1/H4, the same
+  one-level actor-local continuation, exact combat, and sampled settled
+  evidence.
+- **Next-turn** is bit-identical in seed, sampled worlds, rollouts, policy,
+  exact combat, and candidates, changing only the outer `horizon_turns` to
+  zero. The engine therefore finishes the already-resolved current turn,
+  begins and draws for the next turn, and bootstraps C16 at the next First
+  Main priority boundary.
+
+Run unchanged RB1 on Primary first. Parent choices remain parent.
+`SaturatedFrontier` choices remain unchanged because they specifically recover
+information lost to exact terminal aliases. A `PairedLowerBound` deviation is
+accepted only if the same candidate-versus-C16-parent paired differences in
+Next-turn also satisfy `mean(d) - SE(d) > 0`; otherwise retain C16. Do not
+search for an alternate candidate after a veto. Any exact-combat bound
+fallback in either view retains C16. This is a conjunctive partial order, not
+a scalar blend or hand-authored feature.
+
+Use root seed `202607290801` once and the same twelve behavior roots. TC0
+passes only if all eleven RB1 passes remain and the life-20 root now retains
+No Block. In particular, the Next-turn view must support the three nonparent,
+nonfrontier repairs—X=1 self Braingeyser, own-Treefolk Giant Growth, and the
+Blue no-Flying-block prefix—while vetoing the life-20 chump. Ancestral must
+remain the exact Primary saturated-frontier selection.
+
+Require complete finite evidence in both views; reverse-action-key,
+nonvacuous hidden-repartition observation/score/choice/accounting identity in
+both; primary and next-turn candidate/world pairing; selector key identity;
+exact combat with no fallback; maximum nesting one; the existing exact combat
+cardinality/order witnesses; and default-off identity. Focused selector tests
+must cover accept, veto-to-parent, Parent passthrough, SaturatedFrontier
+passthrough, fallback, ragged/nonfinite evidence, and input-order identity.
+
+Any failure rejects TC0 without tuning the one-SE multiplier, either horizon,
+K, frontier, or combat limits on this coordinate. A pass licenses only the
+bounded latency/test ladder and a dated manual web pilot, not a strength
+claim. If rejected, the next permitted step is a separately declared
+descriptive horizon/continuation-policy census, not an H1/H2/H8 sweep on seed
+`202607290801`.
+
+##### AQ6-RB2-TC0 result: reject; H0 veto loses a real repair and Primary is seed-unstable
+
+Run 2026-07-29 after focused selector, exact-combat, and AQ5 protocol tests
+passed and an independent read-only review found no remaining preregistration
+or vacuity defect. `REVIEW.md` was reread through its newest 04:20 PDT cycle
+immediately before and after the run. Exact command:
+
+```sh
+./build/old-school-action-q-recursive-policy-improvement \
+  --run-conservative-rb2-tc0
+```
+
+The frozen C16 fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+root seed was `202607290801`; runtime was approximately 19 seconds. The
+executable returned rejection with `hypothesis_passed=0`. No gameplay,
+bridge, web, artifact, or all-five-deck evaluation seed was opened.
+
+All twelve roots passed complete finite evidence, direct/reversed action-order
+identity, nonvacuous hidden-repartition observation/score/choice/accounting
+identity at both horizons, bit-identical keyed pre-continuation
+settled-boundary and exact-combat evidence across horizons, selector protocol,
+zero bound fallbacks, exact configuration, and maximum nesting one. The final
+TC0 policy passed 8/12 behavior directions and 7/12 conjunctive root gates.
+Primary RB1 itself passed 9/12 behaviors on this new seed, versus 11/12 on
+seed `202607290701`.
+
+The decisive rows were:
+
+- Braingeyser: Primary repaired X=0 opponent to X=1 self, but H0 put the
+  paired one-SE lower bound at `-0.039771`; TC0 vetoed the repair and failed.
+- Ancestral Recall: the unique Primary maximum was Sol Ring at exact `1`;
+  self-target Recall was `.988622`, so the saturated frontier did not exist
+  and RB1 retained opponent-target Recall. This failed before TC0.
+- productive Giant Growth: own Ironroot Treefolk remained a real concordant
+  repair, with H0 lower bound `+0.426118`.
+- payable Force Spike: Primary retained the wrong Force Spike even though the
+  H0 Pass comparison had lower bound `+0.011925`; TC0 deliberately does not
+  search for an alternative after Primary selection.
+- life-20 Flying-Men block: Primary already retained No Block; the chump had
+  Primary/H0 lower bounds `-0.032762/-0.041816`. Behavior was correct, but the
+  preregistered nonvacuous veto witness correctly failed.
+- Blue multi-block: Primary retained the pure Flying-Men chump. The correct
+  no-Flying prefix had Primary/H0 lower bounds `-0.024049/-0.072427`, so both
+  time scales favored the wrong parent.
+
+Decision: **REJECT AQ6-RB2-TC0** and do not deploy it. This is not evidence
+that H0 is generically worse; it is evidence that a conjunction of two noisy
+flat rollout estimates is not a reliable improvement operator. The new seed
+also moved Primary RB1 from its prior 11/12 pattern to 9/12, including
+different combat and Priority failures. Do not tune thresholds, K, horizons,
+or exceptions on this opened coordinate.
+
+##### AQ6-HSCAN0 horizon/continuation census declaration
+
+Declared 2026-07-29 after recording TC0 and before implementing the census or
+opening root seed `202607290901`. C16 remains champion. This is a compact
+descriptive diagnosis, not a challenger, selector screen, gameplay test, or
+strength claim.
+
+Falsifiable diagnostic question: are the remaining errors primarily an outer
+horizon choice, or does one-level actor-local recursive continuation itself
+produce unstable action rankings? Score the unchanged twelve frozen roots on
+the exact Cartesian product:
+
+- outer horizons `{0, 1, 2, 4, 8}`;
+- continuation policies `{FrozenC16, OneLevelRPI}`.
+
+Use one root search seed derived from `202607290901` for every cell belonging
+to a root, so its initial K8 Priority or K2 combat determinized worlds remain
+common. Keep one rollout per world, exact combat, settled-boundary capture,
+zero exploration, the frozen C16 critic, and the RB1 selector unchanged.
+`FrozenC16` sets continuation-search worlds to zero and performs no nested
+actor search. `OneLevelRPI` uses the unchanged one-level all-decision
+continuation. Only the stated horizon and continuation policy may differ.
+
+For each of the 120 root/cell combinations, report selected action, selector
+reason, strategic direction correctness, parent-relative paired
+mean/SE/lower bound, terminal/rollout counts, and inner-search accounting.
+Direction correctness is the existing behavior predicate except that
+Ancestral Recall is correct whenever it targets self; the RB1-specific
+`SaturatedFrontier` witness remains a separately reported mechanism flag and
+must not relabel a correct action ranking as incorrect. Summarize direction
+correctness by horizon, continuation policy, and decision family; per root
+report the number of distinct selected keys and correct/incorrect transitions
+across increasing horizons. Mark every
+OneLevelRPI cell as active only when it records at least one inner-search
+invocation, summarize active cells by horizon and family, and do not interpret
+a FrozenC16/OneLevelRPI agreement at a zero-exposure cell as evidence about
+the continuation policy. A zero-invocation OneLevelRPI cell must be full
+sampler-evidence and keyed-selection bit-identical to FrozenC16 at the same
+root and horizon or the census is invariant-void. Capture the untreated C16
+parent once before scoring. Require complete finite evidence, the exact
+K/R/configuration,
+common keyed candidate/sample shapes, no combat bound fallback, and nesting
+zero for FrozenC16 versus at most one and nonvacuous somewhere for
+OneLevelRPI.
+
+This opened-seed census cannot nominate or promote a bot. If one continuation
+policy shows a stable correct plateau across adjacent horizons, that pattern
+may justify a separately preregistered fresh-seed gate. If rankings remain
+nonmonotonic, no common plateau covers the strategic directions, or
+OneLevelRPI repeatedly loses directions FrozenC16 gets right, close the flat
+horizon-tuning axis and preregister a re-determinizing information-set tree
+search rather than shopping a favorable H value. Run the census once; any
+implementation or invariant failure voids it before interpretation.
+
+##### AQ6-HSCAN0 result: valid census closes flat horizon tuning
+
+Run 2026-07-29 after focused tests and an independent pre-seed review closed
+configuration, common-world, zero-exposure, and correctness-label vacuity
+findings. `REVIEW.md` was reread through its newest 04:20 PDT cycle
+immediately before and after the run. Exact command:
+
+```sh
+./build/old-school-action-q-recursive-policy-improvement \
+  --run-horizon-census
+```
+
+The frozen C16 fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+root seed was `202607290901`; runtime was approximately 11 seconds. The
+executable reported `DIAGNOSTIC_ONLY` with `invariant_gate=PASS`: exactly 12
+parent captures and 120 declared cells, complete finite evidence, exact
+configuration, common keyed pre-continuation evidence, zero combat fallback,
+FrozenC16 nesting zero, OneLevelRPI nesting bounded and nonvacuous, 57/60
+OneLevelRPI cells active, and all three zero-exposure cells full-evidence and
+selection-identical to FrozenC16. No gameplay, bridge, web, artifact, or
+all-five-deck evaluation seed was opened.
+
+Strategic direction counts were:
+
+| Continuation | H0 | H1 | H2 | H4 | H8 |
+|---|---:|---:|---:|---:|---:|
+| FrozenC16 | 8/12 | 8/12 | 8/12 | 8/12 | 8/12 |
+| OneLevelRPI | 7/12 | 8/12 | 9/12 | 8/12 | 10/12 |
+
+The flat aggregate for FrozenC16 concealed changing errors. Redundant
+Counterspell flipped from correct at H0/H1 to wrong at H2/H4/H8; payable
+Force Spike was correct only at H4; and the Blue multi-block root alternated
+wrong/wrong/correct/wrong/correct over H0/H1/H2/H4/H8. FrozenC16 never fixed
+Braingeyser or summoning-sick Growth.
+
+OneLevelRPI likewise had no common plateau. H2 repaired redundant Counter,
+summoning-sick Growth, and all three block roots, but still missed
+Braingeyser, Ancestral Recall, and payable Force Spike. H8 repaired
+Braingeyser, Ancestral, sick Growth, and payable Force Spike for a best
+10/12, but regressed the redundant Counter root and the Blue multi-block root.
+Ancestral itself followed three different wrong choices before becoming
+correct only at H8. The productive Growth, live Force Spike, life-sensitive
+single blocker directions, and no-Flying attack were stable controls.
+
+Decision: the census is valid, but **close the flat horizon-tuning axis**.
+There is no adjacent-horizon stable plateau covering the strategic
+directions, and OneLevelRPI repeatedly loses directions that FrozenC16 gets
+right. H8 is not a deployable candidate merely because it has the largest
+opened-seed count: it reproduces the owner's duplicate-Counter failure and
+the bad Blue chump block. Proceed to a separately declared
+re-determinizing information-set tree search.
+
+##### AQ7-ISP0 re-determinizing information-set PUCT declaration
+
+Declared 2026-07-29 after recording HSCAN0 and before implementing the tree,
+adding a generative decision transition, or opening root seed
+`202607291001`. C16 remains champion. This is the first actual multi-ply tree
+search candidate; it is not a renamed flat rollout, card exception, combat
+score, or hidden-state determinization policy.
+
+Falsifiable hypothesis: sharing visits and values across a bounded
+root-observer information-set tree of that player's successive decisions,
+while rolling intervening opponent choices with frozen hidden-safe C16, will
+recover all twelve strategic directions that no flat horizon covers. It
+should stop redundant Counterspells because the same future stack state is
+revisited, choose productive draw/target/X actions from their successors, and
+preserve life-sensitive combat through authoritative rules
+transitions—without naming any card in the policy.
+
+Add one evaluation-only generative position API for Priority, sequential
+attacker, and sequential blocker decisions. A position contains a sampled
+root-information-set truth particle plus a public decision context; legal
+root actions are canonical stable keys over engine-authoritative Priority
+actions, Skip/Include for the next attacker, or No Block/legal attacker for
+the next blocker. Applying one root action must use production legality and
+advance through forced rules and every intervening opponent decision until
+the next nontrivial decision of the same root observer. Forced singleton
+Priority actions may advance automatically. Completed combat uses the exact
+defender-block/attacker-damage-order transition and the existing fail-closed
+combat bounds. Cleanup and other decisions outside this first tree remain
+frozen C16. A depth or node leaf must complete any partial combat legally
+before critic evaluation; never score a raw attack/block prefix the critic
+does not encode.
+
+Each of 64 simulations begins from a truth particle sampled from the real root
+actor's information set. The shared root key is built before sampled hidden
+identities can enter it, and every shared PUCT node belongs to that same root
+observer. At an intervening opponent decision, create a temporary
+actor-local re-determinization that preserves the opponent's own sampled hand
+and every public field while repartitioning information hidden from it. Use
+frozen production C16 once to select an action from that local view. Priority
+uses the deployed ValueSearchChampion `K=2`, `H=4`, `R=1` common-world search
+with its historical shallow blend and every research treatment zero. Attack
+uses the production C16 full attack-candidate generator/scorer; Block uses its
+full block-candidate scorer and attacker damage-order procedure. Every
+opponent decision receives a deterministic seed domain-separated by ISP0
+simulation index and opponent-decision ordinal, independent of candidate
+identity and hidden card identity; its tie stream is derived separately from
+that decision seed. Require the stable action to be legal in both local view
+and simulation truth, apply only its public declaration/consequence to the
+truth particle, and continue without creating or updating an opponent PUCT
+node. Thus opponent selection never uses a Q estimate conditioned on the root
+actor's private cards, while the returned root value may correctly depend on
+the root actor's own information. At real gameplay each seat independently
+roots the same procedure, so the policy remains symmetric. Simulation truth
+alone supplies future draws and library order.
+
+This root-observer restriction is deliberate. Merely hiding fields from an
+all-actor tree's key, prior, or critic would be insufficient: an opponent edge
+whose backed return is repeatedly computed on the root actor's real hand can
+learn a best response to hidden cards through Q updates. ISP0 does not create
+such shared opponent edges. A later full re-determinizing all-actor tree would
+need an explicit per-player belief transition and is outside this coordinate.
+
+The information-set key is an exact canonical serialization, not a
+neural-feature hash: it includes root actor and decision kind; active player, turn,
+phase, priority/pass/sorcery state, extra-turn and failed-draw state; both life
+totals, mana pools, land-played flags, hand and library sizes; every
+public-zone card's identity, stable ID, controller,
+tapped/summoning-sick/damage state and other rules-relevant properties; the
+ordered stack with spell IDs, controllers, targets, and X; the root actor's
+own hand; and the exact attack/block prefix, cursor, and legal-action
+signature. It excludes the opposing hand identities and both library
+identities/orders, and excludes gameplay telemetry such as decision and
+Monte-Carlo-rollout counters because those are neither rules state nor player
+observation. Reusing one key with a different actor or legal signature is a
+hard collision failure.
+
+Use fixed bounds: 64 simulations, eight searched decision plies, one thread,
+at most 513 nodes and 512 expanded edges, the existing 4,096-action,
+1,024-phase, 64-turn macro bounds, and the existing exact-combat limits.
+For each legal action, rules-resolve its immediate successor and obtain frozen
+C16 value `v_a` from that action's actor perspective (or the exact terminal
+value). Freeze the prior as
+`w_a = 1e-6 + exp(v_a - max_b(v_b))`, normalized over all legal actions;
+every weight and probability must be finite and strictly positive. C16
+contextual value is first-play urgency and the leaf value. Selection is fixed
+PUCT with `c_puct=1.0`, viewed from the node actor. Backup must not negate by
+ply, because one player can make consecutive decisions: convert every leaf or
+terminal result once to an absolute player-zero scalar, and at each node store
+and select edge Q from that node actor's perspective (`p0` for actor zero and
+`1-p0` for actor one). Terminal backup is exact `0/.5/1`. Root choice is
+largest visit count, then actor value, then a domain-separated stable-key tie.
+No Dirichlet noise, exploration epsilon, Handcoded data, or card-specific
+feature is permitted.
+
+After implementation-only tests and independent review pass, run exactly:
+
+```sh
+./build/old-school-information-set-puct-preflight --run-isp0
+```
+
+Use the unchanged twelve AQ5 roots and seed `202607291001` once. ISP0 passes
+only if all twelve strategic directions pass conjunctively: redundant
+Counter Pass; a legal one-Counter completion after an intervening Counter and
+never countering own Counter; X=1 self Braingeyser; self Ancestral Recall;
+Pass for summoning-sick Growth; own-Treefolk productive Growth; live Force
+Spike; Pass for payable Force Spike; No Block at life 20; the Flying-Men block
+at life four; no Flying-Men attack into Air Elemental; and no completed pure
+Flying-Men chump in the Blue multi-block root.
+
+The intervening-Counter direction additionally requires a completed
+principal-variation witness, not only a permissive root predicate: the
+variation must contain exactly the one legal Counter needed against the
+opposing spell after the intervening Counter, contain zero actions that target
+the actor's own Counter, and reach a settled stack outcome. Both Counter
+roots must expose a shared successor node beyond the root and maximum searched
+depth at least two, so a prior-only or broken transition tree cannot pass. The Blue
+multi-block direction likewise requires a completed exact-combat witness with
+the chosen block assignment and attacker damage order; an empty or truncated
+combat trace cannot pass, and every combat family gate requires a nonzero
+exact-combat completion count. If a depth or node bound is reached inside combat,
+the exact subgame must preserve the already fixed attack/block prefix and
+optimize only the remaining legal decisions before evaluation.
+
+Require finite positive priors summing to one, complete legal coverage,
+exactly 64 completed root simulations and exactly 64 summed root-edge visits,
+bounded node/edge/depth/macro accounting, no
+combat fallback, deterministic replay, and stable-key identity under reversed
+root input. A nonvacuous hidden-repartition clone must be bit-identical in
+root information-set key, priors, visits, actor-Q values, choice, and
+accounting, and the complete principal variation/tree evidence used by every
+strategic gate. An additional nonvacuous opponent-rollout noninterference
+control must hold: at the same opponent decision with identical public state,
+opponent observation, and actor-local random stream, two carrier truths
+differing only in the root actor's private hand/library must produce
+bit-identical opponent legal signature, C16 scores, selected stable action,
+and local accounting; the evidence must also prove that no shared PUCT node or
+Q update was created for that opponent choice. Separately prove actor
+own-hand preservation, public-state
+preservation and truth immutability during re-determinization, legal-signature
+identity, and default-off fixed-game identity. Any collision between one node
+key and two legal signatures, bound exhaustion, nonfinite value, or hidden
+identity dependency rejects the candidate.
+
+Any strategic or invariant failure rejects ISP0 without tuning simulations,
+depth, PUCT constant, prior temperature, leaf value, or tie policy on this
+seed. A pass licenses only the latency/test ladder and a dated manual web
+pilot, not an all-five-deck strength claim or champion replacement.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
