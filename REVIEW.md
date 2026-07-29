@@ -8,7 +8,26 @@ binary, never from extrapolation.
 
 ## Status at a glance
 
-*Updated 2026-07-27 13:16 PDT — refreshed every review cycle.*
+*Updated 2026-07-28 03:14 PDT — refreshed every review cycle.*
+
+- **FQ4-D1 HELD-OUT TREATMENT: PASS (the program's first
+  field-validated repair). The D0b Priority-head candidate
+  (81ad05d2…, only Priority changed, all other components
+  bit-identical to C16) repaired 23/27 held-out high-confidence
+  Pass-dominance errors in 21 distinct games across four decks
+  (gate floor: 5/5/2), kept all 81 parent-Safe roots Safe, regressed
+  ZERO roots, and collapsed pooled unsafe from 33 to 6. Preceded the
+  same night by: registered FQ0-T0 composite REJECT whose collision
+  layer was proven a measurement artifact (FR1-FR3 causal quotient)
+  and whose primary Bellman operator PASSED; the blind P0b parent
+  census on held-out fields 790/791; and the two-tier evidence
+  policy cutting iteration from hours to minutes. NEXT: FQ4-DEV0
+  fast loop, then a fresh all-five-deck gameplay screen. C16 remains
+  champion until the full AGENTS.md definition is met. GP0 UPDATE
+  (07-28 06:56): the first gameplay smoke REJECTED the DEV1
+  candidate at 37.5% vs its parent (Green 10-38; runtime 1.63x) —
+  an update-surface coverage failure, not a mislabeling; offline
+  mechanism measurement precedes any refit. The ladder worked.**
 
 - **OC1 REJECTED AT LADDER STAGE 1 (AR1): REJECT/INCONCLUSIVE,
   reproduced by the reviewer (identical verdict and every
@@ -256,6 +275,1794 @@ obey blindly; if you disagree, say why in EXPERIMENTS.md rather than silently
 ignoring the entry.
 
 ---
+
+## 2026-07-28 17:21 PDT (verification addendum: through 831c741 green cross-tree)
+
+**Both commits verified GREEN (full repository gate OK). All
+reviewer obligations current; the alpha-0.75 selector is the next
+number.**
+
+## 2026-07-28 17:14 PDT (review cycle — the boundary ladder self-corrects; alpha-0.75 is the final scalar)
+
+**Three dispositions countersigned. EXPLORE-9: the full resolved
+prior rejected at 45.0% (27-33) — the target repair is real but
+wholesale boundary replacement surrenders too much sequencing
+calibration; an honest negative that teaches the blend. EXPLORE-10:
+the engineering gate caught the declaration's own arithmetic error
+(it mixed 64-world resolved means with deployed-K8 unresolved
+sample means; on matching coordinates alpha-0.50 does not flip the
+root) and stopped BEFORE opening its seed — this is what
+engineering gates are for, and the recomputed exact thresholds
+(>0.5158 self-over-opponent, >0.6334 self-over-Pass) turn the next
+choice into derivation rather than tuning. EXPLORE-11: alpha-0.75,
+the smallest quarter-grid value above both thresholds, declared as
+THE one final scalar coordinate with preregistered interpolated
+aggregates — a bounded family with a principled endpoint, not a
+sweep.** Cross-tree verification of both commits is running; the
+alpha-0.75 selector on seed 202607281731 is the next number. C16
+champion; the mechanism's fate rides on whether 25% of the old
+boundary's calibration is enough to keep the sequencing while the
+resolved 75% fixes the targets.
+
+## 2026-07-28 16:59 PDT (review cycle)
+
+**EXPLORE-8's implementation reached its qualification facts — the
+64-world settled means reproduce exactly, the treatment no longer
+selects Ancestral-at-opponent on the complete legal root, self
+strictly beats opponent, and no action identity is named — and the
+declared successor (fresh seed, unchanged implementation and
+isolation gates) corrects only an over-specific engineering
+qualification rather than weakening anything scientific. The
+honest pattern holds: when a declared gate mismatches reality on a
+technicality, redeclare on fresh coordinates instead of
+reinterpreting.** Implementation continues in the working tree
+toward the 60-game selector. Lift table unchanged; no regen; C16
+champion.
+
+## 2026-07-28 16:49 PDT (verification addendum: through 665f178 green cross-tree)
+
+**All three commits verified GREEN (full repository gate OK). All
+reviewer obligations current; EXPLORE-8's engineering gates and its
+60-game selector are the next events.**
+
+## 2026-07-28 16:44 PDT (review cycle — EXPLORE-7 is the program's sharpest diagnosis; EXPLORE-8 endorsed with convergent evidence)
+
+**EXPLORE-7 countersigned, and its table deserves framing as the
+finding of the week: on the exact captured Ancestral root, every
+width (K8-K256) and every horizon (H0-H20) selects opponent-target
+because all branches' continuations saturate at 1 — no amount of
+search adds foresight when everything wins — while the SAME frozen
+critic, asked about the RESOLVED states, orders them correctly:
+self-draw .912 > Pass .889 > opponent-draw .872. The defect is not
+capacity, not features, not the critic: it is the OBSERVATION
+BOUNDARY. The deployed shallow prior scores spells while they sit
+unresolved on the stack, where giving the opponent three cards is
+not yet visible. EXPLORE-8's treatment — settle the shallow
+observation through resolution before evaluating, changing nothing
+else — is the right general fix, and superseding my 16:29 Pareto
+endorsement with it is correct: repair where the prior meets the
+rules, not with an asserted resource order.**
+
+Convergent independent evidence for the record, from this log's own
+research thread (worktree branch claude/sb1, notebook entries
+2026-07-27 15:44-15:52): the SB0 diagnostic measured the same
+mechanism at scale — across 159 harvested dominated-pick roots, the
+frozen critic at settled boundaries NEVER confidently endorsed a
+dominated action (0/159 wrong-way), strictly corrected 41%, and
+the SB1-Q design proposed exactly this forced-pass settlement as
+the honest evaluation boundary. Two instruments, built
+independently a day apart, one conclusion: C16 already knows; it
+just looks too early. EXPLORE-8's prior for success is accordingly
+strong, its engineering gates (bit-identity off, captured-root
+flip, hidden invariance, counter-war preservation) are the right
+ones, and its 60-game selector on seed 202607281702 is the next
+number. Cross-tree verification of the three commits is running.
+
+## 2026-07-28 16:29 PDT (review cycle — triple composition 36-24; deployment held on the owner's second catch)
+
+**EXPLORE-6 countersigned: the triple composition
+(alpha-0.50 + AdversarialBlocks + PD0) read 36-24 (60%) against
+C16 — the best aggregate any candidate has posted — with GREEN
+POSITIVE at 8-4 for the first time in the repair family's history,
+Blue 10-2, and a strict win over its same-seed comparator. The
+pilot-selection gate passes. And holding deployment anyway is
+EXACTLY right, because the owner's second field catch is the
+controlling evidence: the live PD0 pilot cast Ancestral Recall
+targeting the human. The card-agnostic root cause is precise —
+PD0's dominance requires EQUAL opponent resources, so any action
+that benefits the opponent changes the observation and is
+conservatively retained — and the record should note the
+symmetry: the registered FQ0 audit's frozen failures included
+exactly this class (Pass minus Braingeyser-X=0-at-opponent read
+NEGATIVE on registered coordinates). The meter predicted it; the
+owner felt it; the mechanism now gets its general fix.**
+
+The declared Pareto generalization (Pass dominates when the actor
+is no worse, the opponent is no better, and one relation is strict
+— tested without naming any card, preserving self-draw and
+counter-war responses) is the right shape. Two watch items carried
+forward: RU Aggro's 3-9 row in the winning screen is the next deck
+to watch descriptively, and the 60-game screens remain selectors,
+not strength claims — the powered gate still waits for a candidate
+that survives the owner's table. Priorities for Codex: Pareto-PD0
+-> fresh rapid screen -> recompose with the 36-24 candidate ->
+owner play-test; C16 remains champion.
+
+## 2026-07-28 16:19 PDT (verification addendum: through 7156837 green cross-tree)
+
+**Both commits verified GREEN (full repository gate OK). All
+reviewer obligations current; EXPLORE-6's triple-composition
+verdict is the next number.**
+
+## 2026-07-28 16:14 PDT (review cycle — EXPLORE-5's one-game miss handled right; EXPLORE-6 is the composition)
+
+**EXPLORE-5 countersigned on both halves of its disposition: the
+performance-advance gate failed by one game (30-30 vs 31-29) and
+was neither tuned around nor spun as a regression — the screen
+cannot resolve one game and the record says so. The response
+threads the needle correctly: the PD0 composition ships as an
+explicitly NON-ADVANCING behavior-diagnostic pilot with its failed
+gate printed in the UI, because the owner asked to verify the
+double-counter fix by play, while the attack-only pilot stays
+separately selectable. Transparent, unspun, and exactly what
+owner-in-the-loop iteration should look like.**
+
+EXPLORE-6 is ENDORSED as the right final composition test — the
+alpha-0.50 Priority blend (Blue's axis, E0's best aggregate at
+34-26) + AdversarialBlocks (Green/White's axis) + PD0 (the
+deterministic stack repair), against the same without PD0, both
+against ordinary C16 — the three verified repairs meeting in one
+bot for the first time, on a fresh seed with a short-circuit gate.
+If the full stack holds its traction, the owner gets the most
+complete pilot yet; either way the composition question this log
+flagged at 15:59 gets its measured answer. Cross-tree verification
+of both commits is running; counts next entry.
+
+## 2026-07-28 16:04 PDT (verification addendum: through d520ce2 green cross-tree)
+
+**Both commits verified GREEN (full repository gate OK). All
+reviewer obligations current; EXPLORE-5's single-screen verdict and
+the PD0-composed pilot are the next events.**
+
+## 2026-07-28 15:59 PDT (review cycle — the owner's play-test is steering; EXPLORE-5 declared)
+
+**Three things countersigned. (1) EXPLORE-4's disposition is
+handled correctly: E0's 34-26 (56.7%) licensed E1, E1 ran 50
+minutes without emitting a result, and the operational abandonment
+voids the opened seed honestly — no inference, no reuse, explicitly
+not a scientific rejection. (2) The owner's field report — the live
+pilot casting a second Counterspell at an already-countered spell —
+was matched to the EXISTING
+control.blue.counter-redundant-same-target.v1 fixture, which is
+also exactly the redundant-counter class dominated-witness-v1
+mapped in real games: the human play-test found in minutes what the
+instruments predicted, and the feedback loop the owner asked for is
+now demonstrably working end to end. (3) EXPLORE-5 is the right
+response: Pass dominance already deterministically filters the
+reported failure (with counter-war regressions proving it retains
+responses when the opponent intervenes), so composing it with the
+attack repair and screening once for strength preservation — tie
+favoring the deterministic fix — is the fastest honest path to a
+better pilot for the owner's table.**
+
+One note for the family ledger: E0's 56.7% for
+alpha-0.50+AdversarialBlocks is the best descriptive aggregate any
+candidate has posted; the composition question deserves a
+properly-budgeted revisit (fewer games or a faster combat path)
+once the pilot cadence allows. Cross-tree verification of both
+commits is running; counts next entry. C16 champion; the pilot
+iterates.
+
+## 2026-07-28 15:44 PDT (review cycle)
+
+**EXPLORE-4 continues (~154 CPU-minutes); no new commits, no
+result, lift table unchanged, no regen. Hands off.**
+
+## 2026-07-28 15:29 PDT (review cycle)
+
+**The EXPLORE-4 composition run continues (~139 CPU-minutes — both
+seats carrying adversarial block enumeration roughly doubles the
+combat work, so the longer ladder is expected). No new commits; no
+result yet; lift table unchanged; no regen. Hands off.**
+
+## 2026-07-28 15:21 PDT (verification addendum: composition commits green cross-tree)
+
+**Both composition commits verified GREEN (full repository gate
+OK). All reviewer obligations current; the composition run
+continues and its verdict is the next number.**
+
+## 2026-07-28 15:14 PDT (review cycle)
+
+**The composition screen is committed (9f58913 preregistration,
+feedbdc runner mode) and EXECUTING — observed at ~76 CPU-minutes,
+consistent with the E0/E1 ladder underway. Cross-tree verification
+of both commits is running; the composition verdict (does the
+card-discipline blend add wins on top of the attack fix?) is the
+next entry's number.** Lift table unchanged; C16 champion; the
+attack-only pilot remains live in the web client for the owner's
+play-test meanwhile.
+
+## 2026-07-28 15:04 PDT (verification addendum: web exposure green cross-tree)
+
+**The web-exposure batch verified GREEN (full repository gate OK,
+web bridge suite passing). All reviewer obligations current; the
+pilot is confirmed deployable from both trees, the composition
+ladder is next to execute, and the owner's play-test verdict is the
+program's gating input.**
+
+## 2026-07-28 14:59 PDT (review cycle — pilot live; composition test declared)
+
+**6d881b5 exposes the AdversarialBlocks pilot in the web client —
+the owner's strategic play-test is READY (make web, select the
+dated pilot opponent, watch its attacks and blocks). The
+composition ladder is also declared with exactly the right
+pairing: alpha-0.50 Priority blend + attack fix VERSUS C16 + attack
+fix, so the comparison isolates what the Priority delta adds ON TOP
+of the deployed attack repair, on fresh seeds with strict
+more-wins-than-losses advancement and no framework-building. If it
+advances, it becomes a second named web pilot rather than silently
+replacing the first — the owner gets to feel both.** Cross-tree
+verification including the web suite is running; counts next entry.
+C16 remains champion; the 2,040-game gate correctly waits on human
+judgment.
+
+## 2026-07-28 14:50 PDT (review cycle — EXPLORE-3 TRACTION: first candidate past 50%)
+
+**EXPLORE-3 is countersigned, and it is the afternoon's headline:
+C16+AdversarialBlocks read 127-113 (52.92%, clustered interval
+49.2%-56.6%) — the first candidate in program history to clear the
+traction bar — with the deck profile the composition thesis hoped
+for arriving from the attack axis ALONE: Red 27-21, Blue 27-21,
+White 27-21, Green nearly level at 23-25 where every Priority-family
+candidate collapsed to 16-32-class rows. Worst-case block-response
+scoring fixes the cooperative-block delusion without touching a
+single model weight. The post-run diligence also deserves record:
+seven historical exact-config guards were found missing the new
+field, verified non-load-bearing for this result, and repaired
+mechanically with suites green — plus the honest TODO that the
+generic search API cannot yet request the treatment.**
+
+Endorsed next step exactly as decided: the dated pilot goes to the
+web client for the OWNER'S strategic play-test — watch the attacks
+and the chump blocks — and the 2,040-game certification waits on
+that human verdict. Two follow-ups queued for after the play-test,
+in preference order from the evidence: (1) the untested E1
+composition (alpha-0.50 Priority + AdversarialBlocks — E0 tied and
+simplicity advanced the pure variant, so the composition's 240-game
+read remains unknown; Blue's ceiling may stack with Green's
+repair); (2) the declared trunk-vs-head Priority refit if behavior
+still disappoints. This is not a strength certification and C16
+remains champion — but for the first time, the champion is losing
+the descriptive aggregate to something.
+
+## 2026-07-28 14:44 PDT (review cycle)
+
+**EXPLORE-3's implementation is committed (87146ff,
+defender-best-response attack scoring with tests) and its
+exploration run is EXECUTING — observed live at ~21 CPU-minutes,
+consistent with the E0/E1 ladder playing out. Cross-tree
+verification of the commit is running; the minimax-attack numbers
+and the Green rows they produce are the next entry's business.**
+Lift table unchanged pending the build-graph read; C16 champion.
+
+## 2026-07-28 14:34 PDT (verification addendum: through 61794f0 green cross-tree)
+
+**Both exploration commits verified GREEN (blend-explore tests
+included, full repository gate OK). All reviewer obligations
+current; EXPLORE-3's minimax-attack screens are the next numbers.**
+
+## 2026-07-28 14:29 PDT (review cycle — three explorations in ninety minutes; Green is the frontier)
+
+**EXPLORE-1 and EXPLORE-2 are countersigned with their honest
+stops: alpha 0.50 converted full DEV5's regression to EXACT
+aggregate parity (120-120, Red 29-19, Blue 30-18) but did not
+exceed 50%, so per the frozen rule it was not deployed and the
+family closed; C16+PD0 read 48.3% and stopped without tuning. The
+mid-run label-bug handling (review caught an ambiguous plan line,
+source verified the actual configuration was correct, display
+fixed, result stands) is exactly how a display defect should die.
+EXPLORE-3's minimax block-response attack scoring is ENDORSED — the
+averaging-over-absurd-blocks critique is mechanistically real.**
+
+The pattern across every candidate this afternoon deserves naming,
+because it is now the program's sharpest empirical fact: THE
+REPAIR FAMILY RELIABLY BUYS BLUE AT GREEN'S EXPENSE. Blue rows:
+30-18, 28-20, 32-16, 9-3, 10-2 across candidates; Green rows:
+17-31, 19-29, 16-32, 2-10, 3-9. The spend-discipline direction is
+consistently right for the counter-war deck and consistently wrong
+for the creature-combat deck — plausibly because holding spells is
+good when they are counters and bad when they are Bears. That makes
+EXPLORE-3 well-aimed: attack quality is where Green lives, and it
+is untouched by the Priority delta. A composition of minimax
+attacks (Green's axis) with the alpha-0.50 Priority (Blue's axis)
+is the obvious eventual test if EXPLORE-3 shows traction alone.
+
+Cross-tree verification of both commits is running; counts next
+entry. The exploration loop is doing precisely what the owner
+asked: three genuine policy interventions tested in the time the
+old process spent on one census.
+
+## 2026-07-28 14:21 PDT (verification addendum: through 00dc875 green cross-tree)
+
+**Both commits verified GREEN (notebook batch, full repository gate
+OK). All reviewer obligations current; the E0 alpha screen on seed
+202607280801 is the next event and its four-point curve the next
+numbers.**
+
+## 2026-07-28 14:14 PDT (review cycle — EXPLORE-1: the right response to the directive)
+
+**EXPLORE-1 is ENDORSED without reservation — this is exactly what
+the owner's strength-first directive asked for: four in-memory
+interpolation candidates (C16 + alpha * (DEV5 - C16), Priority
+only), a 60-game coarse screen and 240-game runoff on fresh seeds,
+runtime reported but never rejecting, WORK0 paused off the critical
+path, and — the best clause — a >50% winner goes to the web client
+for the owner's own strategic play-test, which is the 'does it seem
+to be learning' judgment this project was chartered on. The
+exploratory hypothesis is also genuinely plausible: partial deltas
+may keep the trained repairs with less out-of-distribution drift,
+and — worth noting descriptively — smaller alpha should also
+partially mitigate the width-driven slowdown, since less
+hold-priority drift means narrower later decisions. The honest
+scoping (coarse search, not strength claims; stop-and-pivot if
+nothing clears 50%) keeps the epistemics intact at exploration
+speed.** The candidate accounting in the declaration matches this
+log's own tally. Cross-tree verification of both commits is
+running; counts next entry.
+
+Priorities for Codex: run the ladder; report the alpha curve; if a
+winner emerges, wire the play-test and tell the owner it's ready.
+
+## 2026-07-28 14:04 PDT (USER DIRECTIVE — runtime is no longer a rejection gate)
+
+**Direct instruction from the project owner, relayed verbatim in
+substance: DO NOT REJECT CANDIDATES FOR BEING SLOWER. Strength
+comes first; runtime is descriptive evidence, not a stop.**
+
+What this changes, effective immediately:
+
+1. The anchored candidate `22834a95…b2171` is REINSTATED as the
+   live challenger. Its GP0 smoke record stands as written (the
+   frozen gates said what they said, and the record is honest), but
+   per user authority the runtime clause no longer terminates the
+   candidate. Its strength clause PASSED: 46.7% (Wilson
+   40.5%-53.0%) with Blue 31-17. The candidate proceeds.
+2. The next licensed step is the powered strength comparison:
+   preregister the 2,040-game anchored-vs-C16 gate on a fresh,
+   never-used seed, with wall time, decisions, and rollouts
+   RECORDED DESCRIPTIVELY in full — the cost data stays honest, it
+   just does not gate. If that reads a win, the Handcrafted
+   comparison and the full AGENTS.md definition follow.
+3. WORK0 continues IN PARALLEL as the width-economy program — it is
+   good work and the deployment cost is worth understanding and
+   eventually reducing — but it is no longer on the critical path
+   and must not block the strength gate.
+4. Future gameplay declarations should carry runtime as a reported
+   field with no rejection threshold, unless and until the user
+   reinstates one.
+
+Nothing else changes: seed discipline, preregistration,
+no-tuning-on-open-coordinates, the honest-negative rule, and the
+full strength definition (aggregate + per-deck + confidence + lift
+gates) all stand exactly as before. C16 remains champion until
+beaten under that definition — but its challenger is back on the
+board, and the question in front of the program is again the one
+the project exists to answer: does the bot that learned not to
+waste its cards actually win?
+
+## 2026-07-28 13:59 PDT (review cycle)
+
+**f7d1af4 lands the privacy-safe WORK0 cache seam; census
+implementation continues toward the frozen 512-root measurement.
+Cross-tree verification is running (lift regen will follow if the
+seam touched simulator sources); counts next entry.** C16 champion;
+seeds sealed.
+
+## 2026-07-28 13:44 PDT (review cycle)
+
+**No change: WORK0 census implementation continues uncommitted, no
+census process running.** Lift table unchanged; no regen. Standing
+by.
+
+## 2026-07-28 13:29 PDT (review cycle)
+
+**No committed change since 27e271b (verified green with
+bit-identical lift at 13:22); the WORK0 census implementation
+continues in the working tree.** No regen needed. Standing by for
+the census freeze and execution.
+
+## 2026-07-28 13:22 PDT (verification addendum: through 27e271b green; seed-domain refactor bit-preserving)
+
+**Both commits verified GREEN after a merge-conflict resolution
+(main's new seed-domain helpers reconciled with this tree's
+function block), full repository gate OK — and the check that
+mattered: the lift table regenerated BIT-IDENTICAL on the rebuilt
+simulator. The seed-domain extraction provably preserves the
+champion's exact search-seed derivations — 130th consecutive
+stable reading, and precisely the class of refactor the bit-identity
+watch exists to certify. All reviewer obligations current; the
+WORK0 census implementation continues.**
+
+## 2026-07-28 13:14 PDT (review cycle)
+
+**Two commits landed: the WORK0 preregistration (26ccdde) and a
+shared Learned-search seed-domain extraction (27e271b) supporting
+its common-world pairing. Implementation of the census stage
+continues. Cross-tree verification of both is running; counts next
+entry.** Lift table: pending the build-graph read (the seed-domain
+refactor may touch shared search sources — the regen will run if
+the simulator relinks). C16 champion; seeds sealed.
+
+## 2026-07-28 12:59 PDT (review cycle)
+
+**WORK0 is ENDORSED as declared — the width investigation done
+right: (1) an offline parent census of immutable work facts with no
+directional hypothesis (512 roots / 2,018 options, hard coverage
+and invariance gates); (2) a paired successor-sensitive comparison
+through macro-transitions and H4 internals, with shared-root
+options/worlds/evaluations as EXACT-EQUALITY negative controls so
+no spurious current-root-cost claim can slip through; (3) the
+confirmatory replay of the open coordinate, void unless it
+reproduces every outcome row and work count exactly — and the
+declaration's best line for the record: instrumented wall time is
+never evidence. The proxy-validity requirement (WORK0 must model
+the field cost or it cannot license a treatment) prevents the
+classic mistake of treating an unvalidated mechanism.** Census
+execution appears underway. Lift table unchanged; no regen; C16
+champion; seeds sealed.
+
+## 2026-07-28 12:49 PDT (verification addendum: smoke commits green cross-tree)
+
+**Both smoke commits verified GREEN (gameplay harness 9/9, full
+repository gate OK after a clean merge). All reviewer obligations
+current; the instrumentation-only replay of the open coordinate is
+the next event, and its exact-reproduction requirement is the gate
+I will countersign against.**
+
+## 2026-07-28 12:44 PDT (review cycle — anchored smoke: REJECT on runtime; strength floor PASSED)
+
+**The rejection is countersigned as preregistered — the 1.25x
+runtime gate is hard, the measured 1.800 ratio fails it, and
+refusing to reinterpret is correct (also correctly flagged: the
+printed runtime_ratio=0 boolean is a display bug; the numeric ratio
+controls). But the record should be read with both eyes: candidate
+two PASSED the 40% strength floor at 46.7% (Wilson 40.5%-53.0%,
+crossing 50%) where candidate one read 37.5%, and the descriptive
+Blue row — the deck whose deficit launched this entire program —
+reads 31-17 FOR the anchored candidate, its strongest Blue result
+on any candidate. Green (17-31) and White (21-27) remain adverse
+descriptively. The anchoring did its job: no large regression, and
+the trained repairs visibly bite where they trained.**
+
+The runtime decomposition deserves its own sentence, because it
+reframes the failure as a discovered trade-off rather than a bug:
+searched legal actions per decision rose 3.035 -> 3.484, decisions
+1.40x, rollouts 1.60x — the candidate HOLDS cards, and held cards
+widen every later decision's action space at fixed K8. The policy
+pays search cost for its discipline. That makes the declared
+instrumentation-only replay (same coordinate, excluded from
+evidence, must reproduce both outcome rows and work counts exactly
+before its partitions are valid) exactly the right next step —
+measure WHERE the width lives (deck/phase/stack/Pass-vs-cast)
+before any treatment. The successor-sensitive offline alternative
+is also correctly scoped.
+
+For the eventual treatment space, one note from the deployment
+side: the 1.25x gate protects a real constraint, but width-driven
+cost scales with legal-action count by construction — candidate
+axes when measurement licenses them include width-normalized
+sampling budgets (fixed rollouts per decision rather than per
+action) or width-capped candidate enumeration, both card-agnostic
+and both testable on the dev loop before any seed. Cross-tree
+verification of both commits is running; counts next entry. C16
+remains champion; no 2,040-game seed was opened — correctly.
+
+## 2026-07-28 12:29 PDT (review cycle)
+
+**No change: sixth quiet cycle. The Codex process is alive but the
+tree, notebook, and process list are static — consumer commit still
+pending.** Lift table unchanged; no regen. Standing by.
+
+## 2026-07-28 12:14 PDT (review cycle)
+
+**No change: fifth quiet cycle, working session still idle.** Lift
+table unchanged; no regen. Standing by.
+
+## 2026-07-28 11:59 PDT (review cycle)
+
+**No change: fourth quiet cycle — consumer uncommitted, notebook
+static, no processes. The working session appears idle rather than
+mid-edit.** Lift table unchanged; no regen. The reviewer's full
+chain remains verified and the smoke path remains one commit +
+countersign away whenever work resumes.
+
+## 2026-07-28 11:44 PDT (review cycle)
+
+**No change: consumer commit still pending, notebook untouched
+since the pre-commit GO (three quiet cycles now), no gameplay
+process.** Lift table unchanged; no regen. If the pause reflects a
+found issue during final review, the record will say so when it
+lands; the sealed-until-reviewed sequence is working as designed
+either way. Standing by.
+
+## 2026-07-28 11:29 PDT (review cycle)
+
+**No change: consumer still uncommitted, notebook untouched, no
+gameplay process, smoke sealed.** Lift table unchanged; no regen.
+Standing by.
+
+## 2026-07-28 11:14 PDT (review cycle)
+
+**No change: the consumer sources remain uncommitted and the smoke
+stays sealed behind the declared commit-and-review sequence; the
+notebook is untouched since the pre-commit GO.** Lift table
+unchanged; no regen. Standing by.
+
+## 2026-07-28 10:59 PDT (review cycle)
+
+**No committed change; the consumer commit and post-commit identity
+review are still pending, and no gameplay process is running — the
+smoke remains properly closed behind its declared sequence.** Lift
+table unchanged; no regen. Standing by to countersign the commit
+the moment it lands so the run can open.
+
+## 2026-07-28 10:44 PDT (review cycle)
+
+**The GP0 consumer has its implementation GO: a standalone
+load-only binary that exact-loads both artifacts, locally
+reconstructs the full contract and deployment recipe, hard-stops
+unless the C16/C16 control reads exactly 120-120-0 with complete
+accounting, and reconciles rows/columns/quadrants by the corrected
+production definitions — the DEV1 GP0 complement bug specifically
+designed out. 9/9 + 5/5 focused suites and all firewalls pass
+pre-commit. Per the declared sequence, the run stays closed until
+commit and post-commit identity review — that commit is the next
+event, then the smoke.** Lift table unchanged; no regen. The next
+entry should carry the field's answer.
+
+## 2026-07-28 10:29 PDT (review cycle)
+
+**No committed change; the load-only GP0 consumer
+(fq4_dev5_gameplay module) is in implementation with its sanitize
+build directory already present — the last construction before
+seed 202607280701.** No new commits since the publication batch
+(verified green with artifact rehash at 10:19); lift table
+unchanged; no regen. Standing by for the consumer freeze and the
+smoke.
+
+## 2026-07-28 10:19 PDT (verification addendum: publication batch green; artifact hash reproduced)
+
+**Both publication commits verified GREEN cross-tree (publisher
+tests included, full gate OK), and the merged candidate artifact
+independently rehashes to the exact recorded `8252646b…f5fc` in my
+tree. The complete challenger-two chain — parent, bundle,
+supplement, candidate — is dual-tree hash-verified end to end. All
+reviewer obligations current; the GP0 consumer and the smoke on
+seed 202607280701 are the remaining events.**
+
+## 2026-07-28 10:14 PDT (review cycle — candidate published, dual-validated)
+
+**The anchored-candidate publication is countersigned: dual
+evaluator passes, atomic no-replace write, strict reload, artifact
+237,496 bytes / SHA 8252646b…, and — the strong part — two
+independent post-publication validators, one byte-framing parser
+and one minimal generic loader compiled WITHOUT publisher or
+gameplay sources, both reconstructing model 22834a95… from fresh
+exact C16 parents with all 29,534 Priority parameters finite,
+non-Priority components exactly C16, and parent/candidate/delta
+tensor hashes pinned. Cross-tree verification including my own
+rehash of the merged artifact is running; counts next entry.**
+Remaining before the field: the load-only GP0 consumer pinned to
+this identity, its review, then seed 202607280701. Lift table
+unchanged; no regen.
+
+## 2026-07-28 10:04 PDT (verification addendum)
+
+**eb87f6b was already contained in the prior merge batch; the full
+repository gate re-verified OK regardless. All reviewer obligations
+current; awaiting the publisher freeze and the GP0 smoke on seed
+202607280701.**
+
+## 2026-07-28 09:59 PDT (review cycle)
+
+**eb87f6b freezes the anchored-artifact publication contract;
+publisher implementation continues in the working tree toward the
+dual-fit publication, review, and the licensed GP0 smoke on seed
+202607280701. Cross-tree verification running; counts next
+entry.** Lift table unchanged; no regen; C16 champion.
+
+## 2026-07-28 09:49 PDT (verification addendum: through 9296050 green cross-tree)
+
+**Both commits verified GREEN (evaluator + runner tests included,
+full repository gate OK). All reviewer obligations current; the
+candidate publication and the second GP0 smoke are the next
+events.**
+
+## 2026-07-28 09:44 PDT (review cycle — anchored fit PASSES all offline gates; challenger two is licensed)
+
+**The DEV5 anchored-fit result is countersigned in full: gate=PASS
+on all eight conjunctive fields in 1.40 seconds. The numbers that
+matter, held-out and preregistered: neutral CHECK pooled KL fell
+from 0.000462 to 0.0000894 (5.2x, against a required 2x) with
+support flips 68 -> 33 and every deck individually non-worsening —
+while positive CHECK kept 94/94 Safe, all 37 repairs, zero
+violations, and FIT even improved its own support (3 -> 2). The
+omitted-neutral control reproducing the REJECTED candidate
+fingerprint exactly is the cleanest possible causal attribution:
+the anchors, and nothing else, are what fixed the flipping. Model
+22834a95… is the licensed sole challenger; the publication contract
+(238-byte environment literal binding both source artifacts,
+dual-fit bit-identity, atomic no-replace, reload-and-pin) and the
+GP0 protocol on fresh seed 202607280701 are frozen exactly as the
+first smoke's discipline demands.**
+
+The loop closed in one morning: GP0 rejection at 06:34, mechanism
+localized by 07:29, coverage confirmed by 08:29, corpus built by
+09:19, and a repaired candidate through every offline gate by
+09:44 — with the failed candidate's exact defect (near-tie
+flipping on untrained ordinary decisions) now measured, suppressed
+5x on held-out states, and causally attributed. Whatever GP0 reads
+this time, this is what the program was built to do. Cross-tree
+verification of both commits is running; counts next entry.
+
+Priorities for Codex: publication per the frozen contract ->
+review -> the 240-game smoke. The control must read 120-120; the
+rest is the field's answer.
+
+## 2026-07-28 09:34 PDT (verification addendum: 86214a9 green; supplement hash reproduced)
+
+**86214a9 verified GREEN cross-tree (clean merge, full gate OK) and
+the merged supplement artifact independently rehashes to the exact
+recorded `47d94823…aa105` in my tree. Every artifact in the
+second-candidate chain — parent, bundle, supplement — is now
+dual-tree hash-verified. All reviewer obligations current; the
+anchored fit and its offline gate are the next events.**
+
+## 2026-07-28 09:29 PDT (review cycle)
+
+**86214a9 commits the frozen neutral corpus; cross-tree
+verification including an independent hash of the merged supplement
+artifact is running — counts and the hash comparison next entry.
+The anchored-fit evaluator integration continues in the working
+tree toward the one frozen 248-row fit and its conjunctive
+five-deck offline gate.** Lift table unchanged; no regen; seeds
+sealed; C16 champion.
+
+## 2026-07-28 09:19 PDT (verification + DEV5 publication countersigned)
+
+**bc03fd6 verified GREEN cross-tree (supplement tests included, full
+gate OK), and the DEV5 publication is countersigned: 320 neutral
+rows published at 661,475 bytes / SHA 47d94823…, every root with a
+genuinely distinct hidden repartition and bit-identical paired
+scores, source bundle and C16 identities preserved exactly, tmp
+absent, 311 s one-time cost. The reconstruction era is closed —
+every future fit and offline gate consumes fixed artifacts. The
+second candidate's complete corpus now exists: 88 FIT repairs plus
+160 FIT neutral anchors (248 rows), with CHECK's mirror held for
+the conjunctive gate. Next per the record and endorsed: the one
+frozen anchored fit, then the five-deck offline gate — and only a
+pass touches a gameplay seed.**
+
+## 2026-07-28 09:14 PDT (review cycle)
+
+**The DEV5 neutral-supplement implementation is committed (bc03fd6)
+and its publisher is EXECUTING — observed live at ~2.8 CPU-minutes
+of the expected bundle-bound reconstruction. Cross-tree
+verification of the commit runs in parallel; counts and the
+supplement identity next entry.** Hands off the publisher; lift
+table unchanged; no regen.
+
+## 2026-07-28 08:59 PDT (review cycle)
+
+**No committed change; DEV5 implementation continues (compiles
+active in the working tree).** No new commits; lift table
+unchanged; no regen. Standing by.
+
+## 2026-07-28 08:44 PDT (review cycle)
+
+**No committed change; the DEV5 neutral-supplement implementation
+is in flight (fq4_neutral_supplement and fq4_neutral_publisher
+modules in the working tree) per the frozen protocol.** No new
+commits since 9f9aabb (verified green at 08:34); lift table
+unchanged; no regen. Standing by for the supplement construction.
+
+## 2026-07-28 08:34 PDT (verification addendum: through 9f9aabb green cross-tree)
+
+**Both protocol commits verified GREEN (notebook-only batch, full
+repository gate OK). All reviewer obligations current; the DEV5
+supplement construction is the next event.**
+
+## 2026-07-28 08:29 PDT (review cycle — DEV4 PASS: the coverage exists)
+
+**DEV4 is countersigned: the 300-second reconstruction matched the
+immutable bundle and parent hash-exact, then delivered the answer
+the second candidate needed — the eligible unselected stack-empty
+dominance-negative stratum holds roughly 700-950 roots per deck per
+split, present in ALL 64 physical games of every cell, with every
+one of the 40 block predicates passing and every balance matrix
+admitting its two-regular subset. capacity_licensed=1 with room to
+spare; no quota or rule moved after the counts were seen; the
+adversarial committed-tree review pinned the binary and returned
+GO. The neutral-supplement corpus can be fully deck, seat, and
+play/draw balanced from games already played.**
+
+Two descriptive observations worth the record: (1) the COMPLETE
+dominance census dwarfs the selected corpus — RU Aggro CHECK alone
+shows 112 positive-empty roots (1,250 options) against the 94
+selected — the champion's spend-waste is broader than the training
+sample, which strengthens the case that the eventual refit
+generalizes; (2) stack-active positives exist ONLY in Blue and
+White, confirming again that the counter-war decks and the ordinary
+decks fail differently and the supplement's balance across both is
+the right design. DEV5's supplement declaration plus the two
+protocol commits (4561574, 9f9aabb) are in cross-tree verification;
+counts next entry. Seeds sealed; C16 champion.
+
+## 2026-07-28 08:19 PDT (verification addendum: 3863dec green cross-tree)
+
+**3863dec verified GREEN: clean merge including the coverage-census
+tests, full repository gate OK. All reviewer obligations current;
+the census reconstruction continues and its coverage table is the
+next scientific event.**
+
+## 2026-07-28 08:14 PDT (review cycle)
+
+**The DEV4 census implementation is committed (3863dec) after its
+qualification, and the bundle-hash-bound reconstruction is
+EXECUTING — observed live at ~4.5 CPU-minutes of the expected ~10.
+Cross-tree verification of the commit is running in parallel;
+counts and the coverage table next entry.** Hands off the census;
+lift table unchanged; no regen.
+
+## 2026-07-28 07:59 PDT (review cycle)
+
+**No committed change; the DEV4 coverage-census implementation is
+in flight (generator extensions in the working tree) ahead of its
+bundle-hash-bound reconstruction.** No new commits since faf5114
+(verified green at 07:49); lift table unchanged; no regen. Standing
+by for the census reconstruction and its coverage counts.
+
+## 2026-07-28 07:49 PDT (verification addendum: faf5114 green cross-tree)
+
+**faf5114 verified GREEN: clean merge, full repository gate OK. All
+reviewer obligations current; the DEV4 coverage census
+reconstruction (~10 min expected at DEV1 scale) is the next
+scientific event.**
+
+## 2026-07-28 07:44 PDT (review cycle)
+
+**The DEV3 confirmation is countersigned: the durable
+--stack-census loader reproduced every preregistered cell (192
+rows, 1,141 options, full invariance accounting) at 0.12 s with
+7/7 strict and sanitized including the malformed-encoding fixtures
+— the one-off parser's read is now independently confirmed and the
+stack-gate branch is closed NOT LICENSED without a fit or seed
+spent. DEV4 is ENDORSED as declared: the coverage-supply census
+runs one bundle-hash-bound reconstruction of the frozen
+trajectories — no new stochastic coordinate — and asks exactly the
+right descriptive question: do the already-played games contain
+enough unselected, stack-empty, dominance-negative ordinary
+decisions for a deck-balanced behavior-preservation supplement?
+Aggregate-only reporting, phase strata for the main-phase focus,
+and void-on-mismatch reconstruction discipline all carried
+forward.** Cross-tree verification of faf5114 is running; counts
+next entry. Gameplay seeds sealed; C16 champion; lift table
+untouched by these evaluator-only commits.
+
+## 2026-07-28 07:35 PDT (verification addendum: through 2c1eb26 green cross-tree)
+
+**Both commits verified GREEN: clean merge including the background
+diagnostic and its test file, full repository gate OK. All reviewer
+obligations current; the stack-census confirmation tool and the
+coverage-harvest declaration are the next events.**
+
+## 2026-07-28 07:29 PDT (review cycle — stack census closes the gating axis; coverage is the fix)
+
+**The stack-context census is countersigned and its refusal is
+exactly right by the conditional this log set at 07:14: only 18/88
+FIT and 17/94 CHECK positive roots are stack-active, so a gate
+would surrender the fitted support (restoring at least 13+20 exact
+violations from Green and RU alone) — the gate fails its license
+and no fit will be spent on it. The census also delivers the
+reframing insight of the morning: EVERY Green, Red, and RU Aggro
+dominance error sits at an EMPTY stack. The defect class was never
+'stack decisions' — it is SPEND decisions, most of which are
+ordinary main-phase casts. The correct future gate formula
+(parent residual preserved, delta gated) is recorded for a broader
+corpus, and the durable --stack-census confirmation tool is
+predeclared before the branch closes — proper hygiene for a
+one-off parser result.**
+
+The chosen next axis — broader stack-empty coverage harvested from
+the already-frozen trajectories, with a support-aware update
+measured against arbitrary near-tie flips — is the one both trees'
+evidence now points at: the GP0 damage came from untrained
+ordinary decisions, the spillover diagnostic showed uniform
+near-tie flipping, and the census shows the training corpus barely
+sampled ordinary play. Cover the space, anchor the ties, keep the
+repairs. Cross-tree verification of cdcec5b + 2c1eb26 is running;
+counts next entry. Gameplay seeds sealed; C16 champion.
+
+## 2026-07-28 07:14 PDT (review cycle — spillover measured; the near-tie structure is the story)
+
+**Both offline steps are countersigned: the parent-control census
+(10 background roots, 22 options, parent-vs-parent bit-exact zero
+everywhere, 0.26 s) and the spillover diagnostic (0.62 s), whose
+predeclared read came back split and was handled exactly as
+declared — clause (a) passed (Green/White support changes) but
+clause (b) FAILED (Green/White mean KL 0.00028 vs Blue/RU 0.00057),
+so the specific spillover-concentration diagnosis is rejected and
+parent-background anchoring is off the table as the next axis. The
+independent review's pre-GO catch list (dominance-anchor error,
+forgeable flag, missing parent control, unsafe indexing) and its
+repair-then-rereview cycle also deserve the record.**
+
+One connection from this tree's instruments, offered because it
+sharpens the next census: the diagnostic shows exact-support flips
+on 8/10 ordinary controls at KLs of a few 1e-4 — argmax changes at
+margins of ~0.003 and below. That is precisely the margin structure
+dominated-witness-v1's census mapped for ordinary play: most
+non-stack decisions sit at tiny margins (median 0.002-0.003), so
+ANY always-on residual — however small its distributional movement —
+flips a large fraction of them, and which way they flip is
+untrained. This favors the STACK-ACTIVE GATING axis over residual
+shrinkage on mechanism grounds: shrinkage reduces but cannot
+eliminate uniform near-tie flipping; a public stack-context gate
+removes the residual from exactly the decisions where its sign is
+noise. The declared stack-active census of the frozen roots is the
+right next measurement and should also read out in under a second.
+
+Priorities for Codex: the stack-active census as declared; the
+one-axis gate preregistration only if it shows the fitted support
+preserved and a meaningful untrained context protected; gameplay
+seeds stay sealed until the mechanism is offline-proven. C16
+champion.
+
+## 2026-07-28 07:07 PDT (verification addendum: 34aabe3 green; lift bit-identical through the selector refactor)
+
+**34aabe3 verified GREEN after a merge-conflict resolution in my
+tree (main's new constexpr shallow-prior guard reconciled with this
+tree's margin instrumentation): gameplay suite 11/11, full
+repository gate OK, and — the check that mattered most this time,
+since the guard sits on the champion's scoring path — the lift
+table regenerated BIT-IDENTICAL on the rebuilt simulator, the
+129th consecutive stable reading. The selector refactor provably
+preserves champion behavior. All reviewer obligations current;
+the offline background-coverage measurement of the rejected
+candidate is the next scientific event.**
+
+## 2026-07-28 06:59 PDT (review cycle — GP0 disposition countersigned)
+
+**The GP0 final disposition is countersigned on all four points:
+(1) the corrected checker now encodes the production invariants
+exactly, with production-shaped mutations proving both negative
+directions, 11/11 strict and sanitized; (2) classifying the
+original run from its complete output WITHOUT a replay is correct —
+run_bot_benchmark's own authoritative validation completed before
+the buggy wrapper condition ran, so a replay would add only a
+different wall-clock sample; (3) the scientific rejection of
+candidate 71260078… stands on both preregistered grounds (37.5%
+< 40% floor; 1.63x > 1.25 runtime); (4) the mechanism scoping —
+update-surface coverage failure, NOT mislabeled stack roots — and
+the one-axis-at-a-time offline measurement plan match this log's
+06:44 reading exactly. Seeds 202607280602/03 sealed; C16 champion.
+Cross-tree verification of 34aabe3 is running; counts next entry.**
+
+One reflection for the program record, because this is the arc's
+first full circle: yesterday's morning began with a candidate
+recipe nobody could evaluate and infrastructure that crashed trying;
+tonight a candidate went from fit to field rejection in under two
+hours, with every gate honest, every hash bound, and the failure
+mechanism localized to a measurable question before sunrise. The
+rejection is not a setback — it is the program's iteration loop
+working at full speed on the hardest question it has. The
+background-coverage measurement is exactly where the next fix
+comes from.
+
+## 2026-07-28 06:44 PDT (review cycle — GP0 first read: the ladder caught what offline could not)
+
+**The infrastructure classification is countersigned: the checker's
+same-index complement assertions are genuinely invalid for
+unequal-policy comparisons (benchmark deck rows are role-relative;
+only aggregates complement), the C16/C16 control passing at exactly
+120-120 while the candidate run tripped is precisely the signature
+of that bug, and the declared mechanical correction plus the
+explicit open question — classify from complete output or one
+transparent same-seed replay, never a new draw — is the right
+disposition. Seed 202607280602 stays sealed.**
+
+The descriptive read, stated plainly because it will stand if the
+output survives the corrected checker: candidate 90-150 (37.5%,
+Wilson [31.6%, 43.8%]) against its own parent, with Green 10-38 and
+White 14-34 while the stack decks held even (Blue 24-24, RU 24-24)
+— and 1.63x runtime against a 1.25 gate. If confirmed, this is the
+offline-online gap arriving exactly where the ladder was built to
+catch it: a Priority head fitted on 88 stack-decision roots,
+deployed at residual weight 0.10 over EVERY Priority decision,
+appears to damage the ordinary development decisions of the
+creature decks while fixing the counter-war waste it trained on.
+The deck pattern is the tell — even where it learned, broken where
+it never looked. Candidate hypotheses for the eventual redeclared
+fit, offered for consideration: anchor the background/CHECK
+examples it currently excludes at the update boundary, or gate the
+residual to stack-active contexts, or shrink the deployment weight
+— measured, one at a time, on the 0.57-second loop built for
+exactly this.
+
+The meta-point deserves its sentence: 240 cheap games just
+delivered the most important negative signal since the collision
+artifact, something 94/94 offline Safe roots could not see. The
+ladder design is vindicated by its first catch. C16 remains
+champion, undisturbed.
+
+Priorities for Codex: (1) the checker correction as declared; (2)
+the classification decision (complete-output vs same-seed replay)
+made explicitly before anything else; (3) no new fit until the
+regression mechanism is measured on the dev loop — the corpus's
+background rows exist for exactly this question.
+
+## 2026-07-28 06:29 PDT (review cycle)
+
+**A pre-publication clarification landed at 06:22 (still before the
+artifact or any gameplay seed) and a simulator process has just
+started — consistent with the preflight/control sequence beginning.
+No new commits; no result yet; lift table unchanged; no regen.
+Hands off; the GP0 readings belong to the next entry.**
+
+## 2026-07-28 06:20 PDT (verification addendum: 3e87996 green cross-tree)
+
+**3e87996 verified GREEN: clean merge, full repository gate OK. All
+reviewer obligations current; standing by for the GP0 publisher
+freeze and the smoke.**
+
+## 2026-07-28 06:14 PDT (review cycle)
+
+**3e87996 lands the exact Priority-head persistence seam — the
+publisher-side foundation of GP0's artifact family. Implementation
+of the publisher/loader continues in the working tree per the
+declaration's sequencing (strict tests, sanitizers, review, THEN
+the smoke). Cross-tree verification running; counts next entry.**
+Lift table: unchanged pending build-graph read. No scientific
+events this cycle; the GP0 smoke on seed 202607280601 remains the
+next one.
+
+## 2026-07-28 06:04 PDT (verification addendum: through 80532be green cross-tree)
+
+**Both commits verified GREEN: the repaired build graph passes its
+incremental tests (link-input changes now invalidate binaries),
+full repository gate OK after a clean merge. All reviewer
+obligations current. Next events: the GP0 publisher/loader
+implementation, its review, and the 240-game smoke on seed
+202607280601 — I will countersign the deployment control and the
+candidate comparison when they land.**
+
+## 2026-07-28 05:59 PDT (review cycle — the gameplay ladder is declared)
+
+**GP0 is ENDORSED as declared, and it is the right first gameplay
+question: the already-fixed DEV1 candidate (71260078…, Priority
+tensors only, every input hash bound from C16 artifact through
+corpus to optimizer seed) deploys on the ACTUAL production surface
+— residual weight 0.10 explicitly required nonzero so the
+treatment cannot be inert — against exact C16, 240 games on fresh
+seed 202607280601, preceded by a same-seed C16/C16 deployment
+control that separates deployment-path variance from candidate
+effect. The scoping sentence is exactly honest: 240 games tests
+only 'no large regression'; strength needs the powered comparison
+that follows. The artifact-family boundary (new schema, tensors +
+provenance only, atomic no-replace, load-only consumer with a
+firewalled link graph) carries every isolation lesson of the last
+24 hours. Also landed: the build-graph link-input invalidation fix
+from the 05:44 priority list (885fc2a) — closed within one cycle
+of being flagged.** Cross-tree verification of both commits is
+running; counts next entry.
+
+For the record as this arc reaches gameplay: whatever GP0 reads,
+the program is now doing exactly what it should — one fixed,
+provenance-complete candidate, one fresh seed, one preregistered
+question at a time, at minutes per answer. The lift gate that
+motivated everything is two honest gates away.
+
+## 2026-07-28 05:49 PDT (verification addendum: a7a36d3 green cross-tree)
+
+**a7a36d3 verified GREEN: evaluator suite 9/9 under forced relink,
+full repository gate OK after a clean merge. All reviewer
+obligations current. The development loop is certified on both
+trees; candidate iteration is the program's present tense.**
+
+## 2026-07-28 05:44 PDT (review cycle — warm loop PASS: candidate iteration is now sub-second)
+
+**The DEV1 speed hypothesis is countersigned as PASS: ten measured
+warm processes at 0.27 s median / 0.32 s max (gates: <2 s / <5 s),
+all outputs byte-identical to the warmup, and one representative
+16-epoch fit plus complete FIT/CHECK evaluation at 0.57 s against
+the <15 s gate — with 192/1,141 parent anchors exact, zero offline
+accounting, and the fitted candidate keeping every non-Priority
+component bit-identical to C16. Two integrity details deserve
+credit: the stale-binary catch (a Makefile-only link change
+invisible to the depfile graph, caught by audit BEFORE any
+production mode ran, flagged as build follow-up) and the disclosed
+zsh wrapper quirk that did not touch the validated output. The
+morning arc closes the loop that the day opened: this same question
+— evaluate one candidate against a fixed corpus — cost twelve
+sealed-pipeline hours yesterday, ten minutes at P0b scale
+overnight, and now 0.57 seconds.** Cross-tree verification of
+a7a36d3 (with forced evaluator relink, per the known graph gap) is
+running; counts next entry.
+
+Priorities for Codex: (1) the build-graph link-list dependency fix
+so Makefile-only changes invalidate binaries; (2) candidate
+iteration on the FIT/CHECK loop toward a declared gameplay screen;
+(3) the AGENTS.md full gates when a candidate earns them. The lift
+table is waiting.
+
+## 2026-07-28 05:29 PDT (review cycle)
+
+**No committed change since c10d4a2; the warm-loop
+loader/FIT/evaluator implementation continues in the working tree
+toward the declared timing protocol (one unmeasured warm process,
+then ten measured runs against <2 s median / <5 s max / <15 s
+end-to-end).** Lift table unchanged; no regen. Standing by for the
+timing measurement.
+
+## 2026-07-28 05:19 PDT (verification addendum: batch green; bundle hash reproduced)
+
+**The commit batch through c10d4a2 verified GREEN cross-tree (clean
+merge including the published 2.25 MB bundle, full repository gate
+OK), and the merged bundle's SHA-256 independently reproduces the
+recorded `0911fc2e…859df` in my tree. All reviewer obligations
+current; the warm-loop timing measurement is the next event.**
+
+## 2026-07-28 05:14 PDT (review cycle — DEV1 corpus PASS; the sizing arithmetic held)
+
+**DEV1's one-shot corpus construction is countersigned as recorded:
+exit 0 in 606 s (10.1 min, within seconds of the preregistered
+10.4-min point estimate), both 160-game splits clearing every-deck
+coverage and the high-confidence parent floors with room to spare —
+FIT 31 HC roots in 29 games across four decks, CHECK 37/35/4,
+against 5/5/2 floors — 192 selected rows byte-identical across the
+two full constructions, zero candidate rollouts, and a 2.25 MB
+immutable bundle published with dual-verified identity. The DEV0
+lesson converted cleanly: the rate-sized 160-game schedule
+delivered roughly 6x the required support where the 40-game
+schedule starved. The count-only failure diagnostics, scope-guarded
+reporting, and independent post-result audit all rode along as
+declared.** Evaluator metric freeze and constraint preflight
+(a9d7b96, c10d4a2) are committed on top; cross-tree verification of
+the batch is running — counts next entry.
+
+Next per the declaration and endorsed: wire the game-free loader
+and 16-epoch FIT, then MEASURE the ten warm-cache runs against the
+<2 s median / <5 s max / <15 s end-to-end gates. When those pass,
+candidate iteration begins on infrastructure whose every byte is
+provenance-bound — and the gameplay screen, the question this
+entire program serves, is finally in reach.
+
+## 2026-07-28 05:04 PDT (verification addendum: 680591c green; generator finished)
+
+**680591c verified GREEN cross-tree: dev-schedule 4/4 (the fourth
+test arrived with the code commit exactly as anticipated at 04:34),
+full repository gate OK. The DEV1 generator has terminated after
+roughly ten minutes of construction; its result record is being
+composed — the conjunctive publication decision over both 160-game
+splits is the next entry's business.**
+
+## 2026-07-28 04:59 PDT (review cycle — DEV1 generator executing)
+
+**The DEV1 v2 implementation froze at 04:49 (680591c, cached corpus
+pipeline) and the generator is EXECUTING now — observed live at ~6
+CPU-minutes, constructing the two 160-game splits under the frozen
+schedule identities. Cross-tree verification of the commit is
+running in parallel; counts next entry.** With 320 K8/H4 source
+games to play, expect a substantially longer run than DEV0's
+38-second failure — the census phase alone in P0b took 162 s for
+80 games, so on the order of 10-15 minutes of construction is the
+healthy expectation. Lift table: pending the build-graph read.
+
+Priorities for Codex: hands off the generator; both splits
+constructed and reported before the conjunctive publication
+decision, per the declaration.
+
+## 2026-07-28 04:44 PDT (review cycle)
+
+**No committed change; the DEV1 v2 source integration continues in
+the working tree per its license (integration and synthetic tests
+only — no source game may open until the fresh execution review).**
+No new commits since 2b9c271 (verified green at 04:34); lift table
+unchanged; no regen. Standing by.
+
+## 2026-07-28 04:34 PDT (verification addendum: 2b9c271 green cross-tree)
+
+**2b9c271 verified GREEN: clean merge (notebook-only, 197
+insertions), dev-schedule suite 3/3 at the committed state (the
+fourth test in your 04:22 record is evidently in the uncommitted v2
+integration — consistent, not a discrepancy, and it should arrive
+with the next code commit), full repository gate OK. All reviewer
+obligations current.**
+
+## 2026-07-28 04:29 PDT (review cycle)
+
+**DEV1's preregistration is ENDORSED: 160 games per split — twice
+the 80-game floor this log derived from P0b's sparse Green/White
+rates, with the sizing critique explicitly incorporated — plus a
+prospective union-bound power interpretation recorded before
+schedule serialization (7.95% cell prevalence bounds empty-cell
+probability at 5%; the fixed gates, not the planning math, decide
+publication), mechanically derived seed bases frozen as SHA-256
+literals, and a schedule preflight whose bytes and cross-sums were
+reproduced by an independent Node/BigInt implementation before any
+game may open. The count-only failure diagnostics from the DEV0
+lesson are in. Cross-tree verification of 2b9c271 is running;
+counts next entry.** Lift table: bit-identical as of the 04:21
+regen; no further gameplay-source change in this commit.
+
+Priorities for Codex: v2 source integration + synthetic tests ->
+independent execution review -> both splits constructed and
+reported before the conjunctive publication decision, exactly as
+declared.
+
+## 2026-07-28 04:21 PDT (verification addendum: 5784b10 green; lift bit-identical on relinked simulator)
+
+**5784b10 verified GREEN cross-tree (D1 treatment 9/9, full
+repository gate OK), and because its game-source changes relinked
+the simulator, the lift table was regenerated on the fresh binary:
+BIT-IDENTICAL per-deck — 128th consecutive stable reading. The DEV0
+collection seam provably left the gameplay path untouched. All
+reviewer obligations current; awaiting the DEV1 declaration with
+its rate-sized schedule and repaired failure reporting.**
+
+## 2026-07-28 04:14 PDT (review cycle — DEV0 support REJECT, correctly absorbed)
+
+**DEV0's rejection is countersigned as recorded: the FIT split's
+40-game schedule failed the frozen every-deck-coverage +
+5/5/2-support conjunct at 38.96 s, nothing was published or
+salvaged, both fixed splits are consumed, and the speed hypothesis
+remains unmeasured rather than refuted. The preregistered handling
+held exactly — no rerun, no appended seed, no floor-weakening.**
+
+One quantitative note for DEV1's sizing, offered because P0b's
+measured rates make it arithmetic rather than judgment: the blind
+census produced 27 high-confidence errors in 80 games, but with
+extreme deck skew — White contributed 6 H-rows in 80 games and
+Green 5, so a single 40-game split expects ~2-3 for each of those
+decks BEFORE per-split every-deck dominance-positive coverage is
+demanded. Any DEV1 schedule targeting the same per-split floors
+wants at least the P0b 80-game scale per split, or explicitly
+pooled-across-split floors; the declared 'prospectively larger
+all-five-deck schedule' should be sized from those measured rates,
+not chosen round. The declared failure-report improvement
+(predeclared support counts on failure, qualified on synthetic
+fixtures, scope-guarded identities) also removes the one weakness
+this run exposed — a conjunctive diagnostic that cannot say which
+conjunct failed.
+
+Cross-tree verification of 5784b10 (9,567 insertions) is running;
+counts next entry. Lift table: pending build-graph read with the
+verification (test_game.cpp changed, so the regen will run if the
+simulator relinks).
+
+## 2026-07-28 03:59 PDT (review cycle)
+
+**No change: DEV0 bundle implementation continues uncommitted, the
+notebook is untouched since 03:13, and no generator process is
+running.** Lift table unchanged; no regen. Standing by for the
+bundle construction gates.
+
+## 2026-07-28 03:44 PDT (review cycle)
+
+**No committed change; the DEV0 bundle implementation is in flight
+(fq4_dev_bundle, fq4_dev_generator, fq4_priority_collection modules
+in the working tree) toward the declared content-addressed FIT/CHECK
+loop and its measured timing gates.** No new commits since 6ddf210
+(verified green at 03:34); lift table unchanged; no regen. Standing
+by.
+
+## 2026-07-28 03:34 PDT (verification addendum: through 6ddf210 green cross-tree)
+
+**All three post-D1 commits verified GREEN in the reviewer tree:
+clean merge, D1 treatment 9/9, priority-fit suite 15/15 (including
+the new priority-math tests), full repository gate OK. All reviewer
+obligations current; awaiting DEV0's bundle construction and
+measured timing gates.**
+
+## 2026-07-28 03:29 PDT (review cycle)
+
+**Post-D1 consolidation: three commits landed (DEV0 row-cap
+clarification, frozen development schedules, and a
+reusable-priority-math extraction) — the refactor extracting shared
+fit/evaluation math is the right move now that three modules
+consume it, and doing it AFTER the one-shot D1 rather than before
+kept the frozen treatment path pristine. Cross-tree verification of
+all three is running; counts next entry.** DEV0's bundle
+construction and its measured timing gates are the next scientific
+events. Lift table: no gameplay-source changes expected; confirming
+via build graph with the verification.
+
+## 2026-07-28 03:14 PDT (review cycle — D1 PASS: first field-validated repair)
+
+**FQ4-D1 countersigned in full from the committed record: verdict
+PASS at exit 0, run exactly once from the countersigned frozen
+commit with all three mains identical. The parent reconstruction
+reproduced all six P0b identities and the complete census
+hash-for-hash before the candidate existed; component fingerprints
+prove only Priority changed; and the held-out result is decisive —
+23 full Class-1/2-to-Safe repairs in 21 distinct physical games
+across Green (5), Blue (7), White (4), and RU Aggro (7), against a
+5/5/2 floor. All 81 parent-Safe roots stayed Safe; the pooled
+transition matrix shows ZERO severity increases; unsafe fell 33 ->
+6, high-confidence 27 -> 4; Red's protection held untouched. The
+phase timing tells the iteration story in one row: 162 s of parent
+reconstruction, 3.6 s of fit, 0.374 s of candidate evaluation —
+the science is now nearly free once the corpus exists, which is
+exactly what DEV0's content-addressed bundle will exploit.**
+
+Scope discipline, restated so the record cannot inflate: this is
+behavioral repair on held-out decision states — the candidate now
+declines wasteful spends it never trained on — and it is NOT yet
+gameplay-strength evidence. The path from here is exactly as Codex
+declared: DEV0's FIT/CHECK loop to choose a candidate, then a
+fresh, separately declared all-five-deck gameplay screen, then the
+full AGENTS.md gates against Handcrafted. But tonight, for the
+first time, every link in that chain rests on verified mechanism
+rather than hope: defect witnessed -> operator proven -> meter
+repaired -> fit demonstrated -> FIELD GENERALIZATION CONFIRMED.
+
+Priorities for Codex: (1) DEV0 timing gates measured, not
+inferred; (2) candidate selection via FIT/CHECK; (3) the fresh
+gameplay screen declaration — at which point the lift table this
+log has watched through 127 identical readings finally gets its
+chance to move.
+
+## 2026-07-28 03:04 PDT (post-commit countersign: D1 GO)
+
+**565159a reproduced GREEN in the reviewer tree: treatment 9/9,
+field-gate 10/10, full repository gate OK after a clean merge. The
+post-commit condition is SATISFIED from this side. Countersign: GO.
+The single declared D1 command is the only remaining licensed
+action — run it and read the field's answer.**
+
+## 2026-07-28 02:59 PDT (review cycle — D1 implementation frozen; post-commit check running)
+
+**565159a freezes the D1 treatment implementation (5,936 insertions
+including a 1,485-line treatment test file) with the preflight
+record showing the full defense-in-depth: two-phase evaluator with
+parent rederivation gating the input digest, structurally-zero
+treatment accounting, link/symbol/fingerprint firewalls on both
+directions, literal SHA-256 goldens with one-bit mutation coverage,
+severity boundaries, the 5/5/2 floor and Red protection exercised,
+sanitized 9/9 reproduced by an independent reviewer, and the full
+257-second repository gate green. The supervisor publishes only
+complete exit-0/1 reports and suppresses scientific stdout on every
+failure mode — the last lesson of the quarantine era, now standard
+equipment.** My post-commit verification (merge + treatment +
+field-gate + full suites) is running; on green, the post-commit
+condition is satisfied from this side and the single declared D1
+command is the only remaining action. Lift table: pending the
+build-graph read with verification.
+
+## 2026-07-28 02:44 PDT (review cycle)
+
+**No change: D1 treatment implementation continues in the working
+tree (notebook untouched since 02:23, no new commits, no
+invocation).** Lift table unchanged; no regen. Standing by.
+
+## 2026-07-28 02:29 PDT (review cycle)
+
+**No change in committed state; the D1 treatment module
+(fq4_d1_treatment.{hpp,cpp}, dedicated main, tests) is being
+implemented per its registered isolation architecture.** No new
+commits since c8562d7; lift table unchanged; no regen. Standing by
+for implementation review GO and the single treatment invocation.
+
+## 2026-07-28 02:14 PDT (review cycle)
+
+**c8562d7 (docs-only, merged clean) registers two things worth
+separate notice. First, the D1 treatment evaluator's isolation is
+structural, not promissory: a production adapter strips every
+scored root to an opaque TreatmentRow (IDs, descriptors, dominance
+mask, frozen base scores, neutral tensors) and the evaluator never
+receives GameState, probes, seeds, or rollout APIs — with required
+accounting of exactly zero search calls, worlds, and transitions,
+plus reverse-order and hidden-tensor bit-identity controls. The
+candidate cannot cheat because the code path to cheating does not
+link. Second, FQ4-DEV0 declares the fast inner loop BEFORE D1's
+stdout is opened — fresh FIT/CHECK splits on unused seed bases,
+candidate-blind selection, and a content-addressed bundle targeting
+sub-2-second candidate evaluation and a sub-15-second fit-evaluate
+cycle. That is the sub-minute iteration end-state this log has
+been arguing toward, declared with the same evidence hygiene as
+the science.** Treatment implementation continues in the working
+tree; the invocation is the next event. Lift table: docs-only
+commit, unchanged; no regen.
+
+## 2026-07-28 02:04 PDT (verification addendum: 731beac green cross-tree)
+
+**731beac verified GREEN in the reviewer tree: FQ4 suites 14/14
+including the new field-gate test file, full repository gate OK
+after a clean merge. All reviewer obligations current; the D1
+treatment invocation is the next event and I will countersign its
+parent-report reproduction and gate table when it lands.**
+
+## 2026-07-28 01:59 PDT (review cycle — final D1 declared)
+
+**The final D1 treatment declaration is countersigned as read: the
+candidate faces the blind P0b corpus under a conjunctive gate —
+repair at least 5 of the 27 high-confidence Pass-dominance errors
+spanning at least five physical games and two decks, with ZERO
+root-level class regression and ZERO per-deck aggregate regression
+(Red's all-Safe eight rows serving as a nonvacuous protection
+gate) — with the entire parent report reproduced hash-for-hash
+before the candidate is even constructed, and the exact class
+census (81/10/17/6, sigma mass 3417447620267002) copied as
+measured. Implementation-only license until independent review GO
+is the right sequencing. This is the strictest treatment gate the
+program has written, and it is exactly proportionate: the candidate
+gets no credit for its training roots — every one of these 114
+scored roots is held-out field state the fit has never seen.**
+Cross-tree verification of 731beac is running; counts next entry.
+Lift table: no gameplay-source change in the census freeze; will
+confirm via build graph with the verification.
+
+Priorities for Codex: implementation + synthetic tests -> review
+GO -> the single treatment invocation. Whatever it reads, the
+result is the program's first field evidence on a
+mechanism-verified candidate.
+
+## 2026-07-28 01:44 PDT (review cycle — P0b PASS: the parent census is in)
+
+**P0b countersigned: exit 0 in 161.8 s (18 s under watchdog), all
+corpus/schedule/trajectory hashes frozen, retention arithmetic
+exact (18,126 raw = 14,605 trivial + 2 over-cap + 3,519 eligible;
+2,408 retained), 114 dominance-positive roots pooled, and the
+support floor at 27 high-confidence Class-1/2 roots in 24 distinct
+physical games across four decks — comfortably past the 5/5/2
+floor, with an independent parser rederiving every row, cross-sum,
+and control. Red's eight dominance-positives all being Safe makes
+it an explicit protection-only deck in D1 rather than a vacuous
+gate — the right handling.**
+
+Worth recording: the blind census's deck profile — Blue 44 and RU
+43 dominance-positive versus Red 8-all-Safe — independently
+reproduces the live-game shape dominated-witness-v1 mapped on
+different seeds with a different instrument this afternoon. The
+convergence that dissolved with the collision layer is back on
+proper footing: two blind, independent measurements of the SAME
+behavioral defect, both concentrated where the lift gate fails.
+The held-out-field reservation did exactly what it was designed to
+do.
+
+Also noted: the shared-object build graph landed — make test's 369
+source compilations reduce to 79 unique, with every binary's
+translation-unit order preserved. Iteration-speed work continuing
+alongside the science rather than instead of it.
+
+Priorities for Codex: the final D1 declaration copying these exact
+facts, root-level treatment gates frozen before candidate
+81ad05d2… is reconstructed; then the treatment run. C16 remains
+champion until the full definition is met — but for the first time
+the challenger, the mechanism, the instrument, and the field
+evidence are all pointing the same direction.
+
+## 2026-07-28 01:29 PDT (review cycle — P0 void, R0 repair, P0b retry: ten minutes end to end)
+
+**The P0 void and its handling are countersigned: exit 2 at 1.79 s
+on the FQ0 key constructor's <2-action guard meeting a
+singleton-Pass boundary, with scientific stdout correctly withheld
+— and the leak analysis in P0b is right: the only fact the failed
+run disclosed is that at least one retention-EXCLUDED singleton
+existed, which is selection-irrelevant by the declaration's own
+root-eligibility rule (2-32 actions). The R0 repair is properly
+scoped D1-local (FQ0's own guard untouched), the 8/9-then-9/9
+fixture sequence proves the diagnostic before fixing it, and the
+firewall checks confirm the treatment stayed unlinked throughout.
+P0b's single same-source retry is licensed on exactly the right
+grounds.** For the tally: void discovered, diagnosed on synthetic
+fixtures, repaired, mutation-tested, independently reviewed, and
+retry-declared in about ten minutes — the same class of event that
+consumed half a day under the sealed-era process this morning. No
+new commits; lift table unchanged; no regen.
+
+Priorities for Codex: the P0b retry; on a support pass, the final
+D1 declaration copying the measured census; C16 champion.
+
+## 2026-07-28 01:14 PDT (review cycle)
+
+**No change in committed state; the P0 census harness
+implementation and its contract review continue in the working
+tree, with source seeds 790/791 still sealed.** No new commits;
+lift table unchanged; no regen. Next event: the schedule-only
+preflight freeze, then the blind census execution.
+
+## 2026-07-28 00:59 PDT (review cycle)
+
+**P0 was amended at 00:46 — still before opening either source seed
+— to close implementation degrees of freedom identified by an
+independent contract review (hidden canonicalization, retention
+arithmetic, common-world dominance seeds, class arithmetic,
+watchdog mechanics, treatment separation). Amending the contract
+BEFORE execution rather than interpreting ambiguity after is
+precisely the discipline that makes the blind design meaningful;
+endorsed. Implementation of the D1 field-gate module
+(fq4_d1_field_gate, census main) is visible in the working tree.**
+No new commits since e0709cc (verified green at 00:49); source
+seeds 790/791 remain unopened; lift table unchanged; no regen.
+Standing by for the census execution.
+
+## 2026-07-28 00:49 PDT (verification addendum: e0709cc green cross-tree)
+
+**e0709cc verified GREEN in the reviewer tree: FQ4 priority-fit
+suite 14/14 after a clean merge, full repository gate OK. All
+reviewer obligations current; awaiting the P0 census readout.**
+
+## 2026-07-28 00:44 PDT (review cycle)
+
+**e0709cc (the D0/D0b qualification, 5,383 insertions including a
+1,204-line focused test file) is committed; cross-tree verification
+is running here. D1-P0 is declared and ENDORSED — and I note with
+satisfaction that it opens field seeds 790/791 from exactly the
+held-out range this log reserved for candidate evaluation, under a
+harvest protocol that is blind by construction: opponent hidden
+partitions replaced with owner-information-set samples BEFORE any
+hashing or scoring, retention indices fixed BEFORE any dominance
+label or model score exists, balanced 80-game/160-perspective
+five-deck source with schedule coordinates frozen pre-open, and the
+D0b candidate explicitly barred from every P0 step. The support
+hypothesis is honestly falsifiable: fewer than five robust
+dominance support errors across five games and two decks stops D1
+as underpowered rather than fishing for a friendlier source.**
+Verification counts next entry; lift table unchanged pending the
+build-graph read on this commit.
+
+Priorities for Codex: P0 as declared; if supported, the final D1
+declaration copying its measured census; C16 champion throughout.
+
+## 2026-07-28 00:29 PDT (review cycle — D0b PASS: the microfit mechanism is complete)
+
+**FQ4-D0b countersigned as recorded: exit 0 in 3.56 s, 5/5
+production margins at or above +0.005 at 512 epochs (the sole D0
+miss, Blue Braingeyser X=0 opponent, moved parent -0.0258 ->
+anchor +0.0040 -> treatment +0.0069), equal-root KL down 53.5%
+against the frozen 256 anchor, every dominance label strict in
+64/64 worlds, and all ten collateral/isolation/determinism controls
+reporting 1 — with the Green per-root KL's ~3e-11 rise disclosed
+rather than smoothed over. Candidate fingerprint 81ad05d2… is
+frozen for D1. The scoping sentence is exactly right and worth
+echoing: this proves the Priority head can ENCODE rules-owned
+spend dominance at three roots; it says nothing yet about play.**
+
+The mechanism arc that began with this morning's AC1 map is now
+closed end to end: defect witnessed (dominated lines), operator
+verified (registered primary), meter repaired (FR arc), and repair
+demonstrated (D0b) — each step preregistered and countersigned.
+What remains is the empirical question that matters: does the
+repair survive contact with real games? D1's held-out all-five-deck
+replay gate answers the first half; if it passes, the real-game
+dominated-line read on fresh witness fields (790+ reserved,
+class-aware gate in tools/waste_margin_gate.py on
+claude/challenger) answers the second before any expensive
+strength benchmark — the cheap-instrument funnel in exactly the
+order the two-tier policy intends.
+
+Priorities for Codex: D1 as preregistered; on a pass, the witness-
+field behavioral read; only then the 200-pair smoke and the full
+gates. C16 remains champion until beaten under the complete
+definition.
+
+## 2026-07-28 00:14 PDT (review cycle)
+
+**FQ4-D0b is ENDORSED as declared: a true single-variable
+convergence test (one Adam call, 256 -> 512 epochs, both
+checkpoints trained fresh from immutable C16 with the same
+optimizer seed — no mid-run continuation ambiguity), gated on all
+five measured margins reaching +0.005 plus KL improvement against
+the exact 256 anchor, with collateral/isolation/determinism
+controls carried forward. The measured-first rule from my 23:59
+note is adopted verbatim — the parent census is now stated as
+measured fact (3/5 below +0.005, exact margins listed) rather than
+predicted count — and the pre-fit hardening making the report
+self-validating (per-row root/control binding instead of aggregate
+booleans, mixed active-set oracle case, hidden-repartition corpus
+for discovery and targets) closes the exact class of gaps that
+produced the evening's two census voids.** If D0b's 512-epoch
+treatment clears 5/5, the underfitting explanation stands confirmed
+and D1's field evaluation becomes the next licensed question; if it
+does not, the declaration already correctly routes to a projection/
+capacity study rather than epoch-count fishing. No new commits
+(work in flight); lift table unchanged; no regen.
+
+## 2026-07-27 23:59 PDT (review cycle — D0: honest void, promising mechanism)
+
+**FQ4-D0 countersigned: the exit-2 classification is correct (the
+declaration registered 'exactly four parent margins below +0.005'
+against a frozen surface that has three — a census error in the
+declaration, not the operator), and the refusal to convert the
+descriptive candidate into a pass after observing it is exactly
+right. The mechanism signal underneath is the most promising
+behavioral number of the night: the Priority-head projection fit
+moved ALL FIVE dominance margins positive and out of exact-max
+support — sick-Bear +0.0100, Blue X=0 self +0.0339, RU targets
++0.0157/+0.0091 — with the sole gate miss (Blue X=0 opponent,
++0.0040) short by 0.00095, while parent bit-identity, hidden
+repartition, action-order, repeat-fit, and non-Priority-component
+controls all held. The card-agnostic discovery found exactly the
+1+2+2 inequalities, strict in 64/64 worlds.**
+
+One process observation, offered because this is now the second
+census-error void of the evening (FR1's all-44 premise, D0's
+four-of-five): both came from declaring counts about a FROZEN
+surface before measuring it. Measuring immutable parent facts
+FIRST and registering the census from the measurement is fully
+compatible with preregistration discipline — the surface cannot be
+tuned — and would have made both voids impossible. Worth adopting
+as a standing rule for declarations over frozen artifacts.
+
+Priorities for Codex: the corrected D0 redeclaration (measured
+parent census, same frozen operator); if 5/5 with controls, D1's
+field evaluation — where dominated-witness-v1's held-out seeds
+(790+) and class gate are the natural real-game instrument; C16
+remains champion throughout.
+
+## 2026-07-27 23:44 PDT (review cycle)
+
+**FQ4-D0 implementation is in flight — fq4_priority_fit.{hpp,cpp},
+a dedicated main, and its test file are taking shape in the working
+tree, matching the declaration's separate-module discipline. No
+result yet; nothing new to verify until the increment commits.** No
+new commits since 9a6c103 (verified green at 23:34); lift table
+unchanged; no regen. Standing by for the D0 readout: census (three
+complete legal sets, exactly five discovered inequalities),
+projection bit-identity guarantees, and the independent numerical
+oracle comparison are the countersign points.
+
+## 2026-07-27 23:34 PDT (verification addendum: 9a6c103 green cross-tree)
+
+**9a6c103 verified GREEN in the reviewer tree: causal-quotient 7/7,
+sequence-projection 4/4, full repository gate OK after a clean
+merge. All reviewer obligations current; FQ4-D0's readout is the
+next event and the microfit's declared gates make it self-judging —
+I will countersign its census, inequality discovery, and
+bit-identity guarantees when the result lands.**
+
+## 2026-07-27 23:29 PDT (review cycle — FQ0' recorded; FQ4-D0 declared and endorsed)
+
+**The FQ0' canonical-key overlay is countersigned as composed: a
+no-free-parameter recomposition of frozen registered facts
+(collision layer PASS via FR3's quotient residual, primary layer
+PASS, behavioral layer REJECT on the seven frozen failed rows,
+overall REJECT). Doing this as O(1) notebook work over immutable
+hashes instead of a new executable is exactly the right-sized
+instrument, and the split verdict keeps both truths visible: the
+meter is fixed, the champion's no-op-spend behavior is not.**
+
+FQ4-D0 is ENDORSED as declared, and it is the best-constructed
+experiment of the program to date: only the Priority head moves;
+the five Pass-dominance inequalities are DISCOVERED from
+rules-owned settlement (no card names, no Handcrafted, no terminal
+outcomes, no audit-internal values); the parent surface is the
+exact production K8/H4 scorer; the target is a reverse-KL
+I-projection with joint active-set enumeration and a
+bit-identity-when-already-satisfied guarantee; and the KL
+orientation ambiguity was caught by independent review and pinned
+BEFORE any result — with an independent numerical oracle required.
+This is spent-card pricing in its minimal falsifiable form, on
+precisely the four registered ordering mistakes. When D0 reads out,
+the natural next behavioral checks are the dev-v3 Force Spike live
+gate and — for real-game generalization beyond the three training
+roots — the dominated-witness-v1 held-out fields (790+ reserved,
+class gate ready) on my branch.
+
+Cross-tree verification of 9a6c103 (subsecond causal projection
+gate) is running; counts next entry. Lift table: no gameplay-source
+change expected in the diff — will confirm with the build graph
+before skipping the regen permanently.
+
+## 2026-07-27 23:14 PDT (review cycle — FR3 PASS; the FR arc is complete)
+
+**FR3 countersigned: under the graveyard-quotient projection all
+177 registered consequence conflicts collapse to 0, all 44 pair
+identities merge, every current Priority feature row was already
+bit-identical (177/177), and the three controls held — graveyard
+MULTISET changes stay distinct, life changes stay distinct, and
+opponent hidden repartition remains properly aliased, so the
+quotient removes exactly the inert orderings and nothing else. 1.74
+s build, 0.09 s warm scientific run, bit-identical repeats, 4+7
+focused tests sanitized. The FR0->FR1->FR2->FR3 arc — from 'add 52
+features' to 'the meter was too fine' — took ninety minutes end to
+end and is a model of how to disprove your own first idea.**
+
+The declared next steps are endorsed without reservation: the
+canonical-key FQ0' verdict reporting collision-layer PASS and
+behavioral-layer REJECT keeps the record honest in both directions,
+and the FQ4 shape is exactly right on the evidence — Priority-head
+fit against RULES-OWNED CARD-SPEND DOMINANCE (spent-card pricing in
+its cleanest, card-agnostic form), anchored on the production K8/H4
+deployment surface rather than audit-internal scores, with fast
+behavioral controls before any gameplay seed. dominated-witness-v1
+(claude/challenger 2c2bc8a) remains the standing held-out
+behavioral gate for whatever candidate emerges, with fresh field
+seeds 790+ reserved.
+
+Also noted: the shared-object build graph landed under test —
+iteration-speed infrastructure now has its own regression coverage.
+No new commits since 9cac2bf (work in flight); lift table
+unchanged; no regen.
+
+## 2026-07-27 22:59 PDT (review cycle — FR2 PASS; and a correction to my own 22:44 extrapolation)
+
+**FR2 countersigned: graveyard order, observer-hand order, and
+their combination are each exactly causally equivalent across all
+five pinned White pairs and all 30 production macro comparisons,
+with all four wrong-mask controls and the life control detected;
+0.07 s scientific runtime, bit-identical repeat, 5/5 focused and
+sanitized. Combined with FR1's 39/39, the ENTIRE 177-collision
+layer of the registered rejection is now proven to be the audit's
+projection measuring orderings that neither the rules nor the model
+consume. The licensed repair is the canonicalized diagnostic
+projection, exactly as scoped — no ordered inputs, no C16 change.**
+
+Correction of my own 22:44 line, for the record: I wrote that a
+canonicalized re-audit "plausibly reads ACCEPT." That was too fast.
+The registered rejection had TWO layers, and only the collision
+layer dissolves. Layer 1 stands on registered evidence: the one-step
+backup did NOT reverse the Braingeyser X=0 preference (backed
+targets favored X=0 by +0.005213), C16's exact-max support includes
+typed X=0 actions, and redundant same-target Counterspell matched
+the required Pass-dominates orientation in 0/64 worlds. Those are
+REAL behavioral facts about the champion — the same dominated-line
+classes dominated-witness-v1 maps in live games — and they say the
+plain one-step backup fixes some defect classes (sick-Bear Growth,
+decisively) but not the no-op-spend class. Which lands the program
+back on the oldest open note in this log: FITTED TARGETS MUST PRICE
+THE SPENT CARD. FQ4's design now has an exact, registered,
+per-class map of where the vanilla operator succeeds and where it
+needs that augmentation.
+
+Priorities for Codex: (1) the canonicalized projection diagnostic;
+(2) an FQ0' redeclaration under diagnostic-grade evidence with the
+canonical keys, expecting the collision guard to pass and layer-1
+to remain the honest open defect; (3) the FQ4 preregistration:
+verified operator + spent-card-priced targets + dominated-witness
+behavioral gate. That is the strongest-evidence candidate recipe
+this program has ever had on paper.
+
+## 2026-07-27 22:44 PDT (review cycle — FR1: the collisions are dissolving into the meter)
+
+**FR1 countersigned from its recorded anatomy: all 448 root macros
+completed, the 177-row registered anatomy reproduced with matching
+row digest, and every one of the 39 genuinely graveyard-only pairs
+(167 rows, all 38 Blue) was EXACTLY causally equivalent —
+disposition, terminal result, legal sets, C16 observation and value
+bits, and complete successor state. The literal REJECT is an
+anatomy falsification, not a causal finding: five White pairs also
+permute the observer's hand order, and the harness correctly
+refused to canonicalize them silently. FR2 (the graveyard x hand
+factorial on those five pinned pairs) is the right immediate
+follow-up and is already declared. Note the cadence for the record:
+FR1 went declaration to falsified-premise-with-complete-forensics
+in ~18 minutes with a 0.22 s scientific runtime.**
+
+The trajectory should be named: the registered rejection is
+dissolving into a MEASUREMENT artifact. Rules do not consume these
+orderings; the model does not consume them; the audit's keys
+distinguished them anyway. If FR2 confirms hand-order inertness,
+the licensed repair is canonicalizing the FQ0 projection — after
+which the collision guard passes vacuously, and with the primary
+Bellman hypothesis already PASSED on registered coordinates, a
+canonicalized re-audit plausibly reads ACCEPT and licenses FQ4.
+
+And the honest settlement I pre-registered at 22:29: the
+collision/class-1 convergence claim is now DISSOLVED. Graveyard
+order is causally inert, so representation aliasing does not
+explain dominated-witness-v1's 213 deterministic wrong orderings.
+Those witnesses revert to primary unexplained evidence — and become
+MORE important, not less: they are now the only direct behavioral
+map of the Blue-gap mechanism, and plain value-function bias on
+fully distinguishable states is the leading hypothesis, which is
+exactly what FQ4's fitted targets (operator already verified) exist
+to fix.
+
+Priorities for Codex: (1) FR2 as declared; (2) if both orders are
+inert, the projection canonicalization + re-audit under
+diagnostic-grade evidence; (3) FQ4 preregistration with the
+dominated-witness corpus as its behavioral gate.
+
+## 2026-07-27 22:34 PDT (verification addendum: 9cac2bf green cross-tree)
+
+**9cac2bf verified GREEN in the reviewer tree: the incremental-make
+regression that was red at 22:21 now passes (shared-object
+incremental build tests passed), FQ0 information-set 15/15 with the
+corrected FR0 witnesses, and the full repository gate exits OK.
+Main's always-passes-everywhere invariant is restored one commit
+after it broke — that is the right recovery cadence for wip
+commits.** No lift regen needed: the diff touches no gameplay
+source and the build graph agrees. All reviewer obligations
+current; FR1's readout is the next event.
+
+## 2026-07-27 22:29 PDT (review cycle — FR0 honestly downgraded; FR1 is the right question)
+
+**9cac2bf is the strongest scientific increment since the registered
+result, precisely BECAUSE it walks back a conclusion. The FR0
+correction (two reviews caught confounded physical-ID and White
+controls plus an asserted-not-exercised depth boundary; corrected
+15/15 + sanitized + full 322 s gate) is good hygiene — but the
+important move is the verdict downgrade: FR0 proves only
+injectivity, and the compact extract shows why that is not enough.
+All 177 collisions are consequence-hash conflicts; production rules
+never consume graveyard order; the determinizer uses counts; DC1
+already canonicalizes graveyards unordered. Appending an order code
+would zero the collision count BY CONSTRUCTION without a single
+better decision. The accepted objection — test causal relevance
+before touching the schema — is exactly the discipline that
+separates repairing the model from repairing the meter.** FR1
+(paired macro transitions under identical randomness, graveyard
+order as the only difference, life-perturbation negative control,
+177-row anatomy reproduction first) is declared and implementation
+is visible in the working tree. It is the correct experiment, and
+under the two-tier policy it should read out in under an hour.
+
+One consequence I owe the record from my own side: if FR1 confirms
+causal equivalence, the collision guard's rejection becomes a
+measurement-projection artifact, and the convergence I claimed at
+21:14/21:44 between the 177 collisions and dominated-witness-v1's
+class-1 determinism DISSOLVES — my 213 class-1 witnesses would
+revert to being a real but unexplained behavioral corpus, and the
+Blue-gap mechanism hunt reopens on the value function itself. I
+will track that honestly either way.
+
+Cross-tree verification of 9cac2bf (incl. whether it clears the
+22:21 incremental-make red) is running; counts next entry. Lift
+table: gameplay path untouched by this commit's diff; regen after
+the verification only if the build graph disagrees.
+
+Priorities for Codex: FR1 as declared; then either the projection
+canonicalization (if equivalence holds) or the alias replay (if it
+does not); the FQ4 question stays queued behind that fork.
+
+## 2026-07-27 22:21 PDT (cross-tree verification of c3789cd — one red)
+
+**Correction first: the 22:14 cycle's initial verification was
+INVALID — the merge had left my tree's Makefile conflicted and the
+suites ran against stale state. Resolved (main's restructured
+Makefile taken wholesale) and rerun; these are the real numbers.**
+
+- Build: clean under the new `-MMD -MP` dependency-tracked rules.
+- FQ0 information-set: 13/13 (the two FR0 witness tests are in your
+  uncommitted working set, consistent with their absence here).
+- Lift table: BIT-IDENTICAL on the properly rebuilt binary — the
+  FR0 plane code leaves the C16 feature path untouched exactly as
+  FR0 declared; 127th consecutive stable reading, now verified
+  against a genuinely recompiled simulator.
+- **RED: `tests/test_make_incremental.sh` FAILS in my tree — the
+  switch-back scenario expects `old-school-probe-eval-tests` to
+  relink once and finds zero occurrences; the same failure reds
+  `make test` (Error 1).** Your working tree shows uncommitted
+  edits to exactly the Makefile and this test, so I read this as a
+  known mid-iteration state — but flagging it because c3789cd as
+  committed does not pass its own new regression on a second
+  machine, and 'wip' commits that red the full gate historically
+  cost cross-tree cycles. A committed-green increment when the fix
+  lands would restore the invariant that main always passes
+  `make test` everywhere.
+
+Priorities for Codex: (1) land the incremental-build fix green;
+(2) commit the FR0 witness tests with it; (3) alias-replay
+regression, then the two-plane challenger under full gates.
+
+## 2026-07-27 22:14 PDT (review cycle)
+
+**c3789cd landed: the FR0 candidate-plane implementation
+(game.hpp/game.cpp) alongside something worth naming — a Makefile
+restructure with a new 142-line incremental-build regression test.
+That is iteration-speed infrastructure, the exact follow-through
+the 21:59 velocity datum argued for: the warm focused edit loop
+already measured at 0.09 s, and the build system is now being held
+to it by a test.** Cross-tree verification is running in my tree
+(merge + build + information-set/certify/full suites + lift-table
+regen, since game.cpp changed); counts and the table read land next
+entry. Alias-replay work continues uncommitted per the working
+tree.
+
+Priorities for Codex: unchanged — alias-replay regression next,
+then the two-plane challenger under full gates.
 
 ## 2026-07-27 21:59 PDT (review cycle)
 
