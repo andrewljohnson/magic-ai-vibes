@@ -479,11 +479,26 @@ FailureCode SearchFailure::code() const noexcept {
 SearchResult search(
     Environment& environment,
     std::uint64_t tie_seed) {
+    return search(
+        environment, tie_seed, kSimulationCount);
+}
+
+SearchResult search(
+    Environment& environment,
+    std::uint64_t tie_seed,
+    std::size_t simulation_count) {
+    if (simulation_count == 0 ||
+        simulation_count > kMaximumSimulationCount) {
+        fail(
+            FailureCode::InvalidSimulationCount,
+            "ISP0 simulation count is outside [1, 512]");
+    }
+
     std::vector<Node> nodes;
-    nodes.reserve(kSimulationCount + 1);
+    nodes.reserve(simulation_count + 1);
     std::unordered_map<std::string, std::size_t>
         node_indices;
-    node_indices.reserve(kSimulationCount + 1);
+    node_indices.reserve(simulation_count + 1);
     Accounting accounting;
     std::optional<std::string> root_key;
     std::size_t root_index = 0;
@@ -512,7 +527,7 @@ SearchResult search(
     };
 
     for (std::size_t simulation = 0;
-         simulation < kSimulationCount;
+         simulation < simulation_count;
          ++simulation) {
         ++accounting.simulations_started;
         std::unique_ptr<TruthParticle> particle =
@@ -672,13 +687,13 @@ SearchResult search(
     accounting.node_count = nodes.size();
     if (!root_key.has_value() ||
         accounting.simulations_started !=
-            kSimulationCount ||
+            simulation_count ||
         accounting.simulations_completed !=
-            kSimulationCount ||
+            simulation_count ||
         nodes[root_index].visits !=
-            kSimulationCount ||
+            simulation_count ||
         sum_edge_visits(nodes[root_index]) !=
-            kSimulationCount ||
+            simulation_count ||
         accounting.node_count > kMaximumNodeCount ||
         accounting.expanded_edge_count >
             kMaximumExpandedEdgeCount ||
@@ -687,7 +702,7 @@ SearchResult search(
         accounting.terminal_leaves +
                 accounting.observation_leaves +
                 accounting.depth_leaves !=
-            kSimulationCount) {
+            simulation_count) {
         fail(
             FailureCode::InvalidObservation,
             "ISP0 internal accounting invariant failed");

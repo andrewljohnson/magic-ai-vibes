@@ -25304,6 +25304,27 @@ LearnedGenerativeTransition advance_learned_generative_position(
             .search_seed = search_seed,
             .tie_seed = tie_seed,
         };
+        witness.accounting_through_decision = {
+            .actions_applied = result.actions_applied,
+            .phase_transitions =
+                result.phase_transitions,
+            .turn_advances = result.turn_advances,
+            .opponent_decisions_applied =
+                result.witness
+                    .opponent_decisions_applied,
+        };
+        checked_add(
+            witness.accounting_through_decision
+                .actions_applied,
+            1,
+            "opponent decision-local action accounting "
+            "overflow");
+        checked_add(
+            witness.accounting_through_decision
+                .opponent_decisions_applied,
+            1,
+            "opponent decision-local policy accounting "
+            "overflow");
 
         std::string chosen_key;
         if (const auto* priority =

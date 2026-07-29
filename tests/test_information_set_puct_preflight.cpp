@@ -4,7 +4,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <iterator>
+#include <optional>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -355,6 +358,153 @@ void test_isolation_and_opponent_gates_fail_closed() {
         "ISP0 accepted an incomplete callback API");
 }
 
+void test_opponent_accounting_stops_at_witnessed_decision() {
+    constexpr std::uint64_t kNonreservedSeed =
+        UINT64_C(202607290117);
+    old_school::LearnedGenerativeOpponentDecisionWitness
+        witness;
+    witness.search_seed = kNonreservedSeed;
+    witness.tie_seed = kNonreservedSeed + 1;
+    witness.accounting_through_decision = {
+        .actions_applied = 2,
+        .phase_transitions = 0,
+        .turn_advances = 0,
+        .opponent_decisions_applied = 1,
+    };
+
+    old_school::LearnedGenerativeTransition original;
+    original.actions_applied = 2;
+    original.witness.opponent_decisions.push_back(
+        witness);
+    old_school::LearnedGenerativeTransition continued =
+        original;
+    continued.actions_applied += 7;
+    continued.phase_transitions += 3;
+    continued.turn_advances += 1;
+    continued.witness.opponent_decisions_applied += 2;
+
+    expect(
+        original.actions_applied !=
+                continued.actions_applied &&
+            original.phase_transitions !=
+                continued.phase_transitions &&
+            original.turn_advances !=
+                continued.turn_advances &&
+            isp0::opponent_local_accounting_bit_identical(
+                original.witness.opponent_decisions.front(),
+                continued.witness.opponent_decisions.front()),
+        "later continuation contaminated decision-local "
+        "opponent accounting");
+    ++continued.witness.opponent_decisions.front()
+          .accounting_through_decision.actions_applied;
+    expect(
+        !isp0::opponent_local_accounting_bit_identical(
+            original.witness.opponent_decisions.front(),
+            continued.witness.opponent_decisions.front()),
+        "decision-local accounting ignored a witness mutation");
+}
+
+void test_pv_witness_requires_an_actual_completed_cutoff() {
+    constexpr std::size_t kCompletedSimulation = 37;
+    old_school::LearnedGenerativeLeafEvaluation exact_leaf{
+        .value = 0.75,
+        .exact_combat_completed = true,
+        .exact_combat_completed_plan_count = 2,
+        .completed_damage_ordered_blocks = {{2, 3}},
+    };
+    const std::vector<
+        isp0::PrincipalVariationTraceEvidence> traces = {
+        {
+            .simulation_index = 11,
+            .steps = {
+                {
+                    .action_key = "no-block",
+                    // This sidecar is not a cutoff because the same
+                    // simulation traversed another searched edge.
+                    .successor_leaf_evaluation = exact_leaf,
+                },
+                {
+                    .action_key = "later-root-choice",
+                },
+            },
+        },
+        {
+            .simulation_index = kCompletedSimulation,
+            .steps = {
+                {
+                    .action_key = "no-block",
+                    .stack_settled = true,
+                    .initial_opposing_non_counter_spells_countered =
+                        true,
+                    .successor_leaf_evaluation = exact_leaf,
+                },
+            },
+        },
+    };
+    const isp0::PrincipalVariationWitness witness =
+        isp0::build_principal_variation_witness(
+            {"no-block"}, traces);
+    expect(
+        witness.completed_trace &&
+            witness.completed_cutoff_path &&
+            witness.completed_cutoff_simulation ==
+                std::optional<std::size_t>(
+                    kCompletedSimulation) &&
+            witness.exact_combat_completed &&
+            witness.exact_combat_completed_at_cutoff &&
+            witness
+                .initial_opposing_non_counter_spells_countered &&
+            witness.exact_combat_completed_plan_count == 2 &&
+            witness.completed_damage_ordered_blocks ==
+                std::vector<std::pair<
+                    old_school::PermanentId,
+                    old_school::PermanentId>>{{2, 3}},
+        "PV witness did not select the actual completed "
+        "exact-combat cutoff");
+
+    auto truncated = traces;
+    truncated.erase(std::next(truncated.begin()));
+    const auto no_cutoff =
+        isp0::build_principal_variation_witness(
+            {"no-block"}, truncated);
+    expect(
+        no_cutoff.completed_trace &&
+            !no_cutoff.completed_cutoff_path &&
+            !no_cutoff.exact_combat_completed &&
+            !no_cutoff.exact_combat_completed_at_cutoff,
+        "PV witness admitted a leaf sidecar from a "
+        "non-cutoff trace");
+}
+
+void test_report_exposes_opponent_subfields() {
+    const isp0::PreflightReport report =
+        isp0::assemble_preflight(
+            std::string(
+                isp0::kRequiredParentFingerprint),
+            passing_api());
+    std::ostringstream output;
+    isp0::print_report(report, output);
+    const std::string text = output.str();
+    for (const std::string_view field : {
+             "scored-actions=",
+             "selected-membership=",
+             "repartition=",
+             "observation=",
+             "legal-signature=",
+             "c16-scores=",
+             "selected=",
+             "local-accounting=",
+             "no-shared-opponent-node-q=",
+             "accounting-through-decision original=",
+             "repartitioned=",
+         }) {
+        expect(
+            text.find(field) != std::string::npos,
+            "ISP0 report hid an opponent-noninterference "
+            "subfield");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -364,6 +514,9 @@ int main() {
         test_root_gate_is_a_strict_conjunction();
         test_fake_orchestration_accepts_only_all_twelve();
         test_isolation_and_opponent_gates_fail_closed();
+        test_opponent_accounting_stops_at_witnessed_decision();
+        test_pv_witness_requires_an_actual_completed_cutoff();
+        test_report_exposes_opponent_subfields();
     } catch (const std::exception& error) {
         std::cerr
             << "information-set PUCT preflight tests failed: "
@@ -372,6 +525,6 @@ int main() {
     }
     std::cout
         << "information-set PUCT preflight tests passed: "
-           "5/5 groups\n";
+           "8/8 groups\n";
     return 0;
 }

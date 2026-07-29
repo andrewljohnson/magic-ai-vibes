@@ -9,6 +9,7 @@
 #include <functional>
 #include <iosfwd>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -45,11 +46,15 @@ struct RootActionEvidence {
 struct PrincipalVariationWitness {
     std::vector<std::string> actions;
     bool completed_trace = false;
+    bool completed_cutoff_path = false;
+    std::optional<std::size_t> completed_cutoff_simulation;
     std::size_t searched_depth = 0;
     std::size_t root_actor_counterspells = 0;
     std::size_t root_actor_counters_targeting_own_counter = 0;
+    bool initial_opposing_non_counter_spells_countered = false;
     bool stack_settled = false;
     bool exact_combat_completed = false;
+    bool exact_combat_completed_at_cutoff = false;
     std::size_t exact_combat_completed_plan_count = 0;
     bool exact_combat_contains_pure_chump = false;
     std::vector<std::pair<PermanentId, PermanentId>>
@@ -59,6 +64,41 @@ struct PrincipalVariationWitness {
         const PrincipalVariationWitness&) const = default;
 };
 
+// Hidden-safe, evaluation-only trace projection. A completed cutoff is a
+// simulation whose recorded transitions end exactly after the final
+// principal-variation action. Leaf evidence is admissible only there.
+struct PrincipalVariationTraceStepEvidence {
+    std::string action_key;
+    bool stack_settled = false;
+    std::size_t root_actor_counterspells = 0;
+    std::size_t root_actor_counters_targeting_own_counter = 0;
+    bool initial_opposing_non_counter_spells_countered = false;
+    bool exact_combat_completed = false;
+    std::size_t exact_combat_completed_plan_count = 0;
+    bool exact_combat_contains_pure_chump = false;
+    std::vector<std::pair<PermanentId, PermanentId>>
+        completed_damage_ordered_blocks;
+    std::optional<LearnedGenerativeLeafEvaluation>
+        successor_leaf_evaluation;
+
+    bool operator==(
+        const PrincipalVariationTraceStepEvidence&) const =
+        default;
+};
+
+struct PrincipalVariationTraceEvidence {
+    std::size_t simulation_index = 0;
+    std::vector<PrincipalVariationTraceStepEvidence> steps;
+
+    bool operator==(
+        const PrincipalVariationTraceEvidence&) const =
+        default;
+};
+
+PrincipalVariationWitness build_principal_variation_witness(
+    const std::vector<std::string>& principal_variation,
+    const std::vector<PrincipalVariationTraceEvidence>& traces);
+
 struct RootReport {
     std::string stable_id;
     aq5::DecisionFamily family =
@@ -66,6 +106,10 @@ struct RootReport {
     std::string expected_key;
     std::string selected_key;
     std::vector<RootActionEvidence> actions;
+    std::size_t requested_simulations =
+        puct::kSimulationCount;
+    std::uint64_t search_seed = 0;
+    std::uint64_t tie_seed = 0;
     puct::Accounting accounting;
     PrincipalVariationWitness principal_variation;
 
@@ -95,6 +139,7 @@ struct RootReport {
     bool required_exact_combat_completion = false;
     bool partial_combat_leaf_completed_exactly = false;
 
+    bool evidence_gate_passed() const;
     bool gate_passed() const;
 };
 
@@ -109,9 +154,20 @@ struct OpponentNoninterferenceReport {
     bool selected_action_bit_identical = false;
     bool local_accounting_bit_identical = false;
     bool no_shared_opponent_node_or_q_update = false;
+    LearnedGenerativeDecisionAccounting
+        original_accounting_through_decision;
+    LearnedGenerativeDecisionAccounting
+        repartitioned_accounting_through_decision;
 
+    bool operator==(
+        const OpponentNoninterferenceReport&) const =
+        default;
     bool gate_passed() const;
 };
+
+bool opponent_local_accounting_bit_identical(
+    const LearnedGenerativeOpponentDecisionWitness& left,
+    const LearnedGenerativeOpponentDecisionWitness& right);
 
 struct IsolationReport {
     bool exact_parent = false;
@@ -163,6 +219,22 @@ PreflightReport assemble_preflight(
 
 PreflightReport run_preflight(
     std::shared_ptr<const LearnedModel> parent);
+
+// Shared production evidence seam for sealed follow-on diagnostics. The
+// experiment seed and simulation count affect only seed derivation and the
+// PUCT core's bounded simulation loop; all engine/search semantics are the
+// same as ISP0.
+RootReport run_root_evidence(
+    const aq5::PreparedRoot& root,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed,
+    std::size_t simulation_count);
+
+OpponentNoninterferenceReport
+run_opponent_noninterference_evidence(
+    const std::vector<aq5::PreparedRoot>& roots,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed);
 
 void print_report(
     const PreflightReport& report,

@@ -13,6 +13,7 @@
 namespace old_school::information_set_puct {
 
 inline constexpr std::size_t kSimulationCount = 64;
+inline constexpr std::size_t kMaximumSimulationCount = 512;
 inline constexpr std::size_t kMaximumDecisionPlies = 8;
 inline constexpr std::size_t kMaximumNodeCount = 513;
 inline constexpr std::size_t kMaximumExpandedEdgeCount = 512;
@@ -67,8 +68,9 @@ class Environment {
 public:
     virtual ~Environment() = default;
 
-    // Called exactly once for each simulation index [0, 64). The returned
-    // particle is mutable and private to that simulation.
+    // Called exactly once for each simulation index in
+    // [0, requested_simulation_count). The returned particle is mutable and
+    // private to that simulation.
     virtual std::unique_ptr<TruthParticle> start_simulation(
         std::size_t simulation_index) = 0;
 
@@ -93,6 +95,7 @@ enum class FailureCode {
     EdgeLimit,
     CyclicObservation,
     InvalidParticle,
+    InvalidSimulationCount,
 };
 
 class SearchFailure : public std::runtime_error {
@@ -166,11 +169,18 @@ struct SearchResult {
     bool operator==(const SearchResult&) const = default;
 };
 
-// Run the sealed one-thread ISP0 search. The only caller-provided scalar is a
-// tie seed; simulations, depth, allocation bounds, and PUCT constant are
-// fixed by the constants above.
+// Run the sealed one-thread ISP0 search. This legacy entry point always uses
+// exactly kSimulationCount simulations; depth, allocation bounds, and PUCT
+// constant are fixed by the constants above.
 SearchResult search(
     Environment& environment,
     std::uint64_t tie_seed);
+
+// Run the same one-thread search with an explicitly requested simulation
+// count in [1, kMaximumSimulationCount]. No other search coordinate changes.
+SearchResult search(
+    Environment& environment,
+    std::uint64_t tie_seed,
+    std::size_t simulation_count);
 
 } // namespace old_school::information_set_puct

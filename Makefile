@@ -113,6 +113,7 @@ ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE := src/action_q_recursive_policy_im
 CONSERVATIVE_POLICY_IMPROVEMENT_SOURCE := src/conservative_policy_improvement.cpp
 INFORMATION_SET_PUCT_SOURCE := src/information_set_puct.cpp
 INFORMATION_SET_PUCT_PREFLIGHT_SOURCE := src/information_set_puct_preflight.cpp
+INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_SOURCE := src/information_set_puct_budget_diagnostic.cpp
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_SOURCE := src/fq4_dev_background_diagnostic.cpp
 FQ4_DEV_COVERAGE_CENSUS_SOURCE := src/fq4_dev_coverage_census.cpp
 FQ4_NEUTRAL_SUPPLEMENT_SOURCE := src/fq4_neutral_supplement.cpp
@@ -224,6 +225,8 @@ INFORMATION_SET_PUCT_TEST_RUNNER := $(BUILD_DIR)/old-school-information-set-puct
 LEARNED_GENERATIVE_SEARCH_TEST_RUNNER := $(BUILD_DIR)/old-school-learned-generative-search-tests
 INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER := $(BUILD_DIR)/old-school-information-set-puct-preflight-tests
 INFORMATION_SET_PUCT_PREFLIGHT := $(BUILD_DIR)/old-school-information-set-puct-preflight
+INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-information-set-puct-budget-diagnostic-tests
+INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC := $(BUILD_DIR)/old-school-information-set-puct-budget-diagnostic
 FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic-tests
 FQ4_DEV_BACKGROUND_DIAGNOSTIC := $(BUILD_DIR)/old-school-fq4-dev2-background-diagnostic
 FQ4_DEV_COVERAGE_CENSUS_TEST_RUNNER := $(BUILD_DIR)/old-school-fq4-dev4-coverage-census-tests
@@ -280,7 +283,7 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-action-q-on-policy-successor action-q-on-policy-successor-census action-q-on-policy-successor-run
 .PHONY: test-action-q-priority-trust-region action-q-priority-trust-region-run
 .PHONY: test-action-q-recursive-policy-improvement action-q-recursive-policy-improvement-run
-.PHONY: test-conservative-policy-improvement test-exact-combat-subgame test-information-set-puct test-learned-generative-search test-information-set-puct-preflight
+.PHONY: test-conservative-policy-improvement test-exact-combat-subgame test-information-set-puct test-learned-generative-search test-information-set-puct-preflight test-information-set-puct-budget-diagnostic
 
 all: $(SIMULATOR)
 
@@ -426,6 +429,7 @@ ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_BROAD_DISTI
 ACTION_Q_PRIORITY_TRUST_REGION_LINK_SOURCES := $(ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES) $(ACTION_Q_PRIORITY_TRUST_REGION_SOURCE)
 ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_LINK_SOURCES := $(ACTION_Q_OFFLINE_GATE_LINK_SOURCES) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE) $(CONSERVATIVE_POLICY_IMPROVEMENT_SOURCE)
 INFORMATION_SET_PUCT_PREFLIGHT_LINK_SOURCES := $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_LINK_SOURCES) $(INFORMATION_SET_PUCT_SOURCE) $(INFORMATION_SET_PUCT_PREFLIGHT_SOURCE)
+INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_LINK_SOURCES := $(INFORMATION_SET_PUCT_PREFLIGHT_LINK_SOURCES) $(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_SOURCE)
 FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
 FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
@@ -555,6 +559,10 @@ $(eval $(call link_program,$(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER),$(ENGINE_SOU
 $(eval $(call link_program,$(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER),$(INFORMATION_SET_PUCT_PREFLIGHT_LINK_SOURCES) tests/test_information_set_puct_preflight.cpp))
 
 $(eval $(call link_program,$(INFORMATION_SET_PUCT_PREFLIGHT),$(INFORMATION_SET_PUCT_PREFLIGHT_LINK_SOURCES) src/information_set_puct_preflight_main.cpp))
+
+$(eval $(call link_program,$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_TEST_RUNNER),$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_LINK_SOURCES) tests/test_information_set_puct_budget_diagnostic.cpp))
+
+$(eval $(call link_program,$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC),$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_LINK_SOURCES) src/information_set_puct_budget_diagnostic_main.cpp))
 
 $(eval $(call link_program,$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_TEST_RUNNER),$(FQ4_DEV_BACKGROUND_DIAGNOSTIC_LINK_SOURCES) tests/test_fq4_dev_background_diagnostic.cpp))
 
@@ -686,7 +694,7 @@ test: $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_TEST_RUNNER) $(ACTION_Q_NESTED_ACTOR
 test: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 test: $(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER) $(ACTION_Q_PRIORITY_TRUST_REGION)
 test: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
-test: $(CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(EXACT_COMBAT_SUBGAME_TEST_RUNNER) $(INFORMATION_SET_PUCT_TEST_RUNNER) $(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER) $(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER) $(INFORMATION_SET_PUCT_PREFLIGHT)
+test: $(CONSERVATIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(EXACT_COMBAT_SUBGAME_TEST_RUNNER) $(INFORMATION_SET_PUCT_TEST_RUNNER) $(LEARNED_GENERATIVE_SEARCH_TEST_RUNNER) $(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNER) $(INFORMATION_SET_PUCT_PREFLIGHT) $(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_TEST_RUNNER) $(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC)
 test: $(FQ4_WORK0_CACHE_TEST_RUNNER)
 test: test-fq4-work0-firewall
 
@@ -820,6 +828,14 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 		if [ $$status -ne 2 ]; then \
 			printf '%s\n' "$$output"; \
 			printf 'ISP0 preflight accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+	./$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_TEST_RUNNER)
+	@set +e; output=`./$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'ISP1 budget diagnostic accepted an arbitrary mode\n' >&2; \
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
@@ -1745,6 +1761,16 @@ test-information-set-puct-preflight: $(INFORMATION_SET_PUCT_PREFLIGHT_TEST_RUNNE
 		if [ $$status -ne 2 ]; then \
 			printf '%s\n' "$$output"; \
 			printf 'ISP0 preflight accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null
+
+test-information-set-puct-budget-diagnostic: $(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_TEST_RUNNER) $(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC)
+	./$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC_TEST_RUNNER)
+	@set +e; output=`./$(INFORMATION_SET_PUCT_BUDGET_DIAGNOSTIC) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'ISP1 budget diagnostic accepted an arbitrary mode\n' >&2; \
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage:' >/dev/null

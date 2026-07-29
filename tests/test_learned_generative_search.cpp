@@ -394,6 +394,57 @@ void test_attack_block_exact_completion_and_bound() {
                 leaf.completed_damage_ordered_blocks.end(),
         "exact leaf discarded the fixed block prefix");
 
+    // The Blue ISP0 root first declines the Flying Men block. The resulting
+    // partial position must still be completed by the exact leaf evaluator,
+    // and its completed cutoff must use the Air Elemental trade rather than
+    // inventing the declined chump.
+    const auto blue_root =
+        old_school::make_learned_generative_block_position(
+            block_state, block_decks, 0, 1, {2}, {}, 1,
+            {3});
+    const auto declined =
+        old_school::advance_learned_generative_position(
+            blue_root, "block.subject-1.none",
+            model(), 117, false);
+    expect(
+        declined.disposition ==
+                old_school::LearnedGenerativeDisposition::
+                    DecisionBoundary &&
+            declined.position.has_value(),
+        "Blue no-block edge did not reach its partial combat "
+        "cutoff");
+    const auto blue_cutoff =
+        old_school::evaluate_learned_generative_leaf(
+            *declined.position, 0, model(), 118);
+    expect(
+        blue_cutoff.exact_combat_completed &&
+            blue_cutoff.exact_combat_completed_plan_count >
+                0 &&
+            !blue_cutoff.exact_combat_contains_pure_chump &&
+            std::find(
+                blue_cutoff.completed_damage_ordered_blocks
+                    .begin(),
+                blue_cutoff.completed_damage_ordered_blocks
+                    .end(),
+                std::pair<
+                    old_school::PermanentId,
+                    old_school::PermanentId>{2, 3}) !=
+                blue_cutoff.completed_damage_ordered_blocks
+                    .end() &&
+            std::find(
+                blue_cutoff.completed_damage_ordered_blocks
+                    .begin(),
+                blue_cutoff.completed_damage_ordered_blocks
+                    .end(),
+                std::pair<
+                    old_school::PermanentId,
+                    old_school::PermanentId>{2, 1}) ==
+                blue_cutoff.completed_damage_ordered_blocks
+                    .end(),
+        "Blue exact cutoff did not preserve the declined "
+        "Flying Men block and complete the Air Elemental "
+        "trade");
+
     const std::array<std::vector<old_school::CardId>, 2>
         red_decks = {
             old_school::red_deck(),
@@ -513,6 +564,27 @@ void test_hidden_opponent_full_block_accounting() {
                 transition.actions_applied,
         "opponent full Block omitted its declaration or "
         "damage-order accounting");
+    expect(
+        block.accounting_through_decision ==
+            old_school::LearnedGenerativeDecisionAccounting{
+                .actions_applied = 2,
+                .phase_transitions = 1,
+                .turn_advances = 0,
+                .opponent_decisions_applied = 1,
+            },
+        "opponent full Block did not snapshot accounting at "
+        "its decision boundary");
+
+    auto later_continuation = transition;
+    later_continuation.actions_applied += 9;
+    later_continuation.phase_transitions += 4;
+    later_continuation.turn_advances += 1;
+    expect(
+        later_continuation.witness.opponent_decisions.front()
+                .accounting_through_decision ==
+            block.accounting_through_decision,
+        "later root-private continuation mutated the witnessed "
+        "opponent accounting");
 }
 
 } // namespace

@@ -259,6 +259,78 @@ void test_fixed_accounting_draw_and_replay() {
         "terminal draw did not back up exact one-half");
 }
 
+void test_explicit_64_is_legacy_bit_identical() {
+    GraphEnvironment legacy(
+        "root", terminal_root_graph());
+    GraphEnvironment explicit_64(
+        "root", terminal_root_graph());
+    const puct::SearchResult legacy_result =
+        puct::search(legacy, UINT64_C(934764));
+    const puct::SearchResult explicit_result =
+        puct::search(
+            explicit_64,
+            UINT64_C(934764),
+            puct::kSimulationCount);
+
+    expect(
+        explicit_result == legacy_result,
+        "explicit 64 simulations changed legacy ISP0 evidence");
+}
+
+void test_explicit_larger_budget_replay_and_accounting() {
+    GraphEnvironment first(
+        "root", terminal_root_graph());
+    GraphEnvironment second(
+        "root", terminal_root_graph());
+    const puct::SearchResult a =
+        puct::search(
+            first,
+            UINT64_C(556677),
+            puct::kMaximumSimulationCount);
+    const puct::SearchResult b =
+        puct::search(
+            second,
+            UINT64_C(556677),
+            puct::kMaximumSimulationCount);
+
+    expect(
+        a == b,
+        "explicit 512-simulation replay was not exact");
+    expect(
+        a.root_visits == puct::kMaximumSimulationCount &&
+            a.accounting.simulations_started ==
+                puct::kMaximumSimulationCount &&
+            a.accounting.simulations_completed ==
+                puct::kMaximumSimulationCount,
+        "explicit 512-simulation accounting was not exact");
+    expect(
+        total_edge_visits(find_node(a, "root")) ==
+                puct::kMaximumSimulationCount &&
+            a.accounting.terminal_leaves ==
+                puct::kMaximumSimulationCount &&
+            a.accounting.observation_leaves == 0 &&
+            a.accounting.depth_leaves == 0,
+        "explicit 512-simulation leaves or visits were not exact");
+}
+
+void test_invalid_simulation_budgets_fail_closed() {
+    for (const std::size_t simulation_count :
+         {std::size_t{0},
+          puct::kMaximumSimulationCount + 1}) {
+        GraphEnvironment environment(
+            "root", terminal_root_graph());
+        expect_failure(
+            puct::FailureCode::InvalidSimulationCount,
+            [&environment, simulation_count]() {
+                (void)puct::search(
+                    environment,
+                    UINT64_C(881122),
+                    simulation_count);
+            },
+            "out-of-range simulation count was accepted");
+    }
+}
+
 std::map<std::string, GraphNode>
 adversarial_graph() {
     return {
@@ -803,6 +875,9 @@ void test_sealed_depth_bound() {
 int main() {
     try {
         test_fixed_accounting_draw_and_replay();
+        test_explicit_64_is_legacy_bit_identical();
+        test_explicit_larger_budget_replay_and_accounting();
+        test_invalid_simulation_budgets_fail_closed();
         test_deeper_adversarial_lookahead();
         test_consecutive_same_actor_does_not_flip();
         test_input_order_identity();
@@ -818,6 +893,6 @@ int main() {
         return 1;
     }
     std::cout
-        << "information-set PUCT tests passed: 9/9 groups\n";
+        << "information-set PUCT tests passed: 12/12 groups\n";
     return 0;
 }

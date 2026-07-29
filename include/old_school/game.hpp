@@ -1095,6 +1095,20 @@ struct LearnedGenerativeActionPrior {
         const LearnedGenerativeActionPrior&) const = default;
 };
 
+// Cumulative macro accounting captured immediately after an opponent policy
+// choice is committed, before any continuation can reach a later root-private
+// decision. This is evidence only; it does not affect transition control.
+struct LearnedGenerativeDecisionAccounting {
+    std::size_t actions_applied = 0;
+    std::size_t phase_transitions = 0;
+    std::size_t turn_advances = 0;
+    std::size_t opponent_decisions_applied = 0;
+
+    bool operator==(
+        const LearnedGenerativeDecisionAccounting&) const =
+        default;
+};
+
 struct LearnedGenerativeObservation {
     std::size_t actor = 0;
     LearnedGenerativeDecisionKind kind =
@@ -1119,6 +1133,8 @@ struct LearnedGenerativeOpponentDecisionWitness {
     std::string selected_stable_key;
     std::uint64_t search_seed = 0;
     std::uint64_t tie_seed = 0;
+    LearnedGenerativeDecisionAccounting
+        accounting_through_decision;
 
     bool operator==(
         const LearnedGenerativeOpponentDecisionWitness&) const =

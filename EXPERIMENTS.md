@@ -21760,6 +21760,114 @@ plus fixed controls. That diagnostic must distinguish “64 simulations never
 revisited enough nodes” from “the frozen C16 critic converges confidently to
 the wrong move.” It cannot retroactively accept ISP0.
 
+Post-result interpretation recorded before AQ8 implementation: the declared
+ISP0 descriptor gate correctly remains 8/12 and rejected, but the
+intervening-Counter descriptor miss is not the owner's duplicate-Counter
+failure. Its completed PV contained exactly one new Counterspell, targeted no
+own Counterspell, and settled the stack. AQ5-DIAG had already shown that
+countering the underlying Air Elemental and countering the intervening
+Counterspell have the same owner-visible completed outcome in that fixture.
+The actual policy misses relevant to the next general mechanism test are
+therefore Braingeyser, Ancestral Recall, and payable Force Spike. Likewise the
+Blue first-block action was strategically correct; its root gate failed
+measurement anti-vacuity. This interpretation does not alter ISP0's
+predeclared verdict or license it.
+
+##### AQ8-ISP1 one-shot 64-versus-512 search-budget kill test
+
+Declared 2026-07-29 after recording ISP0, before making simulation count
+configurable, implementing the ISP1 runner, or opening seed
+`202607291101`. C16 remains champion and ISP0 remains rejected.
+
+Falsifiable hypothesis: ISP0's 64 simulations spent nearly one expansion per
+simulation and did not revisit enough of the information-set tree. Increasing
+only completed simulations from 64 to 512—large enough to force meaningful
+tree reuse under the existing 513-node/512-edge caps—will correct all three
+true strategic misses while preserving six general controls. If it does not,
+close simulation-budget tuning and change the critic target/backup semantics
+rather than shopping 128/256 or widening the network.
+
+The immutable descriptive input is ISP0's exact census: Braingeyser chose Pass
+(22 visits/Q `0.331859` versus self-X=1 at 10/`0.260731`); Ancestral-self had
+the best immediate successor but lost after backup; payable Spike preferred
+casting it 37 visits to 27; most roots created 58-65 nodes from 64
+simulations. These counts are observations, not tunable thresholds.
+
+Add a bounded simulation-count argument to the pure PUCT core, accepted only
+in `[1,512]`; retain the existing two-argument API as exactly the sealed
+64-simulation ISP0 call. Simulation count is the only search variable.
+Maximum decision plies remain eight, node cap 513, expanded-edge cap 512,
+`c_puct=1.0`, prior formula, FPU/leaf critic, absolute-player-zero backup,
+root choice/ties, one thread, particle construction, opponent policy and all
+macro/exact-combat bounds remain byte-for-byte unchanged. A focused core test
+must prove that explicit 64 is bit-identical to the old API and that 0/513
+fail closed.
+
+After the measurement-only ISP0 fixes pass without changing any root choice,
+run the same nine immutable AQ5 roots at budgets 64 and 512. Both budgets use
+seed base `202607291101`; each root's 512 run uses exactly the same
+simulation-index particle/transition seed derivation as its 64 run, so
+simulations `[0,64)` are a common prefix. For each root/budget run direct,
+deterministic replay, reversed candidate order, and the nonvacuous hidden
+repartition clone. Require their complete search and safe-trace evidence to
+be bit-identical within a budget.
+
+The three primary miss roots are:
+
+1. `control.blue.braingeyser-x0.v1` — self X=1;
+2. `field.blue.ancestral-opponent-seed24.aq0.v1` — self;
+3. `control.blue.force-spike-payable-five-open-gray-ogre.aq0.v1` — Pass.
+
+The six controls are:
+
+1. `control.blue.counter-redundant-same-target.v1` — Pass;
+2. `control.blue.counter-same-target-after-intervening-counter.v1` — a
+   completed settled PV with exactly one needed new Counterspell, zero
+   Counterspells targeting the actor's own Counterspell, and the underlying
+   spell countered; either owner-visible-equivalent legal Counter target is
+   accepted;
+3. `field.green.begin-combat-growth-tapped-air.v1` — Growth own Treefolk;
+4. `control.blue.force-spike-live-gray-ogre.v1` — cast Force Spike;
+5. `field.ru.life20-flying-men-chump-air.v1` — No Blocks;
+6. `diagnostic.blue.life20-flying-men-first-block-air-with-air.v1` — first
+   No Block plus a completed exact plan containing no pure Flying-Men chump.
+
+Report for every root/budget: selected semantic action/completed-plan result,
+all root visits/Q/priors, node and expanded-edge counts, maximum depth,
+terminal/observation/depth leaves, principal variation, wall time, and every
+coverage/prior/accounting/bound/replay/reverse/hidden/opponent-isolation and
+exact-combat witness. Require exactly the requested 64 or 512 completed
+simulations and summed root visits; any node/edge/macro/combat bound or
+invariant failure rejects that budget.
+
+Run exactly:
+
+```sh
+./build/old-school-information-set-puct-budget-diagnostic --run-isp1
+```
+
+The result rule is precommitted:
+
+- 512 correct on all three misses, all six controls preserved, and every
+  invariant green: budget mechanism passes and licenses only a latency check
+  plus dated exploratory manual pilot—not a strength claim or champion
+  replacement;
+- exactly two of three misses correct with all controls/invariants green,
+  at least one explicit 64-wrong to 512-correct transition, and zero
+  64-correct to 512-wrong transitions: mechanism support, candidate reject,
+  and no deployment; if the same two were already correct at 64, reject and
+  close the budget axis instead;
+- zero or one miss correct, any miss that is correct at 64 regressing at 512,
+  any control regression, or any invariant/bound failure: reject and close
+  the simulation-budget axis;
+- if all three misses are already correct at fresh-seed budget 64, the
+  coordinate is inconclusive about scaling and cannot license the 512
+  candidate.
+
+No result on this seed may authorize testing 128, 256, a different depth,
+another PUCT constant, prior temperature, or leaf blend. The next declared
+axis after a budget rejection is general critic target/backup quality.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

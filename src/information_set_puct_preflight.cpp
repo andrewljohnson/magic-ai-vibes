@@ -82,17 +82,19 @@ std::uint64_t indexed_seed(
 }
 
 std::uint64_t root_search_seed(
+    std::uint64_t experiment_seed,
     const aq5::PreparedRoot& root) {
     return splitmix64(
-        kPreflightSeed ^
+        experiment_seed ^
         UINT64_C(0x49535030524f4f54) ^
         fnv_string(root.stable_id));
 }
 
 std::uint64_t root_tie_seed(
+    std::uint64_t experiment_seed,
     const aq5::PreparedRoot& root) {
     return splitmix64(
-        root_search_seed(root) ^
+        root_search_seed(experiment_seed, root) ^
         UINT64_C(0x4953503054494542));
 }
 
@@ -261,6 +263,8 @@ struct SafeTraceStep {
     std::optional<std::string> successor_information_set_key;
     std::optional<LearnedGenerativeLeafEvaluation>
         successor_leaf_evaluation;
+    bool initial_opposing_non_counter_spells_countered =
+        false;
     std::size_t actions_applied = 0;
     std::size_t phase_transitions = 0;
     std::size_t turn_advances = 0;
@@ -280,12 +284,20 @@ struct EngineParticle final : puct::TruthParticle {
     std::map<std::string, std::string> action_map;
 };
 
+struct InitialOpposingSpell {
+    StackObjectId id = 0;
+    std::size_t controller = 0;
+    CardId card = CardId::Forest;
+    std::size_t initial_graveyard_copies = 0;
+};
+
 class EngineEnvironment final : public puct::Environment {
 public:
     EngineEnvironment(
         aq5::PreparedRoot root,
         std::shared_ptr<const LearnedModel> parent,
-        std::uint64_t search_seed)
+        std::uint64_t search_seed,
+        std::size_t simulation_count)
         : root_(std::move(root)),
           parent_(std::move(parent)),
           search_seed_(search_seed),
@@ -308,13 +320,43 @@ public:
             throw std::invalid_argument(
                 "ISP0 environment requires a parent");
         }
-        traces_.resize(puct::kSimulationCount);
+        if (simulation_count == 0 ||
+            simulation_count >
+                puct::kMaximumSimulationCount) {
+            throw std::invalid_argument(
+                "ISP environment simulation count is outside "
+                "the bounded core range");
+        }
+        for (const StackObject& object :
+             root_.state.stack) {
+            if (object.kind != StackObjectKind::Spell ||
+                object.controller == root_.actor ||
+                object.card == CardId::Counterspell) {
+                continue;
+            }
+            initial_opposing_spells_.push_back({
+                .id = object.id,
+                .controller = object.controller,
+                .card = object.card,
+                .initial_graveyard_copies =
+                    static_cast<std::size_t>(
+                        std::count(
+                            root_.state.players[
+                                object.controller]
+                                .graveyard.begin(),
+                            root_.state.players[
+                                object.controller]
+                                .graveyard.end(),
+                            object.card)),
+            });
+        }
+        traces_.resize(simulation_count);
     }
 
     std::unique_ptr<puct::TruthParticle>
     start_simulation(
         std::size_t simulation_index) override {
-        if (simulation_index >= puct::kSimulationCount) {
+        if (simulation_index >= traces_.size()) {
             throw std::out_of_range(
                 "ISP0 simulation index is outside the "
                 "sealed budget");
@@ -403,6 +445,12 @@ public:
         if (transition.terminal_result.has_value()) {
             safe.terminal_winner =
                 transition.terminal_result->winner;
+        }
+        if (transition.position.has_value()) {
+            safe
+                .initial_opposing_non_counter_spells_countered =
+                initial_opposing_spells_countered(
+                    transition.position->truth);
         }
 
         ++particle->depth;
@@ -591,6 +639,37 @@ public:
     }
 
 private:
+    bool initial_opposing_spells_countered(
+        const GameState& state) const {
+        return !initial_opposing_spells_.empty() &&
+               std::all_of(
+                   initial_opposing_spells_.begin(),
+                   initial_opposing_spells_.end(),
+                   [&](const InitialOpposingSpell& spell) {
+                       const bool absent =
+                           std::none_of(
+                               state.stack.begin(),
+                               state.stack.end(),
+                               [&](const StackObject& object) {
+                                   return object.id == spell.id;
+                               });
+                       const std::size_t graveyard_copies =
+                           static_cast<std::size_t>(
+                               std::count(
+                                   state.players[
+                                       spell.controller]
+                                       .graveyard.begin(),
+                                   state.players[
+                                       spell.controller]
+                                       .graveyard.end(),
+                                   spell.card));
+                       return absent &&
+                              graveyard_copies >
+                                  spell
+                                      .initial_graveyard_copies;
+                   });
+    }
+
     std::map<std::string, std::string>
     root_action_map() const {
         std::map<std::string, std::string> result;
@@ -612,6 +691,8 @@ private:
     std::vector<RootActionMap> root_actions_;
     puct::Observation root_observation_;
     std::vector<std::vector<TraceStep>> traces_;
+    std::vector<InitialOpposingSpell>
+        initial_opposing_spells_;
     bool bounded_macro_accounting_ = true;
     bool opponent_action_accounting_consistent_ = true;
     bool no_combat_bound_fallback_ = true;
@@ -814,120 +895,89 @@ PrincipalVariationWitness make_pv_witness(
     const puct::SearchResult& search,
     const std::vector<std::vector<TraceStep>>& traces,
     std::size_t root_actor) {
-    PrincipalVariationWitness best{
-        .actions = search.principal_variation,
-        .searched_depth =
-            search.principal_variation.size(),
-    };
+    // Validate that the reported action variation follows real selected tree
+    // edges. Intermediate successors stay pinned to the canonical tree path;
+    // the final stochastic successor does not, because the proof below must
+    // be one actually traversed cutoff and an aggregate successor need not be
+    // the successor of a simulation that stopped there.
     const PrincipalVariationPath pv_path =
         principal_variation_path(search);
-    int best_rank = -1;
-    for (const auto& simulation : traces) {
-        if (simulation.size() <
-            search.principal_variation.size()) {
+
+    std::vector<PrincipalVariationTraceEvidence> projected;
+    projected.reserve(traces.size());
+    for (std::size_t simulation_index = 0;
+         simulation_index < traces.size();
+         ++simulation_index) {
+        const auto& source_trace =
+            traces[simulation_index];
+        bool follows_intermediate_nodes =
+            source_trace.size() >=
+            search.principal_variation.size();
+        for (std::size_t depth = 0;
+             follows_intermediate_nodes &&
+             depth + 1 <
+                 search.principal_variation.size();
+             ++depth) {
+            follows_intermediate_nodes =
+                source_trace[depth].safe.action_key ==
+                    search.principal_variation[depth] &&
+                source_trace[depth]
+                        .safe
+                        .successor_information_set_key ==
+                    pv_path.successor_keys[depth];
+        }
+        if (!follows_intermediate_nodes) {
             continue;
         }
-        bool prefix = true;
-        for (std::size_t index = 0;
-             index < search.principal_variation.size();
-             ++index) {
-            prefix =
-                prefix &&
-                simulation[index].safe.action_key ==
-                    search.principal_variation[index];
-            if (pv_path.successor_keys[index]
-                    .has_value()) {
-                prefix =
-                    prefix &&
-                    simulation[index]
-                            .safe
-                            .successor_information_set_key ==
-                        pv_path.successor_keys[index];
-            } else {
-                prefix =
-                    prefix &&
-                    !simulation[index]
-                         .safe
-                         .successor_information_set_key
-                         .has_value();
-            }
-        }
-        if (!prefix) {
-            continue;
-        }
-        PrincipalVariationWitness candidate{
-            .actions = search.principal_variation,
-            .completed_trace = true,
-            .searched_depth =
-                search.principal_variation.size(),
+        PrincipalVariationTraceEvidence trace{
+            .simulation_index = simulation_index,
         };
-        for (std::size_t index = 0;
-             index < search.principal_variation.size();
-             ++index) {
-            const TraceStep& step = simulation[index];
-            const auto& witness = step.safe.witness;
-            if (index + 1 ==
-                search.principal_variation.size()) {
-                candidate.stack_settled =
-                    witness.stack_settled;
-            }
-            if (witness.exact_combat_completed) {
-                candidate.exact_combat_completed = true;
-                candidate.exact_combat_completed_plan_count +=
+        trace.steps.reserve(
+            source_trace.size());
+        for (const TraceStep& source :
+             source_trace) {
+            const LearnedGenerativeWitness& witness =
+                source.safe.witness;
+            PrincipalVariationTraceStepEvidence step{
+                .action_key = source.safe.action_key,
+                .stack_settled =
+                    witness.stack_settled,
+                .initial_opposing_non_counter_spells_countered =
+                    source.safe
+                        .initial_opposing_non_counter_spells_countered,
+                .exact_combat_completed =
+                    witness.exact_combat_completed,
+                .exact_combat_completed_plan_count =
                     witness
-                        .exact_combat_completed_plan_count;
-                candidate.exact_combat_contains_pure_chump =
-                    candidate
-                        .exact_combat_contains_pure_chump ||
+                        .exact_combat_completed_plan_count,
+                .exact_combat_contains_pure_chump =
                     witness
-                        .exact_combat_contains_pure_chump;
-                candidate.completed_damage_ordered_blocks =
-                    witness.completed_damage_ordered_blocks;
-            }
-            const bool actual_leaf =
-                index + 1 ==
-                    search.principal_variation.size() &&
-                simulation.size() ==
-                    search.principal_variation.size();
-            if (actual_leaf &&
-                step.safe.successor_leaf_evaluation
-                    .has_value() &&
-                step.safe.successor_leaf_evaluation
-                    ->exact_combat_completed) {
-                const auto& leaf =
-                    *step.safe.successor_leaf_evaluation;
-                candidate.exact_combat_completed = true;
-                candidate.exact_combat_completed_plan_count +=
-                    leaf.exact_combat_completed_plan_count;
-                candidate.exact_combat_contains_pure_chump =
-                    candidate
-                        .exact_combat_contains_pure_chump ||
-                    leaf.exact_combat_contains_pure_chump;
-                candidate.completed_damage_ordered_blocks =
-                    leaf.completed_damage_ordered_blocks;
-            }
+                        .exact_combat_contains_pure_chump,
+                .completed_damage_ordered_blocks =
+                    witness
+                        .completed_damage_ordered_blocks,
+                .successor_leaf_evaluation =
+                    source.safe
+                        .successor_leaf_evaluation,
+            };
             if (witness.applied_priority_action.has_value() &&
                 witness.applied_priority_action->kind ==
                     PriorityActionKind::CastCounterspell) {
-                ++candidate.root_actor_counterspells;
+                step.root_actor_counterspells = 1;
                 if (is_own_counter_target(
-                        step.truth_before, root_actor,
+                        source.truth_before, root_actor,
                         *witness.applied_priority_action)) {
-                    ++candidate
-                          .root_actor_counters_targeting_own_counter;
+                    step
+                        .root_actor_counters_targeting_own_counter =
+                        1;
                 }
             }
+            trace.steps.push_back(std::move(step));
         }
-        const int rank =
-            (candidate.stack_settled ? 4 : 0) +
-            (candidate.exact_combat_completed ? 2 : 0) +
-            (candidate.completed_trace ? 1 : 0);
-        if (rank > best_rank) {
-            best = std::move(candidate);
-            best_rank = rank;
-        }
+        projected.push_back(std::move(trace));
     }
-    return best;
+    return build_principal_variation_witness(
+        search.principal_variation, projected);
 }
 
 bool has_shared_selected_successor(
@@ -952,7 +1002,8 @@ bool has_shared_selected_successor(
 }
 
 bool exact_root_visit_accounting(
-    const puct::SearchResult& search) {
+    const puct::SearchResult& search,
+    std::size_t simulation_count) {
     const puct::NodeEvidence& root = root_node(search);
     const std::size_t edge_visits = std::accumulate(
         root.edges.begin(), root.edges.end(),
@@ -961,17 +1012,18 @@ bool exact_root_visit_accounting(
            const puct::EdgeEvidence& edge) {
             return sum + edge.visits;
         });
-    return search.root_visits == puct::kSimulationCount &&
-           root.visits == puct::kSimulationCount &&
-           edge_visits == puct::kSimulationCount &&
+    return search.root_visits == simulation_count &&
+           root.visits == simulation_count &&
+           edge_visits == simulation_count &&
            search.accounting.simulations_started ==
-               puct::kSimulationCount &&
+               simulation_count &&
            search.accounting.simulations_completed ==
-               puct::kSimulationCount;
+               simulation_count;
 }
 
 bool bounded_tree_accounting(
-    const puct::SearchResult& search) {
+    const puct::SearchResult& search,
+    std::size_t simulation_count) {
     const auto& accounting = search.accounting;
     return accounting.node_count == search.nodes.size() &&
            accounting.node_count <=
@@ -983,7 +1035,7 @@ bool bounded_tree_accounting(
            accounting.terminal_leaves +
                    accounting.observation_leaves +
                    accounting.depth_leaves ==
-               puct::kSimulationCount;
+               simulation_count;
 }
 
 bool finite_positive_normalized(
@@ -1045,7 +1097,10 @@ bool opponent_nodes_absent(
 
 bool completed_expected_blue_block(
     const PrincipalVariationWitness& witness) {
-    return witness.exact_combat_completed &&
+    return witness.completed_cutoff_path &&
+           witness.completed_cutoff_simulation.has_value() &&
+           witness.exact_combat_completed &&
+           witness.exact_combat_completed_at_cutoff &&
            witness.exact_combat_completed_plan_count > 0 &&
            !witness.exact_combat_contains_pure_chump &&
            !witness.completed_damage_ordered_blocks.empty();
@@ -1053,35 +1108,43 @@ bool completed_expected_blue_block(
 
 RootReport run_engine_root(
     const aq5::PreparedRoot& root,
-    const std::shared_ptr<const LearnedModel>& parent) {
+    const std::shared_ptr<const LearnedModel>& parent,
+    std::uint64_t experiment_seed,
+    std::size_t simulation_count) {
     ++g_engine_search_invocations;
     const std::uint64_t search_seed =
-        root_search_seed(root);
+        root_search_seed(experiment_seed, root);
     const std::uint64_t tie_seed =
-        root_tie_seed(root);
+        root_tie_seed(experiment_seed, root);
     EngineEnvironment direct(
-        root, parent, search_seed);
+        root, parent, search_seed, simulation_count);
     const puct::SearchResult direct_search =
-        puct::search(direct, tie_seed);
+        puct::search(
+            direct, tie_seed, simulation_count);
 
     EngineEnvironment replay(
-        root, parent, search_seed);
+        root, parent, search_seed, simulation_count);
     const puct::SearchResult replay_search =
-        puct::search(replay, tie_seed);
+        puct::search(
+            replay, tie_seed, simulation_count);
 
     const aq5::PreparedRoot reversed_root =
         aq5::reverse_candidate_order(root);
     EngineEnvironment reversed(
-        reversed_root, parent, search_seed);
+        reversed_root, parent, search_seed,
+        simulation_count);
     const puct::SearchResult reversed_search =
-        puct::search(reversed, tie_seed);
+        puct::search(
+            reversed, tie_seed, simulation_count);
 
     const aq5::PreparedRoot hidden_root =
         aq5::make_hidden_repartition_clone(root);
     EngineEnvironment hidden(
-        hidden_root, parent, search_seed);
+        hidden_root, parent, search_seed,
+        simulation_count);
     const puct::SearchResult hidden_search =
-        puct::search(hidden, tie_seed);
+        puct::search(
+            hidden, tie_seed, simulation_count);
 
     const puct::NodeEvidence& direct_root =
         root_node(direct_search);
@@ -1092,6 +1155,10 @@ RootReport run_engine_root(
             expected_fixture_choice(root.stable_id),
         .selected_key =
             direct_search.selected_action_key,
+        .requested_simulations =
+            simulation_count,
+        .search_seed = search_seed,
+        .tie_seed = tie_seed,
         .accounting = direct_search.accounting,
         .principal_variation =
             make_pv_witness(
@@ -1128,9 +1195,11 @@ RootReport run_engine_root(
         successor_value_prior_formula_holds(
             report.actions);
     report.root_visit_accounting_exact =
-        exact_root_visit_accounting(direct_search);
+        exact_root_visit_accounting(
+            direct_search, simulation_count);
     report.bounded_tree_accounting =
-        bounded_tree_accounting(direct_search);
+        bounded_tree_accounting(
+            direct_search, simulation_count);
     report.bounded_macro_accounting =
         direct.bounded_macro_accounting();
     report.opponent_action_accounting_consistent =
@@ -1223,6 +1292,8 @@ RootReport run_engine_root(
          report.principal_variation
                  .root_actor_counters_targeting_own_counter ==
              0 &&
+         report.principal_variation
+             .initial_opposing_non_counter_spells_countered &&
          report.principal_variation.stack_settled);
     report.required_exact_combat_completion =
         !is_combat_family(root.family) ||
@@ -1291,7 +1362,8 @@ std::string pass_engine_key(
 OpponentNoninterferenceReport
 check_engine_opponent_noninterference(
     const std::vector<aq5::PreparedRoot>& roots,
-    const std::shared_ptr<const LearnedModel>& parent) {
+    const std::shared_ptr<const LearnedModel>& parent,
+    std::uint64_t experiment_seed) {
     const auto selected_root = std::find_if(
         roots.begin(), roots.end(),
         [](const aq5::PreparedRoot& root) {
@@ -1320,7 +1392,8 @@ check_engine_opponent_noninterference(
             carrier.truth, opponent);
     const std::uint64_t seed =
         indexed_seed(
-            root_search_seed(root),
+            root_search_seed(
+                experiment_seed, root),
             UINT64_C(0x4f50504e4f4e494e));
     const auto root_observation =
         observe_learned_generative_position(
@@ -1401,19 +1474,16 @@ check_engine_opponent_noninterference(
             left.search_seed == right.search_seed &&
             left.tie_seed == right.tie_seed,
         .local_accounting_bit_identical =
-            first.actions_applied ==
-                second.actions_applied &&
-            first.phase_transitions ==
-                second.phase_transitions &&
-            first.turn_advances ==
-                second.turn_advances &&
-            first.witness.opponent_decisions_applied ==
-                second.witness
-                    .opponent_decisions_applied,
+            opponent_local_accounting_bit_identical(
+                left, right),
         // The generative seam rolls this decision outside the
         // Environment/Puct boundary. assemble_preflight also ANDs
         // this with every root's explicit tree-node exclusion.
         .no_shared_opponent_node_or_q_update = true,
+        .original_accounting_through_decision =
+            left.accounting_through_decision,
+        .repartitioned_accounting_through_decision =
+            right.accounting_through_decision,
     };
     return report;
 }
@@ -1563,7 +1633,10 @@ bool valid_root_action_evidence(
     return selected_count == 1 &&
            std::adjacent_find(
                keys.begin(), keys.end()) == keys.end() &&
-           visit_sum == puct::kSimulationCount &&
+           report.requested_simulations > 0 &&
+           report.requested_simulations <=
+               puct::kMaximumSimulationCount &&
+           visit_sum == report.requested_simulations &&
            std::abs(prior_sum - 1.0L) <= 1.0e-12L &&
            successor_value_prior_formula_holds(
                report.actions) &&
@@ -1574,12 +1647,176 @@ bool valid_root_action_evidence(
 
 } // namespace
 
-bool RootReport::gate_passed() const {
+PrincipalVariationWitness build_principal_variation_witness(
+    const std::vector<std::string>& principal_variation,
+    const std::vector<PrincipalVariationTraceEvidence>& traces) {
+    PrincipalVariationWitness best{
+        .actions = principal_variation,
+        .searched_depth = principal_variation.size(),
+    };
+    if (principal_variation.empty()) {
+        return best;
+    }
+
+    const auto add_count =
+        [](std::size_t& destination,
+           std::size_t addition,
+           std::string_view label) {
+            if (addition >
+                std::numeric_limits<std::size_t>::max() -
+                    destination) {
+                throw std::overflow_error(
+                    std::string(label) + " overflow");
+            }
+            destination += addition;
+        };
+
+    int best_rank = -1;
+    std::size_t best_simulation =
+        std::numeric_limits<std::size_t>::max();
+    for (const PrincipalVariationTraceEvidence& trace :
+         traces) {
+        if (trace.steps.size() <
+            principal_variation.size()) {
+            continue;
+        }
+        bool prefix = true;
+        for (std::size_t index = 0;
+             index < principal_variation.size();
+             ++index) {
+            prefix =
+                prefix &&
+                trace.steps[index].action_key ==
+                    principal_variation[index];
+        }
+        if (!prefix) {
+            continue;
+        }
+
+        const bool completed_cutoff =
+            trace.steps.size() ==
+            principal_variation.size();
+        PrincipalVariationWitness candidate{
+            .actions = principal_variation,
+            .completed_trace = true,
+            .completed_cutoff_path =
+                completed_cutoff,
+            .completed_cutoff_simulation =
+                completed_cutoff
+                    ? std::optional<std::size_t>(
+                          trace.simulation_index)
+                    : std::nullopt,
+            .searched_depth =
+                principal_variation.size(),
+        };
+        for (std::size_t index = 0;
+             index < principal_variation.size();
+             ++index) {
+            const PrincipalVariationTraceStepEvidence&
+                step = trace.steps[index];
+            if (index + 1 ==
+                principal_variation.size()) {
+                candidate.stack_settled =
+                    step.stack_settled;
+                candidate
+                    .initial_opposing_non_counter_spells_countered =
+                    step
+                        .initial_opposing_non_counter_spells_countered;
+            }
+            add_count(
+                candidate.root_actor_counterspells,
+                step.root_actor_counterspells,
+                "ISP0 PV Counter count");
+            add_count(
+                candidate
+                    .root_actor_counters_targeting_own_counter,
+                step
+                    .root_actor_counters_targeting_own_counter,
+                "ISP0 PV own-Counter target count");
+            if (step.exact_combat_completed) {
+                candidate.exact_combat_completed = true;
+                add_count(
+                    candidate
+                        .exact_combat_completed_plan_count,
+                    step
+                        .exact_combat_completed_plan_count,
+                    "ISP0 PV exact-combat plan count");
+                candidate
+                    .exact_combat_contains_pure_chump =
+                    candidate
+                        .exact_combat_contains_pure_chump ||
+                    step
+                        .exact_combat_contains_pure_chump;
+                candidate.completed_damage_ordered_blocks =
+                    step.completed_damage_ordered_blocks;
+            }
+            const bool cutoff_leaf =
+                completed_cutoff &&
+                index + 1 ==
+                    principal_variation.size();
+            if (cutoff_leaf &&
+                step.successor_leaf_evaluation.has_value() &&
+                step.successor_leaf_evaluation
+                    ->exact_combat_completed) {
+                const LearnedGenerativeLeafEvaluation& leaf =
+                    *step.successor_leaf_evaluation;
+                candidate.exact_combat_completed = true;
+                add_count(
+                    candidate
+                        .exact_combat_completed_plan_count,
+                    leaf
+                        .exact_combat_completed_plan_count,
+                    "ISP0 PV cutoff exact-combat plan count");
+                candidate
+                    .exact_combat_contains_pure_chump =
+                    candidate
+                        .exact_combat_contains_pure_chump ||
+                    leaf
+                        .exact_combat_contains_pure_chump;
+                candidate.completed_damage_ordered_blocks =
+                    leaf.completed_damage_ordered_blocks;
+            }
+        }
+        candidate.exact_combat_completed_at_cutoff =
+            completed_cutoff &&
+            candidate.exact_combat_completed;
+
+        // Prefer the richest real proof. Completed opposing-spell and exact
+        // combat outcomes dominate structural provenance; otherwise a
+        // settled stack retains precedence over a mere cutoff.
+        const int rank =
+            (candidate
+                     .initial_opposing_non_counter_spells_countered
+                 ? 64
+                 : 0) +
+            (candidate.exact_combat_completed_at_cutoff
+                 ? 32
+                 : 0) +
+            (candidate.exact_combat_completed ? 16 : 0) +
+            (candidate.stack_settled ? 8 : 0) +
+            (candidate.completed_cutoff_path ? 4 : 0) +
+            (candidate.completed_trace ? 1 : 0);
+        if (rank > best_rank ||
+            (rank == best_rank &&
+             trace.simulation_index < best_simulation)) {
+            best = std::move(candidate);
+            best_rank = rank;
+            best_simulation = trace.simulation_index;
+        }
+    }
+    return best;
+}
+
+bool opponent_local_accounting_bit_identical(
+    const LearnedGenerativeOpponentDecisionWitness& left,
+    const LearnedGenerativeOpponentDecisionWitness& right) {
+    return left.accounting_through_decision ==
+           right.accounting_through_decision;
+}
+
+bool RootReport::evidence_gate_passed() const {
     return !stable_id.empty() &&
-           !expected_key.empty() &&
-           selected_key == expected_key &&
            valid_root_action_evidence(*this) &&
-           strategic_direction_passed &&
            complete_legal_choice_coverage &&
            finite_positive_normalized_priors &&
            exact_successor_value_prior_formula &&
@@ -1601,9 +1838,16 @@ bool RootReport::gate_passed() const {
            truth_immutable_during_redeterminization &&
            legal_signature_preserved &&
            required_shared_successor &&
-           required_counter_principal_variation &&
-           required_exact_combat_completion &&
            partial_combat_leaf_completed_exactly;
+}
+
+bool RootReport::gate_passed() const {
+    return evidence_gate_passed() &&
+           !expected_key.empty() &&
+           selected_key == expected_key &&
+           strategic_direction_passed &&
+           required_counter_principal_variation &&
+           required_exact_combat_completion;
 }
 
 bool OpponentNoninterferenceReport::gate_passed() const {
@@ -1633,6 +1877,12 @@ bool PreflightReport::gate_passed() const {
            roots.size() == aq5::kFixtureRootCount &&
            all_twelve_roots_present_once &&
            all_three_decision_families_present &&
+           std::all_of(
+               roots.begin(), roots.end(),
+               [](const RootReport& root) {
+                   return root.requested_simulations ==
+                          puct::kSimulationCount;
+               }) &&
            std::all_of(
                roots.begin(), roots.end(),
                [](const RootReport& root) {
@@ -1797,14 +2047,16 @@ PreflightReport run_preflight(
         .run_root =
             [parent](
                 const aq5::PreparedRoot& root) {
-                return run_engine_root(root, parent);
+                return run_engine_root(
+                    root, parent, kPreflightSeed,
+                    puct::kSimulationCount);
             },
         .check_opponent_noninterference =
             [parent](
                 const std::vector<aq5::PreparedRoot>&
                     roots) {
                 return check_engine_opponent_noninterference(
-                    roots, parent);
+                    roots, parent, kPreflightSeed);
             },
         .check_default_off_identity =
             [parent, default_off_before]() {
@@ -1819,6 +2071,37 @@ PreflightReport run_preflight(
     };
     return assemble_preflight(
         learned_model_fingerprint(parent), api);
+}
+
+RootReport run_root_evidence(
+    const aq5::PreparedRoot& root,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed,
+    std::size_t simulation_count) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            kRequiredParentFingerprint) {
+        throw std::invalid_argument(
+            "ISP root evidence requires exact frozen C16");
+    }
+    return run_engine_root(
+        root, parent, experiment_seed,
+        simulation_count);
+}
+
+OpponentNoninterferenceReport
+run_opponent_noninterference_evidence(
+    const std::vector<aq5::PreparedRoot>& roots,
+    std::shared_ptr<const LearnedModel> parent,
+    std::uint64_t experiment_seed) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            kRequiredParentFingerprint) {
+        throw std::invalid_argument(
+            "ISP opponent evidence requires exact frozen C16");
+    }
+    return check_engine_opponent_noninterference(
+        roots, parent, experiment_seed);
 }
 
 void print_report(
@@ -1848,6 +2131,21 @@ void print_report(
             << " depth="
             << root.accounting.maximum_depth
             << " pv=" << root.principal_variation.actions.size()
+            << " pv-cutoff="
+            << root.principal_variation.completed_cutoff_path
+            << " pv-cutoff-sim=";
+        if (root.principal_variation
+                .completed_cutoff_simulation.has_value()) {
+            output
+                << *root.principal_variation
+                        .completed_cutoff_simulation;
+        } else {
+            output << '-';
+        }
+        output
+            << " pv-cutoff-combat="
+            << root.principal_variation
+                   .exact_combat_completed_at_cutoff
             << '\n';
         for (const RootActionEvidence& action :
              root.actions) {
@@ -1884,12 +2182,59 @@ void print_report(
                 << '\n';
         }
     }
+    const OpponentNoninterferenceReport& opponent =
+        report.opponent_noninterference;
     output
         << "  opponent-noninterference: "
-        << (report.opponent_noninterference.gate_passed()
+        << (opponent.gate_passed()
                 ? "PASS"
                 : "FAIL")
+        << " fixture=" << opponent.fixture_id
+        << " scored-actions="
+        << opponent.scored_action_count
+        << " selected-membership="
+        << opponent.selected_action_membership_count
         << '\n'
+        << "    repartition="
+        << opponent.nonvacuous_private_repartition
+        << " observation="
+        << opponent.opponent_observation_bit_identical
+        << " legal-signature="
+        << opponent.legal_signature_bit_identical
+        << " c16-scores="
+        << opponent.c16_scores_bit_identical
+        << " selected="
+        << opponent.selected_action_bit_identical
+        << " local-accounting="
+        << opponent.local_accounting_bit_identical
+        << " no-shared-opponent-node-q="
+        << opponent.no_shared_opponent_node_or_q_update
+        << '\n'
+        << "    accounting-through-decision original="
+        << opponent.original_accounting_through_decision
+               .actions_applied
+        << '/'
+        << opponent.original_accounting_through_decision
+               .phase_transitions
+        << '/'
+        << opponent.original_accounting_through_decision
+               .turn_advances
+        << '/'
+        << opponent.original_accounting_through_decision
+               .opponent_decisions_applied
+        << " repartitioned="
+        << opponent.repartitioned_accounting_through_decision
+               .actions_applied
+        << '/'
+        << opponent.repartitioned_accounting_through_decision
+               .phase_transitions
+        << '/'
+        << opponent.repartitioned_accounting_through_decision
+               .turn_advances
+        << '/'
+        << opponent.repartitioned_accounting_through_decision
+               .opponent_decisions_applied
+        << " fields=actions/phases/turns/opponent-decisions\n"
         << "  isolation: "
         << (report.isolation.gate_passed()
                 ? "PASS"
