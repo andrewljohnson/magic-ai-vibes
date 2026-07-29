@@ -23328,6 +23328,128 @@ new state-by-action directions. This follows the 10:29 independent review's
 measured TRAIN/DEV eligible-pair asymmetry (especially RU Aggro 38 versus
 240), rather than another fit on the same 80-root split.
 
+##### AQ15-P2-COMBINED-SEARCH manual-pilot declaration
+
+Declared 2026-07-29 at exact DBC5 result commit `86637ac`, after rereading
+`REVIEW.md` through its newest 10:44 PDT cycle and `WEB_ROADMAP.md`, and
+before permitting two existing research flags to coexist, changing a web
+policy ID, or starting a combined-policy game. C16 remains champion. This is
+an unscreened manual diagnostic assembled from two already-open general
+operators, not a learned model, promotion, strength claim, or substitute for
+AQ16 below.
+
+Falsifiable implementation hypothesis: the exact AQ4 actor-local Priority
+search and the exact defender-best-response attack aggregation operate at
+disjoint real-game decision sites and can be composed without changing either
+operator, adding a card/target/phase rule, exposing hidden information, or
+altering canonical C16 when both flags are off.
+
+The sole new recipe is exact frozen C16 with:
+
+```text
+Priority decisions    AQ4 outer K8/R1/H8, inner actor-local K2/R1/H4
+real attack sets      existing defender-min aggregation
+pass dominance        false
+Priority residual     zero
+all other treatments  false / Legacy
+```
+
+AQ4's simulated continuations deliberately retain their already-frozen
+canonical C16 combat policy; defender-min is applied only at real attack
+selection. This is a transparent composition boundary, not a claim of
+recursively self-consistent all-decision MCTS. The new stable web ID is
+`learned-value-c16-combined-search`, displayed as
+**Learned C16 · Combined Search (AQ15)**, dated 2026-07-29 and labeled
+`Manual diagnostic · unscreened · not promoted`.
+
+Before exposure, tests must prove:
+
+1. the combined parser/config differs from AQ4 only by the adversarial-block
+   boolean and from Best-Response Attacks only by actor-local search;
+2. exact C16/G16/T800/S424242/K8 plus those two flags is the only accepted
+   combined recipe, while pass dominance and every other research treatment
+   remain rejected;
+3. fixed-root AQ4 Priority samples and scores are bit-identical with the
+   real-game defender-min flag off or on, freezing the non-propagation into
+   simulated continuations;
+4. mean and defender-min attack aggregation consume the same underlying
+   fixed-seed combat samples, with only the declared aggregation/choice
+   allowed to differ;
+5. the field-off C16 path remains fixed-seed bit-identical; and
+6. engine, bridge, complete web, and rendered setup-selection smokes pass,
+   with `WEB_ROADMAP.md` recording evidence.
+
+No paired gameplay seed is opened in AQ15. Manual observations may nominate a
+separately declared treatment, but cannot promote this policy. Any strength
+claim requires a fresh all-five-deck paired screen because the two real-game
+operators can change later trajectories nonlinearly.
+
+##### AQ16-DBC6-DENSITY-CENSUS fresh owner-safe source declaration
+
+Declared 2026-07-29 at exact DBC5 result commit `86637ac`, after the same
+review read and repository/history searches confirmed root seed
+`202607291801`, identifier `AQ16-DBC6-DENSITY-CENSUS`, and its schedule
+coordinates unused. This declaration precedes source collection, census
+implementation, teacher labels, selection quotas, fitting, and gameplay.
+C16 remains champion.
+
+Descriptive question: does a fresh, larger, all-five-deck C16-mirror source
+contain enough label-free legal-action-width support to freeze a
+decision-density-matched TRAIN/DEV corpus before any teacher or candidate is
+observed? No exact root, option, width, or pair census is guessed here.
+
+Collect from exact frozen C16 self-play with zero research treatments,
+K8/R1/H4, training games 800, training seed 424242, source turn cap 128, and
+fresh root seed `202607291801`. Use
+`learned_iteration::balanced_schedule(root_seed, generation=15, block)`:
+blocks 0 and 1 form TRAIN (80 physical games, 160 actor-games, 32 actor-games
+per owner deck); block 2 forms whole-game-disjoint DEV (40 games, 80
+actor-games, 16 per owner deck). The schedule fixes deck matchup, seat, and
+play/draw balance before play. A physical source game and both actors may
+belong to only one split and, later, one grouped fold.
+
+At every legal Priority decision with at least two actions, retain only:
+
+- immutable physical-game/schedule, split, actor, and trace coordinates;
+- owner deck, legal-action count, and unordered potential-pair count;
+- canonical public typed-action descriptors;
+- a SHA-256 fingerprint over all canonical 893-wide actor-local option rows;
+  and
+- a stable root ID derived from the preceding owner-safe material.
+
+Do not retain or hash a source outcome, teacher score, candidate score,
+opponent hidden card identity/order, sampled world, or transient `GameState`.
+Selection is not part of this stage: retain **all** nontrivial roots. Report
+exact root, option, and potential-pair counts per split, deck, actor-game, and
+each observed legal-action width. Teacher-defined eligible pairs are
+unavailable and may not influence the census or later blind selection.
+
+The only licensed first command is:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-census --census
+```
+
+It must collect twice and require bit-identical row order, records, counts,
+manifest hash, and parent fingerprint. Validation must fail on duplicate
+physical games/root IDs, TRAIN/DEV overlap, actor/schedule drift, deck or
+seat/play-draw imbalance, noncanonical/duplicate actions, option-width drift,
+nonfinite features, count cross-sum failure, or any malformed hash. A
+nonvacuous live hidden-repartition witness must preserve the actor
+observation, legal action order/descriptors, every option row, width stratum,
+and stable IDs bit-for-bit. Mutation-sensitive tests must prove admitted
+public/own changes are detected while opponent hand/library repartition is
+not.
+
+A successful census freezes only its complete manifest and descriptive
+counts. It creates no model and opens no label, selector, or gameplay seed.
+Only after recording that immutable result may a separate declaration derive
+fixed label-free width bins and per-source-game caps from the observed
+support, then collect deep symmetric Learned teacher labels and train a new
+state-by-action representation. This two-stage boundary prevents choosing
+roots from teacher ties, candidate behavior, or a guessed density quota.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
