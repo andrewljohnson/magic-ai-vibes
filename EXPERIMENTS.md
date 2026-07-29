@@ -20089,6 +20089,100 @@ unchanged. Owner field feedback is the next P1 gate. The next learner
 experiment remains the preregistered on-policy multi-generation
 search-as-teacher loop; do not reopen one-shot fixed-corpus distillation.
 
+##### AQ4-OP1 one-step on-policy successor declaration
+
+Declared 2026-07-29 at exact result commit `1227712`, after rereading
+`REVIEW.md` through its newest 2026-07-28 23:59 PDT countersignature and
+before reconstructing a new source game, opening any OP1 search coordinate,
+or changing training code. C16 remains champion. The direct AQ4-P1 policy
+remains a separate manual diagnostic; neither it nor any authored fixture is
+training data.
+
+Falsifiable hypothesis: G4B's whole-game-disjoint reversal came from fitting a
+single fixed C16 state distribution. Starting from the exact rejected G4B
+model and collecting one fresh generation from that model's own deployed
+Priority residual will produce a child with strictly lower actor-local
+teacher regret on a whole-game-disjoint DEV block, without a greater than
+`0.01` regression on any of Green, Red, Blue, White, or RU Aggro.
+
+This is deliberately the smallest true second generation, not a repeat of
+G4B and not a general training framework. Reconstruct the warm parent
+bit-exactly in memory from the frozen G4B preflight, census, corpus, and fit.
+Require fingerprint
+`d0d46d2b4b365686d0c7109df8b32c6ec0b8229b5df9fb43f304c5f33e1003f8`.
+The warm parent is a rejected research checkpoint, never the champion and
+never a web policy.
+
+The sole OP1 coordinate is:
+
+- root seed `202607290101`, publication generation `2`;
+- `balanced_schedule(root_seed, 2, 0)` for TRAIN and
+  `balanced_schedule(root_seed, 2, 1)` for DEV: exactly 40 games per split,
+  with all five decks, both seats, play/draw, and every unordered pairing
+  balanced inside each split;
+- both source seats use the immutable warm parent as a Learned Value mirror,
+  ordinary K8/R1/H4 deployment, residual `0.10`, zero exploration,
+  continuation epsilon, Pass dominance, resolved prior, adversarial blocks,
+  and a Legacy continuation controller; source games stop at turn 128;
+- retain at most six evenly spaced nontrivial Priority roots per actor-game in
+  TRAIN and two in DEV. Root selection depends only on chronological ordinal
+  and count, never a card, action, score, outcome, or candidate;
+- derive each label seed with `derive_seed(root_seed, PrioritySearch, 2,
+  split_index * 40 + schedule_index,
+  (actor << 32) | nontrivial_ordinal)`;
+- residual-free base scores use exact production K8/R1/H4 with the historical
+  shallow blend. Teacher scores use exact AQ4 outer K8/R1/H8, four workers,
+  no shallow blend, inner K2/R1/H4, and maximum nesting depth one, with the
+  warm parent's residual `0.10` active at the root and for both continuation
+  seats;
+- targets are the unchanged soft all-action transform of teacher scores.
+  Each actor-game contributes total weight one and each deck total weight one
+  per split;
+- initialize from the immutable warm parent and fit TRAIN only with the
+  unchanged G4B 64-epoch Adam recipe: batch 64, learning rate `0.003`,
+  beta1 `0.9`, beta2 `0.999`, epsilon `1e-8`, global norm clip `5.0`, fit seed
+  `12262988820247274425`, residual `0.10`, temperature `0.10`. Do not replay
+  G4B rows or use DEV for fitting or selection.
+
+Follow the same measured-first seal as G4B. `--census` may reconstruct the
+warm parent and report the immutable TRAIN/DEV game, actor-game, nontrivial
+root, retained root, option, and per-deck counts plus an owner-safe manifest
+hash. It must not label a root or fit a model. Freeze that exact census in a
+notebook-only commit before `--run`; no count may be guessed or changed after
+inspection.
+
+`--run` must reconstruct the frozen census bit-exactly, label it once, and fit
+twice from the same immutable warm parent. Before any selector opens, require:
+
+1. exact warm-parent, census, corpus, optimizer, repeated-fit, descriptor/order,
+   normalized-target, and component-isolation identity; only Priority may
+   change;
+2. nonzero warm-parent teacher regret in every deck and split;
+3. child TRAIN and DEV equal-deck mean regret both strictly below the warm
+   parent;
+4. every DEV deck's child regret at most warm-parent regret plus `0.01`;
+5. the exact frozen AQ4 tactical preflight and nested hidden-repartition,
+   reversed-action, actor-local noninterference, four-worker, and depth-one
+   controls; and
+6. `action_q_offline_gate::evaluate_model_gates(warm, child)` passes, including
+   redundant Counterspell, productive Braingeyser/Ancestral targeting,
+   sick-Bear Giant Growth, live/payable Force Spike, frozen-probe, and hidden
+   repartition guards. These authored checks remain evaluation-only.
+
+Any failure rejects OP1 and leaves selector seed `202607290111` unopened. If
+all offline gates pass, run exactly one 60-game paired all-five-deck manual
+screen against exact C16: child uses K8/R1/H4 plus residual `0.10`; C16 uses
+the identical recipe with residual zero. At least 31/60 child wins and at
+least 3/12 wins on every challenger deck licenses only a dated manual web
+pilot and an internal immutable artifact. It is not a strength claim, an MDE
+screen, or promotion. Anything less rejects OP1. No Handcrafted policy,
+opponent hidden identity, card-name branch, or authored fixture may enter
+source play, labeling, or fitting.
+
+If OP1 passes, a separately declared OP2 may collect from its frozen child.
+If it fails, stop this branch rather than sweeping caps, schedules, K/H,
+optimizer, epochs, temperature, residual, or seeds.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
