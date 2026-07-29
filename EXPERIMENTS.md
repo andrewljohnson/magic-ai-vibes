@@ -22025,6 +22025,67 @@ remaining-turn discount, retry 512 simulations, or change a leaf/prior blend.
 Failure moves directly to a decision-boundary critic trained and evaluated on
 one consistent utility, not another search-parameter screen.
 
+##### AQ9-TS1 result: rejected; terminal-scale axis closed
+
+Run 2026-07-29 from implementation commit `53199ea` after the focused strict
+and sanitizer suites passed and after rereading `REVIEW.md` through its
+07:44 PDT cycle. The frozen C16 parent fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+The seed was opened exactly once with the declared command:
+
+```sh
+./build/old-school-information-set-puct-budget-diagnostic --run-ts1
+```
+
+The program returned its registered scientific-rejection status (exit 1):
+
+```text
+arm=exact       repairs=1/4 controls=5/5 invariants=1
+                terminal-scale-nonvacuous=0 opponent-isolation=1
+arm=c16-aligned repairs=1/4 controls=5/5 invariants=1
+                terminal-scale-nonvacuous=1 opponent-isolation=1
+result=REJECT_CLOSE_TERMINAL_SCALE_AXIS
+no-repair-regression=0 repair-improvements=1 candidate_accepted=0
+latency_check_licensed=0 manual_web_pilot_licensed=0
+deployment_licensed=0 strength_claim=0 champion_replaced=0
+```
+
+The exact arm's sole repair was payable Force Spike: Pass beat Spike
+32 visits to 32 on Q (`0.270581` vs `0.264861`) and satisfied the semantic
+gate. The aligned arm reversed that root incorrectly, choosing Force Spike
+37 visits to 27 (`0.287334` vs `0.255454`). Conversely, alignment repaired
+Ancestral Recall: exact chose Pass while aligned chose self-target
+(`14` visits, Q `0.885113`; opponent-target `13`, Q `0.875096`; Pass `12`,
+Q `0.873070`). This is one explicit repair and one explicit regression.
+
+The other two repairs did not move. Both arms chose Pass rather than
+self-X=1 Braingeyser, with identical root statistics because no terminal
+leaf was reached there. Both arms also chose the pure Flying-Men chump
+(`37` visits, Q `0.413774`) over No Block (`27`, Q `0.376745`) and failed
+to reach the registered later Air-Elemental trade. Thus the treatment did
+not add foresight in either remaining failure class.
+
+All five controls remained correct in both arms: redundant Counterspell
+Pass, exactly one needed Counterspell with no own-Counter target and a
+settled protected outcome, productive Giant Growth on the actor's
+Treefolk, live Force Spike, and life-20 No Blocks. Every replay,
+reordering, hidden-repartition, root-observer, accounting, prior,
+macro/combat-bound, and opponent-noninterference invariant remained green.
+The treatment was demonstrably active: payable Spike accumulated absolute
+terminal-scale delta `0.684843`, and productive Growth accumulated
+`3.115842` across 49 terminal path backups. Summed root wall time was
+29.748 seconds exact and 30.215 seconds aligned.
+
+Decision: reject TS1, retain C16 as champion, and close terminal-backup
+scale alignment. The hypothesis that the scalar discontinuity was the
+shared cause of the four strategic misses is falsified: removing it traded
+one error for another and left the two clearest foresight errors unchanged.
+Per the declaration, do not tune the discount, retry a larger search,
+change the horizon, or deploy this mode. The next experiment must change
+the learned decision boundary itself while keeping one consistent utility,
+using general actor-local/public state and self-play/search supervision
+rather than card-, stack-, or combat-specific rules.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
