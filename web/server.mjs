@@ -12,6 +12,8 @@ const SERVER_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const UINT64_MAX = 18_446_744_073_709_551_615n;
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_LOG_ENTRIES = 2_000;
+const BUG_REPORT_SCHEMA = "old-school-arena-bug-report";
+const BUG_REPORT_VERSION = 1;
 const FROZEN_C16_GENERATIONS = 16;
 const FROZEN_C16_TRAIN_GAMES = 800;
 const FROZEN_C16_TRAIN_SEED = "424242";
@@ -399,6 +401,362 @@ function normalizedPublicModelIdentity(value) {
     fingerprint: value.fingerprint,
     ...(treatment === undefined ? {} : { treatment }),
   };
+}
+
+function reportScalar(value) {
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function reportId(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return undefined;
+}
+
+function reportCard(value) {
+  if (typeof value === "string") return { name: value };
+  if (!isRecord(value)) return null;
+  const card = {};
+  for (const field of [
+    "id",
+    "name",
+    "type",
+    "costLabel",
+    "power",
+    "toughness",
+    "flying",
+  ]) {
+    const scalar = reportScalar(value[field]);
+    if (scalar !== undefined) card[field] = scalar;
+  }
+  if (isRecord(value.cost)) {
+    const cost = {};
+    for (const field of [
+      "generic",
+      "green",
+      "red",
+      "blue",
+      "white",
+      "colorless",
+    ]) {
+      const scalar = reportScalar(value.cost[field]);
+      if (scalar !== undefined) cost[field] = scalar;
+    }
+    if (Object.keys(cost).length > 0) card.cost = cost;
+  } else {
+    const cost = reportScalar(value.cost);
+    if (cost !== undefined) card.cost = cost;
+  }
+  return Object.keys(card).length > 0 ? card : null;
+}
+
+function reportTarget(value) {
+  const scalar = reportId(value);
+  if (scalar !== undefined) return scalar;
+  if (!isRecord(value)) return null;
+  const target = {};
+  for (const field of ["player", "creature", "label"]) {
+    const entry = reportScalar(value[field]);
+    if (entry !== undefined) target[field] = entry;
+  }
+  return Object.keys(target).length > 0 ? target : null;
+}
+
+function reportPermanent(value, zone) {
+  if (typeof value === "string") return { zone, label: value };
+  if (!isRecord(value)) return null;
+  const permanent = { zone };
+  const permanentId = reportId(value.permanentId);
+  if (permanentId !== undefined) permanent.permanentId = permanentId;
+  const card = reportCard(value.card);
+  if (card !== null) permanent.card = card;
+  for (const field of [
+    "tapped",
+    "summoningSick",
+    "damage",
+    "power",
+    "toughness",
+  ]) {
+    const scalar = reportScalar(value[field]);
+    if (scalar !== undefined) permanent[field] = scalar;
+  }
+  return permanent;
+}
+
+function reportBattlefield(player) {
+  if (!isRecord(player)) return [];
+  const battlefield = [];
+  for (const [field, zone] of [
+    ["lands", "land"],
+    ["creatures", "creature"],
+    ["artifacts", "artifact"],
+    ["enchantments", "enchantment"],
+    ["battlefield", "permanent"],
+  ]) {
+    if (!Array.isArray(player[field])) continue;
+    for (const value of player[field]) {
+      const permanent = reportPermanent(value, zone);
+      if (permanent !== null) battlefield.push(permanent);
+    }
+  }
+  return battlefield;
+}
+
+function reportManaPool(value) {
+  const scalar = reportScalar(value);
+  if (scalar !== undefined) return scalar;
+  if (!isRecord(value)) return undefined;
+  const mana = {};
+  for (const field of [
+    "generic",
+    "green",
+    "red",
+    "blue",
+    "white",
+    "colorless",
+  ]) {
+    const entry = reportScalar(value[field]);
+    if (entry !== undefined) mana[field] = entry;
+  }
+  return Object.keys(mana).length > 0 ? mana : undefined;
+}
+
+function reportPlayer(player, seat) {
+  const source = isRecord(player) ? player : {};
+  const handCount = Number.isSafeInteger(source.handSize)
+    ? source.handSize
+    : Array.isArray(source.hand)
+      ? source.hand.length
+      : Array.isArray(source.revealedHand)
+        ? source.revealedHand.length
+        : null;
+  const libraryCount = Number.isSafeInteger(source.librarySize)
+    ? source.librarySize
+    : Array.isArray(source.library)
+      ? source.library.length
+      : null;
+  const result = {
+    seat,
+    role: seat === 0 ? "human" : "opponent",
+    life: Number.isFinite(source.life) ? source.life : null,
+    handCount,
+    libraryCount,
+    graveyardCount: Array.isArray(source.graveyard)
+      ? source.graveyard.length
+      : 0,
+    exileCount: Array.isArray(source.exile) ? source.exile.length : 0,
+    battlefield: reportBattlefield(source),
+  };
+  const manaPool = reportManaPool(source.manaPool);
+  if (manaPool !== undefined) result.manaPool = manaPool;
+  if (typeof source.landPlayedThisTurn === "boolean") {
+    result.landPlayedThisTurn = source.landPlayedThisTurn;
+  }
+  if (Number.isSafeInteger(source.extraTurns)) {
+    result.extraTurns = source.extraTurns;
+  }
+  return result;
+}
+
+function reportStackEntry(value) {
+  if (!isRecord(value)) return null;
+  const entry = {};
+  for (const field of ["stackId", "id", "kind", "label", "controller", "xValue"]) {
+    const scalar = reportScalar(value[field]);
+    if (scalar !== undefined) entry[field] = scalar;
+  }
+  const card = reportCard(value.card);
+  if (card !== null) entry.card = card;
+  const target = reportTarget(value.target);
+  if (target !== null) entry.target = target;
+  if (Array.isArray(value.targets)) {
+    entry.targets = value.targets
+      .map(reportTarget)
+      .filter((candidate) => candidate !== null);
+  }
+  const spellTarget = reportId(value.spellTarget);
+  if (spellTarget !== undefined) entry.spellTarget = spellTarget;
+  return entry;
+}
+
+function reportPriorityOption(value) {
+  if (!isRecord(value)) return null;
+  const option = {};
+  for (const field of [
+    "index",
+    "label",
+    "kind",
+    "sourcePermanent",
+    "spellTarget",
+    "xValue",
+  ]) {
+    const scalar = reportScalar(value[field]);
+    if (scalar !== undefined) option[field] = scalar;
+  }
+  const card = reportCard(value.card);
+  if (card !== null) option.card = card;
+  const target = reportTarget(value.target);
+  if (target !== null) option.target = target;
+  return option;
+}
+
+function reportDecision(value) {
+  if (!isRecord(value) || typeof value.kind !== "string") return null;
+  const decision = {
+    decisionId: reportId(value.id ?? value.decisionId) ?? null,
+    kind: value.kind,
+  };
+  if (typeof value.phase === "string") decision.phase = value.phase;
+  if (value.kind === "priority") {
+    decision.options = Array.isArray(value.options)
+      ? value.options
+          .map(reportPriorityOption)
+          .filter((option) => option !== null)
+      : [];
+  } else if (value.kind === "attackers") {
+    decision.eligible = Array.isArray(value.eligible)
+      ? value.eligible
+          .map(reportId)
+          .filter((id) => id !== undefined)
+      : [];
+  } else if (value.kind === "blockers") {
+    decision.attackers = Array.isArray(value.attackers)
+      ? value.attackers
+          .map(reportId)
+          .filter((id) => id !== undefined)
+      : [];
+    decision.choices = Array.isArray(value.choices)
+      ? value.choices.flatMap((choice) => {
+          if (!isRecord(choice)) return [];
+          const blocker = reportId(choice.blocker);
+          if (blocker === undefined) return [];
+          return [{
+            blocker,
+            legalAttackers: Array.isArray(choice.legalAttackers)
+              ? choice.legalAttackers
+                  .map(reportId)
+                  .filter((id) => id !== undefined)
+              : [],
+          }];
+        })
+      : [];
+  } else if (value.kind === "damage_order") {
+    decision.attacker = reportId(value.attacker) ?? null;
+    decision.blockers = Array.isArray(value.blockers)
+      ? value.blockers
+          .map(reportId)
+          .filter((id) => id !== undefined)
+      : [];
+  } else if (value.kind === "cleanup_discard") {
+    decision.count = Number.isSafeInteger(value.count) ? value.count : 0;
+    decision.options = Array.isArray(value.options)
+      ? value.options.flatMap((option) => {
+          if (!isRecord(option) || !Number.isSafeInteger(option.index)) {
+            return [];
+          }
+          const card = reportCard(option.card);
+          return [{
+            index: option.index,
+            ...(card === null ? {} : { card }),
+          }];
+        })
+      : [];
+  }
+  return decision;
+}
+
+function explicitReportEventMessage(value) {
+  if (typeof value === "string") return value;
+  if (!isRecord(value)) return "Game event";
+  for (const field of ["message", "text", "label"]) {
+    if (typeof value[field] === "string") return value[field];
+  }
+  return "Game event";
+}
+
+function reportChronicleEntry(value, index) {
+  const entry = {
+    sequence: index + 1,
+    message: explicitReportEventMessage(value),
+  };
+  if (!isRecord(value)) return entry;
+  for (const field of ["turn", "player", "kind", "actionKind", "phase"]) {
+    const scalar = reportScalar(value[field]);
+    if (scalar !== undefined) entry[field] = scalar;
+  }
+  return entry;
+}
+
+function reportConfig(config) {
+  return {
+    players: config.players.map(({ deckId, policyId }) => ({
+      deckId,
+      policyId,
+    })),
+    seed: config.seed,
+    trainGames: config.trainGames,
+    trainSeed: config.trainSeed,
+    debugReveal: config.debugReveal,
+    bluffMode: config.bluffMode,
+    rollouts: config.rollouts,
+    deepRollouts: config.deepRollouts,
+    learnedRollouts: config.learnedRollouts,
+    learnedGenerations: config.learnedGenerations,
+  };
+}
+
+function reportModel(model) {
+  if (model === null) return null;
+  return {
+    family: model.family,
+    generation: model.generation,
+    searchWorlds: model.searchWorlds,
+    horizonTurns: model.horizonTurns,
+    source: model.source,
+    fingerprint: model.fingerprint,
+    ...(model.treatment === undefined
+      ? {}
+      : {
+          treatment: {
+            id: model.treatment.id,
+            parameterSha256: model.treatment.parameterSha256,
+            artifactFileSha256: model.treatment.artifactFileSha256,
+            artifactBytes: model.treatment.artifactBytes,
+          },
+        }),
+  };
+}
+
+function reportAction(action) {
+  const submission = {
+    decisionId: reportId(action.decisionId) ?? null,
+  };
+  if (Number.isSafeInteger(action.index)) submission.index = action.index;
+  if (Array.isArray(action.ids)) {
+    submission.ids = action.ids
+      .map(reportId)
+      .filter((id) => id !== undefined);
+  }
+  if (Array.isArray(action.pairs)) {
+    submission.pairs = action.pairs.flatMap((pair) => {
+      if (!Array.isArray(pair) || pair.length !== 2) return [];
+      const attacker = reportId(pair[0]);
+      const blocker = reportId(pair[1]);
+      return attacker === undefined || blocker === undefined
+        ? []
+        : [[attacker, blocker]];
+    });
+  }
+  if (Array.isArray(action.indices)) {
+    submission.indices = action.indices.filter(Number.isSafeInteger);
+  }
+  return submission;
 }
 
 function normalizedUint64(value, fieldName, fallback) {
@@ -1668,6 +2026,7 @@ class GameSession {
     this.message = "Starting game";
     this.events = [];
     this.log = [];
+    this.successfulHumanActions = [];
     this.latestEnvelope = null;
     this.stderr = "";
     this.closed = false;
@@ -1876,6 +2235,59 @@ class GameSession {
     };
   }
 
+  bugReport() {
+    const state = isRecord(this.snapshot) ? this.snapshot : {};
+    const players = Array.isArray(state.players) ? state.players : [];
+    const turnNumber = Number.isSafeInteger(state.turnNumber)
+      ? state.turnNumber
+      : Number.isSafeInteger(state.turn)
+        ? state.turn
+        : null;
+    const phase =
+      typeof state.phase === "string"
+        ? state.phase
+        : typeof this.decision?.phase === "string"
+          ? this.decision.phase
+          : null;
+    return {
+      schema: BUG_REPORT_SCHEMA,
+      version: BUG_REPORT_VERSION,
+      match: {
+        id: this.id,
+        status: this.status,
+        config: reportConfig(this.config),
+        model: reportModel(this.model),
+      },
+      successfulHumanActions: this.successfulHumanActions,
+      publicState: {
+        turnNumber,
+        phase,
+        activePlayer: Number.isSafeInteger(state.activePlayer)
+          ? state.activePlayer
+          : null,
+        startingPlayer: Number.isSafeInteger(state.startingPlayer)
+          ? state.startingPlayer
+          : null,
+        priority: {
+          holder:
+            this.decision?.kind === "priority" ? "human" : "none",
+          seat: this.decision?.kind === "priority" ? 0 : null,
+        },
+        players: [
+          reportPlayer(players[0], 0),
+          reportPlayer(players[1], 1),
+        ],
+        stack: Array.isArray(state.stack)
+          ? state.stack
+              .map(reportStackEntry)
+              .filter((entry) => entry !== null)
+          : [],
+      },
+      publicChronicle: this.events.map(reportChronicleEntry),
+      currentDecision: reportDecision(this.decision),
+    };
+  }
+
   submitAction(input) {
     const operation = this.actionQueue.then(() =>
       this.#submitActionNow(input),
@@ -1899,7 +2311,27 @@ class GameSession {
       );
     }
 
-    const action = validateActionForDecision(input, this.decision);
+    const submittedDecision = this.decision;
+    const action = validateActionForDecision(input, submittedDecision);
+    const submittedState = isRecord(this.snapshot) ? this.snapshot : {};
+    const actionContext = {
+      turnNumber: Number.isSafeInteger(submittedState.turnNumber)
+        ? submittedState.turnNumber
+        : Number.isSafeInteger(submittedState.turn)
+          ? submittedState.turn
+          : null,
+      phase:
+        typeof submittedState.phase === "string"
+          ? submittedState.phase
+          : typeof submittedDecision.phase === "string"
+            ? submittedDecision.phase
+            : null,
+      decision: {
+        decisionId: reportId(submittedDecision.id) ?? null,
+        kind: submittedDecision.kind,
+      },
+      submission: reportAction(action),
+    };
     const before = this.settlementVersion;
     this.status = "advancing";
     this.message = "Opponent thinking";
@@ -1922,6 +2354,12 @@ class GameSession {
         });
       });
       await this.waitForSettled(before, this.actionTimeoutMs);
+      if (this.status !== "failed") {
+        this.successfulHumanActions.push({
+          sequence: this.successfulHumanActions.length + 1,
+          ...actionContext,
+        });
+      }
     } catch (error) {
       this.#fail(error.message);
       this.stop();
@@ -2161,12 +2599,14 @@ async function handleApi(
     return;
   }
 
-  const match = /^\/api\/games\/([^/]+)(?:\/(actions))?$/.exec(pathname);
+  const match =
+    /^\/api\/games\/([^/]+)(?:\/(actions|bug-report))?$/.exec(pathname);
   if (match === null) {
     throw new ApiError(404, "not_found", "No such API resource");
   }
   const id = decodeURIComponent(match[1]);
   const isActions = match[2] === "actions";
+  const isBugReport = match[2] === "bug-report";
   if (isActions) {
     if (request.method !== "POST") {
       methodNotAllowed(response, ["POST"]);
@@ -2174,6 +2614,16 @@ async function handleApi(
     }
     const game = await manager.get(id).submitAction(await readJson(request));
     sendJson(response, 200, { game });
+    return;
+  }
+  if (isBugReport) {
+    if (request.method !== "GET") {
+      methodNotAllowed(response, ["GET"]);
+      return;
+    }
+    sendJson(response, 200, {
+      report: manager.get(id).bugReport(),
+    });
     return;
   }
   if (request.method === "GET") {
@@ -2331,6 +2781,9 @@ export function createGameContractHarness(options = {}) {
     },
     get(id) {
       return { game: manager.get(id).publicState() };
+    },
+    report(id) {
+      return { report: manager.get(id).bugReport() };
     },
     async action(id, choice) {
       const game = await manager.get(id).submitAction(choice);

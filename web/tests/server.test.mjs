@@ -19,6 +19,16 @@ const FAKE_CLEANUP_BRIDGE = path.join(
   "fixtures",
   "fake-cleanup-bridge.mjs",
 );
+const FAKE_BUG_REPORT_BRIDGE = path.join(
+  TEST_DIRECTORY,
+  "fixtures",
+  "fake-bug-report-bridge.mjs",
+);
+const FAKE_BUG_REPORT_TIMEOUT_BRIDGE = path.join(
+  TEST_DIRECTORY,
+  "fixtures",
+  "fake-bug-report-timeout-bridge.mjs",
+);
 
 function dispatch(server, pathname, init = {}) {
   const request = Readable.from(
@@ -68,7 +78,11 @@ function dispatch(server, pathname, init = {}) {
   });
 }
 
-async function startTestServer(t, bridgePath = FAKE_BRIDGE) {
+async function startTestServer(
+  t,
+  bridgePath = FAKE_BRIDGE,
+  options = {},
+) {
   const distDirectory = await mkdtemp(
     path.join(tmpdir(), "old-school-web-test-"),
   );
@@ -85,9 +99,9 @@ async function startTestServer(t, bridgePath = FAKE_BRIDGE) {
     bridgePath: process.execPath,
     bridgeArgsPrefix: [bridgePath],
     distDirectory,
-    initialTimeoutMs: 5_000,
-    actionTimeoutMs: 5_000,
-    idFactory: () => "test-game",
+    initialTimeoutMs: options.initialTimeoutMs ?? 5_000,
+    actionTimeoutMs: options.actionTimeoutMs ?? 5_000,
+    idFactory: options.idFactory ?? (() => "test-game"),
   });
   t.after(async () => {
     server.gameManager.shutdown();
@@ -330,6 +344,580 @@ test("cleanup discard validates exact duplicate-card hand positions", async (t) 
     accepted.body.game.events.at(-1).cards.map(({ name }) => name),
     ["Forest", "Forest"],
   );
+});
+
+test("bug reports preserve public decisions and successful actions without hidden cards", async (t) => {
+  const { request } = await startTestServer(t, FAKE_BUG_REPORT_BRIDGE);
+  const created = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        players: [
+          { deckId: "blue", policyId: "human" },
+          {
+            deckId: "blue",
+            policyId: "learned-value-c16-bilinear-aq19",
+          },
+        ],
+        seed: 42,
+        trainGames: 800,
+        trainSeed: 424242,
+        debugReveal: true,
+        bluffMode: false,
+        rollouts: 2,
+        deepRollouts: 8,
+        learnedRollouts: 8,
+        learnedGenerations: 16,
+      }),
+    }),
+  );
+  assert.equal(created.response.status, 201);
+
+  const initial = await json(
+    await request("/api/games/test-game/bug-report"),
+  );
+  assert.equal(initial.response.status, 200);
+  assert.equal(initial.body.report.schema, "old-school-arena-bug-report");
+  assert.equal(initial.body.report.version, 1);
+  assert.deepEqual(initial.body.report.successfulHumanActions, []);
+  assert.equal(initial.body.report.currentDecision.kind, "priority");
+  assert.deepEqual(
+    initial.body.report.currentDecision.options.map(({ index, kind }) => [
+      index,
+      kind,
+    ]),
+    [
+      [0, "pass"],
+      [1, "cast_counterspell"],
+    ],
+  );
+
+  const rejected = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decisionId: "stale", index: 1 }),
+    }),
+  );
+  assert.equal(rejected.response.status, 409);
+  assert.deepEqual(
+    (await json(await request("/api/games/test-game/bug-report"))).body.report
+      .successfulHumanActions,
+    [],
+  );
+
+  const illegalOption = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "report-priority-1",
+        index: 99,
+      }),
+    }),
+  );
+  assert.equal(illegalOption.response.status, 422);
+  assert.equal(illegalOption.body.error.code, "illegal_action");
+  assert.deepEqual(
+    (await json(await request("/api/games/test-game/bug-report"))).body.report
+      .successfulHumanActions,
+    [],
+  );
+
+  const firstAction = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "report-priority-1",
+        index: 1,
+      }),
+    }),
+  );
+  assert.equal(firstAction.response.status, 200);
+  assert.equal(firstAction.body.game.decision.kind, "attackers");
+  assert.deepEqual(
+    (await json(await request("/api/games/test-game/bug-report"))).body.report
+      .currentDecision,
+    {
+      decisionId: 2,
+      kind: "attackers",
+      eligible: [110],
+    },
+  );
+
+  const secondAction = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decisionId: 2, ids: [110] }),
+    }),
+  );
+  assert.equal(secondAction.response.status, 200);
+  assert.equal(secondAction.body.game.decision.kind, "blockers");
+
+  const exported = await json(
+    await request("/api/games/test-game/bug-report"),
+  );
+  assert.equal(exported.response.status, 200);
+  const report = exported.body.report;
+  assert.deepEqual(report.match.config.players, [
+    { deckId: "blue", policyId: "human" },
+    {
+      deckId: "blue",
+      policyId: "learned-value-c16-bilinear-aq19",
+    },
+  ]);
+  assert.deepEqual(report.match.model.treatment, {
+    id: "aq19-bilinear",
+    parameterSha256:
+      "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194",
+    artifactFileSha256:
+      "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a",
+    artifactBytes: 14_502,
+  });
+  assert.deepEqual(report.successfulHumanActions, [
+    {
+      sequence: 1,
+      turnNumber: 13,
+      phase: "first_main",
+      decision: {
+        decisionId: "report-priority-1",
+        kind: "priority",
+      },
+      submission: {
+        decisionId: "report-priority-1",
+        index: 1,
+      },
+    },
+    {
+      sequence: 2,
+      turnNumber: 13,
+      phase: "declare_attackers",
+      decision: { decisionId: 2, kind: "attackers" },
+      submission: { decisionId: 2, ids: [110] },
+    },
+  ]);
+  assert.deepEqual(
+    {
+      turnNumber: report.publicState.turnNumber,
+      phase: report.publicState.phase,
+      activePlayer: report.publicState.activePlayer,
+      priority: report.publicState.priority,
+    },
+    {
+      turnNumber: 13,
+      phase: "declare_blockers",
+      activePlayer: 0,
+      priority: { holder: "none", seat: null },
+    },
+  );
+  assert.deepEqual(
+    report.publicState.players.map(
+      ({
+        seat,
+        life,
+        handCount,
+        libraryCount,
+        graveyardCount,
+        exileCount,
+      }) => ({
+        seat,
+        life,
+        handCount,
+        libraryCount,
+        graveyardCount,
+        exileCount,
+      }),
+    ),
+    [
+      {
+        seat: 0,
+        life: 17,
+        handCount: 2,
+        libraryCount: 24,
+        graveyardCount: 1,
+        exileCount: 1,
+      },
+      {
+        seat: 1,
+        life: 14,
+        handCount: 6,
+        libraryCount: 23,
+        graveyardCount: 1,
+        exileCount: 1,
+      },
+    ],
+  );
+  assert.equal(
+    report.publicState.players[1].battlefield[1].card.name,
+    "Flying Men",
+  );
+  assert.deepEqual(
+    report.publicState.stack.map(
+      ({ stackId, controller, card, spellTarget }) => ({
+        stackId,
+        controller,
+        card: card.name,
+        ...(spellTarget === undefined ? {} : { spellTarget }),
+      }),
+    ),
+    [
+      {
+        stackId: 301,
+        controller: 0,
+        card: "Flying Men",
+      },
+      {
+        stackId: 302,
+        controller: 1,
+        card: "Counterspell",
+        spellTarget: 301,
+      },
+    ],
+  );
+  assert.deepEqual(report.currentDecision, {
+    decisionId: "report-blockers-3",
+    kind: "blockers",
+    attackers: [110],
+    choices: [{ blocker: 210, legalAttackers: [110] }],
+  });
+  assert.deepEqual(
+    report.publicChronicle.map(({ sequence, message, kind }) => ({
+      sequence,
+      message,
+      kind,
+    })),
+    [
+      {
+        sequence: 1,
+        message: "Opponent: Cast Counterspell → Flying Men",
+        kind: "priority_action",
+      },
+      {
+        sequence: 2,
+        message: "You: Cast Counterspell → stack #302",
+        kind: "priority_action",
+      },
+      {
+        sequence: 3,
+        message: "You attacked with Flying Men #110",
+        kind: "attackers_declared",
+      },
+    ],
+  );
+
+  const serialized = JSON.stringify(report);
+  for (const secret of [
+    "OPPONENT_HAND_SECRET",
+    "OPPONENT_LIBRARY_SECRET",
+    "HUMAN_GRAVEYARD_SECRET",
+    "OPPONENT_GRAVEYARD_SECRET",
+    "HUMAN_EXILE_SECRET",
+    "OPPONENT_EXILE_SECRET",
+    "INCIDENTAL_EVENT_SECRET",
+    "DECISION_SECRET",
+    "DECISION_SECRET_AFTER_ACTION",
+    "RAW_STATE_SECRET",
+    "STACK_SECRET",
+    "BRIDGE_STDERR_SECRET",
+  ]) {
+    assert.doesNotMatch(serialized, new RegExp(secret));
+  }
+  assert.doesNotMatch(serialized, /"hand":|"revealedHand":|"library":/);
+
+  const blocks = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "report-blockers-3",
+        pairs: [[110, 210]],
+      }),
+    }),
+  );
+  assert.equal(blocks.response.status, 200);
+  assert.deepEqual(
+    (await json(await request("/api/games/test-game/bug-report"))).body.report
+      .currentDecision,
+    {
+      decisionId: "report-damage-order-4",
+      kind: "damage_order",
+      attacker: 110,
+      blockers: [210],
+    },
+  );
+
+  const damageOrder = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "report-damage-order-4",
+        ids: [210],
+      }),
+    }),
+  );
+  assert.equal(damageOrder.response.status, 200);
+  assert.deepEqual(
+    (await json(await request("/api/games/test-game/bug-report"))).body.report
+      .currentDecision,
+    {
+      decisionId: "report-cleanup-5",
+      kind: "cleanup_discard",
+      count: 1,
+      options: [
+        {
+          index: 0,
+          card: {
+            id: "card-counterspell",
+            name: "Counterspell",
+            type: "instant",
+            costLabel: "UU",
+          },
+        },
+        {
+          index: 1,
+          card: {
+            id: "card-flying-men",
+            name: "Flying Men",
+            type: "creature",
+            costLabel: "U",
+            power: 1,
+            toughness: 1,
+            flying: true,
+          },
+        },
+      ],
+    },
+  );
+
+  const cleanup = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "report-cleanup-5",
+        indices: [1],
+      }),
+    }),
+  );
+  assert.equal(cleanup.response.status, 200);
+  assert.equal(cleanup.body.game.status, "finished");
+
+  const finalReport = (
+    await json(await request("/api/games/test-game/bug-report"))
+  ).body.report;
+  assert.deepEqual(
+    finalReport.successfulHumanActions.slice(2).map(
+      ({ decision, submission }) => ({ decision, submission }),
+    ),
+    [
+      {
+        decision: {
+          decisionId: "report-blockers-3",
+          kind: "blockers",
+        },
+        submission: {
+          decisionId: "report-blockers-3",
+          pairs: [[110, 210]],
+        },
+      },
+      {
+        decision: {
+          decisionId: "report-damage-order-4",
+          kind: "damage_order",
+        },
+        submission: {
+          decisionId: "report-damage-order-4",
+          ids: [210],
+        },
+      },
+      {
+        decision: {
+          decisionId: "report-cleanup-5",
+          kind: "cleanup_discard",
+        },
+        submission: {
+          decisionId: "report-cleanup-5",
+          indices: [1],
+        },
+      },
+    ],
+  );
+
+  const wrongMethod = await request(
+    "/api/games/test-game/bug-report",
+    { method: "POST", body: "{}" },
+  );
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "GET");
+});
+
+test("bug reports omit validated actions whose bridge advance fails", async (t) => {
+  const { request } = await startTestServer(t, FAKE_BUG_REPORT_BRIDGE);
+  const created = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        players: [
+          { deckId: "blue", policyId: "human" },
+          {
+            deckId: "blue",
+            policyId: "learned-value-c16-bilinear-aq19",
+          },
+        ],
+        seed: 42,
+        trainGames: 800,
+        trainSeed: 424242,
+        debugReveal: false,
+        bluffMode: false,
+        rollouts: 2,
+        deepRollouts: 8,
+        learnedRollouts: 8,
+        learnedGenerations: 16,
+      }),
+    }),
+  );
+  assert.equal(created.response.status, 201);
+
+  const failedAdvance = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "report-priority-1",
+        index: 0,
+      }),
+    }),
+  );
+  assert.equal(failedAdvance.response.status, 200);
+  assert.equal(failedAdvance.body.game.status, "failed");
+
+  const exported = await json(
+    await request("/api/games/test-game/bug-report"),
+  );
+  assert.equal(exported.response.status, 200);
+  assert.equal(exported.body.report.match.status, "failed");
+  assert.deepEqual(exported.body.report.successfulHumanActions, []);
+  assert.doesNotMatch(
+    JSON.stringify(exported.body.report),
+    /BRIDGE_STDERR_SECRET/,
+  );
+});
+
+test("bug reports omit validated actions that receive no bridge response", async (t) => {
+  const { request } = await startTestServer(
+    t,
+    FAKE_BUG_REPORT_TIMEOUT_BRIDGE,
+    { actionTimeoutMs: 25 },
+  );
+  const created = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ seed: 42 }),
+    }),
+  );
+  assert.equal(created.response.status, 201);
+  assert.equal(created.body.game.decision.id, "timeout-priority-1");
+
+  const timedOut = await json(
+    await request("/api/games/test-game/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "timeout-priority-1",
+        index: 0,
+      }),
+    }),
+  );
+  assert.equal(timedOut.response.status, 504);
+  assert.equal(timedOut.body.error.code, "bridge_timeout");
+
+  const exported = await json(
+    await request("/api/games/test-game/bug-report"),
+  );
+  assert.equal(exported.response.status, 200);
+  assert.equal(exported.body.report.match.status, "failed");
+  assert.deepEqual(exported.body.report.successfulHumanActions, []);
+});
+
+test("bug-report action transcripts stay isolated across live sessions", async (t) => {
+  let nextId = 0;
+  const { request } = await startTestServer(
+    t,
+    FAKE_BUG_REPORT_BRIDGE,
+    { idFactory: () => `report-game-${++nextId}` },
+  );
+  const gameConfig = {
+    players: [
+      { deckId: "blue", policyId: "human" },
+      {
+        deckId: "blue",
+        policyId: "learned-value-c16-bilinear-aq19",
+      },
+    ],
+    seed: 42,
+  };
+  const first = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(gameConfig),
+    }),
+  );
+  const second = await json(
+    await request("/api/games", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...gameConfig, seed: 43 }),
+    }),
+  );
+  assert.equal(first.response.status, 201);
+  assert.equal(second.response.status, 201);
+  assert.equal(first.body.game.id, "report-game-1");
+  assert.equal(second.body.game.id, "report-game-2");
+
+  const firstAction = await json(
+    await request("/api/games/report-game-1/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decisionId: "report-priority-1",
+        index: 1,
+      }),
+    }),
+  );
+  assert.equal(firstAction.response.status, 200);
+
+  const firstReport = (
+    await json(await request("/api/games/report-game-1/bug-report"))
+  ).body.report;
+  const secondReport = (
+    await json(await request("/api/games/report-game-2/bug-report"))
+  ).body.report;
+  assert.equal(firstReport.match.id, "report-game-1");
+  assert.equal(secondReport.match.id, "report-game-2");
+  assert.deepEqual(
+    firstReport.successfulHumanActions.map(({ sequence, submission }) => ({
+      sequence,
+      submission,
+    })),
+    [
+      {
+        sequence: 1,
+        submission: {
+          decisionId: "report-priority-1",
+          index: 1,
+        },
+      },
+    ],
+  );
+  assert.deepEqual(secondReport.successfulHumanActions, []);
+  assert.equal(secondReport.currentDecision.decisionId, "report-priority-1");
 });
 
 test("creates a session and maps canonical config to bridge flags", async (t) => {

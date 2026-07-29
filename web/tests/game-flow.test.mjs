@@ -217,6 +217,112 @@ test("reproduction summaries keep setup stable while public context advances", a
   );
 });
 
+test("bug-report copy ignores a deferred response after its snapshot is invalidated", async () => {
+  const { performBugReportCopy } = await loadTypeScriptModule(
+    "src/bug-report-copy.ts",
+  );
+  let resolveOldReport;
+  const oldReport = new Promise((resolve) => {
+    resolveOldReport = resolve;
+  });
+  let generation = 1;
+  const oldController = new AbortController();
+  const copied = [];
+  const states = [];
+  const staleCopy = performBugReportCopy({
+    gameId: "old-session",
+    generation,
+    signal: oldController.signal,
+    currentGeneration: () => generation,
+    fetchReport: () => oldReport,
+    copyText: async (text) => {
+      copied.push(text);
+    },
+    updateState: (state) => {
+      states.push(state);
+    },
+  });
+
+  generation += 1;
+  oldController.abort();
+  resolveOldReport({ match: { id: "old-session" } });
+
+  assert.equal(await staleCopy, "stale");
+  assert.deepEqual(copied, []);
+  assert.deepEqual(states, []);
+
+  const currentController = new AbortController();
+  const currentCopy = await performBugReportCopy({
+    gameId: "current-session",
+    generation,
+    signal: currentController.signal,
+    currentGeneration: () => generation,
+    fetchReport: async (id) => ({ match: { id } }),
+    copyText: async (text) => {
+      copied.push(text);
+    },
+    updateState: (state) => {
+      states.push(state);
+    },
+  });
+
+  assert.equal(currentCopy, "copied");
+  assert.deepEqual(states, ["copied"]);
+  assert.equal(copied.length, 1);
+  assert.match(copied[0], /"id": "current-session"/);
+  assert.doesNotMatch(copied[0], /old-session/);
+});
+
+test("clipboard copy falls back after API rejection and always removes its field", async () => {
+  const { copyTextToClipboard } = await loadTypeScriptModule(
+    "src/bug-report-copy.ts",
+  );
+  const makeField = () => ({
+    value: "",
+    style: { position: "", opacity: "" },
+    attributes: new Map(),
+    selected: false,
+    removed: false,
+    setAttribute(name, value) {
+      this.attributes.set(name, value);
+    },
+    select() {
+      this.selected = true;
+    },
+    remove() {
+      this.removed = true;
+    },
+  });
+  const fallbackField = makeField();
+  let appendedField = null;
+  await copyTextToClipboard("fallback text", {
+    writeText: async () => {
+      throw new Error("permission denied");
+    },
+    createTextArea: () => fallbackField,
+    appendTextArea: (field) => {
+      appendedField = field;
+    },
+    execCopy: () => true,
+  });
+
+  assert.equal(appendedField, fallbackField);
+  assert.equal(fallbackField.value, "fallback text");
+  assert.equal(fallbackField.selected, true);
+  assert.equal(fallbackField.removed, true);
+
+  const failedField = makeField();
+  await assert.rejects(
+    copyTextToClipboard("uncopyable text", {
+      createTextArea: () => failedField,
+      appendTextArea: () => {},
+      execCopy: () => false,
+    }),
+    /Clipboard copy is unavailable/,
+  );
+  assert.equal(failedField.removed, true);
+});
+
 test("event prose cannot fall back to serializing incidental payloads", async () => {
   const { formatPublicLogEntry, latestPublicEventMessage } =
     await loadTypeScriptModule("src/types.ts");

@@ -1,5 +1,6 @@
 import type {
   ActionRequest,
+  BugReport,
   DeckCard,
   DeckMeta,
   EvolutionConfig,
@@ -258,6 +259,16 @@ export function fetchGame(
     `/api/games/${encodeURIComponent(id)}`,
     { signal },
   ).then(normalizeSnapshot);
+}
+
+export function fetchBugReport(
+  id: string,
+  signal?: AbortSignal,
+): Promise<BugReport> {
+  return request<{ report: BugReport }>(
+    `/api/games/${encodeURIComponent(id)}/bug-report`,
+    { signal },
+  ).then(({ report }) => report);
 }
 
 export function submitAction(

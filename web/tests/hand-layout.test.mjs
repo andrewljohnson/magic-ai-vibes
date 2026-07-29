@@ -710,9 +710,11 @@ test("landing metadata includes and advertises every bot policy", async () => {
 });
 
 test("live header exposes a compact selectable reproduction summary", async () => {
-  const [app, css] = await Promise.all([
+  const [app, css, bugReportCopy, api] = await Promise.all([
     source("App.tsx"),
     source("styles.css"),
+    source("bug-report-copy.ts"),
+    source("api.ts"),
   ]);
   const reproduction = app.slice(
     app.indexOf("function ReproductionSummary"),
@@ -735,9 +737,10 @@ test("live header exposes a compact selectable reproduction summary", async () =
   assert.match(reproduction, /deckLabel\(snapshot, meta, seat\)/);
   assert.match(reproduction, /policyLabel\(snapshot, meta, seat\)/);
   assert.match(reproduction, /formatReproductionSummary\(config,\s*\{/);
+  const exactSummaryStart = reproduction.indexOf("const exactSummary");
   const exactSummary = reproduction.slice(
-    reproduction.indexOf("const exactSummary"),
-    reproduction.indexOf("return ("),
+    exactSummaryStart,
+    reproduction.indexOf("return (", exactSummaryStart),
   );
   assert.match(exactSummary, /snapshot\.state\?\.turnNumber/);
   assert.match(exactSummary, /snapshot\.state\?\.phase/);
@@ -759,10 +762,50 @@ test("live header exposes a compact selectable reproduction summary", async () =
   );
   assert.match(
     reproduction,
-    /Setup \+ public turn context · no hand contents included/,
+    /Hands and libraries are counts only · legal choices may name your\s+cards · opponent hidden cards excluded/,
   );
   assert.match(reproduction, /rows=\{4\}/);
-  assert.doesNotMatch(reproduction, /\.hand|revealedHand|graveyard|library|stack/);
+  assert.doesNotMatch(
+    reproduction,
+    /snapshot\.state\?\.players|snapshot\.state\?\.stack|\.hand|revealedHand|graveyard/,
+  );
+  assert.match(
+    reproduction,
+    /const reportCopyGenerationRef = useRef\(0\)/,
+  );
+  assert.match(
+    reproduction,
+    /const controller = new AbortController\(\)/,
+  );
+  assert.match(reproduction, /reportCopyAbortRef\.current\?\.abort\(\)/);
+  assert.match(
+    reproduction,
+    /\}, \[\s*snapshot\.id,\s*snapshot\.decision\?\.decisionId,\s*snapshot\.log\?\.length,?\s*\]\)/,
+  );
+  assert.match(
+    reproduction,
+    /performBugReportCopy\(\{[\s\S]+?fetchReport: fetchBugReport,[\s\S]+?copyText: copyTextToClipboard/,
+  );
+  assert.match(
+    api,
+    /fetchBugReport\(\s*id: string,\s*signal\?: AbortSignal,[\s\S]+?bug-report`,\s*\{ signal \}/,
+  );
+  assert.match(
+    bugReportCopy,
+    /operation\.currentGeneration\(\) === operation\.generation/,
+  );
+  assert.equal(
+    bugReportCopy.match(/if \(!isCurrent\(operation\)\) return "stale";/g)
+      ?.length,
+    3,
+  );
+  assert.match(
+    bugReportCopy,
+    /operation\.copyText\(JSON\.stringify\(report, null, 2\)\)/,
+  );
+  assert.match(reproduction, /"Copy bug report"/);
+  assert.match(reproduction, /Versioned public-state report copied\./);
+  assert.doesNotMatch(reproduction, /JSON\.stringify\(snapshot/);
   assert.match(
     app,
     /<ReproductionSummary[\s\S]+?config=\{config\}[\s\S]+?snapshot=\{snapshot\}/,
@@ -771,6 +814,9 @@ test("live header exposes a compact selectable reproduction summary", async () =
   const panel = cssRule(css, ".repro-panel");
   assert.match(panel, /position:\s*absolute/);
   assert.match(panel, /width:\s*min\(600px,\s*calc\(100vw - 48px\)\)/);
+  const reportButton = cssRule(css, ".repro-report-actions button");
+  assert.match(reportButton, /font-size:\s*var\(--type-label\)/);
+  assert.match(reportButton, /min-height:\s*30px/);
   assert.equal(pixels(cssRule(css, ".top-bar"), "height"), 64);
 });
 

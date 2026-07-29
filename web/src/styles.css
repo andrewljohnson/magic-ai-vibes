@@ -314,6 +314,36 @@ textarea:focus-visible,
   line-height: 1.4;
 }
 
+.repro-report-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.repro-report-actions button {
+  flex: none;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid rgba(241, 211, 138, 0.55);
+  border-radius: 5px;
+  color: #101512;
+  background: var(--gold);
+  font-size: var(--type-label);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.repro-report-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.repro-report-actions span {
+  color: var(--muted);
+  font-size: var(--type-floor);
+}
+
 .repro-privacy {
   display: block;
   margin-top: 6px;

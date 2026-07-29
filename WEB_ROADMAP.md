@@ -584,6 +584,78 @@ Acceptance criteria:
 - A bug report can copy a compact reproduction containing matchup, seeds,
   settings, turn, phase, and latest event.
 
+#### Preregistered privacy-safe diagnostic export slice
+
+Hypothesis: a server-authored, one-click diagnostic report will make manual
+bot failures such as redundant counters reproducible from the exact public
+stack and submitted human choices, without copying raw bridge state or any
+opponent-private card identities.
+
+Status: **complete — server-side transcript, privacy adversary, stale-copy
+isolation, both required web gates, rendered checks, and live restart passed**
+
+- Keep the existing compact `REPRO` line byte-compatible. Add a separate
+  versioned `old-school-arena-bug-report` JSON document and a native
+  `Copy bug report` control with explicit copied/failure feedback.
+- The live session—not React—records every successfully settled human action
+  submission in order, including engine decision kind/ID and the exact
+  validated scalar IDs/indices. Invalid, stale, timed-out, and failed
+  submissions never enter that history, and client rerenders cannot erase it.
+- The report whitelists normalized match config, status, public model and
+  treatment/artifact identity, current public turn/phase/active seat/priority,
+  public stack objects, public battlefield permanents, life and zone counts,
+  public Chronicle prose/metadata, and the current engine decision metadata.
+  It is assembled field by field at the server boundary rather than cloning or
+  serializing a raw bridge snapshot.
+- Both players expose hand and library **counts only**. `hand`,
+  `revealedHand`, and library card arrays are ignored even when Debug reveal is
+  on. The report contains no raw envelope, bridge stderr, or incidental event
+  payload fields.
+- Focused contract tests inject hidden-card-shaped fields into opponent hand,
+  library, events, decisions, and unrelated snapshot properties, then prove
+  those identities are absent while exact public stack/controller/target,
+  action order, model SHA identity, and current decision data survive.
+- Acceptance requires `make test-web-ui` and `make test-web`. This is a
+  diagnostics contract/control change; it makes no broader visual-layout
+  claim and does not restart the live server.
+
+Evidence on 2026-07-29: `GET /api/games/:id/bug-report` now emits schema
+`old-school-arena-bug-report` version 1 from a field-by-field server
+whitelist. The session appends a choice only after that exact validated action
+settles successfully; stale and bridge-failed submissions each left the
+transcript empty, then two valid Priority/attacker submissions survived later
+snapshots in order.
+The adversarial bridge exposed exact public AQ19 artifact provenance, stack
+controllers/target, board permanents, zone counts, Chronicle prose, and a
+blocker decision while injecting unique secrets through opponent
+`hand`/`revealedHand`/`library`, both graveyards/exiles, raw state, stack,
+event payload, decision payload, and stderr. Every secret and every raw
+hand/library field was absent from the serialized report. The client fetches
+that dedicated document only when `Copy bug report` is activated, pretty
+prints it, and reports clipboard success/failure; it does not construct a
+report from the React snapshot.
+
+Independent review found and blocked release on a stale asynchronous copy:
+switching match/decision while the report fetch was pending could otherwise
+copy the old report into the new panel. The final client aborts and
+generation-checks each request using stable match/decision/log revision keys,
+checks freshness before clipboard and state changes, falls back after a
+clipboard-API rejection, and always removes its temporary field. Executable
+tests delay the old-session fetch and prove it never writes. Server tests
+also prove illegal, stale, timed-out, and bridge-failed submissions never
+enter the transcript, two live sessions remain isolated, and Priority,
+attacker, blocker-pair, damage-order, and cleanup-index submissions serialize
+exactly.
+
+Final gates on 2026-07-29: `make test-web-ui` passed 114/114.
+`make test-web` passed the 21/21 C++ bridge suite plus 142/142 Node/client/
+session tests. The final server was restarted at `http://127.0.0.1:4173/`.
+A real match at 1280 × 720 displayed and copied the report with no horizontal
+overflow; the emitted JSON was inspected and contained only hand/library
+counts for the opponent. At 1440 × 900 the copy control, success state, and
+privacy statement remained visible with no horizontal overflow. The temporary
+viewport override was reset after the smoke.
+
 #### Preregistered ephemeral deck-evolution menu slice
 
 Hypothesis: exposing the existing engine evolution loop in a separate bounded

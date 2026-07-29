@@ -408,6 +408,21 @@ export interface GameSnapshot {
   error?: string | null;
 }
 
+export interface BugReport {
+  schema: "old-school-arena-bug-report";
+  version: 1;
+  match: {
+    id: string;
+    status: string;
+    config: GameConfig;
+    model: LearnedModelIdentity | null;
+  };
+  successfulHumanActions: Array<Record<string, unknown>>;
+  publicState: Record<string, unknown>;
+  publicChronicle: Array<Record<string, unknown>>;
+  currentDecision: Record<string, unknown> | null;
+}
+
 export interface LogEntry {
   id?: string | number;
   turn?: number;

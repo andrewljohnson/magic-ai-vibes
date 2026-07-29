@@ -13,11 +13,17 @@ import {
   createEvolution,
   createGame,
   deleteGame,
+  fetchBugReport,
   fetchGame,
   fetchMeta,
   saveEvolution,
   submitAction,
 } from "./api";
+import {
+  copyTextToClipboard,
+  performBugReportCopy,
+  type BugReportCopyState,
+} from "./bug-report-copy";
 import { ApiRequestError } from "./errors";
 import {
   blockerPairsFromKeys,
@@ -4196,6 +4202,54 @@ function ReproductionSummary({
   snapshot: GameSnapshot;
   meta: MetaResponse | null;
 }) {
+  const [reportCopyState, setReportCopyState] =
+    useState<BugReportCopyState>("idle");
+  const reportCopyGenerationRef = useRef(0);
+  const reportCopyAbortRef = useRef<AbortController | null>(null);
+  const reportCopyInFlightRef = useRef(false);
+  useEffect(() => {
+    reportCopyGenerationRef.current += 1;
+    reportCopyAbortRef.current?.abort();
+    reportCopyAbortRef.current = null;
+    reportCopyInFlightRef.current = false;
+    setReportCopyState("idle");
+    return () => {
+      reportCopyGenerationRef.current += 1;
+      reportCopyAbortRef.current?.abort();
+      reportCopyAbortRef.current = null;
+      reportCopyInFlightRef.current = false;
+    };
+  }, [snapshot.id, snapshot.decision?.decisionId, snapshot.log?.length]);
+  const copyBugReport = async () => {
+    if (reportCopyInFlightRef.current) return;
+
+    reportCopyAbortRef.current?.abort();
+    const controller = new AbortController();
+    const generation = reportCopyGenerationRef.current + 1;
+    reportCopyGenerationRef.current = generation;
+    reportCopyAbortRef.current = controller;
+    reportCopyInFlightRef.current = true;
+    setReportCopyState("copying");
+    try {
+      await performBugReportCopy({
+        gameId: snapshot.id,
+        generation,
+        signal: controller.signal,
+        currentGeneration: () => reportCopyGenerationRef.current,
+        fetchReport: fetchBugReport,
+        copyText: copyTextToClipboard,
+        updateState: setReportCopyState,
+      });
+    } finally {
+      if (
+        reportCopyGenerationRef.current === generation &&
+        reportCopyAbortRef.current === controller
+      ) {
+        reportCopyAbortRef.current = null;
+        reportCopyInFlightRef.current = false;
+      }
+    }
+  };
   const exactSummary = formatReproductionSummary(config, {
     turnNumber: snapshot.state?.turnNumber,
     phase: snapshot.state?.phase,
@@ -4294,8 +4348,29 @@ function ReproductionSummary({
             onFocus={(event) => event.currentTarget.select()}
           />
         </label>
+        <div className="repro-report-actions">
+          <button
+            type="button"
+            disabled={reportCopyState === "copying"}
+            onClick={() => void copyBugReport()}
+          >
+            {reportCopyState === "copying"
+              ? "Preparing report…"
+              : reportCopyState === "copied"
+                ? "Copied bug report"
+                : "Copy bug report"}
+          </button>
+          <span role="status" aria-live="polite">
+            {reportCopyState === "copied"
+              ? "Versioned public-state report copied."
+              : reportCopyState === "failed"
+                ? "Could not copy; compact REPRO remains selectable above."
+                : "Includes action history, public stack, and board."}
+          </span>
+        </div>
         <small className="repro-privacy">
-          Setup + public turn context · no hand contents included
+          Hands and libraries are counts only · legal choices may name your
+          cards · opponent hidden cards excluded
         </small>
       </section>
     </details>
