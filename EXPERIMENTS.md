@@ -18648,6 +18648,60 @@ terminal/bootstrap census to choose between terminal-to-completion
 information-set rollouts and critic retraining. No corpus, fit, artifact,
 benchmark, or gameplay seed is licensed by AQ3-D0.
 
+##### AQ3-D0 long-horizon root-sampled action-Q result
+
+Completed 2026-07-28 from immutable implementation commit `55b6767`.
+Before the science run, the engine `181/181`, web `118/118`, and
+certification `48/48` suites passed; the final implementation then passed
+its focused `4/4` optimized and AddressSanitizer/UndefinedBehaviorSanitizer
+suites. Independent design and implementation reviews returned GO with no
+remaining P0/P1 findings. `REVIEW.md` was reread through its newest 19:49
+PDT entry before and after the run. Exact command:
+
+```sh
+./build/old-school-action-q-long-horizon-diagnostic --diagnose
+```
+
+The command exited one in 3.52 seconds after evaluating all 13 authoritative
+legal actions. Exact C16 fingerprint was
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+All four hidden-zone repartitions were nonvacuous and bit-identical, and
+reversed legal-action input reproduced every sample, mean, and accounting
+field bit-exactly.
+
+| Fixture | Required direction | H32 continuation result | Terminal / total | Result |
+| --- | --- | --- | ---: | --- |
+| Intervening Counterspell | counter opposing Counterspell > Pass | Pass `0.4267280240`; counter opposing Counterspell `0.4109624876` (tied with countering the original spell); counter own Counterspell `0.0735140998` | 218 / 256 | **FAIL** |
+| Braingeyser | neither X=0 action in exact-max support | X=0 opponent was the unique max at `0.4279468318`; Pass `0.4223888375`; X=0 self `0.4070892304`; X=1 opponent/self `0.3718102554 / 0.3502568574` | 151 / 320 | **FAIL** |
+| Sick-Bear Giant Growth | Pass > Growth | Pass `0.140625`; Growth `0.125`; margin `0.015625` | 128 / 128 | PASS |
+| Live Force Spike | Spike > Pass | Spike `0.2995530378`; Pass `0.046875`; margin `0.2526780378` | 109 / 128 | PASS |
+
+Aggregate accounting was 256 common sampled worlds, 832 action
+continuations, 606 terminal leaves, and 226 C16 bootstraps. Thus 72.84% of
+all continuations, and 85.16% of the failed Counterspell fixture, reached an
+exact terminal result before H32. No corpus was collected, model fit,
+artifact published, benchmark run, or gameplay seed opened.
+
+Verdict: **reject AQ3-D0 exactly as declared**. Do not sweep world count or
+horizon. Longer flat root sampling successfully prices the sick-Bear and
+live-Spike decisions but does not make the frozen C16-mirror continuation a
+sound teacher for the counter-war or free-card-gift classes. The high terminal
+fraction, especially on the failed counter fixture, rules out “merely extend
+the leaf cutoff” as the general repair. It does not exonerate the C16 critic:
+that critic still selects every intermediate rollout action even when the
+eventual leaf is terminal.
+
+The next experiment must improve the continuation policy itself with
+hidden-information-safe policy improvement or tree search, and must clear
+these same four controls before collecting an all-five-deck corpus. Standard
+perfect-information AlphaZero MCTS is not licensed because a sampled hidden
+world must not become shared omniscient state or create strategy fusion.
+Prefer an information-set method with observations as nodes, root-world
+sampling/re-determinization, legal-action masking, and a learned-mirror
+opponent. Declare its exact simulation budget and backup semantics after the
+mechanistic trace of these two remaining failures; no AQ4 science seed is
+opened by this result entry.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
