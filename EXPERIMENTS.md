@@ -18928,6 +18928,131 @@ Preregister the exact collection schedule, fit seed, selector seed, and
 promotion threshold before collecting it; do not tune AQ4's K/H from this
 successful fixture coordinate.
 
+##### AQ4-G1 nested-actor distillation declaration
+
+Declared 2026-07-28 at HEAD `d5dcb9f`, after AQ4-D1 passed and before
+changing collection/training code, tracing a source game, scoring a retained
+root, fitting a model, or opening a selector seed. `REVIEW.md` was reread
+through its 20:35 PDT verification correction and 20:29 PDT AQ4 result
+review. The correction concerns a merge conflict in the reviewer's separate
+tree; this tree's full gate and independent focused/sanitizer review remain
+green. C16 remains champion.
+
+Collection root `202607282031`, derived PolicyFit seed
+`12262988820247274425`, and selector seed `202607282041` were searched
+across the source-visible worktree and were unused. The fit seed is exactly
+`derive_seed(collection_root, PolicyFit, 0, 0, 0)`.
+
+Falsifiable hypothesis: one card-agnostic all-action distillation of the
+passing actor-local continuation operator will produce a Priority-head-only
+candidate that (a) preserves all four AQ4 strategic repairs in its ordinary
+fast deployed policy, (b) improves held-out ranking against the same teacher,
+and (c) wins more games than exact frozen C16 in a fresh balanced 60-game
+selector.
+
+Before collection, run the corrected four-control preflight with outer
+`K8/R1/H8`, no outer shallow blend, four evaluation workers, and symmetric
+actor-local inner `K2/R1/H4` with the historical inner shallow blend. The
+four fixed preflight seeds, derived as
+`derive_seed(collection_root, PrioritySearch, 1, fixture_index, 0)`, are:
+
+1. `17325739327377847697` — Pass strictly above both redundant
+   Counterspells;
+2. `7290531001140838622` — neither Braingeyser X=0 action in exact-max
+   support;
+3. `14289136244687689594` — Pass strictly above sick-Bear Giant Growth; and
+4. `18147400410803436980` — live Force Spike strictly above Pass.
+
+The same actor-local Red hidden-hand noninterference and maximum nesting
+depth-one controls remain mandatory. `K8/H8` is frozen before observing this
+coordinate as the minutes-budget training teacher: it preserves AQ4's
+eight-turn temporal reach while reducing only root information-set sampling.
+If this preflight fails, reject AQ4-G1 without a K/H retry or sweep.
+
+The source corpus is exactly
+`balanced_schedule(202607282031, generation=0, block=0)`: 40 games covering
+all ten unordered deck pairs, both seat assignments, and both starting
+players. Both source seats are exact frozen C16 mirrors
+(T800/S424242/C16, K8/R1/H4, residual/exploration/epsilon/Pass-dominance/
+resolved-prior/adversarial-blocks all zero, Legacy continuation), with turn
+cap 128. For each of the 80 actor-games, enumerate chronological nontrivial
+Priority roots and retain at most eight using
+`evenly_spaced_retained_indices` before inspecting any action, score,
+outcome, phase, or stack. Retained positions with even indices form FIT and
+odd indices form CHECK; reject the census if either split lacks any of the
+five decks. Weight roots so every owner deck has equal total mass within
+each split. Actual root/action counts are descriptive and must be frozen
+after census rather than guessed here.
+
+At every retained root, keep the complete authoritative legal Priority
+action set and its existing 893-dimensional owner-safe action features.
+Frozen base scores are exact deployed C16 K8/R1/H4 with its historical
+shallow blend and no nested search. Teacher scores use the preflight's
+outer K8/R1/H8 plus inner actor-local K2/R1/H4 recipe, common outer worlds
+across all actions, and candidate-independent seeds:
+`derive_seed(collection_root, PrioritySearch, 0, schedule_index,
+(actor << 32) | nontrivial_ordinal)`. Convert the complete mean vector with
+the existing temperature-0.10, 90%-softmax/10%-uniform target. Do not store
+or serialize a `GameState`, opponent hand/library identity, library order,
+or sampled determinization; retain only owner-safe feature rows, typed
+actions/descriptors, scalar scores/targets/accounting, and coordinates.
+
+Fit only FIT with the existing 893-input/32-hidden Priority head and
+`update_learned_value_priority_head`: batch 64, 64 epochs, learning rate
+0.003, Adam beta1/beta2 `0.9/0.999`, epsilon `1e-8`, global gradient clip
+5, target temperature 0.10, and bounded deployed residual weight 0.10.
+Critic, Attack, Block, and DamageOrder must remain bit-identical. Repeat the
+fit from C16 and require the candidate fingerprint to be bit-identical.
+
+Collection is two-step but deliberately small. The exact CLI is:
+
+```sh
+./build/old-school-action-q-nested-actor-distill --census
+./build/old-school-action-q-nested-actor-distill --run
+```
+
+`--census` runs only the inexpensive source trajectories/retention,
+validates the preflight witnesses without scoring their reserved seeds, and
+prints an owner-safe manifest hash plus exact FIT/CHECK roots/options by all
+five decks. It cannot score AQ4, fit, open the selector, or publish. After
+that immutable census is recorded and frozen in source, `--run`
+reconstructs it, opens the four preflight and collection coordinates once,
+fits once, and applies these conjunctive offline gates:
+
+- every legal-action/feature/accounting cross-sum, hidden repartition,
+  action-order identity, actor-local noninterference, and depth-one bound
+  passes;
+- the parent is immutable, repeat fit is identical, only Priority changes,
+  FIT teacher regret improves, CHECK equal-deck teacher regret strictly
+  improves, and no CHECK deck's mean regret rises by more than 0.01;
+- the candidate's ordinary production C16 K8/H4 plus residual-0.10 scores
+  select Pass over both redundant Counterspells, exclude both X=0
+  Braingeysers, select Pass over sick-Bear Growth, and select live Force
+  Spike over Pass; and
+- existing five-deck frozen-probe metrics are reported as a regression
+  diagnostic, but the old actor-mirror reference and now-invalid
+  intervening-counter direction are not imported wholesale as a gate.
+
+Only a complete offline pass opens selector seed `202607282041`.
+`run_bot_benchmark(1, seed, candidate, C16, max_turns=500, false)` produces
+exactly 60 games: 12 per challenger deck, six on play/six on draw, balanced
+policy seats and deck matchups. Both policies use ordinary fast K8/R1/H4
+Legacy deployment; only the candidate's fitted Priority head and residual
+0.10 differ from C16's residual zero. Interpret the result as:
+
+- **FAST_GO** at at least 37/60 wins and at least 3/12 wins on every deck;
+- **MANUAL_ONLY / INCONCLUSIVE** at 31–36 wins with the same per-deck floor;
+- **REJECT** at 30 or fewer wins or any deck below 3/12.
+
+Thirty-seven is the first one-sided exact 5% binomial threshold at 60 games,
+but this screen has useful power only for a large effect (roughly +16
+percentage points for 80% power). It is therefore a rapid candidate/manual
+pilot selector, never a strength, Learned-is-king, or champion claim. A
+passing or manual-only result may license a separate no-replace artifact and
+dated user web pilot; it does not replace C16 or license a Handcrafted
+conclusion. No Handcrafted policy, target, rollout, card heuristic, or
+opponent hidden identity enters AQ4-G1.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
