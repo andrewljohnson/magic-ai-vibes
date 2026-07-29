@@ -23664,6 +23664,84 @@ only the selected manifest/counts. Commit and review that hash before a
 separate deep-label/cache declaration. A failure stops without changing bins,
 quotas, seed, or game cap.
 
+AQ17-DBC6-S0 report-recovery addendum, recorded 2026-07-29 after the first
+exact licensed invocation terminated and before a second invocation. The
+first process completed, but the tool transport truncated the complete stdout
+before returning it and subsequently reported the process identifier unknown.
+No result line, selected manifest, cell row, alias row, exit status, or timing
+was recoverable, and no artifact was published by design. This is a reporting
+void, not evidence for either outcome. It does not license a changed selector,
+seed, quota, source coordinate, or scientific interpretation.
+
+Exactly one recovery replay is licensed with the identical executable and
+argument, with stdout and `/usr/bin/time` stderr captured intact to previously
+absent temporary files:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-priority --select \
+  > /private/tmp/aq17-dbc6-s0-recovery.stdout \
+  2> /private/tmp/aq17-dbc6-s0-recovery.stderr
+```
+
+The replay is acceptable only if it exits zero, stderr contains exactly the
+three `real`/`user`/`sys` timing rows, stdout contains exactly one PASS result
+and the complete declared cell/alias report, all no-label/no-model gates are
+zero, and the selector's internal repeated-run and hidden-repartition gates
+pass. The captured files are evidence transport only and will not enter a
+model or repository artifact.
+
+AQ17-DBC6-S0 result, completed 2026-07-29 from frozen implementation commit
+`d6e6756`: **PASS; accept as CENSUS_ONLY**. The first invocation remains a
+reporting void. The one licensed recovery replay exited zero in 103.19 s
+(`user 102.65`, `sys 0.12`); its stderr contained exactly those three timing
+rows. Captured stdout was 175 lines / 32,362 bytes with SHA-256
+`469199ee579c5dd5180cc9e6b5ec5debef1ec6b51b93e0cc3af8dde88da918bc`;
+timing stderr was 33 bytes with SHA-256
+`8afe5966452b4bb4aa5bb4806ecb8bf438186ac044bb912ea1891268e6a54385`.
+It contained exactly one result row, 30 cell rows, 53 alias-group rows, 91
+alias-pair rows, and no unexpected rows.
+
+The selected manifest is
+`967bd44bfb444fa84e8b52df2652d090410a3ce6bda57bda6c353b5fb34d6576`.
+It binds exact accepted AQ16 parent/source identities, selection seed
+`202607291811`, and:
+
+```text
+                 TRAIN                              DEV
+deck       roots options pairs aliases       roots options pairs aliases
+Green        60     198   290      13           30     105   180      19
+Red          60     233   514      24           30     105   175       3
+Blue         60     208   402       2           30      92   108       2
+White        60     202   300      12           30     105   168      10
+RU Aggro     60     247   787       5           30     106   180       1
+TOTAL       300   1,088 2,293      56          150     513   811      35
+```
+
+Every one of the 30 split × deck × width cells filled its exact quota. Each
+TRAIN cell used 20 distinct actor-games and each DEV cell used ten, so the
+second selector round was never needed inside a cell; the maximum across all
+width cells was three selected roots from one actor-game, below the declared
+cap of six. The corpus spans 120 physical games. The internal pure-selector
+repeat was bit-identical, and the nonvacuous hidden repartition preserved the
+selected root/key/actions/893-feature rows.
+
+The 91 bit-identical pairs are 2.93% of 3,104 possible within-root pairs and
+occur exclusively in B4+ cells. Inspection of the complete descriptor report
+shows the expected generic equivalence classes: targeting multiple public
+creature/permanent instances with the same encoded public attributes and
+targeting multiple stack entries with the same encoded spell attributes.
+This census alone cannot decide whether those targets have equal deep value;
+the next label pass must report teacher spread within every alias group before
+any architecture is fit.
+
+All scientific gates remained closed: `teacher_labels=0`,
+`candidate_scores=0`, `model_created=0`, `selector_opened=0`, and
+`artifact_published=0`. `REVIEW.md` was reread after the run through its
+newest 11:44 PDT cycle. It had explicitly countersigned S0 and requested the
+teacher-labeling declaration next; no newer contrary feedback was present.
+C16 remains champion.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
