@@ -23265,6 +23265,69 @@ enabled. An exact config assertion must pass before the seed opens. More than
 at least 37/60 is `FAST_GO`. Neither result promotes the champion or licenses
 a Handcrafted strength claim without the full repository gates.
 
+AQ14-DBC5 result, completed 2026-07-29 10:49 PDT from pushed implementation
+commit `a92a96e`, after rereading `REVIEW.md` through its newest 10:44 PDT
+cycle:
+
+```sh
+/usr/bin/time -p ./build/old-school-decision-boundary-adaptive-trunk --run
+```
+
+The complete declared offline run took 2.32 seconds and returned
+`REJECT stage=offline`. The candidate fingerprint was
+`d551923a9ae0ee17cd9d2bdb7606a4f181d73695ac3caf3b30551f1b0a68eeb5`;
+all 96 declared parameters changed. Cache authentication, parent
+immutability, component isolation, parameter replay, repeatability,
+analytic/model agreement, action-permutation equivariance, and the live
+hidden-repartition witness all passed. The latter proved a nonvacuous
+opponent hand/library repartition while actor observation, all 893 option
+features, legal typed actions, candidate logits, centered logits, and
+residuals remained bit-identical.
+
+| Split | Metric | C16 parent | DBC5 |
+| --- | --- | ---: | ---: |
+| TRAIN | pair BCE | 0.674486823 | 0.673489110 |
+| TRAIN | listwise CE | 0.978292717 | 0.977391631 |
+| TRAIN | regret | 0.016914708 | 0.014459190 |
+| TRAIN | top-one | 0.525000000 | 0.525000000 |
+| TRAIN | stable-pair agreement | 0.700000000 | 0.731250000 |
+| grouped OOF | pair BCE | 0.674486823 | 0.673867782 |
+| grouped OOF | listwise CE | 0.978292717 | 0.977727784 |
+| grouped OOF | regret | 0.016914708 | 0.014768675 |
+| grouped OOF | top-one | 0.525000000 | 0.537500000 |
+| grouped OOF | stable-pair agreement | 0.700000000 | 0.731250000 |
+| reused DEV | pair BCE | 0.611686293 | 0.611074126 |
+| reused DEV | listwise CE | 1.089425767 | 1.088668561 |
+| reused DEV | regret | 0.023696003 | 0.026626351 |
+| reused DEV | top-one | 0.553125000 | 0.562500000 |
+| reused DEV | stable-pair agreement | 0.826296296 | 0.822962963 |
+
+Per-deck regret:
+
+| Deck | OOF C16 | OOF DBC5 | Guard | DEV C16 | DEV DBC5 | Guard |
+| --- | ---: | ---: | --- | ---: | ---: | --- |
+| Green | 0.021988774 | 0.013927177 | pass | 0.021999539 | 0.025284540 | fail |
+| Red | 0.020646901 | 0.021886729 | fail | 0.015785999 | 0.010607150 | pass |
+| Blue | 0.019434697 | 0.018503713 | pass | 0.009117605 | 0.010671550 | fail |
+| White | 0.010196090 | 0.011002314 | fail | 0.050950738 | 0.055881603 | fail |
+| RU Aggro | 0.012307078 | 0.008523442 | pass | 0.020626133 | 0.030686913 | fail |
+
+Decision: **REJECT offline**. OOF deck regret increased on Red and White;
+DEV aggregate regret and stable-pair agreement regressed, and four of five
+DEV deck-regret guards failed. The model fixture battery, selector seed
+`202607291711`, gameplay, and pilot remained unopened; C16 remains champion.
+
+DBC5 made slightly better continuous fit metrics than DBC4 but produced the
+same aggregate regret, top-one/stable agreement, and every per-deck regret
+outcome to the shown precision. This falsifies the adaptive-operating-point
+hypothesis and closes the small frozen-direction action-head family. It is
+not evidence for tuning optimizer, residual scale, temperature, steps, seed,
+or thresholds. The next experiment will first freeze a larger independently
+sampled owner-safe corpus balanced by decision density, then train genuinely
+new state-by-action directions. This follows the 10:29 independent review's
+measured TRAIN/DEV eligible-pair asymmetry (especially RU Aggro 38 versus
+240), rather than another fit on the same 80-root split.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
