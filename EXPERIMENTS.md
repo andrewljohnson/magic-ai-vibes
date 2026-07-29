@@ -17993,6 +17993,65 @@ dated manual web pilot; 30 or fewer rejects AQ0. Report all five deck rows,
 runtime, decisions, rollouts, parent/candidate fingerprints, and the frozen
 collection census. No seed or hyperparameter sweep is licensed.
 
+##### AQ0 frozen census result
+
+Completed 2026-07-28 before any AQ0 fit, candidate model, or reserved gameplay
+seed. `REVIEW.md` was reread through the independent 17:49 PDT verification
+addendum immediately before recording this result. The exact completed
+command was:
+
+```sh
+./build/old-school-action-q-explore --census
+```
+
+An earlier launch of the same command was interrupted with SIGINT before it
+emitted any stdout or complete count when independent review identified two
+preflight omissions. No model or gameplay seed was opened. Before the
+completed rerun, default tests were made independent of the untracked C16
+artifact, corpus validation was strengthened to bind every retained
+coordinate and exact evenly spaced ordinal back to the frozen schedule, and
+the census executable was made to fail closed on direct-teacher equivalence,
+hidden repartition, action order, and the exact Ancestral witness. None of
+those repairs changed the declared schedule, roots, teacher, model, or seed
+coordinate. The completed preflight reported all four checks bit-identical.
+
+Frozen identities and global counts:
+
+- C16 fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+- root/fit seeds `202607281751` /
+  `15687967101834164397`, generation zero, K8/H4/R1, root cap eight,
+  source turn cap 128;
+- FIT block zero: 40 games, 632 retained roots, 2,085 options, 16,680
+  teacher samples, 632 base-score calls / 5,056 worlds / 16,680 rollouts,
+  of which 6,369 were terminal and 10,311 bootstrapped;
+- CHECK block one: 40 games, 640 retained roots, 2,007 options, 16,056
+  teacher samples, 640 base-score calls / 5,120 worlds / 16,056 rollouts,
+  of which 5,496 were terminal and 10,560 bootstrapped.
+
+Per-deck frozen census (`nontrivial / retained roots / options / teacher
+samples / exact-zero / exact-one / nonzero-spread roots / min-max width`):
+
+| Block | Deck | Census |
+|---|---|---|
+| FIT | Green | 255 / 128 / 351 / 2,808 / 0 / 0 / 128 / 2-8 |
+| FIT | Red | 301 / 128 / 497 / 3,976 / 8 / 64 / 128 / 2-13 |
+| FIT | Blue | 355 / 120 / 290 / 2,320 / 0 / 0 / 120 / 2-5 |
+| FIT | White | 458 / 128 / 421 / 3,368 / 0 / 0 / 128 / 2-7 |
+| FIT | RU Aggro | 301 / 128 / 526 / 4,208 / 0 / 0 / 128 / 2-34 |
+| CHECK | Green | 334 / 128 / 325 / 2,600 / 0 / 0 / 128 / 2-7 |
+| CHECK | Red | 332 / 128 / 417 / 3,336 / 8 / 24 / 128 / 2-12 |
+| CHECK | Blue | 404 / 128 / 321 / 2,568 / 0 / 0 / 128 / 2-10 |
+| CHECK | White | 514 / 128 / 386 / 3,088 / 0 / 0 / 128 / 2-9 |
+| CHECK | RU Aggro | 329 / 128 / 558 / 4,464 / 24 / 24 / 128 / 2-50 |
+
+Every deck had 16 actor-games and total root weight exactly one in each block.
+Every retained root had nonzero teacher spread, so the action head receives a
+nonvacuous ranking signal on all 1,272 examples. The census is accepted and
+freezes these counts without changing any quota. It licenses exactly the
+declared `--run` fit/offline command; the fresh gameplay seed remains
+conditionally unopened.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
