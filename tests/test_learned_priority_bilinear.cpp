@@ -1,5 +1,6 @@
 #include "old_school/game.hpp"
 #include "old_school/learned_priority_bilinear.hpp"
+#include "old_school/learned_priority_sparse_cross.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,6 +22,9 @@ namespace {
 
 using old_school::LearnedPriorityBilinear;
 using old_school::LearnedPriorityBilinearParameters;
+using old_school::LearnedPrioritySparseCross;
+using old_school::LearnedPrioritySparseCrossTerm;
+using old_school::LearnedPrioritySparseCrossTerms;
 
 class TestRunner {
   public:
@@ -196,6 +200,139 @@ LearnedPriorityBilinearParameters nonzero_parameters() {
     parameters.v[1][0] = 0.5;
     parameters.v[1][1] = 0.375;
     return parameters;
+}
+
+LearnedPrioritySparseCrossTerms sparse_terms_for_rows(
+    const std::vector<std::vector<double>>& rows,
+    std::span<const std::size_t> canonical_order) {
+    expect(
+        !rows.empty() && canonical_order.size() == rows.size(),
+        "AQ20 test rows are empty or incomplete");
+    std::size_t state_feature =
+        old_school::
+            kLearnedPrioritySparseCrossStateFeatureCount;
+    for (std::size_t feature = 0;
+         feature <
+         old_school::
+             kLearnedPrioritySparseCrossStateFeatureCount;
+         ++feature) {
+        if (rows[canonical_order.front()][feature] != 0.0) {
+            state_feature = feature;
+            break;
+        }
+    }
+    expect(
+        state_feature <
+            old_school::
+                kLearnedPrioritySparseCrossStateFeatureCount,
+        "AQ20 test rows have no active state feature");
+
+    std::size_t action_feature =
+        old_school::
+            kLearnedPrioritySparseCrossActionFeatureCount;
+    const std::size_t action_offset =
+        old_school::
+            kLearnedPrioritySparseCrossStateFeatureCount;
+    for (std::size_t feature = 0;
+         feature <
+         old_school::
+             kLearnedPrioritySparseCrossActionFeatureCount;
+         ++feature) {
+        const double first =
+            rows[canonical_order.front()]
+                [action_offset + feature];
+        if (std::any_of(
+                canonical_order.begin() + 1,
+                canonical_order.end(),
+                [&](std::size_t index) {
+                    return rows[index]
+                               [action_offset + feature] !=
+                           first;
+                })) {
+            action_feature = feature;
+            break;
+        }
+    }
+    expect(
+        action_feature <
+            old_school::
+                kLearnedPrioritySparseCrossActionFeatureCount,
+        "AQ20 test rows have no varying action feature");
+
+    LearnedPrioritySparseCrossTerms terms;
+    terms.reserve(
+        old_school::kLearnedPrioritySparseCrossTermCount);
+    for (std::size_t term = 0;
+         term <
+         old_school::kLearnedPrioritySparseCrossTermCount;
+         ++term) {
+        terms.push_back({
+            .state_feature =
+                (state_feature + term) %
+                old_school::
+                    kLearnedPrioritySparseCrossStateFeatureCount,
+            .action_feature =
+                (action_feature + term) %
+                old_school::
+                    kLearnedPrioritySparseCrossActionFeatureCount,
+            .sigma =
+                1.0 +
+                static_cast<double>(term) / 32.0,
+            .beta =
+                term == 0
+                    ? 0.75
+                    : (term % 2 == 0 ? 0.01 : -0.01),
+        });
+    }
+    return terms;
+}
+
+std::vector<double> reference_sparse_cross_residuals(
+    const LearnedPrioritySparseCrossTerms& terms,
+    const std::vector<std::vector<double>>& rows,
+    std::span<const std::size_t> canonical_order) {
+    std::vector<double> logits(rows.size(), 0.0);
+    const std::size_t action_offset =
+        old_school::
+            kLearnedPrioritySparseCrossStateFeatureCount;
+    for (const LearnedPrioritySparseCrossTerm& term : terms) {
+        double action_mean = 0.0;
+        for (const std::size_t index : canonical_order) {
+            action_mean +=
+                rows[index]
+                    [action_offset + term.action_feature];
+        }
+        action_mean /=
+            static_cast<double>(canonical_order.size());
+        for (std::size_t index = 0;
+             index < rows.size(); ++index) {
+            const double centered_action =
+                rows[index]
+                    [action_offset + term.action_feature] -
+                action_mean;
+            logits[index] +=
+                term.beta *
+                rows[index][term.state_feature] *
+                centered_action / term.sigma;
+        }
+    }
+
+    double mean_logit = 0.0;
+    for (const std::size_t index : canonical_order) {
+        mean_logit += logits[index];
+    }
+    mean_logit /=
+        static_cast<double>(canonical_order.size());
+    for (double& value : logits) {
+        value =
+            old_school::
+                kLearnedPrioritySparseCrossResidualWeight *
+            std::tanh(value - mean_logit);
+        if (value == 0.0) {
+            value = 0.0;
+        }
+    }
+    return logits;
 }
 
 void test_fixed_u0_and_shape() {
@@ -526,6 +663,255 @@ void test_live_canonical_wrapper_and_hidden_safety() {
         "opponent hidden identity reached AQ19 scorer");
 }
 
+void test_sparse_empty_control_is_exact_c16_identity() {
+    const auto object =
+        std::make_shared<LearnedPrioritySparseCross>(
+            LearnedPrioritySparseCrossTerms{});
+    expect(
+        object->empty(),
+        "AQ20 empty control did not retain its control shape");
+    expect(
+        old_school::
+            learned_priority_sparse_cross_equivalent(
+                object, nullptr),
+        "AQ20 empty control is not semantically identical to null C16");
+    const auto state =
+        live_state(old_school::CardId::Mountain);
+    const auto actions =
+        old_school::legal_priority_actions(
+            state, 0, true);
+    const auto diagnostic =
+        old_school::
+            diagnose_learned_priority_sparse_cross_residual(
+                state, 0, true,
+                old_school::TurnPhase::FirstMain, 0,
+                actions, object);
+    expect(
+        diagnostic.residuals.size() == actions.size() &&
+            std::all_of(
+                diagnostic.residuals.begin(),
+                diagnostic.residuals.end(),
+                positive_zero),
+        "AQ20 empty control changed a production Priority score");
+
+    std::vector<double> c16_scores;
+    c16_scores.reserve(actions.size());
+    for (std::size_t index = 0;
+         index < actions.size(); ++index) {
+        c16_scores.push_back(
+            0.25 -
+            static_cast<double>(index) / 16.0);
+    }
+    std::vector<double> replay = c16_scores;
+    if (!object->empty()) {
+        for (std::size_t index = 0;
+             index < replay.size(); ++index) {
+            replay[index] += diagnostic.residuals[index];
+        }
+    }
+    expect(
+        replay == c16_scores,
+        "AQ20 empty production fast path changed C16 scores");
+}
+
+void test_sparse_live_production_score_replay() {
+    const auto state =
+        live_state(old_school::CardId::Mountain);
+    const auto actions =
+        old_school::legal_priority_actions(
+            state, 0, true);
+    const auto empty =
+        std::make_shared<LearnedPrioritySparseCross>(
+            LearnedPrioritySparseCrossTerms{});
+    const auto projection =
+        old_school::
+            diagnose_learned_priority_sparse_cross_residual(
+                state, 0, true,
+                old_school::TurnPhase::FirstMain, 0,
+                actions, empty);
+    const LearnedPrioritySparseCrossTerms terms =
+        sparse_terms_for_rows(
+            projection.option_rows,
+            projection.canonical_order);
+    const auto object =
+        std::make_shared<LearnedPrioritySparseCross>(
+            terms);
+    const auto production =
+        old_school::
+            diagnose_learned_priority_sparse_cross_residual(
+                state, 0, true,
+                old_school::TurnPhase::FirstMain, 0,
+                actions, object);
+    const auto direct =
+        object->residuals(
+            production.option_rows,
+            production.canonical_order);
+    const auto reference =
+        reference_sparse_cross_residuals(
+            terms, production.option_rows,
+            production.canonical_order);
+    expect(
+        production.residuals == direct,
+        "AQ20 production wrapper did not replay the immutable scorer");
+    expect(
+        std::any_of(
+            production.residuals.begin(),
+            production.residuals.end(),
+            [](double value) { return value != 0.0; }),
+        "AQ20 production replay fixture produced no treatment signal");
+    for (std::size_t index = 0;
+         index < reference.size(); ++index) {
+        expect_near(
+            production.residuals[index],
+            reference[index], 1.0e-15,
+            "AQ20 production score disagrees with declared sparse cross");
+    }
+
+    const auto hidden_state =
+        live_state(old_school::CardId::Forest);
+    const auto hidden_actions =
+        old_school::legal_priority_actions(
+            hidden_state, 0, true);
+    const auto hidden =
+        old_school::
+            diagnose_learned_priority_sparse_cross_residual(
+                hidden_state, 0, true,
+                old_school::TurnPhase::FirstMain, 0,
+                hidden_actions, object);
+    expect(
+        hidden_actions == actions &&
+            hidden.option_rows == production.option_rows &&
+            hidden.residuals == production.residuals,
+        "opponent hidden identity reached AQ20 production scoring");
+}
+
+void test_sparse_symmetric_continuation_propagation() {
+    const auto state =
+        live_state(old_school::CardId::Mountain);
+    const auto actions =
+        old_school::legal_priority_actions(
+            state, 0, true);
+    const auto empty =
+        std::make_shared<LearnedPrioritySparseCross>(
+            LearnedPrioritySparseCrossTerms{});
+    const auto projection =
+        old_school::
+            diagnose_learned_priority_sparse_cross_residual(
+                state, 0, true,
+                old_school::TurnPhase::FirstMain, 0,
+                actions, empty);
+    const auto object =
+        std::make_shared<LearnedPrioritySparseCross>(
+            sparse_terms_for_rows(
+                projection.option_rows,
+                projection.canonical_order));
+    const old_school::BotConfig root{
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::
+                ValueSearchChampion,
+        .rollouts_per_action =
+            old_school::
+                kLearnedPrioritySparseCrossWorlds,
+        .value_priority_sparse_cross = object,
+    };
+    const auto diagnostic =
+        old_school::
+            diagnose_learned_priority_sparse_cross_continuation(
+                root);
+    expect(
+        diagnostic.first_seat_has_root_object &&
+            diagnostic.second_seat_has_root_object &&
+            diagnostic.seats_share_object_identity &&
+            diagnostic.seats_are_semantically_equivalent,
+        "production continuation builder did not share the "
+        "immutable AQ20 object");
+    expect(
+        diagnostic.rollout_counts ==
+                std::array<std::size_t, 2>{0, 0} &&
+            diagnostic.variants ==
+                std::array<old_school::LearnedVariant, 2>{
+                    old_school::LearnedVariant::
+                        ValueSearchChampion,
+                    old_school::LearnedVariant::
+                        ValueSearchChampion,
+                } &&
+            diagnostic.exploration_rates ==
+                std::array<double, 2>{0.0, 0.0},
+        "production continuation builder changed the "
+        "AQ20 depth-zero mirror recipe");
+}
+
+void test_sparse_treatment_composition_is_rejected() {
+    const auto sparse =
+        std::make_shared<LearnedPrioritySparseCross>(
+            LearnedPrioritySparseCrossTerms{});
+    const auto bilinear =
+        std::make_shared<LearnedPriorityBilinear>(
+            nonzero_parameters());
+    const auto rejected =
+        [&](old_school::BotConfig root,
+            std::string_view message) {
+            expect_rejected(
+                [&] {
+                    static_cast<void>(
+                        old_school::
+                            diagnose_learned_priority_sparse_cross_continuation(
+                                root));
+                },
+                message);
+        };
+    rejected(
+        {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action =
+                old_school::
+                    kLearnedPrioritySparseCrossWorlds,
+            .value_priority_bilinear = bilinear,
+            .value_priority_sparse_cross = sparse,
+        },
+        "AQ19 and AQ20 were composed");
+    rejected(
+        {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action =
+                old_school::
+                    kLearnedPrioritySparseCrossWorlds,
+            .value_priority_residual_weight = 0.10,
+            .value_priority_sparse_cross = sparse,
+        },
+        "AQ20 and the legacy Priority residual were composed");
+    rejected(
+        {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action =
+                old_school::
+                    kLearnedPrioritySparseCrossWorlds,
+            .value_priority_sparse_cross = sparse,
+            .value_pass_dominance = true,
+        },
+        "AQ20 and Pass dominance were composed");
+    rejected(
+        {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 2,
+            .value_priority_sparse_cross = sparse,
+        },
+        "AQ20 accepted a non-C16 rollout recipe");
+}
+
 void test_bot_shape_rejects_non_c16_recipes() {
     const auto object =
         std::make_shared<LearnedPriorityBilinear>(
@@ -650,6 +1036,18 @@ int main() {
     runner.run(
         "live canonical wrapper and hidden safety",
         test_live_canonical_wrapper_and_hidden_safety);
+    runner.run(
+        "AQ20 empty control is exact C16 identity",
+        test_sparse_empty_control_is_exact_c16_identity);
+    runner.run(
+        "AQ20 production score replay",
+        test_sparse_live_production_score_replay);
+    runner.run(
+        "AQ20 symmetric continuation propagation",
+        test_sparse_symmetric_continuation_propagation);
+    runner.run(
+        "AQ20 treatment composition is rejected",
+        test_sparse_treatment_composition_is_rejected);
     runner.run(
         "BotConfig rejects non-C16 recipes",
         test_bot_shape_rejects_non_c16_recipes);

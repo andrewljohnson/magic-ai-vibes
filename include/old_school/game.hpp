@@ -620,6 +620,7 @@ inline constexpr std::string_view
 class LearnedModel;
 class LearnedPolicyRecorder;
 class LearnedPriorityBilinear;
+class LearnedPrioritySparseCross;
 struct LearnedNestedSearchTracker;
 
 inline constexpr std::uint64_t kDefaultLearnedTrainingSeed = 424242;
@@ -646,6 +647,12 @@ struct BotConfig {
     // recipe. A null pointer preserves C16 bit-for-bit.
     std::shared_ptr<const LearnedPriorityBilinear>
         value_priority_bilinear;
+    // AQ20's immutable sixteen-term sparse state-by-action Priority residual.
+    // It occupies the same exact frozen-C16 treatment slot as AQ19 and is
+    // mutually exclusive with every other Priority treatment. A null pointer,
+    // or an immutable empty control object, preserves C16 bit-for-bit.
+    std::shared_ptr<const LearnedPrioritySparseCross>
+        value_priority_sparse_cross;
     // Research-only exact Pass-dominance filter for Learned Value Priority
     // choices. It changes neither legal actions nor any other policy. False
     // preserves the historical selector and RNG stream bit-for-bit.
@@ -808,6 +815,32 @@ struct LearnedPriorityBilinearContinuationDiagnostic {
 
     bool operator==(
         const LearnedPriorityBilinearContinuationDiagnostic&) const =
+        default;
+};
+
+struct LearnedPrioritySparseCrossDiagnostic {
+    // Rows retain caller action order; canonical reduction order is exposed
+    // so tests and the fit runner can verify the exact production mapping.
+    std::vector<std::vector<double>> option_rows;
+    std::vector<std::size_t> canonical_order;
+    std::vector<double> residuals;
+
+    bool operator==(
+        const LearnedPrioritySparseCrossDiagnostic&) const =
+        default;
+};
+
+struct LearnedPrioritySparseCrossContinuationDiagnostic {
+    bool first_seat_has_root_object = false;
+    bool second_seat_has_root_object = false;
+    bool seats_share_object_identity = false;
+    bool seats_are_semantically_equivalent = false;
+    std::array<std::size_t, 2> rollout_counts{};
+    std::array<LearnedVariant, 2> variants{};
+    std::array<double, 2> exploration_rates{};
+
+    bool operator==(
+        const LearnedPrioritySparseCrossContinuationDiagnostic&) const =
         default;
 };
 
@@ -1732,6 +1765,22 @@ diagnose_learned_priority_bilinear_residual(
 // symmetric depth-zero mirror seats.
 LearnedPriorityBilinearContinuationDiagnostic
 diagnose_learned_priority_bilinear_continuation(
+    const BotConfig& root);
+
+// Evaluation-only view of AQ20's exact production scorer. The candidate list
+// may be permuted, but every entry must be a unique legal action. Reductions
+// always follow the engine's canonical typed-action order.
+LearnedPrioritySparseCrossDiagnostic
+diagnose_learned_priority_sparse_cross_residual(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedPrioritySparseCross> residual);
+
+// Evaluation-only view of the exact builder used by AQ20 Value search for its
+// two symmetric depth-zero Learned-mirror seats.
+LearnedPrioritySparseCrossContinuationDiagnostic
+diagnose_learned_priority_sparse_cross_continuation(
     const BotConfig& root);
 
 // Focused evaluation-only seams for proving that generation-mode searched

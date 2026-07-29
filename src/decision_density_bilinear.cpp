@@ -946,6 +946,11 @@ void validate_corpus(const Corpus& corpus) {
     }
 }
 
+std::vector<std::size_t> canonical_option_order(
+    const Root& root) {
+    return canonical_order(root);
+}
+
 namespace testing {
 
 Root project_root(const labels::RootLabel& source) {

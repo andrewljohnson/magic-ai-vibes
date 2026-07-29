@@ -48,7 +48,8 @@ program_config_relink = $(if \
 # transition, so every engine consumer links that implementation as one unit.
 LEARNED_PRIORITY_BILINEAR_SOURCE := src/learned_priority_bilinear.cpp
 LEARNED_PRIORITY_BILINEAR_ARTIFACT_SOURCE := src/learned_priority_bilinear_artifact.cpp
-ENGINE_SOURCE := src/game.cpp src/exact_combat_subgame.cpp $(LEARNED_PRIORITY_BILINEAR_SOURCE)
+LEARNED_PRIORITY_SPARSE_CROSS_SOURCE := src/learned_priority_sparse_cross.cpp
+ENGINE_SOURCE := src/game.cpp src/exact_combat_subgame.cpp $(LEARNED_PRIORITY_BILINEAR_SOURCE) $(LEARNED_PRIORITY_SPARSE_CROSS_SOURCE)
 INTERACTIVE_SOURCE := src/interactive.cpp
 LEARNED_ITERATION_SOURCE := src/learned_iteration.cpp
 PROBE_SOURCE := src/probes.cpp src/dvr1_replay.cpp
@@ -120,6 +121,7 @@ DECISION_DENSITY_PRIORITY_SOURCE := src/decision_density_priority.cpp
 DECISION_DENSITY_LABELS_SOURCE := src/decision_density_labels.cpp
 DECISION_DENSITY_BILINEAR_SOURCE := src/decision_density_bilinear.cpp
 DECISION_DENSITY_SPARSE_SUPPORT_SOURCE := src/decision_density_sparse_support.cpp
+DECISION_DENSITY_SPARSE_CROSS_SOURCE := src/decision_density_sparse_cross.cpp
 ACTION_Q_ON_POLICY_SUCCESSOR_SOURCE := src/action_q_on_policy_successor.cpp
 ACTION_Q_PRIORITY_TRUST_REGION_SOURCE := src/action_q_priority_trust_region.cpp
 ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_SOURCE := src/action_q_recursive_policy_improvement.cpp
@@ -244,11 +246,14 @@ DECISION_DENSITY_LABELS_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-density-
 DECISION_DENSITY_LABELS := $(BUILD_DIR)/old-school-decision-density-labels
 LEARNED_PRIORITY_BILINEAR_TEST_RUNNER := $(BUILD_DIR)/old-school-learned-priority-bilinear-tests
 LEARNED_PRIORITY_BILINEAR_ARTIFACT_TEST_RUNNER := $(BUILD_DIR)/old-school-learned-priority-bilinear-artifact-tests
+LEARNED_PRIORITY_SPARSE_CROSS_TEST_RUNNER := $(BUILD_DIR)/old-school-learned-priority-sparse-cross-tests
 DECISION_DENSITY_BILINEAR_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-density-bilinear-tests
 DECISION_DENSITY_BILINEAR := $(BUILD_DIR)/old-school-decision-density-bilinear
 DECISION_DENSITY_BILINEAR_ARTIFACT := $(BUILD_DIR)/old-school-decision-density-bilinear-artifact
 DECISION_DENSITY_SPARSE_SUPPORT_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-density-sparse-support-tests
 DECISION_DENSITY_SPARSE_SUPPORT := $(BUILD_DIR)/old-school-decision-density-sparse-support
+DECISION_DENSITY_SPARSE_CROSS_TEST_RUNNER := $(BUILD_DIR)/old-school-decision-density-sparse-cross-tests
+DECISION_DENSITY_SPARSE_CROSS := $(BUILD_DIR)/old-school-decision-density-sparse-cross
 ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-on-policy-successor-tests
 ACTION_Q_ON_POLICY_SUCCESSOR := $(BUILD_DIR)/old-school-action-q-on-policy-successor
 ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER := $(BUILD_DIR)/old-school-action-q-priority-trust-region-tests
@@ -325,7 +330,8 @@ FQ4_NEUTRAL_CANDIDATE_PUBLISHER_MAIN_DEPFILE := $(FQ4_NEUTRAL_CANDIDATE_PUBLISHE
 .PHONY: test-decision-density-priority old-school-decision-density-priority decision-density-priority
 .PHONY: test-decision-density-labels old-school-decision-density-labels decision-density-labels-publish
 .PHONY: test-learned-priority-bilinear test-learned-priority-bilinear-artifact test-decision-density-bilinear decision-density-bilinear-run decision-density-bilinear-offline-report decision-density-bilinear-artifact-publish
-.PHONY: test-decision-density-sparse-support decision-density-sparse-support-census
+.PHONY: test-learned-priority-sparse-cross test-decision-density-sparse-support decision-density-sparse-support-census
+.PHONY: test-decision-density-sparse-cross decision-density-sparse-cross-offline-report
 .PHONY: test-action-q-on-policy-successor action-q-on-policy-successor-census action-q-on-policy-successor-run
 .PHONY: test-action-q-priority-trust-region action-q-priority-trust-region-run
 .PHONY: test-action-q-recursive-policy-improvement action-q-recursive-policy-improvement-run
@@ -487,6 +493,7 @@ DECISION_DENSITY_LABELS_LINK_SOURCES := $(ACTION_Q_NESTED_ACTOR_BROAD_DISTILL_LI
 DECISION_DENSITY_BILINEAR_LINK_SOURCES := $(DECISION_DENSITY_LABELS_LINK_SOURCES) $(filter-out $(DECISION_DENSITY_LABELS_LINK_SOURCES),$(DECISION_BOUNDARY_ACTION_PAIR_LINK_SOURCES)) $(DECISION_DENSITY_BILINEAR_SOURCE)
 DECISION_DENSITY_BILINEAR_ARTIFACT_LINK_SOURCES := $(DECISION_DENSITY_BILINEAR_LINK_SOURCES) $(LEARNED_PRIORITY_BILINEAR_ARTIFACT_SOURCE)
 DECISION_DENSITY_SPARSE_SUPPORT_LINK_SOURCES := $(DECISION_DENSITY_BILINEAR_LINK_SOURCES) $(DECISION_DENSITY_SPARSE_SUPPORT_SOURCE)
+DECISION_DENSITY_SPARSE_CROSS_LINK_SOURCES := $(DECISION_DENSITY_SPARSE_SUPPORT_LINK_SOURCES) $(DECISION_DENSITY_SPARSE_CROSS_SOURCE)
 FQ4_PRIORITY_FIT_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE)
 FQ4_D1_FIELD_GATE_LINK_SOURCES := $(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(PROBE_SOURCE) $(PROBE_EVAL_SOURCE) $(PROBE_RUNNER_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(FQ0_INFORMATION_SET_SOURCE) $(FQ0_DOMINANCE_SOURCE) $(FQ0_DOMINANCE_TRANSITION_SOURCE) $(OC1_ACTION_SCORING_SOURCE) $(FQ4_PARENT_CLASSIFICATION_SOURCE) $(FQ4_PRIORITY_COLLECTION_SOURCE) $(FQ4_D1_FIELD_GATE_SOURCE)
 FQ4_D1_TREATMENT_LINK_SOURCES := $(FQ4_D1_FIELD_GATE_LINK_SOURCES) $(FQ4_PRIORITY_MATH_SOURCE) $(FQ4_PRIORITY_FIT_SOURCE) $(FQ4_D1_TREATMENT_SOURCE) $(FQ4_D1_TREATMENT_PRODUCTION_SOURCE)
@@ -629,6 +636,8 @@ $(eval $(call link_program,$(LEARNED_PRIORITY_BILINEAR_TEST_RUNNER),$(ENGINE_SOU
 
 $(eval $(call link_program,$(LEARNED_PRIORITY_BILINEAR_ARTIFACT_TEST_RUNNER),$(LEARNED_PRIORITY_BILINEAR_SOURCE) $(ARTIFACT_INTEGRITY_SOURCE) $(LEARNED_PRIORITY_BILINEAR_ARTIFACT_SOURCE) tests/test_learned_priority_bilinear_artifact.cpp))
 
+$(eval $(call link_program,$(LEARNED_PRIORITY_SPARSE_CROSS_TEST_RUNNER),$(LEARNED_PRIORITY_SPARSE_CROSS_SOURCE) tests/test_learned_priority_sparse_cross.cpp))
+
 $(eval $(call link_program,$(DECISION_DENSITY_BILINEAR_TEST_RUNNER),$(DECISION_DENSITY_BILINEAR_LINK_SOURCES) tests/test_decision_density_bilinear.cpp))
 
 $(eval $(call link_program,$(DECISION_DENSITY_BILINEAR),$(DECISION_DENSITY_BILINEAR_LINK_SOURCES) src/decision_density_bilinear_main.cpp))
@@ -638,6 +647,10 @@ $(eval $(call link_program,$(DECISION_DENSITY_BILINEAR_ARTIFACT),$(DECISION_DENS
 $(eval $(call link_program,$(DECISION_DENSITY_SPARSE_SUPPORT_TEST_RUNNER),$(DECISION_DENSITY_SPARSE_SUPPORT_LINK_SOURCES) tests/test_decision_density_sparse_support.cpp))
 
 $(eval $(call link_program,$(DECISION_DENSITY_SPARSE_SUPPORT),$(DECISION_DENSITY_SPARSE_SUPPORT_LINK_SOURCES) src/decision_density_sparse_support_main.cpp))
+
+$(eval $(call link_program,$(DECISION_DENSITY_SPARSE_CROSS_TEST_RUNNER),$(DECISION_DENSITY_SPARSE_CROSS_LINK_SOURCES) tests/test_decision_density_sparse_cross.cpp))
+
+$(eval $(call link_program,$(DECISION_DENSITY_SPARSE_CROSS),$(DECISION_DENSITY_SPARSE_CROSS_LINK_SOURCES) src/decision_density_sparse_cross_main.cpp))
 
 $(eval $(call link_program,$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER),$(ACTION_Q_ON_POLICY_SUCCESSOR_LINK_SOURCES) tests/test_action_q_on_policy_successor.cpp))
 
@@ -805,6 +818,7 @@ test: $(DECISION_DENSITY_LABELS_TEST_RUNNER) $(DECISION_DENSITY_LABELS)
 test: $(LEARNED_PRIORITY_BILINEAR_TEST_RUNNER)
 test: $(LEARNED_PRIORITY_BILINEAR_ARTIFACT_TEST_RUNNER) $(DECISION_DENSITY_BILINEAR_TEST_RUNNER) $(DECISION_DENSITY_BILINEAR) $(DECISION_DENSITY_BILINEAR_ARTIFACT)
 test: $(DECISION_DENSITY_SPARSE_SUPPORT_TEST_RUNNER) $(DECISION_DENSITY_SPARSE_SUPPORT)
+test: $(LEARNED_PRIORITY_SPARSE_CROSS_TEST_RUNNER) $(DECISION_DENSITY_SPARSE_CROSS_TEST_RUNNER) $(DECISION_DENSITY_SPARSE_CROSS)
 test: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 test: $(ACTION_Q_PRIORITY_TRUST_REGION_TEST_RUNNER) $(ACTION_Q_PRIORITY_TRUST_REGION)
 test: $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT_TEST_RUNNER) $(ACTION_Q_RECURSIVE_POLICY_IMPROVEMENT)
@@ -1005,6 +1019,15 @@ test: $(TEST_RUNNER) $(LEARNED_ITERATION_TEST_RUNNER) $(PROBE_TEST_RUNNER) $(PRO
 			exit 1; \
 		fi; \
 		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-density-sparse-support --census' >/dev/null
+	./$(LEARNED_PRIORITY_SPARSE_CROSS_TEST_RUNNER)
+	./$(DECISION_DENSITY_SPARSE_CROSS_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_DENSITY_SPARSE_CROSS) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ20 sparse cross accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-density-sparse-cross --offline-report' >/dev/null
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)
 	@set +e; output=`./$(ACTION_Q_ON_POLICY_SUCCESSOR) unexpected 2>&1`; status=$$?; set -e; \
 		if [ $$status -ne 2 ]; then \
@@ -2028,6 +2051,9 @@ test-learned-priority-bilinear: $(LEARNED_PRIORITY_BILINEAR_TEST_RUNNER)
 test-learned-priority-bilinear-artifact: $(LEARNED_PRIORITY_BILINEAR_ARTIFACT_TEST_RUNNER)
 	./$(LEARNED_PRIORITY_BILINEAR_ARTIFACT_TEST_RUNNER)
 
+test-learned-priority-sparse-cross: $(LEARNED_PRIORITY_SPARSE_CROSS_TEST_RUNNER)
+	./$(LEARNED_PRIORITY_SPARSE_CROSS_TEST_RUNNER)
+
 test-decision-density-bilinear: $(DECISION_DENSITY_BILINEAR_TEST_RUNNER) $(DECISION_DENSITY_BILINEAR)
 	./$(DECISION_DENSITY_BILINEAR_TEST_RUNNER)
 	@set +e; output=`./$(DECISION_DENSITY_BILINEAR) unexpected 2>&1`; status=$$?; set -e; \
@@ -2059,6 +2085,19 @@ test-decision-density-sparse-support: $(DECISION_DENSITY_SPARSE_SUPPORT_TEST_RUN
 
 decision-density-sparse-support-census: $(DECISION_DENSITY_SPARSE_SUPPORT)
 	./$(DECISION_DENSITY_SPARSE_SUPPORT) --census
+
+test-decision-density-sparse-cross: $(DECISION_DENSITY_SPARSE_CROSS_TEST_RUNNER) $(DECISION_DENSITY_SPARSE_CROSS)
+	./$(DECISION_DENSITY_SPARSE_CROSS_TEST_RUNNER)
+	@set +e; output=`./$(DECISION_DENSITY_SPARSE_CROSS) unexpected 2>&1`; status=$$?; set -e; \
+		if [ $$status -ne 2 ]; then \
+			printf '%s\n' "$$output"; \
+			printf 'AQ20 sparse cross accepted an arbitrary mode\n' >&2; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$output" | grep -F 'Usage: old-school-decision-density-sparse-cross --offline-report' >/dev/null
+
+decision-density-sparse-cross-offline-report: $(DECISION_DENSITY_SPARSE_CROSS)
+	./$(DECISION_DENSITY_SPARSE_CROSS) --offline-report
 
 test-action-q-on-policy-successor: $(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER) $(ACTION_Q_ON_POLICY_SUCCESSOR)
 	./$(ACTION_Q_ON_POLICY_SUCCESSOR_TEST_RUNNER)

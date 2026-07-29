@@ -101,6 +101,11 @@ void print_usage(std::ostream& output);
 // sample, target, or accounting field.
 aq19::Dataset project_train_label_blind(
     const labels::Corpus& source);
+// Validates only root identities, actor-visible feature rows, canonical
+// ordinals, and deck/width census. It deliberately does not inspect any
+// teacher or base-score field.
+void validate_label_blind_dataset(
+    const aq19::Dataset& dataset);
 PartitionReport census_partition(
     std::string name,
     const aq19::Dataset& dataset);

@@ -57,7 +57,8 @@ bool bit_equal(double left, double right) {
            std::bit_cast<std::uint64_t>(right);
 }
 
-std::vector<std::size_t> canonical_option_order(
+std::vector<std::size_t>
+label_blind_canonical_option_order(
     const aq19::Root& root) {
     std::vector<std::size_t> result(
         root.options.size(),
@@ -98,7 +99,7 @@ void validate_feature_root(const aq19::Root& root) {
     }
     (void)deck_index(root.deck);
     (void)width_index(root.width);
-    (void)canonical_option_order(root);
+    (void)label_blind_canonical_option_order(root);
     for (const aq19::Option& option : root.options) {
         if (!finite_range(option.action_features)) {
             throw std::invalid_argument(
@@ -246,7 +247,7 @@ PartitionReport census_roots(
     // ordinal, state feature p, action feature q.
     for (const aq19::Root* root : roots) {
         const std::vector<std::size_t> order =
-            canonical_option_order(*root);
+            label_blind_canonical_option_order(*root);
         std::vector<std::size_t> active_state_features;
         active_state_features.reserve(
             aq19::kStateFeatureCount);
@@ -523,6 +524,11 @@ aq19::Dataset project_train_label_blind(
     }
     validate_feature_dataset(result);
     return result;
+}
+
+void validate_label_blind_dataset(
+    const aq19::Dataset& dataset) {
+    validate_feature_dataset(dataset);
 }
 
 PartitionReport census_partition(

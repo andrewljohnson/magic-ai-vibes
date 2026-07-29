@@ -2,6 +2,7 @@
 #include "old_school/exact_combat_subgame.hpp"
 #include "old_school/learned_iteration.hpp"
 #include "old_school/learned_priority_bilinear.hpp"
+#include "old_school/learned_priority_sparse_cross.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -360,6 +361,11 @@ void validate_bot_research_config(const BotConfig& bot) {
             "Value Priority residual requires Learned Value");
     }
     if (bot.value_priority_bilinear &&
+        bot.value_priority_sparse_cross) {
+        throw std::invalid_argument(
+            "AQ19 and AQ20 Priority treatments are mutually exclusive");
+    }
+    if (bot.value_priority_bilinear &&
         (bot.kind != BotKind::Learned ||
          bot.learned_variant !=
              LearnedVariant::ValueSearchChampion ||
@@ -380,6 +386,29 @@ void validate_bot_research_config(const BotConfig& bot) {
         throw std::invalid_argument(
             "AQ19 bilinear Priority residual requires exact untreated "
             "C16 Learned Value K8 or its depth-zero continuation");
+    }
+    if (bot.value_priority_sparse_cross &&
+        (bot.kind != BotKind::Learned ||
+         bot.learned_variant !=
+             LearnedVariant::ValueSearchChampion ||
+         (bot.rollouts_per_action !=
+              kLearnedPrioritySparseCrossWorlds &&
+          bot.rollouts_per_action != 0) ||
+         bot.exploration_rate != 0.0 ||
+         bot.value_continuation_epsilon != 0.0 ||
+         bot.value_priority_residual_weight != 0.0 ||
+         bot.value_pass_dominance ||
+         bot.value_resolved_shallow_prior_weight != 0.0 ||
+         bot.value_adversarial_blocks ||
+         bot.value_actor_local_search ||
+         bot.value_recursive_policy_improvement ||
+         bot.value_continuation_controller !=
+             LearnedContinuationController::Legacy ||
+         bot.training_games != 800)) {
+        throw std::invalid_argument(
+            "AQ20 sparse-cross Priority residual requires exact "
+            "untreated C16 Learned Value K8 or its depth-zero "
+            "continuation");
     }
     if (bot.value_pass_dominance &&
         (bot.kind != BotKind::Learned ||
@@ -10813,6 +10842,64 @@ priority_bilinear_residual_unchecked(
     return diagnostic;
 }
 
+LearnedPrioritySparseCrossDiagnostic
+priority_sparse_cross_residual_unchecked(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    const std::shared_ptr<const LearnedPrioritySparseCross>& residual) {
+    static_assert(
+        LearnedModel::kFeatureCount ==
+        kLearnedPrioritySparseCrossStateFeatureCount);
+    static_assert(
+        LearnedModel::kPolicyFeatureCount ==
+        kLearnedPrioritySparseCrossPolicyFeatureCount);
+    if (!residual) {
+        throw std::invalid_argument(
+            "AQ20 sparse-cross Priority residual is null");
+    }
+    LearnedPrioritySparseCrossDiagnostic diagnostic;
+    const auto encoded = encode_learned_policy_options(
+        state, player,
+        priority_policy_options(
+            state, player, candidates, sorcery_actions, phase,
+            consecutive_passes));
+    diagnostic.option_rows.reserve(encoded.size());
+    for (const auto& row : encoded) {
+        diagnostic.option_rows.emplace_back(
+            row.begin(), row.end());
+    }
+
+    const std::vector<PriorityAction> canonical_actions =
+        legal_priority_actions(
+            state, player, sorcery_actions);
+    diagnostic.canonical_order.reserve(candidates.size());
+    for (const PriorityAction& canonical_action :
+         canonical_actions) {
+        const auto candidate = std::find(
+            candidates.begin(), candidates.end(),
+            canonical_action);
+        if (candidate == candidates.end()) {
+            continue;
+        }
+        diagnostic.canonical_order.push_back(
+            static_cast<std::size_t>(
+                std::distance(
+                    candidates.begin(), candidate)));
+    }
+    if (diagnostic.canonical_order.size() !=
+        candidates.size()) {
+        throw std::logic_error(
+            "AQ20 sparse-cross candidates are not a canonical "
+            "legal subset");
+    }
+    diagnostic.residuals =
+        residual->residuals(
+            diagnostic.option_rows,
+            diagnostic.canonical_order);
+    return diagnostic;
+}
+
 void add_policy_creature(
     const PlayerState& player, PermanentId id,
     LearnedCardPlane& plane, double& total_power) {
@@ -13392,6 +13479,30 @@ Game::Game(std::vector<CardId> player_zero_deck,
                 }
             }
             if (config_.bots[player]
+                    .value_priority_sparse_cross) {
+                const bool real_root =
+                    config_.learned_search_depth == 1 &&
+                    config_.bots[player]
+                            .rollouts_per_action ==
+                        kLearnedPrioritySparseCrossWorlds;
+                const bool depth_zero_continuation =
+                    config_.learned_search_depth == 0 &&
+                    config_.bots[player]
+                            .rollouts_per_action == 0;
+                if ((!real_root &&
+                     !depth_zero_continuation) ||
+                    config_.learned_policy_recorder ||
+                    config_.human_controllers[player]
+                        .has_value() ||
+                    learned_model_fingerprint(model) !=
+                        kLearnedPrioritySparseCrossRequiredFingerprint) {
+                    throw std::invalid_argument(
+                        "AQ20 sparse-cross Priority residual requires "
+                        "exact frozen C16 at a real K8 root or "
+                        "symmetric depth-zero continuation");
+                }
+            }
+            if (config_.bots[player]
                     .value_actor_local_search &&
                 (config_.learned_search_depth != 1 ||
                  config_.learned_policy_recorder ||
@@ -13447,6 +13558,21 @@ Game::Game(std::vector<CardId> player_zero_deck,
         throw std::invalid_argument(
             "AQ19 depth-zero continuation requires the same "
             "bilinear policy for both mirror seats");
+    }
+    const bool first_sparse_cross =
+        static_cast<bool>(
+            config_.bots[0].value_priority_sparse_cross);
+    const bool second_sparse_cross =
+        static_cast<bool>(
+            config_.bots[1].value_priority_sparse_cross);
+    if (config_.learned_search_depth == 0 &&
+        (first_sparse_cross || second_sparse_cross) &&
+        !learned_priority_sparse_cross_equivalent(
+            config_.bots[0].value_priority_sparse_cross,
+            config_.bots[1].value_priority_sparse_cross)) {
+        throw std::invalid_argument(
+            "AQ20 depth-zero continuation requires the same "
+            "sparse-cross policy for both mirror seats");
     }
 }
 
@@ -14407,6 +14533,18 @@ PriorityAction Game::choose_priority_action(
                 scores[index] += residual.residuals[index];
             }
         }
+        if (bot.value_priority_sparse_cross &&
+            !bot.value_priority_sparse_cross->empty()) {
+            const auto residual =
+                priority_sparse_cross_residual_unchecked(
+                    state_, player, sorcery_actions, phase,
+                    consecutive_passes, actions,
+                    bot.value_priority_sparse_cross);
+            for (std::size_t index = 0;
+                 index < scores.size(); ++index) {
+                scores[index] += residual.residuals[index];
+            }
+        }
 
         if (continuation_controller_active) {
             const auto selection =
@@ -14990,6 +15128,8 @@ learned_value_mirror_continuation_bots(
                     root.value_priority_residual_weight,
                 .value_priority_bilinear =
                     root.value_priority_bilinear,
+                .value_priority_sparse_cross =
+                    root.value_priority_sparse_cross,
                 .value_pass_dominance =
                     root.value_pass_dominance,
                 .value_adversarial_blocks =
@@ -18157,6 +18297,65 @@ diagnose_learned_priority_bilinear_continuation(
             learned_priority_bilinear_equivalent(
                 bots[0].value_priority_bilinear,
                 bots[1].value_priority_bilinear),
+        .rollout_counts = {
+            bots[0].rollouts_per_action,
+            bots[1].rollouts_per_action,
+        },
+        .variants = {
+            bots[0].learned_variant,
+            bots[1].learned_variant,
+        },
+        .exploration_rates = {
+            bots[0].exploration_rate,
+            bots[1].exploration_rate,
+        },
+    };
+}
+
+LearnedPrioritySparseCrossDiagnostic
+diagnose_learned_priority_sparse_cross_residual(
+    const GameState& state, std::size_t player,
+    bool sorcery_actions, TurnPhase phase, int consecutive_passes,
+    const std::vector<PriorityAction>& candidates,
+    std::shared_ptr<const LearnedPrioritySparseCross> residual) {
+    validate_priority_candidates(
+        state, player, sorcery_actions, phase,
+        consecutive_passes, candidates);
+    return priority_sparse_cross_residual_unchecked(
+        state, player, sorcery_actions, phase,
+        consecutive_passes, candidates, residual);
+}
+
+LearnedPrioritySparseCrossContinuationDiagnostic
+diagnose_learned_priority_sparse_cross_continuation(
+    const BotConfig& root) {
+    validate_bot_research_config(root);
+    if (!root.value_priority_sparse_cross ||
+        root.rollouts_per_action !=
+            kLearnedPrioritySparseCrossWorlds) {
+        throw std::invalid_argument(
+            "AQ20 continuation diagnostic requires a real K8 root");
+    }
+    const auto bots =
+        learned_value_mirror_continuation_bots(
+            root, root.learned_model);
+    const auto* const root_object =
+        root.value_priority_sparse_cross.get();
+    const auto* const first_object =
+        bots[0].value_priority_sparse_cross.get();
+    const auto* const second_object =
+        bots[1].value_priority_sparse_cross.get();
+    return {
+        .first_seat_has_root_object =
+            first_object == root_object,
+        .second_seat_has_root_object =
+            second_object == root_object,
+        .seats_share_object_identity =
+            first_object == second_object,
+        .seats_are_semantically_equivalent =
+            learned_priority_sparse_cross_equivalent(
+                bots[0].value_priority_sparse_cross,
+                bots[1].value_priority_sparse_cross),
         .rollout_counts = {
             bots[0].rollouts_per_action,
             bots[1].rollouts_per_action,
@@ -29478,6 +29677,9 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
           learned_priority_bilinear_equivalent(
               challenger.value_priority_bilinear,
               baseline.value_priority_bilinear) &&
+          learned_priority_sparse_cross_equivalent(
+              challenger.value_priority_sparse_cross,
+              baseline.value_priority_sparse_cross) &&
           challenger.value_pass_dominance ==
               baseline.value_pass_dominance &&
           challenger.value_resolved_shallow_prior_weight ==

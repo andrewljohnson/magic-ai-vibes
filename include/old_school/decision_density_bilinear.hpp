@@ -322,6 +322,11 @@ void print_usage(std::ostream& output);
 void validate_root(const Root& root);
 void validate_dataset(const Dataset& dataset);
 void validate_corpus(const Corpus& corpus);
+// Returns row indices in engine-authoritative canonical action order. Later
+// frozen action-head experiments share this implementation rather than
+// recreating canonical-order validation.
+std::vector<std::size_t> canonical_option_order(
+    const Root& root);
 Corpus project_corpus(const labels::Corpus& source);
 PairCensus pair_census(const Dataset& dataset);
 bool frozen_pair_census_exact(

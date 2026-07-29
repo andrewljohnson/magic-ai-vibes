@@ -24661,6 +24661,122 @@ selection/scale isolation, sign deduplication, S0 drift rejection, exact
 positive zero, permutation/hidden identity, symmetric propagation,
 treatment mutual exclusion, repeat identity, and unopened conditional paths.
 
+###### AQ20-DBC6-S16-SPARSE-CROSS result: REJECT at grouped OOF
+
+Run 2026-07-29 after rereading `REVIEW.md` through its newest 15:29 PDT
+cycle. Before opening the candidate, the immutable runtime passed 6/6 focused
+tests, production engine integration passed 12/12, the AQ19 regression passed
+9/9, S0 passed 6/6, and the sparse fitter passed 9/9 optimized plus 9/9 under
+AddressSanitizer/UndefinedBehaviorSanitizer. Independent review caught and
+repaired held-out sign-deduplication leakage, label reads during column
+preparation, an OOF-listwise comparator mismatch, incomplete comparator
+authentication, and a fused-multiply-add runtime replay mismatch before this
+run. No candidate metric, DEV candidate value, counter fixture, or gameplay
+seed had opened before the exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-decision-density-sparse-cross --offline-report
+```
+
+It exited zero in 7.41 seconds wall (`7.12s` user, `0.18s` system) with exact
+cache/corpus/fold/S0 identities, exact frozen AQ19 comparator fields, physical
+group isolation, one OOF prediction per TRAIN root, and bit-identical repeated
+full/fold fits and scores. A reporting-only patch then printed the already
+computed fold regrets and compact fold term lists; the exact same command
+replayed the same model SHA, every aggregate/per-deck digit, 89/300 decision
+footprint, rejection list, and unopened-state flags in 7.36 seconds. This
+second deterministic execution recovered missing evidence only; it did not
+change the model, gate, or disposition and opened no downstream coordinate.
+
+The full fit had 353 eligible coordinates and 319 sign-deduplicated
+representatives. Its canonical term SHA-256 is
+`7016571c1b268c574961081209871587b7851a6c536abd25966f17e12711af4e`.
+Maximum `|c|` was `0.66492135784756567`; **0/300 roots** had any
+`|c| >= 1`, so tanh saturation did not bind. No coefficient step clipped;
+these observations do not rule out residual scale as a future axis:
+
+| Stage | `(p,q)` | Sigma | Beta | Roots | Groups | Max leverage | Clipped |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | `(181,13)` | .057352617771584971 | -.042482841336343988 | 62 | 41 | .073399663826111822 | no |
+| 1 | `(72,184)` | .0022225749436625354 | -.028999222737739676 | 32 | 22 | .097768960849036579 | no |
+| 2 | `(8,177)` | .068969822955980573 | -.029128662714463332 | 70 | 52 | .061780040651760806 | no |
+| 3 | `(54,176)` | .039524545928202676 | -.027400660464320804 | 33 | 22 | .099907246215919523 | no |
+| 4 | `(63,198)` | .019278864540161211 | -.020518978859372591 | 26 | 24 | .087853890598980133 | no |
+| 5 | `(7,177)` | .093909460477668141 | -.023392838618662148 | 65 | 49 | .0991127549169602 | no |
+| 6 | `(2,186)` | .045945820082226911 | -.021853683873222084 | 114 | 61 | .077817989214123071 | no |
+| 7 | `(190,11)` | .082345336799713995 | -.017030779026746653 | 56 | 30 | .083569854546453312 | no |
+| 8 | `(57,196)` | .046817804612174059 | .016431966095306342 | 30 | 23 | .093145686665619273 | no |
+| 9 | `(54,182)` | .0093431045205974502 | -.016891254206067172 | 42 | 28 | .095463277199034205 | no |
+| 10 | `(138,13)` | .11120079666503875 | .017514344385532926 | 46 | 30 | .081543308250775645 | no |
+| 11 | `(1,187)` | .067456270250133454 | -.017466711538522715 | 114 | 61 | .07137223136579908 | no |
+| 12 | `(112,196)` | .091583895840503901 | -.019387378882468581 | 25 | 22 | .095378779194881955 | no |
+| 13 | `(67,11)` | .016476209113210866 | -.012889116384301165 | 52 | 29 | .081007507159723574 | no |
+| 14 | `(53,176)` | .054480944869830079 | -.014806274658567856 | 61 | 41 | .089842012197647619 | no |
+| 15 | `(6,177)` | .07702744636373797 | -.016458442669643684 | 70 | 52 | .057546282452455924 | no |
+
+Aggregate metrics:
+
+| Split / policy | Pair BCE | Listwise CE | Regret | Top-one | Stable-pair |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TRAIN C16 | .4774595980542512 | 1.1659151286438101 | .018436662452262116 | .67333333333333334 | .88637241175128145 |
+| TRAIN AQ19 | .47741713626667204 | 1.1658761235415642 | .018108270406560753 | .68000000000000005 | .88726526889413859 |
+| TRAIN AQ20 | .46505804904600434 | 1.1558097768559659 | .016870752004304261 | .65000000000000002 | .92589597969493054 |
+| OOF C16 | .4774595980542512 | 1.1659151286438101 | .018436662452262116 | .67333333333333334 | .88637241175128145 |
+| OOF AQ19 | .47745340221887206 | 1.1658959361331662 | .018128661632956275 | .68000000000000005 | .88943918193761673 |
+| OOF AQ20 | .47289915049425257 | 1.1625316153569099 | .020207001757904866 | .62666666666666671 | .93541610126629127 |
+
+Per-deck regret and OOF pair BCE:
+
+| Deck | TRAIN regret C16 / AQ19 / AQ20 | OOF regret C16 / AQ19 / AQ20 | OOF pair BCE C16 / AQ19 / AQ20 |
+| --- | --- | --- | --- |
+| Green | .013165204668703483 / .013038174994677269 / .010847042321368577 | .013165204668703483 / .013140131126654879 / .013736403736884671 | .47041695187344756 / .47037246554278139 / .46541310005829695 |
+| Red | .026226565361018767 / .024711634806538169 / .026439155940445415 | .026226565361018767 / .024711634806538169 / .024476401914400956 | .51473637966184826 / .51466728040721166 / .5073566176123101 |
+| Blue | .013099042185603772 / .013099042185603772 / .0099083206164579038 | .013099042185603772 / .013099042185603772 / .010799125846230348 | .45087944368792221 / .45080410185776232 / .43334322587490492 |
+| White | .0071829827867596731 / .0071829827867596731 / .0088593496654694147 | .0071829827867596731 / .0071829827867596731 / .012470336383836097 | .4302369220008686 / .43025749826862558 / .43386299364600223 |
+| RU Aggro | .0325095172592249 / .0325095172592249 / .02829989147777999 | .0325095172592249 / .0325095172592249 / .039552740908172256 | .52102829304716924 / .52116566501797945 / .52451981527974856 |
+
+Held-fold regret was:
+
+| Held fold | C16 | AQ19 | AQ20 | AQ20 fit SHA-256 |
+| ---: | ---: | ---: | ---: | --- |
+| 0 | .021744637209644455 | .021744637209644455 | .020532377966544068 | `9931a4e651eed0f77391abd629123abd79202107c8ea7af7a619f64e0e6e2402` |
+| 1 | .016169781510677828 | .014957837067093353 | .01822958654940441 | `e65b7a086e67a23131ec183d06cceac6c17d3a208cea6397fbc54496b9bc96ed` |
+| 2 | .023432569443314559 | .023413764286778108 | .030496002342703686 | `51dd2fe4a2dc8f16bc60419e0a3ee1d0d82043d8d01a80a359ebf41b5c9c2a65` |
+| 3 | .012089273435056752 | .012089273435056752 | .011199334590696814 | `1da874e835ad7378f81ae06a4a378a05ca9fc02e133177d34192ce0ec0ac4a98` |
+
+**Decision: reject at OOF.** AQ20 improved OOF pair BCE by
+`.00455425172461949` and stable-pair agreement by about 4.60 points over
+AQ19, but worsened regret by `.002078340124948591`, reduced top-one by about
+5.33 points, and regressed Green, White, and RU. TRAIN top-one also fell.
+The exact-max action changed on **89/300** roots, expanding AQ19's 2/300
+footprint to 89/300. The simultaneous pair-BCE
+improvement and regret/top-one regressions diagnose surrogate misalignment,
+not a causal win for width alone. Folds 1 and 2 regressed; only Red and Blue
+improved OOF regret. The formal failure list contained eleven misses.
+
+DEV candidate values remain unopened; the counter pair, selector seeds
+`202607292011` / `202607292012`, gameplay, artifact publication, and web
+pilot all remain unopened. C16 remains champion and AQ19 remains only its
+dated manual challenger.
+
+Post-result verification passed the complete `make -j4 test` repository
+suite, including engine 184/184, web 142/142, and certification 48/48.
+Two additional report-review tests then exercised the entire OOF and DEV gate
+conjunctions, simultaneous failure retention, and NaN fail-closed behavior;
+the focused AQ20 fitter suite passed 11/11 and engine integration remained
+12/12. Independent final review reconciled all eleven reported OOF misses and
+found no blocking correctness defect.
+
+The four fold fits selected exactly eight coordinates in at least three
+folds: `(2,187)`, `(3,198)`, `(6,177)`, and `(8,177)` in 4/4; `(1,179)`,
+`(1,187)`, `(181,13)`, and `(6,181)` in 3/4. This is descriptive evidence
+from the already opened rejected fit, not a retrospectively accepted model.
+Next experiment: separately preregister one coordinate-stability challenger
+using only that fixed recurrence signal and untouched DEV as its first
+candidate-generalization gate. Do not tune term count, recurrence floor,
+coefficient scale, or inspect DEV before that declaration.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
