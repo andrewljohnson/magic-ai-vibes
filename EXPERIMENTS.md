@@ -20750,6 +20750,156 @@ It observed the licensed retry in progress and did not yet contain its result;
 its earlier I1 review agreed that both rare-behavior erosions must be visible
 and all proper-arm safety gates remain strict.
 
+##### AQ5-RPI0 Priority-and-combat recursive policy-improvement pilot declaration
+
+Declared 2026-07-29 04:28 PDT at exact OP2 result commit `912adca`, after
+rereading `REVIEW.md` through its independent 04:20 verification and before
+changing live policy code, scoring a new fixture coordinate, or opening
+preflight root seed `202607290401`. C16 remains champion. This is one fast
+direct-search bot intended for owner play-testing, not a fit, artifact,
+promotion, or Learned-is-king claim.
+
+Falsifiable hypothesis: AQ4-D1's hidden-safe actor-local search repairs
+strategic Priority choices, but every attempt to project it into one shared
+Priority head has improved average regret while breaking rare behaviors.
+Applying the search operator directly and recursively at the acting player's
+own Priority, attacker, and blocker decisions will preserve the complete
+stack/target/resource battery and repair the observed combat errors without a
+card-, phase-, target-, or combat-outcome heuristic. The v0 pilot passes only
+if all declared strategic directions and information-safety controls pass and
+one real bridge decision in each declared family remains under the existing
+120-second timeout.
+
+Frozen parent and isolation:
+
+- use only exact Environment-v3 C16 artifact
+  `build/model-cache/old-school-value-challenger-v3-c16-t800-s424242.bin`,
+  3,111,437 bytes, SHA-256 `53aeb904...44ca`, model fingerprint
+  `68126afc...3e2f`; change no tensor and publish no model artifact;
+- add one default-off `recursive policy improvement` treatment, valid only
+  for this C16 Value model with residual, PD0, resolved prior,
+  AdversarialBlocks, exploration, continuation epsilon, and non-Legacy
+  controller all off;
+- use authoritative legal actions and rules transitions only. Neither
+  Handcrafted, a card name, opponent private identity, fixture result, nor
+  authored score enters policy. Fixtures remain evaluation-only.
+
+Search recipe and bounds:
+
+1. A real Priority root retains exact AQ4-P1 outer `K8/R1/H8`, four workers,
+   no outer shallow blend. Every later nontrivial Priority, attacker, or
+   blocker choice by either actor uses a fresh actor-local `K2/R1/H4` search.
+2. A real attacker or blocker microdecision uses latency-first outer
+   `K2/R1/H4`, one worker, no outer shallow blend. Every later nontrivial
+   Priority, attacker, or blocker choice by either actor uses a fresh
+   actor-local `K1/R1/H4` search.
+3. Attackers are selected in engine creature order as canonical binary
+   `Skip/Include` choices with the already-selected prefix and remaining
+   suffix explicit. Blockers are selected in engine creature order as
+   canonical `No Block` followed by assignment to each currently legal
+   attacker, preserving all prior assignments and completing the full combat
+   before a candidate is scored. This linear native action representation
+   avoids exponential attack/block-set enumeration without changing combat
+   legality.
+4. At every later chooser, form that sampled world's **current acting
+   player's** observation. Preserve that actor's sampled own hand and public
+   state, resample only the other player's hidden identities/order, and use
+   the same indexed worlds and continuation seeds for every candidate. The
+   actor's own sampled cards and public consequences may condition its
+   choice; the chooser and its seeds may not read the other player's inherited
+   private identities. Select from aggregate candidate means, never a
+   per-world argmax.
+5. Use an explicit inherited RPI evaluation-depth/disabled sentinel in every
+   clone, separate from the ordinary production search-depth field. A real
+   root starts at RPI depth zero. An outer-continuation chooser may enter one
+   inner search at depth one. Every inner candidate clone remains marked
+   depth one with RPI disabled and uses baseline C16 for all later choices;
+   attempting to enter RPI again at depth one fails closed. Maximum active
+   nesting is one. A shared tracker must cross-sum outer cells, inner
+   invocations, inner rollout evaluations, and maximum depth. Candidate
+   clones additionally fail on incomplete combat context, action-order drift,
+   invalid scores, or accounting mismatch. Existing AQ4-P1 and every
+   treatment-off path must remain bit-identical.
+6. Each search invocation maximizes the value of its own current actor:
+   its exact terminal leaves return `0/0.5/1` and nonterminal leaves
+   bootstrap unchanged C16 from that actor's perspective. After an inner
+   opponent search selects its action, the enclosing outer rollout continues
+   and its final cell is still valued from the enclosing outer actor's
+   perspective. Inner Priority keeps C16's historical shallow blend; inner
+   Attack and Block are unblended. Canonical exact ties use a separately
+   domain-derived seeded tie choice. Damage order and cleanup discard remain
+   ordinary C16 in RPI0 and are outside this Priority-and-combat claim.
+
+Before observing RPI0 scores, report exact untreated C16 choices and margins
+on the same fixtures, including C16's opponent-Growth margin. This is the
+relevant analogue to the warm-parent margin suggested by the 04:20 review:
+RPI0 starts from exact C16 and should not pay to reconstruct a different G4B
+training endpoint merely for a descriptive number. These are immutable
+descriptive facts, not thresholds or training labels.
+
+The preflight seed is exactly `202607290401`. For fixed fixture ordinal
+`i=0..7` and kind tag Priority=`0`, Attack=`1`, Block=`2`, the search seed is
+exactly
+`derive_seed(202607290401, PrioritySearch for Priority else AttackSearch,
+generation=0, index=i, subindex=kind_tag)`. The exact-tie seed uses the same
+coordinate with `PriorityChoice` for Priority and `AttackChoice` otherwise.
+World and continuation seeds then use the existing indexed search domains.
+Candidate identity never enters a seed. The conjunctive directional gate is:
+
+1. redundant same-target Counterspell selects Pass, while the companion
+   intervening-counter root selects the productive opposing Counterspell;
+2. Braingeyser selects productive X=1 self and excludes both X=0 actions;
+3. Ancestral Recall selects self and excludes opponent;
+4. summoning-sick Bear Giant Growth selects Pass and opponent-target Growth
+   is excluded;
+5. live Force Spike selects Spike while five-open payable Force Spike selects
+   Pass;
+6. at life 20, Flying Men does not block an opposing Air Elemental; its
+   life-4 companion does block;
+7. Flying Men does not attack into an untapped opposing Air Elemental; and
+8. use a new exact Blue-mirror Declare Blockers state at turn 10: both players
+   at life 20; defender has five untapped Islands, ready Flying Men permanent
+   `1`, and ready Air Elemental permanent `3`; attacker has five tapped
+   Islands and attacking/tapped Air Elemental permanent `2`; no other public
+   permanents, stack, graveyard, or exile; hidden zones are completed from the
+   exact Blue deck on both seats. At the first sequential subject, Flying Men,
+   `No Block` strictly exceeds the Flying-Men chump. Completing the selected
+   suffix may choose no block or Air-Elemental-only, but must never produce
+   the Flying-Men chump.
+
+For Priority, Attack, and Block separately require complete legal-choice
+coverage, rules settlement, finite scores, reversed-input action-keyed bit
+identity, and a nonvacuous hidden-repartition clone with bit-identical scores,
+choice, and accounting. Reuse AQ4's actor-local Red noninterference pair.
+Add attacker- and defender-local pairs in which the acting observation and
+legal choices are unchanged while the other player's hidden identities
+differ; their complete inner score vectors, choice, and accounting must be
+bit-identical. Require maximum nesting one, exact configuration isolation,
+default-off fixed-seed game identity, focused release and ASan/UBSan suites,
+and full `make -j4 test`.
+
+Only after the core preflight passes may the bridge expose a non-UI test token.
+Three exact real-bridge latency smokes must each complete its authoritative
+decision under 120 seconds: (a) Priority in an RU Aggro mirror, game seed 42,
+after the human plays the first Island and passes to the AQ5 opponent;
+(b) Attack from
+`diagnostic.ru.life20-flying-men-attack-air.v1`; and (c) Block from the exact
+new multi-choice Blue fixture in item 8. Then run the complete web bridge/UI
+suites. No public setup option is added unless all three smokes pass.
+
+Any directional, hidden-safety, accounting, latency, or regression failure
+rejects RPI0 before web exposure. Do not tune K, H, nesting, seed, fixture
+thresholds, or add a special-case rule from this coordinate. A complete pass
+licenses only a dated web option labeled
+**Learned C16 · Recursive Foresight (AQ5)**,
+`manual diagnostic / not promoted`, with exact search budgets and the
+damage-order/cleanup exclusions disclosed. The owner then supplies fresh
+field behavior before a separately declared all-five paired selector. This
+deliberately prioritizes a genuinely new playable bot over another expensive
+underpowered gameplay screen. No strength, promotion, or Learned-is-king
+verdict is permitted before that all-five selector and the normal later
+gates.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
