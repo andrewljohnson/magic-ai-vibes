@@ -22387,6 +22387,157 @@ loss alone. The cache is justified only to avoid paying this 10.8-minute
 labeling cost for every candidate; it may not change a row, target, split,
 weight, or gate, and it is not evidence by itself.
 
+##### AQ10-DBC1-CACHE exact owner-safe corpus preservation declaration
+
+Declared 2026-07-29 08:46 PDT after the DBC1 rejection was recorded and
+pushed, after rereading `REVIEW.md` through its newest 08:44 PDT cycle, and
+before publishing or loading a DBC corpus cache. The review independently
+agrees that DBC1 found useful successor-boundary calibration signal but lacked
+state-conditional capacity, and endorses preserving the exact labeled
+coordinate once. This cache step is infrastructure, not new model evidence.
+It does not open a seed, choose a candidate, or alter C16.
+
+Falsifiable preservation hypothesis: the exact already-open DBC1 collection
+can be reproduced once and encoded using only its authenticated owner-safe
+census, actor-local 674-scalar observations, aligned targets, weights, and
+accounting. Loading those bytes against exact C16 will reproduce the canonical
+corpus digest, examples, root action values, and parent metrics without a
+`GameState`, opponent hidden identity, source deck ordering, or source-game
+reconstruction.
+
+The only licensed publication command is:
+
+```sh
+./build/old-school-decision-boundary-critic --cache
+```
+
+It writes atomically to
+`build/model-cache/old-school-aq10-dbc1-owner-safe-corpus-v1.bin` only after
+the ordinary DBC1 run has again satisfied every identity, collection-repeat,
+hidden-repartition, accounting, fit-repeat, and parent-immutability gate and
+has reproduced:
+
+- parent `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+- subset `850fe865b474b6b49e0794dc5dff5e917b322cc7fdabcf0ab673858a3e43c76a`;
+- corpus digest
+  `28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58`;
+- 80 TRAIN and 80 DEV roots, 1,824 eligible TRAIN examples; and
+- DBC1 candidate
+  `91ecdf2e47f0f1d94127d5bc2a33a71e52c5a8ecb6e0ef9c01d039e562815efb`
+  with the same offline rejection.
+
+The versioned binary envelope binds its schema and payload SHA-256. The
+loaded cache must rerun the complete frozen census/corpus validation against
+the supplied immutable C16 model, have no trailing bytes, and score directly
+from stored observations. A round trip must reproduce the in-memory corpus
+digest, training examples, root predictions, and metrics exactly. Mutation,
+truncation, trailing data, schema drift, wrong-parent loading, or any
+replication mismatch fails closed and publishes nothing. Record the final
+file byte count and SHA-256 before freezing them for consumers.
+
+##### AQ11-DBC2-RANK-DIRECT state-conditional ranking critic declaration
+
+Declared 2026-07-29 08:46 PDT after the cache declaration above, after
+repository and Git-history searches confirmed fresh identifiers
+`202607291401` and `202607291411` were absent, and before fitting, scoring, or
+playing the challenger. C16 remains champion. This is exactly one
+state-conditional candidate, not an architecture, optimizer, regularization,
+temperature, budget, interpolation, or seed sweep.
+
+Falsifiable hypothesis: DBC1 failed because its 34 output-layer scalars could
+only recalibrate broad regions, whereas the frozen actor-local/public
+observation already distinguishes the states whose legal-action rankings need
+different corrections. A shared additive 674-parameter direct-path residual,
+trained on root-relative rankings rather than independent value calibration,
+will strictly improve both TRAIN and whole-game-disjoint DEV teacher regret
+without worsening DEV ranking agreement or any deck beyond the fixed guard.
+Because the same learned critic is queried after every rules-resolved action,
+the treatment applies uniformly to targeting, stack play, mana sequencing,
+permanent development, attacks, and blocks. It contains no card name,
+card-specific switch, authored fixture, Handcrafted score, opponent hidden
+identity, stack heuristic, combat heuristic, or target preference.
+
+###### Exact model and fixed listwise objective
+
+Load exact C16 and only the frozen cache produced by DBC1-CACHE. The cache's
+path, bytes, SHA-256, schema, parent, subset, corpus digest, counts, weights,
+and all validation witnesses become immutable inputs before this command may
+run:
+
+```sh
+./build/old-school-decision-boundary-rank-direct --run
+```
+
+For each critic leaf, add the same learned vector
+`delta[0..673]` to its 674 observation-to-logit direct weights. Initialize
+`delta` to exact zero. Freeze both leaves' input-to-hidden tensors,
+hidden/output weights, output biases, context tensors, and every Priority,
+Attack, Block, and DamageOrder policy tensor. Thus there are exactly 674
+trainable scalars, shared bit-identically by the two leaves, and zero delta
+must reproduce exact C16.
+
+For each root/action, let teacher `Q` be the mean of its exact eight aligned
+H8 teacher samples. Candidate `Q` is the same mean with terminal-before-
+boundary cells fixed to their aligned terminal utility and surviving cells
+scored by the candidate critic on their cached actor-local observation. With
+`N` legal actions, form:
+
+```text
+t = 0.90 * softmax(Q_teacher / 0.10) + 0.10 / N
+p = 0.90 * softmax(Q_candidate / 0.10) + 0.10 / N
+```
+
+Minimize equal-root, equal-deck
+`cross_entropy(t, p) + 0.5 * 0.10 * sum(delta^2)` over TRAIN only. Use
+deterministic full-batch Adam for exactly 256 updates, learning rate `0.001`,
+betas `0.9/0.999`, epsilon `1e-8`, global gradient-norm clipping at `5.0`,
+and fixed fit identifier `202607291401`. There is no mini-batch sampling,
+early stopping, arm selection, trust interpolation, or post-result retry.
+Canonical root/action order is part of the replay witness.
+
+Repeat the fit from exact C16 and require the same 674-vector and candidate
+fingerprint. Exporting the vector and applying it to exact C16 must reproduce
+that fingerprint. At least one and at most 674 coordinates may change.
+Subtracting the two leaves' candidate and parent direct tensors must yield
+the exact same vector. All other critic tensors and all policy components
+must remain bit-identical. The parent artifact and in-memory parent must remain
+immutable.
+
+###### Offline development gate
+
+Report equal-deck and per-deck root-listwise cross-entropy, teacher regret,
+exact-max top-one agreement, stable-pair agreement, plus the existing
+successor-cell BCE/Brier/bias/ECE on TRAIN and DEV. Eligibility is
+conjunctive:
+
+1. TRAIN listwise cross-entropy and teacher regret both strictly improve;
+2. DEV listwise cross-entropy and teacher regret both strictly improve;
+3. DEV exact-max top-one and stable-pair agreement do not decrease;
+4. no DEV deck's teacher regret exceeds C16 by more than `0.01`;
+5. DEV successor-cell BCE does not exceed C16 by more than `0.005`; and
+6. cache identity, repeat fit, replay, shared-delta, parameter-count, parent
+   immutability, and exact direct-only component isolation all pass.
+
+DBC1's DEV split is already open, so even a complete pass is development
+evidence only. Failure rejects the candidate without gameplay and licenses
+no nearby lambda, temperature, step-count, or seed shopping. The next
+capacity experiment, if justified, must be separately declared. Passing only
+licenses the already-open nine-root causal battery.
+
+Run that battery at its exact DBC1 settings: 64 simulations, maximum eight
+decision plies, aligned terminal utility, and reused reject-only seed
+`202607291201`. Require all five controls and no regression of a parent-correct
+repair. At least three of four repairs supports the general mechanism; only
+four of four repairs plus all five controls licenses the fresh selector.
+
+The conditional selector uses fresh seed `202607291411` and the exact DBC1
+60-paired-game, five-deck, seat/play-draw-balanced C16 comparison with ordinary
+Learned Value K8/R1/H4 production play in both arms. More than 30/60 wins and
+at least 3/12 on Green, Red, Blue, White, and RU Aggro licenses a dated manual
+web pilot; 37/60 or more may additionally be called `FAST_GO`. It is not a
+strength, Learned-is-king, or champion claim. No 200-game smoke, 2,000-game
+milestone, fixed panel, or web deployment is licensed otherwise.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
