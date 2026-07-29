@@ -22086,6 +22086,57 @@ the learned decision boundary itself while keeping one consistent utility,
 using general actor-local/public state and self-play/search supervision
 rather than card-, stack-, or combat-specific rules.
 
+##### AQ10-DBC0 decision-boundary source-census declaration
+
+Declared 2026-07-29 after the AQ9-TS1 rejection was recorded and pushed,
+after rereading `REVIEW.md` through its newest 07:44 PDT cycle, and before
+adding the DBC0 collector, reconstructing a source game, opening a new search
+or fit seed, or changing a model. C16 remains champion. This first command is
+source measurement only; it cannot label an action, fit or score a candidate,
+run gameplay, publish an artifact, or change a web policy.
+
+The next scientific axis is fixed in advance: train the shared learned critic
+on the public, actor-local decision boundary caused by each complete legal
+action, using a deeper Learned-mirror continuation as the target. This is a
+general credit-assignment treatment, not another MCTS budget, horizon,
+terminal-scale, card, stack, target, or combat rule. Before that treatment is
+declared, measure its immutable source exactly rather than guessing counts.
+
+Reuse the already-frozen AQ4-G4B C16 source manifest without changing a source
+game, schedule, root-retention rule, or legal-action order:
+
+- exact C16 fingerprint
+  `68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`;
+- TRAIN block 0 and whole-game-disjoint DEV block 1 from root seed
+  `202607282301`, 40 games and 80 actor-games in each split, balanced across
+  Green, Red, Blue, White, and RU Aggro, both seats, and play/draw;
+- exact frozen G4B manifest
+  `8954d6b98075a588fe6000efb387c264b661608d6c8a46f9a750074a87ce838f`;
+- from each actor-game retain only the already-frozen root whose
+  `retained_position` is zero. The selection therefore depends only on the
+  preexisting chronological/even-spacing coordinate and never on a card,
+  action, teacher value, outcome, candidate, or authored fixture.
+
+Add one small `old-school-decision-boundary-critic --census` command. It must
+load the immutable C16 artifact, reconstruct and authenticate the complete
+G4B census, project the fixed position-zero subset, and report per split and
+per deck: games, actor-games, roots, legal options, and nonterminal successor
+eligibility if that fact can be measured without opening a new teacher
+coordinate. Its owner-safe subset hash may contain the frozen root coordinate,
+stable root ID, action descriptors, and neutral feature rows, but no
+`GameState`, opponent hidden identity, library order, source result, sampled
+world, or label. Repeated census runs must be bit-identical.
+
+The expected root count is a derivation, not a fitted guess: 80 actor-games
+give exactly 80 selected roots in TRAIN and 80 in DEV, with exactly 16 roots
+per deck per split. Legal-option and successor counts are deliberately not
+guessed. Record and freeze their measured values and the subset hash before
+declaring or running DBC0 labels. A mismatch in the parent, full G4B manifest,
+80/80 roots, 16-per-deck balance, action identity, hidden-safe feature width,
+or repeated hash rejects the source rather than changing selection. This
+census reuses only previously opened source coordinates and licenses no
+scientific conclusion by itself.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
