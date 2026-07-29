@@ -19286,6 +19286,81 @@ four-prefix ladder tests that exact symptom nearly for free after one label
 replay. If it fails, the review's neutral-anchor route becomes next by
 predeclaration rather than being silently ignored.
 
+##### AQ4-G2 bounded early-stop retention result
+
+Completed 2026-07-28 from frozen implementation commit `b0d943e`. Before
+opening science, focused AQ4-G2 7/7, AQ4-G1 7/7, AQ4-D1 4/4, a forced
+AddressSanitizer/UndefinedBehaviorSanitizer AQ4-G2 rebuild 7/7, and the full
+repository gate passed: engine 181/181, all research/audit suites, web
+118/118, and certification 48/48. Independent source review returned GO.
+`REVIEW.md` was reread through its newest 21:44 PDT entry before finalizing
+this conclusion; that review independently countersigns the whole-family
+rejection and the neutral-anchor successor. Exact command:
+
+```sh
+/usr/bin/time -p \
+  ./build/old-school-action-q-nested-actor-early-stop --run
+```
+
+The command exited one after 536.45 seconds (`user 1507.39`, `sys 3.08`).
+The exact frozen G1 corpus was reconstructed once, with owner-safe digest
+`3b1fa739cbe5ece28f581f7361bc7ba22e9bc0d6f90f39addce783f1e7df346b`.
+It contained 320 FIT roots / 1,023 options and 319 DEV roots / 1,018
+options. The mandatory epoch-64 control passed: fingerprint
+`e0217302d83a4949950af84ab754e38be6ebbd6c2adac6a4193f05f70b7a1376`,
+corpus counts, and all four aggregate metrics reproduced G1 bit-exactly:
+
+| Split | Policy | Agreement | Mean regret |
+| --- | --- | ---: | ---: |
+| FIT | C16 | 0.668750 | 0.01805075 |
+| FIT | epoch 64 | 0.821875 | 0.00627356 |
+| DEV | C16 | 0.727282 | 0.01580498 |
+| DEV | epoch 64 | 0.698760 | 0.01468854 |
+
+The bounded prefix ladder produced:
+
+| Epochs | Fingerprint | FIT agreement | FIT regret | DEV agreement | DEV regret | DEV regret delta |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 4 | `701a8763...f49907` | 0.671875 | 0.01792817 | 0.711558 | 0.01809063 | +0.00228565 |
+| 8 | `38009396...ce70d3` | 0.662500 | 0.01661085 | 0.705258 | 0.01692628 | +0.00112131 |
+| 16 | `2f6cf36e...2ce008` | 0.675000 | 0.01573034 | 0.698958 | 0.01768131 | +0.00187633 |
+| 32 | `e5f5adbf...5c9a6d` | 0.721875 | 0.01126630 | 0.705159 | 0.01710567 | +0.00130070 |
+
+DEV mean-regret deltas by owner deck:
+
+| Epochs | Green | Red | Blue | White | RU Aggro |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 4 | +0.00346394 | -0.00215765 | +0.00277043 | +0.00343691 | +0.00391463 |
+| 8 | +0.00333627 | -0.00175820 | -0.00516858 | +0.00353469 | +0.00566235 |
+| 16 | +0.00333627 | +0.00095803 | -0.00528834 | +0.00275829 | +0.00761740 |
+| 32 | +0.00274687 | +0.00109147 | -0.00738963 | +0.00139637 | +0.00865839 |
+
+Epochs 4, 8, and 16 preserved every general tactical gate: redundant
+Counterspell pass, productive Braingeyser, sick-Bear Giant Growth pass, live
+Force Spike, and the complete hidden-safe Ancestral self-target gate. Their
+Ancestral self/opponent scores were respectively `0.9743032/0.9688523`,
+`0.9762727/0.9680624`, and `0.9681592/0.9605656`. Epoch 32 retained
+Counterspell, sick Growth, and Ancestral
+(`0.9705783/0.7826123`) but lost productive Braingeyser and live Force Spike.
+Every per-deck +0.01 guard passed.
+
+Nevertheless, **all four prefixes failed the original G1 offline gate**
+because every DEV aggregate regret was worse than frozen C16. Thus no prefix
+was eligible, no model was selected, selector seed `202607282131` remained
+unopened, no artifact was published, and no Handcrafted comparison ran.
+
+Decision: **reject the complete early-stop family**. The hypothesis that G1
+needed only fewer passes over the same repair teacher is refuted. Earlier
+prefixes preserve the observed tactical repairs, proving the useful signal
+arrives quickly, but their broad out-of-sample ranking is worse; more epochs
+eventually forget individual repairs while still not repairing that
+generalization. Per the declaration, do not test epoch 48, a new learning
+rate, another residual, or another fit seed. The next experiment is one
+separately preregistered, card-agnostic parent-behavior/KL retention treatment:
+keep the same actor-local teacher examples, add broad owner-safe neutral
+decision anchors sampled without inspecting candidate scores, and require the
+candidate to learn the repairs without moving C16's already-correct behavior.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
