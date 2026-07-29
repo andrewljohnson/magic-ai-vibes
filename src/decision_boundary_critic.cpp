@@ -1393,7 +1393,10 @@ void write_corpus_cache_file_atomic(
             "cannot open AQ10-DBC1 cache directory: " +
             detail);
     }
-    if (::rename(
+    // A frozen scientific cache is publish-once. Linking the already-synced
+    // temporary inode to the final name is atomic and, unlike rename, fails
+    // if that name already exists.
+    if (::link(
             temporary.c_str(), path.c_str()) != 0) {
         const std::string detail =
             std::strerror(errno);
@@ -1403,6 +1406,15 @@ void write_corpus_cache_file_atomic(
             ::unlink(temporary.c_str()));
         throw std::runtime_error(
             "cannot atomically publish AQ10-DBC1 cache: " +
+            detail);
+    }
+    if (::unlink(temporary.c_str()) != 0) {
+        const std::string detail =
+            std::strerror(errno);
+        static_cast<void>(
+            ::close(directory_descriptor));
+        throw std::runtime_error(
+            "cannot retire published AQ10-DBC1 cache temporary: " +
             detail);
     }
     if (::fsync(directory_descriptor) != 0) {
@@ -2171,6 +2183,10 @@ void write_corpus_cache_atomic(
     const Corpus& corpus) {
     validate_corpus(corpus);
     require_frozen_census(corpus.census);
+    if (corpus.digest != kFrozenCorpusDigest) {
+        throw std::runtime_error(
+            "AQ10-DBC1 production cache corpus digest drifted");
+    }
     write_corpus_cache_file_atomic(
         path, make_corpus_cache_file(corpus));
 }
@@ -2190,10 +2206,11 @@ Corpus load_corpus_cache(
         parse_corpus_cache_file(
             read_corpus_cache_file(path));
     require_frozen_census(corpus.census);
-    if (corpus.parent_components !=
+    if (corpus.digest != kFrozenCorpusDigest ||
+        corpus.parent_components !=
             learned_model_component_fingerprints(parent)) {
         throw std::runtime_error(
-            "AQ10-DBC1 cache parent components drifted");
+            "AQ10-DBC1 cache frozen corpus identity drifted");
     }
     return corpus;
 }

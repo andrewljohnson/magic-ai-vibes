@@ -632,6 +632,8 @@ int main() {
         expect(
             std::filesystem::is_regular_file(path),
             "atomic corpus cache was not published");
+        const std::string published_bytes =
+            read_binary(path);
 
         dbc::Corpus expected = original;
         for (auto* examples :
@@ -651,13 +653,20 @@ int main() {
             loaded == expected,
             "owner-safe corpus cache roundtrip drifted");
         dbc::validate_corpus(loaded);
-        const auto predictions =
+        const auto original_predictions =
+            dbc::score(
+                original.train, test_value_model());
+        const auto loaded_predictions =
             dbc::score(
                 loaded.train, test_value_model());
         expect(
-            predictions.size() ==
-                loaded.train.size(),
-            "loaded observation-only corpus could not be scored");
+            loaded_predictions == original_predictions &&
+                dbc::evaluate(
+                    loaded.train, loaded_predictions) ==
+                dbc::evaluate(
+                    original.train,
+                    original_predictions),
+            "loaded observation-only scoring or metrics drifted");
         for (const auto* examples :
              {&loaded.train, &loaded.dev}) {
             for (const auto& root : *examples) {
@@ -707,6 +716,18 @@ int main() {
                     original);
             },
             "production cache accepted an unfrozen subset");
+
+        expect_rejected(
+            [&] {
+                dbc::testing::
+                    write_unfrozen_corpus_cache_atomic(
+                        path, original);
+            },
+            "cache publication replaced an existing artifact");
+        expect(
+            read_binary(path) ==
+                published_bytes,
+            "cache collision changed the published artifact");
 
         const std::string temporary_prefix =
             path.filename().string() + ".tmp.";

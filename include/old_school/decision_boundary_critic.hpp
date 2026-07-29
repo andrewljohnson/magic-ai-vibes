@@ -31,6 +31,8 @@ inline constexpr std::string_view kRequiredSourceManifestHash =
     source::kFrozenCensusManifestHash;
 inline constexpr std::string_view kFrozenSubsetHash =
     "850fe865b474b6b49e0794dc5dff5e917b322cc7fdabcf0ab673858a3e43c76a";
+inline constexpr std::string_view kFrozenCorpusDigest =
+    "28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58";
 inline constexpr std::uint64_t kTeacherSeed =
     202607291301ULL;
 inline constexpr std::size_t kTeacherWorlds = 8;
