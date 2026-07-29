@@ -881,7 +881,8 @@ void test_all_five_deck_accounting_and_mutations() {
             gameplay::kParentModelFingerprint),
         "adversarial-block policy drift was accepted");
     policy_drift = summary;
-    policy_drift.challenger.value_resolved_shallow_prior = true;
+    policy_drift.challenger.value_resolved_shallow_prior_weight =
+        1.0;
     expect(
         !gameplay::testing::benchmark_accounting_exact(
             policy_drift, expected_challenger,

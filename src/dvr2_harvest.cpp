@@ -1664,7 +1664,7 @@ bool source_policy_exact(const GameConfig& config,
             bot.value_continuation_epsilon != 0.0 ||
             bot.value_priority_residual_weight != 0.0 ||
             bot.value_pass_dominance ||
-            bot.value_resolved_shallow_prior ||
+            bot.value_resolved_shallow_prior_weight != 0.0 ||
             bot.value_adversarial_blocks ||
             bot.value_continuation_controller !=
                 LearnedContinuationController::Legacy ||

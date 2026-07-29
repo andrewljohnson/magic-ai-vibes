@@ -52,9 +52,10 @@ inline constexpr std::uint64_t kLearnedStackCombatSeed =
     202607280810ULL;
 inline constexpr std::size_t kLearnedStackCombatRepetitions = 1;
 inline constexpr double kLearnedStackCombatBlendAlpha = 0.50;
-inline constexpr std::uint64_t kResolvedPriorSeed =
-    202607281711ULL;
-inline constexpr std::size_t kResolvedPriorRepetitions = 1;
+inline constexpr std::uint64_t kDualBoundarySeed =
+    202607281731ULL;
+inline constexpr std::size_t kDualBoundaryRepetitions = 1;
+inline constexpr double kDualBoundaryResolvedWeight = 0.75;
 
 struct CandidateScore {
     double alpha = 0.0;
@@ -125,13 +126,14 @@ std::array<BotConfig, 3> make_learned_stack_combat_bots(
     std::shared_ptr<const LearnedModel> blended_model,
     std::shared_ptr<const LearnedModel> baseline_model);
 
-// EXPLORE-8 advances only when the resolved-consequence treatment wins
-// strictly against exact ordinary C16.
-bool resolved_prior_advances(const CandidateScore& treatment);
+// EXPLORE-11 advances only when the alpha-0.75 dual-boundary treatment wins
+// strictly more than half of its exact 60-game schedule against ordinary C16.
+bool dual_boundary_advances(const CandidateScore& treatment);
 
-// Returns resolved-consequence C16 and ordinary C16 in that order. The
-// frozen model and every other deployment setting are identical.
-std::array<BotConfig, 2> make_resolved_prior_bots(
+// Returns alpha-0.75 dual-boundary C16 and ordinary C16 in that order. The
+// frozen model and every other deployment setting are identical, including
+// absolute K8/H4/R1 search and zero Priority residual.
+std::array<BotConfig, 2> make_dual_boundary_bots(
     std::shared_ptr<const LearnedModel> model);
 
 // Returns the exact K8/H4/R1 C16 deployment recipe with only the explicit
@@ -140,7 +142,7 @@ BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
     bool pass_dominance,
     bool adversarial_blocks = false,
-    bool resolved_shallow_prior = false);
+    double resolved_shallow_prior_weight = 0.0);
 
 int run_cli(
     int argc, char* argv[], std::ostream& output,

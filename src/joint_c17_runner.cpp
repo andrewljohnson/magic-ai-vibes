@@ -117,7 +117,7 @@ bool learned_bot_config_exact(
            bot.value_continuation_epsilon == 0.0 &&
            bot.value_priority_residual_weight == 0.0 &&
            bot.value_pass_dominance == pass_dominance &&
-           !bot.value_resolved_shallow_prior &&
+           bot.value_resolved_shallow_prior_weight == 0.0 &&
            !bot.value_adversarial_blocks &&
            bot.value_continuation_controller == controller &&
            bot.training_games == kCanonicalTrainingGames;
@@ -136,7 +136,7 @@ bool learned_search_config_exact(
            search.blend_shallow_prior &&
            search.value_priority_residual_weight == 0.0 &&
            search.value_pass_dominance == pass_dominance &&
-           !search.value_resolved_shallow_prior &&
+           search.value_resolved_shallow_prior_weight == 0.0 &&
            search.value_continuation_controller == controller &&
            search.evaluation_threads == 1;
 }

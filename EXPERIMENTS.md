@@ -17712,6 +17712,74 @@ wins advances to a labeled web pilot; 30 or fewer rejects. Report all five
 rows, runtime, decisions, and rollouts. This is a rapid selector, not a
 strength claim, and is not composed with another treatment.
 
+##### FQ4-EXPLORE-10 engineering result — rejected before gameplay
+
+Recorded 2026-07-28 after 181/181 engine tests, the 17-test runner, and all
+eight affected frozen-recipe suites passed. The bounded weight implementation
+is general and correct: alpha zero is exact historical identity, alpha one is
+exact EXPLORE-9 behavior, alpha 0.50 is a cellwise `std::lerp`, invalid
+weights fail closed, and hidden/common-world continuation samples remain
+bit-identical.
+
+The exact frozen-root check reused the command and C16 fingerprint recorded
+for EXPLORE-8, rebuilt against the weight implementation, and added a
+`MIDPOINT` diagnostic at alpha 0.50. It reproduced the settled values and
+measured these exact deployed K8 aggregates:
+
+| Action | Alpha 0 control | Alpha 0.50 | Alpha 1 resolved |
+| --- | ---: | ---: | ---: |
+| Ancestral Recall targeting self | .9854725965 | .9871748494 | .9888771023 |
+| Pass | .9876290663 | .9876290663 | .9876290663 |
+| Ancestral Recall targeting opponent | .9887476869 | .9872752574 | .9858028279 |
+
+The alpha-0.50 preregistration incorrectly mixed the 64-world resolved critic
+mean with the deployed K8 unresolved sample mean. On matching common K8
+coordinates, alpha 0.50 still ranks opponent-target above self-target and Pass
+above both. Therefore its exact engineering gate failed. Gameplay seed
+`202607281722` was never opened; EXPLORE-10 is **rejected/stopped** without a
+gameplay result. The weighted implementation remains useful, but the declared
+alpha does not qualify.
+
+The paired endpoints give exact flip thresholds without gameplay tuning:
+alpha `> 0.5158138653` for self-target over opponent-target, and alpha
+`> 0.6334163978` for self-target over Pass.
+
+##### FQ4-EXPLORE-11 final scalar alpha-0.75 declaration
+
+Declared 2026-07-28 17:14 PDT before changing the frozen runner alpha or
+opening fresh gameplay seed `202607281731`. Repository and Git-history search
+found that seed unused.
+
+Falsifiable hypothesis: alpha `0.75`, the smallest quarter-grid weight above
+both exact deployed-K8 thresholds, will retain more historical sequencing
+signal than the rejected alpha-1 treatment while preserving the diagnosed
+target correction, and will win strictly more than 30/60 against ordinary
+C16.
+
+This is the one final scalar-boundary coordinate, not a sweep. Its exact
+preregistered K8 interpolation is:
+
+| Action | Alpha-0.75 aggregate |
+| --- | ---: |
+| Ancestral Recall targeting self | .9880259759 |
+| Pass | .9876290663 |
+| Ancestral Recall targeting opponent | .9865390427 |
+
+All implementation/isolation requirements from EXPLORE-10 remain unchanged.
+Before gameplay, the external frozen-root diagnostic must reproduce those
+values and ordering, the runner must expose exactly alpha 0.75 and seed
+`202607281731`, and focused/full/sanitizer gates must be green.
+
+Then run alpha-0.75 treatment first against ordinary C16 for exactly one
+balanced repetition: 60 games, 12 per challenger deck, same frozen model,
+K8/H4/R1, zero residual/exploration, PD0/AdversarialBlocks off, Legacy
+controller. Strictly more than 30 treatment wins advances to a clearly
+labeled web pilot; 30 or fewer rejects. Report all five rows, runtime,
+decisions, and rollouts. Failure closes scalar observation-boundary tuning;
+the next research axis becomes the preregistered card-agnostic,
+action-conditioned fitted-Q/dueling-head learner before information-set tree
+search. This is a rapid selector, not a strength claim.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

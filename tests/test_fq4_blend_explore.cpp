@@ -1,5 +1,5 @@
 #include "old_school/fq4_blend_explore.hpp"
-#include "old_school/fq4_dev1_gameplay.hpp"
+#include "old_school/fq4_dev5_gameplay.hpp"
 
 #include <array>
 #include <cmath>
@@ -14,7 +14,7 @@
 #include <vector>
 
 namespace explore = old_school::fq4_blend_explore;
-namespace gameplay = old_school::fq4_dev1_gameplay;
+namespace gameplay = old_school::fq4_dev5_gameplay;
 
 namespace {
 
@@ -146,13 +146,14 @@ void test_frozen_schedule() {
             explore::kLearnedStackCombatBlendAlpha == 0.50,
         "LearnedStackCombat exploration schedule drifted");
     expect(
-        explore::kResolvedPriorSeed ==
-                202607281711ULL &&
-            explore::kResolvedPriorRepetitions == 1 &&
+        explore::kDualBoundarySeed ==
+                202607281731ULL &&
+            explore::kDualBoundaryRepetitions == 1 &&
+            explore::kDualBoundaryResolvedWeight == 0.75 &&
             gameplay::kWorldsPerAction == 8 &&
             gameplay::kRolloutsPerWorld == 1 &&
             gameplay::kHorizonTurns == 4,
-        "ResolvedPrior exploration schedule drifted");
+        "DualBoundary exploration schedule drifted");
 }
 
 void test_blend_endpoints_and_isolation() {
@@ -333,6 +334,8 @@ void test_pd0_config_changes_only_pass_dominance() {
             ordinary.value_priority_residual_weight == 0.10 &&
             !ordinary.value_pass_dominance &&
             !ordinary.value_adversarial_blocks &&
+            ordinary.value_resolved_shallow_prior_weight ==
+                0.0 &&
             ordinary.value_continuation_controller ==
                 old_school::LearnedContinuationController::
                     Legacy &&
@@ -353,6 +356,8 @@ void test_pd0_config_changes_only_pass_dominance() {
                 ordinary.value_priority_residual_weight &&
             pd0.value_pass_dominance &&
             !pd0.value_adversarial_blocks &&
+            pd0.value_resolved_shallow_prior_weight ==
+                ordinary.value_resolved_shallow_prior_weight &&
             pd0.value_continuation_controller ==
                 ordinary.value_continuation_controller &&
             pd0.training_games == ordinary.training_games &&
@@ -432,6 +437,10 @@ void test_adversarial_blocks_config_changes_only_aggregation() {
                 ordinary.value_pass_dominance &&
             treatment.value_adversarial_blocks &&
             !ordinary.value_adversarial_blocks &&
+            treatment.value_resolved_shallow_prior_weight ==
+                ordinary.value_resolved_shallow_prior_weight &&
+            ordinary.value_resolved_shallow_prior_weight ==
+                0.0 &&
             treatment.value_continuation_controller ==
                 ordinary.value_continuation_controller &&
             treatment.training_games ==
@@ -493,6 +502,10 @@ void test_adversarial_composition_matchup_isolation() {
             !baseline.value_pass_dominance &&
             challenger.value_adversarial_blocks &&
             baseline.value_adversarial_blocks &&
+            challenger.value_resolved_shallow_prior_weight ==
+                baseline.value_resolved_shallow_prior_weight &&
+            baseline.value_resolved_shallow_prior_weight ==
+                0.0 &&
             challenger.value_continuation_controller ==
                 baseline.value_continuation_controller &&
             challenger.training_games ==
@@ -574,6 +587,12 @@ void test_stack_discipline_config_isolation() {
             attack_only.value_adversarial_blocks &&
             pass_dominance.value_adversarial_blocks &&
             !baseline.value_adversarial_blocks &&
+            attack_only.value_resolved_shallow_prior_weight ==
+                0.0 &&
+            pass_dominance.value_resolved_shallow_prior_weight ==
+                0.0 &&
+            baseline.value_resolved_shallow_prior_weight ==
+                0.0 &&
             attack_only.value_continuation_controller ==
                 baseline.value_continuation_controller &&
             pass_dominance.value_continuation_controller ==
@@ -693,6 +712,12 @@ void test_learned_stack_combat_config_isolation() {
             treatment.value_adversarial_blocks &&
             comparator.value_adversarial_blocks &&
             !baseline.value_adversarial_blocks &&
+            treatment.value_resolved_shallow_prior_weight ==
+                0.0 &&
+            comparator.value_resolved_shallow_prior_weight ==
+                0.0 &&
+            baseline.value_resolved_shallow_prior_weight ==
+                0.0 &&
             treatment.value_continuation_controller ==
                 comparator.value_continuation_controller &&
             treatment.value_continuation_controller ==
@@ -722,39 +747,39 @@ void test_learned_stack_combat_config_isolation() {
         "LearnedStackCombat accepted a missing baseline");
 }
 
-void test_resolved_prior_selection_and_config_isolation() {
+void test_dual_boundary_selection_and_config_isolation() {
     expect(
-        explore::resolved_prior_advances({
+        explore::dual_boundary_advances({
             .wins = 31,
             .losses = 29,
         }),
-        "ResolvedPrior rejected a strict win");
+        "DualBoundary rejected a strict win");
     expect(
-        !explore::resolved_prior_advances({
+        !explore::dual_boundary_advances({
             .wins = 30,
             .losses = 30,
         }),
-        "ResolvedPrior advanced a tie");
+        "DualBoundary advanced a tie");
     expect(
-        !explore::resolved_prior_advances({
+        !explore::dual_boundary_advances({
             .wins = 30,
             .losses = 20,
             .draws = 10,
         }),
-        "ResolvedPrior relaxed the more-than-30 gate");
+        "DualBoundary relaxed the more-than-30 gate");
     expect_rejected(
         [] {
             static_cast<void>(
-                explore::resolved_prior_advances({
+                explore::dual_boundary_advances({
                     .wins = 31,
                     .losses = 28,
                 }));
         },
-        "ResolvedPrior accepted a non-60-game result");
+        "DualBoundary accepted a non-60-game result");
 
     const auto model = parent_model();
     const auto bots =
-        explore::make_resolved_prior_bots(model);
+        explore::make_dual_boundary_bots(model);
     const auto& treatment = bots[0];
     const auto& baseline = bots[1];
     expect(
@@ -780,8 +805,10 @@ void test_resolved_prior_selection_and_config_isolation() {
             !baseline.value_pass_dominance &&
             !treatment.value_adversarial_blocks &&
             !baseline.value_adversarial_blocks &&
-            treatment.value_resolved_shallow_prior &&
-            !baseline.value_resolved_shallow_prior &&
+            treatment.value_resolved_shallow_prior_weight ==
+                explore::kDualBoundaryResolvedWeight &&
+            baseline.value_resolved_shallow_prior_weight ==
+                0.0 &&
             treatment.value_continuation_controller ==
                 baseline.value_continuation_controller &&
             treatment.value_continuation_controller ==
@@ -792,14 +819,14 @@ void test_resolved_prior_selection_and_config_isolation() {
             treatment.training_games == 800 &&
             treatment.learned_model == model &&
             baseline.learned_model == model,
-        "ResolvedPrior changed more than the shallow "
+        "DualBoundary changed more than the shallow "
         "observation boundary");
     expect_rejected(
         [] {
             static_cast<void>(
-                explore::make_resolved_prior_bots(nullptr));
+                explore::make_dual_boundary_bots(nullptr));
         },
-        "ResolvedPrior accepted a missing frozen model");
+        "DualBoundary accepted a missing frozen model");
 }
 
 void test_adversarial_block_aggregation_changes_ranking() {
@@ -854,7 +881,7 @@ void test_cli_rejects_arguments_without_loading_models() {
                 "--adversarial-composition|"
                 "--stack-discipline|"
                 "--learned-stack-combat|"
-                "--resolved-prior]\n",
+                "--dual-boundary]\n",
         "CLI argument rejection was not concise");
 }
 
@@ -903,8 +930,8 @@ int main() {
         "LearnedStackCombat config isolation",
         test_learned_stack_combat_config_isolation);
     runner.run(
-        "ResolvedPrior selection and config isolation",
-        test_resolved_prior_selection_and_config_isolation);
+        "DualBoundary selection and config isolation",
+        test_dual_boundary_selection_and_config_isolation);
     runner.run(
         "AdversarialBlocks synthetic aggregation",
         test_adversarial_block_aggregation_changes_ranking);

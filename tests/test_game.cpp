@@ -11205,7 +11205,7 @@ TEST(benchmark_policy_identity_includes_value_pass_dominance) {
     CHECK(!result.baseline.value_pass_dominance);
 }
 
-TEST(benchmark_policy_identity_includes_resolved_shallow_prior) {
+TEST(benchmark_policy_identity_includes_resolved_shallow_prior_weight) {
     const auto model = small_value_model();
     const old_school::BotConfig control = {
         .kind = old_school::BotKind::Learned,
@@ -11215,9 +11215,9 @@ TEST(benchmark_policy_identity_includes_resolved_shallow_prior) {
         .training_games = 1,
         .learned_model = model,
     };
-    CHECK(!control.value_resolved_shallow_prior);
+    CHECK(control.value_resolved_shallow_prior_weight == 0.0);
     old_school::BotConfig treatment = control;
-    treatment.value_resolved_shallow_prior = true;
+    treatment.value_resolved_shallow_prior_weight = 0.5;
     old_school::GameConfig bounded;
     bounded.max_turns = 1;
     bounded.learned_model = model;
@@ -11225,8 +11225,10 @@ TEST(benchmark_policy_identity_includes_resolved_shallow_prior) {
     const auto result = old_school::run_bot_benchmark(
         1, 0x5E771ED501ULL, treatment, control, bounded);
     CHECK(result.total_games == 60);
-    CHECK(result.challenger.value_resolved_shallow_prior);
-    CHECK(!result.baseline.value_resolved_shallow_prior);
+    CHECK(result.challenger.value_resolved_shallow_prior_weight ==
+          0.5);
+    CHECK(result.baseline.value_resolved_shallow_prior_weight ==
+          0.0);
 }
 
 TEST(resolved_shallow_prior_default_off_is_rng_identity) {
@@ -11255,7 +11257,7 @@ TEST(resolved_shallow_prior_default_off_is_rng_identity) {
     };
     old_school::GameConfig explicit_off = implicit;
     for (auto& bot : explicit_off.bots) {
-        bot.value_resolved_shallow_prior = false;
+        bot.value_resolved_shallow_prior_weight = 0.0;
     }
 
     old_school::Game implicit_game(
@@ -11474,14 +11476,14 @@ TEST(resolved_shallow_prior_rejects_non_value_bots) {
         old_school::BotConfig{
             .kind = old_school::BotKind::Random,
             .rollouts_per_action = 1,
-            .value_resolved_shallow_prior = true,
+            .value_resolved_shallow_prior_weight = 0.5,
         },
         old_school::BotConfig{
             .kind = old_school::BotKind::Learned,
             .learned_variant =
                 old_school::LearnedVariant::UnifiedActor,
             .rollouts_per_action = 0,
-            .value_resolved_shallow_prior = true,
+            .value_resolved_shallow_prior_weight = 0.5,
         },
     };
     const old_school::BotConfig baseline = {
@@ -11497,6 +11499,67 @@ TEST(resolved_shallow_prior_rejects_non_value_bots) {
                         challenger, baseline));
             },
             "resolved shallow prior requires Learned Value"));
+    }
+}
+
+TEST(resolved_shallow_prior_weight_rejects_invalid_numbers) {
+    const std::array<double, 4> invalid_weights = {
+        -0.01,
+        1.01,
+        std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::quiet_NaN(),
+    };
+    const auto model = small_value_model();
+    const old_school::BotConfig baseline = {
+        .kind = old_school::BotKind::Handcrafted,
+        .rollouts_per_action = 1,
+    };
+    for (const double weight : invalid_weights) {
+        const old_school::BotConfig challenger = {
+            .kind = old_school::BotKind::Learned,
+            .learned_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .rollouts_per_action = 0,
+            .value_resolved_shallow_prior_weight = weight,
+            .training_games = 1,
+            .learned_model = model,
+        };
+        CHECK(throws_with_text(
+            [&] {
+                static_cast<void>(
+                    old_school::run_bot_benchmark(
+                        1, 0xBAD5E771ED2ULL,
+                        challenger, baseline));
+            },
+            "resolved shallow prior weight must be finite and in [0, 1]"));
+    }
+
+    const auto fixture = ancestral_target_fixture();
+    const auto actions =
+        old_school::legal_priority_actions(
+            fixture.state, 0, true);
+    for (const double weight : invalid_weights) {
+        const old_school::LearnedSearchConfig search = {
+            .seed = 0xBAD5E771ED3ULL,
+            .worlds = 1,
+            .rollouts_per_world = 1,
+            .horizon_turns = 0,
+            .continuation_variant =
+                old_school::LearnedVariant::
+                    ValueSearchChampion,
+            .blend_shallow_prior = true,
+            .value_resolved_shallow_prior_weight = weight,
+        };
+        CHECK(throws_with_text(
+            [&] {
+                static_cast<void>(
+                    old_school::learned_priority_action_samples(
+                        fixture.state, fixture.decks, 0, true,
+                        old_school::TurnPhase::FirstMain, 0,
+                        actions, model, search));
+            },
+            "resolved shallow prior weight must be finite and in [0, 1]"));
     }
 }
 
@@ -12934,8 +12997,9 @@ TEST(resolved_priority_consequence_observes_rules_effects_without_responses) {
             small_value_model(), 0, 0xC0A17E2ULL,
             0.0, 0.0, false,
             old_school::LearnedContinuationController::Legacy,
-            true);
-    CHECK(counter_war_diagnostic.value_resolved_shallow_prior);
+            1.0);
+    CHECK(counter_war_diagnostic
+              .value_resolved_shallow_prior_weight == 1.0);
     CHECK(counter_war_diagnostic.legal_actions ==
           counter_war_actions);
     CHECK(counter_war_diagnostic.actions ==
@@ -12996,19 +13060,54 @@ TEST(resolved_shallow_prior_changes_only_the_paired_root_observation) {
                 ValueSearchChampion,
         .blend_shallow_prior = true,
     };
+    auto explicit_zero = control;
+    explicit_zero.value_resolved_shallow_prior_weight = 0.0;
     auto treatment = control;
-    treatment.value_resolved_shallow_prior = true;
+    treatment.value_resolved_shallow_prior_weight = 1.0;
+    auto midpoint = control;
+    midpoint.value_resolved_shallow_prior_weight = 0.5;
     const auto before =
         old_school::learned_priority_action_samples(
             fixture.state, fixture.decks, 0, true,
             old_school::TurnPhase::FirstMain, 0, actions,
             model, control);
+    const auto zero =
+        old_school::learned_priority_action_samples(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, explicit_zero);
     const auto after =
         old_school::learned_priority_action_samples(
             fixture.state, fixture.decks, 0, true,
             old_school::TurnPhase::FirstMain, 0, actions,
             model, treatment);
+    const auto half =
+        old_school::learned_priority_action_samples(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, midpoint);
 
+    const auto check_same_samples =
+        [](const old_school::LearnedActionSamples& left,
+           const old_school::LearnedActionSamples& right) {
+            CHECK(left.q_samples == right.q_samples);
+            CHECK(left.priority_shallow_prior_samples ==
+                  right.priority_shallow_prior_samples);
+            CHECK(left.priority_continuation_samples ==
+                  right.priority_continuation_samples);
+            CHECK(left.exact_priority_aggregate_scores ==
+                  right.exact_priority_aggregate_scores);
+            CHECK(left.sampled_worlds == right.sampled_worlds);
+            CHECK(left.rollout_evaluations ==
+                  right.rollout_evaluations);
+            CHECK(left.terminal_evaluations ==
+                  right.terminal_evaluations);
+            CHECK(left.bootstrapped_evaluations ==
+                  right.bootstrapped_evaluations);
+            CHECK(left.priority_h0_boundaries ==
+                  right.priority_h0_boundaries);
+        };
+    check_same_samples(zero, before);
     CHECK(before.sampled_worlds == after.sampled_worlds);
     CHECK(before.rollout_evaluations ==
           after.rollout_evaluations);
@@ -13018,13 +13117,41 @@ TEST(resolved_shallow_prior_changes_only_the_paired_root_observation) {
           after.bootstrapped_evaluations);
     CHECK(before.priority_continuation_samples ==
           after.priority_continuation_samples);
+    CHECK(before.priority_continuation_samples ==
+          half.priority_continuation_samples);
     CHECK(before.priority_shallow_prior_samples !=
           after.priority_shallow_prior_samples);
+    CHECK(half.priority_shallow_prior_samples.size() ==
+          before.priority_shallow_prior_samples.size());
+    for (std::size_t action_index = 0;
+         action_index <
+         half.priority_shallow_prior_samples.size();
+         ++action_index) {
+        CHECK(
+            half.priority_shallow_prior_samples[action_index].size() ==
+            before.priority_shallow_prior_samples[action_index].size());
+        for (std::size_t sample = 0;
+             sample <
+             half.priority_shallow_prior_samples[action_index].size();
+             ++sample) {
+            CHECK(
+                half.priority_shallow_prior_samples[action_index][sample] ==
+                std::lerp(
+                    before.priority_shallow_prior_samples[action_index]
+                                                         [sample],
+                    after.priority_shallow_prior_samples[action_index]
+                                                        [sample],
+                    0.5));
+        }
+    }
     CHECK(after.priority_shallow_prior_samples[self_draw] !=
           after.priority_shallow_prior_samples[opponent_draw]);
     CHECK(after.priority_shallow_prior_samples[self_draw].front() >
           after.priority_shallow_prior_samples[opponent_draw]
                                               .front());
+    CHECK(half.priority_shallow_prior_samples[self_draw].front() >
+          half.priority_shallow_prior_samples[opponent_draw]
+                                             .front());
 
     const auto hidden =
         old_school::learned_priority_action_samples(
@@ -13041,6 +13168,14 @@ TEST(resolved_shallow_prior_changes_only_the_paired_root_observation) {
           after.exact_priority_aggregate_scores);
     CHECK(hidden.rollout_evaluations ==
           after.rollout_evaluations);
+
+    const auto hidden_half =
+        old_school::learned_priority_action_samples(
+            hidden_repartition(fixture.state, 0),
+            fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0, actions,
+            model, midpoint);
+    check_same_samples(hidden_half, half);
 
     auto unblended = treatment;
     unblended.blend_shallow_prior = false;

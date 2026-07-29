@@ -252,6 +252,14 @@ void validate_value_priority_residual_weight(double weight) {
     }
 }
 
+void validate_value_resolved_shallow_prior_weight(double weight) {
+    if (!std::isfinite(weight) || weight < 0.0 ||
+        weight > 1.0) {
+        throw std::invalid_argument(
+            "resolved shallow prior weight must be finite and in [0, 1]");
+    }
+}
+
 void validate_value_continuation_controller(
     LearnedContinuationController controller) {
     switch (controller) {
@@ -268,6 +276,8 @@ void validate_bot_research_config(const BotConfig& bot) {
         bot.value_continuation_epsilon);
     validate_value_priority_residual_weight(
         bot.value_priority_residual_weight);
+    validate_value_resolved_shallow_prior_weight(
+        bot.value_resolved_shallow_prior_weight);
     validate_value_continuation_controller(
         bot.value_continuation_controller);
     if (bot.value_continuation_epsilon != 0.0 &&
@@ -291,7 +301,7 @@ void validate_bot_research_config(const BotConfig& bot) {
         throw std::invalid_argument(
             "Value Pass dominance requires Learned Value");
     }
-    if (bot.value_resolved_shallow_prior &&
+    if (bot.value_resolved_shallow_prior_weight != 0.0 &&
         (bot.kind != BotKind::Learned ||
          bot.learned_variant !=
              LearnedVariant::ValueSearchChampion)) {
@@ -13435,7 +13445,7 @@ PriorityAction Game::choose_priority_action(
                             actions[action_index], player,
                             sorcery_actions, phase,
                             consecutive_passes, world.state,
-                            bot.value_resolved_shallow_prior));
+                            bot.value_resolved_shallow_prior_weight));
                 }
                 aggregate.average_shallow(worlds.size());
             }
@@ -13707,9 +13717,27 @@ double Game::learned_value_shallow_action_score(
     bool sorcery_actions, TurnPhase phase,
     int consecutive_passes,
     const GameState& sampled_state,
-    bool resolve_immediate_consequence) const {
+    double resolved_consequence_weight) const {
     const auto model = learned_model_for(player);
-    if (resolve_immediate_consequence) {
+    if (resolved_consequence_weight > 0.0 &&
+        resolved_consequence_weight < 1.0) {
+        const double unresolved =
+            learned_value_shallow_action_score(
+                action, player, sorcery_actions, phase,
+                consecutive_passes, sampled_state, 0.0);
+        const double resolved =
+            learned_value_shallow_action_score(
+                action, player, sorcery_actions, phase,
+                consecutive_passes, sampled_state, 1.0);
+        if (!std::isfinite(unresolved) ||
+            !std::isfinite(resolved)) {
+            return -std::numeric_limits<double>::infinity();
+        }
+        return std::lerp(
+            unresolved, resolved,
+            resolved_consequence_weight);
+    }
+    if (resolved_consequence_weight == 1.0) {
         const auto consequence =
             resolve_priority_action_consequence(
                 sampled_state, player, sorcery_actions,
@@ -21577,6 +21605,8 @@ void validate_search_config(
         config.value_continuation_epsilon);
     validate_value_priority_residual_weight(
         config.value_priority_residual_weight);
+    validate_value_resolved_shallow_prior_weight(
+        config.value_resolved_shallow_prior_weight);
     validate_value_continuation_controller(
         config.value_continuation_controller);
     if (config.value_continuation_epsilon != 0.0 &&
@@ -21597,13 +21627,13 @@ void validate_search_config(
         throw std::invalid_argument(
             "Value Pass dominance requires a Value-mirror search");
     }
-    if (config.value_resolved_shallow_prior &&
+    if (config.value_resolved_shallow_prior_weight != 0.0 &&
         config.continuation_variant !=
             LearnedVariant::ValueSearchChampion) {
         throw std::invalid_argument(
             "resolved shallow prior requires a Value-mirror search");
     }
-    if (config.value_resolved_shallow_prior &&
+    if (config.value_resolved_shallow_prior_weight != 0.0 &&
         !config.blend_shallow_prior) {
         throw std::invalid_argument(
             "resolved shallow prior requires shallow-prior blending");
@@ -22062,7 +22092,7 @@ LearnedActionSamples learned_priority_action_samples(
                 ? simulation.learned_value_shallow_action_score(
                       action, player, sorcery_actions, phase,
                       consecutive_passes, world.state,
-                      config.value_resolved_shallow_prior)
+                      config.value_resolved_shallow_prior_weight)
                 : 0.0;
         PriorityState priority{
             .player = player,
@@ -23009,7 +23039,7 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     bool value_pass_dominance,
     LearnedContinuationController
         value_continuation_controller,
-    bool value_resolved_shallow_prior) {
+    double value_resolved_shallow_prior_weight) {
     if (!model) {
         throw std::invalid_argument(
             "Learned Value diagnostic requires a frozen model");
@@ -23026,9 +23056,11 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
         value_continuation_epsilon);
     validate_value_priority_residual_weight(
         value_priority_residual_weight);
+    validate_value_resolved_shallow_prior_weight(
+        value_resolved_shallow_prior_weight);
     validate_value_continuation_controller(
         value_continuation_controller);
-    if (value_resolved_shallow_prior &&
+    if (value_resolved_shallow_prior_weight != 0.0 &&
         model->variant() !=
             LearnedVariant::ValueSearchChampion) {
         throw std::invalid_argument(
@@ -23050,8 +23082,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .value_priority_residual_weight =
                 value_priority_residual_weight,
             .value_pass_dominance = value_pass_dominance,
-            .value_resolved_shallow_prior =
-                value_resolved_shallow_prior,
+            .value_resolved_shallow_prior_weight =
+                value_resolved_shallow_prior_weight,
             .value_continuation_controller =
                 value_continuation_controller,
             .learned_model = model,
@@ -23066,8 +23098,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
             .value_priority_residual_weight =
                 value_priority_residual_weight,
             .value_pass_dominance = value_pass_dominance,
-            .value_resolved_shallow_prior =
-                value_resolved_shallow_prior,
+            .value_resolved_shallow_prior_weight =
+                value_resolved_shallow_prior_weight,
             .value_continuation_controller =
                 value_continuation_controller,
             .learned_model = model,
@@ -23079,8 +23111,8 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
     evaluator.state_ = state;
 
     LearnedValuePriorityDiagnostic diagnostic;
-    diagnostic.value_resolved_shallow_prior =
-        value_resolved_shallow_prior;
+    diagnostic.value_resolved_shallow_prior_weight =
+        value_resolved_shallow_prior_weight;
     diagnostic.legal_actions =
         legal_priority_actions(state, player, sorcery_actions);
     diagnostic.actions = diagnostic.legal_actions;
@@ -23135,7 +23167,7 @@ LearnedValuePriorityDiagnostic diagnose_learned_value_priority(
                         sorcery_actions, phase,
                         consecutive_passes,
                         world.state,
-                        value_resolved_shallow_prior));
+                        value_resolved_shallow_prior_weight));
             }
             aggregate.average_shallow(worlds.size());
         }
@@ -23460,8 +23492,8 @@ run_bot_benchmark(std::size_t repetitions_per_deck_pairing,
               baseline.value_priority_residual_weight &&
           challenger.value_pass_dominance ==
               baseline.value_pass_dominance &&
-          challenger.value_resolved_shallow_prior ==
-              baseline.value_resolved_shallow_prior &&
+          challenger.value_resolved_shallow_prior_weight ==
+              baseline.value_resolved_shallow_prior_weight &&
           challenger.value_adversarial_blocks ==
               baseline.value_adversarial_blocks &&
           challenger.value_continuation_controller ==

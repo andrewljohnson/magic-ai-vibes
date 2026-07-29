@@ -851,55 +851,58 @@ int run_learned_stack_combat_exploration(
     return 0;
 }
 
-int run_resolved_prior_exploration(
+int run_dual_boundary_exploration(
     const gameplay::FixedDeployment& deployment,
     std::ostream& output) {
     const auto bots =
-        make_resolved_prior_bots(deployment.parent);
+        make_dual_boundary_bots(deployment.parent);
     output
-        << "FQ4 resolved-consequence shallow-prior exploration"
+        << "FQ4 dual-boundary shallow-prior exploration"
         << " parent="
         << deployment.parent_model_fingerprint
         << '\n'
-        << "plan mode=ResolvedPrior seed="
-        << kResolvedPriorSeed
-        << " repetitions=" << kResolvedPriorRepetitions
-        << " treatment=C16+ResolvedPrior"
+        << "plan mode=DualBoundary alpha="
+        << kDualBoundaryResolvedWeight
+        << " seed=" << kDualBoundarySeed
+        << " repetitions=" << kDualBoundaryRepetitions
+        << " treatment=C16+DualBoundaryAlpha0.75"
         << " baseline=ordinary-C16"
         << " pass_dominance=off"
         << " adversarial_blocks=off"
         << " priority_residual=off"
         << " continuation_controller=Legacy"
-        << " qualification=general_target_correction"
+        << " qualification=general_target_correction_preserved"
         << " advance=treatment_wins_gt_30"
         << " runtime=descriptive\n";
     output.flush();
 
     output
-        << "running mode=ResolvedPrior"
-        << " variant=C16+ResolvedPrior"
+        << "running mode=DualBoundary"
+        << " variant=C16+DualBoundaryAlpha0.75"
         << " model="
         << deployment.parent_model_fingerprint
-        << " resolved_shallow_prior=on\n";
+        << " resolved_shallow_prior_weight="
+        << kDualBoundaryResolvedWeight << '\n';
     output.flush();
     const TimedResult treatment = run_one(
         bots[0], bots[1],
-        kResolvedPriorRepetitions,
-        kResolvedPriorSeed, false);
+        kDualBoundaryRepetitions,
+        kDualBoundarySeed, false);
     print_result(
-        output, "E0", "C16+ResolvedPrior",
-        0.0, treatment);
+        output, "E0", "C16+DualBoundaryAlpha0.75",
+        kDualBoundaryResolvedWeight, treatment);
     const CandidateScore score{
-        .alpha = 0.0,
+        .alpha = kDualBoundaryResolvedWeight,
         .wins = treatment.summary.challenger_stats.wins,
         .losses = treatment.summary.challenger_stats.losses,
         .draws = treatment.summary.challenger_stats.draws,
     };
-    const bool advances = resolved_prior_advances(score);
+    const bool advances = dual_boundary_advances(score);
     output
         << (advances ? "advance" : "stop")
-        << " mode=ResolvedPrior"
-        << " variant=C16+ResolvedPrior"
+        << " mode=DualBoundary"
+        << " variant=C16+DualBoundaryAlpha0.75"
+        << " alpha=" << kDualBoundaryResolvedWeight
         << " treatment_wins=" << score.wins
         << " treatment_losses=" << score.losses
         << " treatment_draws=" << score.draws;
@@ -1149,31 +1152,33 @@ std::array<BotConfig, 3> make_learned_stack_combat_bots(
     };
 }
 
-bool resolved_prior_advances(
+bool dual_boundary_advances(
     const CandidateScore& treatment) {
     constexpr std::size_t kExpectedGames =
-        60 * kResolvedPriorRepetitions;
+        60 * kDualBoundaryRepetitions;
     if (treatment.wins + treatment.losses +
             treatment.draws !=
         kExpectedGames) {
         throw std::invalid_argument(
-            "ResolvedPrior selection requires the exact "
+            "DualBoundary selection requires the exact "
             "60-game schedule");
     }
     return treatment.wins > kExpectedGames / 2;
 }
 
-std::array<BotConfig, 2> make_resolved_prior_bots(
+std::array<BotConfig, 2> make_dual_boundary_bots(
     std::shared_ptr<const LearnedModel> model) {
     if (!model) {
         throw std::invalid_argument(
-            "ResolvedPrior requires a frozen model");
+            "DualBoundary requires a frozen model");
     }
     BotConfig treatment =
-        make_exploratory_bot(model, false, false, true);
+        make_exploratory_bot(
+            model, false, false,
+            kDualBoundaryResolvedWeight);
     BotConfig baseline =
         make_exploratory_bot(
-            std::move(model), false, false, false);
+            std::move(model), false, false, 0.0);
     treatment.value_priority_residual_weight = 0.0;
     baseline.value_priority_residual_weight = 0.0;
     return {std::move(treatment), std::move(baseline)};
@@ -1183,7 +1188,7 @@ BotConfig make_exploratory_bot(
     std::shared_ptr<const LearnedModel> model,
     bool pass_dominance,
     bool adversarial_blocks,
-    bool resolved_shallow_prior) {
+    double resolved_shallow_prior_weight) {
     if (!model) {
         throw std::invalid_argument(
             "exploratory bot requires a frozen model");
@@ -1193,8 +1198,8 @@ BotConfig make_exploratory_bot(
             std::move(model));
     bot.value_pass_dominance = pass_dominance;
     bot.value_adversarial_blocks = adversarial_blocks;
-    bot.value_resolved_shallow_prior =
-        resolved_shallow_prior;
+    bot.value_resolved_shallow_prior_weight =
+        resolved_shallow_prior_weight;
     return bot;
 }
 
@@ -1205,7 +1210,7 @@ int run_cli(
         "Usage: old-school-fq4-blend-explore"
         " [--pd0|--adversarial-blocks|"
         "--adversarial-composition|--stack-discipline|"
-        "--learned-stack-combat|--resolved-prior]\n";
+        "--learned-stack-combat|--dual-boundary]\n";
     const bool valid_arguments =
         argv != nullptr && argv[0] != nullptr &&
         (argc == 1 ||
@@ -1220,7 +1225,7 @@ int run_cli(
            std::string_view(argv[1]) ==
                "--learned-stack-combat" ||
            std::string_view(argv[1]) ==
-               "--resolved-prior")));
+               "--dual-boundary")));
     if (!valid_arguments) {
         error << kUsage;
         return 2;
@@ -1249,8 +1254,8 @@ int run_cli(
                     deployment, output);
             }
             if (std::string_view(argv[1]) ==
-                "--resolved-prior") {
-                return run_resolved_prior_exploration(
+                "--dual-boundary") {
+                return run_dual_boundary_exploration(
                     deployment, output);
             }
             return run_adversarial_blocks_exploration(
