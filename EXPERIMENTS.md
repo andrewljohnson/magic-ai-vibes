@@ -22876,6 +22876,213 @@ priority context, and public stack/board can interact directly. It remains a
 general learned policy/value change, not a card, stack, target, or combat
 exception.
 
+##### AQ13-DBC4-ACTION-PAIR action-conditioned policy declaration
+
+Declared 2026-07-29 09:49 PDT at exact DBC3 result commit `8f7eb3b`, after
+rereading `REVIEW.md` through its newest 09:47 PDT cycle and before fitting,
+scoring, or opening fresh selector seed `202607291611`. Repository and
+Git-history searches found fit tag `202607291601`, selector seed
+`202607291611`, and identifier `DBC4-ACTION-PAIR` unused. C16 remains
+champion.
+
+This is one candidate, not an architecture, optimizer, loss-temperature,
+regularization, residual-weight, fold, seed, or threshold sweep. It is the
+predeclared action-conditioned successor required by DBC3's rejection. Its
+policy is card-agnostic: it consumes only the existing 893 owner-safe
+state/action features, which encode the acting player's own hand plus public
+rules-level source, target, X, phase, mana, stack, and board information. It
+contains no card name, card-specific switch, authored fixture, Handcrafted
+score, opponent hidden identity, stack heuristic, combat heuristic, or target
+preference.
+
+Falsifiable hypothesis: DBC2 and DBC3 failed because one state value had to
+serve every legal action at that state. C16's already-frozen Priority
+`893 -> 32 tanh` trunk can instead provide a distinct nonlinear embedding for
+each legal action. Fitting only its exact-zero 32-scalar hidden readout with a
+cost-weighted pairwise objective will improve whole-game-disjoint action
+ranking without repeating the RU support flip. Failure rejects this frozen
+trunk/readout treatment and licenses no nearby fit. It would not prove that
+the frozen action representation is intrinsically inadequate; a separately
+declared treatment could learn or otherwise transform the state/action trunk
+rather than merely read it out.
+
+###### Immutable source, treatment, and production score
+
+Load exact C16 and only the frozen DBC1 owner-safe cache:
+
+```text
+path   build/model-cache/old-school-aq10-dbc1-owner-safe-corpus-v1.bin
+bytes  25886525
+sha256 9234b10d7181d566d4dacb972fbb32bf20d2961eb34c4d95d7e92ece1622a4a4
+digest 28bd1d37a62b7f4f5e8fae7032c85dbc016690e5e328072f13a51a37fa519c58
+roots  TRAIN 80 / DEV 80, exactly 16 per deck in each split
+```
+
+The cache's retained `ManifestRoot.options` are the exact 893-wide,
+actor-local Priority rows aligned to its typed legal actions. For action `a`,
+compute its frozen C16 Priority activation
+
+```text
+h_a = tanh(W_priority * option_a + b_priority)       (32 coordinates)
+```
+
+and train only `delta[0..31]`, initialized to exact zero. C16's Priority
+hidden bias, hidden-output vector, 893-wide direct path, and output bias must
+all be exact **positive-zero binary64 bits** before fitting; the input-hidden
+tensor is the frozen nonlinear basis. Freeze that tensor, hidden bias, direct
+path, output bias, complete critic, and Attack, Block, and DamageOrder heads.
+Apply the candidate by replacing only the Priority hidden-output vector with
+`delta`; between one and 32 stored coordinates may change. The runner must
+assert the positive-zero bits at runtime rather than relying on numeric
+equality with zero.
+
+For each root/action, `T_a` is the mean of its exact eight aligned H8 teacher
+targets. `B_cache,a` is the corresponding mean of exact terminal utility for
+terminal-before-boundary cells and exact C16 two-leaf prediction at the first
+boundary for surviving cells. Let `z_a = dot(delta, h_a)` and let `mean(z)`
+use canonical typed-action order. The cached score optimized and gated is:
+
+```text
+S_cache,a = B_cache,a + 0.10 * tanh(z_a - mean_legal(z))
+```
+
+Thus all-zero `delta` plus residual weight `0.10` must reproduce C16 action
+scores on the cache exactly. Production does not contain `B_cache`: it
+computes the ordinary residual-free `K8/R1/H4` root score `B_prod,a` and adds
+the identical, same-unit residual:
+
+```text
+S_prod,a = B_prod,a + 0.10 * tanh(z_a - mean_legal(z))
+```
+
+The immutable candidate is deployed through that existing Learned Value path
+with `value_priority_residual_weight = 0.10`; the parent comparison uses the
+same model with residual weight zero. Only the action-conditioned residual
+function is shared between cached fitting and production, not the numerical
+base-score source. The treatment changes Priority choices only; it is a
+proof-of-traction experiment, not yet an all-decision AlphaZero head.
+
+###### Fixed pairwise fit and whole-game out-of-fold check
+
+For every unordered action pair `(i,j)` with `T_i != T_j`, define:
+
+```text
+d_ij = T_i - T_j
+y_ij = sigmoid(d_ij / 0.10)
+p_ij = sigmoid((S_i - S_j) / 0.10)
+w_ij = abs(d_ij) / sum_root_pairs(abs(d))
+```
+
+The eligible-pair set is exactly `{(i,j): i < j and T_i != T_j}`. For a root
+with at least one eligible pair, its reported pair BCE is
+`sum_eligible(w_ij * BCE(y_ij,p_ij))`. An all-tied root has pair BCE exactly
+zero and remains in the fixed equal-root denominator. Pair BCE never includes
+the L2 term. For any complete split or combined OOF report the exact outer
+reduction is:
+
+```text
+(1 / 5) * sum_deck [
+    (1 / R_deck) * sum_root_in_deck [
+        sum_eligible_pair w_ij * BCE(y_ij, p_ij)
+    ]
+]
+```
+
+The optimizer minimizes that equal-root, equal-deck pair BCE plus
+`0.5 * 0.10 * sum(delta^2)` over its TRAIN roots only. Cost weighting makes
+a large teacher-regret reversal more expensive than many almost-tied pairs,
+directly testing the failure mode shared by DBC2 and DBC3. Use deterministic
+full-batch Adam for exactly 256 updates, learning rate `0.001`, betas
+`0.9/0.999`, epsilon `1e-8`, global gradient-norm clip `5.0`, and fit tag
+`202607291601`. There is no shuffle, random initialization, early stopping,
+arm selection, trust interpolation, or post-result retry.
+
+Before this declaration was frozen, a parent-only read of the authenticated
+cache measured the exact eligible-pair census below. It did not construct,
+fit, or score a candidate. The runner must reproduce these counts before
+fitting:
+
+| split/deck | roots | all-tied roots | unordered pairs | eligible pairs |
+| --- | ---: | ---: | ---: | ---: |
+| TRAIN / all | 80 | 1 | 262 | 246 |
+| TRAIN / Green | 16 | 1 | 38 | 35 |
+| TRAIN / Red | 16 | 0 | 79 | 76 |
+| TRAIN / Blue | 16 | 0 | 35 | 31 |
+| TRAIN / White | 16 | 0 | 72 | 66 |
+| TRAIN / RU Aggro | 16 | 0 | 38 | 38 |
+| DEV / all | 80 | 7 | 594 | 470 |
+| DEV / Green | 16 | 1 | 66 | 40 |
+| DEV / Red | 16 | 0 | 74 | 71 |
+| DEV / Blue | 16 | 3 | 49 | 41 |
+| DEV / White | 16 | 3 | 126 | 78 |
+| DEV / RU Aggro | 16 | 0 | 279 | 240 |
+
+Before the final full-TRAIN fit, perform one fixed grouped four-fold
+out-of-fold diagnostic. Assign whole source games by
+`schedule_index % 4`; both actors from one game remain in the same fold.
+Each fold therefore holds out exactly ten games, 20 roots, and four roots per
+deck, while fitting 60 roots and 12 per deck. The four held-out predictions
+are combined once into an 80-root OOF report. The folds do not select any
+hyperparameter and the final candidate still fits all 80 TRAIN roots with the
+unchanged recipe.
+
+Repeat every fold and the full fit from exact zero and require bit-identical
+vectors, scores, and fingerprints. Reapplying the exported full-fit vector to
+C16 must reproduce the candidate. All reported candidate scores must come
+from the actual immutable model through `learned_policy_head_logits`; the
+analytic frozen-activation surrogate and engine logits/residuals must agree
+within `1e-12`. Cache validation, canonical ordering, parent immutability,
+zero-delta equivalence, and exact component isolation fail closed.
+
+###### Offline, causal, and conditional gameplay gates
+
+Report pairwise BCE, the prior 90%-softmax/10%-uniform listwise CE as a
+diagnostic, teacher regret, exact-max top-one agreement, and stable-pair
+agreement for full TRAIN, combined OOF, and DEV, aggregate and per deck. DEV
+is whole-game-disjoint and held out from this fit, but it was opened by prior
+experiments and is explicitly reused development/reject-only evidence—not an
+untouched final holdout. Report the unchanged successor-cell
+BCE/Brier/bias/ECE to prove that a policy-only treatment did not alter critic
+evaluation.
+
+Eligibility is conjunctive:
+
+1. full-TRAIN pairwise BCE and teacher regret strictly improve, and listwise
+   CE does not increase;
+2. combined OOF pairwise BCE and teacher regret strictly improve, listwise CE
+   does not increase, top-one and stable-pair agreement do not decrease, and
+   every deck's OOF regret does not increase;
+3. reused whole-game-disjoint DEV pairwise BCE and teacher regret strictly
+   improve, listwise CE does not increase, top-one and stable-pair agreement
+   do not decrease, and every deck's DEV regret does not increase;
+4. parent and candidate successor critic predictions and all successor
+   BCE/Brier/bias/ECE fields are bit-identical; and
+5. fixed recipe, cache identity, grouped folds, repeat fits, parameter replay,
+   zero-delta equivalence, actual-model agreement, parent immutability,
+   1-to-32 changed-coordinate boundary, and exact Priority-readout-only
+   isolation all pass.
+
+Any failure rejects DBC4 immediately and opens no gameplay coordinate.
+A complete offline pass alone licenses the existing frozen
+`action_q_offline_gate::evaluate_model_gates(parent, candidate)` battery,
+including balanced held-out roots, Ancestral Recall, Counterspell,
+Braingeyser, Force Spike, Giant Growth, descriptor/order, and hidden
+repartition controls. These are evaluation-only causal checks; they neither
+enter training nor alter the generic policy. Every model gate must pass.
+
+Only a complete model-gate pass may open one fresh 60-game, five-deck,
+seat/play-draw-balanced selector at seed `202607291611`: immutable DBC4 with
+residual weight `0.10` versus immutable C16 with residual weight zero,
+ordinary `K8/R1/H4` Learned Value play in both arms. Continuation epsilon and
+resolved-shallow-prior weight are zero; pass dominance, adversarial blocks,
+actor-local search, and recursive policy improvement are false; the
+continuation controller is Legacy; no other research treatment is enabled.
+More than 30/60 wins plus at least 3/12 on Green, Red, Blue, White, and RU
+Aggro licenses a dated manual web pilot; at least 37/60 may additionally be
+called `FAST_GO`. It remains neither a strength nor Learned-is-king claim and
+licenses no champion replacement, 200-game smoke, 2,000-game milestone, fixed
+panel, or web deployment otherwise.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
