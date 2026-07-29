@@ -24461,6 +24461,52 @@ separate exact AQ20 fit declaration. Failure opens no learner; any revised
 support floor must be declared from this label-blind result before teacher
 values are exposed. No support result can count as bot-strength evidence.
 
+###### AQ20-DBC6-S0-SPARSE-SUPPORT result: PASS
+
+Run 2026-07-29 after the focused optimized and ASan/UBSan suites each passed
+6/6. The implementation projects only root identities plus the frozen 674
+state and 219 action features; tests mutate every teacher sample, aggregate,
+derived target/weight, and accounting field and require the complete report
+bytes to remain identical. Sparse iteration preserves the declared canonical
+reduction order while avoiding zero state/action coordinates. Exact command:
+
+```sh
+make -j4 build/old-school-decision-density-sparse-support && \
+  /usr/bin/time -p \
+    ./build/old-school-decision-density-sparse-support --census \
+    > /private/tmp/aq20-s0.stdout \
+    2> /private/tmp/aq20-s0.stderr
+```
+
+The immutable cache byte count/SHA, corpus digest, and fold manifest all
+matched the declaration. The command exited zero in 0.93 seconds:
+
+| Fit partition | Roots | Groups | Active | Eligible | Min root support | Min group support | Max group leverage | Table SHA-256 |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| TRAIN | 300 | 80 | 8,384 | 353 | 24 | 16 | 0.099970866780510315 | `cfbd1d4eb1356cb347e47be2d47c1be8bc5c9c00bc6d0e0d7af8b14720884e93` |
+| TRAIN except fold 0 | 224 | 60 | 7,865 | 175 | 25 | 19 | 0.099849301187874176 | `b77022091035f30a6d2760c10652c0ed08c20604c4377b9053632049d6423b19` |
+| TRAIN except fold 1 | 224 | 60 | 7,739 | 176 | 24 | 17 | 0.099926119201241004 | `7e6470b6fb204d212e87e292c29ed6edcbebe81d114c59c0b049e0b7bc5c9afc` |
+| TRAIN except fold 2 | 224 | 59 | 7,777 | 193 | 25 | 17 | 0.099623576049895204 | `13b728281d3e926a27072aab1b1addf394dae014571a8a044bf9ceac12989eb2` |
+| TRAIN except fold 3 | 228 | 61 | 7,938 | 194 | 24 | 17 | 0.099676647017160544 | `d6016121fd8c1a62836681d7cc7da53284cd9de92e9cdd726edb53b83cc3bb63` |
+
+The cross-partition digest is
+`b6a321bc76d137550ddf74e9afa2dfa03874124c47b9af879f0b63e551f8a4a7`;
+every partition has at least 16 eligible coordinates. All sealed counters are
+zero: no teacher field, candidate score, optimizer step, model, tactical seed,
+selector seed, or gameplay game was opened. The stdout SHA-256 is
+`ae7dbe9ecf9a52151357e342a82ec81b451c5d5ae26ea3a56879f3d1bb3f7f8f`.
+
+Verdict: **PASS** as a descriptive prerequisite, not bot-strength evidence.
+There is ample cross-fold support for a separately declared 16-term sparse
+interaction fit without relaxing any floor. The newest independent review
+also asked whether AQ19 residuals saturate their bounded tanh output. That is
+not measurable from this deliberately label/model-blind census; report the
+exact saturation fraction in the AQ20 fit before interpreting its magnitude.
+Next: preregister one fold-local sparse fit, compare it with frozen AQ19 on
+grouped OOF, use reused DEV only as a reject-only veto, then require the
+frozen redundant-counter/intervening-counter pair before opening any gameplay
+selector.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
