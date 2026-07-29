@@ -120,6 +120,29 @@ struct Report {
     bool gate_passed() const;
 };
 
+// Parameterized reuse seam for a successor experiment that has separately
+// preregistered its root seed and outer budget.  The fixture definitions and
+// actor-local hidden-information witness remain the sealed AQ4-D1 ones.
+// Fixture seeds are derived as
+//   derive_seed(root, PrioritySearch, 1, fixture_index, 0).
+struct PreflightRecipe {
+    std::uint64_t root_seed = 0;
+    std::size_t worlds = 1;
+    std::size_t rollouts_per_world = 1;
+    std::size_t horizon_turns = 1;
+    std::size_t evaluation_threads = 1;
+    std::size_t inner_worlds = 1;
+
+    bool operator==(const PreflightRecipe&) const = default;
+};
+
+struct PreflightReport {
+    PreflightRecipe recipe;
+    Report evidence;
+
+    bool gate_passed() const;
+};
+
 enum class Command {
     Diagnose,
 };
@@ -133,6 +156,12 @@ std::uint64_t actor_local_seed();
 std::array<FixtureSpec, kFixtureCount> fixture_manifest();
 LearnedSearchConfig outer_search_config(std::uint64_t seed);
 LearnedSearchConfig actor_search_config(std::uint64_t seed);
+std::uint64_t preflight_fixture_seed(
+    const PreflightRecipe& recipe, std::size_t fixture_index);
+std::uint64_t preflight_actor_local_seed(
+    const PreflightRecipe& recipe);
+LearnedSearchConfig preflight_outer_search_config(
+    const PreflightRecipe& recipe, std::uint64_t seed);
 
 DirectionSummary evaluate_direction(
     const FixtureSpec& spec,
@@ -148,6 +177,9 @@ void require_invariant_root_scores(
 // actor-local Red response pair without scoring either state.
 void validate_fixture_witnesses();
 Report diagnose(std::shared_ptr<const LearnedModel> parent);
+PreflightReport run_preflight(
+    std::shared_ptr<const LearnedModel> parent,
+    const PreflightRecipe& recipe);
 void print_report(std::ostream& output, const Report& report);
 
 } // namespace old_school::action_q_nested_actor_diagnostic

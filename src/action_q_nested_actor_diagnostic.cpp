@@ -914,6 +914,72 @@ LearnedSearchConfig actor_search_config(
     };
 }
 
+std::uint64_t preflight_fixture_seed(
+    const PreflightRecipe& recipe,
+    std::size_t fixture_index) {
+    if (fixture_index >= kFixtureCount ||
+        recipe.root_seed == 0) {
+        throw std::out_of_range(
+            "AQ4 preflight fixture coordinate is invalid");
+    }
+    return learned_iteration::derive_seed(
+        recipe.root_seed,
+        learned_iteration::SeedDomain::PrioritySearch,
+        1, fixture_index, 0);
+}
+
+std::uint64_t preflight_actor_local_seed(
+    const PreflightRecipe& recipe) {
+    if (recipe.root_seed == 0) {
+        throw std::invalid_argument(
+            "AQ4 preflight root seed is zero");
+    }
+    return learned_iteration::derive_seed(
+        recipe.root_seed,
+        learned_iteration::SeedDomain::PrioritySearch,
+        1, kFixtureCount, 0);
+}
+
+LearnedSearchConfig preflight_outer_search_config(
+    const PreflightRecipe& recipe,
+    std::uint64_t seed) {
+    if (recipe.root_seed == 0 ||
+        recipe.worlds == 0 ||
+        recipe.worlds > 4096 ||
+        recipe.rollouts_per_world == 0 ||
+        recipe.rollouts_per_world > 256 ||
+        recipe.horizon_turns == 0 ||
+        recipe.horizon_turns > 128 ||
+        recipe.evaluation_threads == 0 ||
+        recipe.evaluation_threads > 4096 ||
+        recipe.inner_worlds == 0 ||
+        recipe.inner_worlds > 4096) {
+        throw std::invalid_argument(
+            "AQ4 preflight recipe is invalid");
+    }
+    return {
+        .seed = seed,
+        .worlds = recipe.worlds,
+        .rollouts_per_world =
+            recipe.rollouts_per_world,
+        .horizon_turns = recipe.horizon_turns,
+        .continuation_variant =
+            LearnedVariant::ValueSearchChampion,
+        .value_continuation_epsilon = 0.0,
+        .blend_shallow_prior = false,
+        .value_resolved_shallow_prior_weight = 0.0,
+        .value_priority_residual_weight = 0.0,
+        .value_pass_dominance = false,
+        .value_continuation_controller =
+            LearnedContinuationController::Legacy,
+        .evaluation_threads =
+            recipe.evaluation_threads,
+        .capture_priority_h0_boundaries = false,
+        .value_continuation_search_worlds =
+            recipe.inner_worlds,
+    };
+}
+
 DirectionSummary evaluate_direction(
     const FixtureSpec& spec,
     std::span<const ActionScore> actions) {
@@ -1224,9 +1290,308 @@ bool Report::gate_passed() const {
            hypothesis_passed;
 }
 
+bool PreflightReport::gate_passed() const {
+    if (recipe.root_seed == 0 ||
+        evidence.parent_fingerprint !=
+            kRequiredParentFingerprint ||
+        evidence.fixtures.size() != kFixtureCount) {
+        return false;
+    }
+    const std::size_t samples_per_action =
+        recipe.worlds * recipe.rollouts_per_world;
+    const auto base_manifest = fixture_manifest();
+    bool all_directions = true;
+    for (std::size_t index = 0;
+         index < evidence.fixtures.size(); ++index) {
+        const FixtureReport& fixture =
+            evidence.fixtures[index];
+        FixtureSpec expected = base_manifest[index];
+        expected.expected_seed =
+            preflight_fixture_seed(recipe, index);
+        if (fixture.spec != expected ||
+            fixture.seed != expected.expected_seed ||
+            fixture.score.actions.empty() ||
+            fixture.score.selected_probe_key.empty() ||
+            fixture.score.accounting.sampled_worlds !=
+                recipe.worlds ||
+            fixture.score.accounting.rollout_evaluations !=
+                fixture.score.actions.size() *
+                    samples_per_action ||
+            fixture.score.accounting.terminal_evaluations +
+                    fixture.score.accounting
+                        .bootstrapped_evaluations !=
+                fixture.score.accounting.rollout_evaluations ||
+            fixture.score.accounting
+                    .inner_rollout_evaluations == 0 ||
+            fixture.score.accounting
+                    .inner_search_invocations == 0 ||
+            fixture.score.accounting
+                    .inner_search_max_depth != 1 ||
+            !fixture.direction.passed ||
+            !fixture.hidden_repartition_nonvacuous ||
+            !fixture.hidden_repartition_bit_identical ||
+            !fixture.reversed_action_bit_identical) {
+            return false;
+        }
+        std::size_t inner_rollouts = 0;
+        std::size_t inner_invocations = 0;
+        std::size_t maximum_depth = 0;
+        for (const ActionScore& action :
+             fixture.score.actions) {
+            if (action.samples.size() !=
+                    samples_per_action ||
+                action.inner_rollout_evaluations.size() !=
+                    samples_per_action ||
+                action.inner_search_invocations.size() !=
+                    samples_per_action ||
+                action.inner_search_max_depth.size() !=
+                    samples_per_action ||
+                !probability(action.mean)) {
+                return false;
+            }
+            for (std::size_t sample = 0;
+                 sample < samples_per_action; ++sample) {
+                const std::size_t rollouts =
+                    action.inner_rollout_evaluations[sample];
+                const std::size_t invocations =
+                    action.inner_search_invocations[sample];
+                const std::size_t depth =
+                    action.inner_search_max_depth[sample];
+                const bool inactive =
+                    invocations == 0 &&
+                    rollouts == 0 && depth == 0;
+                const bool active =
+                    invocations != 0 &&
+                    rollouts != 0 &&
+                    rollouts % recipe.inner_worlds == 0 &&
+                    depth == 1;
+                if (!probability(action.samples[sample]) ||
+                    (!inactive && !active) ||
+                    inner_rollouts >
+                        std::numeric_limits<std::size_t>::max() -
+                            rollouts ||
+                    inner_invocations >
+                        std::numeric_limits<std::size_t>::max() -
+                            invocations) {
+                    return false;
+                }
+                inner_rollouts += rollouts;
+                inner_invocations += invocations;
+                maximum_depth =
+                    std::max(maximum_depth, depth);
+            }
+        }
+        if (inner_rollouts !=
+                fixture.score.accounting
+                    .inner_rollout_evaluations ||
+            inner_invocations !=
+                fixture.score.accounting
+                    .inner_search_invocations ||
+            maximum_depth != 1) {
+            return false;
+        }
+        DirectionSummary observed;
+        try {
+            observed = evaluate_direction(
+                fixture.spec, fixture.score.actions);
+        } catch (const std::exception&) {
+            return false;
+        }
+        if (!direction_bit_identical(
+                observed, fixture.direction) ||
+            evidence.direction_passed[index] !=
+                fixture.direction.passed) {
+            return false;
+        }
+        all_directions =
+            all_directions && fixture.direction.passed;
+    }
+
+    const ActorLocalReport& actor = evidence.actor_local;
+    const std::size_t actor_samples =
+        recipe.inner_worlds *
+        kLearnedValueSearchRolloutsPerWorld;
+    if (actor.seed !=
+            preflight_actor_local_seed(recipe) ||
+        actor.score.actions.empty() ||
+        actor.score.selected_probe_key.empty() ||
+        actor.score.accounting.sampled_worlds !=
+            recipe.inner_worlds ||
+        actor.score.accounting.rollout_evaluations !=
+            actor.score.actions.size() * actor_samples ||
+        actor.score.accounting.terminal_evaluations +
+                actor.score.accounting
+                    .bootstrapped_evaluations !=
+            actor.score.accounting.rollout_evaluations ||
+        actor.score.accounting.inner_rollout_evaluations != 0 ||
+        actor.score.accounting.inner_search_invocations != 0 ||
+        actor.score.accounting.inner_search_max_depth != 0 ||
+        !actor.hidden_repartition_nonvacuous ||
+        !actor.observation_bit_identical ||
+        !actor.legal_actions_bit_identical ||
+        !actor.score_bit_identical ||
+        !actor.one_level_nesting_bounded) {
+        return false;
+    }
+    for (const ActionScore& action : actor.score.actions) {
+        if (action.samples.size() != actor_samples ||
+            !action.inner_rollout_evaluations.empty() ||
+            !action.inner_search_invocations.empty() ||
+            !action.inner_search_max_depth.empty() ||
+            !probability(action.mean) ||
+            !std::all_of(
+                action.samples.begin(), action.samples.end(),
+                [](double value) {
+                    return probability(value);
+                })) {
+            return false;
+        }
+    }
+    return all_directions &&
+           evidence.hypothesis_passed;
+}
+
 void validate_fixture_witnesses() {
     static_cast<void>(prepare_fixtures());
     static_cast<void>(prepare_actor_local());
+}
+
+PreflightReport run_preflight(
+    std::shared_ptr<const LearnedModel> parent,
+    const PreflightRecipe& recipe) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            kRequiredParentFingerprint) {
+        throw std::invalid_argument(
+            "AQ4 preflight requires exact frozen C16");
+    }
+    static_cast<void>(
+        preflight_outer_search_config(recipe, recipe.root_seed));
+    const auto prepared = prepare_fixtures();
+    const PreparedActorLocal actor =
+        prepare_actor_local();
+    auto manifest = fixture_manifest();
+
+    PreflightReport output;
+    output.recipe = recipe;
+    Report& report = output.evidence;
+    report.parent_fingerprint =
+        learned_model_fingerprint(parent);
+    bool all_directions = true;
+    for (std::size_t index = 0;
+         index < prepared.size(); ++index) {
+        const PreparedFixture& input =
+            prepared[index];
+        const std::uint64_t seed =
+            preflight_fixture_seed(recipe, index);
+        manifest[index].expected_seed = seed;
+        const LearnedSearchConfig search =
+            preflight_outer_search_config(recipe, seed);
+        RootScore direct =
+            score_root(
+                input.probe.state,
+                input.probe.original_decks,
+                input.probe.root_player,
+                sorcery_actions_for(input.probe),
+                input.probe.phase,
+                input.probe.consecutive_passes,
+                input.actions, &input.probe, parent,
+                search, true);
+        auto reversed_actions = input.actions;
+        std::reverse(
+            reversed_actions.begin(),
+            reversed_actions.end());
+        const RootScore reversed =
+            score_root(
+                input.probe.state,
+                input.probe.original_decks,
+                input.probe.root_player,
+                sorcery_actions_for(input.probe),
+                input.probe.phase,
+                input.probe.consecutive_passes,
+                reversed_actions, &input.probe, parent,
+                search, true);
+        const RootScore hidden =
+            score_root(
+                input.hidden_probe.state,
+                input.hidden_probe.original_decks,
+                input.hidden_probe.root_player,
+                sorcery_actions_for(input.hidden_probe),
+                input.hidden_probe.phase,
+                input.hidden_probe.consecutive_passes,
+                input.hidden_actions,
+                &input.hidden_probe, parent,
+                search, true);
+        require_invariant_root_scores(
+            direct, hidden, reversed);
+
+        FixtureReport fixture;
+        fixture.spec = manifest[index];
+        fixture.seed = seed;
+        fixture.direction =
+            evaluate_direction(
+                fixture.spec, direct.actions);
+        fixture.hidden_repartition_nonvacuous =
+            input.hidden_probe.state !=
+            input.probe.state;
+        fixture.hidden_repartition_bit_identical = true;
+        fixture.reversed_action_bit_identical = true;
+        fixture.score = std::move(direct);
+        report.direction_passed[index] =
+            fixture.direction.passed;
+        all_directions =
+            all_directions &&
+            fixture.direction.passed;
+        report.fixtures.push_back(
+            std::move(fixture));
+    }
+
+    LearnedSearchConfig actor_search =
+        actor_search_config(
+            preflight_actor_local_seed(recipe));
+    actor_search.worlds = recipe.inner_worlds;
+    const RootScore actor_direct =
+        score_root(
+            actor.direct_state, actor.original_decks,
+            actor.player, actor.sorcery_actions,
+            actor.phase, actor.consecutive_passes,
+            actor.actions, nullptr, parent,
+            actor_search, false);
+    const RootScore actor_hidden =
+        score_root(
+            actor.hidden_state, actor.original_decks,
+            actor.player, actor.sorcery_actions,
+            actor.phase, actor.consecutive_passes,
+            actor.actions, nullptr, parent,
+            actor_search, false);
+    if (!root_scores_bit_identical(
+            actor_direct, actor_hidden)) {
+        throw std::runtime_error(
+            "AQ4 preflight actor-local response leaked "
+            "private state");
+    }
+    report.actor_local = {
+        .seed = preflight_actor_local_seed(recipe),
+        .score = actor_direct,
+        .hidden_repartition_nonvacuous =
+            actor.direct_state != actor.hidden_state,
+        .observation_bit_identical =
+            actor.observation_identical,
+        .legal_actions_bit_identical =
+            actor.legal_actions_identical,
+        .score_bit_identical = true,
+        .one_level_nesting_bounded =
+            actor_direct.accounting
+                .inner_rollout_evaluations == 0,
+    };
+    report.hypothesis_passed =
+        all_directions &&
+        report.actor_local.hidden_repartition_nonvacuous &&
+        report.actor_local.observation_bit_identical &&
+        report.actor_local.legal_actions_bit_identical &&
+        report.actor_local.score_bit_identical &&
+        report.actor_local.one_level_nesting_bounded;
+    return output;
 }
 
 Report diagnose(
