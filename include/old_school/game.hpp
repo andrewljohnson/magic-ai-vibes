@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1512,9 +1513,47 @@ std::array<double, 2> learned_actor_binary_attack_logits(
     PermanentId subject,
     const std::vector<PermanentId>& remaining_attackers,
     std::shared_ptr<const LearnedModel> model);
+inline constexpr std::size_t
+    kLearnedCriticObservationFeatureCount =
+        50 + 24 * kCardCount;
+inline constexpr std::size_t
+    kLearnedCriticLeafCount = 2;
+struct LearnedCriticDirectPathParameters {
+    std::array<
+        std::array<
+            double,
+            kLearnedCriticObservationFeatureCount>,
+        kLearnedCriticLeafCount>
+        leaves{};
+
+    bool operator==(
+        const LearnedCriticDirectPathParameters&) const =
+        default;
+};
 double learned_critic_value(
     const GameState& state, std::size_t perspective,
     std::shared_ptr<const LearnedModel> model);
+// Scores an already-encoded actor-local state observation. This is the
+// narrow persistence-safe critic seam: callers need not retain or reconstruct
+// a GameState after the observation has passed its live collection checks.
+double learned_critic_observation_value(
+    std::span<const double> observation,
+    std::shared_ptr<const LearnedModel> model);
+std::array<double, kLearnedCriticLeafCount>
+learned_critic_observation_leaf_values(
+    std::span<const double> observation,
+    std::shared_ptr<const LearnedModel> model);
+// Exact two-leaf LegacyStateOnly Value topology only.
+LearnedCriticDirectPathParameters
+learned_critic_direct_path_parameters(
+    std::shared_ptr<const LearnedModel> model);
+// Returns an immutable clone after adding one shared actor-local feature
+// delta to both critic leaves. A numerically all-zero delta returns the exact
+// parent object, preserving bit identity.
+std::shared_ptr<const LearnedModel>
+with_learned_shared_critic_direct_delta(
+    std::shared_ptr<const LearnedModel> parent,
+    std::span<const double> delta);
 // Evaluation-only access to the two predictions underlying an exact
 // two-leaf LegacyStateOnly Value ensemble.
 std::array<double, 2> learned_critic_leaf_values(

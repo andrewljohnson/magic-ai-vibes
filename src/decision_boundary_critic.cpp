@@ -4,10 +4,16 @@
 #include "old_school/probes.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
+#include <cerrno>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <fcntl.h>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iterator>
 #include <limits>
@@ -20,6 +26,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -520,6 +528,898 @@ void append_example(
     append_accounting(output, example.accounting);
 }
 
+constexpr std::string_view kCorpusCacheMagic =
+    "OSDBCC01";
+constexpr std::string_view kCorpusCacheSchema =
+    "old-school-aq10-dbc1-owner-safe-corpus-cache-v1";
+constexpr std::uint64_t kCorpusCacheVersion = 1;
+constexpr std::size_t kMaximumCorpusCacheBytes =
+    256U * 1024U * 1024U;
+constexpr std::size_t kMaximumCacheStringBytes = 4096;
+constexpr std::size_t kMaximumCacheActionsPerRoot = 1024;
+
+void append_priority_action(
+    std::string& output,
+    const PriorityAction& action) {
+    append_u64(
+        output, static_cast<std::uint64_t>(action.kind));
+    append_u64(
+        output, static_cast<std::uint64_t>(action.card));
+    append_bool(output, action.target.has_value());
+    if (action.target) {
+        append_size(output, action.target->player);
+        append_bool(
+            output, action.target->creature.has_value());
+        if (action.target->creature) {
+            append_u64(output, *action.target->creature);
+        }
+    }
+    append_bool(output, action.spell_target.has_value());
+    if (action.spell_target) {
+        append_u64(output, *action.spell_target);
+    }
+    append_bool(
+        output, action.source_permanent.has_value());
+    if (action.source_permanent) {
+        append_u64(output, *action.source_permanent);
+    }
+    append_u64(
+        output,
+        std::bit_cast<std::uint64_t>(
+            static_cast<std::int64_t>(action.x_value)));
+}
+
+void append_cached_manifest_root(
+    std::string& output,
+    const ManifestRoot& root) {
+    append_coordinate(output, root.coordinate);
+    append_string(output, root.stable_root_id);
+    append_string(
+        output, root.information_action_fingerprint);
+    append_size(output, root.actions.size());
+    for (const PriorityAction& action : root.actions) {
+        append_priority_action(output, action);
+    }
+    append_size(output, root.action_descriptors.size());
+    for (const std::string& descriptor :
+         root.action_descriptors) {
+        append_string(output, descriptor);
+    }
+    append_size(output, root.options.size());
+    for (const auto& option : root.options) {
+        append_size(output, option.size());
+        for (const double feature : option) {
+            append_double(output, feature);
+        }
+    }
+}
+
+void append_cached_census(
+    std::string& output, const Census& census) {
+    append_string(output, census.parent_fingerprint);
+    append_string(output, census.source_manifest_hash);
+    append_size(output, census.splits.size());
+    for (const SplitCensus& split : census.splits) {
+        append_u64(
+            output,
+            static_cast<std::uint64_t>(split.split));
+        append_size(output, split.games);
+        append_size(output, split.actor_games);
+        append_size(output, split.roots);
+        append_size(output, split.legal_options);
+        append_size(output, split.decks.size());
+        for (const DeckCensus& deck : split.decks) {
+            append_size(output, deck.actor_games);
+            append_size(output, deck.roots);
+            append_size(output, deck.legal_options);
+        }
+    }
+    append_size(output, census.roots.size());
+    for (const ManifestRoot& root : census.roots) {
+        append_cached_manifest_root(output, root);
+    }
+    append_string(output, census.subset_hash);
+}
+
+void append_cached_example(
+    std::string& output,
+    const RootExample& example) {
+    // The exact census owns the manifest. These two identities bind each
+    // compact example to its canonical root without duplicating the
+    // owner-safe action/feature manifest.
+    append_string(
+        output, example.manifest.stable_root_id);
+    append_string(
+        output,
+        example.manifest.information_action_fingerprint);
+    append_size(output, example.teacher_samples.size());
+    for (const auto& samples : example.teacher_samples) {
+        append_size(output, samples.size());
+        for (const double sample : samples) {
+            append_double(output, sample);
+        }
+    }
+    append_size(output, example.cells.size());
+    for (const BoundaryCell& cell : example.cells) {
+        append_size(output, cell.action_index);
+        append_size(output, cell.world_index);
+        append_double(output, cell.teacher_target);
+        append_double(output, cell.parent_prediction);
+        append_double(output, cell.weight);
+        append_bool(
+            output, cell.terminal_before_boundary);
+        append_size(output, cell.observation.size());
+        for (const double feature : cell.observation) {
+            append_double(output, feature);
+        }
+        // Deliberately no boundary_state field.
+    }
+    append_accounting(output, example.accounting);
+}
+
+std::string corpus_cache_payload(
+    const Corpus& corpus) {
+    std::string payload;
+    append_string(payload, kCorpusCacheSchema);
+    append_string(payload, kCorpusSchema);
+    append_size(payload, kCriticFeatureCount);
+    append_size(payload, kPolicyFeatureCount);
+    append_u64(payload, kTeacherSeed);
+    append_size(payload, kTeacherWorlds);
+    append_size(payload, kTeacherRolloutsPerWorld);
+    append_size(payload, kTeacherHorizonTurns);
+    append_size(payload, kInnerWorlds);
+    append_size(payload, kInnerHorizonTurns);
+    append_cached_census(payload, corpus.census);
+    append_components(
+        payload, corpus.parent_components);
+    append_string(payload, corpus.digest);
+    append_size(payload, corpus.train.size());
+    for (const RootExample& example : corpus.train) {
+        append_cached_example(payload, example);
+    }
+    append_size(payload, corpus.dev.size());
+    for (const RootExample& example : corpus.dev) {
+        append_cached_example(payload, example);
+    }
+    return payload;
+}
+
+class CorpusCacheReader {
+  public:
+    explicit CorpusCacheReader(std::string_view bytes)
+        : bytes_(bytes) {}
+
+    std::uint64_t unsigned64() {
+        require_available(8);
+        std::uint64_t value = 0;
+        for (unsigned int byte = 0; byte < 8; ++byte) {
+            value |=
+                static_cast<std::uint64_t>(
+                    static_cast<unsigned char>(
+                        bytes_[position_ + byte]))
+                << (byte * 8);
+        }
+        position_ += 8;
+        return value;
+    }
+
+    std::size_t size(
+        std::size_t maximum,
+        std::string_view field) {
+        const std::uint64_t value = unsigned64();
+        if (value > maximum ||
+            value >
+                static_cast<std::uint64_t>(
+                    std::numeric_limits<std::size_t>::max())) {
+            throw std::runtime_error(
+                "AQ10-DBC1 cache " +
+                std::string(field) +
+                " exceeds its bound");
+        }
+        return static_cast<std::size_t>(value);
+    }
+
+    bool boolean() {
+        const std::uint64_t value = unsigned64();
+        if (value > 1) {
+            throw std::runtime_error(
+                "AQ10-DBC1 cache boolean is invalid");
+        }
+        return value != 0;
+    }
+
+    double real() {
+        return std::bit_cast<double>(unsigned64());
+    }
+
+    std::string text(
+        std::size_t maximum =
+            kMaximumCacheStringBytes) {
+        const std::size_t count =
+            size(maximum, "text length");
+        require_available(count);
+        std::string result(
+            bytes_.substr(position_, count));
+        position_ += count;
+        return result;
+    }
+
+    std::string_view bytes(std::size_t count) {
+        require_available(count);
+        const std::string_view result =
+            bytes_.substr(position_, count);
+        position_ += count;
+        return result;
+    }
+
+    void require_finished() const {
+        if (position_ != bytes_.size()) {
+            throw std::runtime_error(
+                "AQ10-DBC1 cache has trailing bytes");
+        }
+    }
+
+  private:
+    void require_available(std::size_t count) const {
+        if (count > bytes_.size() - position_) {
+            throw std::runtime_error(
+                "AQ10-DBC1 cache is truncated");
+        }
+    }
+
+    std::string_view bytes_;
+    std::size_t position_ = 0;
+};
+
+template <typename Enum>
+Enum read_enum(
+    CorpusCacheReader& input,
+    std::uint64_t maximum,
+    std::string_view field) {
+    const std::uint64_t raw = input.unsigned64();
+    if (raw > maximum) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache " +
+            std::string(field) + " is invalid");
+    }
+    return static_cast<Enum>(raw);
+}
+
+source::RootCoordinate read_coordinate(
+    CorpusCacheReader& input) {
+    source::RootCoordinate coordinate;
+    coordinate.split =
+        read_enum<Split>(input, 1, "split");
+    coordinate.schedule_index =
+        input.size(
+            source::kGamesPerSplit - 1,
+            "schedule index");
+    coordinate.pairing_index =
+        input.size(
+            source::kGamesPerSplit,
+            "pairing index");
+    coordinate.game_seed = input.unsigned64();
+    coordinate.starting_player =
+        input.size(1, "starting player");
+    for (DeckId& deck : coordinate.seat_decks) {
+        deck = read_enum<DeckId>(
+            input, kDeckCount - 1, "deck");
+    }
+    coordinate.actor = input.size(1, "actor");
+    coordinate.trace_ordinal =
+        input.size(
+            std::numeric_limits<std::size_t>::max(),
+            "trace ordinal");
+    coordinate.nontrivial_ordinal =
+        input.size(
+            std::numeric_limits<std::size_t>::max(),
+            "nontrivial ordinal");
+    coordinate.actor_game_nontrivial_roots =
+        input.size(
+            std::numeric_limits<std::size_t>::max(),
+            "actor-game nontrivial roots");
+    coordinate.retained_position =
+        input.size(
+            std::numeric_limits<std::size_t>::max(),
+            "retained position");
+    coordinate.actor_game_retained_roots =
+        input.size(
+            std::numeric_limits<std::size_t>::max(),
+            "actor-game retained roots");
+    coordinate.search_seed = input.unsigned64();
+    return coordinate;
+}
+
+PriorityAction read_priority_action(
+    CorpusCacheReader& input) {
+    PriorityAction action;
+    action.kind =
+        read_enum<PriorityActionKind>(
+            input,
+            static_cast<std::uint64_t>(
+                PriorityActionKind::ActivateMillstone),
+            "priority action kind");
+    action.card =
+        read_enum<CardId>(
+            input, kCardCount - 1, "card");
+    if (input.boolean()) {
+        Target target;
+        target.player = input.size(1, "target player");
+        if (input.boolean()) {
+            target.creature = input.unsigned64();
+        }
+        action.target = target;
+    }
+    if (input.boolean()) {
+        action.spell_target = input.unsigned64();
+    }
+    if (input.boolean()) {
+        action.source_permanent = input.unsigned64();
+    }
+    const std::int64_t x_value =
+        std::bit_cast<std::int64_t>(
+            input.unsigned64());
+    if (x_value <
+            std::numeric_limits<int>::min() ||
+        x_value >
+            std::numeric_limits<int>::max()) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache X value is invalid");
+    }
+    action.x_value = static_cast<int>(x_value);
+    return action;
+}
+
+ManifestRoot read_manifest_root(
+    CorpusCacheReader& input) {
+    ManifestRoot root;
+    root.coordinate = read_coordinate(input);
+    root.stable_root_id = input.text(64);
+    root.information_action_fingerprint =
+        input.text(64);
+    const std::size_t action_count =
+        input.size(
+            kMaximumCacheActionsPerRoot,
+            "action count");
+    root.actions.reserve(action_count);
+    for (std::size_t action = 0;
+         action < action_count; ++action) {
+        root.actions.push_back(
+            read_priority_action(input));
+    }
+    const std::size_t descriptor_count =
+        input.size(
+            kMaximumCacheActionsPerRoot,
+            "descriptor count");
+    root.action_descriptors.reserve(descriptor_count);
+    for (std::size_t descriptor = 0;
+         descriptor < descriptor_count; ++descriptor) {
+        root.action_descriptors.push_back(
+            input.text());
+    }
+    const std::size_t option_count =
+        input.size(
+            kMaximumCacheActionsPerRoot,
+            "policy-option count");
+    root.options.reserve(option_count);
+    for (std::size_t option = 0;
+         option < option_count; ++option) {
+        const std::size_t feature_count =
+            input.size(
+                kPolicyFeatureCount,
+                "policy feature count");
+        std::vector<double> features;
+        features.reserve(feature_count);
+        for (std::size_t feature = 0;
+             feature < feature_count; ++feature) {
+            features.push_back(input.real());
+        }
+        root.options.push_back(
+            std::move(features));
+    }
+    return root;
+}
+
+Census read_cached_census(
+    CorpusCacheReader& input) {
+    Census census;
+    census.parent_fingerprint = input.text(64);
+    census.source_manifest_hash = input.text(64);
+    const std::size_t split_count =
+        input.size(2, "split count");
+    if (split_count != census.splits.size()) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache split count drifted");
+    }
+    for (SplitCensus& split : census.splits) {
+        split.split =
+            read_enum<Split>(input, 1, "split");
+        split.games =
+            input.size(
+                source::kGamesPerSplit,
+                "game count");
+        split.actor_games =
+            input.size(
+                source::kActorGamesPerSplit,
+                "actor-game count");
+        split.roots =
+            input.size(
+                kExpectedRootsPerSplit,
+                "root count");
+        split.legal_options =
+            input.size(
+                kExpectedRootsPerSplit *
+                    kMaximumCacheActionsPerRoot,
+                "legal-option count");
+        const std::size_t deck_count =
+            input.size(kDeckCount, "deck count");
+        if (deck_count != split.decks.size()) {
+            throw std::runtime_error(
+                "AQ10-DBC1 cache deck count drifted");
+        }
+        for (DeckCensus& deck : split.decks) {
+            deck.actor_games =
+                input.size(
+                    kExpectedRootsPerDeckAndSplit,
+                    "deck actor-game count");
+            deck.roots =
+                input.size(
+                    kExpectedRootsPerDeckAndSplit,
+                    "deck root count");
+            deck.legal_options =
+                input.size(
+                    kExpectedRootsPerDeckAndSplit *
+                        kMaximumCacheActionsPerRoot,
+                    "deck legal-option count");
+        }
+    }
+    const std::size_t root_count =
+        input.size(
+            2 * kExpectedRootsPerSplit,
+            "census root count");
+    census.roots.reserve(root_count);
+    for (std::size_t root = 0;
+         root < root_count; ++root) {
+        census.roots.push_back(
+            read_manifest_root(input));
+    }
+    census.subset_hash = input.text(64);
+    return census;
+}
+
+LearnedModelComponentFingerprints read_components(
+    CorpusCacheReader& input) {
+    return {
+        .critic = input.text(64),
+        .priority = input.text(64),
+        .attack = input.text(64),
+        .block = input.text(64),
+        .damage_order = input.text(64),
+    };
+}
+
+RootAccounting read_accounting(
+    CorpusCacheReader& input) {
+    const std::size_t maximum_cells =
+        kMaximumCacheActionsPerRoot *
+        kTeacherWorlds;
+    return {
+        .sampled_worlds =
+            input.size(
+                kTeacherWorlds, "sampled worlds"),
+        .rollout_evaluations =
+            input.size(
+                maximum_cells,
+                "rollout evaluations"),
+        .terminal_evaluations =
+            input.size(
+                maximum_cells,
+                "terminal evaluations"),
+        .bootstrapped_evaluations =
+            input.size(
+                maximum_cells,
+                "bootstrapped evaluations"),
+        .eligible_cells =
+            input.size(
+                maximum_cells, "eligible cells"),
+        .terminal_before_boundary_cells =
+            input.size(
+                maximum_cells,
+                "terminal-before-boundary cells"),
+        .inner_rollout_evaluations =
+            input.size(
+                std::numeric_limits<std::size_t>::max(),
+                "inner rollout evaluations"),
+        .inner_search_invocations =
+            input.size(
+                std::numeric_limits<std::size_t>::max(),
+                "inner search invocations"),
+        .inner_search_max_depth =
+            input.size(1, "inner search max depth"),
+    };
+}
+
+RootExample read_cached_example(
+    CorpusCacheReader& input,
+    const ManifestRoot& manifest) {
+    if (input.text(64) != manifest.stable_root_id ||
+        input.text(64) !=
+            manifest.information_action_fingerprint) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache example root identity drifted");
+    }
+    RootExample example;
+    example.manifest = manifest;
+    const std::size_t action_count =
+        input.size(
+            kMaximumCacheActionsPerRoot,
+            "teacher action count");
+    example.teacher_samples.reserve(action_count);
+    for (std::size_t action = 0;
+         action < action_count; ++action) {
+        const std::size_t world_count =
+            input.size(
+                kTeacherWorlds,
+                "teacher world count");
+        std::vector<double> samples;
+        samples.reserve(world_count);
+        for (std::size_t world = 0;
+             world < world_count; ++world) {
+            samples.push_back(input.real());
+        }
+        example.teacher_samples.push_back(
+            std::move(samples));
+    }
+    const std::size_t cell_count =
+        input.size(
+            kMaximumCacheActionsPerRoot *
+                kTeacherWorlds,
+            "cell count");
+    example.cells.reserve(cell_count);
+    for (std::size_t index = 0;
+         index < cell_count; ++index) {
+        BoundaryCell cell{
+            .action_index =
+                input.size(
+                    kMaximumCacheActionsPerRoot - 1,
+                    "cell action index"),
+            .world_index =
+                input.size(
+                    kTeacherWorlds - 1,
+                    "cell world index"),
+            .teacher_target = input.real(),
+            .parent_prediction = input.real(),
+            .weight = input.real(),
+            .terminal_before_boundary =
+                input.boolean(),
+        };
+        const std::size_t feature_count =
+            input.size(
+                kCriticFeatureCount,
+                "critic feature count");
+        cell.observation.reserve(feature_count);
+        for (std::size_t feature = 0;
+             feature < feature_count; ++feature) {
+            cell.observation.push_back(
+                input.real());
+        }
+        example.cells.push_back(std::move(cell));
+    }
+    example.accounting = read_accounting(input);
+    return example;
+}
+
+std::vector<const ManifestRoot*> split_manifests(
+    const Census& census, Split split) {
+    std::vector<const ManifestRoot*> result;
+    result.reserve(kExpectedRootsPerSplit);
+    for (const ManifestRoot& root : census.roots) {
+        if (root.coordinate.split == split) {
+            result.push_back(&root);
+        }
+    }
+    return result;
+}
+
+std::vector<RootExample> read_cached_examples(
+    CorpusCacheReader& input,
+    const Census& census, Split split) {
+    const auto manifests =
+        split_manifests(census, split);
+    const std::size_t count =
+        input.size(
+            kExpectedRootsPerSplit,
+            "example count");
+    if (count != manifests.size()) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache example census drifted");
+    }
+    std::vector<RootExample> examples;
+    examples.reserve(count);
+    for (const ManifestRoot* manifest : manifests) {
+        examples.push_back(
+            read_cached_example(input, *manifest));
+    }
+    return examples;
+}
+
+std::string make_corpus_cache_file(
+    const Corpus& corpus) {
+    const std::string payload =
+        corpus_cache_payload(corpus);
+    if (payload.size() > kMaximumCorpusCacheBytes) {
+        throw std::length_error(
+            "AQ10-DBC1 cache payload exceeds its bound");
+    }
+    std::string file;
+    file.append(kCorpusCacheMagic);
+    append_u64(file, kCorpusCacheVersion);
+    append_size(file, payload.size());
+    append_string(
+        file,
+        artifact_integrity::sha256_string(payload));
+    file.append(payload);
+    return file;
+}
+
+Corpus parse_corpus_cache_file(
+    std::string_view file) {
+    CorpusCacheReader envelope(file);
+    if (envelope.bytes(kCorpusCacheMagic.size()) !=
+            kCorpusCacheMagic ||
+        envelope.unsigned64() != kCorpusCacheVersion) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache magic or version is invalid");
+    }
+    const std::size_t payload_size =
+        envelope.size(
+            kMaximumCorpusCacheBytes,
+            "payload size");
+    const std::string payload_digest =
+        envelope.text(64);
+    const std::string_view payload =
+        envelope.bytes(payload_size);
+    envelope.require_finished();
+    if (payload_digest.size() != 64 ||
+        payload_digest !=
+            artifact_integrity::sha256_string(payload)) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache payload digest is invalid");
+    }
+
+    CorpusCacheReader input(payload);
+    if (input.text() != kCorpusCacheSchema ||
+        input.text() != kCorpusSchema ||
+        input.size(
+            kCriticFeatureCount,
+            "critic schema width") !=
+            kCriticFeatureCount ||
+        input.size(
+            kPolicyFeatureCount,
+            "policy schema width") !=
+            kPolicyFeatureCount ||
+        input.unsigned64() != kTeacherSeed ||
+        input.size(
+            kTeacherWorlds,
+            "teacher schema worlds") !=
+            kTeacherWorlds ||
+        input.size(
+            kTeacherRolloutsPerWorld,
+            "teacher schema rollouts") !=
+            kTeacherRolloutsPerWorld ||
+        input.size(
+            kTeacherHorizonTurns,
+            "teacher schema horizon") !=
+            kTeacherHorizonTurns ||
+        input.size(
+            kInnerWorlds,
+            "inner schema worlds") !=
+            kInnerWorlds ||
+        input.size(
+            kInnerHorizonTurns,
+            "inner schema horizon") !=
+            kInnerHorizonTurns) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache recipe is invalid");
+    }
+    Corpus corpus;
+    corpus.census = read_cached_census(input);
+    corpus.parent_components = read_components(input);
+    corpus.digest = input.text(64);
+    corpus.train =
+        read_cached_examples(
+            input, corpus.census, Split::Train);
+    corpus.dev =
+        read_cached_examples(
+            input, corpus.census, Split::Dev);
+    input.require_finished();
+    validate_corpus(corpus);
+    return corpus;
+}
+
+std::string read_corpus_cache_file(
+    const std::filesystem::path& path) {
+    if (path.empty() || path.filename().empty()) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 cache path must name a file");
+    }
+    std::error_code size_error;
+    const std::uintmax_t byte_count =
+        std::filesystem::file_size(path, size_error);
+    if (size_error ||
+        byte_count > kMaximumCorpusCacheBytes +
+                         4096U ||
+        byte_count >
+            static_cast<std::uintmax_t>(
+                std::numeric_limits<std::size_t>::max())) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache file is missing or exceeds its bound");
+    }
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error(
+            "cannot open AQ10-DBC1 cache");
+    }
+    std::string bytes(
+        static_cast<std::size_t>(byte_count), '\0');
+    if (!bytes.empty()) {
+        input.read(
+            bytes.data(),
+            static_cast<std::streamsize>(bytes.size()));
+    }
+    if (input.gcount() !=
+            static_cast<std::streamsize>(bytes.size()) ||
+        input.peek() != std::char_traits<char>::eof()) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache changed or was truncated while reading");
+    }
+    return bytes;
+}
+
+void write_corpus_cache_file_atomic(
+    const std::filesystem::path& path,
+    std::string_view bytes) {
+    if (path.empty() || path.filename().empty()) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 cache path must name a file");
+    }
+    const std::filesystem::path directory =
+        path.has_parent_path()
+            ? path.parent_path()
+            : std::filesystem::path(".");
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+        directory, directory_error);
+    if (directory_error) {
+        throw std::runtime_error(
+            "cannot create AQ10-DBC1 cache directory: " +
+            directory_error.message());
+    }
+
+    static std::atomic<std::uint64_t> counter{0};
+    std::filesystem::path temporary;
+    int descriptor = -1;
+    for (std::size_t attempt = 0;
+         attempt < 128; ++attempt) {
+        temporary =
+            directory /
+            (path.filename().string() + ".tmp." +
+             std::to_string(
+                 static_cast<unsigned long long>(
+                     ::getpid())) +
+             "." +
+             std::to_string(
+                 counter.fetch_add(
+                     1,
+                     std::memory_order_relaxed)));
+        descriptor = ::open(
+            temporary.c_str(),
+            O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+            0644);
+        if (descriptor >= 0) {
+            break;
+        }
+        if (errno != EEXIST) {
+            throw std::runtime_error(
+                "cannot create temporary AQ10-DBC1 cache: " +
+                std::string(std::strerror(errno)));
+        }
+    }
+    if (descriptor < 0) {
+        throw std::runtime_error(
+            "cannot reserve temporary AQ10-DBC1 cache");
+    }
+    const auto cleanup = [&] {
+        if (descriptor >= 0) {
+            static_cast<void>(::close(descriptor));
+            descriptor = -1;
+        }
+        static_cast<void>(::unlink(temporary.c_str()));
+    };
+    std::size_t position = 0;
+    while (position < bytes.size()) {
+        const ssize_t written = ::write(
+            descriptor,
+            bytes.data() + position,
+            bytes.size() - position);
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            const std::string detail =
+                std::strerror(errno);
+            cleanup();
+            throw std::runtime_error(
+                "cannot write temporary AQ10-DBC1 cache: " +
+                detail);
+        }
+        if (written == 0) {
+            cleanup();
+            throw std::runtime_error(
+                "temporary AQ10-DBC1 cache write made no progress");
+        }
+        position += static_cast<std::size_t>(written);
+    }
+    if (::fsync(descriptor) != 0) {
+        const std::string detail =
+            std::strerror(errno);
+        cleanup();
+        throw std::runtime_error(
+            "cannot sync temporary AQ10-DBC1 cache: " +
+            detail);
+    }
+    if (::close(descriptor) != 0) {
+        const std::string detail =
+            std::strerror(errno);
+        descriptor = -1;
+        static_cast<void>(
+            ::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot close temporary AQ10-DBC1 cache: " +
+            detail);
+    }
+    descriptor = -1;
+    const int directory_descriptor =
+        ::open(
+            directory.c_str(),
+            O_RDONLY | O_CLOEXEC);
+    if (directory_descriptor < 0) {
+        const std::string detail =
+            std::strerror(errno);
+        static_cast<void>(
+            ::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot open AQ10-DBC1 cache directory: " +
+            detail);
+    }
+    if (::rename(
+            temporary.c_str(), path.c_str()) != 0) {
+        const std::string detail =
+            std::strerror(errno);
+        static_cast<void>(
+            ::close(directory_descriptor));
+        static_cast<void>(
+            ::unlink(temporary.c_str()));
+        throw std::runtime_error(
+            "cannot atomically publish AQ10-DBC1 cache: " +
+            detail);
+    }
+    if (::fsync(directory_descriptor) != 0) {
+        const std::string detail =
+            std::strerror(errno);
+        static_cast<void>(
+            ::close(directory_descriptor));
+        throw std::runtime_error(
+            "cannot sync AQ10-DBC1 cache directory: " +
+            detail);
+    }
+    if (::close(directory_descriptor) != 0) {
+        throw std::runtime_error(
+            "cannot close AQ10-DBC1 cache directory");
+    }
+}
+
 GameState hidden_repartition_clone(
     const GameState& state, std::size_t observer) {
     if (observer >= state.players.size()) {
@@ -636,7 +1536,6 @@ void validate_root_example(
             ++eligible;
             if (cell.observation.size() !=
                     kCriticFeatureCount ||
-                !cell.boundary_state.has_value() ||
                 !std::all_of(
                     cell.observation.begin(),
                     cell.observation.end(),
@@ -1267,6 +2166,38 @@ void validate_corpus(const Corpus& corpus) {
     }
 }
 
+void write_corpus_cache_atomic(
+    const std::filesystem::path& path,
+    const Corpus& corpus) {
+    validate_corpus(corpus);
+    require_frozen_census(corpus.census);
+    write_corpus_cache_file_atomic(
+        path, make_corpus_cache_file(corpus));
+}
+
+Corpus load_corpus_cache(
+    const std::filesystem::path& path,
+    std::shared_ptr<const LearnedModel> parent) {
+    if (!parent ||
+        learned_model_fingerprint(parent) !=
+            kRequiredParentFingerprint ||
+        learned_critic_schema(parent) !=
+            LearnedCriticSchema::LegacyStateOnly) {
+        throw std::invalid_argument(
+            "AQ10-DBC1 cache requires exact frozen C16");
+    }
+    Corpus corpus =
+        parse_corpus_cache_file(
+            read_corpus_cache_file(path));
+    require_frozen_census(corpus.census);
+    if (corpus.parent_components !=
+            learned_model_component_fingerprints(parent)) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache parent components drifted");
+    }
+    return corpus;
+}
+
 Corpus collect_corpus(
     std::shared_ptr<const LearnedModel> parent,
     const Census& frozen_subset,
@@ -1343,10 +2274,8 @@ std::vector<RootPrediction> score(
             }
             prediction.action_samples
                 [cell.action_index][cell.world_index] =
-                    learned_critic_value(
-                        *cell.boundary_state,
-                        root.manifest.coordinate.actor,
-                        model);
+                    learned_critic_observation_value(
+                        cell.observation, model);
         }
         result.push_back(std::move(prediction));
     }
@@ -2081,6 +3010,32 @@ Corpus make_corpus(
     };
     corpus.digest =
         canonical_corpus_digest(corpus);
+    return corpus;
+}
+
+void write_unfrozen_corpus_cache_atomic(
+    const std::filesystem::path& path,
+    const Corpus& corpus) {
+    validate_corpus(corpus);
+    write_corpus_cache_file_atomic(
+        path, make_corpus_cache_file(corpus));
+}
+
+Corpus load_unfrozen_corpus_cache(
+    const std::filesystem::path& path,
+    const Census& expected_census,
+    const LearnedModelComponentFingerprints&
+        expected_parent_components) {
+    validate_census(expected_census);
+    Corpus corpus =
+        parse_corpus_cache_file(
+            read_corpus_cache_file(path));
+    if (corpus.census != expected_census ||
+        corpus.parent_components !=
+            expected_parent_components) {
+        throw std::runtime_error(
+            "AQ10-DBC1 cache frozen identity drifted");
+    }
     return corpus;
 }
 

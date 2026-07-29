@@ -4,8 +4,11 @@
 #include "old_school/probes.hpp"
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -40,6 +43,65 @@ void expect_rejected(
         return;
     }
     throw std::runtime_error(std::string(message));
+}
+
+class TemporaryDirectory {
+  public:
+    TemporaryDirectory() {
+        const auto nonce =
+            std::chrono::steady_clock::now()
+                .time_since_epoch()
+                .count();
+        path_ =
+            std::filesystem::temp_directory_path() /
+            ("old-school-dbc-cache-test-" +
+             std::to_string(nonce));
+        std::filesystem::create_directories(path_);
+    }
+
+    TemporaryDirectory(const TemporaryDirectory&) = delete;
+    TemporaryDirectory& operator=(
+        const TemporaryDirectory&) = delete;
+
+    ~TemporaryDirectory() {
+        std::error_code ignored;
+        std::filesystem::remove_all(path_, ignored);
+    }
+
+    const std::filesystem::path& path() const {
+        return path_;
+    }
+
+  private:
+    std::filesystem::path path_;
+};
+
+std::string read_binary(
+    const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error(
+            "could not open binary cache fixture");
+    }
+    return {
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>()};
+}
+
+void write_binary(
+    const std::filesystem::path& path,
+    std::string_view bytes) {
+    std::ofstream output(
+        path,
+        std::ios::binary | std::ios::trunc);
+    output.write(
+        bytes.data(),
+        static_cast<std::streamsize>(bytes.size()));
+    output.close();
+    if (!output) {
+        throw std::runtime_error(
+            "could not write binary cache fixture");
+    }
 }
 
 template <typename T>
@@ -311,6 +373,14 @@ dbc::Corpus make_valid_corpus(
         std::move(train), std::move(dev));
 }
 
+const std::shared_ptr<const old_school::LearnedModel>&
+test_value_model() {
+    static const auto model =
+        old_school::train_learned_value_champion(
+            1, 0xDBC20001ULL);
+    return model;
+}
+
 std::vector<dbc::RootPrediction> make_predictions(
     const std::vector<dbc::RootExample>& examples,
     bool rank_teacher) {
@@ -548,6 +618,331 @@ int main() {
         expect(
             first != second,
             "repeated-collection seam ignored live state");
+    });
+
+    test("owner-safe corpus cache roundtrips without states", [] {
+        const dbc::Corpus original =
+            make_valid_corpus(true);
+        TemporaryDirectory directory;
+        const auto path =
+            directory.path() / "nested" / "corpus.bin";
+        dbc::testing::
+            write_unfrozen_corpus_cache_atomic(
+                path, original);
+        expect(
+            std::filesystem::is_regular_file(path),
+            "atomic corpus cache was not published");
+
+        dbc::Corpus expected = original;
+        for (auto* examples :
+             {&expected.train, &expected.dev}) {
+            for (auto& root : *examples) {
+                for (auto& cell : root.cells) {
+                    cell.boundary_state.reset();
+                }
+            }
+        }
+        const dbc::Corpus loaded =
+            dbc::testing::
+                load_unfrozen_corpus_cache(
+                    path, original.census,
+                    original.parent_components);
+        expect(
+            loaded == expected,
+            "owner-safe corpus cache roundtrip drifted");
+        dbc::validate_corpus(loaded);
+        const auto predictions =
+            dbc::score(
+                loaded.train, test_value_model());
+        expect(
+            predictions.size() ==
+                loaded.train.size(),
+            "loaded observation-only corpus could not be scored");
+        for (const auto* examples :
+             {&loaded.train, &loaded.dev}) {
+            for (const auto& root : *examples) {
+                for (const auto& cell : root.cells) {
+                    expect(
+                        !cell.boundary_state.has_value(),
+                        "loaded cache retained transient GameState");
+                }
+            }
+        }
+
+        dbc::Census other_census = original.census;
+        other_census.roots.front()
+            .options.front().front() += 1.0;
+        other_census =
+            dbc::testing::make_census(
+                other_census.splits,
+                other_census.roots);
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    dbc::testing::
+                        load_unfrozen_corpus_cache(
+                            path, other_census,
+                            original.parent_components));
+            },
+            "cache accepted a different frozen census");
+        auto other_components =
+            original.parent_components;
+        other_components.critic.front() =
+            other_components.critic.front() == '0'
+                ? '1'
+                : '0';
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    dbc::testing::
+                        load_unfrozen_corpus_cache(
+                            path, original.census,
+                            other_components));
+            },
+            "cache accepted different parent components");
+        expect_rejected(
+            [&] {
+                dbc::write_corpus_cache_atomic(
+                    directory.path() / "production.bin",
+                    original);
+            },
+            "production cache accepted an unfrozen subset");
+
+        const std::string temporary_prefix =
+            path.filename().string() + ".tmp.";
+        for (const auto& entry :
+             std::filesystem::directory_iterator(
+                 path.parent_path())) {
+            expect(
+                entry.path().filename().string().rfind(
+                    temporary_prefix, 0) != 0,
+                "atomic cache left a temporary file");
+        }
+    });
+
+    test("corpus cache rejects mutation truncation and trailing bytes", [] {
+        const dbc::Corpus corpus =
+            make_valid_corpus();
+        TemporaryDirectory directory;
+        const auto valid_path =
+            directory.path() / "valid.bin";
+        dbc::testing::
+            write_unfrozen_corpus_cache_atomic(
+                valid_path, corpus);
+        const std::string valid =
+            read_binary(valid_path);
+        expect(
+            valid.size() > 100,
+            "cache fixture is unexpectedly small");
+
+        const auto require_rejected =
+            [&](std::string_view name,
+                std::string bytes) {
+                const auto path =
+                    directory.path() /
+                    std::string(name);
+                write_binary(path, bytes);
+                expect_rejected(
+                    [&] {
+                        static_cast<void>(
+                            dbc::testing::
+                                load_unfrozen_corpus_cache(
+                                    path, corpus.census,
+                                    corpus.parent_components));
+                    },
+                    "malformed corpus cache was accepted");
+            };
+
+        std::string mutated = valid;
+        mutated.back() =
+            static_cast<char>(
+                static_cast<unsigned char>(
+                    mutated.back()) ^
+                0x01U);
+        require_rejected(
+            "mutated.bin", std::move(mutated));
+
+        std::string truncated = valid;
+        truncated.pop_back();
+        require_rejected(
+            "truncated.bin", std::move(truncated));
+
+        std::string trailing = valid;
+        trailing.push_back('\0');
+        require_rejected(
+            "trailing.bin", std::move(trailing));
+    });
+
+    test("shared critic direct delta is exact and isolated", [] {
+        const auto parent = test_value_model();
+        const auto actor =
+            old_school::train_learned_actor_model(
+                1, 0xDBC20002ULL);
+        std::vector<double> observation(
+            old_school::
+                kLearnedCriticObservationFeatureCount,
+            0.0);
+        observation[0] = 1.0;
+        observation[1] = 0.5;
+        const auto parent_leaf_values =
+            old_school::
+                learned_critic_observation_leaf_values(
+                    observation, parent);
+        const double parent_value =
+            old_school::
+                learned_critic_observation_value(
+                    observation, parent);
+        expect(
+            parent_value ==
+                (parent_leaf_values[0] +
+                 parent_leaf_values[1]) /
+                    2.0,
+            "observation scorer disagreed with leaf mean");
+
+        const auto parent_parameters =
+            old_school::
+                learned_critic_direct_path_parameters(
+                    parent);
+        std::vector<double> zero(
+            observation.size(), 0.0);
+        const auto unchanged =
+            old_school::
+                with_learned_shared_critic_direct_delta(
+                    parent, zero);
+        expect(
+            unchanged == parent &&
+                old_school::learned_model_fingerprint(
+                    unchanged) ==
+                    old_school::learned_model_fingerprint(
+                        parent) &&
+                old_school::
+                    learned_critic_observation_leaf_values(
+                        observation, unchanged) ==
+                    parent_leaf_values,
+            "zero shared delta lost parent bit identity");
+
+        std::vector<double> delta(
+            observation.size(), 0.0);
+        delta[0] = 0.25;
+        const auto candidate =
+            old_school::
+                with_learned_shared_critic_direct_delta(
+                    parent, delta);
+        const auto replay =
+            old_school::
+                with_learned_shared_critic_direct_delta(
+                    parent, delta);
+        const auto candidate_parameters =
+            old_school::
+                learned_critic_direct_path_parameters(
+                    candidate);
+        for (std::size_t leaf = 0;
+             leaf <
+             old_school::kLearnedCriticLeafCount;
+             ++leaf) {
+            for (std::size_t feature = 0;
+                 feature < delta.size(); ++feature) {
+                expect(
+                    candidate_parameters.leaves[leaf][feature] ==
+                        parent_parameters.leaves[leaf][feature] +
+                            delta[feature],
+                    "shared delta changed a direct path incorrectly");
+            }
+        }
+        const double first_difference =
+            candidate_parameters.leaves[0][0] -
+            parent_parameters.leaves[0][0];
+        const double second_difference =
+            candidate_parameters.leaves[1][0] -
+            parent_parameters.leaves[1][0];
+        expect(
+            std::bit_cast<std::uint64_t>(
+                first_difference) ==
+                std::bit_cast<std::uint64_t>(
+                    second_difference),
+            "leaf direct-path differences were not bit-identical");
+
+        const auto parent_components =
+            old_school::
+                learned_model_component_fingerprints(
+                    parent);
+        const auto candidate_components =
+            old_school::
+                learned_model_component_fingerprints(
+                    candidate);
+        const auto parent_tensors =
+            old_school::
+                learned_critic_tensor_fingerprints(
+                    parent);
+        const auto candidate_tensors =
+            old_school::
+                learned_critic_tensor_fingerprints(
+                    candidate);
+        expect(
+            candidate_components.critic !=
+                    parent_components.critic &&
+                candidate_components.priority ==
+                    parent_components.priority &&
+                candidate_components.attack ==
+                    parent_components.attack &&
+                candidate_components.block ==
+                    parent_components.block &&
+                candidate_components.damage_order ==
+                    parent_components.damage_order,
+            "shared direct delta escaped the critic component");
+        expect(
+            candidate_tensors.input_hidden ==
+                    parent_tensors.input_hidden &&
+                candidate_tensors.output_layer ==
+                    parent_tensors.output_layer &&
+                candidate_tensors.direct_paths !=
+                    parent_tensors.direct_paths,
+            "shared direct delta escaped its tensor group");
+        expect(
+            old_school::learned_model_fingerprint(
+                candidate) ==
+                    old_school::learned_model_fingerprint(
+                        replay) &&
+                candidate_parameters ==
+                    old_school::
+                        learned_critic_direct_path_parameters(
+                            replay),
+            "shared direct-delta replay was not deterministic");
+
+        std::vector<double> short_delta(
+            delta.size() - 1, 0.0);
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    old_school::
+                        with_learned_shared_critic_direct_delta(
+                            parent, short_delta));
+            },
+            "short shared delta was accepted");
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    old_school::
+                        learned_critic_direct_path_parameters(
+                            actor));
+            },
+            "actor topology exported Value direct paths");
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    old_school::
+                        learned_critic_observation_leaf_values(
+                            observation, actor));
+            },
+            "actor topology exposed Value critic leaves");
+        expect_rejected(
+            [&] {
+                static_cast<void>(
+                    old_school::
+                        with_learned_shared_critic_direct_delta(
+                            actor, delta));
+            },
+            "actor topology accepted shared Value delta");
     });
 
     test("hidden repartition is nonvacuous and owner-safe", [] {

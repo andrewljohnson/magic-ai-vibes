@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -45,6 +46,9 @@ inline constexpr double kMaximumDevDeckRegretIncrease = 0.01;
 inline constexpr std::size_t kCalibrationBinCount = 5;
 
 static_assert(kPolicyFeatureCount == 893);
+static_assert(
+    kCriticFeatureCount ==
+    kLearnedCriticObservationFeatureCount);
 static_assert(kExpectedRootsPerSplit == 80);
 static_assert(kExpectedRootsPerDeckAndSplit == 16);
 static_assert(kOutputParameterCount == 34);
@@ -252,6 +256,16 @@ std::uint64_t teacher_search_seed(
 LearnedSearchConfig teacher_search_config(std::uint64_t seed);
 std::string canonical_corpus_digest(const Corpus& corpus);
 void validate_corpus(const Corpus& corpus);
+// Persists only the authenticated owner-safe census, neutral observations,
+// labels, weights, and accounting. Transient GameState witnesses are never
+// serialized. Production publication and loading require the exact frozen
+// subset; loading also binds the cache to the supplied immutable parent.
+void write_corpus_cache_atomic(
+    const std::filesystem::path& path,
+    const Corpus& corpus);
+Corpus load_corpus_cache(
+    const std::filesystem::path& path,
+    std::shared_ptr<const LearnedModel> parent);
 Corpus collect_corpus(
     std::shared_ptr<const LearnedModel> parent,
     const Census& frozen_subset,
@@ -299,6 +313,17 @@ Corpus make_corpus(
     LearnedModelComponentFingerprints parent_components,
     std::vector<RootExample> train,
     std::vector<RootExample> dev);
+
+// The same byte codec and atomic writer with only the production frozen-hash
+// gate relaxed, so synthetic corpora can exercise persistence fail-closed.
+void write_unfrozen_corpus_cache_atomic(
+    const std::filesystem::path& path,
+    const Corpus& corpus);
+Corpus load_unfrozen_corpus_cache(
+    const std::filesystem::path& path,
+    const Census& expected_census,
+    const LearnedModelComponentFingerprints&
+        expected_parent_components);
 
 GameState hidden_repartition(
     const GameState& state, std::size_t observer);

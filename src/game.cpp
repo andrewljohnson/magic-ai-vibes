@@ -2225,6 +2225,13 @@ class LearnedModel {
     friend LearnedCriticTensorFingerprints
     learned_critic_tensor_fingerprints(
         std::shared_ptr<const LearnedModel> model);
+    friend LearnedCriticDirectPathParameters
+    learned_critic_direct_path_parameters(
+        std::shared_ptr<const LearnedModel> model);
+    friend std::shared_ptr<const LearnedModel>
+    with_learned_shared_critic_direct_delta(
+        std::shared_ptr<const LearnedModel> parent,
+        std::span<const double> delta);
     friend LearnedPriorityHeadParameters
     learned_priority_head_parameters(
         std::shared_ptr<const LearnedModel> model);
@@ -18051,6 +18058,122 @@ double learned_critic_value(
             "Learned critic perspective must be 0 or 1");
     }
     return model->predict(learned_features(state, perspective));
+}
+
+double learned_critic_observation_value(
+    std::span<const double> observation,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(model);
+    if (observation.size() != LearnedModel::kFeatureCount ||
+        !std::all_of(
+            observation.begin(), observation.end(),
+            [](double value) {
+                return std::isfinite(value);
+            })) {
+        throw std::invalid_argument(
+            "Learned critic observation has invalid features");
+    }
+    LearnedModel::FeatureVector features{};
+    std::copy(
+        observation.begin(), observation.end(),
+        features.begin());
+    return model->predict(features);
+}
+
+std::array<double, kLearnedCriticLeafCount>
+learned_critic_observation_leaf_values(
+    std::span<const double> observation,
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    if (observation.size() !=
+            LearnedModel::kFeatureCount ||
+        !std::all_of(
+            observation.begin(), observation.end(),
+            [](double value) {
+                return std::isfinite(value);
+            })) {
+        throw std::invalid_argument(
+            "Learned critic observation has invalid features");
+    }
+    LearnedModel::FeatureVector features{};
+    std::copy(
+        observation.begin(), observation.end(),
+        features.begin());
+    return model->output_calibration_leaf_values(
+        features);
+}
+
+LearnedCriticDirectPathParameters
+learned_critic_direct_path_parameters(
+    std::shared_ptr<const LearnedModel> model) {
+    validate_learned_model(
+        model, LearnedVariant::ValueSearchChampion);
+    if (!model->has_output_calibration_topology()) {
+        throw std::invalid_argument(
+            "Learned critic direct paths require an exact "
+            "two-leaf legacy Value ensemble");
+    }
+    LearnedCriticDirectPathParameters result;
+    for (std::size_t leaf = 0;
+         leaf < result.leaves.size(); ++leaf) {
+        result.leaves[leaf] =
+            model->ensemble_[leaf]
+                ->direct_output_weights_;
+    }
+    return result;
+}
+
+std::shared_ptr<const LearnedModel>
+with_learned_shared_critic_direct_delta(
+    std::shared_ptr<const LearnedModel> parent,
+    std::span<const double> delta) {
+    validate_learned_model(
+        parent, LearnedVariant::ValueSearchChampion);
+    if (!parent->has_output_calibration_topology() ||
+        delta.size() !=
+            LearnedModel::kFeatureCount ||
+        !std::all_of(
+            delta.begin(), delta.end(),
+            [](double value) {
+                return std::isfinite(value);
+            })) {
+        throw std::invalid_argument(
+            "shared critic direct delta requires an exact "
+            "two-leaf legacy Value ensemble and finite full-width "
+            "delta");
+    }
+    if (std::all_of(
+            delta.begin(), delta.end(),
+            [](double value) {
+                return value == 0.0;
+            })) {
+        return parent;
+    }
+
+    std::vector<std::shared_ptr<LearnedModel>> leaves;
+    auto candidate =
+        parent->deep_clone_mutable(leaves);
+    if (leaves.size() !=
+            kLearnedCriticLeafCount) {
+        throw std::logic_error(
+            "shared critic direct delta topology drifted");
+    }
+    for (const auto& leaf : leaves) {
+        for (std::size_t feature = 0;
+             feature < delta.size(); ++feature) {
+            const double updated =
+                leaf->direct_output_weights_[feature] +
+                delta[feature];
+            if (!std::isfinite(updated)) {
+                throw std::overflow_error(
+                    "shared critic direct delta overflowed");
+            }
+            leaf->direct_output_weights_[feature] =
+                updated;
+        }
+    }
+    return candidate;
 }
 
 std::array<double, 2> learned_critic_leaf_values(
