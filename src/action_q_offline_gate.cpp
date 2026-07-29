@@ -897,6 +897,36 @@ bool BehavioralGate::gate_passed() const {
                raw_braingeyser;
 }
 
+bool ModelGateReport::gate_passed() const {
+    return frozen_dev.gate_passed() &&
+           ancestral.gate_passed() &&
+           descriptor_order.gate_passed() &&
+           behavior.gate_passed();
+}
+
+std::vector<std::string> ModelGateReport::failures() const {
+    std::vector<std::string> result;
+    const auto append =
+        [&result](bool passed, std::string text) {
+            if (!passed) {
+                result.push_back(std::move(text));
+            }
+        };
+    append(
+        frozen_dev.gate_passed(),
+        "frozen DevV3 regret/agreement gate failed");
+    append(
+        ancestral.gate_passed(),
+        "captured Ancestral target gate failed");
+    append(
+        descriptor_order.gate_passed(),
+        "descriptor-order invariance gate failed");
+    append(
+        behavior.gate_passed(),
+        "focused behavior gate failed");
+    return result;
+}
+
 bool Report::gate_passed() const {
     return report_metadata_exact(*this) &&
            isolation.gate_passed() &&
@@ -1015,14 +1045,19 @@ std::vector<std::string> validate_five_open_force_spike_control(
     return errors;
 }
 
-Report evaluate(
-    const action_q_explore::Corpus& corpus,
-    const action_q_explore::FitReport& fit,
+namespace {
+
+Report evaluate_impl(
+    const action_q_explore::Corpus* corpus_ptr,
+    const action_q_explore::FitReport* fit_ptr,
     std::shared_ptr<const LearnedModel> parent,
     std::shared_ptr<const LearnedModel> candidate) {
     require_model(parent, "AQ0 offline parent");
     require_model(candidate, "AQ0 offline candidate");
-    action_q_explore::validate_corpus(corpus);
+    if ((corpus_ptr == nullptr) != (fit_ptr == nullptr)) {
+        throw std::invalid_argument(
+            "AQ0 corpus and fit must both be present or absent");
+    }
 
     Report report;
     report.parent_fingerprint =
@@ -1030,72 +1065,81 @@ Report evaluate(
     report.candidate_fingerprint =
         learned_model_fingerprint(candidate);
 
-    const LearnedModelComponentFingerprints parent_components =
-        learned_model_component_fingerprints(parent);
-    const LearnedModelComponentFingerprints candidate_components =
-        learned_model_component_fingerprints(candidate);
-    report.isolation.parent_identity_exact =
-        report.parent_fingerprint ==
-            action_q_explore::kRequiredParentFingerprint &&
-        corpus.parent_fingerprint ==
-            report.parent_fingerprint &&
-        fit.parent_fingerprint_before ==
-            report.parent_fingerprint &&
-        fit.parent_fingerprint_after ==
-            report.parent_fingerprint &&
-        fit.parent_components == parent_components;
-    report.isolation.candidate_identity_exact =
-        fit.candidate &&
-        learned_model_fingerprint(fit.candidate) ==
-            report.candidate_fingerprint &&
-        fit.candidate_fingerprint ==
-            report.candidate_fingerprint &&
-        fit.candidate_components == candidate_components;
-    report.isolation.parent_immutable =
-        fit.parent_immutable;
-    report.isolation.repeated_fit_bit_identical =
-        fit.repeated_fit_bit_identical;
-    report.isolation.only_priority_component_changed =
-        fit.only_priority_component_changed &&
-        parent_components.critic ==
-            candidate_components.critic &&
-        parent_components.attack ==
-            candidate_components.attack &&
-        parent_components.block ==
-            candidate_components.block &&
-        parent_components.damage_order ==
-            candidate_components.damage_order &&
-        parent_components.priority !=
-            candidate_components.priority;
+    if (corpus_ptr != nullptr) {
+        const action_q_explore::Corpus& corpus =
+            *corpus_ptr;
+        const action_q_explore::FitReport& fit =
+            *fit_ptr;
+        action_q_explore::validate_corpus(corpus);
+        const LearnedModelComponentFingerprints
+            parent_components =
+                learned_model_component_fingerprints(parent);
+        const LearnedModelComponentFingerprints
+            candidate_components =
+                learned_model_component_fingerprints(candidate);
+        report.isolation.parent_identity_exact =
+            report.parent_fingerprint ==
+                action_q_explore::kRequiredParentFingerprint &&
+            corpus.parent_fingerprint ==
+                report.parent_fingerprint &&
+            fit.parent_fingerprint_before ==
+                report.parent_fingerprint &&
+            fit.parent_fingerprint_after ==
+                report.parent_fingerprint &&
+            fit.parent_components == parent_components;
+        report.isolation.candidate_identity_exact =
+            fit.candidate &&
+            learned_model_fingerprint(fit.candidate) ==
+                report.candidate_fingerprint &&
+            fit.candidate_fingerprint ==
+                report.candidate_fingerprint &&
+            fit.candidate_components == candidate_components;
+        report.isolation.parent_immutable =
+            fit.parent_immutable;
+        report.isolation.repeated_fit_bit_identical =
+            fit.repeated_fit_bit_identical;
+        report.isolation.only_priority_component_changed =
+            fit.only_priority_component_changed &&
+            parent_components.critic ==
+                candidate_components.critic &&
+            parent_components.attack ==
+                candidate_components.attack &&
+            parent_components.block ==
+                candidate_components.block &&
+            parent_components.damage_order ==
+                candidate_components.damage_order &&
+            parent_components.priority !=
+                candidate_components.priority;
 
-    report.check.parent =
-        action_q_explore::evaluate(
-            corpus.check, parent, 0.0);
-    report.check.candidate =
-        action_q_explore::evaluate(
-            corpus.check, candidate,
-            action_q_explore::kCandidateResidualWeight);
-    report.check.metrics_match_fit_report =
-        report.check.parent == fit.parent_check &&
-        report.check.candidate == fit.candidate_check;
-    report.check.regret_strictly_improved =
-        report.check.candidate
-                .equal_deck_mean_regret <
-            report.check.parent
-                .equal_deck_mean_regret;
-    report.check.top_one_not_lower =
-        report.check.candidate
-                .equal_deck_top_one_expected_agreement >=
-            report.check.parent
-                .equal_deck_top_one_expected_agreement;
-    for (std::size_t deck = 0;
-         deck < kDeckCount; ++deck) {
-        report.check.deck_regret_guard[deck] =
-            report.check.candidate.decks[deck]
-                    .mean_regret <=
-                report.check.parent.decks[deck]
-                        .mean_regret +
-                    kMaximumCheckDeckRegretIncrease;
+        report.check.parent =
+            action_q_explore::evaluate(
+                corpus.check, parent, 0.0);
+        report.check.candidate =
+            action_q_explore::evaluate(
+                corpus.check, candidate,
+                action_q_explore::kCandidateResidualWeight);
+        report.check.metrics_match_fit_report =
+            report.check.parent == fit.parent_check &&
+            report.check.candidate == fit.candidate_check;
+        report.check.regret_strictly_improved =
+            report.check.candidate
+                    .equal_deck_mean_regret <
+                report.check.parent
+                    .equal_deck_mean_regret;
+        report.check.top_one_not_lower =
+            report.check.candidate
+                    .equal_deck_top_one_expected_agreement >=
+                report.check.parent
+                    .equal_deck_top_one_expected_agreement;
+        for (std::size_t deck = 0;
+             deck < kDeckCount; ++deck) {
+            report.check.deck_regret_guard[deck] =
+                report.check.candidate.decks[deck]
+                        .mean_regret <=
+                    report.check.parent.decks[deck]
+                            .mean_regret +
+                        kMaximumCheckDeckRegretIncrease;
+        }
     }
 
     report.frozen_dev.cache_before =
@@ -1408,6 +1452,33 @@ Report evaluate(
                 .braingeyser_selected_keys);
 
     return report;
+}
+
+} // namespace
+
+ModelGateReport evaluate_model_gates(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate) {
+    Report full = evaluate_impl(
+        nullptr, nullptr,
+        std::move(parent), std::move(candidate));
+    return {
+        .frozen_dev = std::move(full.frozen_dev),
+        .ancestral = std::move(full.ancestral),
+        .descriptor_order =
+            std::move(full.descriptor_order),
+        .behavior = std::move(full.behavior),
+    };
+}
+
+Report evaluate(
+    const action_q_explore::Corpus& corpus,
+    const action_q_explore::FitReport& fit,
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate) {
+    return evaluate_impl(
+        &corpus, &fit,
+        std::move(parent), std::move(candidate));
 }
 
 } // namespace old_school::action_q_offline_gate

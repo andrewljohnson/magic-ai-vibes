@@ -126,6 +126,20 @@ struct BehavioralGate {
     bool gate_passed() const;
 };
 
+// The model-only part of the AQ0/AQ1 offline battery.  These checks depend
+// only on the frozen parent, the candidate, and the shared K8/H4/residual
+// deployment recipe, so keeping them here prevents successor experiments
+// from cloning authored fixtures and frozen-label evaluation code.
+struct ModelGateReport {
+    FrozenDevGate frozen_dev;
+    AncestralGate ancestral;
+    DescriptorOrderGate descriptor_order;
+    BehavioralGate behavior;
+
+    bool gate_passed() const;
+    std::vector<std::string> failures() const;
+};
+
 struct Report {
     std::string parent_fingerprint;
     std::string candidate_fingerprint;
@@ -152,6 +166,10 @@ std::vector<std::string> validate_five_open_force_spike_control(
 // its complete typed legal Priority action set.
 std::string ancestral_information_action_fingerprint(
     const action_q_field_gate::AncestralFieldRoot& root);
+
+ModelGateReport evaluate_model_gates(
+    std::shared_ptr<const LearnedModel> parent,
+    std::shared_ptr<const LearnedModel> candidate);
 
 // Applies every preregistered AQ0 offline gate. No result from these authored
 // fixtures or frozen labels is consumed by training or runtime policy code.
