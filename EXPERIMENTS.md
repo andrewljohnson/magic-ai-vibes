@@ -17838,6 +17838,123 @@ Only a passing artifact gets a fresh five-deck gameplay selector; ordinary
 perfect-information AlphaZero MCTS remains deferred until the learned Q
 signal is nonsaturated and trustworthy.
 
+##### AQ0 resolved-consequence action-head declaration
+
+Declared 2026-07-28 after EXPLORE-11 closed scalar boundary tuning and before
+changing or fitting any action-head code. `REVIEW.md` was reread through its
+newest 17:21 PDT verification addendum. This is the first rapid
+action-conditioned learner after the owner's instruction to prefer actual
+bot trials over more audit infrastructure.
+
+Falsifiable hypothesis: C16's neutral Priority state/action features contain
+enough information for its dormant 32-unit action head to learn useful
+candidate-specific margins from rules-resolved consequences. Fitting that
+head on every legal action at balanced frozen-parent mirror roots will improve
+held-out action ranking and remove the observed opponent-target Ancestral
+Recall, payable Force Spike, and redundant Counterspell choices without a
+card-name rule. If the offline gates pass, the resulting policy will win more
+than 30 of 60 fresh balanced games against exact C16.
+
+This is deliberately a small first action-Q artifact, not full MCTS and not a
+strength claim. A tree using C16's current saturated leaf signal would only
+make its bad ties more confident. Proper information-set POMCP/RIS-MCTS is the
+next search layer only after an action-conditioned signal proves useful.
+
+The immutable parent is Environment-v3 C16, training games/seed/generations
+`800/424242/16`, fingerprint
+`68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f`.
+Collection root seed is `202607281751`. Block zero is FIT and block one is
+untouched CHECK. Each block is the existing 40-game all-five-deck schedule:
+every unordered deck pair in both seat orientations with each seat starting
+once, using `balanced_schedule(root_seed, generation=0, block)`. Games use
+exact C16 K8/H4/R1 mirrors, zero exploration, zero Priority
+residual, PD0 off, AdversarialBlocks off, and Legacy continuations. Retain at
+most eight evenly spaced nontrivial Priority roots per actor-game,
+candidate-independently. The source-game turn cap is 128, matching the frozen
+FQ4 source collection; every other rule setting is the exact Environment-v3
+game configuration. This previously omitted mechanical bound was fixed before
+collection code completed and before any census or model was produced.
+
+The root scorer seed is
+`derive_seed(root_seed, PrioritySearch, block, schedule_index * 2 + actor,
+actor-local chronological nontrivial-root ordinal)`. The fit seed is
+`derive_seed(root_seed, PolicyFit, 0, 0, 0)`. These coordinates were fixed
+before collection. They depend on the frozen schedule and chronological root,
+not on action order, action identity, hidden cards, or candidate scores.
+
+At every retained root, enumerate the complete engine-authoritative legal
+action set. On eight common hidden-information worlds, score:
+
+1. the immutable deployed C16 K8/H4 aggregate for the base score; and
+2. the unchanged C16 critic immediately after each action's engine-resolved
+   consequence, before any later voluntary action can heal the branch.
+
+The second vector is converted with the existing temperature-0.10,
+90%-softmax/10%-uniform distribution. Fit all legal actions, never only the
+chosen action. Every root receives inverse within-deck root-count weight, so
+the five decks have equal loss mass. The only trainable component is the outer
+Priority head; the critic, Attack, Block, DamageOrder, card identities,
+observation schema, legal moves, and rules remain bit-identical. Fixed
+optimizer: Adam, batch 64, 64 epochs, rate 0.003, beta1 0.9, beta2 0.999,
+epsilon `1e-8`, global norm clip 5, residual bound 0.10, fit seed derived from
+`202607281751`.
+
+Exact binary64 equality defines a tied maximum. Offline top-one agreement
+means the teacher and deployed exact-max support sets intersect; deployment
+keeps the engine's existing first-candidate rule on an exact tie.
+Descriptor-order invariance compares action-keyed values and support after
+mapping the permuted list back to the original action identities.
+
+Collection is two-step to obey the census rule. The first command may only
+collect and print both frozen blocks: exact games, retained roots/options by
+deck, exact-zero/one teacher samples, and nonzero-spread roots. It creates no
+model and opens no gameplay seed. Record those immutable counts here before
+the fit command is allowed to run; do not change the root cap or quotas after
+seeing them.
+
+The executable contract is exactly
+`old-school-action-q-explore --census` and
+`old-school-action-q-explore --run`; all other arguments fail. `--run`
+reconstructs and validates the frozen corpus, performs the repeated fit and
+offline gates in memory, and opens the gameplay seed only after every offline
+gate passes. This rapid selector does not publish a candidate artifact:
+it prints the exact model/component fingerprints, and the repeated-fit
+identity is the persistence witness. A strict gameplay winner requires a
+separately declared no-replace artifact publication before web deployment.
+This intentionally avoids designing an artifact format before knowing the
+action-Q mechanism works.
+
+The fixed offline gate is conjunctive:
+
+- repeated fitting is bit-identical; only the Priority component changes;
+- descriptor-order and opponent-hidden repartition leave scores and selected
+  support bit-identical;
+- on untouched CHECK, equal-deck resolved-teacher regret strictly improves,
+  candidate top-one agreement does not fall, and no deck's absolute regret
+  worsens by more than 0.01;
+- against the existing frozen 20-root K64/H8 dev-v3 label cache, pooled regret
+  does not worsen and no stable parent agreement is lost;
+- the exact captured field root
+  `field.blue.ancestral-opponent-seed24.aq0.v1` has self-target score strictly
+  above opponent-target and never selects opponent-target;
+- live Force Spike remains selected; both the existing one-open-mana payable
+  control and a new
+  `control.blue.force-spike-payable-five-open-gray-ogre.aq0.v1` select Pass,
+  redundant same-target Counterspell selects Pass while the intervening
+  counter-war response remains available,
+  `field.green.second-main-sick-bear-growth.v1` selects Pass,
+  `field.green.begin-combat-growth-tapped-air.v1` excludes opponent-target
+  Growth, and `control.blue.braingeyser-x0.v1` excludes Braingeyser X=0; and
+- all focused tests, full engine tests, and ASan/UBSan pass.
+
+Any offline failure rejects AQ0 before gameplay. If it passes, run treatment
+first on fresh seed `202607281801` for exactly one balanced repetition:
+60 games, 12 per challenger deck, AQ0+C16 K8/H4/R1/residual 0.10 versus exact
+C16 K8/H4/R1/residual zero. Strictly more than 30 wins advances only to a
+dated manual web pilot; 30 or fewer rejects AQ0. Report all five deck rows,
+runtime, decisions, rollouts, parent/candidate fingerprints, and the frozen
+collection census. No seed or hyperparameter sweep is licensed.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
