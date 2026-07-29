@@ -22538,6 +22538,41 @@ web pilot; 37/60 or more may additionally be called `FAST_GO`. It is not a
 strength, Learned-is-king, or champion claim. No 200-game smoke, 2,000-game
 milestone, fixed panel, or web deployment is licensed otherwise.
 
+###### AQ11-DBC2-I0 numerical-isolation clarification
+
+Recorded 2026-07-29 08:52 PDT after an independent read-only implementation
+review, before completing the fitter, loading the cache, or fitting the
+candidate. This clarification changes no scientific arm, target, parameter,
+optimizer, metric threshold, seed, or conditional gameplay gate.
+
+The original phrase requiring the deltas *recovered by subtraction* from the
+two leaves to be bit-identical is withdrawn as numerically ill-posed:
+binary64 `(parent + delta) - parent` can round differently for two different
+parent weights even when the exact same delta was applied. The enforceable
+shared-treatment witness is instead, for every leaf and coordinate:
+
+```text
+candidate_direct[leaf][j] ==
+    binary64(parent_direct[leaf][j] + fitted_delta[j])
+```
+
+using the same exported fitted vector for both leaves. Reapplying that vector
+to C16 must reproduce every candidate tensor and fingerprint. Report the
+number of direct coordinates whose stored candidate value differs from its
+stored parent value and require it to be between 1 and 674. All other tensor
+and component requirements remain unchanged.
+
+The differentiable fitter may use the algebraically equivalent
+`sigmoid(logit(parent_leaf) + dot(delta, observation))` form internally, but
+an all-zero delta must return the stored exact parent value rather than take a
+round-trip through `logit`/`sigmoid`. More importantly, all reported TRAIN and
+DEV gate metrics must be recomputed from the actual immutable candidate model
+through the engine's observation scorer. Report the maximum absolute
+surrogate-versus-engine cell difference and require it to be at most `1e-12`;
+otherwise reject as an implementation mismatch. The already-declared global
+gradient-norm clipping at `5.0`, DEV stable-pair nondecrease, and DEV
+successor-cell BCE `+0.005` guard are mandatory, not optional diagnostics.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
