@@ -8291,9 +8291,36 @@ TEST(learned_value_attack_set_scores_match_deployed_argmax_and_hide_cards) {
             old_school::learned_value_attack_set_scores(
                 fixture.state, 0, candidates,
                 small_value_model(), seed, false);
+        const auto shared_samples =
+            old_school::learned_value_attack_block_samples(
+                fixture.state, 0, candidates,
+                small_value_model(), seed);
+        CHECK(
+            shared_samples ==
+            old_school::learned_value_attack_block_samples(
+                fixture.state, 0, candidates,
+                small_value_model(), seed));
+        const auto mean_from_shared_samples =
+            old_school::aggregate_learned_value_attack_block_scores(
+                shared_samples, false);
+        const auto minimum_from_shared_samples =
+            old_school::aggregate_learned_value_attack_block_scores(
+                shared_samples, true);
+        const auto explicit_minimum =
+            old_school::learned_value_attack_set_scores(
+                fixture.state, 0, candidates,
+                small_value_model(), seed, true);
         CHECK(explicit_default.scores == scored.scores);
         CHECK(explicit_default.selected_candidate ==
               scored.selected_candidate);
+        CHECK(explicit_default.scores ==
+              mean_from_shared_samples.scores);
+        CHECK(explicit_default.selected_candidate ==
+              mean_from_shared_samples.selected_candidate);
+        CHECK(explicit_minimum.scores ==
+              minimum_from_shared_samples.scores);
+        CHECK(explicit_minimum.selected_candidate ==
+              minimum_from_shared_samples.selected_candidate);
         CHECK(scored.scores.size() == candidates.size());
         CHECK(std::all_of(
             scored.scores.begin(), scored.scores.end(),
@@ -11421,6 +11448,56 @@ TEST(value_actor_local_search_recipe_is_exact_and_default_off) {
     CHECK(recipe.evaluation_threads == 4);
     CHECK(!recipe.capture_priority_h0_boundaries);
     CHECK(recipe.value_continuation_search_worlds == 2);
+}
+
+TEST(value_actor_local_priority_samples_ignore_real_attack_aggregation) {
+    const auto model = small_value_model();
+    old_school::BotConfig actor_local = {
+        .kind = old_school::BotKind::Learned,
+        .learned_variant =
+            old_school::LearnedVariant::ValueSearchChampion,
+        .rollouts_per_action =
+            old_school::kLearnedValueActorLocalSearchWorlds,
+        .value_actor_local_search = true,
+        .learned_model = model,
+    };
+    auto combined = actor_local;
+    combined.value_adversarial_blocks = true;
+    constexpr std::uint64_t kSeed = 0xA015C0B1EDULL;
+    const auto actor_local_search =
+        old_school::learned_value_actor_local_priority_search_config(
+            actor_local, kSeed);
+    const auto combined_search =
+        old_school::learned_value_actor_local_priority_search_config(
+            combined, kSeed);
+    CHECK(actor_local_search == combined_search);
+
+    const auto fixture = ancestral_target_fixture();
+    const auto actions = old_school::legal_priority_actions(
+        fixture.state, 0, true);
+    CHECK(actions.size() > 1);
+    const auto actor_local_samples =
+        old_school::learned_priority_action_samples(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0,
+            actions, model, actor_local_search);
+    const auto combined_samples =
+        old_school::learned_priority_action_samples(
+            fixture.state, fixture.decks, 0, true,
+            old_school::TurnPhase::FirstMain, 0,
+            actions, model, combined_search);
+    CHECK(actor_local_samples == combined_samples);
+
+    auto invalid = combined;
+    invalid.value_pass_dominance = true;
+    CHECK(throws_with_text(
+        [&] {
+            static_cast<void>(
+                old_school::
+                    learned_value_actor_local_priority_search_config(
+                        invalid, kSeed));
+        },
+        "exact AQ4-P1/AQ15"));
 }
 
 TEST(value_actor_local_search_fails_closed_and_off_is_rng_identity) {

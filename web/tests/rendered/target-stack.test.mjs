@@ -232,6 +232,7 @@ async function configureFrozenC16Match(page) {
     [
       "learned-value-c16",
       "learned-value-c16-actor-local-search",
+      "learned-value-c16-combined-search",
       "learned-value-c16-adversarial-blocks",
       "learned-value-c16-stack-discipline",
       "learned-value-g0",
@@ -541,6 +542,34 @@ test(
     assert.equal(
       await provenance.locator("time").getAttribute("datetime"),
       "2026-07-28",
+    );
+    assert.equal(await numberInputs.nth(1).inputValue(), "800");
+    assert.equal(await numberInputs.nth(2).inputValue(), "424242");
+    assert.equal(await numberInputs.nth(1).isEditable(), false);
+    assert.equal(await numberInputs.nth(2).isEditable(), false);
+
+    await policy.selectOption("learned-value-c16-combined-search");
+    assert.match(await description.innerText(), /outer K8\/H8/);
+    assert.match(await description.innerText(), /actor-local inner K2\/H4/);
+    assert.match(await description.innerText(), /real attack sets/);
+    assert.match(
+      await description.innerText(),
+      /defender-best-response minimum/,
+    );
+    assert.match(
+      await description.innerText(),
+      /Simulated continuations retain canonical C16 combat/,
+    );
+    assert.match(await provenance.innerText(), /Manual diagnostic/);
+    assert.match(await provenance.innerText(), /unscreened/);
+    assert.match(await provenance.innerText(), /not promoted/);
+    assert.match(
+      await provenance.innerText(),
+      /Manual pilot introduced Jul 29, 2026/,
+    );
+    assert.equal(
+      await provenance.locator("time").getAttribute("datetime"),
+      "2026-07-29",
     );
     assert.equal(await numberInputs.nth(1).inputValue(), "800");
     assert.equal(await numberInputs.nth(2).inputValue(), "424242");

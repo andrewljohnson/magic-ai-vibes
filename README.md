@@ -85,8 +85,9 @@ make web
 
 Open <http://127.0.0.1:4173>. The setup drawer offers all five decks and
 Random, Monte Carlo, Deep Monte Carlo, Handcoded Policy, Learned Value C16,
-Learned C16 · Best-Response Attacks, Learned C16 · Stack Discipline, Learned
-Value G0, and Learned Actor opponents, plus deterministic game/training seeds.
+Learned C16 · Foresight Search, Learned C16 · Combined Search, Learned C16 ·
+Best-Response Attacks, Learned C16 · Stack Discipline, Learned Value G0, and
+Learned Actor opponents, plus deterministic game/training seeds.
 C16 is the default Learned opponent: it loads the exact frozen
 T800/S424242/C16 artifact at K=8/H=4 and fails closed if that artifact is
 missing, stale, or has the wrong fingerprint. The exploratory Best-Response

@@ -58,6 +58,7 @@ void print_help(std::ostream& output) {
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
            "handcrafted|learned-value-c16|"
            "learned-value-c16-actor-local-search|"
+           "learned-value-c16-combined-search|"
            "learned-value-c16-adversarial-blocks|"
            "learned-value-c16-stack-discipline|"
            "learned-value-g0|learned-actor\n"

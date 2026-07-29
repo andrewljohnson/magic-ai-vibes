@@ -390,13 +390,13 @@ void validate_bot_research_config(const BotConfig& bot) {
          bot.value_priority_residual_weight != 0.0 ||
          bot.value_pass_dominance ||
          bot.value_resolved_shallow_prior_weight != 0.0 ||
-         bot.value_adversarial_blocks ||
          bot.value_recursive_policy_improvement ||
          bot.value_continuation_controller !=
              LearnedContinuationController::Legacy)) {
         throw std::invalid_argument(
-            "Value actor-local search requires the exact AQ4-P1 "
-            "Learned Value K8 recipe without another treatment");
+            "Value actor-local search requires the exact AQ4-P1/AQ15 "
+            "Learned Value K8 recipe with only optional adversarial "
+            "blocks");
     }
     if (bot.value_recursive_policy_improvement &&
         (bot.kind != BotKind::Learned ||
@@ -9460,11 +9460,12 @@ double learned_value_post_combat_score(
         });
 }
 
-LearnedValueAttackSetScores score_learned_value_attack_sets(
+std::vector<std::vector<double>>
+sample_learned_value_attack_block_scores(
     const GameState& state, std::size_t attacking_player,
     const std::vector<std::vector<PermanentId>>& candidates,
     const std::shared_ptr<const LearnedModel>& model,
-    std::mt19937_64& random, bool adversarial_blocks) {
+    std::mt19937_64& random) {
     if (attacking_player >= state.players.size()) {
         throw std::out_of_range(
             "Learned Value attacking player must be 0 or 1");
@@ -9552,8 +9553,18 @@ LearnedValueAttackSetScores score_learned_value_attack_sets(
         }
         block_scores.push_back(std::move(candidate_scores));
     }
+    return block_scores;
+}
+
+LearnedValueAttackSetScores score_learned_value_attack_sets(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<std::vector<PermanentId>>& candidates,
+    const std::shared_ptr<const LearnedModel>& model,
+    std::mt19937_64& random, bool adversarial_blocks) {
     return aggregate_learned_value_attack_block_scores(
-        block_scores, adversarial_blocks);
+        sample_learned_value_attack_block_scores(
+            state, attacking_player, candidates, model, random),
+        adversarial_blocks);
 }
 
 enum class LearnedPolicyVerb : std::uint8_t {
@@ -13792,8 +13803,8 @@ PriorityAction Game::choose_priority_action(
                 recursive_policy_improvement_root
                     ? learned_value_recursive_policy_improvement_priority_config(
                           root_seed)
-                    : learned_value_actor_local_search_config(
-                          root_seed);
+                    : learned_value_actor_local_priority_search_config(
+                          bot, root_seed);
             if (recursive_policy_improvement_root) {
                 search.use_exact_combat_subgame =
                     config_
@@ -18432,6 +18443,16 @@ LearnedValueAttackSetScores learned_value_attack_set_scores(
     return score_learned_value_attack_sets(
         state, attacking_player, candidates, model, random,
         adversarial_blocks);
+}
+
+std::vector<std::vector<double>>
+learned_value_attack_block_samples(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<std::vector<PermanentId>>& candidates,
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed) {
+    std::mt19937_64 random(seed);
+    return sample_learned_value_attack_block_scores(
+        state, attacking_player, candidates, model, random);
 }
 
 LearnedValueBinaryBlockScores
@@ -23454,6 +23475,17 @@ LearnedSearchConfig learned_value_actor_local_search_config(
         .value_continuation_search_worlds =
             kLearnedValueActorLocalSearchContinuationWorlds,
     };
+}
+
+LearnedSearchConfig
+learned_value_actor_local_priority_search_config(
+    const BotConfig& bot, std::uint64_t seed) {
+    validate_bot_research_config(bot);
+    if (!bot.value_actor_local_search) {
+        throw std::invalid_argument(
+            "AQ4/AQ15 Priority search requires actor-local search");
+    }
+    return learned_value_actor_local_search_config(seed);
 }
 
 LearnedSearchConfig

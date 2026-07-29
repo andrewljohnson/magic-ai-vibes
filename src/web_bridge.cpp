@@ -1518,6 +1518,15 @@ BotKind parse_opponent_bot(
         value_actor_local_search = true;
         return BotKind::Learned;
     }
+    if (value ==
+        "learned-value-c16-combined-search") {
+        learned_variant = LearnedVariant::ValueSearchChampion;
+        learned_generations = kFrozenWebC16Generations;
+        value_adversarial_blocks = true;
+        value_pass_dominance = false;
+        value_actor_local_search = true;
+        return BotKind::Learned;
+    }
     if (value == "learned-value-c16" ||
         value == "learned-value" || value == "learned") {
         learned_variant = LearnedVariant::ValueSearchChampion;
@@ -1650,11 +1659,10 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             "actor-local search requires frozen Learned Value C16");
     }
     if (config.value_actor_local_search &&
-        (config.value_adversarial_blocks ||
-         config.value_pass_dominance)) {
+        config.value_pass_dominance) {
         throw std::invalid_argument(
-            "actor-local search cannot be combined with another "
-            "Learned Value treatment");
+            "actor-local search cannot be combined with Pass "
+            "dominance");
     }
     if (config.value_actor_local_search &&
         config.learned_rollouts !=

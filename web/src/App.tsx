@@ -106,6 +106,15 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
     lifecycle: "Manual diagnostic · not promoted",
   },
   {
+    id: "learned-value-c16-combined-search",
+    name: "Learned C16 · Combined Search (AQ15)",
+    description:
+      "Exact frozen C16 critic. Priority uses outer K8/H8 with symmetric actor-local inner K2/H4; real attack sets use the defender-best-response minimum. Simulated continuations retain canonical C16 combat.",
+    versionDate: "2026-07-29",
+    versionDateLabel: "Manual pilot introduced",
+    lifecycle: "Manual diagnostic · unscreened · not promoted",
+  },
+  {
     id: "learned-value-c16-adversarial-blocks",
     name: "Learned C16 · Best-Response Attacks",
     description:
@@ -148,6 +157,7 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
 const FROZEN_C16_POLICY_IDS = new Set([
   "learned-value-c16",
   "learned-value-c16-actor-local-search",
+  "learned-value-c16-combined-search",
   "learned-value-c16-adversarial-blocks",
   "learned-value-c16-stack-discipline",
 ]);

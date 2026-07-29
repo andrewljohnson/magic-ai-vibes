@@ -634,6 +634,10 @@ test("landing metadata includes and advertises every bot policy", async () => {
   );
   assert.match(
     app,
+    /id:\s*"learned-value-c16-combined-search"/,
+  );
+  assert.match(
+    app,
     /id:\s*"learned-value-c16-adversarial-blocks"/,
   );
   assert.match(
@@ -664,6 +668,10 @@ test("landing metadata includes and advertises every bot policy", async () => {
   );
   assert.match(
     app,
+    /Learned C16 · Combined Search \(AQ15\)[\s\S]+?outer K8\/H8[\s\S]+?actor-local inner K2\/H4[\s\S]+?real attack sets[\s\S]+?defender-best-response minimum[\s\S]+?Simulated continuations retain canonical C16 combat[\s\S]+?versionDate:\s*"2026-07-29"[\s\S]+?Manual diagnostic · unscreened · not promoted/,
+  );
+  assert.match(
+    app,
     /rules-only marginal-effect filter[\s\S]+?same public outcome[\s\S]+?strictly fewer resources/,
   );
   assert.match(
@@ -673,7 +681,7 @@ test("landing metadata includes and advertises every bot policy", async () => {
   assert.doesNotMatch(app, /never double-counter/i);
   assert.match(
     app,
-    /const FROZEN_C16_POLICY_IDS[\s\S]+?learned-value-c16-actor-local-search[\s\S]+?learned-value-c16-adversarial-blocks[\s\S]+?learned-value-c16-stack-discipline[\s\S]+?function isFrozenC16Policy/,
+    /const FROZEN_C16_POLICY_IDS[\s\S]+?learned-value-c16-actor-local-search[\s\S]+?learned-value-c16-combined-search[\s\S]+?learned-value-c16-adversarial-blocks[\s\S]+?learned-value-c16-stack-discipline[\s\S]+?function isFrozenC16Policy/,
   );
   assert.match(app, /if \(isFrozenC16Policy\(value\)\)/);
   assert.equal(

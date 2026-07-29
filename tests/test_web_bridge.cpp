@@ -153,6 +153,18 @@ void test_names_parse_strictly() {
                actor_local_search,
            "AQ4 actor-local-search pilot did not parse");
     expect(parse_opponent_bot(
+               "learned-value-c16-combined-search",
+               variant, generations, adversarial_blocks,
+               pass_dominance, actor_local_search) ==
+               BotKind::Learned &&
+               variant ==
+                   LearnedVariant::ValueSearchChampion &&
+               generations == 16 &&
+               adversarial_blocks &&
+               !pass_dominance &&
+               actor_local_search,
+           "AQ15 combined-search pilot did not parse");
+    expect(parse_opponent_bot(
                "learned-value-c16-stack-discipline",
                variant, generations, adversarial_blocks,
                pass_dominance, actor_local_search) ==
@@ -539,6 +551,80 @@ void test_actor_local_search_maps_only_the_exact_pilot_flag() {
             !canonical_bot.value_actor_local_search,
         "AQ4 pilot changed more than the actor-local-search flag");
 
+    pilot.value_adversarial_blocks = true;
+    const auto combined_bot =
+        old_school::web::make_opponent_bot_config(
+            pilot, nullptr);
+    expect(
+        combined_bot.kind == actor_local_bot.kind &&
+            combined_bot.learned_variant ==
+                actor_local_bot.learned_variant &&
+            combined_bot.rollouts_per_action ==
+                actor_local_bot.rollouts_per_action &&
+            combined_bot.exploration_rate ==
+                actor_local_bot.exploration_rate &&
+            combined_bot.value_continuation_epsilon ==
+                actor_local_bot.value_continuation_epsilon &&
+            combined_bot.value_priority_residual_weight ==
+                actor_local_bot.value_priority_residual_weight &&
+            combined_bot.value_pass_dominance ==
+                actor_local_bot.value_pass_dominance &&
+            combined_bot
+                    .value_resolved_shallow_prior_weight ==
+                actor_local_bot
+                    .value_resolved_shallow_prior_weight &&
+            combined_bot.value_continuation_controller ==
+                actor_local_bot.value_continuation_controller &&
+            combined_bot.training_games ==
+                actor_local_bot.training_games &&
+            combined_bot.learned_model ==
+                actor_local_bot.learned_model &&
+            combined_bot.value_actor_local_search ==
+                actor_local_bot.value_actor_local_search &&
+            combined_bot.value_recursive_policy_improvement ==
+                actor_local_bot.value_recursive_policy_improvement &&
+            combined_bot.value_adversarial_blocks &&
+            !actor_local_bot.value_adversarial_blocks,
+        "AQ15 combined pilot changed more than attack "
+        "aggregation relative to AQ4");
+
+    pilot.value_actor_local_search = false;
+    const auto adversarial_bot =
+        old_school::web::make_opponent_bot_config(
+            pilot, nullptr);
+    expect(
+        combined_bot.kind == adversarial_bot.kind &&
+            combined_bot.learned_variant ==
+                adversarial_bot.learned_variant &&
+            combined_bot.rollouts_per_action ==
+                adversarial_bot.rollouts_per_action &&
+            combined_bot.exploration_rate ==
+                adversarial_bot.exploration_rate &&
+            combined_bot.value_continuation_epsilon ==
+                adversarial_bot.value_continuation_epsilon &&
+            combined_bot.value_priority_residual_weight ==
+                adversarial_bot.value_priority_residual_weight &&
+            combined_bot.value_pass_dominance ==
+                adversarial_bot.value_pass_dominance &&
+            combined_bot
+                    .value_resolved_shallow_prior_weight ==
+                adversarial_bot
+                    .value_resolved_shallow_prior_weight &&
+            combined_bot.value_adversarial_blocks ==
+                adversarial_bot.value_adversarial_blocks &&
+            combined_bot.value_recursive_policy_improvement ==
+                adversarial_bot.value_recursive_policy_improvement &&
+            combined_bot.value_continuation_controller ==
+                adversarial_bot.value_continuation_controller &&
+            combined_bot.training_games ==
+                adversarial_bot.training_games &&
+            combined_bot.learned_model ==
+                adversarial_bot.learned_model &&
+            combined_bot.value_actor_local_search &&
+            !adversarial_bot.value_actor_local_search,
+        "AQ15 combined pilot changed more than actor-local "
+        "search relative to Best-Response Attacks");
+
     const auto rejected_with =
         [](old_school::web::BridgeConfig config,
            std::string_view required_text) {
@@ -566,6 +652,7 @@ void test_actor_local_search_maps_only_the_exact_pilot_flag() {
         "non-C16 web policy accepted actor-local search");
 
     invalid = pilot;
+    invalid.value_actor_local_search = true;
     invalid.learned_rollouts = 7;
     expect(
         rejected_with(
@@ -574,12 +661,14 @@ void test_actor_local_search_maps_only_the_exact_pilot_flag() {
         "AQ4 web policy accepted non-K8 root search");
 
     invalid = pilot;
+    invalid.value_actor_local_search = true;
     invalid.value_adversarial_blocks = true;
+    invalid.value_pass_dominance = true;
     expect(
         rejected_with(
             invalid,
-            "cannot be combined with another Learned Value treatment"),
-        "AQ4 web policy accepted a second Learned Value treatment");
+            "cannot be combined with Pass dominance"),
+        "AQ15 web policy accepted Pass dominance");
 }
 
 void test_g0_status_exposes_actual_model_identity() {

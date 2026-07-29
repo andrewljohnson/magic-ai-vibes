@@ -900,6 +900,8 @@ struct LearnedSearchConfig {
     // aggregate initializer and default search remains exact bit-for-bit.
     LearnedTerminalUtilityMode terminal_utility_mode =
         LearnedTerminalUtilityMode::ExactOutcome;
+
+    bool operator==(const LearnedSearchConfig&) const = default;
 };
 
 inline constexpr std::size_t
@@ -918,6 +920,13 @@ inline constexpr std::size_t
 // actor; this config controls the K8/R1/H8 outer search.
 LearnedSearchConfig learned_value_actor_local_search_config(
     std::uint64_t seed);
+
+// Production translation seam for AQ4/AQ15. The optional real-game
+// defender-best-response attack treatment is validated but deliberately not
+// propagated into the frozen actor-local Priority evaluator.
+LearnedSearchConfig
+learned_value_actor_local_priority_search_config(
+    const BotConfig& bot, std::uint64_t seed);
 
 // The two licensed AQ5-RPI0 real-root recipes. Priority retains AQ4-P1's
 // K8/H8 outer search with K2/H4 all-decision continuations. Combat uses a
@@ -1376,6 +1385,8 @@ struct LearnedActionSamples {
     // inner order exactly match q_samples.
     std::vector<std::vector<LearnedPriorityH0Boundary>>
         priority_h0_boundaries;
+
+    bool operator==(const LearnedActionSamples&) const = default;
 };
 
 struct LearnedValueAttackSetScores {
@@ -1409,6 +1420,15 @@ LearnedValueAttackSetScores
 aggregate_learned_value_attack_block_scores(
     const std::vector<std::vector<double>>& block_scores,
     bool adversarial_blocks);
+
+// Evaluation-only view of the exact fixed-seed combat samples consumed by
+// both aggregation modes. The deployed selector generates this matrix before
+// choosing mean or defender-min and draws no further randomness afterward.
+std::vector<std::vector<double>>
+learned_value_attack_block_samples(
+    const GameState& state, std::size_t attacking_player,
+    const std::vector<std::vector<PermanentId>>& candidates,
+    std::shared_ptr<const LearnedModel> model, std::uint64_t seed);
 
 // Evaluation-only view of the deployed Value attack-set selector. `seed`
 // initializes the RNG exactly at the block-candidate enumeration boundary;

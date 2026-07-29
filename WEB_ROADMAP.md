@@ -47,9 +47,10 @@ horizontal fit are also green**
 
 Acceptance criteria:
 
-- Setup exposes all five decks and all nine opponent policies, including
+- Setup exposes all five decks and all eleven opponent policies, including
   explicit Learned Value C16, its best-response-attacks challenger, the
-  stack-discipline diagnostic, and G0 identities.
+  stack-discipline diagnostic, the AQ4 and AQ15 search diagnostics, and G0
+  identities.
 - The current player, phase, priority holder, and required choice are obvious.
 - Land play, spell cast, priority pass, stack resolution, attackers, blockers,
   damage order, game over, and rematch can each be completed without guessing.
@@ -341,6 +342,41 @@ smoke complete; human strategic play-test in progress; not promoted**
   completed a real opponent turn well inside the 120-second timeout. The
   rebuilt server is running at `http://127.0.0.1:4173`; setup was left open
   with AQ4 selected for the owner's next match.
+
+#### Preregistered AQ15 combined-search diagnostic exposure slice
+
+Hypothesis: composing the already-frozen AQ4 actor-local Priority search with
+the already-frozen defender-best-response attack aggregation at their
+disjoint real-game decision sites will give manual play-testing both general
+operators without changing either operator or introducing card-specific
+policy.
+
+Status: **engine, bridge, metadata, production build, complete structural
+web contracts, and rendered setup-selection smoke pass; unscreened and not
+promoted**
+
+- The stable ID is `learned-value-c16-combined-search`, displayed as
+  `Learned C16 · Combined Search (AQ15)`.
+- It loads exact frozen C16 at T800/S424242/G16. Real Priority decisions use
+  AQ4 outer K8/R1/H8 plus symmetric actor-local K2/R1/H4; real attack sets use
+  the existing defender-min aggregation. Pass dominance, residuals, recursive
+  policy improvement, and every other treatment remain off.
+- AQ4 simulated continuations deliberately retain canonical C16 combat. A
+  focused fixed-root witness proves that enabling the real-game attack flag
+  leaves AQ4 Priority configuration, samples, and scores bit-identical.
+- A separate raw-sample witness proves that mean and defender-min consume the
+  same fixed-seed combat-score matrix; only aggregation and the selected
+  attack candidate may differ.
+- Metadata dates the pilot 2026-07-29 and labels it
+  `Manual diagnostic · unscreened · not promoted`. No gameplay-strength seed
+  was opened and no strength claim is made.
+- Evidence on 2026-07-29: the engine passed 184/184; the focused C++ bridge
+  passed 20/20; `make test-web-ui` passed 107/107 including the complete
+  55-case five-deck × eleven-policy journey matrix; and `make test-web`
+  passed the C++ bridge plus 130/130 Node/client/session tests.
+  `make test-web-rendered` passed 10/10 at 1280 × 720 and 1440 × 900,
+  including the setup policy/date/lifecycle selection smoke with no
+  horizontal overflow.
 
 Acceptance criteria:
 
