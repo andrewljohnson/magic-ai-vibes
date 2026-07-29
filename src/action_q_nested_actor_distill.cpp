@@ -1218,6 +1218,17 @@ FitReport fit_with_optimizer(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent,
     LearnedValuePriorityHeadUpdateConfig optimizer) {
+    return fit_with_optimizer_and_supplement(
+        corpus, std::move(parent), optimizer, {});
+}
+
+FitReport fit_with_optimizer_and_supplement(
+    const Corpus& corpus,
+    std::shared_ptr<const LearnedModel> parent,
+    LearnedValuePriorityHeadUpdateConfig optimizer,
+    std::span<
+        const LearnedValuePriorityTrainingExample>
+        supplement) {
     require_parent(parent);
     validate_corpus(corpus);
     require_frozen_census(corpus.census);
@@ -1233,10 +1244,17 @@ FitReport fit_with_optimizer(
     report.parent_components =
         learned_model_component_fingerprints(parent);
     report.optimizer = optimizer;
-    report.fit_examples = corpus.fit.size();
+    if (supplement.size() >
+        std::numeric_limits<std::size_t>::max() -
+            corpus.fit.size()) {
+        throw std::overflow_error(
+            "AQ4-G1 supplemental example count overflow");
+    }
+    report.fit_examples =
+        corpus.fit.size() + supplement.size();
     std::vector<LearnedValuePriorityTrainingExample>
         examples;
-    examples.reserve(corpus.fit.size());
+    examples.reserve(report.fit_examples);
     for (const RootExample& root : corpus.fit) {
         report.fit_options +=
             root.manifest.actions.size();
@@ -1247,6 +1265,16 @@ FitReport fit_with_optimizer(
                 root.target_probabilities,
             .weight = root.weight,
         });
+    }
+    for (const auto& example : supplement) {
+        if (example.options.size() >
+            std::numeric_limits<std::size_t>::max() -
+                report.fit_options) {
+            throw std::overflow_error(
+                "AQ4-G1 supplemental option count overflow");
+        }
+        report.fit_options += example.options.size();
+        examples.push_back(example);
     }
     report.candidate =
         update_learned_value_priority_head(

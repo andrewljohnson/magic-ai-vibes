@@ -237,6 +237,16 @@ FitReport fit_with_optimizer(
     const Corpus& corpus,
     std::shared_ptr<const LearnedModel> parent,
     LearnedValuePriorityHeadUpdateConfig optimizer);
+// Preserves the exact canonical G1 teacher prefix, then appends the supplied
+// examples before the single seeded optimizer call. An empty supplement is
+// exactly the historical G1/G2 fit path.
+FitReport fit_with_optimizer_and_supplement(
+    const Corpus& corpus,
+    std::shared_ptr<const LearnedModel> parent,
+    LearnedValuePriorityHeadUpdateConfig optimizer,
+    std::span<
+        const LearnedValuePriorityTrainingExample>
+        supplement);
 OfflineReport evaluate_offline(
     const Corpus& corpus, const FitReport& fit,
     std::shared_ptr<const LearnedModel> parent,
