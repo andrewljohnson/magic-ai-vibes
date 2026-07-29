@@ -24015,6 +24015,243 @@ Next: preregister one small rank-2 state-by-action residual fit against this
 fixed cache, use grouped TRAIN out-of-fold and untouched DEV metrics across
 all five decks, and open a gameplay seed only if those offline gates pass.
 
+##### AQ19-DBC6-R2-BILINEAR state-by-action residual declaration
+
+Declared 2026-07-29 at exact AQ18 result commit `eee291d`, after rereading
+`REVIEW.md` through its newest 13:44 PDT cycle and before fitting, scoring, or
+opening a gameplay seed. That independent review accepted AQ18 and named one
+rank-2 state-by-action residual with grouped OOF and whole-game-disjoint DEV
+gates as the next experiment. Independent preimplementation review returned
+GO on the fixed recipe below. Repository and history searches found identifier
+`AQ19-DBC6-R2-BILINEAR`, fit tag `202607291901`, selector seed
+`202607291911`, and fold schema `old-school-aq19-physical-fold-v1` unused.
+C16 remains champion.
+
+This is one architecture and one fit, not a rank, initialization, scale,
+optimizer, temperature, regularization, fold, seed, threshold, or loss sweep.
+It tests a general learned interaction between the acting player's state and
+each legal action. It contains no card name, authored card value, target rule,
+stack rule, combat rule, Handcrafted score, opponent hidden identity, or
+field-observation label. Failure closes this exact rank-2 treatment without a
+nearby retry.
+
+Falsifiable hypothesis: DBC4/DBC5 failed because 80 TRAIN roots could only
+reweight or locally adapt C16's 32 frozen Priority directions. AQ18 now
+provides 300 balanced TRAIN roots and a deeper symmetric actor-local teacher,
+and proved that the existing owner-safe 893 features contain no resolved
+required-correction alias conflict. Learning two genuinely new separable
+state-by-action directions will therefore improve grouped OOF and reused
+whole-game-disjoint DEV action ranking on every deck, not merely fit TRAIN.
+
+###### Immutable cache and descriptive pre-fit census
+
+Load only the strict AQ18 artifact:
+
+```text
+path    build/model-cache/old-school-aq18-dbc6-label-cache-v1.bin
+bytes   13006842
+sha256  591498b82d352c870c786289f54b4e5c197f1c972b06d4f74c7a3ca7731916e8
+digest  519ebe666adaf567ac3b4fdf7a1e2096cf96ccc70ad23e55b5db7f45c37c3f3f
+parent  68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f
+roots   TRAIN 300 / DEV 150
+```
+
+Before this declaration, a read-only consumer inspected only authenticated
+root identities, feature shapes, and frozen parent/teacher labels; it created
+no parameters and scored no candidate. Every 893-wide option row is exactly:
+
+```text
+s = row[0..673]     674 actor-local state/critic-observation features
+a = row[674..892]   219 legal-action and public-decision features
+```
+
+Every option in every TRAIN and DEV root has a bit-identical `s` prefix.
+Every stored teacher shallow-prior component is exact positive zero; the
+consumer must assert that descriptive invariant even though the no-blend
+teacher aggregate does not use it.
+
+The exact frozen pair census, using unequal stored teacher aggregates as the
+eligibility rule, is:
+
+| Split / deck | all-tied roots | potential pairs | eligible pairs |
+| --- | ---: | ---: | ---: |
+| TRAIN / Green | 21 | 290 | 125 |
+| TRAIN / Red | 12 | 514 | 316 |
+| TRAIN / Blue | 20 | 402 | 273 |
+| TRAIN / White | 23 | 300 | 184 |
+| TRAIN / RU Aggro | 13 | 787 | 567 |
+| DEV / Green | 11 | 180 | 73 |
+| DEV / Red | 4 | 175 | 146 |
+| DEV / Blue | 16 | 108 | 41 |
+| DEV / White | 8 | 168 | 86 |
+| DEV / RU Aggro | 9 | 180 | 126 |
+
+Thus TRAIN has 2,293 potential / 1,465 eligible pairs and DEV has
+811 / 472. All-tied roots remain in the equal-cell denominator and contribute
+zero pair loss.
+
+The grouped four-fold assignment uses only opaque
+`physical_game_group` and each group's 15-vector of owner-deck × B2/B3/B4+
+root counts. Order the 80 physical groups by descending total roots, then
+ascending group hash. For each group, trial all four folds and choose the
+lexicographically smallest global tuple after placement:
+
+```text
+(maximum of all 4x15 cell counts,
+ sum of squares of all 4x15 cell counts,
+ maximum of all 4x5 deck totals,
+ maximum of all four fold root totals,
+ fold index)
+```
+
+The fold manifest is SHA-256 over exact bytes
+`old-school-aq19-physical-fold-v1\n`, the AQ18 corpus digest plus newline, then
+`physical_hash<TAB>decimal_fold\n` in ascending physical-hash order:
+
+```text
+51852e6fa7fee97edf809e7f29cf5859cca7fd0e1575a388053d5d2b042c7765
+```
+
+It yields:
+
+| Fold | physical games | held roots | Green B2/B3/B4+ | each other deck B2/B3/B4+ |
+| --- | ---: | ---: | --- | --- |
+| 0 | 20 | 76 | 5 / 6 / 5 | 5 / 5 / 5 |
+| 1 | 20 | 76 | 5 / 5 / 6 | 5 / 5 / 5 |
+| 2 | 21 | 76 | 6 / 5 / 5 | 5 / 5 / 5 |
+| 3 | 19 | 72 | 4 / 4 / 4 | 5 / 5 / 5 |
+
+No physical game may cross folds. Every TRAIN root must receive exactly one
+OOF prediction. DEV is never assigned a fold or used for fitting.
+
+###### Fixed rank-2 residual
+
+For root state `s` and canonical legal-action suffixes `a_i`, compute the
+canonical binary64 mean and centered suffix:
+
+```text
+d_i       = a_i - mean_legal(a)
+U         = U0 + delta_U
+h_k       = tanh(dot(U_k, s))
+g_i,k     = dot(V_k, d_i)
+z_i       = sum_{k=0..1}(h_k * g_i,k)
+c_i       = z_i - mean_legal(z)
+rho_i     = 0.10 * tanh(c_i)
+score_i   = AQ18_base_aggregate_i + rho_i
+```
+
+All means and reductions use engine-authoritative typed-action order, even
+when a diagnostic caller permutes its input. The explicit `z` centering is
+retained even though `d` is centered, so fitting and production use exactly
+the same floating-point operation order.
+
+There are exactly 1,786 trained binary64 scalars:
+`delta_U[2][674]` and `V[2][219]`. `U0` is a fixed Rademacher projection at
+`+1/32` or `-1/32`. For coordinate `(k,j)`, start from
+`x = 202607291901 XOR ((k+1) << 32) XOR (j+1)`, apply the standard SplitMix64
+step exactly:
+
+```text
+x += 0x9e3779b97f4a7c15
+x = (x XOR (x >> 30)) * 0xbf58476d1ce4e5b9
+x = (x XOR (x >> 27)) * 0x94d049bb133111eb
+x = x XOR (x >> 31)
+```
+
+and use `+1/32` when the high bit is one, otherwise `-1/32`. Require both rows
+nonconstant and distinct. Initialize every `delta_U` and `V` coordinate to
+exact positive zero. A zero `V` must take an explicit fast path returning
+exact positive-zero residuals, making the initial policy bit-identical to C16
+while the fixed nonzero `U0` gives `V` a live first-step gradient.
+
+This residual is a separate small immutable policy object beside the frozen
+C16 `LearnedModel`; it does not mutate or masquerade as a new C16 model.
+Production applies it after the unchanged K8/R1/H4 aggregate and propagates
+the same immutable object symmetrically to both Learned-mirror continuation
+seats. Attack, Block, DamageOrder, critic, base Priority head, and all other
+research treatments remain exact C16.
+
+###### One optimizer recipe
+
+Use AQ18's stored `base_aggregate_scores` and `teacher_aggregate_scores`
+verbatim. Do not recompute either from Q samples: the base shallow-blend
+reduction is mathematically equivalent but can differ in binary64 operation
+order. Common-world teacher Q samples are used only for stable-pair standard
+errors.
+
+For each root and unordered pair `i < j` with `T_i != T_j`:
+
+```text
+gap_ij = T_i - T_j
+y_ij   = sigmoid(gap_ij / 0.10)
+p_ij   = sigmoid((score_i - score_j) / 0.10)
+w_ij   = abs(gap_ij) / sum_root_pairs(abs(gap))
+```
+
+The data term is root-normalized cost-weighted pair BCE. During every
+full-TRAIN or fold fit, each nonempty deck × width cell has mass `1/15` and
+each root within that cell has equal mass; no deck, width, root with many
+options, or pair with tiny cost can dominate by count. Add exactly:
+
+```text
+0.5 * 0.10 * (sum(delta_U^2) + sum(V^2))
+```
+
+Fit tag is `202607291901`. Run deterministic full-batch Adam for exactly
+256 updates: learning rate `0.001`, betas `0.9/0.999`, epsilon `1e-8`, and
+global gradient-norm clip `5.0`. There is no shuffle, random fit seed, early
+stopping, parameter interpolation, arm choice, retry, or post-result
+adjustment. Repeat every fold fit and the all-TRAIN fit from exact zero and
+require bit-identical parameters, scores, optimizer accounting, and digest.
+A synthetic finite-difference test must validate the analytic gradient; the
+production fit uses only the analytic O(actions × rank × features) path and
+should complete in seconds because all rollouts are already cached.
+
+###### Offline gates and conditional field pilot
+
+Report pair BCE, listwise cross-entropy, teacher regret, exact-max top-one
+agreement, and stable-pair agreement for full TRAIN, combined grouped OOF,
+and DEV, aggregate and per deck. Full-dataset metrics retain AQ18's exact
+equal deck × width balance. DEV is whole-game-disjoint and completely
+excluded from fitting, but its AQ18 descriptive metrics and earlier model
+choices have already been observed; it is reused reject-only development
+evidence, not an untouched final validation set.
+
+Eligibility is conjunctive:
+
+1. full-TRAIN pair BCE and regret strictly improve, with listwise CE
+   non-increasing;
+2. combined OOF pair BCE and regret strictly improve, listwise CE
+   non-increasing, top-one and stable-pair agreement non-decreasing, and
+   Green, Red, Blue, White, and RU Aggro regret each non-increasing;
+3. reused DEV pair BCE and regret strictly improve, listwise CE
+   non-increasing, top-one and stable-pair agreement non-decreasing, and
+   every one of the five deck regrets non-increasing; and
+4. exact cache/fold/pair census, 674/219 split, state-prefix identity,
+   teacher-zero invariant, recipe, repeated fits, parameter replay, positive-
+   zero C16 equivalence, finite/bounded residuals, legal-action permutation
+   equivariance, actor-local hidden-repartition bit identity, symmetric
+   continuation propagation, parent immutability, and treatment-only
+   isolation all pass.
+
+The established DBC4 metric implementation may be mechanically generalized
+to accept authenticated precomputed base/teacher aggregates and common-world
+teacher samples; its formulas and thresholds must not be cloned or changed.
+Any offline failure returns `REJECT stage=offline`, creates no pilot, and
+opens no gameplay seed.
+
+Only a complete offline pass may open one fresh five-deck,
+seat/play-draw-balanced 60-game selector at seed `202607291911`: AQ19 versus
+exact C16, 12 games per challenger deck with six play and six draw, ordinary
+K8/R1/H4 Learned Value search in both arms, identical C16 model, and only the
+AQ19 residual object differing. More than 30/60 wins plus at least 3/12 on
+every deck licenses a dated **Learned C16 · Bilinear AQ19** manual web pilot;
+at least 37/60 may additionally be called `FAST_GO`. Otherwise reject. This
+small selector is only a catastrophic-regression guard and a license for the
+owner's qualitative play test; it is not a strength claim, champion
+replacement, Handcrafted comparison, or substitute for the later 2,000-game
+and fixed-seed gates.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot
