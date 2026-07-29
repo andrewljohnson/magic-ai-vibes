@@ -17877,8 +17877,11 @@ collection code completed and before any census or model was produced.
 
 The root scorer seed is
 `derive_seed(root_seed, PrioritySearch, block, schedule_index * 2 + actor,
-actor-local chronological nontrivial-root ordinal)`. The fit seed is
-`derive_seed(root_seed, PolicyFit, 0, 0, 0)`. These coordinates were fixed
+zero-based actor-local chronological nontrivial-root ordinal before
+retention)`. The same root seed feeds the complete ordered action vector for
+both base and teacher scoring. The fit seed is
+`derive_seed(root_seed, PolicyFit, 0, 0, 0) =
+15687967101834164397` (`0xd9b6daf5f0d6f8ad`). These coordinates were fixed
 before collection. They depend on the frozen schedule and chronological root,
 not on action order, action identity, hidden cards, or candidate scores.
 
@@ -17889,21 +17892,42 @@ action set. On eight common hidden-information worlds, score:
 2. the unchanged C16 critic immediately after each action's engine-resolved
    consequence, before any later voluntary action can heal the branch.
 
-The second vector is converted with the existing temperature-0.10,
-90%-softmax/10%-uniform distribution. Fit all legal actions, never only the
-chosen action. Every root receives inverse within-deck root-count weight, so
-the five decks have equal loss mass. The only trainable component is the outer
-Priority head; the critic, Attack, Block, DamageOrder, card identities,
-observation schema, legal moves, and rules remain bit-identical. Fixed
-optimizer: Adam, batch 64, 64 epochs, rate 0.003, beta1 0.9, beta2 0.999,
-epsilon `1e-8`, global norm clip 5, residual bound 0.10, fit seed derived from
-`202607281751`.
+For action `a`, the teacher is exactly
+`T_a = (1 / 8) * sum_w V(resolve(a, sampled_world_w))`: terminal
+consequences use 0/0.5/1 and nonterminal consequences use the unchanged
+state-only C16 critic from the actor's perspective. The world seed is
+`learned_search_world_seed(root_search_seed, w)`. Resolve is transient and
+never continues with a voluntary action. Average the eight scalar samples
+first, then convert the resulting action vector with the existing
+temperature-0.10, 90%-softmax/10%-uniform transform; never softmax each world
+and average. Base is the weight-zero call's
+`exact_priority_aggregate_scores`. The deployed candidate score is exactly
+`S_a = base_a + 0.10 * tanh(logit_a - mean_b(logit_b))`.
 
-Exact binary64 equality defines a tied maximum. Offline top-one agreement
-means the teacher and deployed exact-max support sets intersect; deployment
-keeps the engine's existing first-candidate rule on an exact tie.
-Descriptor-order invariance compares action-keyed values and support after
-mapping the permuted list back to the original action identities.
+The reviewer suggested extracting `T_a` from a second weight-one sampler call.
+AQ0 instead invokes that sampler's underlying public
+determinize/resolve/critic seams directly: for frozen Legacy-state-only C16
+this is the same shallow-prior quantity and avoids calculating unused H4
+continuations a second time. A focused test must compare the direct teacher
+rows with the weight-one sampler's `priority_shallow_prior_samples`
+bit-for-bit on a representative root before the census is accepted.
+
+Fit all legal actions, never only the chosen action. Every root receives
+inverse within-deck root-count weight, so the five decks have equal loss mass.
+The only trainable component is the outer Priority head; the critic, Attack,
+Block, DamageOrder, card identities, observation schema, legal moves, and
+rules remain bit-identical. Fixed optimizer: Adam, batch 64, 64 epochs, rate
+0.003, beta1 0.9, beta2 0.999, epsilon `1e-8`, global norm clip 5, residual
+bound 0.10, and the fit seed above.
+
+Exact binary64 equality defines a tied maximum. The deployed selected index is
+the lowest engine-order index in its exact-max support. Per-root regret is
+`max_a T_a - T_selected`; top-one agreement is one exactly when that selected
+action is in the teacher exact-max support, otherwise zero. Pooled metrics are
+the arithmetic mean of the five deck means. Descriptor-order invariance
+compares action-keyed values and support after mapping the permuted list back
+to the original action identities; an exact tie need not preserve the
+order-dependent selected index.
 
 Collection is two-step to obey the census rule. The first command may only
 collect and print both frozen blocks: exact games, retained roots/options by
@@ -17913,16 +17937,24 @@ the fit command is allowed to run; do not change the root cap or quotas after
 seeing them.
 
 The executable contract is exactly
-`old-school-action-q-explore --census` and
-`old-school-action-q-explore --run`; all other arguments fail. `--run`
+`./build/old-school-action-q-explore --census` and
+`./build/old-school-action-q-explore --run`; all other arguments fail.
+`--census` has no fit, model-writer, or gameplay path. `--run`
 reconstructs and validates the frozen corpus, performs the repeated fit and
 offline gates in memory, and opens the gameplay seed only after every offline
-gate passes. This rapid selector does not publish a candidate artifact:
+gate passes. It snapshots the parent identity before and after and never
+overwrites an artifact. This rapid selector does not publish a candidate artifact:
 it prints the exact model/component fingerprints, and the repeated-fit
 identity is the persistence witness. A strict gameplay winner requires a
 separately declared no-replace artifact publication before web deployment.
 This intentionally avoids designing an artifact format before knowing the
 action-Q mechanism works.
+
+Neither the corpus nor its report may serialize a `GameState`, a resolved
+consequence state, opponent hand/library identities, or either library order.
+Resolved states exist only as transient critic inputs. Stored evidence is
+limited to owner-safe option rows, typed public actions, scalar
+base/teacher data, root coordinates, and hidden-safe fingerprints.
 
 The fixed offline gate is conjunctive:
 
@@ -17936,12 +17968,16 @@ The fixed offline gate is conjunctive:
   does not worsen and no stable parent agreement is lost;
 - the exact captured field root
   `field.blue.ancestral-opponent-seed24.aq0.v1` has self-target score strictly
-  above opponent-target and never selects opponent-target;
-- live Force Spike remains selected; both the existing one-open-mana payable
-  control and a new
-  `control.blue.force-spike-payable-five-open-gray-ogre.aq0.v1` select Pass,
-  redundant same-target Counterspell selects Pass while the intervening
-  counter-war response remains available,
+  above opponent-target, never selects opponent-target, and preserves its
+  complete legal-action list plus owner-information/action fingerprint;
+- `control.blue.force-spike-live-gray-ogre.v1` remains selected; the existing
+  one-open-mana payable control is descriptive only because spending Spike
+  plus Island to tax the opponent's last mana is strategically ambiguous. A new
+  `control.blue.force-spike-payable-five-open-gray-ogre.aq0.v1` selects Pass,
+  providing the hard payable gate that matches the field report;
+  `control.blue.counter-redundant-same-target.v1` selects Pass, while
+  `control.blue.counter-same-target-after-intervening-counter.v1` selects the
+  counter targeting the opponent's intervening Counterspell;
   `field.green.second-main-sick-bear-growth.v1` selects Pass,
   `field.green.begin-combat-growth-tapped-air.v1` excludes opponent-target
   Growth, and `control.blue.braingeyser-x0.v1` excludes Braingeyser X=0; and
