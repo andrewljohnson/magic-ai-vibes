@@ -392,7 +392,8 @@ void test_cli_recipe_and_search_constants_are_sealed() {
             aq::kTrainRootCeiling == 480 &&
             aq::kDevRootCeiling == 160 &&
             aq::kActorGamesPerDeckAndSplit == 16 &&
-            aq::kFrozenPreflightDigest.empty() &&
+            aq::kFrozenPreflightDigest ==
+                "8a5800dc3ebd7cfad3c8cc893e3aa7e5795f38cb63fcf10442f7bb6588fd950d" &&
             aq::kFrozenCensusManifestHash.empty() &&
             recipe == g1_recipe &&
             base.seed == 123 &&
@@ -436,7 +437,7 @@ void test_cli_recipe_and_search_constants_are_sealed() {
         "AQ4-G4B accepted an invalid split");
 }
 
-void test_preflight_digest_is_canonical_and_unfrozen() {
+void test_preflight_digest_is_canonical_and_fail_closed() {
     old_school::action_q_nested_actor_diagnostic::
         PreflightReport report;
     report.recipe = aq::preflight_recipe();
@@ -501,8 +502,7 @@ void test_preflight_digest_is_canonical_and_unfrozen() {
             digest ==
                 aq::canonical_preflight_digest(report) &&
             !aq::preflight_exact(report),
-        "AQ4-G4B unfrozen preflight digest authorized "
-        "later stages");
+        "AQ4-G4B unrelated preflight digest authorized later stages");
 
     auto changed_recipe = report;
     ++changed_recipe.recipe.root_seed;
@@ -1346,8 +1346,8 @@ int main() {
         "cli_recipe_and_search_constants_are_sealed",
         test_cli_recipe_and_search_constants_are_sealed);
     run(
-        "preflight_digest_is_canonical_and_unfrozen",
-        test_preflight_digest_is_canonical_and_unfrozen);
+        "preflight_digest_is_canonical_and_fail_closed",
+        test_preflight_digest_is_canonical_and_fail_closed);
     run(
         "schedules_are_balanced_and_game_disjoint",
         test_schedules_are_balanced_and_game_disjoint);

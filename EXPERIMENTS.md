@@ -19810,6 +19810,36 @@ declaration required bit-exact G1 replay, while the old notebook retained only
 rounded scalar displays. Capturing the complete already-open control report
 once and freezing its digest is stricter than relaxing that requirement.
 
+###### AQ4-G4B control-preflight result and digest freeze
+
+Completed 2026-07-28 from immutable implementation commit `f7f981f`, after
+the full repository gate and an independent implementation review returned
+GO. Before recording this result, `REVIEW.md` was reread through its newest
+23:14 PDT cycle; it contained no conflicting result.
+
+Exact command:
+
+```sh
+/usr/bin/time -p ./build/old-school-action-q-broad-distill --preflight
+```
+
+Result: **PASS**, with canonical complete-report SHA-256
+`8a5800dc3ebd7cfad3c8cc893e3aa7e5795f38cb63fcf10442f7bb6588fd950d`
+and runtime 6.47 seconds real / 22.44 user / 0.11 sys. All four strategic
+directions reproduced: redundant Counterspell selected Pass at
+`+0.0239755`; Braingeyser selected X=1 self at `+0.0118071`; sick-Bear
+Growth selected Pass at `+0.0532776`; and live Force Spike selected the
+counter at `+0.0930790`. Every fixture's hidden-repartition and reversed-order
+controls passed. The actor-local control selected the same Lightning Bolt
+action under hidden repartition with observation, legal-action, and score
+bit identity, and maximum nesting depth remained one.
+
+This replay opened only the five already-used G1 control seeds. It executed
+zero G4B source games, scored zero G4B candidate roots, fit no model, opened
+no selector, and published no artifact. The digest is now frozen in source;
+the census hash remains empty, so `--run` is still sealed. The next and only
+licensed action after committing/reviewing this freeze is `--census`.
+
 ##### FQ4-WORK0 frozen trajectory-cache and parent-census declaration
 
 Declared 2026-07-28 after closing DEV5 GP0 and before changing Learned bot

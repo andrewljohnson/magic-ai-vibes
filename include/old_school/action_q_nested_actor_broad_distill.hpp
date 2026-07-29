@@ -53,7 +53,8 @@ inline constexpr std::string_view kRequiredParentFingerprint =
 // Filled only after the control-only `--preflight` replay is recorded.
 // Keeping this empty seals `--census` and `--run` before a bit-exact G1
 // preflight report has been reviewed and frozen.
-inline constexpr std::string_view kFrozenPreflightDigest = "";
+inline constexpr std::string_view kFrozenPreflightDigest =
+    "8a5800dc3ebd7cfad3c8cc893e3aa7e5795f38cb63fcf10442f7bb6588fd950d";
 
 // Filled only after the source-only `--census` result is recorded. Keeping
 // this empty seals `--run` before any G4B search coordinate can be opened.
