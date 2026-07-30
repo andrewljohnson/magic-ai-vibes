@@ -721,6 +721,14 @@ struct DeckEvolutionConfig {
         .kind = BotKind::Handcrafted,
         .rollouts_per_action = 1,
     };
+    // Optional controller-driven pilot (for example Self-Play Zero). When
+    // set it is invoked once per evolution game with the two seat decks and
+    // a deterministic seed, and the returned controllers drive both seats;
+    // `pilot` is then ignored for decisions.
+    std::function<std::array<std::optional<HumanController>, 2>(
+        const std::array<std::vector<CardId>, 2>& decks,
+        std::uint64_t game_seed)>
+        controller_pilot;
 };
 
 struct EvolvedDeck {

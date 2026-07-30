@@ -4584,13 +4584,32 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
                                             starting_player;
                                         const bool candidate_first =
                                             candidate_player == 0;
+                                        const std::array<
+                                            std::vector<CardId>, 2>
+                                            seat_decks = {
+                                                candidate_first
+                                                    ? candidates
+                                                          [candidate_index]
+                                                    : metagame[opponent],
+                                                candidate_first
+                                                    ? metagame[opponent]
+                                                    : candidates
+                                                          [candidate_index],
+                                            };
+                                        if (config.controller_pilot) {
+                                            current_config
+                                                .human_controllers =
+                                                config.controller_pilot(
+                                                    seat_decks,
+                                                    game_seed ^
+                                                        (0x9E3779B97F4A7C15ULL *
+                                                         (candidate_player *
+                                                              2 +
+                                                          starting_player +
+                                                          1)));
+                                        }
                                         Game game(
-                                            candidate_first
-                                                ? candidates[candidate_index]
-                                                : metagame[opponent],
-                                            candidate_first
-                                                ? metagame[opponent]
-                                                : candidates[candidate_index],
+                                            seat_decks[0], seat_decks[1],
                                             game_seed, current_config);
                                         const GameResult result =
                                             game.run();

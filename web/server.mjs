@@ -195,6 +195,31 @@ export const EVOLUTION_PILOTS = Object.freeze([
     name: "Handcoded Policy",
     description: "Fast rules-aware evaluation against the five-deck metagame.",
   },
+  {
+    id: "spz",
+    label: "Self-Play Zero (SPZ)",
+    name: "Self-Play Zero (SPZ)",
+    description:
+      "The self-taught champion evaluates candidates with its fast myopic policy.",
+  },
+  {
+    id: "random",
+    label: "Random",
+    name: "Random",
+    description: "Uniform legal actions; a noisy but unbiased fitness signal.",
+  },
+  {
+    id: "monte-carlo",
+    label: "Monte Carlo",
+    name: "Monte Carlo",
+    description: "Short random-continuation sampling for each choice.",
+  },
+  {
+    id: "deep-monte-carlo",
+    label: "Deep Monte Carlo",
+    name: "Deep Monte Carlo",
+    description: "A larger rollout budget per choice; slower evaluation.",
+  },
 ]);
 
 export const EVOLUTION_DEFAULTS = Object.freeze({
@@ -843,7 +868,7 @@ export function normalizeEvolutionConfig(body) {
     throw new ApiError(
       400,
       "invalid_evolution_config",
-      "pilot must be handcrafted",
+      "pilot must be one of " + [...validPilots].join(", "),
     );
   }
   try {

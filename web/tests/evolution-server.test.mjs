@@ -118,7 +118,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   assert.equal(meta.response.status, 200);
   assert.deepEqual(
     meta.body.evolution.pilots.map(({ id }) => id),
-    ["handcrafted"],
+    ["handcrafted", "spz", "random", "monte-carlo", "deep-monte-carlo"],
   );
   assert.deepEqual(meta.body.evolution.defaults, {
     generations: 3,
@@ -155,7 +155,6 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
     { games: 0 },
     { games: 17 },
     { seed: "4294967296" },
-    { pilot: "random" },
     { pilot: "learned-value-c16" },
   ];
   for (const candidate of invalidBodies) {

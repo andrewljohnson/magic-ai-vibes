@@ -56,7 +56,8 @@ void print_help(std::ostream& output) {
         << "\n"
         << "       old-school-web-bridge --evolve-json "
            "[evolution options]\n"
-        << "  --evolve-pilot handcrafted\n"
+        << "  --evolve-pilot random|monte-carlo|deep-monte-carlo|"
+           "handcrafted|spz\n"
         << "  --generations N --population N --games N --seed N\n";
 }
 
@@ -85,6 +86,7 @@ int main(int argc, char** argv) {
         }
         if (evolve_json) {
             old_school::web::EvolutionJsonConfig config;
+            config.spz_artifact_path = spz_artifact_path;
             std::set<std::string> seen_options;
             for (int argument = 1; argument < argc; ++argument) {
                 const std::string_view option(argv[argument]);
@@ -102,6 +104,7 @@ int main(int argc, char** argv) {
                     option != "--generations" &&
                     option != "--population" &&
                     option != "--games" &&
+                    option != "--spz-artifact" &&
                     option != "--seed") {
                     throw std::invalid_argument(
                         "unknown evolution option: " +
@@ -117,6 +120,9 @@ int main(int argc, char** argv) {
                     config.pilot =
                         old_school::web::parse_evolution_pilot(
                             value);
+                } else if (option == "--spz-artifact") {
+                    config.spz_artifact_path =
+                        std::string(value);
                 } else if (option == "--generations") {
                     config.generations =
                         parse_positive_size(option, value);

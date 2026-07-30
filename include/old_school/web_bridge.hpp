@@ -35,7 +35,11 @@ struct BridgeConfig {
 };
 
 enum class EvolutionPilot : std::uint8_t {
+    Random,
+    MonteCarlo,
+    DeepMonteCarlo,
     Handcrafted,
+    SelfPlayZero,
 };
 
 struct EvolutionJsonConfig {
@@ -44,6 +48,11 @@ struct EvolutionJsonConfig {
     std::size_t games_per_opponent = 1;
     std::uint64_t seed = 42;
     EvolutionPilot pilot = EvolutionPilot::Handcrafted;
+    std::size_t monte_carlo_rollouts = 2;
+    std::size_t deep_monte_carlo_rollouts = 8;
+    // Self-Play Zero pilot: net artifact and a fast myopic policy (no
+    // rollout lookahead) so evolution fitness stays cheap.
+    std::string spz_artifact_path;
 
     bool operator==(const EvolutionJsonConfig&) const = default;
 };

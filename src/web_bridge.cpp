@@ -89,8 +89,16 @@ std::string_view deck_id_token(DeckId deck) {
 
 std::string_view evolution_pilot_token(EvolutionPilot pilot) {
     switch (pilot) {
+    case EvolutionPilot::Random:
+        return "random";
+    case EvolutionPilot::MonteCarlo:
+        return "monte-carlo";
+    case EvolutionPilot::DeepMonteCarlo:
+        return "deep-monte-carlo";
     case EvolutionPilot::Handcrafted:
         return "handcrafted";
+    case EvolutionPilot::SelfPlayZero:
+        return "spz";
     }
     throw std::out_of_range("unknown evolution pilot");
 }
@@ -1214,8 +1222,20 @@ DeckId parse_deck_id(std::string_view value) {
 }
 
 EvolutionPilot parse_evolution_pilot(std::string_view value) {
+    if (value == "random") {
+        return EvolutionPilot::Random;
+    }
+    if (value == "monte-carlo" || value == "mc") {
+        return EvolutionPilot::MonteCarlo;
+    }
+    if (value == "deep-monte-carlo" || value == "deep-mc") {
+        return EvolutionPilot::DeepMonteCarlo;
+    }
     if (value == "handcrafted") {
         return EvolutionPilot::Handcrafted;
+    }
+    if (value == "spz" || value == "self-play-zero") {
+        return EvolutionPilot::SelfPlayZero;
     }
     throw std::invalid_argument(
         "unknown evolution pilot: " + std::string(value));
@@ -1385,21 +1405,64 @@ int run_evolution_json(
             "evolution population must be at least five");
     }
 
-    BotConfig pilot = {
-        .kind = BotKind::Handcrafted,
-        .rollouts_per_action = 1,
+    DeckEvolutionConfig evolution = {
+        .generations = config.generations,
+        .population = config.population,
+        .repetitions_per_opponent = config.games_per_opponent,
     };
+    switch (config.pilot) {
+        case EvolutionPilot::Random:
+            evolution.pilot = {.kind = BotKind::Random,
+                               .rollouts_per_action = 1};
+            break;
+        case EvolutionPilot::MonteCarlo:
+            evolution.pilot = {
+                .kind = BotKind::MonteCarlo,
+                .rollouts_per_action = config.monte_carlo_rollouts,
+            };
+            break;
+        case EvolutionPilot::DeepMonteCarlo:
+            evolution.pilot = {
+                .kind = BotKind::DeepMonteCarlo,
+                .rollouts_per_action =
+                    config.deep_monte_carlo_rollouts,
+            };
+            break;
+        case EvolutionPilot::Handcrafted:
+            evolution.pilot = {.kind = BotKind::Handcrafted,
+                               .rollouts_per_action = 1};
+            break;
+        case EvolutionPilot::SelfPlayZero: {
+            // Both seats are driven by the frozen champion with a fast
+            // myopic policy; fitness games stay cheap and deterministic.
+            const auto net =
+                std::make_shared<const selfplay_zero::SpzNet>(
+                    selfplay_zero::load_spz_net(
+                        config.spz_artifact_path));
+            evolution.controller_pilot =
+                [net](const std::array<std::vector<CardId>, 2>& decks,
+                      std::uint64_t game_seed) {
+                    std::array<std::optional<HumanController>, 2>
+                        controllers;
+                    for (std::size_t seat = 0; seat < 2; ++seat) {
+                        selfplay_zero::SpzPolicyConfig policy;
+                        policy.worlds = 1;
+                        policy.block_prediction_worlds = 1;
+                        policy.rollout = false;
+                        policy.seed = game_seed;
+                        controllers[seat] =
+                            selfplay_zero::make_spz_controller(
+                                net, decks, seat, policy);
+                    }
+                    return controllers;
+                };
+            break;
+        }
+    }
     GameConfig game_config;
 
     const DeckEvolutionSummary summary = evolve_deck(
-        {
-            .generations = config.generations,
-            .population = config.population,
-            .repetitions_per_opponent =
-                config.games_per_opponent,
-            .pilot = std::move(pilot),
-        },
-        config.seed, std::move(game_config));
+        std::move(evolution), config.seed, std::move(game_config));
     write_evolution_json(output, summary, config);
     return 0;
 }
