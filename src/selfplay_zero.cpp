@@ -6,7 +6,9 @@
 #include <fstream>
 #include <iomanip>
 #include <istream>
+#include <cstdlib>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <ostream>
 #include <random>
@@ -576,6 +578,192 @@ struct SpzAgent {
         }
     }
 
+    // ------------------------------------------------------------------
+    // No-upside prune: a rules-only refusal of actions that cannot help.
+    //
+    // Compared with passing in the same window, an action has no upside
+    // when its settled consequence leaves the opponent equal or better
+    // (only their creatures' temporary bonuses may have risen), leaves the
+    // actor equal or worse (life no higher; own permanents unchanged apart
+    // from extra taps; hand a sub-multiset; graveyard a super-multiset;
+    // library no larger; mana no higher), and changes nothing else. This
+    // catches pumping an enemy creature, burning one's own face, milling
+    // oneself, and every pay-for-a-no-op, without any card knowledge.
+
+    static std::map<CardId, int> counted(const std::vector<CardId>& cards) {
+        std::map<CardId, int> counts;
+        for (const CardId card : cards) {
+            counts[card] += 1;
+        }
+        return counts;
+    }
+
+    static bool multiset_subset(const std::map<CardId, int>& small,
+                                const std::map<CardId, int>& large) {
+        for (const auto& [card, count] : small) {
+            const auto entry = large.find(card);
+            if (entry == large.end() || entry->second < count) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool mana_leq(const ManaCost& left, const ManaCost& right) {
+        return left.generic <= right.generic &&
+               left.green <= right.green && left.red <= right.red &&
+               left.blue <= right.blue && left.white <= right.white;
+    }
+
+    // (card -> total, tapped) census over lands or artifacts.
+    template <typename Permanent>
+    static std::map<CardId, std::pair<int, int>> tap_census(
+        const std::vector<Permanent>& permanents) {
+        std::map<CardId, std::pair<int, int>> census;
+        for (const auto& permanent : permanents) {
+            auto& entry = census[permanent.card];
+            entry.first += 1;
+            entry.second += permanent.tapped ? 1 : 0;
+        }
+        return census;
+    }
+
+    template <typename Permanent>
+    static bool same_permanents_allowing_extra_taps(
+        const std::vector<Permanent>& action_side,
+        const std::vector<Permanent>& pass_side, bool allow_extra_taps) {
+        const auto action_census = tap_census(action_side);
+        const auto pass_census = tap_census(pass_side);
+        if (action_census.size() != pass_census.size()) {
+            return false;
+        }
+        for (const auto& [card, totals] : action_census) {
+            const auto entry = pass_census.find(card);
+            if (entry == pass_census.end() ||
+                entry->second.first != totals.first) {
+                return false;
+            }
+            if (allow_extra_taps ? totals.second < entry->second.second
+                                 : totals.second != entry->second.second) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static const CreaturePermanent* creature_by_id(
+        const std::vector<CreaturePermanent>& creatures, PermanentId id) {
+        for (const auto& creature : creatures) {
+            if (creature.id == id) {
+                return &creature;
+            }
+        }
+        return nullptr;
+    }
+
+    // Creature-list comparison keyed by permanent id. `bonus_rule`:
+    // 0 = temporary bonuses must be equal, +1 = action side may be higher.
+    static bool same_creatures(
+        const std::vector<CreaturePermanent>& action_side,
+        const std::vector<CreaturePermanent>& pass_side, int bonus_rule) {
+        if (action_side.size() != pass_side.size()) {
+            return false;
+        }
+        for (const auto& creature : action_side) {
+            const auto* other = creature_by_id(pass_side, creature.id);
+            if (other == nullptr || other->card != creature.card ||
+                other->tapped != creature.tapped ||
+                other->summoning_sick != creature.summoning_sick ||
+                other->damage != creature.damage ||
+                other->exile_on_death_this_turn !=
+                    creature.exile_on_death_this_turn) {
+                return false;
+            }
+            if (bonus_rule == 0) {
+                if (creature.temporary_power_bonus !=
+                        other->temporary_power_bonus ||
+                    creature.temporary_toughness_bonus !=
+                        other->temporary_toughness_bonus) {
+                    return false;
+                }
+            } else {
+                if (creature.temporary_power_bonus <
+                        other->temporary_power_bonus ||
+                    creature.temporary_toughness_bonus <
+                        other->temporary_toughness_bonus) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    static bool no_upside_versus_pass(
+        std::size_t actor,
+        const ResolvedPriorityActionConsequence& action_settled,
+        const ResolvedPriorityActionConsequence& pass_settled) {
+        if (action_settled.terminal || pass_settled.terminal) {
+            return false;
+        }
+        const GameState& acted = action_settled.state;
+        const GameState& passed = pass_settled.state;
+        if (acted.stack != passed.stack ||
+            acted.extra_turns_pending != passed.extra_turns_pending ||
+            acted.failed_draw != passed.failed_draw) {
+            return false;
+        }
+        const std::size_t opponent = 1 - actor;
+        const PlayerState& acted_self = acted.players[actor];
+        const PlayerState& passed_self = passed.players[actor];
+        const PlayerState& acted_opponent = acted.players[opponent];
+        const PlayerState& passed_opponent = passed.players[opponent];
+
+        // Opponent: identical apart from possibly raised temporary
+        // bonuses on their creatures.
+        if (acted_opponent.life != passed_opponent.life ||
+            acted_opponent.hand.size() != passed_opponent.hand.size() ||
+            acted_opponent.library.size() !=
+                passed_opponent.library.size() ||
+            counted(acted_opponent.graveyard) !=
+                counted(passed_opponent.graveyard) ||
+            counted(acted_opponent.exile) !=
+                counted(passed_opponent.exile) ||
+            counted(acted_opponent.enchantments) !=
+                counted(passed_opponent.enchantments) ||
+            acted_opponent.mana_pool != passed_opponent.mana_pool ||
+            acted_opponent.land_played_this_turn !=
+                passed_opponent.land_played_this_turn ||
+            !same_permanents_allowing_extra_taps(
+                acted_opponent.lands, passed_opponent.lands, false) ||
+            !same_permanents_allowing_extra_taps(
+                acted_opponent.artifacts, passed_opponent.artifacts,
+                false) ||
+            !same_creatures(acted_opponent.creatures,
+                            passed_opponent.creatures, +1)) {
+            return false;
+        }
+
+        // Actor: equal or strictly worse in every dimension.
+        return acted_self.life <= passed_self.life &&
+               acted_self.library.size() <= passed_self.library.size() &&
+               acted_self.land_played_this_turn ==
+                   passed_self.land_played_this_turn &&
+               counted(acted_self.enchantments) ==
+                   counted(passed_self.enchantments) &&
+               counted(acted_self.exile) == counted(passed_self.exile) &&
+               multiset_subset(counted(acted_self.hand),
+                               counted(passed_self.hand)) &&
+               multiset_subset(counted(passed_self.graveyard),
+                               counted(acted_self.graveyard)) &&
+               mana_leq(acted_self.mana_pool, passed_self.mana_pool) &&
+               same_permanents_allowing_extra_taps(
+                   acted_self.lands, passed_self.lands, true) &&
+               same_permanents_allowing_extra_taps(
+                   acted_self.artifacts, passed_self.artifacts, true) &&
+               same_creatures(acted_self.creatures, passed_self.creatures,
+                              0);
+    }
+
     static bool creature_on_battlefield(const GameState& state,
                                         std::size_t player,
                                         PermanentId id,
@@ -680,6 +868,10 @@ struct SpzAgent {
         if (actions.size() <= 1) {
             return actions.empty() ? PriorityAction::pass() : actions[0];
         }
+        const auto pass_settled = resolve_priority_action_consequence(
+            state, priority.player, sorcery,
+            std::min(priority.consecutive_passes, 1),
+            PriorityAction::pass());
         double best_value = -std::numeric_limits<double>::infinity();
         PriorityAction chosen = actions[0];
         for (const PriorityAction& action : actions) {
@@ -687,6 +879,12 @@ struct SpzAgent {
                 state, priority.player, sorcery,
                 std::min(priority.consecutive_passes, 1), action);
             if (!consequence.has_value()) {
+                continue;
+            }
+            if (action.kind != PriorityActionKind::Pass &&
+                pass_settled.has_value() &&
+                no_upside_versus_pass(priority.player, *consequence,
+                                      *pass_settled)) {
                 continue;
             }
             double value = 0.0;
@@ -1021,6 +1219,28 @@ struct SpzAgent {
                 for (std::size_t index = 0; index < actions.size();
                      ++index) {
                     if (actions[index] == entry.action) {
+                        dominated[index] = true;
+                    }
+                }
+            }
+            const auto pass_settled = resolve_priority_action_consequence(
+                reconstructed, seat, sorcery_actions, 0,
+                PriorityAction::pass());
+            if (pass_settled.has_value()) {
+                for (std::size_t index = 0; index < actions.size();
+                     ++index) {
+                    if (dominated[index] ||
+                        actions[index].kind ==
+                            PriorityActionKind::Pass) {
+                        continue;
+                    }
+                    const auto settled =
+                        resolve_priority_action_consequence(
+                            reconstructed, seat, sorcery_actions, 0,
+                            actions[index]);
+                    if (settled.has_value() &&
+                        no_upside_versus_pass(seat, *settled,
+                                              *pass_settled)) {
                         dominated[index] = true;
                     }
                 }

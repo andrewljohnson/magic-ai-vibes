@@ -449,6 +449,77 @@ SPZ_TEST(champion_pumps_declared_blocker_in_response_window) {
            "the pump targets the blocking Grizzly Bears");
 }
 
+SPZ_TEST(no_upside_prune_blocks_pumping_enemy_creatures) {
+    // Reported from live play: SPZ (green, active player) with no creatures
+    // of its own cast Giant Growth on the opponent's summoning-sick Orcs.
+    // Buffing an enemy creature has no upside versus passing and must never
+    // be selected, whatever an arbitrary value net thinks of it.
+    const auto green = green_deck();
+    const auto red = red_deck();
+    GameState state;
+    state.turn_number = 4;
+    state.active_player = 1;  // SPZ's own turn.
+    state.starting_player = 0;
+    state.next_permanent_id = 5;
+    const auto remove_one = [](std::vector<CardId>& pool, CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        expect(found != pool.end(), "waste fixture card is in its deck");
+        pool.erase(found);
+    };
+    auto red_pool = red;
+    for (int land = 0; land < 2; ++land) {
+        remove_one(red_pool, CardId::Mountain);
+        state.players[0].lands.push_back({CardId::Mountain, false});
+    }
+    remove_one(red_pool, CardId::IronclawOrcs);
+    state.players[0].creatures.push_back({
+        .id = 1,
+        .card = CardId::IronclawOrcs,
+        .summoning_sick = true,
+    });
+    state.players[0].library = red_pool;
+
+    auto green_pool = green;
+    for (int land = 0; land < 2; ++land) {
+        remove_one(green_pool, CardId::Forest);
+        state.players[1].lands.push_back({CardId::Forest, false});
+    }
+    remove_one(green_pool, CardId::GiantGrowth);
+    remove_one(green_pool, CardId::Forest);
+    state.players[1].hand.push_back(CardId::GiantGrowth);
+    state.players[1].hand.push_back(CardId::Forest);
+    state.players[1].library = green_pool;
+
+    const auto observation = observe_game_state(state, 1);
+    const auto actions = legal_priority_actions(state, 1, true);
+    bool enemy_growth_available = false;
+    for (const auto& action : actions) {
+        enemy_growth_available |=
+            action.kind == PriorityActionKind::CastGiantGrowth &&
+            action.target.has_value() && action.target->player == 0;
+    }
+    expect(enemy_growth_available,
+           "fixture offers a Giant Growth at the enemy creature");
+    const std::array<std::vector<CardId>, 2> game_decks = {red, green};
+    for (std::uint64_t net_seed = 1; net_seed <= 30; ++net_seed) {
+        const auto net = std::make_shared<const SpzNet>(
+            spz_feature_count(), 8, net_seed);
+        SpzPolicyConfig policy;
+        policy.worlds = 1;
+        policy.block_prediction_worlds = 1;
+        policy.seed = net_seed;
+        const auto controller =
+            make_spz_controller(net, game_decks, 1, policy);
+        const std::size_t chosen = controller.choose_priority_action(
+            observation, TurnPhase::FirstMain, actions);
+        const PriorityAction& action = actions[chosen];
+        expect(!(action.kind == PriorityActionKind::CastGiantGrowth &&
+                 action.target.has_value() &&
+                 action.target->player == 0),
+               "pruned policy never pumps the enemy creature");
+    }
+}
+
 SPZ_TEST(recorder_collects_outcome_labeled_rows) {
     const auto net = std::make_shared<const SpzNet>(
         spz_feature_count(), 8, 99);
