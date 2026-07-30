@@ -3191,6 +3191,11 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                     const std::size_t spar_seat = game_rng() % 2;
                     seat_nets[spar_seat] = sparring_net;
                     champion_seat[spar_seat] = true;
+                    // A sparring partner on a different feature schema
+                    // must not record: its rows cannot train this net.
+                    record_seat[spar_seat] =
+                        sparring_net->input_count() ==
+                        frozen->input_count();
                 } else if (!league_pool.empty() &&
                            unit(game_rng) <
                                config.league_probability) {
