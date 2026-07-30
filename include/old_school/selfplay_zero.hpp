@@ -181,6 +181,11 @@ struct SpzTrainConfig {
     // Generate self-play games with rollout lookahead (slower, stronger
     // play; used to fine-tune a net toward search-improved targets).
     bool rollout = false;
+    // Self-play with the ISMCTS contender search instead of greedy rollout
+    // scoring, so the value net learns the trajectories that search
+    // produces (search/net co-training).
+    bool ismcts = false;
+    std::size_t ismcts_iterations = 96;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
     double learning_rate = 0.01;
@@ -249,6 +254,7 @@ SpzBenchmarkResult run_spz_benchmark(
     const SpzPolicyConfig& policy, std::size_t max_turns = 200,
     std::size_t threads = 1,
     const std::function<void(const std::string&)>& log = {},
-    const SpzPolicyConfig* baseline_spz_policy = nullptr);
+    const SpzPolicyConfig* baseline_spz_policy = nullptr,
+    std::shared_ptr<const SpzNet> baseline_net = nullptr);
 
 }  // namespace old_school::selfplay_zero

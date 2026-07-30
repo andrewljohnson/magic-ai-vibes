@@ -32,6 +32,7 @@ struct Arguments {
     std::string out;
     std::string init;
     std::string model;
+    std::string baseline_model;
     std::string baseline = "handcrafted";
     std::size_t iterations = 60;
     std::size_t games = 128;
@@ -73,6 +74,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.init = next();
         } else if (flag == "--model") {
             arguments.model = next();
+        } else if (flag == "--baseline-model") {
+            arguments.baseline_model = next();
         } else if (flag == "--baseline") {
             arguments.baseline = next();
         } else if (flag == "--iterations") {
@@ -137,6 +140,8 @@ int run_train(const Arguments& arguments) {
         config.training_worlds = arguments.worlds;
     }
     config.rollout = arguments.rollout;
+    config.ismcts = arguments.ismcts;
+    config.ismcts_iterations = arguments.sims;
     if (!arguments.init.empty()) {
         config.initial_net = std::make_shared<const SpzNet>(
             load_spz_net(arguments.init));
@@ -188,7 +193,11 @@ int run_benchmark(const Arguments& arguments) {
         net, baseline, arguments.reps, arguments.seed, policy, max_turns,
         arguments.threads,
         [](const std::string& line) { std::cout << line << std::endl; },
-        arguments.versus_champion ? &champion_policy : nullptr);
+        arguments.versus_champion ? &champion_policy : nullptr,
+        arguments.baseline_model.empty()
+            ? nullptr
+            : std::make_shared<const SpzNet>(
+                  load_spz_net(arguments.baseline_model)));
     std::cout << std::fixed << std::setprecision(4);
     for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {
         const SpzDeckStats& stats = result.per_deck[deck];

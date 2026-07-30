@@ -2514,6 +2514,11 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                     policy.block_prediction_worlds = config.training_worlds;
                     policy.epsilon = epsilon;
                     policy.rollout = config.rollout;
+                    if (config.ismcts) {
+                        policy.search = SpzPolicyConfig::Search::Ismcts;
+                        policy.ismcts_iterations =
+                            config.ismcts_iterations;
+                    }
                     policy.seed = game_rng();
                     game_config.human_controllers[seat] =
                         make_spz_controller(
@@ -2655,7 +2660,8 @@ SpzBenchmarkResult run_spz_benchmark(
     const SpzPolicyConfig& policy, std::size_t max_turns,
     std::size_t threads,
     const std::function<void(const std::string&)>& log,
-    const SpzPolicyConfig* baseline_spz_policy) {
+    const SpzPolicyConfig* baseline_spz_policy,
+    std::shared_ptr<const SpzNet> baseline_net) {
     const auto& decks = spz_decks();
 
     struct Job {
@@ -2717,8 +2723,9 @@ SpzBenchmarkResult run_spz_benchmark(
                 opponent_policy.seed =
                     mix_seed(pairing_seed, 200 + game_index);
                 game_config.human_controllers[baseline_seat] =
-                    make_spz_controller(net, game_decks, baseline_seat,
-                                        opponent_policy);
+                    make_spz_controller(
+                        baseline_net != nullptr ? baseline_net : net,
+                        game_decks, baseline_seat, opponent_policy);
             }
             Game game(game_decks[0], game_decks[1], pairing_seed,
                       game_config);
