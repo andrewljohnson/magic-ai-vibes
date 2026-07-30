@@ -3056,6 +3056,9 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
         if (!config.telemetry_path.empty()) {
             double vs_handcrafted = -1.0;
             double vs_baseline = -1.0;
+            double vs_random = -1.0;
+            std::array<double, kSpzDeckCount> deck_lift{};
+            bool have_deck_lift = false;
             if (config.probe_interval > 0 &&
                 (iteration + 1) % config.probe_interval == 0) {
                 const auto probe_net =
@@ -3064,6 +3067,21 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 probe_policy.worlds = 4;
                 probe_policy.block_prediction_worlds = 4;
                 probe_policy.rollout = true;
+                const auto random_probe = run_spz_benchmark(
+                    probe_net, BotKind::Random, config.probe_reps,
+                    mix_seed(config.seed, 9300 + iteration),
+                    probe_policy, 200, config.threads);
+                vs_random = random_probe.aggregate.win_rate();
+                // Classic deck lift: on identical pairings, how much
+                // better each deck wins piloted by the current net than
+                // piloted by Random.
+                for (std::size_t deck = 0; deck < kSpzDeckCount;
+                     ++deck) {
+                    deck_lift[deck] =
+                        random_probe.per_deck[deck].win_rate() -
+                        random_probe.baseline_deck_win_rate(deck);
+                }
+                have_deck_lift = true;
                 vs_handcrafted =
                     run_spz_benchmark(
                         probe_net, BotKind::Handcrafted,
@@ -3089,8 +3107,9 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 if (config.log) {
                     std::ostringstream probe_line;
                     probe_line << "probe iteration " << (iteration + 1)
-                               << " vs-handcrafted " << std::fixed
-                               << std::setprecision(3) << vs_handcrafted;
+                               << " vs-random " << std::fixed
+                               << std::setprecision(3) << vs_random
+                               << " vs-handcrafted " << vs_handcrafted;
                     if (vs_baseline >= 0.0) {
                         probe_line << " vs-champion " << vs_baseline;
                     }
@@ -3113,12 +3132,26 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                         static_cast<double>(
                                             config
                                                 .games_per_iteration));
+                if (vs_random >= 0.0) {
+                    telemetry << ",\"vs_random\":" << vs_random;
+                }
                 if (vs_handcrafted >= 0.0) {
                     telemetry << ",\"vs_handcrafted\":"
                               << vs_handcrafted;
                 }
                 if (vs_baseline >= 0.0) {
                     telemetry << ",\"vs_champion\":" << vs_baseline;
+                }
+                if (have_deck_lift) {
+                    telemetry << ",\"deck_lift\":{";
+                    for (std::size_t deck = 0; deck < kSpzDeckCount;
+                         ++deck) {
+                        telemetry
+                            << (deck == 0 ? "\"" : ",\"")
+                            << spz_deck_name(deck) << "\":"
+                            << deck_lift[deck];
+                    }
+                    telemetry << '}';
                 }
                 telemetry << "}\n";
             }

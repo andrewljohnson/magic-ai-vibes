@@ -7,12 +7,14 @@
 <style>
   :root {
     --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e7e6e2;
-    --s1: #2a78d6; --s2: #1baf7a; --ref: #9a9891;
+    --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #4a3aa7; --s5: #e34948;
+    --ref: #9a9891;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --grid: #34332f;
-      --s1: #3987e5; --s2: #199e70; --ref: #6f6d66;
+      --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #9085e9; --s5: #e66767;
+      --ref: #6f6d66;
     }
   }
   html, body { margin: 0; background: var(--surface); color: var(--ink);
@@ -21,10 +23,10 @@
   h1 { font-size: 18px; margin: 0 0 2px; }
   .sub { color: var(--ink-2); margin: 0 0 18px; font-size: 13px; }
   .tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-  .tile { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 14px; min-width: 130px; }
+  .tile { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 14px; min-width: 132px; }
   .tile .k { color: var(--ink-2); font-size: 12px; }
   .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  .tile .v small { font-size: 12px; color: var(--ink-2); font-weight: 400; }
+  .tile .lift { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
   section { margin-bottom: 28px; }
   h2 { font-size: 14px; margin: 0 0 2px; }
   .desc { color: var(--ink-2); font-size: 12px; margin: 0 0 8px; }
@@ -34,7 +36,7 @@
     border: 1px solid var(--grid); border-radius: 6px; padding: 6px 9px; font-size: 12px;
     box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; white-space: nowrap; }
   .tooltip b { font-variant-numeric: tabular-nums; }
-  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); margin: 6px 2px 0; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); margin: 6px 2px 0; flex-wrap: wrap; }
   .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px;
     border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
   details { margin-top: 8px; }
@@ -43,7 +45,6 @@
     font-variant-numeric: tabular-nums; }
   th, td { border: 1px solid var(--grid); padding: 3px 8px; text-align: right; }
   th { color: var(--ink-2); font-weight: 550; }
-  .stale { color: var(--ink-2); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -51,29 +52,42 @@
   <h1>Self-Play Zero — live training</h1>
   <p class="sub" id="status">Waiting for telemetry…</p>
   <div class="tiles">
-    <div class="tile"><div class="k">Iterations</div><div class="v" id="t-iter">–</div></div>
-    <div class="tile"><div class="k">Self-play games</div><div class="v" id="t-games">–</div></div>
-    <div class="tile"><div class="k">vs Handcrafted <small>(latest probe)</small></div><div class="v" id="t-hc">–</div></div>
-    <div class="tile"><div class="k">vs v6 champion <small>(latest probe)</small></div><div class="v" id="t-champ">–</div></div>
+    <div class="tile"><div class="k">Iterations · games</div><div class="v" id="t-iter">–</div><div class="lift" id="t-games"></div></div>
+    <div class="tile"><div class="k">vs Random</div><div class="v" id="t-rand">–</div><div class="lift" id="l-rand"></div></div>
+    <div class="tile"><div class="k">vs Handcrafted</div><div class="v" id="t-hc">–</div><div class="lift" id="l-hc"></div></div>
+    <div class="tile"><div class="k">vs v6 champion</div><div class="v" id="t-champ">–</div><div class="lift" id="l-champ"></div></div>
+    <div class="tile"><div class="k">Mean deck lift</div><div class="v" id="t-lift">–</div><div class="lift">bot pilot vs Random pilot</div></div>
   </div>
 
   <section>
     <h2>Strength probes</h2>
-    <p class="desc">Paired win rate of the current net (100 games per probe, so ±10 points of noise per dot — watch the trend, not the wiggles). Above the gray 50% line means winning.</p>
+    <p class="desc">Paired win rate of the current net, probed every 10 iterations (100 games per opponent per probe, so ±10 points of noise per dot — watch trends, not wiggles). Above the gray 50% line means winning.</p>
     <div class="chartwrap"><svg id="strength" viewBox="0 0 960 300"></svg><div class="tooltip" id="tip-strength"></div></div>
     <div class="legend">
       <span style="--c: var(--s1)">vs Handcrafted</span>
       <span style="--c: var(--s2)">vs v6 champion (head-to-head)</span>
+      <span style="--c: var(--s3)">vs Random</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Deck lift over Random pilots</h2>
+    <p class="desc">For each metagame deck, on identical pairings: its win rate piloted by the current net minus its win rate piloted by Random — e.g. +40 means the bot turns a 20% deck into a 60% deck. Higher is better piloting; the zero line means no better than random play.</p>
+    <div class="chartwrap"><svg id="deck-lift" viewBox="0 0 960 280"></svg><div class="tooltip" id="tip-deck-lift"></div></div>
+    <div class="legend">
+      <span style="--c: var(--s1)">Blue</span>
+      <span style="--c: var(--s2)">Green</span>
+      <span style="--c: var(--s3)">White</span>
+      <span style="--c: var(--s4)">RU Aggro</span>
+      <span style="--c: var(--s5)">Red</span>
     </div>
   </section>
 
   <section>
     <h2>Training loss</h2>
-    <p class="desc">Value-net cross-entropy per iteration (and policy loss when a policy head is training). Lower is better-fitted, but strength probes above are the real score.</p>
-    <div class="chartwrap"><svg id="loss" viewBox="0 0 960 260"></svg><div class="tooltip" id="tip-loss"></div></div>
-    <div class="legend" id="loss-legend">
-      <span style="--c: var(--s1)">value loss</span>
-    </div>
+    <p class="desc">Value-net cross-entropy per iteration (policy loss appears when a policy head trains). Fit quality only — the probes above are the score.</p>
+    <div class="chartwrap"><svg id="loss" viewBox="0 0 960 240"></svg><div class="tooltip" id="tip-loss"></div></div>
+    <div class="legend" id="loss-legend"><span style="--c: var(--s1)">value loss</span></div>
   </section>
 
   <details><summary>Data table (latest 40 rows)</summary><div id="table"></div></details>
@@ -100,39 +114,36 @@ async function poll() {
 }
 
 function fmtPct(v) { return (100 * v).toFixed(1) + "%"; }
+function fmtDelta(v) { return (v >= 0 ? "+" : "") + (100 * v).toFixed(1); }
 
 function scale(domainMin, domainMax, rangeMin, rangeMax) {
   const d = domainMax - domainMin || 1;
   return v => rangeMin + (v - domainMin) / d * (rangeMax - rangeMin);
 }
 
-function drawChart(svgId, tipId, seriesList, yDomain, yFmt, refLine) {
+function drawChart(svgId, tipId, data, seriesList, yDomain, yFmt, refLine) {
   const svg = document.getElementById(svgId);
   const [, , W, H] = svg.getAttribute("viewBox").split(" ").map(Number);
-  const m = { l: 46, r: 14, t: 12, b: 26 };
-  const xs = rows.map(r => r.games);
-  const xMax = Math.max(...xs, 1);
+  const m = { l: 48, r: 14, t: 12, b: 26 };
+  const xMax = Math.max(...data.map(r => r.games), 1);
   const x = scale(0, xMax, m.l, W - m.r);
   const y = scale(yDomain[0], yDomain[1], H - m.b, m.t);
   let out = "";
-  // recessive grid + axis labels
   const yTicks = 4;
   for (let i = 0; i <= yTicks; i++) {
     const v = yDomain[0] + (yDomain[1] - yDomain[0]) * i / yTicks;
     out += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${css("--grid")}" stroke-width="1"/>`;
     out += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${css("--ink-2")}">${yFmt(v)}</text>`;
   }
-  const xTickCount = 5;
-  for (let i = 0; i <= xTickCount; i++) {
-    const v = xMax * i / xTickCount;
+  for (let i = 0; i <= 5; i++) {
+    const v = xMax * i / 5;
     out += `<text x="${x(v)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${css("--ink-2")}">${v >= 1000 ? (v / 1000).toFixed(1) + "k" : Math.round(v)}</text>`;
   }
-  out += `<text x="${(m.l + W - m.r) / 2}" y="${H - 8}" dy="0" text-anchor="middle" font-size="0"></text>`;
-  if (refLine !== null) {
+  if (refLine !== null && refLine >= yDomain[0] && refLine <= yDomain[1]) {
     out += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(refLine)}" y2="${y(refLine)}" stroke="${css("--ref")}" stroke-width="1.5" stroke-dasharray="5 4"/>`;
   }
   for (const s of seriesList) {
-    const pts = rows.filter(r => r[s.key] !== undefined);
+    const pts = data.filter(r => r[s.key] !== undefined);
     if (!pts.length) continue;
     const path = pts.map((r, i) => `${i ? "L" : "M"}${x(r.games).toFixed(1)},${y(r[s.key]).toFixed(1)}`).join("");
     out += `<path d="${path}" fill="none" stroke="${css(s.color)}" stroke-width="2" stroke-linejoin="round"/>`;
@@ -142,18 +153,17 @@ function drawChart(svgId, tipId, seriesList, yDomain, yFmt, refLine) {
       }
     }
     const last = pts[pts.length - 1];
-    out += `<text x="${Math.min(x(last.games) + 6, W - 4)}" y="${y(last[s.key]) + 4}" font-size="11" fill="${css("--ink")}">${yFmt(last[s.key])}</text>`;
+    out += `<text x="${Math.min(x(last.games) + 6, W - 6)}" y="${y(last[s.key]) + 4}" font-size="11" fill="${css("--ink")}">${yFmt(last[s.key])}</text>`;
   }
   svg.innerHTML = out;
 
-  // crosshair tooltip: nearest row by x
   const tip = document.getElementById(tipId);
   svg.onmousemove = event => {
-    if (!rows.length) return;
+    if (!data.length) return;
     const rect = svg.getBoundingClientRect();
     const gx = (event.clientX - rect.left) / rect.width * W;
-    let best = rows[0], bestDistance = Infinity;
-    for (const r of rows) {
+    let best = data[0], bestDistance = Infinity;
+    for (const r of data) {
       const d = Math.abs(x(r.games) - gx);
       if (d < bestDistance) { bestDistance = d; best = r; }
     }
@@ -163,31 +173,71 @@ function drawChart(svgId, tipId, seriesList, yDomain, yFmt, refLine) {
     }
     tip.innerHTML = parts.join("<br>");
     tip.style.display = "block";
-    tip.style.left = Math.min(event.clientX - rect.left + 14, rect.width - 170) + "px";
+    tip.style.left = Math.min(event.clientX - rect.left + 14, rect.width - 190) + "px";
     tip.style.top = (event.clientY - rect.top + 12) + "px";
   };
   svg.onmouseleave = () => { tip.style.display = "none"; };
 }
+
+const PROBE_KEYS = [
+  { key: "vs_handcrafted", label: "vs Handcrafted", color: "--s1" },
+  { key: "vs_champion", label: "vs v6 champion", color: "--s2" },
+  { key: "vs_random", label: "vs Random", color: "--s3" },
+];
+// Deck colors follow the deck identity, alphabetical-stable order.
+const DECK_KEYS = [
+  { deck: "Blue", color: "--s1" },
+  { deck: "Green", color: "--s2" },
+  { deck: "White", color: "--s3" },
+  { deck: "RU Aggro", color: "--s4" },
+  { deck: "Red", color: "--s5" },
+];
 
 function render() {
   if (!rows.length) return;
   const last = rows[rows.length - 1];
   const probes = rows.filter(r => r.vs_handcrafted !== undefined);
   const lastProbe = probes[probes.length - 1];
+  const firstProbe = probes[0];
   document.getElementById("t-iter").textContent = last.iteration;
-  document.getElementById("t-games").textContent = last.games.toLocaleString();
-  document.getElementById("t-hc").textContent = lastProbe ? fmtPct(lastProbe.vs_handcrafted) : "–";
-  document.getElementById("t-champ").textContent =
-    lastProbe && lastProbe.vs_champion !== undefined ? fmtPct(lastProbe.vs_champion) : "–";
+  document.getElementById("t-games").textContent = last.games.toLocaleString() + " games";
 
-  drawChart("strength", "tip-strength",
-    [{ key: "vs_handcrafted", label: "vs Handcrafted", color: "--s1", dots: true },
-     { key: "vs_champion", label: "vs v6 champion", color: "--s2", dots: true }],
-    [0.2, 0.8], fmtPct, 0.5);
+  const tiles = [["vs_random", "t-rand", "l-rand"], ["vs_handcrafted", "t-hc", "l-hc"], ["vs_champion", "t-champ", "l-champ"]];
+  for (const [key, valueId, liftId] of tiles) {
+    const has = lastProbe && lastProbe[key] !== undefined;
+    document.getElementById(valueId).textContent = has ? fmtPct(lastProbe[key]) : "–";
+    document.getElementById(liftId).textContent =
+      has && firstProbe && firstProbe[key] !== undefined && probes.length > 1
+        ? `${fmtDelta(lastProbe[key] - firstProbe[key])} pts since run start`
+        : "";
+  }
+  if (lastProbe && lastProbe.deck_lift) {
+    const values = Object.values(lastProbe.deck_lift);
+    document.getElementById("t-lift").textContent =
+      fmtDelta(values.reduce((a, b) => a + b, 0) / values.length) + " pts";
+  }
+
+  drawChart("strength", "tip-strength", rows,
+    PROBE_KEYS.map(s => ({ ...s, dots: true })),
+    [0.2, 1.0], fmtPct, 0.5);
+
+  const liftRows = probes.filter(r => r.deck_lift).map(r => {
+    const row = { iteration: r.iteration, games: r.games };
+    for (const [deck, value] of Object.entries(r.deck_lift)) row["lift_" + deck] = value;
+    return row;
+  });
+  if (liftRows.length) {
+    const magnitudes = liftRows.flatMap(r =>
+      DECK_KEYS.map(s => Math.abs(r["lift_" + s.deck] ?? 0)));
+    const bound = Math.max(0.3, ...magnitudes) * 1.12;
+    drawChart("deck-lift", "tip-deck-lift", liftRows,
+      DECK_KEYS.map(s => ({ key: "lift_" + s.deck, label: s.deck, color: s.color, dots: true })),
+      [Math.min(0, -0.05), bound], v => fmtDelta(v), 0);
+  }
 
   const hasPolicy = rows.some(r => r.policy_loss > 0);
   const lossMax = Math.max(...rows.map(r => Math.max(r.loss, hasPolicy ? r.policy_loss : 0)));
-  drawChart("loss", "tip-loss",
+  drawChart("loss", "tip-loss", rows,
     [{ key: "loss", label: "value loss", color: "--s1", dots: false },
      ...(hasPolicy ? [{ key: "policy_loss", label: "policy loss", color: "--s2", dots: false }] : [])],
     [0, Math.max(0.8, lossMax * 1.1)], v => v.toFixed(2), null);
@@ -197,10 +247,18 @@ function render() {
 
   const recent = rows.slice(-40).reverse();
   document.getElementById("table").innerHTML =
-    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs HC</th><th>vs v6</th></tr>" +
-    recent.map(r => `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${r.loss.toFixed(3)}</td>` +
-      `<td>${r.vs_handcrafted !== undefined ? fmtPct(r.vs_handcrafted) : ""}</td>` +
-      `<td>${r.vs_champion !== undefined ? fmtPct(r.vs_champion) : ""}</td></tr>`).join("") +
+    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs v6</th><th>mean lift</th></tr>" +
+    recent.map(r => {
+      let lift = "";
+      if (r.deck_lift) {
+        const values = Object.values(r.deck_lift);
+        lift = fmtDelta(values.reduce((a, b) => a + b, 0) / values.length);
+      }
+      return `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${r.loss.toFixed(3)}</td>` +
+        `<td>${r.vs_random !== undefined ? fmtPct(r.vs_random) : ""}</td>` +
+        `<td>${r.vs_handcrafted !== undefined ? fmtPct(r.vs_handcrafted) : ""}</td>` +
+        `<td>${r.vs_champion !== undefined ? fmtPct(r.vs_champion) : ""}</td><td>${lift}</td></tr>`;
+    }).join("") +
     "</table>";
 }
 
