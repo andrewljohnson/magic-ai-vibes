@@ -139,21 +139,13 @@ write({
   type: "status",
   message: "Loaded report fixture",
   model: {
-    family: "learned-value",
-    generation: 16,
-    searchWorlds: 8,
-    horizonTurns: 4,
-    source: "frozen-artifact+aq19-bilinear",
+    family: "self-play-zero",
+    generation: 0,
+    searchWorlds: 4,
+    horizonTurns: 1,
+    source: "frozen-artifact",
     fingerprint:
       "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
-    treatment: {
-      id: "aq19-bilinear",
-      parameterSha256:
-        "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194",
-      artifactFileSha256:
-        "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a",
-      artifactBytes: 14_502,
-    },
   },
 });
 write({

@@ -30,14 +30,10 @@ test("the production session manager drives the real engine bridge without HTTP"
       { deckId: "red", policyId: "random" },
     ],
     seed: 42,
-    trainGames: 1,
-    trainSeed: 424242,
     debugReveal: false,
     bluffMode: false,
     rollouts: 1,
     deepRollouts: 1,
-    learnedRollouts: 1,
-    learnedGenerations: 0,
   };
 
   const { game: created } = await harness.create(requestedConfig);
@@ -46,7 +42,6 @@ test("the production session manager drives the real engine bridge without HTTP"
     assert.deepEqual(created.config, {
       ...requestedConfig,
       seed: "42",
-      trainSeed: "424242",
     });
     assert.equal(created.snapshot.turnNumber, 1);
     assert.equal(created.snapshot.phase, "first_main");

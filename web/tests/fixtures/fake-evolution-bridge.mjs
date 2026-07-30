@@ -32,9 +32,6 @@ if (args.includes("--evolve-json")) {
   const generations = Number(valueAfter("--generations", "3"));
   const population = Number(valueAfter("--population", "8"));
   const gamesPerOpponent = Number(valueAfter("--games", "1"));
-  const learnedRollouts = Number(
-    valueAfter("--learned-rollouts", "8"),
-  );
   const cardIds = Array.from(
     { length: 40 },
     (_, index) => (index % 2 === 0 ? 0 : 2),
@@ -67,7 +64,6 @@ if (args.includes("--evolve-json")) {
       generations,
       population,
       gamesPerOpponent,
-      learnedRollouts,
     },
     deck: {
       size: 40,

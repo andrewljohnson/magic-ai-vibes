@@ -118,7 +118,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   assert.equal(meta.response.status, 200);
   assert.deepEqual(
     meta.body.evolution.pilots.map(({ id }) => id),
-    ["handcrafted", "learned-value-c16"],
+    ["handcrafted"],
   );
   assert.deepEqual(meta.body.evolution.defaults, {
     generations: 3,
@@ -126,7 +126,6 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
     games: 1,
     pilot: "handcrafted",
     seed: "424242",
-    learnedRollouts: 8,
   });
   assert.deepEqual(meta.body.evolution.limits.generations, {
     min: 1,
@@ -139,10 +138,6 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   assert.deepEqual(meta.body.evolution.limits.games, {
     min: 1,
     max: 16,
-  });
-  assert.deepEqual(meta.body.evolution.limits.learnedRollouts, {
-    min: 1,
-    max: 64,
   });
   assert.deepEqual(meta.body.evolution.limits.seed, {
     min: 0,
@@ -159,10 +154,9 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
     { population: 33 },
     { games: 0 },
     { games: 17 },
-    { learnedRollouts: 0 },
-    { learnedRollouts: 65 },
     { seed: "4294967296" },
     { pilot: "random" },
+    { pilot: "learned-value-c16" },
   ];
   for (const candidate of invalidBodies) {
     const rejected = await json(
@@ -188,20 +182,18 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
       generations: 2,
       population: 5,
       games: 1,
-      pilot: "learned-value-c16",
+      pilot: "handcrafted",
       seed: "4294967295",
-      learnedRollouts: 4,
     }),
   );
   assert.equal(created.response.status, 201);
   assert.deepEqual(created.body.evolution, {
     id: "evolution-1",
     seed: "4294967295",
-    pilot: "learned-value-c16",
+    pilot: "handcrafted",
     generations: [50, 51],
     population: 5,
     games: 1,
-    learnedRollouts: 4,
     best: {
       cards: [
         { id: 0, name: "Forest", count: 20 },
@@ -277,7 +269,6 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
         { deckId: "deck-1", policyId: "handcrafted" },
       ],
       seed: 42,
-      learnedGenerations: 0,
     }),
   );
   assert.equal(game.response.status, 201);
@@ -341,7 +332,6 @@ test("saved decks disappear with their Node server process", async (t) => {
         { deckId: "deck-1", policyId: "human" },
         { deckId: "red", policyId: "random" },
       ],
-      learnedGenerations: 0,
     }),
   );
   assert.equal(rejected.response.status, 400);
