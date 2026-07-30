@@ -20,8 +20,9 @@ using namespace old_school::selfplay_zero;
         << "      [--hidden N] [--seed N] [--threads N] [--max-turns N]\n"
         << "      [--worlds N] [--lr X] [--eps-start X] [--eps-final X]\n"
         << "  selfplay-zero benchmark --model PATH [--reps N] [--seed N]\n"
-        << "      [--threads N] [--worlds N] [--max-turns N]\n"
-        << "      [--baseline handcrafted|random|montecarlo]\n";
+        << "      [--threads N] [--worlds N] [--max-turns N] [--rollout]\n"
+        << "      [--baseline handcrafted|random|montecarlo|learned-c16]\n"
+        << "      [--baseline-model PATH]\n";
     std::exit(2);
 }
 
@@ -30,6 +31,7 @@ struct Arguments {
     std::string out;
     std::string init;
     std::string model;
+    std::string baseline_model;
     std::string baseline = "handcrafted";
     std::size_t iterations = 60;
     std::size_t games = 128;
@@ -66,6 +68,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.init = next();
         } else if (flag == "--model") {
             arguments.model = next();
+        } else if (flag == "--baseline-model") {
+            arguments.baseline_model = next();
         } else if (flag == "--baseline") {
             arguments.baseline = next();
         } else if (flag == "--iterations") {
@@ -139,12 +143,23 @@ int run_benchmark(const Arguments& arguments) {
         usage();
     }
     BotKind baseline = BotKind::Handcrafted;
+    std::shared_ptr<const LearnedModel> baseline_model;
     if (arguments.baseline == "handcrafted") {
         baseline = BotKind::Handcrafted;
     } else if (arguments.baseline == "random") {
         baseline = BotKind::Random;
     } else if (arguments.baseline == "montecarlo") {
         baseline = BotKind::MonteCarlo;
+    } else if (arguments.baseline == "learned-c16") {
+        baseline = BotKind::Learned;
+        const std::string path =
+            arguments.baseline_model.empty()
+                ? "build/model-cache/"
+                  "old-school-value-challenger-v3-c16-t800-s424242.bin"
+                : arguments.baseline_model;
+        baseline_model =
+            load_learned_value_challenger_artifact(path, 800, 424242, 16)
+                .model();
     } else {
         std::cerr << "unknown baseline: " << arguments.baseline << '\n';
         usage();
@@ -159,9 +174,9 @@ int run_benchmark(const Arguments& arguments) {
         arguments.max_turns == 0 ? 200 : arguments.max_turns;
     const auto result = run_spz_benchmark(
         net, baseline, arguments.reps, arguments.seed, policy, max_turns,
-        arguments.threads, [](const std::string& line) {
-            std::cout << line << std::endl;
-        });
+        arguments.threads,
+        [](const std::string& line) { std::cout << line << std::endl; },
+        baseline_model);
     std::cout << std::fixed << std::setprecision(4);
     for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {
         const SpzDeckStats& stats = result.per_deck[deck];

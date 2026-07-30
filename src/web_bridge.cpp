@@ -1,5 +1,7 @@
 #include "old_school/web_bridge.hpp"
 #include "old_school/learned_priority_bilinear_artifact.hpp"
+#include "old_school/artifact_integrity.hpp"
+#include "old_school/selfplay_zero.hpp"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
+#include <fstream>
 #include <istream>
 #include <memory>
 #include <optional>
@@ -1896,6 +1899,35 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         config.bluff_mode);
     game_config.human_controllers[0] =
         controller.controller();
+
+    if (config.opponent_spz) {
+        // Self-Play Zero drives the opponent seat through the same
+        // perspective-safe controller interface a human uses; its engine
+        // BotConfig is never consulted for decisions.
+        const auto spz_net =
+            std::make_shared<const selfplay_zero::SpzNet>(
+                selfplay_zero::load_spz_net(config.spz_artifact_path));
+        selfplay_zero::SpzPolicyConfig spz_policy;
+        spz_policy.worlds = config.spz_worlds;
+        spz_policy.block_prediction_worlds = config.spz_worlds;
+        spz_policy.rollout = config.spz_rollout;
+        spz_policy.seed = config.game_seed ^ 0x53505AULL;
+        game_config.human_controllers[1] =
+            selfplay_zero::make_spz_controller(
+                spz_net,
+                {human_cards, opponent_cards}, 1, spz_policy);
+        std::ifstream spz_bytes(config.spz_artifact_path,
+                                std::ios::binary);
+        std::ostringstream spz_contents;
+        spz_contents << spz_bytes.rdbuf();
+        const std::string spz_fingerprint =
+            artifact_integrity::sha256_string(spz_contents.str());
+        write_model_status(
+            output, "Self-Play Zero champion loaded", "self-play-zero",
+            0, config.spz_worlds,
+            config.spz_rollout ? 1 : 0, "frozen-artifact",
+            spz_fingerprint);
+    }
 
     Game game(human_cards, opponent_cards,
               config.game_seed, game_config);

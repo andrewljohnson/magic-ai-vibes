@@ -203,11 +203,15 @@ struct SpzBenchmarkResult {
 // baseline engine bot. Every (spz deck, opponent deck, repetition) triple
 // plays two games with identical seed and identical SPZ play/draw role,
 // swapping only the seats. Draws count half a win in the Wilson bound.
+// A Learned baseline requires `baseline_learned_model` (a frozen artifact;
+// this function never trains) and uses `baseline_learned_rollouts` worlds.
 SpzBenchmarkResult run_spz_benchmark(
     std::shared_ptr<const SpzNet> net, BotKind baseline,
     std::size_t repetitions_per_pairing, std::uint64_t seed,
     const SpzPolicyConfig& policy, std::size_t max_turns = 200,
     std::size_t threads = 1,
-    const std::function<void(const std::string&)>& log = {});
+    const std::function<void(const std::string&)>& log = {},
+    std::shared_ptr<const LearnedModel> baseline_learned_model = nullptr,
+    std::size_t baseline_learned_rollouts = 8);
 
 }  // namespace old_school::selfplay_zero

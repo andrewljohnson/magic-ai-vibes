@@ -62,7 +62,9 @@ void print_help(std::ostream& output) {
            "learned-value-c16-bilinear-aq19|"
            "learned-value-c16-adversarial-blocks|"
            "learned-value-c16-stack-discipline|"
-           "learned-value-g0|learned-actor\n"
+           "learned-value-g0|learned-actor|spz\n"
+        << "  --spz-artifact PATH (Self-Play Zero net; default "
+           "data/spz-champion-v6.txt beside the repo)\n"
         << "  --seed N --train-games N --train-seed N\n"
         << "  --rollouts N --deep-rollouts N --learned-rollouts N\n"
         << "  --learned-generations 0|16\n"
@@ -89,6 +91,10 @@ int main(int argc, char** argv) {
         const std::string aq19_bilinear_artifact_path =
             (executable.parent_path() / "model-cache" /
              "old-school-aq19-dbc6-r2-bilinear.bin")
+                .string();
+        const std::string spz_artifact_path =
+            (executable.parent_path().parent_path() / "data" /
+             "spz-champion-v6.txt")
                 .string();
         if (argc == 2 &&
             std::string_view(argv[1]) == "--help") {
@@ -165,6 +171,7 @@ int main(int argc, char** argv) {
             frozen_c16_artifact_path;
         config.aq19_bilinear_artifact_path =
             aq19_bilinear_artifact_path;
+        config.spz_artifact_path = spz_artifact_path;
         for (int argument = 1; argument < argc; ++argument) {
             const std::string_view option(argv[argument]);
             if (option == "--help") {
@@ -199,14 +206,24 @@ int main(int argc, char** argv) {
                     old_school::web::parse_exact_deck_cards(
                         value);
             } else if (option == "--opponent-policy") {
-                config.opponent_bot =
-                    old_school::web::parse_opponent_bot(
-                        value, config.learned_variant,
-                        config.learned_generations,
-                        config.value_adversarial_blocks,
-                        config.value_pass_dominance,
-                        config.value_actor_local_search,
-                        config.value_priority_bilinear);
+                if (value == "spz" || value == "self-play-zero" ||
+                    value == "selfplay-zero") {
+                    config.opponent_spz = true;
+                    config.opponent_bot =
+                        old_school::BotKind::Random;
+                } else {
+                    config.opponent_spz = false;
+                    config.opponent_bot =
+                        old_school::web::parse_opponent_bot(
+                            value, config.learned_variant,
+                            config.learned_generations,
+                            config.value_adversarial_blocks,
+                            config.value_pass_dominance,
+                            config.value_actor_local_search,
+                            config.value_priority_bilinear);
+                }
+            } else if (option == "--spz-artifact") {
+                config.spz_artifact_path = std::string(value);
             } else if (option == "--seed") {
                 config.game_seed = parse_u64(option, value);
             } else if (option == "--train-games") {

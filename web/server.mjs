@@ -168,6 +168,16 @@ export const POLICIES = Object.freeze([
     description: "The compact rules-aware benchmark policy.",
   },
   {
+    id: "spz",
+    label: "Self-Play Zero (SPZ)",
+    name: "Self-Play Zero (SPZ)",
+    description:
+      "General self-taught bot: a value net learned purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 57.7% and Learned Value C16 60.2% in paired benchmarks.",
+    versionDate: "2026-07-29",
+    versionDateLabel: "Champion frozen",
+    lifecycle: "Self-play champion",
+  },
+  {
     id: "learned-value-c16",
     label: "Learned Value C16",
     name: "Learned Value C16",

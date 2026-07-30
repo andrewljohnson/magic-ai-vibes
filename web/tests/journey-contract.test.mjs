@@ -282,6 +282,7 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
       "monte-carlo",
       "deep-monte-carlo",
       "handcrafted",
+      "spz",
       "learned-value-c16",
       "learned-value-c16-actor-local-search",
       "learned-value-c16-combined-search",

@@ -43,6 +43,12 @@ struct BridgeConfig {
     bool value_pass_dominance = false;
     bool value_actor_local_search = false;
     bool value_priority_bilinear = false;
+    // Self-Play Zero opponent: a controller-driven bot loaded from a text
+    // artifact. When set, `opponent_bot` is ignored for decisions.
+    bool opponent_spz = false;
+    std::string spz_artifact_path;
+    std::size_t spz_worlds = 4;
+    bool spz_rollout = true;
 
     bool operator==(const BridgeConfig&) const = default;
 };
