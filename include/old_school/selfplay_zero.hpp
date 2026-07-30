@@ -91,6 +91,57 @@ void save_spz_net(const SpzNet& net, const std::string& path);
 SpzNet load_spz_net(const std::string& path);
 
 // ---------------------------------------------------------------------------
+// Policy network (search priors)
+
+// Generic, card-agnostic encoding of a priority action: kind, card, target
+// class and target card, countered-spell card, X value, source presence.
+std::size_t spz_action_feature_count();
+std::vector<float> spz_action_features(const PriorityAction& action,
+                                       std::size_t actor,
+                                       const GameState& context);
+
+// Scores (state, action) pairs with a single hidden layer; softmax over a
+// decision's legal actions gives search priors. Trained by cross-entropy
+// toward root-search visit distributions.
+class SpzPolicyNet {
+  public:
+    SpzPolicyNet(std::size_t state_inputs, std::size_t action_inputs,
+                 std::size_t hidden, std::uint64_t seed);
+
+    double logit(const std::vector<float>& state_features,
+                 const std::vector<float>& action_features) const;
+
+    // One SGD-with-momentum step over a batch of decisions; each decision
+    // supplies its action rows and a visit-probability target. Returns the
+    // mean pre-update cross-entropy.
+    struct Decision {
+        const std::vector<float>* state = nullptr;
+        const std::vector<std::vector<float>>* actions = nullptr;
+        const std::vector<float>* target = nullptr;
+    };
+    double train_batch(const std::vector<Decision>& decisions,
+                       double learning_rate);
+
+    void save(std::ostream& out) const;
+    static SpzPolicyNet load(std::istream& in);
+
+  private:
+    SpzPolicyNet() = default;
+
+    std::size_t state_inputs_ = 0;
+    std::size_t action_inputs_ = 0;
+    std::size_t hidden_ = 0;
+    std::vector<double> hidden_weights_;  // hidden x (state+action)
+    std::vector<double> hidden_bias_;
+    std::vector<double> output_weights_;
+    double output_bias_ = 0.0;
+    std::vector<double> momentum_;
+};
+
+void save_spz_policy_net(const SpzPolicyNet& net, const std::string& path);
+SpzPolicyNet load_spz_policy_net(const std::string& path);
+
+// ---------------------------------------------------------------------------
 // Policy / controller
 
 struct SpzPolicyConfig {
@@ -133,9 +184,18 @@ struct SpzSample {
     float target = 0.5f;
 };
 
+// One root-search decision recorded for policy training: the state row,
+// the surviving actions' feature rows, and the visit distribution.
+struct SpzPolicySample {
+    std::vector<float> state;
+    std::vector<std::vector<float>> actions;
+    std::vector<float> visits;
+};
+
 // Per-seat recording sink for self-play training.
 struct SpzRecorder {
     std::vector<std::vector<float>> feature_rows;
+    std::vector<SpzPolicySample> policy_samples;
 };
 
 // Builds the full five-callback controller for `seat`. `recorder` may be null
@@ -146,7 +206,8 @@ HumanController make_spz_controller(
     std::shared_ptr<const SpzNet> net,
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t seat, const SpzPolicyConfig& config,
-    SpzRecorder* recorder = nullptr);
+    SpzRecorder* recorder = nullptr,
+    std::shared_ptr<const SpzPolicyNet> policy_net = nullptr);
 
 // ---------------------------------------------------------------------------
 // Training
@@ -186,6 +247,17 @@ struct SpzTrainConfig {
     // produces (search/net co-training).
     bool ismcts = false;
     std::size_t ismcts_iterations = 96;
+    // Train a policy head toward root-search visit distributions and use it
+    // for tree priors during self-play.
+    bool train_policy = false;
+    double policy_learning_rate = 0.003;
+    std::size_t policy_hidden = 64;
+    std::size_t policy_replay_capacity = 40000;
+    std::shared_ptr<const SpzPolicyNet> initial_policy;
+    // With this probability the opponent seat is the frozen champion
+    // (initial_net under the deployed greedy-rollout policy), keeping the
+    // learner honest against the configuration it must beat.
+    double champion_spar_probability = 0.25;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
     double learning_rate = 0.01;
@@ -213,7 +285,12 @@ struct SpzTrainConfig {
     std::function<void(const std::string&)> log;
 };
 
-std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config);
+struct SpzTrainOutput {
+    std::shared_ptr<SpzNet> value;
+    std::shared_ptr<SpzPolicyNet> policy;  // null unless train_policy
+};
+
+SpzTrainOutput train_spz(const SpzTrainConfig& config);
 
 // ---------------------------------------------------------------------------
 // Benchmark
@@ -255,6 +332,8 @@ SpzBenchmarkResult run_spz_benchmark(
     std::size_t threads = 1,
     const std::function<void(const std::string&)>& log = {},
     const SpzPolicyConfig* baseline_spz_policy = nullptr,
-    std::shared_ptr<const SpzNet> baseline_net = nullptr);
+    std::shared_ptr<const SpzNet> baseline_net = nullptr,
+    std::shared_ptr<const SpzPolicyNet> policy_net = nullptr,
+    std::shared_ptr<const SpzPolicyNet> baseline_policy_net = nullptr);
 
 }  // namespace old_school::selfplay_zero

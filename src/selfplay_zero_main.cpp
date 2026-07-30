@@ -32,6 +32,9 @@ struct Arguments {
     std::string out;
     std::string init;
     std::string model;
+    std::string policy;
+    std::string policy_out;
+    std::string policy_init;
     std::string baseline_model;
     std::string baseline = "handcrafted";
     std::size_t iterations = 60;
@@ -76,6 +79,12 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.model = next();
         } else if (flag == "--baseline-model") {
             arguments.baseline_model = next();
+        } else if (flag == "--policy") {
+            arguments.policy = next();
+        } else if (flag == "--policy-out") {
+            arguments.policy_out = next();
+        } else if (flag == "--policy-init") {
+            arguments.policy_init = next();
         } else if (flag == "--baseline") {
             arguments.baseline = next();
         } else if (flag == "--iterations") {
@@ -142,6 +151,14 @@ int run_train(const Arguments& arguments) {
     config.rollout = arguments.rollout;
     config.ismcts = arguments.ismcts;
     config.ismcts_iterations = arguments.sims;
+    if (!arguments.policy_out.empty()) {
+        config.train_policy = true;
+        if (!arguments.policy_init.empty()) {
+            config.initial_policy =
+                std::make_shared<const SpzPolicyNet>(
+                    load_spz_policy_net(arguments.policy_init));
+        }
+    }
     if (!arguments.init.empty()) {
         config.initial_net = std::make_shared<const SpzNet>(
             load_spz_net(arguments.init));
@@ -150,9 +167,13 @@ int run_train(const Arguments& arguments) {
     config.log = [](const std::string& line) {
         std::cout << line << std::endl;
     };
-    const auto net = train_spz(config);
-    save_spz_net(*net, arguments.out);
+    const auto output = train_spz(config);
+    save_spz_net(*output.value, arguments.out);
     std::cout << "saved " << arguments.out << std::endl;
+    if (output.policy != nullptr && !arguments.policy_out.empty()) {
+        save_spz_policy_net(*output.policy, arguments.policy_out);
+        std::cout << "saved " << arguments.policy_out << std::endl;
+    }
     return 0;
 }
 
@@ -197,7 +218,12 @@ int run_benchmark(const Arguments& arguments) {
         arguments.baseline_model.empty()
             ? nullptr
             : std::make_shared<const SpzNet>(
-                  load_spz_net(arguments.baseline_model)));
+                  load_spz_net(arguments.baseline_model)),
+        arguments.policy.empty()
+            ? nullptr
+            : std::make_shared<const SpzPolicyNet>(
+                  load_spz_policy_net(arguments.policy)),
+        nullptr);
     std::cout << std::fixed << std::setprecision(4);
     for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {
         const SpzDeckStats& stats = result.per_deck[deck];

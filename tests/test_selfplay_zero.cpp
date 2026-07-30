@@ -604,7 +604,8 @@ SPZ_TEST(training_smoke_produces_a_working_net) {
     config.max_turns = 30;
     config.training_worlds = 1;
     config.threads = 2;
-    const auto net = train_spz(config);
+    const auto output = train_spz(config);
+    const auto net = output.value;
     expect(net != nullptr, "training returns a net");
     std::vector<float> probe(spz_feature_count(), 0.1f);
     const double value = net->value(probe);
@@ -628,8 +629,8 @@ SPZ_TEST(training_is_bit_identical_across_thread_counts) {
 
     std::stringstream serial_artifact;
     std::stringstream parallel_artifact;
-    serial->save(serial_artifact);
-    parallel->save(parallel_artifact);
+    serial.value->save(serial_artifact);
+    parallel.value->save(parallel_artifact);
     expect(serial_artifact.str() == parallel_artifact.str(),
            "training artifact is bit-identical at threads 1 and 8");
 
@@ -638,7 +639,7 @@ SPZ_TEST(training_is_bit_identical_across_thread_counts) {
         probe[index] =
             static_cast<float>((index * 7U) % 19U) / 19.0f;
     }
-    expect(serial->value(probe) == parallel->value(probe),
+    expect(serial.value->value(probe) == parallel.value->value(probe),
            "thread-count training values are bit-identical");
 }
 

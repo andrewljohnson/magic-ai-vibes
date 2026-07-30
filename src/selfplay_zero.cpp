@@ -521,12 +521,317 @@ SpzNet load_spz_net(const std::string& path) {
 }
 
 // ---------------------------------------------------------------------------
+// Policy network
+
+std::size_t spz_action_feature_count() {
+    // kind one-hot + card one-hot + target class (none/self/opponent
+    // player, own/enemy creature) + target creature card + countered spell
+    // card + x scale + source-permanent flag.
+    return 14 + kCardCount + 5 + kCardCount + kCardCount + 1 + 1;
+}
+
+std::vector<float> spz_action_features(const PriorityAction& action,
+                                       std::size_t actor,
+                                       const GameState& context) {
+    std::vector<float> features(spz_action_feature_count(), 0.0f);
+    std::size_t offset = 0;
+    features[offset + static_cast<std::size_t>(action.kind)] = 1.0f;
+    offset += 14;
+    features[offset + static_cast<std::size_t>(action.card)] = 1.0f;
+    offset += kCardCount;
+    if (!action.target.has_value()) {
+        features[offset + 0] = 1.0f;
+    } else if (!action.target->creature.has_value()) {
+        features[offset + (action.target->player == actor ? 1 : 2)] =
+            1.0f;
+    } else {
+        features[offset + (action.target->player == actor ? 3 : 4)] =
+            1.0f;
+    }
+    offset += 5;
+    if (action.target.has_value() &&
+        action.target->creature.has_value()) {
+        for (const auto& creature :
+             context.players[action.target->player].creatures) {
+            if (creature.id == *action.target->creature) {
+                features[offset +
+                         static_cast<std::size_t>(creature.card)] = 1.0f;
+                break;
+            }
+        }
+    }
+    offset += kCardCount;
+    if (action.spell_target.has_value()) {
+        for (const auto& object : context.stack) {
+            if (object.id == *action.spell_target) {
+                features[offset +
+                         static_cast<std::size_t>(object.card)] = 1.0f;
+                break;
+            }
+        }
+    }
+    offset += kCardCount;
+    features[offset] = static_cast<float>(action.x_value) / 4.0f;
+    offset += 1;
+    features[offset] = action.source_permanent.has_value() ? 1.0f : 0.0f;
+    return features;
+}
+
+SpzPolicyNet::SpzPolicyNet(std::size_t state_inputs,
+                           std::size_t action_inputs, std::size_t hidden,
+                           std::uint64_t seed)
+    : state_inputs_(state_inputs),
+      action_inputs_(action_inputs),
+      hidden_(hidden) {
+    if (state_inputs == 0 || action_inputs == 0 || hidden == 0) {
+        throw std::invalid_argument(
+            "SpzPolicyNet requires nonzero dimensions");
+    }
+    const std::size_t inputs = state_inputs + action_inputs;
+    std::mt19937_64 random(seed);
+    const double scale = 1.0 / std::sqrt(static_cast<double>(inputs));
+    std::uniform_real_distribution<double> hidden_init(-scale, scale);
+    hidden_weights_.resize(hidden * inputs);
+    for (double& weight : hidden_weights_) {
+        weight = hidden_init(random);
+    }
+    hidden_bias_.assign(hidden, 0.0);
+    const double output_scale =
+        1.0 / std::sqrt(static_cast<double>(hidden));
+    std::uniform_real_distribution<double> output_init(-output_scale,
+                                                       output_scale);
+    output_weights_.resize(hidden);
+    for (double& weight : output_weights_) {
+        weight = output_init(random);
+    }
+    momentum_.assign(hidden * inputs + hidden + hidden + 1, 0.0);
+}
+
+double SpzPolicyNet::logit(
+    const std::vector<float>& state_features,
+    const std::vector<float>& action_features) const {
+    if (state_features.size() != state_inputs_ ||
+        action_features.size() != action_inputs_) {
+        throw std::invalid_argument(
+            "SpzPolicyNet feature size mismatch");
+    }
+    const std::size_t inputs = state_inputs_ + action_inputs_;
+    double output = output_bias_;
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        const double* row = hidden_weights_.data() + unit * inputs;
+        double activation = hidden_bias_[unit];
+        for (std::size_t index = 0; index < state_inputs_; ++index) {
+            activation += row[index] * state_features[index];
+        }
+        for (std::size_t index = 0; index < action_inputs_; ++index) {
+            activation +=
+                row[state_inputs_ + index] * action_features[index];
+        }
+        output += output_weights_[unit] * std::tanh(activation);
+    }
+    return output;
+}
+
+double SpzPolicyNet::train_batch(const std::vector<Decision>& decisions,
+                                 double learning_rate) {
+    if (decisions.empty()) {
+        return 0.0;
+    }
+    const std::size_t inputs = state_inputs_ + action_inputs_;
+    const std::size_t weight_count = hidden_ * inputs;
+    std::vector<double> gradient(weight_count + hidden_ + hidden_ + 1,
+                                 0.0);
+    double total_loss = 0.0;
+    std::size_t decision_count = 0;
+    for (const Decision& decision : decisions) {
+        const auto& actions = *decision.actions;
+        const auto& target = *decision.target;
+        if (actions.empty() || actions.size() != target.size()) {
+            continue;
+        }
+        decision_count += 1;
+        // Forward every action, caching activations for the backward pass.
+        std::vector<std::vector<double>> activations(actions.size());
+        std::vector<double> logits(actions.size());
+        for (std::size_t option = 0; option < actions.size(); ++option) {
+            activations[option].resize(hidden_);
+            double output = output_bias_;
+            for (std::size_t unit = 0; unit < hidden_; ++unit) {
+                const double* row =
+                    hidden_weights_.data() + unit * inputs;
+                double activation = hidden_bias_[unit];
+                for (std::size_t index = 0; index < state_inputs_;
+                     ++index) {
+                    activation += row[index] * (*decision.state)[index];
+                }
+                for (std::size_t index = 0; index < action_inputs_;
+                     ++index) {
+                    activation += row[state_inputs_ + index] *
+                                  actions[option][index];
+                }
+                activations[option][unit] = std::tanh(activation);
+                output +=
+                    output_weights_[unit] * activations[option][unit];
+            }
+            logits[option] = output;
+        }
+        double best = -std::numeric_limits<double>::infinity();
+        for (const double value : logits) {
+            best = std::max(best, value);
+        }
+        double normalizer = 0.0;
+        std::vector<double> probabilities(actions.size());
+        for (std::size_t option = 0; option < actions.size(); ++option) {
+            probabilities[option] = std::exp(logits[option] - best);
+            normalizer += probabilities[option];
+        }
+        for (std::size_t option = 0; option < actions.size(); ++option) {
+            probabilities[option] /= normalizer;
+            if (target[option] > 0.0f) {
+                total_loss -=
+                    target[option] *
+                    std::log(std::max(probabilities[option], 1e-9));
+            }
+        }
+        for (std::size_t option = 0; option < actions.size(); ++option) {
+            const double output_delta =
+                probabilities[option] - target[option];
+            gradient[weight_count + hidden_ + hidden_] += output_delta;
+            for (std::size_t unit = 0; unit < hidden_; ++unit) {
+                const double activation = activations[option][unit];
+                gradient[weight_count + hidden_ + unit] +=
+                    output_delta * activation;
+                const double hidden_delta =
+                    output_delta * output_weights_[unit] *
+                    (1.0 - activation * activation);
+                gradient[weight_count + unit] += hidden_delta;
+                double* row_gradient =
+                    gradient.data() + unit * inputs;
+                for (std::size_t index = 0; index < state_inputs_;
+                     ++index) {
+                    row_gradient[index] +=
+                        hidden_delta * (*decision.state)[index];
+                }
+                for (std::size_t index = 0; index < action_inputs_;
+                     ++index) {
+                    row_gradient[state_inputs_ + index] +=
+                        hidden_delta * actions[option][index];
+                }
+            }
+        }
+    }
+    if (decision_count == 0) {
+        return 0.0;
+    }
+    const double batch_scale = 1.0 / static_cast<double>(decision_count);
+    constexpr double kMomentum = 0.9;
+    const auto apply = [&](std::size_t offset, double* parameter) {
+        momentum_[offset] = kMomentum * momentum_[offset] -
+                            learning_rate * gradient[offset] * batch_scale;
+        *parameter += momentum_[offset];
+    };
+    for (std::size_t index = 0; index < weight_count; ++index) {
+        apply(index, &hidden_weights_[index]);
+    }
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        apply(weight_count + unit, &hidden_bias_[unit]);
+    }
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        apply(weight_count + hidden_ + unit, &output_weights_[unit]);
+    }
+    apply(weight_count + hidden_ + hidden_, &output_bias_);
+    return total_loss * batch_scale;
+}
+
+void SpzPolicyNet::save(std::ostream& out) const {
+    out << "spz-policy-v1\n"
+        << state_inputs_ << ' ' << action_inputs_ << ' ' << hidden_
+        << '\n';
+    out << std::hexfloat;
+    for (const double weight : hidden_weights_) {
+        out << weight << '\n';
+    }
+    for (const double bias : hidden_bias_) {
+        out << bias << '\n';
+    }
+    for (const double weight : output_weights_) {
+        out << weight << '\n';
+    }
+    out << output_bias_ << '\n';
+}
+
+SpzPolicyNet SpzPolicyNet::load(std::istream& in) {
+    std::string magic;
+    in >> magic;
+    if (magic != "spz-policy-v1") {
+        throw std::runtime_error(
+            "unrecognized SPZ policy artifact header");
+    }
+    SpzPolicyNet net;
+    in >> net.state_inputs_ >> net.action_inputs_ >> net.hidden_;
+    if (!in || net.state_inputs_ == 0 || net.action_inputs_ == 0 ||
+        net.hidden_ == 0) {
+        throw std::runtime_error("malformed SPZ policy dimensions");
+    }
+    const auto read_value = [&in]() {
+        std::string token;
+        in >> token;
+        if (!in) {
+            throw std::runtime_error("truncated SPZ policy artifact");
+        }
+        return std::strtod(token.c_str(), nullptr);
+    };
+    const std::size_t inputs =
+        net.state_inputs_ + net.action_inputs_;
+    net.hidden_weights_.resize(net.hidden_ * inputs);
+    for (double& weight : net.hidden_weights_) {
+        weight = read_value();
+    }
+    net.hidden_bias_.resize(net.hidden_);
+    for (double& bias : net.hidden_bias_) {
+        bias = read_value();
+    }
+    net.output_weights_.resize(net.hidden_);
+    for (double& weight : net.output_weights_) {
+        weight = read_value();
+    }
+    net.output_bias_ = read_value();
+    net.momentum_.assign(net.hidden_ * inputs + net.hidden_ * 2 + 1,
+                         0.0);
+    return net;
+}
+
+void save_spz_policy_net(const SpzPolicyNet& net,
+                         const std::string& path) {
+    std::ofstream out(path);
+    if (!out) {
+        throw std::runtime_error(
+            "cannot open SPZ policy artifact for writing: " + path);
+    }
+    net.save(out);
+    if (!out) {
+        throw std::runtime_error("failed writing SPZ policy artifact: " +
+                                 path);
+    }
+}
+
+SpzPolicyNet load_spz_policy_net(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open SPZ policy artifact: " +
+                                 path);
+    }
+    return SpzPolicyNet::load(in);
+}
+
+// ---------------------------------------------------------------------------
 // Agent
 
 namespace {
 
 struct SpzAgent {
     std::shared_ptr<const SpzNet> net;
+    std::shared_ptr<const SpzPolicyNet> policy_net;
     std::array<std::vector<CardId>, 2> decks;
     std::size_t seat = 0;
     SpzPolicyConfig config;
@@ -536,8 +841,10 @@ struct SpzAgent {
     SpzAgent(std::shared_ptr<const SpzNet> shared_net,
              const std::array<std::vector<CardId>, 2>& original_decks,
              std::size_t player_seat, const SpzPolicyConfig& policy,
-             SpzRecorder* sample_recorder)
+             SpzRecorder* sample_recorder,
+             std::shared_ptr<const SpzPolicyNet> shared_policy)
         : net(std::move(shared_net)),
+          policy_net(std::move(shared_policy)),
           decks(original_decks),
           seat(player_seat),
           config(policy),
@@ -1449,6 +1756,37 @@ struct SpzAgent {
         }
     }
 
+    // Learned priors: softmax over policy-net logits for the actor at the
+    // given position. Empty when no policy net is attached.
+    std::vector<double> learned_priors(
+        const GameState& state, TurnPhase phase, std::size_t actor,
+        const std::vector<PriorityAction>& actions) const {
+        if (policy_net == nullptr) {
+            return {};
+        }
+        const auto state_row =
+            spz_features(observe_game_state(state, actor), decks, phase);
+        std::vector<double> logits;
+        logits.reserve(actions.size());
+        for (const PriorityAction& action : actions) {
+            logits.push_back(policy_net->logit(
+                state_row, spz_action_features(action, actor, state)));
+        }
+        double best = -std::numeric_limits<double>::infinity();
+        for (const double value : logits) {
+            best = std::max(best, value);
+        }
+        double total = 0.0;
+        for (double& value : logits) {
+            value = std::exp(value - best);
+            total += value;
+        }
+        for (double& value : logits) {
+            value /= total;
+        }
+        return logits;
+    }
+
     // Expands `node`: legal actions minus no-upside waste, myopic priors
     // from the acting player's perspective, and the node's own net value.
     // Returns the seat-perspective estimate for backpropagation.
@@ -1500,8 +1838,14 @@ struct SpzAgent {
             node.actions.push_back(PriorityAction::pass());
             scores.push_back(0.5);
         }
-        softmax_priors(scores);
-        node.priors = std::move(scores);
+        auto priors = learned_priors(position.state, position.phase,
+                                     position.priority.player,
+                                     node.actions);
+        if (priors.empty()) {
+            softmax_priors(scores);
+            priors = std::move(scores);
+        }
+        node.priors = std::move(priors);
         node.child_visits.assign(node.actions.size(), 0);
         node.child_value_sums.assign(node.actions.size(), 0.0);
         node.children.resize(node.actions.size());
@@ -1593,8 +1937,16 @@ struct SpzAgent {
                        ? 0
                        : root_action_indices.front();
         }
-        std::vector<double> priors = root_scores;
-        softmax_priors(priors);
+        std::vector<PriorityAction> root_actions;
+        for (const std::size_t index : root_action_indices) {
+            root_actions.push_back(actions[index]);
+        }
+        std::vector<double> priors = learned_priors(
+            worlds.front(), phase, seat, root_actions);
+        if (priors.empty()) {
+            priors = root_scores;
+            softmax_priors(priors);
+        }
 
         std::vector<std::unique_ptr<IsmctsNode>> roots;
         for (const GameState& world : worlds) {
@@ -1639,6 +1991,31 @@ struct SpzAgent {
         for (std::size_t iteration = 0; iteration < iterations;
              ++iteration) {
             ismcts_simulate(*roots[iteration % roots.size()]);
+        }
+
+        if (recorder != nullptr) {
+            SpzPolicySample sample;
+            sample.state = spz_features(
+                observe_game_state(worlds.front(), seat), decks, phase);
+            float visit_total = 0.0f;
+            for (std::size_t slot = 0;
+                 slot < root_action_indices.size(); ++slot) {
+                sample.actions.push_back(spz_action_features(
+                    root_actions[slot], seat, worlds.front()));
+                float visits = 0.0f;
+                for (const auto& root : roots) {
+                    visits += static_cast<float>(
+                        root->child_visits[slot]);
+                }
+                sample.visits.push_back(visits);
+                visit_total += visits;
+            }
+            if (visit_total > 0.0f) {
+                for (float& visits : sample.visits) {
+                    visits /= visit_total;
+                }
+                recorder->policy_samples.push_back(std::move(sample));
+            }
         }
 
         std::size_t best_root_slot = 0;
@@ -2321,9 +2698,11 @@ HumanController make_spz_controller(
     std::shared_ptr<const SpzNet> net,
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t seat, const SpzPolicyConfig& config,
-    SpzRecorder* recorder) {
+    SpzRecorder* recorder,
+    std::shared_ptr<const SpzPolicyNet> policy_net) {
     auto agent = std::make_shared<SpzAgent>(std::move(net), original_decks,
-                                            seat, config, recorder);
+                                            seat, config, recorder,
+                                            std::move(policy_net));
     HumanController controller;
     controller.choose_priority_action =
         [agent](const PlayerObservation& observation, TurnPhase phase,
@@ -2438,12 +2817,23 @@ SpzTrainingCoordinate spz_training_coordinate(
     };
 }
 
-std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
+SpzTrainOutput train_spz(const SpzTrainConfig& config) {
     const auto& decks = spz_decks();
     auto net = config.initial_net != nullptr
                    ? std::make_shared<SpzNet>(*config.initial_net)
                    : std::make_shared<SpzNet>(spz_feature_count(),
                                               config.hidden, config.seed);
+    std::shared_ptr<SpzPolicyNet> policy_net;
+    if (config.train_policy) {
+        policy_net =
+            config.initial_policy != nullptr
+                ? std::make_shared<SpzPolicyNet>(*config.initial_policy)
+                : std::make_shared<SpzPolicyNet>(
+                      spz_feature_count(), spz_action_feature_count(),
+                      config.policy_hidden, mix_seed(config.seed, 77));
+    }
+    std::vector<SpzPolicySample> policy_replay;
+    std::size_t policy_cursor = 0;
     std::vector<SpzSample> replay;
     replay.reserve(std::min<std::size_t>(config.replay_capacity, 1 << 20));
     std::size_t replay_cursor = 0;
@@ -2468,6 +2858,10 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
             (config.epsilon_final - config.epsilon_start) * progress;
 
         auto frozen = std::make_shared<const SpzNet>(*net);
+        const auto frozen_policy =
+            policy_net != nullptr
+                ? std::make_shared<const SpzPolicyNet>(*policy_net)
+                : std::shared_ptr<const SpzPolicyNet>{};
         if (config.league_snapshot_interval > 0 &&
             iteration % config.league_snapshot_interval == 0) {
             league_pool.push_back(frozen);
@@ -2493,10 +2887,19 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                 // learner keeps beating past selves, not only its mirror.
                 std::array<std::shared_ptr<const SpzNet>, 2> seat_nets = {
                     frozen, frozen};
+                std::array<bool, 2> champion_seat = {false, false};
                 std::array<bool, 2> record_seat = {true, true};
                 std::uniform_real_distribution<double> unit(0.0, 1.0);
-                if (!league_pool.empty() &&
-                    unit(game_rng) < config.league_probability) {
+                if (config.initial_net != nullptr &&
+                    unit(game_rng) < config.champion_spar_probability) {
+                    // Frozen champion sparring partner under the deployed
+                    // greedy-rollout configuration.
+                    const std::size_t spar_seat = game_rng() % 2;
+                    seat_nets[spar_seat] = config.initial_net;
+                    champion_seat[spar_seat] = true;
+                } else if (!league_pool.empty() &&
+                           unit(game_rng) <
+                               config.league_probability) {
                     const std::size_t snapshot =
                         game_rng() % league_pool.size();
                     const std::size_t league_seat = game_rng() % 2;
@@ -2514,7 +2917,7 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                     policy.block_prediction_worlds = config.training_worlds;
                     policy.epsilon = epsilon;
                     policy.rollout = config.rollout;
-                    if (config.ismcts) {
+                    if (config.ismcts && !champion_seat[seat]) {
                         policy.search = SpzPolicyConfig::Search::Ismcts;
                         policy.ismcts_iterations =
                             config.ismcts_iterations;
@@ -2524,7 +2927,9 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                         make_spz_controller(
                             seat_nets[seat], game_decks, seat, policy,
                             record_seat[seat] ? &record.recorders[seat]
-                                              : nullptr);
+                                              : nullptr,
+                            champion_seat[seat] ? nullptr
+                                                : frozen_policy);
                 }
                 Game game(game_decks[0], game_decks[1], game_rng(),
                           game_config);
@@ -2556,6 +2961,26 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
             }
         }
 
+        std::size_t new_policy_samples = 0;
+        if (policy_net != nullptr) {
+            for (GameRecord& record : records) {
+                for (auto& seat_recorder : record.recorders) {
+                    for (auto& sample : seat_recorder.policy_samples) {
+                        if (policy_replay.size() <
+                            config.policy_replay_capacity) {
+                            policy_replay.push_back(std::move(sample));
+                        } else {
+                            policy_replay[policy_cursor] =
+                                std::move(sample);
+                            policy_cursor = (policy_cursor + 1) %
+                                            config.policy_replay_capacity;
+                        }
+                        new_policy_samples += 1;
+                    }
+                }
+            }
+        }
+
         double mean_loss = 0.0;
         std::size_t steps = 0;
         if (!replay.empty()) {
@@ -2583,6 +3008,28 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
             mean_loss /= static_cast<double>(steps);
         }
 
+        double policy_loss = 0.0;
+        if (policy_net != nullptr && !policy_replay.empty() &&
+            new_policy_samples > 0) {
+            const std::size_t batch = 32;
+            const std::size_t policy_steps = std::max<std::size_t>(
+                1, new_policy_samples / batch);
+            std::uniform_int_distribution<std::size_t> pick(
+                0, policy_replay.size() - 1);
+            std::vector<SpzPolicyNet::Decision> batch_decisions(batch);
+            for (std::size_t step = 0; step < policy_steps; ++step) {
+                for (std::size_t slot = 0; slot < batch; ++slot) {
+                    const SpzPolicySample& sample =
+                        policy_replay[pick(trainer_rng)];
+                    batch_decisions[slot] = {
+                        &sample.state, &sample.actions, &sample.visits};
+                }
+                policy_loss += policy_net->train_batch(
+                    batch_decisions, config.policy_learning_rate);
+            }
+            policy_loss /= static_cast<double>(policy_steps);
+        }
+
         if (config.log) {
             std::ostringstream line;
             line << "iteration " << (iteration + 1) << '/'
@@ -2597,7 +3044,10 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                                    config.games_per_iteration))
                  << " new-samples " << new_samples << " replay "
                  << replay.size() << " steps " << steps << " loss "
-                 << std::setprecision(4) << mean_loss;
+                 << std::setprecision(4) << mean_loss
+                 << " policy-samples " << new_policy_samples
+                 << " policy-loss " << std::setprecision(4)
+                 << policy_loss;
             config.log(line.str());
         }
         if (!config.checkpoint_prefix.empty() &&
@@ -2608,7 +3058,7 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                                    ".txt");
         }
     }
-    return net;
+    return {net, policy_net};
 }
 
 // ---------------------------------------------------------------------------
@@ -2661,7 +3111,9 @@ SpzBenchmarkResult run_spz_benchmark(
     std::size_t threads,
     const std::function<void(const std::string&)>& log,
     const SpzPolicyConfig* baseline_spz_policy,
-    std::shared_ptr<const SpzNet> baseline_net) {
+    std::shared_ptr<const SpzNet> baseline_net,
+    std::shared_ptr<const SpzPolicyNet> policy_net,
+    std::shared_ptr<const SpzPolicyNet> baseline_policy_net) {
     const auto& decks = spz_decks();
 
     struct Job {
@@ -2716,7 +3168,7 @@ SpzBenchmarkResult run_spz_benchmark(
                 mix_seed(pairing_seed, 100 + game_index);
             game_config.human_controllers[spz_seat] =
                 make_spz_controller(net, game_decks, spz_seat,
-                                    game_policy);
+                                    game_policy, nullptr, policy_net);
             if (baseline_spz_policy != nullptr) {
                 SpzPolicyConfig opponent_policy = *baseline_spz_policy;
                 opponent_policy.epsilon = 0.0;
@@ -2725,7 +3177,8 @@ SpzBenchmarkResult run_spz_benchmark(
                 game_config.human_controllers[baseline_seat] =
                     make_spz_controller(
                         baseline_net != nullptr ? baseline_net : net,
-                        game_decks, baseline_seat, opponent_policy);
+                        game_decks, baseline_seat, opponent_policy,
+                        nullptr, baseline_policy_net);
             }
             Game game(game_decks[0], game_decks[1], pairing_seed,
                       game_config);
