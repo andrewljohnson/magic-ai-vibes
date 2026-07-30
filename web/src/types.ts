@@ -404,7 +404,7 @@ export interface GameSnapshot {
   decision?: Decision | null;
   log?: Array<string | LogEntry>;
   result?: GameResult | null;
-  model?: LearnedModelIdentity | null;
+  model?: ModelIdentity | null;
   error?: string | null;
 }
 
@@ -415,7 +415,7 @@ export interface BugReport {
     id: string;
     status: string;
     config: GameConfig;
-    model: LearnedModelIdentity | null;
+    model: ModelIdentity | null;
   };
   successfulHumanActions: Array<Record<string, unknown>>;
   publicState: Record<string, unknown>;
@@ -548,7 +548,6 @@ export interface EvolutionConfig {
   population: number;
   games: number;
   pilot: string;
-  learnedRollouts: number;
 }
 
 export interface EvolutionMeta {
@@ -559,7 +558,6 @@ export interface EvolutionMeta {
     generations: EvolutionNumericLimit;
     population: EvolutionNumericLimit;
     games: EvolutionNumericLimit;
-    learnedRollouts: EvolutionNumericLimit;
   };
   lifetime: string;
   active?: boolean;
@@ -601,7 +599,6 @@ export interface EvolutionResult {
   generations: number[];
   population?: number;
   games?: number;
-  learnedRollouts?: number;
   best: {
     cards: EvolvedCard[];
     stats: EvolutionStats;
@@ -648,30 +645,20 @@ export interface SeatConfig {
 
 export interface GameConfig {
   seed: number | string;
-  trainGames: number;
-  trainSeed: number | string;
   debugReveal: boolean;
   bluffMode: boolean;
   rollouts: number;
   deepRollouts: number;
-  learnedRollouts: number;
-  learnedGenerations: number;
   players: [SeatConfig, SeatConfig];
 }
 
-export interface LearnedModelIdentity {
+export interface ModelIdentity {
   family: string;
   generation: number;
   searchWorlds: number;
   horizonTurns: number;
   source: string;
   fingerprint: string;
-  treatment?: {
-    id: "aq19-bilinear";
-    parameterSha256: string;
-    artifactFileSha256: string;
-    artifactBytes: number;
-  };
 }
 
 export interface ReproductionPublicContext {
@@ -679,7 +666,7 @@ export interface ReproductionPublicContext {
   phase?: string;
   priorityHolder: "You" | "None" | "Unknown";
   latestEvent?: string;
-  model?: LearnedModelIdentity | null;
+  model?: ModelIdentity | null;
 }
 
 export function reproductionPriorityHolder(
@@ -706,28 +693,17 @@ export function formatReproductionSummary(
     `you=${config.players[0].deckId}/${config.players[0].policyId}`,
     `opponent=${config.players[1].deckId}/${config.players[1].policyId}`,
     `game-seed=${String(config.seed)}`,
-    `train-games=${config.trainGames}`,
-    `train-seed=${String(config.trainSeed)}`,
     `rollouts=${config.rollouts}`,
     `deep-rollouts=${config.deepRollouts}`,
-    `learned-rollouts=${config.learnedRollouts}`,
-    `learned-generations=${config.learnedGenerations}`,
     context.model
       ? `model=${context.model.family}/C${context.model.generation}`
       : "model=none",
     context.model
       ? `model-fingerprint=${context.model.fingerprint}`
       : "model-fingerprint=none",
-    ...(context.model?.treatment
-      ? [
-          `treatment=${context.model.treatment.id}`,
-          `treatment-parameter-sha256=${context.model.treatment.parameterSha256}`,
-          `treatment-artifact-sha256=${context.model.treatment.artifactFileSha256}`,
-        ]
-      : []),
     context.model
-      ? `learned-search=K${context.model.searchWorlds}/H${context.model.horizonTurns}`
-      : "learned-search=none",
+      ? `model-search=K${context.model.searchWorlds}/H${context.model.horizonTurns}`
+      : "model-search=none",
     `bluff=${config.bluffMode ? "on" : "off"}`,
     `reveal=${config.debugReveal ? "on" : "off"}`,
     `turn=${turnNumber}`,

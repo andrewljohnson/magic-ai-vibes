@@ -622,85 +622,12 @@ test("landing metadata includes and advertises every bot policy", async () => {
     "Monte Carlo",
     "Deep Monte Carlo",
     "HandcodedPolicy",
-    "Learned Value",
-    "Learned Actor",
+    "Self-Play Zero",
   ]) {
     assert.match(app, new RegExp(policy));
   }
-  assert.match(app, /id:\s*"learned-value-c16"/);
-  assert.match(
-    app,
-    /id:\s*"learned-value-c16-actor-local-search"/,
-  );
-  assert.match(
-    app,
-    /id:\s*"learned-value-c16-combined-search"/,
-  );
-  assert.match(
-    app,
-    /id:\s*"learned-value-c16-bilinear-aq19"/,
-  );
-  assert.match(
-    app,
-    /id:\s*"learned-value-c16-adversarial-blocks"/,
-  );
-  assert.match(
-    app,
-    /id:\s*"learned-value-c16-stack-discipline"/,
-  );
-  assert.match(app, /id:\s*"learned-value-g0"/);
-  assert.match(app, /id:\s*"learned-actor"/);
-  assert.match(
-    app,
-    /versionDate:\s*"2026-07-26"[\s\S]+?Artifact frozen[\s\S]+?Research control/,
-  );
-  assert.match(
-    app,
-    /versionDate:\s*"2026-07-24"[\s\S]+?Recipe introduced[\s\S]+?trained per match/,
-  );
-  assert.match(
-    app,
-    /versionDate:\s*"2026-07-28"[\s\S]+?Fast screen run[\s\S]+?127–113 fast screen[\s\S]+?awaiting human play-test[\s\S]+?not promoted/,
-  );
-  assert.match(
-    app,
-    /outer K8\/H8[\s\S]+?actor-local inner K2\/H4[\s\S]+?Priority decisions only[\s\S]+?attack and block selection still use C16/,
-  );
-  assert.match(
-    app,
-    /Manual pilot introduced[\s\S]+?Manual diagnostic · not promoted/,
-  );
-  assert.match(
-    app,
-    /Learned C16 · Combined Search \(AQ15\)[\s\S]+?outer K8\/H8[\s\S]+?actor-local inner K2\/H4[\s\S]+?real attack sets[\s\S]+?defender-best-response minimum[\s\S]+?Simulated continuations retain canonical C16 combat[\s\S]+?versionDate:\s*"2026-07-29"[\s\S]+?Manual diagnostic · unscreened · not promoted/,
-  );
-  assert.match(
-    app,
-    /Learned C16 · Bilinear AQ19[\s\S]+?Rank-2 card-agnostic state×action residual[\s\S]+?deep actor-local labels[\s\S]+?exact C16 K8\/H4 base[\s\S]+?Offline all-five-deck gates passed[\s\S]+?small selector only licenses manual testing[\s\S]+?versionDate:\s*"2026-07-29"[\s\S]+?Manual pilot · 31–29 selector · not promoted/,
-  );
-  assert.match(
-    app,
-    /rules-only marginal-effect filter[\s\S]+?same public outcome[\s\S]+?strictly fewer resources/,
-  );
-  assert.match(
-    app,
-    /Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted/,
-  );
-  assert.doesNotMatch(app, /never double-counter/i);
-  assert.match(
-    app,
-    /const FROZEN_C16_POLICY_IDS[\s\S]+?learned-value-c16-actor-local-search[\s\S]+?learned-value-c16-combined-search[\s\S]+?learned-value-c16-bilinear-aq19[\s\S]+?learned-value-c16-adversarial-blocks[\s\S]+?learned-value-c16-stack-discipline[\s\S]+?function isFrozenC16Policy/,
-  );
-  assert.match(app, /if \(isFrozenC16Policy\(value\)\)/);
-  assert.equal(
-    [
-      ...app.matchAll(
-        /readOnly=\{\s*isFrozenC16Policy\(config\.players\[1\]\.policyId\)\s*\}/g,
-      ),
-    ].length,
-    2,
-    "both frozen training identity fields must use the shared C16 predicate",
-  );
+  assert.match(app, /id:\s*"spz"/);
+  assert.doesNotMatch(app, /learned/i);
   assert.match(
     app,
     /className="policy-provenance"[\s\S]+?<time dateTime=\{policy\.versionDate\}>/,
@@ -723,12 +650,8 @@ test("live header exposes a compact selectable reproduction summary", async () =
 
   for (const field of [
     "config.seed",
-    "config.trainGames",
-    "config.trainSeed",
     "config.rollouts",
     "config.deepRollouts",
-    "config.learnedRollouts",
-    "config.learnedGenerations",
     "config.bluffMode",
     "config.debugReveal",
   ]) {

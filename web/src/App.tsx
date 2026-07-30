@@ -94,93 +94,15 @@ const FALLBACK_POLICIES: PolicyMeta[] = [
     description: "A compact rules-aware benchmark.",
   },
   {
-    id: "learned-value-c16",
-    name: "Learned Value C16",
+    id: "spz",
+    name: "Self-Play Zero (SPZ)",
     description:
-      "Value critic trained through 16 bootstrapped self-play generations; deployed with K8/H4 search.",
-    versionDate: "2026-07-26",
-    versionDateLabel: "Artifact frozen",
-    lifecycle: "Research control · not promoted over Handcoded Policy",
-  },
-  {
-    id: "learned-value-c16-actor-local-search",
-    name: "Learned C16 · Foresight Search (AQ4)",
-    description:
-      "Exact frozen C16 critic with outer K8/H8 search and symmetric actor-local inner K2/H4 search. Changes Priority decisions only; attack and block selection still use C16.",
-    versionDate: "2026-07-28",
-    versionDateLabel: "Manual pilot introduced",
-    lifecycle: "Manual diagnostic · not promoted",
-  },
-  {
-    id: "learned-value-c16-combined-search",
-    name: "Learned C16 · Combined Search (AQ15)",
-    description:
-      "Exact frozen C16 critic. Priority uses outer K8/H8 with symmetric actor-local inner K2/H4; real attack sets use the defender-best-response minimum. Simulated continuations retain canonical C16 combat.",
+      "General self-taught bot: a value net trained purely from mirror self-play, played with greedy rollout lookahead.",
     versionDate: "2026-07-29",
-    versionDateLabel: "Manual pilot introduced",
-    lifecycle: "Manual diagnostic · unscreened · not promoted",
-  },
-  {
-    id: "learned-value-c16-bilinear-aq19",
-    name: "Learned C16 · Bilinear AQ19",
-    description:
-      "Rank-2 card-agnostic state×action residual trained on deep actor-local labels over the exact C16 K8/H4 base. Offline all-five-deck gates passed; the small selector only licenses manual testing.",
-    versionDate: "2026-07-29",
-    versionDateLabel: "Manual pilot introduced",
-    lifecycle: "Manual pilot · 31–29 selector · not promoted",
-  },
-  {
-    id: "learned-value-c16-adversarial-blocks",
-    name: "Learned C16 · Best-Response Attacks",
-    description:
-      "Exact frozen C16 critic with K8/H4 search; only attack-set aggregation changes, from mean legal blocks to the defender-best-response minimum.",
-    versionDate: "2026-07-28",
-    versionDateLabel: "Fast screen run",
-    lifecycle:
-      "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
-  },
-  {
-    id: "learned-value-c16-stack-discipline",
-    name: "Learned C16 · Stack Discipline",
-    description:
-      "Exact frozen C16 critic with K8/H4 Best-Response Attacks plus a rules-only marginal-effect filter that rejects an action when Pass reaches the same public outcome with strictly fewer resources.",
-    versionDate: "2026-07-28",
-    versionDateLabel: "Fast screen run",
-    lifecycle:
-      "Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted",
-  },
-  {
-    id: "learned-value-g0",
-    name: "Learned Value G0",
-    description:
-      "Legacy Value critic trained from random play plus two fitted self-play passes; built for this match from the selected games and seed.",
-    versionDate: "2026-07-24",
-    versionDateLabel: "Recipe introduced",
-    lifecycle: "Legacy recipe · trained per match",
-  },
-  {
-    id: "learned-actor",
-    name: "Learned Actor",
-    description:
-      "Separate policy heads learn priority, attacks, blocks, and damage order, backed by a learned critic; built for this match.",
-    versionDate: "2026-07-24",
-    versionDateLabel: "Recipe introduced",
-    lifecycle: "Experimental recipe · trained per match",
+    versionDateLabel: "Champion frozen",
+    lifecycle: "Self-play champion",
   },
 ];
-
-const FROZEN_C16_POLICY_IDS = new Set([
-  "learned-value-c16",
-  "learned-value-c16-actor-local-search",
-  "learned-value-c16-combined-search",
-  "learned-value-c16-bilinear-aq19",
-  "learned-value-c16-adversarial-blocks",
-  "learned-value-c16-stack-discipline",
-]);
-
-function isFrozenC16Policy(policyId: string): boolean {
-  return FROZEN_C16_POLICY_IDS.has(policyId);
-}
 
 const HUMAN_POLICY: PolicyMeta = {
   id: "human",
@@ -2119,25 +2041,6 @@ function SetupDrawer({
     if (!config) return;
     const players = [...config.players] as GameConfig["players"];
     players[seat] = { ...players[seat], [field]: value };
-    if (seat === 1 && field === "policyId") {
-      if (isFrozenC16Policy(value)) {
-        setConfig({
-          ...config,
-          players,
-          trainGames: 800,
-          trainSeed: 424242,
-          learnedRollouts: 8,
-          learnedGenerations: 16,
-        });
-        return;
-      }
-      setConfig({
-        ...config,
-        players,
-        learnedGenerations: 0,
-      });
-      return;
-    }
     setConfig({ ...config, players });
   };
   const submit = (event: FormEvent) => {
@@ -2325,52 +2228,6 @@ function SetupDrawer({
                   </button>
                 </div>
               </label>
-              <label>
-                <span>Learned train games</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="100000"
-                  value={config.trainGames}
-                  readOnly={
-                    isFrozenC16Policy(config.players[1].policyId)
-                  }
-                  title={
-                    isFrozenC16Policy(config.players[1].policyId)
-                      ? "Frozen C16 is pinned to 800 initial training games"
-                      : undefined
-                  }
-                  onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      trainGames: Number(event.target.value),
-                    })
-                  }
-                />
-              </label>
-              <label>
-                <span>Learned train seed</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="4294967295"
-                  value={config.trainSeed}
-                  readOnly={
-                    isFrozenC16Policy(config.players[1].policyId)
-                  }
-                  title={
-                    isFrozenC16Policy(config.players[1].policyId)
-                      ? "Frozen C16 is pinned to training seed 424242"
-                      : undefined
-                  }
-                  onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      trainSeed: Number(event.target.value),
-                    })
-                  }
-                />
-              </label>
               <label className="toggle-field">
                 <input
                   type="checkbox"
@@ -2494,7 +2351,7 @@ function EvolutionDialog({
   if (!open) return null;
 
   const updateNumber = (
-    field: "seed" | "generations" | "population" | "games" | "learnedRollouts",
+    field: "seed" | "generations" | "population" | "games",
     value: string,
   ) => {
     if (!config) return;
@@ -2703,21 +2560,6 @@ function EvolutionDialog({
                     ))}
                   </select>
                 </label>
-                <label>
-                  <span>Learned rollouts</span>
-                  <input
-                    type="number"
-                    required
-                    step="1"
-                    min={evolution.limits.learnedRollouts.min}
-                    max={evolution.limits.learnedRollouts.max}
-                    value={config.learnedRollouts}
-                    disabled={!config.pilot.includes("learned")}
-                    onChange={(event) =>
-                      updateNumber("learnedRollouts", event.target.value)
-                    }
-                  />
-                </label>
                 {selectedPilot?.description && (
                   <p className="evolution-pilot-description">
                     {selectedPilot.description}
@@ -2741,8 +2583,8 @@ function EvolutionDialog({
                   )}
                 </button>
                 <p className="evolution-resource-note">
-                  One bounded engine job runs at a time. Larger populations,
-                  generations, and Learned rollouts take longer.
+                  One bounded engine job runs at a time. Larger populations
+                  and generations take longer.
                 </p>
               </form>
 
@@ -2834,10 +2676,6 @@ function EvolutionDialog({
                     <div>
                       <dt>Paired reps</dt>
                       <dd>{runConfig?.games ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Learned rollouts</dt>
-                      <dd>{runConfig?.learnedRollouts ?? "—"}</dd>
                     </div>
                   </dl>
 
@@ -3025,7 +2863,7 @@ function WelcomeTable({
         <p>
           Pilot {deckCount} classic archetypes against {policyCount} bot
           policies: Random, Monte Carlo, Deep Monte Carlo, HandcodedPolicy,
-          explicit Learned Value generations, and Learned Actor.
+          and Self-Play Zero.
         </p>
         {error ? (
           <div className="welcome-error">
@@ -3248,30 +3086,18 @@ export default function App() {
     const firstDeck = meta.decks[0].id;
     const secondDeck = meta.decks[1]?.id ?? firstDeck;
     const defaultOpponentPolicy =
-      meta.policies.find((policy) => policy.id === "learned-value-c16")?.id ??
+      meta.policies.find((policy) => policy.id === "handcrafted")?.id ??
       meta.policies[0]?.id ??
-      "learned-value-c16";
+      "handcrafted";
     const defaultPlayers = readDefault<
       Array<{ deckId?: string; policyId?: string }>
     >(defaults, ["players"], []);
     return {
       seed: Number(readDefault(defaults, ["seed", "gameSeed"], 42)),
-      trainGames: Number(
-        readDefault(defaults, ["trainGames", "learnedTrainGames"], 800),
-      ),
-      trainSeed: Number(
-        readDefault(defaults, ["trainSeed", "learnedTrainSeed"], 424242),
-      ),
       debugReveal: false,
       bluffMode: Boolean(readDefault(defaults, ["bluffMode"], false)),
       rollouts: Number(readDefault(defaults, ["rollouts"], 2)),
       deepRollouts: Number(readDefault(defaults, ["deepRollouts"], 8)),
-      learnedRollouts: Number(
-        readDefault(defaults, ["learnedRollouts"], 8),
-      ),
-      learnedGenerations: Number(
-        readDefault(defaults, ["learnedGenerations"], 16),
-      ),
       players: [
         {
           deckId:
@@ -4288,21 +4114,13 @@ function ReproductionSummary({
             <dd>{String(config.seed)}</dd>
           </div>
           <div>
-            <dt>Training</dt>
-            <dd>
-              C{config.learnedGenerations} · {config.trainGames} games · seed{" "}
-              {String(config.trainSeed)}
-            </dd>
-          </div>
-          <div>
             <dt>Rollouts</dt>
             <dd>
-              {config.rollouts} normal · {config.deepRollouts} deep ·{" "}
-              {config.learnedRollouts} learned
+              {config.rollouts} normal · {config.deepRollouts} deep
             </dd>
           </div>
           <div className="repro-model-identity">
-            <dt>Learned model</dt>
+            <dt>Model</dt>
             <dd>
               {snapshot.model ? (
                 <>
@@ -4310,19 +4128,6 @@ function ReproductionSummary({
                   {snapshot.model.searchWorlds}/H
                   {snapshot.model.horizonTurns} ·{" "}
                   <span>{snapshot.model.fingerprint}</span>
-                  {snapshot.model.treatment ? (
-                    <>
-                      <br />
-                      {snapshot.model.treatment.id} · params{" "}
-                      <span>
-                        {snapshot.model.treatment.parameterSha256}
-                      </span>{" "}
-                      · artifact{" "}
-                      <span>
-                        {snapshot.model.treatment.artifactFileSha256}
-                      </span>
-                    </>
-                  ) : null}
                 </>
               ) : (
                 <>None loaded</>

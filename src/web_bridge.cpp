@@ -1,5 +1,4 @@
 #include "old_school/web_bridge.hpp"
-#include "old_school/learned_priority_bilinear_artifact.hpp"
 #include "old_school/artifact_integrity.hpp"
 #include "old_school/selfplay_zero.hpp"
 
@@ -92,8 +91,6 @@ std::string_view evolution_pilot_token(EvolutionPilot pilot) {
     switch (pilot) {
     case EvolutionPilot::Handcrafted:
         return "handcrafted";
-    case EvolutionPilot::LearnedValueC16:
-        return "learned-value-c16";
     }
     throw std::out_of_range("unknown evolution pilot");
 }
@@ -268,33 +265,20 @@ void write_evolution_stats(std::ostream& output,
 void write_model_status(
     std::ostream& output, std::string_view message,
     std::string_view family, std::size_t generation,
-    std::size_t learned_rollouts, std::size_t horizon_turns,
+    std::size_t search_worlds, std::size_t horizon_turns,
     std::string_view source,
-    std::string_view fingerprint,
-    const FrozenAq19Bilinear* aq19 = nullptr) {
+    std::string_view fingerprint) {
     output << "{\"type\":\"status\",\"message\":";
     write_json_string(output, message);
     output << ",\"model\":{\"family\":";
     write_json_string(output, family);
     output << ",\"generation\":" << generation
-           << ",\"searchWorlds\":" << learned_rollouts
+           << ",\"searchWorlds\":" << search_worlds
            << ",\"horizonTurns\":" << horizon_turns
            << ",\"source\":";
     write_json_string(output, source);
     output << ",\"fingerprint\":";
     write_json_string(output, fingerprint);
-    if (aq19 != nullptr) {
-        output << ",\"treatment\":{\"id\":"
-                  "\"aq19-bilinear\","
-                  "\"parameterSha256\":";
-        write_json_string(
-            output, aq19->parameter_sha256);
-        output << ",\"artifactFileSha256\":";
-        write_json_string(
-            output, aq19->artifact_file_sha256);
-        output << ",\"artifactBytes\":"
-               << aq19->artifact_bytes << '}';
-    }
     output << "}}\n" << std::flush;
 }
 
@@ -1233,9 +1217,6 @@ EvolutionPilot parse_evolution_pilot(std::string_view value) {
     if (value == "handcrafted") {
         return EvolutionPilot::Handcrafted;
     }
-    if (value == "learned-value-c16") {
-        return EvolutionPilot::LearnedValueC16;
-    }
     throw std::invalid_argument(
         "unknown evolution pilot: " + std::string(value));
 }
@@ -1279,84 +1260,6 @@ std::vector<CardId> parse_exact_deck_cards(
     }
     validate_exact_deck_cards(cards, "custom deck");
     return cards;
-}
-
-std::shared_ptr<const LearnedModel>
-load_frozen_learned_value_c16(const std::string& path) {
-    std::shared_ptr<const LearnedModel> model;
-    try {
-        model = load_learned_value_challenger_artifact(
-                    path, kFrozenWebC16TrainingGames,
-                    kFrozenWebC16TrainingSeed,
-                    kFrozenWebC16Generations)
-                    .model();
-    } catch (const std::exception& error) {
-        throw std::runtime_error(
-            "frozen Learned Value C16 artifact '" + path +
-            "' is missing, stale, or invalid: " + error.what() +
-            "; generate it in a separate CLI run with "
-            "./build/old-school-sim --benchmark --games 1 "
-            "--challenger learned-value-c16 --baseline random "
-            "--learned-rollouts 8 --train-games 800 "
-            "--train-seed 424242 "
-            "--refresh-value-challenger-cache");
-    }
-    const std::string fingerprint =
-        learned_model_fingerprint(model);
-    if (fingerprint != kFrozenWebC16Fingerprint) {
-        throw std::runtime_error(
-            "frozen Learned Value C16 artifact '" + path +
-            "' has fingerprint " + fingerprint +
-            ", expected " +
-            std::string(kFrozenWebC16Fingerprint) +
-            "; the web bridge will not train, refresh, or "
-            "substitute a model");
-    }
-    return model;
-}
-
-FrozenAq19Bilinear
-load_frozen_aq19_bilinear(const std::string& path) {
-    try {
-        const auto loaded =
-            learned_priority_bilinear_artifact::load(
-                path,
-                learned_priority_bilinear_artifact::
-                    production_contract());
-        if (loaded.identity.parameter_sha256 !=
-                learned_priority_bilinear_artifact::
-                    kProductionParameterSha256 ||
-            loaded.identity.parent_fingerprint !=
-                kFrozenWebC16Fingerprint ||
-            loaded.identity.bytes !=
-                learned_priority_bilinear_artifact::
-                    kProductionArtifactBytes ||
-            loaded.identity.file_sha256 !=
-                learned_priority_bilinear_artifact::
-                    kProductionFileSha256) {
-            throw std::runtime_error(
-                "loaded identity differs from the frozen "
-                "web contract");
-        }
-        return {
-            .residual = loaded.residual,
-            .artifact_bytes = loaded.identity.bytes,
-            .artifact_file_sha256 =
-                loaded.identity.file_sha256,
-            .parameter_sha256 =
-                loaded.identity.parameter_sha256,
-            .parent_fingerprint =
-                loaded.identity.parent_fingerprint,
-        };
-    } catch (const std::exception& error) {
-        throw std::runtime_error(
-            "frozen AQ19 bilinear artifact '" + path +
-            "' is missing, stale, or invalid: " +
-            error.what() +
-            "; generate it offline with "
-            "./build/old-school-decision-density-bilinear-artifact "
-            "--publish");
-    }
 }
 
 void write_evolution_json(
@@ -1407,8 +1310,6 @@ void write_evolution_json(
            << ",\"population\":" << config.population
            << ",\"gamesPerOpponent\":"
            << config.games_per_opponent
-           << ",\"learnedRollouts\":"
-           << config.learned_rollouts
            << "},\"deck\":{\"size\":40,\"cardIds\":[";
     for (std::size_t index = 0;
          index < summary.best.cards.size(); ++index) {
@@ -1475,11 +1376,9 @@ int run_evolution_json(
     std::ostream& output,
     const EvolutionJsonConfig& config) {
     if (config.generations == 0 ||
-        config.games_per_opponent == 0 ||
-        config.learned_rollouts == 0) {
+        config.games_per_opponent == 0) {
         throw std::invalid_argument(
-            "evolution generations, games, and rollout budget "
-            "must be positive");
+            "evolution generations and games must be positive");
     }
     if (config.population < kDeckCount) {
         throw std::invalid_argument(
@@ -1491,28 +1390,6 @@ int run_evolution_json(
         .rollouts_per_action = 1,
     };
     GameConfig game_config;
-    game_config.learned_training_seed =
-        kFrozenWebC16TrainingSeed;
-    if (config.pilot == EvolutionPilot::LearnedValueC16) {
-        const std::string artifact_path =
-            config.frozen_c16_artifact_path.empty()
-                ? learned_value_challenger_cache_path(
-                      kFrozenWebC16TrainingGames,
-                      kFrozenWebC16TrainingSeed,
-                      kFrozenWebC16Generations)
-                : config.frozen_c16_artifact_path;
-        const auto model =
-            load_frozen_learned_value_c16(artifact_path);
-        pilot = {
-            .kind = BotKind::Learned,
-            .learned_variant =
-                LearnedVariant::ValueSearchChampion,
-            .rollouts_per_action = config.learned_rollouts,
-            .training_games = kFrozenWebC16TrainingGames,
-            .learned_model = model,
-        };
-        game_config.learned_model = model;
-    }
 
     const DeckEvolutionSummary summary = evolve_deck(
         {
@@ -1527,258 +1404,42 @@ int run_evolution_json(
     return 0;
 }
 
-BotKind parse_opponent_bot(
-    std::string_view value,
-    LearnedVariant& learned_variant,
-    std::size_t& learned_generations,
-    bool& value_adversarial_blocks,
-    bool& value_pass_dominance,
-    bool& value_actor_local_search,
-    bool& value_priority_bilinear) {
-    value_actor_local_search = false;
-    value_priority_bilinear = false;
+BotKind parse_opponent_bot(std::string_view value) {
     if (value == "random") {
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
         return BotKind::Random;
     }
     if (value == "monte-carlo" || value == "mc") {
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
         return BotKind::MonteCarlo;
     }
     if (value == "deep-monte-carlo" || value == "deep-mc") {
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
         return BotKind::DeepMonteCarlo;
     }
     if (value == "handcrafted" ||
         value == "handcoded-policy") {
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
         return BotKind::Handcrafted;
-    }
-    if (value == "learned-value-c16-stack-discipline") {
-        learned_variant = LearnedVariant::ValueSearchChampion;
-        learned_generations = kFrozenWebC16Generations;
-        value_adversarial_blocks = true;
-        value_pass_dominance = true;
-        return BotKind::Learned;
-    }
-    if (value ==
-        "learned-value-c16-adversarial-blocks") {
-        learned_variant = LearnedVariant::ValueSearchChampion;
-        learned_generations = kFrozenWebC16Generations;
-        value_adversarial_blocks = true;
-        value_pass_dominance = false;
-        return BotKind::Learned;
-    }
-    if (value ==
-        "learned-value-c16-actor-local-search") {
-        learned_variant = LearnedVariant::ValueSearchChampion;
-        learned_generations = kFrozenWebC16Generations;
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
-        value_actor_local_search = true;
-        return BotKind::Learned;
-    }
-    if (value ==
-        "learned-value-c16-combined-search") {
-        learned_variant = LearnedVariant::ValueSearchChampion;
-        learned_generations = kFrozenWebC16Generations;
-        value_adversarial_blocks = true;
-        value_pass_dominance = false;
-        value_actor_local_search = true;
-        return BotKind::Learned;
-    }
-    if (value ==
-        "learned-value-c16-bilinear-aq19") {
-        learned_variant =
-            LearnedVariant::ValueSearchChampion;
-        learned_generations =
-            kFrozenWebC16Generations;
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
-        value_actor_local_search = false;
-        value_priority_bilinear = true;
-        return BotKind::Learned;
-    }
-    if (value == "learned-value-c16" ||
-        value == "learned-value" || value == "learned") {
-        learned_variant = LearnedVariant::ValueSearchChampion;
-        learned_generations = kFrozenWebC16Generations;
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
-        return BotKind::Learned;
-    }
-    if (value == "learned-value-g0") {
-        learned_variant = LearnedVariant::ValueSearchChampion;
-        learned_generations = 0;
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
-        return BotKind::Learned;
-    }
-    if (value == "learned-actor" || value == "actor") {
-        learned_variant = LearnedVariant::UnifiedActor;
-        learned_generations = 0;
-        value_adversarial_blocks = false;
-        value_pass_dominance = false;
-        return BotKind::Learned;
     }
     throw std::invalid_argument(
         "unknown opponent policy: " + std::string(value));
 }
 
-BotConfig make_opponent_bot_config(
-    const BridgeConfig& config,
-    std::shared_ptr<const LearnedModel> learned_model,
-    std::shared_ptr<const LearnedPriorityBilinear>
-        priority_bilinear) {
-    if (config.value_priority_bilinear !=
-        static_cast<bool>(priority_bilinear)) {
-        throw std::invalid_argument(
-            "AQ19 bilinear configuration and residual "
-            "presence must match exactly");
-    }
+BotConfig make_opponent_bot_config(const BridgeConfig& config) {
     return {
         .kind = config.opponent_bot,
-        .learned_variant = config.learned_variant,
         .rollouts_per_action =
             config.opponent_bot == BotKind::MonteCarlo
                 ? config.monte_carlo_rollouts
                 : config.opponent_bot == BotKind::DeepMonteCarlo
                       ? config.deep_monte_carlo_rollouts
-                      : config.opponent_bot == BotKind::Learned
-                            ? config.learned_rollouts
-                            : 1,
-        .value_priority_bilinear =
-            std::move(priority_bilinear),
-        .value_pass_dominance =
-            config.value_pass_dominance,
-        .value_adversarial_blocks =
-            config.value_adversarial_blocks,
-        .value_actor_local_search =
-            config.value_actor_local_search,
-        .training_games = config.training_games,
-        .learned_model = std::move(learned_model),
+                      : 1,
     };
 }
 
 int run_bridge_session(std::istream& input, std::ostream& output,
                        const BridgeConfig& config) {
-    if (config.training_games == 0 ||
-        config.monte_carlo_rollouts == 0 ||
-        config.deep_monte_carlo_rollouts == 0 ||
-        config.learned_rollouts == 0) {
+    if (config.monte_carlo_rollouts == 0 ||
+        config.deep_monte_carlo_rollouts == 0) {
         throw std::invalid_argument(
-            "training games and rollout budgets must be positive");
-    }
-    if (config.opponent_bot == BotKind::Learned &&
-        config.learned_variant ==
-            LearnedVariant::UnifiedActor &&
-        config.learned_generations != 0) {
-        throw std::invalid_argument(
-            "Learned Actor requires --learned-generations 0");
-    }
-    if (config.opponent_bot == BotKind::Learned &&
-        config.learned_variant ==
-            LearnedVariant::ValueSearchChampion &&
-        config.learned_generations != 0 &&
-        config.learned_generations !=
-            kFrozenWebC16Generations) {
-        throw std::invalid_argument(
-            "the web bridge supports Learned Value generations "
-            "0 and 16 only");
-    }
-    if (config.opponent_bot == BotKind::Learned &&
-        config.learned_variant ==
-            LearnedVariant::ValueSearchChampion &&
-        config.learned_generations ==
-            kFrozenWebC16Generations &&
-        (config.training_games !=
-             kFrozenWebC16TrainingGames ||
-         config.training_seed !=
-             kFrozenWebC16TrainingSeed)) {
-        throw std::invalid_argument(
-            "Learned Value C16 requires exact --train-games 800 "
-            "--train-seed 424242; select Learned Value G0 for "
-            "custom match training");
-    }
-    if (config.value_adversarial_blocks &&
-        (config.opponent_bot != BotKind::Learned ||
-         config.learned_variant !=
-             LearnedVariant::ValueSearchChampion ||
-         config.learned_generations !=
-             kFrozenWebC16Generations)) {
-        throw std::invalid_argument(
-            "defender-best-response attacks require frozen "
-            "Learned Value C16");
-    }
-    if (config.value_pass_dominance &&
-        (config.opponent_bot != BotKind::Learned ||
-         config.learned_variant !=
-             LearnedVariant::ValueSearchChampion ||
-         config.learned_generations !=
-             kFrozenWebC16Generations)) {
-        throw std::invalid_argument(
-            "stack discipline requires frozen Learned Value C16");
-    }
-    if (config.value_pass_dominance &&
-        !config.value_adversarial_blocks) {
-        throw std::invalid_argument(
-            "stack discipline requires defender-best-response "
-            "attacks");
-    }
-    if (config.value_pass_dominance &&
-        config.learned_rollouts !=
-            kFrozenWebC16SearchWorlds) {
-        throw std::invalid_argument(
-            "stack discipline requires frozen C16 K8/H4 search");
-    }
-    if (config.value_actor_local_search &&
-        (config.opponent_bot != BotKind::Learned ||
-         config.learned_variant !=
-             LearnedVariant::ValueSearchChampion ||
-         config.learned_generations !=
-             kFrozenWebC16Generations)) {
-        throw std::invalid_argument(
-            "actor-local search requires frozen Learned Value C16");
-    }
-    if (config.value_actor_local_search &&
-        config.value_pass_dominance) {
-        throw std::invalid_argument(
-            "actor-local search cannot be combined with Pass "
-            "dominance");
-    }
-    if (config.value_actor_local_search &&
-        config.learned_rollouts !=
-            kFrozenWebC16SearchWorlds) {
-        throw std::invalid_argument(
-            "actor-local search requires frozen C16 K8/H8 plus "
-            "inner K2/H4 search");
-    }
-    if (config.value_priority_bilinear &&
-        (config.opponent_bot != BotKind::Learned ||
-         config.learned_variant !=
-             LearnedVariant::ValueSearchChampion ||
-         config.learned_generations !=
-             kFrozenWebC16Generations)) {
-        throw std::invalid_argument(
-            "AQ19 bilinear requires frozen Learned Value C16");
-    }
-    if (config.value_priority_bilinear &&
-        config.learned_rollouts !=
-            kFrozenWebC16SearchWorlds) {
-        throw std::invalid_argument(
-            "AQ19 bilinear requires frozen C16 K8/H4 search");
-    }
-    if (config.value_priority_bilinear &&
-        (config.value_adversarial_blocks ||
-         config.value_pass_dominance ||
-         config.value_actor_local_search)) {
-        throw std::invalid_argument(
-            "AQ19 bilinear cannot be combined with another "
-            "web research treatment");
+            "rollout budgets must be positive");
     }
     const std::vector<CardId> human_cards =
         configured_deck_cards(
@@ -1789,110 +1450,16 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             config.opponent_deck, config.opponent_deck_cards,
             "--opponent-deck-cards");
 
-    std::shared_ptr<const LearnedModel> learned_model;
-    std::shared_ptr<const LearnedPriorityBilinear>
-        priority_bilinear;
-    std::optional<FrozenAq19Bilinear> aq19_identity;
-    if (config.opponent_bot == BotKind::Learned &&
-        config.learned_variant ==
-            LearnedVariant::ValueSearchChampion &&
-        config.learned_generations ==
-            kFrozenWebC16Generations) {
-        const std::string artifact_path =
-            config.frozen_c16_artifact_path.empty()
-                ? learned_value_challenger_cache_path(
-                      kFrozenWebC16TrainingGames,
-                      kFrozenWebC16TrainingSeed,
-                      kFrozenWebC16Generations)
-                : config.frozen_c16_artifact_path;
-        if (config.value_priority_bilinear) {
-            const std::string bilinear_path =
-                config.aq19_bilinear_artifact_path.empty()
-                    ? (std::filesystem::path(
-                           artifact_path)
-                           .parent_path() /
-                       learned_priority_bilinear_artifact::
-                           kProductionFilename)
-                          .string()
-                    : config.aq19_bilinear_artifact_path;
-            aq19_identity =
-                load_frozen_aq19_bilinear(
-                    bilinear_path);
-            priority_bilinear =
-                aq19_identity->residual;
-        }
-        learned_model =
-            load_frozen_learned_value_c16(artifact_path);
-    }
-
     output << "{\"type\":\"status\",\"message\":";
-    write_json_string(
-        output,
-        config.opponent_bot == BotKind::Learned
-            ? config.learned_variant ==
-                      LearnedVariant::UnifiedActor ||
-                      config.learned_generations == 0
-                  ? "Training the selected learned model"
-                  : "Loading frozen Learned Value C16"
-            : "Preparing the battlefield");
+    write_json_string(output, "Preparing the battlefield");
     output << "}\n" << std::flush;
 
-    if (config.opponent_bot == BotKind::Learned) {
-        if (config.learned_variant ==
-            LearnedVariant::UnifiedActor) {
-            learned_model = train_learned_actor_model(
-                config.training_games, config.training_seed);
-            write_model_status(
-                output, "Learned Actor G0 ready",
-                "learned-actor", 0,
-                config.learned_rollouts,
-                kLearnedValueSearchHorizonTurns,
-                "trained-for-match",
-                learned_model_fingerprint(learned_model));
-        } else if (config.learned_generations == 0) {
-            learned_model = train_learned_value_champion(
-                config.training_games, config.training_seed);
-            write_model_status(
-                output, "Learned Value G0 ready",
-                "learned-value", 0,
-                config.learned_rollouts,
-                kLearnedValueSearchHorizonTurns,
-                "trained-for-match",
-                learned_model_fingerprint(learned_model));
-        } else {
-            write_model_status(
-                output,
-                config.value_priority_bilinear
-                    ? "Frozen Learned Value C16 and AQ19 "
-                      "bilinear residual loaded"
-                    : "Frozen Learned Value C16 loaded",
-                "learned-value",
-                kFrozenWebC16Generations,
-                config.learned_rollouts,
-                config.value_actor_local_search
-                    ? kLearnedValueActorLocalSearchHorizonTurns
-                    : kLearnedValueSearchHorizonTurns,
-                config.value_priority_bilinear
-                    ? "frozen-artifact+aq19-bilinear"
-                    : "frozen-artifact",
-                learned_model_fingerprint(learned_model),
-                aq19_identity
-                    ? &*aq19_identity
-                    : nullptr);
-        }
-    }
-
     GameConfig game_config;
-    game_config.learned_training_seed = config.training_seed;
     game_config.bots[0] = {
         .kind = BotKind::Random,
         .rollouts_per_action = 1,
     };
-    game_config.bots[1] =
-        make_opponent_bot_config(
-            config, learned_model,
-            priority_bilinear);
-    game_config.learned_model = learned_model;
+    game_config.bots[1] = make_opponent_bot_config(config);
 
     JsonController controller(
         input, output, config.reveal_opponent_hand,

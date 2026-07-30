@@ -83,11 +83,9 @@ test("journey Pass priority settles and unsupported branches fail promptly", asy
   const { game: opening } = await harness.create({
     players: [
       { deckId: "green", policyId: "human" },
-      { deckId: "green", policyId: "learned-value-g0" },
+      { deckId: "green", policyId: "handcrafted" },
     ],
     seed: 42,
-    trainGames: 800,
-    trainSeed: 424242,
     debugReveal: false,
   });
 
@@ -124,11 +122,9 @@ test("delayed journey mode has a real bounded in-flight interval", async (t) => 
   const { game: opening } = await harness.create({
     players: [
       { deckId: "green", policyId: "human" },
-      { deckId: "green", policyId: "learned-value-g0" },
+      { deckId: "green", policyId: "handcrafted" },
     ],
     seed: 42,
-    trainGames: 800,
-    trainSeed: 424242,
     debugReveal: false,
   });
 
@@ -159,24 +155,10 @@ async function runFullJourney(harness, config) {
   assert.deepEqual(game.config, {
     players: config.players,
     seed: "42",
-    trainGames: 800,
-    trainSeed: "424242",
     debugReveal: false,
     bluffMode: false,
     rollouts: 2,
     deepRollouts: 8,
-    learnedRollouts: 8,
-    learnedGenerations:
-      [
-        "learned-value-c16",
-        "learned-value-c16-actor-local-search",
-        "learned-value-c16-combined-search",
-        "learned-value-c16-bilinear-aq19",
-        "learned-value-c16-adversarial-blocks",
-        "learned-value-c16-stack-discipline",
-      ].includes(config.players[1].policyId)
-        ? 16
-        : 0,
   });
   assert.equal(game.events.at(-1).kind, "turn_started");
 
@@ -277,21 +259,7 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
   );
   assert.deepEqual(
     metadata.policies.map(({ id }) => id),
-    [
-      "random",
-      "monte-carlo",
-      "deep-monte-carlo",
-      "handcrafted",
-      "spz",
-      "learned-value-c16",
-      "learned-value-c16-actor-local-search",
-      "learned-value-c16-combined-search",
-      "learned-value-c16-bilinear-aq19",
-      "learned-value-c16-adversarial-blocks",
-      "learned-value-c16-stack-discipline",
-      "learned-value-g0",
-      "learned-actor",
-    ],
+    ["random", "monte-carlo", "deep-monte-carlo", "handcrafted", "spz"],
   );
 
   for (const deck of metadata.decks) {
@@ -304,8 +272,6 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
             { deckId: deck.id, policyId: policy.id },
           ],
           seed: 42,
-          trainGames: 800,
-          trainSeed: 424242,
           debugReveal: false,
         };
 
@@ -342,11 +308,9 @@ test("debug reveal is explicit and leaves the human hand visible", async (t) => 
   const { game } = await harness.create({
     players: [
       { deckId: "blue", policyId: "human" },
-      { deckId: "white", policyId: "learned-value-g0" },
+      { deckId: "white", policyId: "handcrafted" },
     ],
     seed: 707,
-    trainGames: 800,
-    trainSeed: 424242,
     debugReveal: true,
   });
 

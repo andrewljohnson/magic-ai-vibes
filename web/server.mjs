@@ -14,15 +14,6 @@ const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_LOG_ENTRIES = 2_000;
 const BUG_REPORT_SCHEMA = "old-school-arena-bug-report";
 const BUG_REPORT_VERSION = 1;
-const FROZEN_C16_GENERATIONS = 16;
-const FROZEN_C16_TRAIN_GAMES = 800;
-const FROZEN_C16_TRAIN_SEED = "424242";
-const FROZEN_C16_SEARCH_WORLDS = 8;
-const AQ19_PARAMETER_SHA256 =
-  "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194";
-const AQ19_ARTIFACT_FILE_SHA256 =
-  "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a";
-const AQ19_ARTIFACT_BYTES = 14_502;
 const EVOLUTION_TIMEOUT_MS = 120_000;
 const MAX_EVOLUTION_OUTPUT_BYTES = 512 * 1024;
 const MAX_EVOLUTION_RESULTS = 32;
@@ -172,131 +163,29 @@ export const POLICIES = Object.freeze([
     label: "Self-Play Zero (SPZ)",
     name: "Self-Play Zero (SPZ)",
     description:
-      "General self-taught bot: a value net learned purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 57.7% and Learned Value C16 60.2% in paired benchmarks.",
+      "General self-taught bot: a value net trained purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 57.7% in paired benchmarks.",
     versionDate: "2026-07-29",
     versionDateLabel: "Champion frozen",
     lifecycle: "Self-play champion",
-  },
-  {
-    id: "learned-value-c16",
-    label: "Learned Value C16",
-    name: "Learned Value C16",
-    description:
-      "Value critic trained through 16 bootstrapped self-play generations; deployed with K8/H4 search.",
-    versionDate: "2026-07-26",
-    versionDateLabel: "Artifact frozen",
-    lifecycle: "Research control · not promoted over Handcoded Policy",
-  },
-  {
-    id: "learned-value-c16-actor-local-search",
-    label: "Learned C16 · Foresight Search (AQ4)",
-    name: "Learned C16 · Foresight Search (AQ4)",
-    description:
-      "Exact frozen C16 critic with outer K8/H8 search and symmetric actor-local inner K2/H4 search. Changes Priority decisions only; attack and block selection still use C16.",
-    versionDate: "2026-07-28",
-    versionDateLabel: "Manual pilot introduced",
-    lifecycle: "Manual diagnostic · not promoted",
-  },
-  {
-    id: "learned-value-c16-combined-search",
-    label: "Learned C16 · Combined Search (AQ15)",
-    name: "Learned C16 · Combined Search (AQ15)",
-    description:
-      "Exact frozen C16 critic. Priority uses outer K8/H8 with symmetric actor-local inner K2/H4; real attack sets use the defender-best-response minimum. Simulated continuations retain canonical C16 combat.",
-    versionDate: "2026-07-29",
-    versionDateLabel: "Manual pilot introduced",
-    lifecycle: "Manual diagnostic · unscreened · not promoted",
-  },
-  {
-    id: "learned-value-c16-bilinear-aq19",
-    label: "Learned C16 · Bilinear AQ19",
-    name: "Learned C16 · Bilinear AQ19",
-    description:
-      "Rank-2 card-agnostic state×action residual trained on deep actor-local labels over the exact C16 K8/H4 base. Offline all-five-deck gates passed; the small selector only licenses manual testing.",
-    versionDate: "2026-07-29",
-    versionDateLabel: "Manual pilot introduced",
-    lifecycle: "Manual pilot · 31–29 selector · not promoted",
-  },
-  {
-    id: "learned-value-c16-adversarial-blocks",
-    label: "Learned C16 · Best-Response Attacks",
-    name: "Learned C16 · Best-Response Attacks",
-    description:
-      "Exact frozen C16 critic with K8/H4 search; only attack-set aggregation changes, from mean legal blocks to the defender-best-response minimum.",
-    versionDate: "2026-07-28",
-    versionDateLabel: "Fast screen run",
-    lifecycle:
-      "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
-  },
-  {
-    id: "learned-value-c16-stack-discipline",
-    label: "Learned C16 · Stack Discipline",
-    name: "Learned C16 · Stack Discipline",
-    description:
-      "Exact frozen C16 critic with K8/H4 Best-Response Attacks plus a rules-only marginal-effect filter that rejects an action when Pass reaches the same public outcome with strictly fewer resources.",
-    versionDate: "2026-07-28",
-    versionDateLabel: "Fast screen run",
-    lifecycle:
-      "Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted",
-  },
-  {
-    id: "learned-value-g0",
-    label: "Learned Value G0",
-    name: "Learned Value G0",
-    description:
-      "Legacy Value critic trained from random play plus two fitted self-play passes; built for this match from the selected games and seed.",
-    versionDate: "2026-07-24",
-    versionDateLabel: "Recipe introduced",
-    lifecycle: "Legacy recipe · trained per match",
-  },
-  {
-    id: "learned-actor",
-    label: "Learned Actor",
-    name: "Learned Actor",
-    description:
-      "Separate policy heads learn priority, attacks, blocks, and damage order, backed by a learned critic; built for this match.",
-    versionDate: "2026-07-24",
-    versionDateLabel: "Recipe introduced",
-    lifecycle: "Experimental recipe · trained per match",
   },
 ]);
 
 const DECK_IDS = new Set(DECKS.map(({ id }) => id));
 const POLICY_IDS = new Set(POLICIES.map(({ id }) => id));
-const FROZEN_C16_POLICY_IDS = new Set([
-  "learned-value-c16",
-  "learned-value-c16-actor-local-search",
-  "learned-value-c16-combined-search",
-  "learned-value-c16-bilinear-aq19",
-  "learned-value-c16-adversarial-blocks",
-  "learned-value-c16-stack-discipline",
-]);
-
-function isFrozenC16Policy(policyId) {
-  return FROZEN_C16_POLICY_IDS.has(policyId);
-}
-
 const DEFAULT_CONFIG = Object.freeze({
   players: [
     { deckId: "ru-aggro", policyId: "human" },
-    { deckId: "ru-aggro", policyId: "learned-value-c16" },
+    { deckId: "ru-aggro", policyId: "handcrafted" },
   ],
-  trainGames: FROZEN_C16_TRAIN_GAMES,
-  trainSeed: FROZEN_C16_TRAIN_SEED,
   debugReveal: false,
   bluffMode: false,
   rollouts: 2,
   deepRollouts: 8,
-  learnedRollouts: FROZEN_C16_SEARCH_WORLDS,
-  learnedGenerations: FROZEN_C16_GENERATIONS,
 });
 
 const LIMITS = Object.freeze({
-  trainGames: { min: 1, max: 100_000 },
   rollouts: { min: 1, max: 4_096 },
   deepRollouts: { min: 1, max: 4_096 },
-  learnedRollouts: { min: 1, max: 4_096 },
-  learnedGenerations: { min: 0, max: FROZEN_C16_GENERATIONS },
 });
 
 export const EVOLUTION_PILOTS = Object.freeze([
@@ -306,13 +195,6 @@ export const EVOLUTION_PILOTS = Object.freeze([
     name: "Handcoded Policy",
     description: "Fast rules-aware evaluation against the five-deck metagame.",
   },
-  {
-    id: "learned-value-c16",
-    label: "Learned Value C16",
-    name: "Learned Value C16",
-    description:
-      "Frozen C16 Value model with bounded information-set rollouts.",
-  },
 ]);
 
 export const EVOLUTION_DEFAULTS = Object.freeze({
@@ -320,8 +202,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
   population: 8,
   games: 1,
   pilot: "handcrafted",
-  seed: FROZEN_C16_TRAIN_SEED,
-  learnedRollouts: 8,
+  seed: "424242",
 });
 
 export const EVOLUTION_LIMITS = Object.freeze({
@@ -329,7 +210,6 @@ export const EVOLUTION_LIMITS = Object.freeze({
   generations: { min: 1, max: 20 },
   population: { min: 5, max: 32 },
   games: { min: 1, max: 16 },
-  learnedRollouts: { min: 1, max: 64 },
   retainedResults: MAX_EVOLUTION_RESULTS,
   savedDecks: MAX_SAVED_DECKS,
 });
@@ -383,24 +263,8 @@ function normalizedPublicModelIdentity(value) {
   ) {
     return null;
   }
-  let treatment;
   if (value.treatment !== undefined) {
-    if (
-      !isRecord(value.treatment) ||
-      value.treatment.id !== "aq19-bilinear" ||
-      value.treatment.parameterSha256 !== AQ19_PARAMETER_SHA256 ||
-      value.treatment.artifactFileSha256 !==
-        AQ19_ARTIFACT_FILE_SHA256 ||
-      value.treatment.artifactBytes !== AQ19_ARTIFACT_BYTES
-    ) {
-      return null;
-    }
-    treatment = {
-      id: value.treatment.id,
-      parameterSha256: value.treatment.parameterSha256,
-      artifactFileSha256: value.treatment.artifactFileSha256,
-      artifactBytes: value.treatment.artifactBytes,
-    };
+    return null;
   }
   return {
     family: value.family,
@@ -409,7 +273,6 @@ function normalizedPublicModelIdentity(value) {
     horizonTurns: value.horizonTurns,
     source: value.source,
     fingerprint: value.fingerprint,
-    ...(treatment === undefined ? {} : { treatment }),
   };
 }
 
@@ -710,14 +573,10 @@ function reportConfig(config) {
       policyId,
     })),
     seed: config.seed,
-    trainGames: config.trainGames,
-    trainSeed: config.trainSeed,
     debugReveal: config.debugReveal,
     bluffMode: config.bluffMode,
     rollouts: config.rollouts,
     deepRollouts: config.deepRollouts,
-    learnedRollouts: config.learnedRollouts,
-    learnedGenerations: config.learnedGenerations,
   };
 }
 
@@ -730,16 +589,6 @@ function reportModel(model) {
     horizonTurns: model.horizonTurns,
     source: model.source,
     fingerprint: model.fingerprint,
-    ...(model.treatment === undefined
-      ? {}
-      : {
-          treatment: {
-            id: model.treatment.id,
-            parameterSha256: model.treatment.parameterSha256,
-            artifactFileSha256: model.treatment.artifactFileSha256,
-            artifactBytes: model.treatment.artifactBytes,
-          },
-        }),
   };
 }
 
@@ -940,96 +789,6 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
     "players[1].policyId",
     DEFAULT_CONFIG.players[1].policyId,
   );
-  const trainGames = positiveBoundedInteger(
-    body.trainGames,
-    "trainGames",
-    LIMITS.trainGames,
-    DEFAULT_CONFIG.trainGames,
-  );
-  const trainSeed = normalizedUint64(
-    body.trainSeed,
-    "trainSeed",
-    DEFAULT_CONFIG.trainSeed,
-  );
-  const learnedRollouts = positiveBoundedInteger(
-    body.learnedRollouts,
-    "learnedRollouts",
-    LIMITS.learnedRollouts,
-    DEFAULT_CONFIG.learnedRollouts,
-  );
-  const expectedLearnedGenerations =
-    isFrozenC16Policy(normalizedOpponentPolicy)
-      ? FROZEN_C16_GENERATIONS
-      : 0;
-  const learnedGenerations = boundedInteger(
-    body.learnedGenerations,
-    "learnedGenerations",
-    LIMITS.learnedGenerations,
-    expectedLearnedGenerations,
-  );
-  if (learnedGenerations !== expectedLearnedGenerations) {
-    throw new ApiError(
-      400,
-      "invalid_config",
-      `${normalizedOpponentPolicy} requires learnedGenerations=${expectedLearnedGenerations}`,
-    );
-  }
-  if (
-    isFrozenC16Policy(normalizedOpponentPolicy) &&
-    (trainGames !== FROZEN_C16_TRAIN_GAMES ||
-      trainSeed !== FROZEN_C16_TRAIN_SEED)
-  ) {
-    throw new ApiError(
-      400,
-      "invalid_config",
-      "Frozen C16 policies require trainGames=800 and trainSeed=424242; select Learned Value G0 for custom match training",
-    );
-  }
-  if (
-    normalizedOpponentPolicy ===
-      "learned-value-c16-stack-discipline" &&
-    learnedRollouts !== FROZEN_C16_SEARCH_WORLDS
-  ) {
-    throw new ApiError(
-      400,
-      "invalid_config",
-      "learned-value-c16-stack-discipline requires learnedRollouts=8",
-    );
-  }
-  if (
-    normalizedOpponentPolicy ===
-      "learned-value-c16-actor-local-search" &&
-    learnedRollouts !== FROZEN_C16_SEARCH_WORLDS
-  ) {
-    throw new ApiError(
-      400,
-      "invalid_config",
-      "learned-value-c16-actor-local-search requires learnedRollouts=8",
-    );
-  }
-  if (
-    normalizedOpponentPolicy ===
-      "learned-value-c16-combined-search" &&
-    learnedRollouts !== FROZEN_C16_SEARCH_WORLDS
-  ) {
-    throw new ApiError(
-      400,
-      "invalid_config",
-      "learned-value-c16-combined-search requires learnedRollouts=8",
-    );
-  }
-  if (
-    normalizedOpponentPolicy ===
-      "learned-value-c16-bilinear-aq19" &&
-    learnedRollouts !== FROZEN_C16_SEARCH_WORLDS
-  ) {
-    throw new ApiError(
-      400,
-      "invalid_config",
-      "learned-value-c16-bilinear-aq19 requires learnedRollouts=8",
-    );
-  }
-
   return {
     players: [
       {
@@ -1052,8 +811,6 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
       },
     ],
     seed: normalizedUint64(body.seed, "seed", freshSeed()),
-    trainGames,
-    trainSeed,
     debugReveal,
     bluffMode,
     rollouts: positiveBoundedInteger(
@@ -1068,8 +825,6 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
       LIMITS.deepRollouts,
       DEFAULT_CONFIG.deepRollouts,
     ),
-    learnedRollouts,
-    learnedGenerations,
   };
 }
 
@@ -1088,7 +843,7 @@ export function normalizeEvolutionConfig(body) {
     throw new ApiError(
       400,
       "invalid_evolution_config",
-      "pilot must be handcrafted or learned-value-c16",
+      "pilot must be handcrafted",
     );
   }
   try {
@@ -1125,12 +880,6 @@ export function normalizeEvolutionConfig(body) {
       ),
       pilot,
       seed,
-      learnedRollouts: positiveBoundedInteger(
-        body.learnedRollouts,
-        "learnedRollouts",
-        EVOLUTION_LIMITS.learnedRollouts,
-        EVOLUTION_DEFAULTS.learnedRollouts,
-      ),
     };
   } catch (error) {
     if (error instanceof ApiError && error.code === "invalid_config") {
@@ -1234,8 +983,7 @@ export function validateEvolutionResult(value, config) {
   if (
     value.parameters.generations !== config.generations ||
     value.parameters.population !== config.population ||
-    value.parameters.gamesPerOpponent !== config.games ||
-    value.parameters.learnedRollouts !== config.learnedRollouts
+    value.parameters.gamesPerOpponent !== config.games
   ) {
     throw new ApiError(
       502,
@@ -1397,7 +1145,6 @@ export function validateEvolutionResult(value, config) {
       generations,
       population: config.population,
       games: config.games,
-      learnedRollouts: config.learnedRollouts,
       best: { cards, stats, byOpponent },
     },
     cardIds: [...value.deck.cardIds],
@@ -1539,7 +1286,6 @@ class EphemeralDeckCatalog {
         generations: stored.config.generations,
         population: evolution.population,
         games: evolution.games,
-        learnedRollouts: evolution.learnedRollouts,
         winRate: evolution.best.stats.winRate,
       },
     };
@@ -1579,8 +1325,6 @@ export function evolutionArguments(config) {
     config.pilot,
     "--seed",
     config.seed,
-    "--learned-rollouts",
-    String(config.learnedRollouts),
   ];
 }
 
@@ -1803,18 +1547,10 @@ function bridgeArguments(config, deckCatalog) {
     config.players[1].policyId,
     "--seed",
     config.seed,
-    "--train-games",
-    String(config.trainGames),
-    "--train-seed",
-    config.trainSeed,
     "--rollouts",
     String(config.rollouts),
     "--deep-rollouts",
     String(config.deepRollouts),
-    "--learned-rollouts",
-    String(config.learnedRollouts),
-    "--learned-generations",
-    String(config.learnedGenerations),
   ];
   if (humanCustomCards !== null) {
     args.push("--human-deck-cards", humanCustomCards.join(","));
@@ -2116,16 +1852,6 @@ class GameSession {
         const model = normalizedPublicModelIdentity(envelope.model);
         if (model === null) {
           this.#fail("The game engine produced invalid model identity");
-          this.stop();
-          return;
-        }
-        const expectsAq19 =
-          this.config.players[1].policyId ===
-          "learned-value-c16-bilinear-aq19";
-        if (expectsAq19 !== (model.treatment?.id === "aq19-bilinear")) {
-          this.#fail(
-            "The game engine produced mismatched AQ19 treatment identity",
-          );
           this.stop();
           return;
         }

@@ -124,7 +124,7 @@ std::string_view end_reason_name(EndReason reason) {
 
 std::string player_name(const PlayerObservation& observation,
                         std::size_t player) {
-    return player == observation.observer ? "You" : "Learned";
+    return player == observation.observer ? "You" : "Opponent";
 }
 
 struct LocatedCreature {
@@ -165,7 +165,7 @@ std::string creature_name(const PlayerObservation& observation,
     if (include_controller) {
         result += located->controller == observation.observer
                       ? "your "
-                      : "Learned's ";
+                      : "Opponent's ";
     }
     result += card_definition(located->creature->card).name;
     result += " #" + std::to_string(permanent);
@@ -180,7 +180,7 @@ std::string target_name(const PlayerObservation& observation,
     }
     return target.player == observation.observer
                ? "you"
-               : "Learned";
+               : "Opponent";
 }
 
 std::string stack_object_name(
@@ -800,7 +800,7 @@ void print_player(std::ostream& output,
                   std::size_t player) {
     const auto& state = observation.players[player];
     std::ostringstream title;
-    title << (player == observation.observer ? "YOU" : "LEARNED")
+    title << (player == observation.observer ? "YOU" : "OPPONENT")
           << " | LIFE " << state.life;
     if (player == observation.active_player) {
         title << " | ACTIVE";
@@ -1018,7 +1018,7 @@ class TerminalSession {
                    static_cast<int>(observation.observer)) {
             output_ << "Result: You win\n";
         } else {
-            output_ << "Result: Learned wins\n";
+            output_ << "Result: Opponent wins\n";
         }
         output_ << "Reason: " << end_reason_name(result.reason)
                 << "\nIndividual turns: " << result.turns << '\n';
@@ -1240,7 +1240,7 @@ class TerminalSession {
                 "TURN " + std::to_string(observation.turn_number) +
                     (event.player == observation.observer
                          ? " | YOUR TURN"
-                         : " | LEARNED'S TURN"));
+                         : " | OPPONENT'S TURN"));
             print_state(output_, observation);
             last_rendered_ = observation;
             return;
@@ -1273,7 +1273,7 @@ class TerminalSession {
             if (event.attackers.empty()) {
                 if (event.player != observation.observer) {
                     output_
-                        << "[ATTACK] Learned declares no attackers.\n";
+                        << "[ATTACK] Opponent declares no attackers.\n";
                 }
                 return;
             }
@@ -1414,49 +1414,33 @@ InteractiveMatchup choose_interactive_matchup(std::uint64_t seed) {
     std::mt19937_64 random(
         seed ^ 0xA17E4AC7D3C5B921ULL);
     const std::size_t human = random() % kDeckCount;
-    const std::size_t learned =
+    const std::size_t opponent =
         (human + 1 + random() % (kDeckCount - 1)) %
         kDeckCount;
     return {
         .human_deck = static_cast<DeckId>(human),
-        .learned_deck = static_cast<DeckId>(learned),
+        .opponent_deck = static_cast<DeckId>(opponent),
     };
 }
 
 InteractiveMatchResult run_interactive_match(
     std::istream& input, std::ostream& output, std::uint64_t seed,
-    std::shared_ptr<const LearnedModel> learned_model,
-    InteractiveMatchup matchup, std::size_t learned_rollouts,
-    double value_continuation_epsilon) {
-    if (!learned_model) {
-        throw std::invalid_argument(
-            "interactive match requires a frozen Learned model");
-    }
-    if (learned_rollouts == 0) {
-        throw std::invalid_argument(
-            "interactive match requires positive Learned rollouts");
-    }
+    InteractiveMatchup matchup) {
     TerminalSession terminal(input, output);
     GameConfig config;
     config.bots[0] = {
         .kind = BotKind::Random,
-        .learned_variant = LearnedVariant::ValueSearchChampion,
         .rollouts_per_action = 1,
     };
     config.bots[1] = {
-        .kind = BotKind::Learned,
-        .learned_variant = LearnedVariant::ValueSearchChampion,
-        .rollouts_per_action = learned_rollouts,
-        .value_continuation_epsilon =
-            value_continuation_epsilon,
-        .learned_model = learned_model,
+        .kind = BotKind::Handcrafted,
+        .rollouts_per_action = 1,
     };
-    config.learned_model = learned_model;
     config.human_controllers[0] = terminal.controller();
 
     Game game(
         interactive_deck(matchup.human_deck),
-        interactive_deck(matchup.learned_deck), seed, config);
+        interactive_deck(matchup.opponent_deck), seed, config);
     try {
         const GameResult result = game.run();
         auto observation = observe_game_state(game.state(), 0);

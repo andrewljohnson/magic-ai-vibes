@@ -5,19 +5,15 @@ CPPFLAGS ?= -Iinclude
 BUILD_DIR := build
 OBJ_DIR := $(BUILD_DIR)/obj
 
-ENGINE_SOURCE := src/game.cpp src/exact_combat_subgame.cpp \
-	src/learned_priority_bilinear.cpp src/learned_priority_sparse_cross.cpp \
-	src/learned_iteration.cpp
+ENGINE_SOURCE := src/game.cpp
 SELFPLAY_ZERO_SOURCE := src/selfplay_zero.cpp
-WEB_BRIDGE_SOURCE := src/web_bridge.cpp src/artifact_integrity.cpp \
-	src/learned_priority_bilinear_artifact.cpp
+WEB_BRIDGE_SOURCE := src/web_bridge.cpp src/artifact_integrity.cpp
 
 SELFPLAY_ZERO := $(BUILD_DIR)/selfplay-zero
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 GAME_TESTS := $(BUILD_DIR)/old-school-tests
 SELFPLAY_ZERO_TESTS := $(BUILD_DIR)/test-selfplay-zero
 WEB_BRIDGE_TESTS := $(BUILD_DIR)/old-school-web-bridge-tests
-LEARNED_ITERATION_TESTS := $(BUILD_DIR)/old-school-learned-iteration-tests
 ARTIFACT_INTEGRITY_TESTS := $(BUILD_DIR)/old-school-artifact-integrity-tests
 WEB_DEPENDENCIES := web/node_modules/.package-lock.json
 
@@ -40,7 +36,6 @@ $(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE
 $(eval $(call link_program,$(GAME_TESTS),$(ENGINE_SOURCE) src/interactive.cpp tests/test_game.cpp))
 $(eval $(call link_program,$(SELFPLAY_ZERO_TESTS),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) tests/test_selfplay_zero.cpp))
 $(eval $(call link_program,$(WEB_BRIDGE_TESTS),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) $(WEB_BRIDGE_SOURCE) tests/test_web_bridge.cpp))
-$(eval $(call link_program,$(LEARNED_ITERATION_TESTS),src/learned_iteration.cpp tests/test_learned_iteration.cpp))
 $(eval $(call link_program,$(ARTIFACT_INTEGRITY_TESTS),src/artifact_integrity.cpp tests/test_artifact_integrity.cpp))
 
 $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
@@ -51,11 +46,10 @@ $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 
 selfplay-zero: $(SELFPLAY_ZERO)
 
-test: $(GAME_TESTS) $(SELFPLAY_ZERO_TESTS) $(WEB_BRIDGE_TESTS) $(LEARNED_ITERATION_TESTS) $(ARTIFACT_INTEGRITY_TESTS) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
+test: $(GAME_TESTS) $(SELFPLAY_ZERO_TESTS) $(WEB_BRIDGE_TESTS) $(ARTIFACT_INTEGRITY_TESTS) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 	./$(GAME_TESTS)
 	./$(SELFPLAY_ZERO_TESTS)
 	./$(WEB_BRIDGE_TESTS)
-	./$(LEARNED_ITERATION_TESTS)
 	./$(ARTIFACT_INTEGRITY_TESTS)
 	npm --prefix web test
 

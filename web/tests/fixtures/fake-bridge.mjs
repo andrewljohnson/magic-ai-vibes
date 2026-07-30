@@ -14,51 +14,6 @@ const write = (message) => {
 
 write({ type: "status", message: "Shuffling libraries" });
 const opponentPolicy = valueAfter("--opponent-policy");
-const learnedGenerations = valueAfter("--learned-generations");
-if (opponentPolicy?.startsWith("learned-")) {
-  const generation = Number(learnedGenerations ?? "0");
-  const aq19 =
-    opponentPolicy === "learned-value-c16-bilinear-aq19";
-  write({
-    type: "status",
-    message: `Fake learned model generation ${generation} ready`,
-    model: {
-      family:
-        opponentPolicy === "learned-actor"
-          ? "learned-actor"
-          : "learned-value",
-      generation,
-      searchWorlds: Number(valueAfter("--learned-rollouts") ?? "1"),
-      horizonTurns:
-        opponentPolicy === "learned-value-c16-actor-local-search" ||
-        opponentPolicy === "learned-value-c16-combined-search"
-          ? 8
-          : 4,
-      source:
-        generation === 16
-          ? aq19
-            ? "frozen-artifact+aq19-bilinear"
-            : "frozen-artifact"
-          : "trained-for-match",
-      fingerprint:
-        generation === 16
-          ? "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f"
-          : "0000000000000000000000000000000000000000000000000000000000000000",
-      ...(aq19
-        ? {
-            treatment: {
-              id: "aq19-bilinear",
-              parameterSha256:
-                "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194",
-              artifactFileSha256:
-                "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a",
-              artifactBytes: 14_502,
-            },
-          }
-        : {}),
-    },
-  });
-}
 write({
   type: "decision",
   state: {
@@ -68,12 +23,8 @@ write({
       opponentDeck: valueAfter("--opponent-deck"),
       opponentPolicy,
       seed: valueAfter("--seed"),
-      trainGames: valueAfter("--train-games"),
-      trainSeed: valueAfter("--train-seed"),
       rollouts: valueAfter("--rollouts"),
       deepRollouts: valueAfter("--deep-rollouts"),
-      learnedRollouts: valueAfter("--learned-rollouts"),
-      learnedGenerations,
       debugReveal: args.includes("--debug-reveal"),
       bluffMode: args.includes("--bluff-mode"),
     },

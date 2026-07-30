@@ -141,140 +141,13 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     body.decks.find(({ id }) => id === "blue").deckList,
     /Force Spike/,
   );
-  const c16 = body.policies.find(({ id }) => id === "learned-value-c16");
-  const foresight = body.policies.find(
-    ({ id }) => id === "learned-value-c16-actor-local-search",
-  );
-  const combinedSearch = body.policies.find(
-    ({ id }) => id === "learned-value-c16-combined-search",
-  );
-  const bilinear = body.policies.find(
-    ({ id }) => id === "learned-value-c16-bilinear-aq19",
-  );
-  const bestResponse = body.policies.find(
-    ({ id }) => id === "learned-value-c16-adversarial-blocks",
-  );
-  const stackDiscipline = body.policies.find(
-    ({ id }) => id === "learned-value-c16-stack-discipline",
-  );
-  const g0 = body.policies.find(({ id }) => id === "learned-value-g0");
-  const actor = body.policies.find(({ id }) => id === "learned-actor");
   assert.deepEqual(
-    {
-      versionDate: c16?.versionDate,
-      versionDateLabel: c16?.versionDateLabel,
-      lifecycle: c16?.lifecycle,
-    },
-    {
-      versionDate: "2026-07-26",
-      versionDateLabel: "Artifact frozen",
-      lifecycle: "Research control · not promoted over Handcoded Policy",
-    },
+    body.policies.map(({ id }) => id),
+    ["random", "monte-carlo", "deep-monte-carlo", "handcrafted", "spz"],
   );
-  assert.match(c16?.description ?? "", /16 bootstrapped self-play generations/);
-  assert.deepEqual(
-    {
-      name: foresight?.name,
-      versionDate: foresight?.versionDate,
-      versionDateLabel: foresight?.versionDateLabel,
-      lifecycle: foresight?.lifecycle,
-    },
-    {
-      name: "Learned C16 · Foresight Search (AQ4)",
-      versionDate: "2026-07-28",
-      versionDateLabel: "Manual pilot introduced",
-      lifecycle: "Manual diagnostic · not promoted",
-    },
-  );
-  assert.match(foresight?.description ?? "", /outer K8\/H8/);
-  assert.match(foresight?.description ?? "", /actor-local inner K2\/H4/);
-  assert.match(foresight?.description ?? "", /Priority decisions only/);
-  assert.match(foresight?.description ?? "", /attack and block selection still use C16/);
-  assert.deepEqual(
-    {
-      name: combinedSearch?.name,
-      versionDate: combinedSearch?.versionDate,
-      versionDateLabel: combinedSearch?.versionDateLabel,
-      lifecycle: combinedSearch?.lifecycle,
-    },
-    {
-      name: "Learned C16 · Combined Search (AQ15)",
-      versionDate: "2026-07-29",
-      versionDateLabel: "Manual pilot introduced",
-      lifecycle: "Manual diagnostic · unscreened · not promoted",
-    },
-  );
-  assert.match(combinedSearch?.description ?? "", /outer K8\/H8/);
-  assert.match(combinedSearch?.description ?? "", /actor-local inner K2\/H4/);
-  assert.match(combinedSearch?.description ?? "", /real attack sets/);
-  assert.match(combinedSearch?.description ?? "", /defender-best-response minimum/);
-  assert.match(combinedSearch?.description ?? "", /Simulated continuations retain canonical C16 combat/);
-  assert.deepEqual(
-    {
-      name: bilinear?.name,
-      versionDate: bilinear?.versionDate,
-      versionDateLabel: bilinear?.versionDateLabel,
-      lifecycle: bilinear?.lifecycle,
-    },
-    {
-      name: "Learned C16 · Bilinear AQ19",
-      versionDate: "2026-07-29",
-      versionDateLabel: "Manual pilot introduced",
-      lifecycle: "Manual pilot · 31–29 selector · not promoted",
-    },
-  );
-  assert.match(bilinear?.description ?? "", /Rank-2 card-agnostic state×action residual/);
-  assert.match(bilinear?.description ?? "", /deep actor-local labels/);
-  assert.match(bilinear?.description ?? "", /exact C16 K8\/H4 base/);
-  assert.match(bilinear?.description ?? "", /Offline all-five-deck gates passed/);
-  assert.match(bilinear?.description ?? "", /small selector only licenses manual testing/);
-  assert.deepEqual(
-    {
-      name: bestResponse?.name,
-      versionDate: bestResponse?.versionDate,
-      versionDateLabel: bestResponse?.versionDateLabel,
-      lifecycle: bestResponse?.lifecycle,
-    },
-    {
-      name: "Learned C16 · Best-Response Attacks",
-      versionDate: "2026-07-28",
-      versionDateLabel: "Fast screen run",
-      lifecycle:
-        "Exploratory challenger · 127–113 fast screen · awaiting human play-test · not promoted",
-    },
-  );
-  assert.match(bestResponse?.description ?? "", /Exact frozen C16 critic/);
-  assert.match(bestResponse?.description ?? "", /K8\/H4/);
-  assert.match(bestResponse?.description ?? "", /defender-best-response minimum/);
-  assert.deepEqual(
-    {
-      name: stackDiscipline?.name,
-      versionDate: stackDiscipline?.versionDate,
-      versionDateLabel: stackDiscipline?.versionDateLabel,
-      lifecycle: stackDiscipline?.lifecycle,
-    },
-    {
-      name: "Learned C16 · Stack Discipline",
-      versionDate: "2026-07-28",
-      versionDateLabel: "Fast screen run",
-      lifecycle:
-        "Behavior diagnostic · 30–30 fast screen · performance gate not passed · awaiting human play-test · not promoted",
-    },
-  );
-  assert.match(stackDiscipline?.description ?? "", /rules-only marginal-effect filter/);
-  assert.match(stackDiscipline?.description ?? "", /same public outcome/);
-  assert.match(stackDiscipline?.description ?? "", /strictly fewer resources/);
-  assert.doesNotMatch(stackDiscipline?.description ?? "", /never double-counter/i);
-  for (const policy of [g0, actor]) {
-    assert.equal(policy?.versionDate, "2026-07-24");
-    assert.equal(policy?.versionDateLabel, "Recipe introduced");
-    assert.match(policy?.lifecycle ?? "", /trained per match/);
-  }
-  assert.match(g0?.description ?? "", /random play plus two fitted self-play/);
-  assert.match(actor?.description ?? "", /priority, attacks, blocks/);
+  const spz = body.policies.find(({ id }) => id === "spz");
+  assert.match(spz?.description ?? "", /mirror self-play/);
   assert.equal(body.defaults.bluffMode, false);
-  assert.equal(body.defaults.learnedGenerations, 16);
-  assert.equal(body.defaults.learnedRollouts, 8);
   assert.deepEqual(body.decisionKinds, [
     "priority",
     "attackers",
@@ -355,20 +228,13 @@ test("bug reports preserve public decisions and successful actions without hidde
       body: JSON.stringify({
         players: [
           { deckId: "blue", policyId: "human" },
-          {
-            deckId: "blue",
-            policyId: "learned-value-c16-bilinear-aq19",
-          },
+          { deckId: "blue", policyId: "spz" },
         ],
         seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
         debugReveal: true,
         bluffMode: false,
         rollouts: 2,
         deepRollouts: 8,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
       }),
     }),
   );
@@ -464,18 +330,16 @@ test("bug reports preserve public decisions and successful actions without hidde
   const report = exported.body.report;
   assert.deepEqual(report.match.config.players, [
     { deckId: "blue", policyId: "human" },
-    {
-      deckId: "blue",
-      policyId: "learned-value-c16-bilinear-aq19",
-    },
+    { deckId: "blue", policyId: "spz" },
   ]);
-  assert.deepEqual(report.match.model.treatment, {
-    id: "aq19-bilinear",
-    parameterSha256:
-      "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194",
-    artifactFileSha256:
-      "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a",
-    artifactBytes: 14_502,
+  assert.deepEqual(report.match.model, {
+    family: "self-play-zero",
+    generation: 0,
+    searchWorlds: 4,
+    horizonTurns: 1,
+    source: "frozen-artifact",
+    fingerprint:
+      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
   });
   assert.deepEqual(report.successfulHumanActions, [
     {
@@ -764,20 +628,13 @@ test("bug reports omit validated actions whose bridge advance fails", async (t) 
       body: JSON.stringify({
         players: [
           { deckId: "blue", policyId: "human" },
-          {
-            deckId: "blue",
-            policyId: "learned-value-c16-bilinear-aq19",
-          },
+          { deckId: "blue", policyId: "spz" },
         ],
         seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
         debugReveal: false,
         bluffMode: false,
         rollouts: 2,
         deepRollouts: 8,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
       }),
     }),
   );
@@ -855,10 +712,7 @@ test("bug-report action transcripts stay isolated across live sessions", async (
   const gameConfig = {
     players: [
       { deckId: "blue", policyId: "human" },
-      {
-        deckId: "blue",
-        policyId: "learned-value-c16-bilinear-aq19",
-      },
+      { deckId: "blue", policyId: "spz" },
     ],
     seed: 42,
   };
@@ -929,17 +783,13 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
       body: JSON.stringify({
         players: [
           { deckId: "blue", policyId: "human" },
-          { deckId: "white", policyId: "learned-value-g0" },
+          { deckId: "white", policyId: "monte-carlo" },
         ],
         seed: "18446744073709551615",
-        trainGames: 321,
-        trainSeed: 424242,
         debugReveal: true,
         bluffMode: true,
         rollouts: 3,
         deepRollouts: 9,
-        learnedRollouts: 5,
-        learnedGenerations: 0,
       }),
     }),
   );
@@ -952,14 +802,10 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
   assert.deepEqual(body.game.snapshot.received, {
     humanDeck: "blue",
     opponentDeck: "white",
-    opponentPolicy: "learned-value-g0",
+    opponentPolicy: "monte-carlo",
     seed: "18446744073709551615",
-    trainGames: "321",
-    trainSeed: "424242",
     rollouts: "3",
     deepRollouts: "9",
-    learnedRollouts: "5",
-    learnedGenerations: "0",
     debugReveal: true,
     bluffMode: true,
   });
@@ -967,254 +813,13 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
     handSize: 7,
     life: 20,
   });
-  assert.deepEqual(body.game.model, {
-    family: "learned-value",
-    generation: 0,
-    searchWorlds: 5,
-    horizonTurns: 4,
-    source: "trained-for-match",
-    fingerprint:
-      "0000000000000000000000000000000000000000000000000000000000000000",
-  });
+  assert.equal(body.game.model, null);
 
   const fetched = await json(
     await request("/api/games/test-game"),
   );
   assert.equal(fetched.response.status, 200);
   assert.equal(fetched.body.game.decision.id, "priority-1");
-});
-
-test("C16 is explicit, canonical, and fingerprinted in match metadata", async (t) => {
-  const { request } = await startTestServer(t);
-  const { response, body } = await json(
-    await request("/api/games", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "blue", policyId: "learned-value-c16" },
-        ],
-        seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
-      }),
-    }),
-  );
-
-  assert.equal(response.status, 201);
-  assert.equal(body.game.config.players[1].policyId, "learned-value-c16");
-  assert.equal(body.game.snapshot.received.opponentPolicy, "learned-value-c16");
-  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
-  assert.deepEqual(body.game.model, {
-    family: "learned-value",
-    generation: 16,
-    searchWorlds: 8,
-    horizonTurns: 4,
-    source: "frozen-artifact",
-    fingerprint:
-      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
-  });
-});
-
-test("best-response attacks reuse exact frozen C16 identity", async (t) => {
-  const { request } = await startTestServer(t);
-  const policyId = "learned-value-c16-adversarial-blocks";
-  const { response, body } = await json(
-    await request("/api/games", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        players: [
-          { deckId: "ru-aggro", policyId: "human" },
-          { deckId: "ru-aggro", policyId },
-        ],
-        seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
-      }),
-    }),
-  );
-
-  assert.equal(response.status, 201);
-  assert.equal(body.game.config.players[1].policyId, policyId);
-  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
-  assert.equal(body.game.snapshot.received.trainGames, "800");
-  assert.equal(body.game.snapshot.received.trainSeed, "424242");
-  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
-  assert.deepEqual(body.game.model, {
-    family: "learned-value",
-    generation: 16,
-    searchWorlds: 8,
-    horizonTurns: 4,
-    source: "frozen-artifact",
-    fingerprint:
-      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
-  });
-});
-
-test("stack discipline reuses exact frozen C16 identity", async (t) => {
-  const { request } = await startTestServer(t);
-  const policyId = "learned-value-c16-stack-discipline";
-  const { response, body } = await json(
-    await request("/api/games", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "blue", policyId },
-        ],
-        seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
-      }),
-    }),
-  );
-
-  assert.equal(response.status, 201);
-  assert.equal(body.game.config.players[1].policyId, policyId);
-  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
-  assert.equal(body.game.snapshot.received.trainGames, "800");
-  assert.equal(body.game.snapshot.received.trainSeed, "424242");
-  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
-  assert.deepEqual(body.game.model, {
-    family: "learned-value",
-    generation: 16,
-    searchWorlds: 8,
-    horizonTurns: 4,
-    source: "frozen-artifact",
-    fingerprint:
-      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
-  });
-});
-
-test("AQ4 foresight search reuses exact frozen C16 identity", async (t) => {
-  const { request } = await startTestServer(t);
-  const policyId = "learned-value-c16-actor-local-search";
-  const { response, body } = await json(
-    await request("/api/games", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "blue", policyId },
-        ],
-        seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
-      }),
-    }),
-  );
-
-  assert.equal(response.status, 201);
-  assert.equal(body.game.config.players[1].policyId, policyId);
-  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
-  assert.equal(body.game.snapshot.received.trainGames, "800");
-  assert.equal(body.game.snapshot.received.trainSeed, "424242");
-  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
-  assert.deepEqual(body.game.model, {
-    family: "learned-value",
-    generation: 16,
-    searchWorlds: 8,
-    horizonTurns: 8,
-    source: "frozen-artifact",
-    fingerprint:
-      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
-  });
-});
-
-test("AQ15 combined search reuses exact frozen C16 identity", async (t) => {
-  const { request } = await startTestServer(t);
-  const policyId = "learned-value-c16-combined-search";
-  const { response, body } = await json(
-    await request("/api/games", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "blue", policyId },
-        ],
-        seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
-      }),
-    }),
-  );
-
-  assert.equal(response.status, 201);
-  assert.equal(body.game.config.players[1].policyId, policyId);
-  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
-  assert.equal(body.game.snapshot.received.trainGames, "800");
-  assert.equal(body.game.snapshot.received.trainSeed, "424242");
-  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
-  assert.deepEqual(body.game.model, {
-    family: "learned-value",
-    generation: 16,
-    searchWorlds: 8,
-    horizonTurns: 8,
-    source: "frozen-artifact",
-    fingerprint:
-      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
-  });
-});
-
-test("AQ19 bilinear reuses exact frozen C16 identity", async (t) => {
-  const { request } = await startTestServer(t);
-  const policyId = "learned-value-c16-bilinear-aq19";
-  const { response, body } = await json(
-    await request("/api/games", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "blue", policyId },
-        ],
-        seed: 42,
-        trainGames: 800,
-        trainSeed: 424242,
-        learnedRollouts: 8,
-        learnedGenerations: 16,
-      }),
-    }),
-  );
-
-  assert.equal(response.status, 201);
-  assert.equal(body.game.config.players[1].policyId, policyId);
-  assert.equal(body.game.snapshot.received.opponentPolicy, policyId);
-  assert.equal(body.game.snapshot.received.trainGames, "800");
-  assert.equal(body.game.snapshot.received.trainSeed, "424242");
-  assert.equal(body.game.snapshot.received.learnedGenerations, "16");
-  assert.deepEqual(body.game.model, {
-    family: "learned-value",
-    generation: 16,
-    searchWorlds: 8,
-    horizonTurns: 4,
-    source: "frozen-artifact+aq19-bilinear",
-    fingerprint:
-      "68126afc5a3e3757eb1d510a056585aa974c4f54ce1b4a789ff430f1c7413e2f",
-    treatment: {
-      id: "aq19-bilinear",
-      parameterSha256:
-        "3114c898085375b7c39a8d8a7add5b0ab87dc70916d676deccd28d45e0942194",
-      artifactFileSha256:
-        "445f93435aebafbafc16cda4d1faa9e4d56dc12a25196f79c1334fcc84d22c1a",
-      artifactBytes: 14_502,
-    },
-  });
 });
 
 test("rejects stale and illegal choices before progressing a valid game", async (t) => {
@@ -1408,129 +1013,8 @@ test("rejects malformed config without spawning a game", async (t) => {
       ],
     },
     { seed: "18446744073709551616" },
-    { trainGames: 0 },
-    { learnedRollouts: 4_097 },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        { deckId: "blue", policyId: "learned-value-c16" },
-      ],
-      trainGames: 799,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        { deckId: "blue", policyId: "learned-value-c16" },
-      ],
-      learnedGenerations: 0,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-stack-discipline",
-        },
-      ],
-      learnedRollouts: 7,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-combined-search",
-        },
-      ],
-      learnedRollouts: 7,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-actor-local-search",
-        },
-      ],
-      learnedRollouts: 7,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-bilinear-aq19",
-        },
-      ],
-      learnedRollouts: 7,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-stack-discipline",
-        },
-      ],
-      trainGames: 799,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-stack-discipline",
-        },
-      ],
-      trainSeed: 424243,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-stack-discipline",
-        },
-      ],
-      learnedGenerations: 0,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-adversarial-blocks",
-        },
-      ],
-      trainGames: 799,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-adversarial-blocks",
-        },
-      ],
-      trainSeed: 424243,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        {
-          deckId: "blue",
-          policyId: "learned-value-c16-adversarial-blocks",
-        },
-      ],
-      learnedGenerations: 0,
-    },
-    {
-      players: [
-        { deckId: "green", policyId: "human" },
-        { deckId: "blue", policyId: "learned-value-g0" },
-      ],
-      learnedGenerations: 16,
-    },
+    { rollouts: 0 },
+    { deepRollouts: 4_097 },
     { debugReveal: "yes" },
     { bluffMode: "yes" },
   ];

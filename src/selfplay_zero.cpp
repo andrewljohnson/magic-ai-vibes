@@ -1895,7 +1895,7 @@ float outcome_target(const GameResult& result, std::size_t seat,
                      bool discounted) {
     if (discounted) {
         return static_cast<float>(
-            learned_discounted_terminal_target(result, seat));
+            discounted_terminal_target(result, seat));
     }
     if (result.winner == -1) {
         return 0.5f;
@@ -2149,14 +2149,7 @@ SpzBenchmarkResult run_spz_benchmark(
     std::size_t repetitions_per_pairing, std::uint64_t seed,
     const SpzPolicyConfig& policy, std::size_t max_turns,
     std::size_t threads,
-    const std::function<void(const std::string&)>& log,
-    std::shared_ptr<const LearnedModel> baseline_learned_model,
-    std::size_t baseline_learned_rollouts) {
-    if (baseline == BotKind::Learned &&
-        baseline_learned_model == nullptr) {
-        throw std::invalid_argument(
-            "a Learned baseline requires a frozen model artifact");
-    }
+    const std::function<void(const std::string&)>& log) {
     const auto& decks = spz_decks();
 
     struct Job {
@@ -2199,15 +2192,6 @@ SpzBenchmarkResult run_spz_benchmark(
             game_config.starting_player =
                 spz_on_play ? spz_seat : baseline_seat;
             game_config.bots[baseline_seat].kind = baseline;
-            if (baseline == BotKind::Learned) {
-                game_config.bots[baseline_seat].learned_variant =
-                    LearnedVariant::ValueSearchChampion;
-                game_config.bots[baseline_seat].rollouts_per_action =
-                    baseline_learned_rollouts;
-                game_config.bots[baseline_seat].learned_model =
-                    baseline_learned_model;
-                game_config.learned_model = baseline_learned_model;
-            }
             std::array<std::vector<CardId>, 2> game_decks;
             game_decks[spz_seat] = decks[job.spz_deck];
             game_decks[baseline_seat] = decks[job.opponent_deck];
