@@ -36,6 +36,11 @@ struct Arguments {
     std::string policy_out;
     std::string policy_init;
     std::string baseline_model;
+    std::string telemetry;
+    std::string spar_model;
+    std::string probe_baseline;
+    std::size_t probe_every = 0;
+    std::size_t probe_reps = 2;
     std::string baseline = "handcrafted";
     std::size_t iterations = 60;
     std::size_t games = 128;
@@ -85,6 +90,16 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.policy_out = next();
         } else if (flag == "--policy-init") {
             arguments.policy_init = next();
+        } else if (flag == "--telemetry") {
+            arguments.telemetry = next();
+        } else if (flag == "--spar-model") {
+            arguments.spar_model = next();
+        } else if (flag == "--probe-baseline") {
+            arguments.probe_baseline = next();
+        } else if (flag == "--probe-every") {
+            arguments.probe_every = std::stoull(next());
+        } else if (flag == "--probe-reps") {
+            arguments.probe_reps = std::stoull(next());
         } else if (flag == "--baseline") {
             arguments.baseline = next();
         } else if (flag == "--iterations") {
@@ -162,6 +177,17 @@ int run_train(const Arguments& arguments) {
     if (!arguments.init.empty()) {
         config.initial_net = std::make_shared<const SpzNet>(
             load_spz_net(arguments.init));
+    }
+    if (!arguments.spar_model.empty()) {
+        config.spar_net = std::make_shared<const SpzNet>(
+            load_spz_net(arguments.spar_model));
+    }
+    config.telemetry_path = arguments.telemetry;
+    config.probe_interval = arguments.probe_every;
+    config.probe_reps = arguments.probe_reps;
+    if (!arguments.probe_baseline.empty()) {
+        config.probe_baseline_net = std::make_shared<const SpzNet>(
+            load_spz_net(arguments.probe_baseline));
     }
     config.checkpoint_prefix = arguments.out + ".ckpt-";
     config.log = [](const std::string& line) {

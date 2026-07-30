@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPZ training monitor</title>
+<style>
+  :root {
+    --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e7e6e2;
+    --s1: #2a78d6; --s2: #1baf7a; --ref: #9a9891;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --grid: #34332f;
+      --s1: #3987e5; --s2: #199e70; --ref: #6f6d66;
+    }
+  }
+  html, body { margin: 0; background: var(--surface); color: var(--ink);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: var(--ink-2); margin: 0 0 18px; font-size: 13px; }
+  .tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .tile { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 14px; min-width: 130px; }
+  .tile .k { color: var(--ink-2); font-size: 12px; }
+  .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: 12px; color: var(--ink-2); font-weight: 400; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 14px; margin: 0 0 2px; }
+  .desc { color: var(--ink-2); font-size: 12px; margin: 0 0 8px; }
+  .chartwrap { position: relative; }
+  svg { display: block; width: 100%; height: auto; }
+  .tooltip { position: absolute; pointer-events: none; background: var(--surface);
+    border: 1px solid var(--grid); border-radius: 6px; padding: 6px 9px; font-size: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; white-space: nowrap; }
+  .tooltip b { font-variant-numeric: tabular-nums; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); margin: 6px 2px 0; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px;
+    border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+  details { margin-top: 8px; }
+  summary { color: var(--ink-2); font-size: 12px; cursor: pointer; }
+  table { border-collapse: collapse; font-size: 12px; margin-top: 8px;
+    font-variant-numeric: tabular-nums; }
+  th, td { border: 1px solid var(--grid); padding: 3px 8px; text-align: right; }
+  th { color: var(--ink-2); font-weight: 550; }
+  .stale { color: var(--ink-2); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Self-Play Zero — live training</h1>
+  <p class="sub" id="status">Waiting for telemetry…</p>
+  <div class="tiles">
+    <div class="tile"><div class="k">Iterations</div><div class="v" id="t-iter">–</div></div>
+    <div class="tile"><div class="k">Self-play games</div><div class="v" id="t-games">–</div></div>
+    <div class="tile"><div class="k">vs Handcrafted <small>(latest probe)</small></div><div class="v" id="t-hc">–</div></div>
+    <div class="tile"><div class="k">vs v6 champion <small>(latest probe)</small></div><div class="v" id="t-champ">–</div></div>
+  </div>
+
+  <section>
+    <h2>Strength probes</h2>
+    <p class="desc">Paired win rate of the current net (100 games per probe, so ±10 points of noise per dot — watch the trend, not the wiggles). Above the gray 50% line means winning.</p>
+    <div class="chartwrap"><svg id="strength" viewBox="0 0 960 300"></svg><div class="tooltip" id="tip-strength"></div></div>
+    <div class="legend">
+      <span style="--c: var(--s1)">vs Handcrafted</span>
+      <span style="--c: var(--s2)">vs v6 champion (head-to-head)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Training loss</h2>
+    <p class="desc">Value-net cross-entropy per iteration (and policy loss when a policy head is training). Lower is better-fitted, but strength probes above are the real score.</p>
+    <div class="chartwrap"><svg id="loss" viewBox="0 0 960 260"></svg><div class="tooltip" id="tip-loss"></div></div>
+    <div class="legend" id="loss-legend">
+      <span style="--c: var(--s1)">value loss</span>
+    </div>
+  </section>
+
+  <details><summary>Data table (latest 40 rows)</summary><div id="table"></div></details>
+</main>
+<script>
+"use strict";
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let rows = [];
+
+async function poll() {
+  try {
+    const response = await fetch("telemetry.jsonl", { cache: "no-store" });
+    if (!response.ok) throw new Error(response.status);
+    const text = await response.text();
+    rows = text.split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
+    render();
+    document.getElementById("status").textContent =
+      `Live — updated ${new Date().toLocaleTimeString()}, polling every 15 s.`;
+  } catch (e) {
+    document.getElementById("status").textContent =
+      "No telemetry yet (training may still be warming up). Retrying…";
+  }
+  setTimeout(poll, 15000);
+}
+
+function fmtPct(v) { return (100 * v).toFixed(1) + "%"; }
+
+function scale(domainMin, domainMax, rangeMin, rangeMax) {
+  const d = domainMax - domainMin || 1;
+  return v => rangeMin + (v - domainMin) / d * (rangeMax - rangeMin);
+}
+
+function drawChart(svgId, tipId, seriesList, yDomain, yFmt, refLine) {
+  const svg = document.getElementById(svgId);
+  const [, , W, H] = svg.getAttribute("viewBox").split(" ").map(Number);
+  const m = { l: 46, r: 14, t: 12, b: 26 };
+  const xs = rows.map(r => r.games);
+  const xMax = Math.max(...xs, 1);
+  const x = scale(0, xMax, m.l, W - m.r);
+  const y = scale(yDomain[0], yDomain[1], H - m.b, m.t);
+  let out = "";
+  // recessive grid + axis labels
+  const yTicks = 4;
+  for (let i = 0; i <= yTicks; i++) {
+    const v = yDomain[0] + (yDomain[1] - yDomain[0]) * i / yTicks;
+    out += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${css("--grid")}" stroke-width="1"/>`;
+    out += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${css("--ink-2")}">${yFmt(v)}</text>`;
+  }
+  const xTickCount = 5;
+  for (let i = 0; i <= xTickCount; i++) {
+    const v = xMax * i / xTickCount;
+    out += `<text x="${x(v)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${css("--ink-2")}">${v >= 1000 ? (v / 1000).toFixed(1) + "k" : Math.round(v)}</text>`;
+  }
+  out += `<text x="${(m.l + W - m.r) / 2}" y="${H - 8}" dy="0" text-anchor="middle" font-size="0"></text>`;
+  if (refLine !== null) {
+    out += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(refLine)}" y2="${y(refLine)}" stroke="${css("--ref")}" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+  }
+  for (const s of seriesList) {
+    const pts = rows.filter(r => r[s.key] !== undefined);
+    if (!pts.length) continue;
+    const path = pts.map((r, i) => `${i ? "L" : "M"}${x(r.games).toFixed(1)},${y(r[s.key]).toFixed(1)}`).join("");
+    out += `<path d="${path}" fill="none" stroke="${css(s.color)}" stroke-width="2" stroke-linejoin="round"/>`;
+    if (s.dots) {
+      for (const r of pts) {
+        out += `<circle cx="${x(r.games)}" cy="${y(r[s.key])}" r="3.5" fill="${css(s.color)}" stroke="${css("--surface")}" stroke-width="2"/>`;
+      }
+    }
+    const last = pts[pts.length - 1];
+    out += `<text x="${Math.min(x(last.games) + 6, W - 4)}" y="${y(last[s.key]) + 4}" font-size="11" fill="${css("--ink")}">${yFmt(last[s.key])}</text>`;
+  }
+  svg.innerHTML = out;
+
+  // crosshair tooltip: nearest row by x
+  const tip = document.getElementById(tipId);
+  svg.onmousemove = event => {
+    if (!rows.length) return;
+    const rect = svg.getBoundingClientRect();
+    const gx = (event.clientX - rect.left) / rect.width * W;
+    let best = rows[0], bestDistance = Infinity;
+    for (const r of rows) {
+      const d = Math.abs(x(r.games) - gx);
+      if (d < bestDistance) { bestDistance = d; best = r; }
+    }
+    const parts = [`iter <b>${best.iteration}</b> · ${best.games} games`];
+    for (const s of seriesList) {
+      if (best[s.key] !== undefined) parts.push(`${s.label}: <b>${yFmt(best[s.key])}</b>`);
+    }
+    tip.innerHTML = parts.join("<br>");
+    tip.style.display = "block";
+    tip.style.left = Math.min(event.clientX - rect.left + 14, rect.width - 170) + "px";
+    tip.style.top = (event.clientY - rect.top + 12) + "px";
+  };
+  svg.onmouseleave = () => { tip.style.display = "none"; };
+}
+
+function render() {
+  if (!rows.length) return;
+  const last = rows[rows.length - 1];
+  const probes = rows.filter(r => r.vs_handcrafted !== undefined);
+  const lastProbe = probes[probes.length - 1];
+  document.getElementById("t-iter").textContent = last.iteration;
+  document.getElementById("t-games").textContent = last.games.toLocaleString();
+  document.getElementById("t-hc").textContent = lastProbe ? fmtPct(lastProbe.vs_handcrafted) : "–";
+  document.getElementById("t-champ").textContent =
+    lastProbe && lastProbe.vs_champion !== undefined ? fmtPct(lastProbe.vs_champion) : "–";
+
+  drawChart("strength", "tip-strength",
+    [{ key: "vs_handcrafted", label: "vs Handcrafted", color: "--s1", dots: true },
+     { key: "vs_champion", label: "vs v6 champion", color: "--s2", dots: true }],
+    [0.2, 0.8], fmtPct, 0.5);
+
+  const hasPolicy = rows.some(r => r.policy_loss > 0);
+  const lossMax = Math.max(...rows.map(r => Math.max(r.loss, hasPolicy ? r.policy_loss : 0)));
+  drawChart("loss", "tip-loss",
+    [{ key: "loss", label: "value loss", color: "--s1", dots: false },
+     ...(hasPolicy ? [{ key: "policy_loss", label: "policy loss", color: "--s2", dots: false }] : [])],
+    [0, Math.max(0.8, lossMax * 1.1)], v => v.toFixed(2), null);
+  document.getElementById("loss-legend").innerHTML =
+    `<span style="--c: var(--s1)">value loss</span>` +
+    (hasPolicy ? `<span style="--c: var(--s2)">policy loss</span>` : "");
+
+  const recent = rows.slice(-40).reverse();
+  document.getElementById("table").innerHTML =
+    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs HC</th><th>vs v6</th></tr>" +
+    recent.map(r => `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${r.loss.toFixed(3)}</td>` +
+      `<td>${r.vs_handcrafted !== undefined ? fmtPct(r.vs_handcrafted) : ""}</td>` +
+      `<td>${r.vs_champion !== undefined ? fmtPct(r.vs_champion) : ""}</td></tr>`).join("") +
+    "</table>";
+}
+
+poll();
+</script>
+</body>
+</html>

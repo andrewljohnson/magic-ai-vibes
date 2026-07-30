@@ -255,9 +255,20 @@ struct SpzTrainConfig {
     std::size_t policy_replay_capacity = 40000;
     std::shared_ptr<const SpzPolicyNet> initial_policy;
     // With this probability the opponent seat is the frozen champion
-    // (initial_net under the deployed greedy-rollout policy), keeping the
-    // learner honest against the configuration it must beat.
+    // (spar_net, else initial_net, under the deployed greedy-rollout
+    // policy), keeping the learner honest against the configuration it
+    // must beat.
     double champion_spar_probability = 0.25;
+    std::shared_ptr<const SpzNet> spar_net;
+    // Live telemetry: every iteration appends a JSONL line (losses, games,
+    // turns) to `telemetry_path`; every `probe_interval` iterations the
+    // current net additionally plays quick paired strength probes — vs
+    // Handcrafted and, when `probe_baseline_net` is set, head-to-head
+    // against it under the deployed champion settings.
+    std::string telemetry_path;
+    std::size_t probe_interval = 0;
+    std::size_t probe_reps = 2;
+    std::shared_ptr<const SpzNet> probe_baseline_net;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
     double learning_rate = 0.01;

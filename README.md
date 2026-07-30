@@ -60,3 +60,17 @@ legal-action list, and hidden information stays on the engine side.
 ```
 
 The deployed champion lives at `data/spz-champion-v6.txt`.
+
+## Live training monitor
+
+Add `--telemetry build/telemetry/telemetry.jsonl --probe-every 10
+--probe-baseline data/spz-champion-v6.txt` to any `train` run, then:
+
+```sh
+cp web/training-monitor.html build/telemetry/monitor.html
+python3 -m http.server 4175 --directory build/telemetry --bind 127.0.0.1
+```
+
+Open <http://127.0.0.1:4175/monitor.html> for live strength-probe and
+loss charts (probes are 100-game paired sets vs Handcrafted and
+head-to-head vs the frozen champion).

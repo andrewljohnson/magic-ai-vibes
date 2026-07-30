@@ -2890,12 +2890,15 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 std::array<bool, 2> champion_seat = {false, false};
                 std::array<bool, 2> record_seat = {true, true};
                 std::uniform_real_distribution<double> unit(0.0, 1.0);
-                if (config.initial_net != nullptr &&
+                const auto sparring_net = config.spar_net != nullptr
+                                              ? config.spar_net
+                                              : config.initial_net;
+                if (sparring_net != nullptr &&
                     unit(game_rng) < config.champion_spar_probability) {
                     // Frozen champion sparring partner under the deployed
                     // greedy-rollout configuration.
                     const std::size_t spar_seat = game_rng() % 2;
-                    seat_nets[spar_seat] = config.initial_net;
+                    seat_nets[spar_seat] = sparring_net;
                     champion_seat[spar_seat] = true;
                 } else if (!league_pool.empty() &&
                            unit(game_rng) <
@@ -3049,6 +3052,76 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                  << " policy-loss " << std::setprecision(4)
                  << policy_loss;
             config.log(line.str());
+        }
+        if (!config.telemetry_path.empty()) {
+            double vs_handcrafted = -1.0;
+            double vs_baseline = -1.0;
+            if (config.probe_interval > 0 &&
+                (iteration + 1) % config.probe_interval == 0) {
+                const auto probe_net =
+                    std::make_shared<const SpzNet>(*net);
+                SpzPolicyConfig probe_policy;
+                probe_policy.worlds = 4;
+                probe_policy.block_prediction_worlds = 4;
+                probe_policy.rollout = true;
+                vs_handcrafted =
+                    run_spz_benchmark(
+                        probe_net, BotKind::Handcrafted,
+                        config.probe_reps,
+                        mix_seed(config.seed, 9100 + iteration),
+                        probe_policy, 200, config.threads)
+                        .aggregate.win_rate();
+                if (config.probe_baseline_net != nullptr) {
+                    SpzPolicyConfig baseline_policy;
+                    baseline_policy.worlds = 4;
+                    baseline_policy.block_prediction_worlds = 4;
+                    baseline_policy.rollout = true;
+                    vs_baseline =
+                        run_spz_benchmark(
+                            probe_net, BotKind::Random,
+                            config.probe_reps,
+                            mix_seed(config.seed, 9200 + iteration),
+                            probe_policy, 200, config.threads, {},
+                            &baseline_policy,
+                            config.probe_baseline_net)
+                            .aggregate.win_rate();
+                }
+                if (config.log) {
+                    std::ostringstream probe_line;
+                    probe_line << "probe iteration " << (iteration + 1)
+                               << " vs-handcrafted " << std::fixed
+                               << std::setprecision(3) << vs_handcrafted;
+                    if (vs_baseline >= 0.0) {
+                        probe_line << " vs-champion " << vs_baseline;
+                    }
+                    config.log(probe_line.str());
+                }
+            }
+            std::ofstream telemetry(config.telemetry_path,
+                                    std::ios::app);
+            if (telemetry) {
+                telemetry << "{\"iteration\":" << (iteration + 1)
+                          << ",\"games\":"
+                          << (iteration + 1) *
+                                 config.games_per_iteration
+                          << ",\"loss\":" << std::setprecision(6)
+                          << mean_loss << ",\"policy_loss\":"
+                          << policy_loss << ",\"avg_turns\":"
+                          << (config.games_per_iteration == 0
+                                  ? 0.0
+                                  : static_cast<double>(total_turns) /
+                                        static_cast<double>(
+                                            config
+                                                .games_per_iteration));
+                if (vs_handcrafted >= 0.0) {
+                    telemetry << ",\"vs_handcrafted\":"
+                              << vs_handcrafted;
+                }
+                if (vs_baseline >= 0.0) {
+                    telemetry << ",\"vs_champion\":" << vs_baseline;
+                }
+                telemetry << "}\n";
+            }
         }
         if (!config.checkpoint_prefix.empty() &&
             config.checkpoint_interval > 0 &&
