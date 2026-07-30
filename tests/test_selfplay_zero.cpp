@@ -520,6 +520,55 @@ SPZ_TEST(no_upside_prune_blocks_pumping_enemy_creatures) {
     }
 }
 
+SPZ_TEST(schema_v2_is_complete_bounded_and_playable) {
+    // v2 embeds v1 as an exact prefix, stays bounded, and a v2-sized net
+    // drives full legal games through the same controller machinery.
+    const std::array<std::vector<CardId>, 2> game_decks = {
+        spz_decks()[1], spz_decks()[2]};
+    GameConfig probe_config;
+    probe_config.max_turns = 10;
+    Game probe_game(game_decks[0], game_decks[1], 777, probe_config);
+    (void)probe_game.run();
+    const auto observation = observe_game_state(probe_game.state(), 0);
+    const auto v1 =
+        spz_features(observation, game_decks, TurnPhase::FirstMain);
+    const auto v2 =
+        spz_features_v2(observation, game_decks, TurnPhase::FirstMain);
+    expect(v2.size() == spz_feature_count_v2(),
+           "v2 feature vector matches its schema size");
+    expect(v2.size() > v1.size(), "v2 extends v1");
+    expect(std::equal(v1.begin(), v1.end(), v2.begin()),
+           "v1 is an exact prefix of v2");
+    for (const float value : v2) {
+        expect(std::isfinite(value) && value >= -3.0f && value <= 30.0f,
+               "v2 features are finite and bounded");
+    }
+    expect(spz_features_for(spz_feature_count_v2(), observation,
+                            game_decks, TurnPhase::FirstMain) == v2,
+           "dispatch selects v2 by input count");
+
+    const auto net = std::make_shared<const SpzNet>(
+        spz_feature_count_v2(), 8, 424299);
+    std::vector<GameResult> results;
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        GameConfig config;
+        config.max_turns = 30;
+        for (std::size_t seat = 0; seat < 2; ++seat) {
+            SpzPolicyConfig policy;
+            policy.worlds = 1;
+            policy.block_prediction_worlds = 1;
+            policy.rollout = true;
+            policy.seed = 31 + seat;
+            config.human_controllers[seat] =
+                make_spz_controller(net, game_decks, seat, policy);
+        }
+        Game game(game_decks[0], game_decks[1], 4321, config);
+        results.push_back(game.run());
+    }
+    expect(results[0] == results[1],
+           "v2 net games replay deterministically");
+}
+
 SPZ_TEST(recorder_collects_outcome_labeled_rows) {
     const auto net = std::make_shared<const SpzNet>(
         spz_feature_count(), 8, 99);

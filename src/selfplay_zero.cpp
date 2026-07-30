@@ -280,6 +280,291 @@ std::vector<float> spz_features(
     return features;
 }
 
+namespace {
+
+constexpr std::size_t kCreatureSlots = 8;
+constexpr std::size_t kCreatureSlotFeatures = 36;
+constexpr std::size_t kStackSlots = 3;
+constexpr std::size_t kStackSlotFeatures = 61;
+constexpr std::size_t kCastabilityFeatures = kCardCount + 2;
+constexpr std::size_t kRaceFeatures = 10;
+
+int creature_current_power(const CreaturePermanent& creature) {
+    return card_definition(creature.card).power +
+           creature.temporary_power_bonus;
+}
+
+int creature_current_toughness(const CreaturePermanent& creature) {
+    return card_definition(creature.card).toughness +
+           creature.temporary_toughness_bonus;
+}
+
+void append_creature_slots(std::vector<float>& features,
+                           const std::vector<CreaturePermanent>& raw) {
+    std::vector<const CreaturePermanent*> ordered;
+    ordered.reserve(raw.size());
+    for (const auto& creature : raw) {
+        ordered.push_back(&creature);
+    }
+    std::sort(ordered.begin(), ordered.end(),
+              [](const CreaturePermanent* left,
+                 const CreaturePermanent* right) {
+                  const int lp = creature_current_power(*left);
+                  const int rp = creature_current_power(*right);
+                  if (lp != rp) {
+                      return lp > rp;
+                  }
+                  const int lt = creature_current_toughness(*left);
+                  const int rt = creature_current_toughness(*right);
+                  if (lt != rt) {
+                      return lt > rt;
+                  }
+                  if (left->card != right->card) {
+                      return left->card < right->card;
+                  }
+                  return left->id < right->id;
+              });
+    const auto push = [&features](double value) {
+        features.push_back(static_cast<float>(value));
+    };
+    for (std::size_t slot = 0; slot < kCreatureSlots; ++slot) {
+        if (slot >= ordered.size()) {
+            for (std::size_t f = 0; f < kCreatureSlotFeatures; ++f) {
+                push(0.0);
+            }
+            continue;
+        }
+        const CreaturePermanent& creature = *ordered[slot];
+        const auto& definition = card_definition(creature.card);
+        push(1.0);
+        for (std::size_t card = 0; card < kCardCount; ++card) {
+            push(card == static_cast<std::size_t>(creature.card) ? 1.0
+                                                                 : 0.0);
+        }
+        push(creature_current_power(creature) / 12.0);
+        push(creature_current_toughness(creature) / 12.0);
+        push(std::max(0, creature_current_toughness(creature) -
+                             creature.damage) /
+             12.0);
+        push(creature.damage / 8.0);
+        push(creature.temporary_power_bonus / 6.0);
+        push(creature.temporary_toughness_bonus / 6.0);
+        push(creature.tapped ? 1.0 : 0.0);
+        push(creature.summoning_sick ? 1.0 : 0.0);
+        push(definition.flying ? 1.0 : 0.0);
+    }
+}
+
+// Approximate castability against the observer's untapped producers: lands
+// give their color, Mox Sapphire blue, Sol Ring two generic. Colored costs
+// draw from matching producers first, generic from what remains.
+struct ManaAvailable {
+    int green = 0, red = 0, blue = 0, white = 0, generic = 0;
+
+    int total() const { return green + red + blue + white + generic; }
+};
+
+ManaAvailable available_mana(const PublicPlayerState& player) {
+    ManaAvailable mana;
+    for (const auto& land : player.lands) {
+        if (land.tapped) {
+            continue;
+        }
+        switch (land.card) {
+            case CardId::Forest: mana.green += 1; break;
+            case CardId::Mountain: mana.red += 1; break;
+            case CardId::Island: mana.blue += 1; break;
+            case CardId::Plains: mana.white += 1; break;
+            default: mana.generic += 1; break;
+        }
+    }
+    for (const auto& artifact : player.artifacts) {
+        if (artifact.tapped) {
+            continue;
+        }
+        if (artifact.card == CardId::MoxSapphire) {
+            mana.blue += 1;
+        } else if (artifact.card == CardId::SolRing) {
+            mana.generic += 2;
+        }
+    }
+    mana.green += player.mana_pool.green;
+    mana.red += player.mana_pool.red;
+    mana.blue += player.mana_pool.blue;
+    mana.white += player.mana_pool.white;
+    mana.generic += player.mana_pool.generic;
+    return mana;
+}
+
+bool roughly_castable(const CardDefinition& definition,
+                      const ManaAvailable& mana, bool land_played) {
+    if (definition.type == CardType::Land) {
+        return !land_played;
+    }
+    const ManaCost& cost = definition.cost;
+    if (cost.green > mana.green || cost.red > mana.red ||
+        cost.blue > mana.blue || cost.white > mana.white) {
+        return false;
+    }
+    const int leftover = mana.total() - cost.green - cost.red -
+                         cost.blue - cost.white;
+    return leftover >= cost.generic;
+}
+
+}  // namespace
+
+std::size_t spz_feature_count_v2() {
+    return spz_feature_count() +
+           2 * kCreatureSlots * kCreatureSlotFeatures +
+           kStackSlots * kStackSlotFeatures + kCastabilityFeatures +
+           kRaceFeatures;
+}
+
+std::vector<float> spz_features_v2(
+    const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase) {
+    std::vector<float> features =
+        spz_features(observation, original_decks, phase);
+    features.reserve(spz_feature_count_v2());
+    const std::size_t me = observation.observer;
+    const std::size_t opponent = 1 - me;
+    const PublicPlayerState& my_public = observation.players[me];
+    const PublicPlayerState& opponent_public =
+        observation.players[opponent];
+    const auto push = [&features](double value) {
+        features.push_back(static_cast<float>(value));
+    };
+
+    append_creature_slots(features, my_public.creatures);
+    append_creature_slots(features, opponent_public.creatures);
+
+    // Top of stack first: the objects that resolve next.
+    for (std::size_t slot = 0; slot < kStackSlots; ++slot) {
+        if (slot >= observation.stack.size()) {
+            for (std::size_t f = 0; f < kStackSlotFeatures; ++f) {
+                push(0.0);
+            }
+            continue;
+        }
+        const StackObject& object =
+            observation.stack[observation.stack.size() - 1 - slot];
+        push(1.0);
+        for (std::size_t card = 0; card < kCardCount; ++card) {
+            push(card == static_cast<std::size_t>(object.card) ? 1.0
+                                                               : 0.0);
+        }
+        push(object.controller == me ? 1.0 : 0.0);
+        push(object.kind == StackObjectKind::ActivatedAbility ? 1.0
+                                                              : 0.0);
+        std::array<double, 5> target_class{};
+        std::array<double, kCardCount> target_card{};
+        if (!object.target.has_value()) {
+            target_class[0] = 1.0;
+        } else if (!object.target->creature.has_value()) {
+            target_class[object.target->player == me ? 1 : 2] = 1.0;
+        } else {
+            target_class[object.target->player == me ? 3 : 4] = 1.0;
+            const auto& creatures =
+                observation.players[object.target->player].creatures;
+            for (const auto& creature : creatures) {
+                if (creature.id == *object.target->creature) {
+                    target_card[static_cast<std::size_t>(
+                        creature.card)] = 1.0;
+                    break;
+                }
+            }
+        }
+        for (const double value : target_class) {
+            push(value);
+        }
+        for (const double value : target_card) {
+            push(value);
+        }
+        push(object.x_value / 4.0);
+    }
+
+    const ManaAvailable mana = available_mana(my_public);
+    std::array<int, kCardCount> castable{};
+    int castable_total = 0;
+    for (const CardId card : observation.hand) {
+        if (roughly_castable(card_definition(card), mana,
+                             my_public.land_played_this_turn)) {
+            castable[static_cast<std::size_t>(card)] += 1;
+            castable_total += 1;
+        }
+    }
+    for (const int count : castable) {
+        push(count / 4.0);
+    }
+    push(castable_total / 7.0);
+    push(mana.total() / 8.0);
+
+    int my_ready_power = 0;
+    int my_untapped_power = 0;
+    for (const auto& creature : my_public.creatures) {
+        const int power = creature_current_power(creature);
+        if (!creature.tapped) {
+            my_untapped_power += power;
+            if (!creature.summoning_sick) {
+                my_ready_power += power;
+            }
+        }
+    }
+    int opponent_ready_power = 0;
+    int opponent_untapped_power = 0;
+    for (const auto& creature : opponent_public.creatures) {
+        const int power = creature_current_power(creature);
+        if (!creature.tapped) {
+            opponent_untapped_power += power;
+            if (!creature.summoning_sick) {
+                opponent_ready_power += power;
+            }
+        }
+    }
+    const auto clipped_ratio = [](double numerator,
+                                  double denominator) {
+        return std::min(2.0, numerator / std::max(1.0, denominator));
+    };
+    push(clipped_ratio(my_ready_power, opponent_public.life));
+    push(clipped_ratio(opponent_ready_power, my_public.life));
+    push(my_ready_power >= opponent_public.life ? 1.0 : 0.0);
+    push(opponent_ready_power >= my_public.life ? 1.0 : 0.0);
+    push(std::min(10.0, opponent_public.life /
+                            std::max(1.0, double(my_ready_power))) /
+         10.0);
+    push(std::min(10.0, my_public.life /
+                            std::max(1.0,
+                                     double(opponent_ready_power))) /
+         10.0);
+    push(clipped_ratio(my_untapped_power, opponent_untapped_power));
+    push((my_ready_power - opponent_ready_power) / 12.0);
+    push((static_cast<double>(my_public.creatures.size()) -
+          static_cast<double>(opponent_public.creatures.size())) /
+         6.0);
+    push(clipped_ratio(opponent_untapped_power, my_public.life));
+
+    if (features.size() != spz_feature_count_v2()) {
+        throw std::logic_error("spz v2 feature schema size mismatch");
+    }
+    return features;
+}
+
+std::vector<float> spz_features_for(
+    std::size_t input_count, const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase) {
+    if (input_count == spz_feature_count()) {
+        return spz_features(observation, original_decks, phase);
+    }
+    if (input_count == spz_feature_count_v2()) {
+        return spz_features_v2(observation, original_decks, phase);
+    }
+    throw std::invalid_argument(
+        "unknown SPZ feature schema for input count " +
+        std::to_string(input_count));
+}
+
 GameState reconstruct_observed_state(const PlayerObservation& observation) {
     const std::size_t me = observation.observer;
     const std::size_t opponent = 1 - me;
@@ -1148,7 +1433,8 @@ struct SpzAgent {
             }
             return self_dead ? 0.0 : 1.0;
         }
-        return net->value(spz_features(
+        return net->value(spz_features_for(
+            net->input_count(),
             observe_game_state(state, perspective), decks, phase));
     }
 
@@ -1764,8 +2050,9 @@ struct SpzAgent {
         if (policy_net == nullptr) {
             return {};
         }
-        const auto state_row =
-            spz_features(observe_game_state(state, actor), decks, phase);
+        const auto state_row = spz_features_for(
+            net->input_count(),
+            observe_game_state(state, actor), decks, phase);
         std::vector<double> logits;
         logits.reserve(actions.size());
         for (const PriorityAction& action : actions) {
@@ -1995,7 +2282,8 @@ struct SpzAgent {
 
         if (recorder != nullptr) {
             SpzPolicySample sample;
-            sample.state = spz_features(
+            sample.state = spz_features_for(
+                net->input_count(),
                 observe_game_state(worlds.front(), seat), decks, phase);
             float visit_total = 0.0f;
             for (std::size_t slot = 0;
@@ -2044,15 +2332,16 @@ struct SpzAgent {
 
     void record(const PlayerObservation& observation, TurnPhase phase) {
         if (recorder != nullptr) {
-            recorder->feature_rows.push_back(
-                spz_features(observation, decks, phase));
+            recorder->feature_rows.push_back(spz_features_for(
+                net->input_count(), observation, decks, phase));
         }
     }
 
     void record_state(const GameState& state, TurnPhase phase) {
         if (recorder != nullptr &&
             state.players[0].life > 0 && state.players[1].life > 0) {
-            recorder->feature_rows.push_back(spz_features(
+            recorder->feature_rows.push_back(spz_features_for(
+                net->input_count(),
                 observe_game_state(state, seat), decks, phase));
         }
     }
@@ -2819,9 +3108,11 @@ SpzTrainingCoordinate spz_training_coordinate(
 
 SpzTrainOutput train_spz(const SpzTrainConfig& config) {
     const auto& decks = spz_decks();
+    const std::size_t state_inputs =
+        config.schema_v2 ? spz_feature_count_v2() : spz_feature_count();
     auto net = config.initial_net != nullptr
                    ? std::make_shared<SpzNet>(*config.initial_net)
-                   : std::make_shared<SpzNet>(spz_feature_count(),
+                   : std::make_shared<SpzNet>(state_inputs,
                                               config.hidden, config.seed);
     std::shared_ptr<SpzPolicyNet> policy_net;
     if (config.train_policy) {
@@ -2829,7 +3120,7 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             config.initial_policy != nullptr
                 ? std::make_shared<SpzPolicyNet>(*config.initial_policy)
                 : std::make_shared<SpzPolicyNet>(
-                      spz_feature_count(), spz_action_feature_count(),
+                      net->input_count(), spz_action_feature_count(),
                       config.policy_hidden, mix_seed(config.seed, 77));
     }
     std::vector<SpzPolicySample> policy_replay;

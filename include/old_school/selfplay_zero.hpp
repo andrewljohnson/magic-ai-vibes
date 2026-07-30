@@ -45,6 +45,21 @@ std::vector<float> spz_features(
     const std::array<std::vector<CardId>, 2>& original_decks,
     TurnPhase phase);
 
+// Schema v2: everything v1 encodes (as an identical prefix) plus complete
+// per-permanent detail — individual creature slots, stack objects with
+// their targets, hand castability against untapped mana, and race
+// arithmetic. Nets declare their schema implicitly through input size;
+// spz_features_for dispatches, so v1 and v2 nets coexist in one process.
+std::size_t spz_feature_count_v2();
+std::vector<float> spz_features_v2(
+    const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase);
+std::vector<float> spz_features_for(
+    std::size_t input_count, const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase);
+
 // Rebuilds a full GameState from a perspective-safe observation. Hidden zones
 // (the opponent's hand and both libraries) are filled with placeholder cards
 // of the correct sizes; callers must pass the result through
@@ -236,6 +251,9 @@ struct SpzTrainConfig {
     std::size_t iterations = 60;
     std::size_t games_per_iteration = 128;
     std::size_t hidden = 64;
+    // Fresh nets use the complete v2 observation schema when set; warm
+    // starts inherit their net's schema regardless.
+    bool schema_v2 = false;
     std::uint64_t seed = 20260729;
     std::size_t max_turns = 120;
     std::size_t training_worlds = 2;
