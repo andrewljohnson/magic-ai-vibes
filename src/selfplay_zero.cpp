@@ -299,8 +299,20 @@ int creature_current_toughness(const CreaturePermanent& creature) {
            creature.temporary_toughness_bonus;
 }
 
+void append_creature_slots_range(std::vector<float>& features,
+                                 const std::vector<CreaturePermanent>& raw,
+                                 std::size_t first_slot,
+                                 std::size_t slot_count);
+
 void append_creature_slots(std::vector<float>& features,
                            const std::vector<CreaturePermanent>& raw) {
+    append_creature_slots_range(features, raw, 0, kCreatureSlots);
+}
+
+void append_creature_slots_range(std::vector<float>& features,
+                                 const std::vector<CreaturePermanent>& raw,
+                                 std::size_t first_slot,
+                                 std::size_t slot_count) {
     std::vector<const CreaturePermanent*> ordered;
     ordered.reserve(raw.size());
     for (const auto& creature : raw) {
@@ -327,7 +339,8 @@ void append_creature_slots(std::vector<float>& features,
     const auto push = [&features](double value) {
         features.push_back(static_cast<float>(value));
     };
-    for (std::size_t slot = 0; slot < kCreatureSlots; ++slot) {
+    for (std::size_t slot = first_slot;
+         slot < first_slot + slot_count; ++slot) {
         if (slot >= ordered.size()) {
             for (std::size_t f = 0; f < kCreatureSlotFeatures; ++f) {
                 push(0.0);
@@ -550,6 +563,135 @@ std::vector<float> spz_features_v2(
     return features;
 }
 
+namespace {
+
+constexpr std::size_t kCreatureSlotsV3 = 18;
+constexpr std::size_t kStackSlotsV3 = 6;
+
+void append_stack_slot(std::vector<float>& features,
+                       const PlayerObservation& observation,
+                       std::size_t me, std::size_t slot) {
+    const auto push = [&features](double value) {
+        features.push_back(static_cast<float>(value));
+    };
+    if (slot >= observation.stack.size()) {
+        for (std::size_t f = 0; f < kStackSlotFeatures; ++f) {
+            push(0.0);
+        }
+        return;
+    }
+    const StackObject& object =
+        observation.stack[observation.stack.size() - 1 - slot];
+    push(1.0);
+    for (std::size_t card = 0; card < kCardCount; ++card) {
+        push(card == static_cast<std::size_t>(object.card) ? 1.0 : 0.0);
+    }
+    push(object.controller == me ? 1.0 : 0.0);
+    push(object.kind == StackObjectKind::ActivatedAbility ? 1.0 : 0.0);
+    std::array<double, 5> target_class{};
+    std::array<double, kCardCount> target_card{};
+    if (!object.target.has_value()) {
+        target_class[0] = 1.0;
+    } else if (!object.target->creature.has_value()) {
+        target_class[object.target->player == me ? 1 : 2] = 1.0;
+    } else {
+        target_class[object.target->player == me ? 3 : 4] = 1.0;
+        for (const auto& creature :
+             observation.players[object.target->player].creatures) {
+            if (creature.id == *object.target->creature) {
+                target_card[static_cast<std::size_t>(creature.card)] =
+                    1.0;
+                break;
+            }
+        }
+    }
+    for (const double value : target_class) {
+        push(value);
+    }
+    for (const double value : target_card) {
+        push(value);
+    }
+    push(object.x_value / 4.0);
+}
+
+void append_untapped_permanent_counts(
+    std::vector<float>& features, const PublicPlayerState& player) {
+    std::array<int, kCardCount> counts{};
+    for (const auto& land : player.lands) {
+        if (!land.tapped) {
+            counts[static_cast<std::size_t>(land.card)] += 1;
+        }
+    }
+    for (const auto& creature : player.creatures) {
+        if (!creature.tapped) {
+            counts[static_cast<std::size_t>(creature.card)] += 1;
+        }
+    }
+    for (const auto& artifact : player.artifacts) {
+        if (!artifact.tapped) {
+            counts[static_cast<std::size_t>(artifact.card)] += 1;
+        }
+    }
+    for (const CardId enchantment : player.enchantments) {
+        counts[static_cast<std::size_t>(enchantment)] += 1;
+    }
+    for (const int count : counts) {
+        features.push_back(static_cast<float>(count) / 4.0f);
+    }
+}
+
+}  // namespace
+
+// Schema v3: lossless play-zone representation. v2 as an exact prefix,
+// plus creature slots nine through eighteen per player (no metagame deck
+// can field more, so individual creatures never aggregate), untapped
+// counts by card for every permanent type, per-color mana pools for both
+// players, and stack objects four through six.
+std::size_t spz_feature_count_v3() {
+    return spz_feature_count_v2() +
+           2 * (kCreatureSlotsV3 - kCreatureSlots) *
+               kCreatureSlotFeatures +
+           2 * kCardCount + 10 +
+           (kStackSlotsV3 - kStackSlots) * kStackSlotFeatures;
+}
+
+std::vector<float> spz_features_v3(
+    const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase) {
+    std::vector<float> features =
+        spz_features_v2(observation, original_decks, phase);
+    features.reserve(spz_feature_count_v3());
+    const std::size_t me = observation.observer;
+    const std::size_t opponent = 1 - me;
+    append_creature_slots_range(features,
+                                observation.players[me].creatures,
+                                kCreatureSlots,
+                                kCreatureSlotsV3 - kCreatureSlots);
+    append_creature_slots_range(features,
+                                observation.players[opponent].creatures,
+                                kCreatureSlots,
+                                kCreatureSlotsV3 - kCreatureSlots);
+    append_untapped_permanent_counts(features, observation.players[me]);
+    append_untapped_permanent_counts(features,
+                                     observation.players[opponent]);
+    for (const std::size_t player : {me, opponent}) {
+        const ManaCost& pool = observation.players[player].mana_pool;
+        features.push_back(static_cast<float>(pool.green) / 4.0f);
+        features.push_back(static_cast<float>(pool.red) / 4.0f);
+        features.push_back(static_cast<float>(pool.blue) / 4.0f);
+        features.push_back(static_cast<float>(pool.white) / 4.0f);
+        features.push_back(static_cast<float>(pool.generic) / 4.0f);
+    }
+    for (std::size_t slot = kStackSlots; slot < kStackSlotsV3; ++slot) {
+        append_stack_slot(features, observation, me, slot);
+    }
+    if (features.size() != spz_feature_count_v3()) {
+        throw std::logic_error("spz v3 feature schema size mismatch");
+    }
+    return features;
+}
+
 std::vector<float> spz_features_for(
     std::size_t input_count, const PlayerObservation& observation,
     const std::array<std::vector<CardId>, 2>& original_decks,
@@ -559,6 +701,9 @@ std::vector<float> spz_features_for(
     }
     if (input_count == spz_feature_count_v2()) {
         return spz_features_v2(observation, original_decks, phase);
+    }
+    if (input_count == spz_feature_count_v3()) {
+        return spz_features_v3(observation, original_decks, phase);
     }
     throw std::invalid_argument(
         "unknown SPZ feature schema for input count " +
@@ -3109,7 +3254,9 @@ SpzTrainingCoordinate spz_training_coordinate(
 SpzTrainOutput train_spz(const SpzTrainConfig& config) {
     const auto& decks = spz_decks();
     const std::size_t state_inputs =
-        config.schema_v2 ? spz_feature_count_v2() : spz_feature_count();
+        config.schema == 3   ? spz_feature_count_v3()
+        : config.schema == 2 ? spz_feature_count_v2()
+                             : spz_feature_count();
     auto net = config.initial_net != nullptr
                    ? std::make_shared<SpzNet>(*config.initial_net)
                    : std::make_shared<SpzNet>(state_inputs,

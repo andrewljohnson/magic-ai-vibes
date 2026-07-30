@@ -569,6 +569,58 @@ SPZ_TEST(schema_v2_is_complete_bounded_and_playable) {
            "v2 net games replay deterministically");
 }
 
+SPZ_TEST(schema_v3_is_lossless_bounded_and_playable) {
+    // Creature slots can never overflow: no metagame deck fields more
+    // than the slot count.
+    for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {
+        std::size_t creatures = 0;
+        for (const CardId card : spz_decks()[deck]) {
+            creatures +=
+                card_definition(card).type == CardType::Creature ? 1 : 0;
+        }
+        expect(creatures <= 18, "deck creature count fits v3 slots");
+    }
+    const std::array<std::vector<CardId>, 2> game_decks = {
+        spz_decks()[0], spz_decks()[4]};
+    GameConfig probe_config;
+    probe_config.max_turns = 12;
+    Game probe_game(game_decks[0], game_decks[1], 909, probe_config);
+    (void)probe_game.run();
+    const auto observation = observe_game_state(probe_game.state(), 1);
+    const auto v2 =
+        spz_features_v2(observation, game_decks, TurnPhase::FirstMain);
+    const auto v3 =
+        spz_features_v3(observation, game_decks, TurnPhase::FirstMain);
+    expect(v3.size() == spz_feature_count_v3(),
+           "v3 feature vector matches its schema size");
+    expect(std::equal(v2.begin(), v2.end(), v3.begin()),
+           "v2 is an exact prefix of v3");
+    for (const float value : v3) {
+        expect(std::isfinite(value) && value >= -3.0f && value <= 30.0f,
+               "v3 features are finite and bounded");
+    }
+    const auto net = std::make_shared<const SpzNet>(
+        spz_feature_count_v3(), 8, 90125);
+    std::vector<GameResult> results;
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        GameConfig config;
+        config.max_turns = 25;
+        for (std::size_t seat = 0; seat < 2; ++seat) {
+            SpzPolicyConfig policy;
+            policy.worlds = 1;
+            policy.block_prediction_worlds = 1;
+            policy.rollout = true;
+            policy.seed = 61 + seat;
+            config.human_controllers[seat] =
+                make_spz_controller(net, game_decks, seat, policy);
+        }
+        Game game(game_decks[0], game_decks[1], 8642, config);
+        results.push_back(game.run());
+    }
+    expect(results[0] == results[1],
+           "v3 net games replay deterministically");
+}
+
 SPZ_TEST(recorder_collects_outcome_labeled_rows) {
     const auto net = std::make_shared<const SpzNet>(
         spz_feature_count(), 8, 99);

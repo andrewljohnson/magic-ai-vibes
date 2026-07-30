@@ -55,6 +55,14 @@ std::vector<float> spz_features_v2(
     const PlayerObservation& observation,
     const std::array<std::vector<CardId>, 2>& original_decks,
     TurnPhase phase);
+// Schema v3: lossless play zones — individual slots for every creature
+// (18 per player), untapped-by-card counts for all permanent types,
+// per-color mana pools, six stack objects. v2 is an exact prefix.
+std::size_t spz_feature_count_v3();
+std::vector<float> spz_features_v3(
+    const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase);
 std::vector<float> spz_features_for(
     std::size_t input_count, const PlayerObservation& observation,
     const std::array<std::vector<CardId>, 2>& original_decks,
@@ -251,9 +259,9 @@ struct SpzTrainConfig {
     std::size_t iterations = 60;
     std::size_t games_per_iteration = 128;
     std::size_t hidden = 64;
-    // Fresh nets use the complete v2 observation schema when set; warm
+    // Fresh nets: 0 = v1, 2 = v2, 3 = v3 (lossless play zones). Warm
     // starts inherit their net's schema regardless.
-    bool schema_v2 = false;
+    std::size_t schema = 0;
     std::uint64_t seed = 20260729;
     std::size_t max_turns = 120;
     std::size_t training_worlds = 2;
