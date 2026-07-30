@@ -538,6 +538,11 @@ ValuePassDominanceDiagnostic diagnose_value_pass_dominance(
 
 // Attackers and blockers are identified by permanent ID. A repeated attacker in
 // blocks represents multiple creatures blocking it; block order is damage order.
+// Returns the complete engine-authoritative attacker set in battlefield order,
+// including all current permanent- and battlefield-based attack restrictions.
+std::vector<PermanentId> legal_attackers(
+    const GameState& state, std::size_t attacking_player);
+
 bool resolve_combat(
     GameState& state, std::size_t attacking_player,
     const std::vector<PermanentId>& attackers,

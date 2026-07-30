@@ -13014,6 +13014,23 @@ std::size_t advance_turn_player(GameState& state) {
     return state.active_player;
 }
 
+std::vector<PermanentId> legal_attackers(
+    const GameState& state, std::size_t attacking_player) {
+    if (attacking_player >= state.players.size()) {
+        throw std::out_of_range(
+            "attacking player must be 0 or 1");
+    }
+    std::vector<PermanentId> result;
+    for (const CreaturePermanent& creature :
+         state.players[attacking_player].creatures) {
+        if (!creature.tapped && !creature.summoning_sick &&
+            can_attack_through_moat(state, creature)) {
+            result.push_back(creature.id);
+        }
+    }
+    return result;
+}
+
 bool resolve_combat(
     GameState& state, std::size_t attacking_player,
     const std::vector<PermanentId>& attackers,
@@ -17930,23 +17947,6 @@ void validate_priority_candidates(
         }
         seen.push_back(candidate);
     }
-}
-
-std::vector<PermanentId> legal_attackers(
-    const GameState& state, std::size_t attacking_player) {
-    if (attacking_player >= state.players.size()) {
-        throw std::out_of_range(
-            "attacking player must be 0 or 1");
-    }
-    std::vector<PermanentId> result;
-    for (const CreaturePermanent& creature :
-         state.players[attacking_player].creatures) {
-        if (!creature.tapped && !creature.summoning_sick &&
-            can_attack_through_moat(state, creature)) {
-            result.push_back(creature.id);
-        }
-    }
-    return result;
 }
 
 std::vector<PermanentId> validate_binary_attack_context(

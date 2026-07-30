@@ -296,12 +296,11 @@ GameState reconstruct_observed_state(const PlayerObservation& observation) {
         reconstructed.mana_pool = public_state.mana_pool;
         reconstructed.land_played_this_turn =
             public_state.land_played_this_turn;
-        reconstructed.library.assign(public_state.library_size,
-                                     CardId::Forest);
+        reconstructed.library.assign(public_state.library_size, CardId{});
     }
     state.players[me].hand = observation.hand;
     state.players[opponent].hand.assign(
-        observation.players[opponent].hand_size, CardId::Forest);
+        observation.players[opponent].hand_size, CardId{});
     state.stack = observation.stack;
     state.extra_turns_pending = observation.extra_turns_pending;
     state.active_player = observation.active_player;
@@ -591,31 +590,6 @@ struct SpzAgent {
         return self_dead ? 0.0 : 1.0;
     }
 
-    static bool moat_on_battlefield(const GameState& state) {
-        for (const PlayerState& player : state.players) {
-            for (const CardId enchantment : player.enchantments) {
-                if (enchantment == CardId::Moat) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    static std::vector<PermanentId> eligible_attackers(
-        const GameState& state, std::size_t attacking_player) {
-        const bool moat = moat_on_battlefield(state);
-        std::vector<PermanentId> eligible;
-        for (const auto& creature :
-             state.players[attacking_player].creatures) {
-            if (!creature.tapped && !creature.summoning_sick &&
-                (!moat || card_definition(creature.card).flying)) {
-                eligible.push_back(creature.id);
-            }
-        }
-        return eligible;
-    }
-
     PriorityAction choose_rollout_priority(
         const GameState& state, const PriorityState& priority,
         bool sorcery, TurnPhase phase) const {
@@ -741,7 +715,8 @@ struct SpzAgent {
     std::optional<double> rollout_combat_after_beginning(
         GameState& state, int& budget) const {
         const std::size_t attacking_player = state.active_player;
-        const auto eligible = eligible_attackers(state, attacking_player);
+        const auto eligible =
+            old_school::legal_attackers(state, attacking_player);
         if (!eligible.empty()) {
             const auto attack_set =
                 greedy_attack_set(state, attacking_player, eligible);
@@ -943,17 +918,47 @@ struct SpzAgent {
         if (actions.size() <= 1) {
             return 0;
         }
-        if (explore()) {
-            std::uniform_int_distribution<std::size_t> pick(
-                0, actions.size() - 1);
-            return pick(rng);
-        }
         const GameState reconstructed =
             reconstruct_observed_state(observation);
         const bool sorcery_actions =
             (phase == TurnPhase::FirstMain ||
              phase == TurnPhase::SecondMain) &&
             observation.active_player == observation.observer;
+        // Rules-only prune: never take an action whose settled consequence
+        // is the Pass consequence minus resources. Placeholder hidden zones
+        // are safe here — any action that reveals hidden cards settles to a
+        // different observation and is therefore retained.
+        std::vector<bool> dominated(actions.size(), false);
+        if (config.pass_dominance_prune) {
+            const auto dominance = diagnose_value_pass_dominance(
+                reconstructed, seat, sorcery_actions, phase, 0);
+            for (const auto& entry : dominance.actions) {
+                if (!entry.strictly_dominated_by_pass) {
+                    continue;
+                }
+                for (std::size_t index = 0; index < actions.size();
+                     ++index) {
+                    if (actions[index] == entry.action) {
+                        dominated[index] = true;
+                    }
+                }
+            }
+        }
+        if (explore()) {
+            std::vector<std::size_t> retained;
+            for (std::size_t index = 0; index < actions.size();
+                 ++index) {
+                if (!dominated[index]) {
+                    retained.push_back(index);
+                }
+            }
+            if (retained.empty()) {
+                return 0;
+            }
+            std::uniform_int_distribution<std::size_t> pick(
+                0, retained.size() - 1);
+            return retained[pick(rng)];
+        }
         const std::size_t worlds = std::max<std::size_t>(1, config.worlds);
         std::vector<GameState> sampled_worlds;
         sampled_worlds.reserve(worlds);
@@ -984,8 +989,17 @@ struct SpzAgent {
             return value_for(consequence->state, seat, phase);
         };
         std::vector<double> totals(actions.size(), 0.0);
+        for (std::size_t index = 0; index < actions.size(); ++index) {
+            if (dominated[index]) {
+                totals[index] =
+                    kIllegalScore * static_cast<double>(worlds);
+            }
+        }
         for (const GameState& sampled : sampled_worlds) {
             for (std::size_t index = 0; index < actions.size(); ++index) {
+                if (dominated[index]) {
+                    continue;
+                }
                 totals[index] += score_action(sampled, actions[index],
                                               false);
             }

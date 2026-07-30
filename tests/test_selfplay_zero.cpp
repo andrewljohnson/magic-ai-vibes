@@ -1,5 +1,6 @@
 #include "old_school/selfplay_zero.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -114,6 +115,97 @@ SPZ_TEST(reconstruction_supports_determinization) {
     }
 }
 
+SPZ_TEST(features_and_rollout_policy_ignore_opponent_hidden_partition) {
+    const std::array<std::vector<CardId>, 2> game_decks = {
+        spz_decks()[1], spz_decks()[2]};
+    GameState first;
+    first.active_player = 0;
+    first.starting_player = 0;
+    first.turn_number = 1;
+    first.next_permanent_id = 1;
+    first.next_stack_object_id = 1;
+    first.players[0].library = game_decks[0];
+    first.players[1].library = game_decks[1];
+
+    const auto move_to_hand = [](PlayerState& player, CardId card) {
+        const auto position =
+            std::find(player.library.begin(), player.library.end(), card);
+        expect(position != player.library.end(),
+               "hidden-safety fixture card is in its deck");
+        player.hand.push_back(*position);
+        player.library.erase(position);
+    };
+    move_to_hand(first.players[0], CardId::Mountain);
+    for (std::size_t draw = 1; draw < 7; ++draw) {
+        first.players[0].hand.push_back(first.players[0].library.back());
+        first.players[0].library.pop_back();
+    }
+    for (std::size_t draw = 0; draw < 7; ++draw) {
+        move_to_hand(first.players[1], CardId::Island);
+    }
+
+    GameState repartitioned = first;
+    const auto hidden_counterspell = std::find(
+        repartitioned.players[1].library.begin(),
+        repartitioned.players[1].library.end(), CardId::Counterspell);
+    expect(hidden_counterspell != repartitioned.players[1].library.end(),
+           "hidden-safety fixture has an unseen nonland");
+    std::swap(repartitioned.players[1].hand.front(),
+              *hidden_counterspell);
+
+    const PlayerObservation first_observation =
+        observe_game_state(first, 0);
+    const PlayerObservation repartitioned_observation =
+        observe_game_state(repartitioned, 0);
+    expect(first_observation == repartitioned_observation,
+           "opponent hand/library repartition is observation-invisible");
+    expect(
+        spz_features(first_observation, game_decks, TurnPhase::FirstMain) ==
+            spz_features(repartitioned_observation, game_decks,
+                         TurnPhase::FirstMain),
+        "features ignore opponent hidden identities");
+
+    const auto actions = legal_priority_actions(first, 0, true);
+    expect(actions.size() > 1,
+           "hidden-safety fixture has a real priority choice");
+    const auto net = std::make_shared<const SpzNet>(
+        spz_feature_count(), 8, 20260731);
+    SpzPolicyConfig policy;
+    policy.worlds = 2;
+    policy.block_prediction_worlds = 2;
+    policy.rollout = true;
+    policy.rollout_top_k = 2;
+    policy.seed = 0x5AFE;
+    const HumanController first_controller =
+        make_spz_controller(net, game_decks, 0, policy);
+    const HumanController repartitioned_controller =
+        make_spz_controller(net, game_decks, 0, policy);
+    const std::size_t first_choice =
+        first_controller.choose_priority_action(
+            first_observation, TurnPhase::FirstMain, actions);
+    const std::size_t repartitioned_choice =
+        repartitioned_controller.choose_priority_action(
+            repartitioned_observation, TurnPhase::FirstMain, actions);
+    expect(first_choice == repartitioned_choice,
+           "rollout action is invariant to opponent hidden partition");
+
+    PlayerObservation revealed_first = first_observation;
+    PlayerObservation revealed_second = first_observation;
+    revealed_first.revealed_opponent_hand = first.players[1].hand;
+    revealed_second.revealed_opponent_hand =
+        repartitioned.players[1].hand;
+    const HumanController first_reveal_controller =
+        make_spz_controller(net, game_decks, 0, policy);
+    const HumanController second_reveal_controller =
+        make_spz_controller(net, game_decks, 0, policy);
+    expect(
+        first_reveal_controller.choose_priority_action(
+            revealed_first, TurnPhase::FirstMain, actions) ==
+            second_reveal_controller.choose_priority_action(
+                revealed_second, TurnPhase::FirstMain, actions),
+        "debug-only revealed hand cannot affect rollout action");
+}
+
 SPZ_TEST(net_learns_a_simple_separation) {
     SpzNet net(4, 8, 7);
     std::vector<float> positive = {1.0f, 0.0f, 0.5f, 0.0f};
@@ -195,6 +287,69 @@ SPZ_TEST(rollout_controller_plays_complete_legal_games) {
         }
         expect(results[0] == results[1],
                "rollout policy replays identically for identical seeds");
+    }
+}
+
+SPZ_TEST(pass_dominance_prune_blocks_zero_effect_casts) {
+    // A state with Braingeyser and four untapped Islands: the X=0 casts are
+    // strictly dominated by Pass and must never be selected, regardless of
+    // how an arbitrary value net happens to score them.
+    const auto deck = blue_deck();
+    GameState state;
+    state.turn_number = 6;
+    state.active_player = 0;
+    state.starting_player = 0;
+    const auto remove_one = [](std::vector<CardId>& pool, CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        expect(found != pool.end(), "probe deck contains the card");
+        pool.erase(found);
+    };
+    for (std::size_t player = 0; player < 2; ++player) {
+        auto pool = deck;
+        auto& player_state = state.players[player];
+        for (int land = 0; land < 4; ++land) {
+            remove_one(pool, CardId::Island);
+            player_state.lands.push_back({CardId::Island, false});
+        }
+        const std::vector<CardId> hand =
+            player == 0 ? std::vector<CardId>{CardId::Braingeyser,
+                                              CardId::Island,
+                                              CardId::AirElemental}
+                        : std::vector<CardId>{CardId::Island,
+                                              CardId::Counterspell,
+                                              CardId::AirElemental};
+        for (const CardId card : hand) {
+            remove_one(pool, card);
+            player_state.hand.push_back(card);
+        }
+        player_state.library = pool;
+        player_state.life = 15;
+    }
+    const auto observation = observe_game_state(state, 0);
+    const auto actions = legal_priority_actions(state, 0, true);
+    bool saw_zero_geyser = false;
+    for (const auto& action : actions) {
+        saw_zero_geyser |=
+            action.kind == PriorityActionKind::CastBraingeyser &&
+            action.x_value == 0;
+    }
+    expect(saw_zero_geyser, "state offers an X=0 Braingeyser");
+    const std::array<std::vector<CardId>, 2> game_decks = {deck, deck};
+    for (std::uint64_t net_seed = 1; net_seed <= 30; ++net_seed) {
+        const auto net = std::make_shared<const SpzNet>(
+            spz_feature_count(), 8, net_seed);
+        SpzPolicyConfig policy;
+        policy.worlds = 1;
+        policy.block_prediction_worlds = 1;
+        policy.seed = net_seed;
+        const auto controller =
+            make_spz_controller(net, game_decks, 0, policy);
+        const std::size_t chosen = controller.choose_priority_action(
+            observation, TurnPhase::FirstMain, actions);
+        const PriorityAction& action = actions[chosen];
+        expect(!(action.kind == PriorityActionKind::CastBraingeyser &&
+                 action.x_value == 0),
+               "pruned policy never selects an X=0 Braingeyser");
     }
 }
 

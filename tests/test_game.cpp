@@ -10420,6 +10420,30 @@ TEST(flying_and_ironclaw_block_restrictions_are_enforced_without_mutation) {
     CHECK(ordinary_block.players[1].creatures.empty());
 }
 
+TEST(legal_attackers_is_engine_authoritative_and_preserves_order) {
+    old_school::GameState state;
+    state.players[0].creatures = {
+        creature(1, old_school::CardId::FlyingMen),
+        bear(2),
+        creature(3, old_school::CardId::HillGiant, true),
+        bear(4, false, true),
+    };
+    CHECK(old_school::legal_attackers(state, 0) ==
+          std::vector<old_school::PermanentId>({1, 2}));
+
+    state.players[1].enchantments = {old_school::CardId::Moat};
+    CHECK(old_school::legal_attackers(state, 0) ==
+          std::vector<old_school::PermanentId>({1}));
+
+    bool rejected_invalid_player = false;
+    try {
+        static_cast<void>(old_school::legal_attackers(state, 2));
+    } catch (const std::out_of_range&) {
+        rejected_invalid_player = true;
+    }
+    CHECK(rejected_invalid_player);
+}
+
 TEST(grizzly_bears_trade_in_combat) {
     old_school::GameState state;
     state.players[0].creatures = {bear(1)};

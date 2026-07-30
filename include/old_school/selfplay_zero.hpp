@@ -108,6 +108,11 @@ struct SpzPolicyConfig {
     bool rollout = false;
     // Priority candidates advanced to rollout scoring (myopic preranking).
     std::size_t rollout_top_k = 5;
+    // Rules-only prune of real-root priority actions that are strictly
+    // dominated by Pass (identical settled state, strictly more of the
+    // actor's resources consumed) — e.g. an X=0 Braingeyser. No card
+    // knowledge; comparisons that fail to settle retain the action.
+    bool pass_dominance_prune = true;
 };
 
 // Outcome-labeled training example. Targets are filled in after the game.
