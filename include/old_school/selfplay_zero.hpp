@@ -188,8 +188,15 @@ struct SpzDeckStats {
 struct SpzBenchmarkResult {
     // Indexed by the SPZ seat's deck in spz_decks() order.
     std::array<SpzDeckStats, kSpzDeckCount> per_deck;
+    // [spz deck][baseline deck] slice of the same games.
+    std::array<std::array<SpzDeckStats, kSpzDeckCount>, kSpzDeckCount>
+        matchups;
     SpzDeckStats aggregate;
     double wilson_lower_bound_95 = 0.0;
+
+    // Win rate of the baseline bot when *it* holds `deck` against the SPZ
+    // field — the pilot-skill comparison partner for per_deck[deck].
+    double baseline_deck_win_rate(std::size_t deck) const;
 };
 
 // Deck-, seat-, and play/draw-balanced paired benchmark of SPZ against a

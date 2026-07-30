@@ -168,7 +168,9 @@ int run_benchmark(const Arguments& arguments) {
         std::cout << "deck " << spz_deck_name(deck) << ": games "
                   << stats.games << " wins " << stats.wins << " losses "
                   << stats.losses << " draws " << stats.draws
-                  << " win-rate " << stats.win_rate() << '\n';
+                  << " win-rate " << stats.win_rate()
+                  << " baseline-pilots-it " << std::setprecision(4)
+                  << result.baseline_deck_win_rate(deck) << '\n';
     }
     std::cout << "aggregate: games " << result.aggregate.games << " wins "
               << result.aggregate.wins << " losses "

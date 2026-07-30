@@ -1165,16 +1165,49 @@ struct SpzAgent {
         };
 
         if (config.rollout) {
-            // Candidate sets: no attack, the myopic greedy set, and all-in.
+            // Candidate sets around the myopic greedy set: none, greedy,
+            // all-in, and single-creature edits of the greedy set.
             std::vector<std::vector<PermanentId>> candidates;
-            candidates.push_back({});
+            const auto add_candidate =
+                [&candidates](std::vector<PermanentId> candidate) {
+                    std::sort(candidate.begin(), candidate.end());
+                    if (std::find(candidates.begin(), candidates.end(),
+                                  candidate) == candidates.end()) {
+                        candidates.push_back(std::move(candidate));
+                    }
+                };
+            add_candidate({});
             const auto greedy_set =
                 greedy_attack_set(sampled_worlds.front(), seat, eligible);
-            if (!greedy_set.empty()) {
-                candidates.push_back(greedy_set);
+            add_candidate(greedy_set);
+            add_candidate(eligible);
+            constexpr std::size_t kEditLimit = 3;
+            std::size_t additions = 0;
+            for (const PermanentId attacker : eligible) {
+                if (additions >= kEditLimit) {
+                    break;
+                }
+                if (std::find(greedy_set.begin(), greedy_set.end(),
+                              attacker) == greedy_set.end()) {
+                    auto extended = greedy_set;
+                    extended.push_back(attacker);
+                    add_candidate(std::move(extended));
+                    additions += 1;
+                }
             }
-            if (eligible.size() > greedy_set.size()) {
-                candidates.push_back(eligible);
+            std::size_t removals = 0;
+            for (const PermanentId attacker : greedy_set) {
+                if (removals >= kEditLimit) {
+                    break;
+                }
+                std::vector<PermanentId> reduced;
+                for (const PermanentId kept : greedy_set) {
+                    if (kept != attacker) {
+                        reduced.push_back(kept);
+                    }
+                }
+                add_candidate(std::move(reduced));
+                removals += 1;
             }
             double best_value =
                 -std::numeric_limits<double>::infinity();
@@ -1257,6 +1290,62 @@ struct SpzAgent {
             candidates.push_back(greedy);
             if (!greedy.empty()) {
                 candidates.push_back({});
+            }
+            // Single-edit variants of the greedy assignment.
+            constexpr std::size_t kBlockEditLimit = 3;
+            std::size_t block_removals = 0;
+            for (const auto& removed : greedy) {
+                if (block_removals >= kBlockEditLimit) {
+                    break;
+                }
+                std::vector<std::pair<PermanentId, PermanentId>> reduced;
+                for (const auto& kept : greedy) {
+                    if (kept != removed) {
+                        reduced.push_back(kept);
+                    }
+                }
+                candidates.push_back(std::move(reduced));
+                block_removals += 1;
+            }
+            std::size_t block_additions = 0;
+            for (const auto& choice : choices) {
+                if (block_additions >= kBlockEditLimit) {
+                    break;
+                }
+                const bool already_blocking = std::any_of(
+                    greedy.begin(), greedy.end(),
+                    [&choice](const auto& block) {
+                        return block.second == choice.blocker;
+                    });
+                if (already_blocking || choice.legal_attackers.empty()) {
+                    continue;
+                }
+                // Myopically best attacker for this extra blocker.
+                double best_value =
+                    -std::numeric_limits<double>::infinity();
+                std::optional<PermanentId> best_attacker;
+                for (const PermanentId attacker :
+                     choice.legal_attackers) {
+                    auto trial = greedy;
+                    trial.emplace_back(attacker, choice.blocker);
+                    GameState simulation = reconstructed;
+                    if (!resolve_combat(simulation, attacking_player,
+                                        attackers, trial)) {
+                        continue;
+                    }
+                    const double value = value_for(
+                        simulation, seat, TurnPhase::SecondMain);
+                    if (value > best_value) {
+                        best_value = value;
+                        best_attacker = attacker;
+                    }
+                }
+                if (best_attacker.has_value()) {
+                    auto extended = greedy;
+                    extended.emplace_back(*best_attacker, choice.blocker);
+                    candidates.push_back(std::move(extended));
+                    block_additions += 1;
+                }
             }
             const std::size_t worlds = std::max<std::size_t>(
                 1, config.block_prediction_worlds);
@@ -1650,6 +1739,19 @@ double SpzDeckStats::win_rate() const {
            static_cast<double>(games);
 }
 
+double SpzBenchmarkResult::baseline_deck_win_rate(std::size_t deck) const {
+    std::size_t games = 0;
+    double baseline_score = 0.0;
+    for (std::size_t spz_deck = 0; spz_deck < kSpzDeckCount; ++spz_deck) {
+        const SpzDeckStats& stats = matchups[spz_deck][deck];
+        games += stats.games;
+        baseline_score += static_cast<double>(stats.losses) +
+                          0.5 * static_cast<double>(stats.draws);
+    }
+    return games == 0 ? 0.0
+                      : baseline_score / static_cast<double>(games);
+}
+
 namespace {
 
 double wilson_lower_bound(double successes, double games) {
@@ -1753,16 +1855,22 @@ SpzBenchmarkResult run_spz_benchmark(
         const JobOutcome& outcome = outcomes[job_index];
         for (std::size_t game_index = 0; game_index < 2; ++game_index) {
             SpzDeckStats& deck_stats = result.per_deck[job.spz_deck];
+            SpzDeckStats& matchup_stats =
+                result.matchups[job.spz_deck][job.opponent_deck];
             deck_stats.games += 1;
+            matchup_stats.games += 1;
             result.aggregate.games += 1;
             if (outcome.spz_wins[game_index] == 1) {
                 deck_stats.wins += 1;
+                matchup_stats.wins += 1;
                 result.aggregate.wins += 1;
             } else if (outcome.draws[game_index] == 1) {
                 deck_stats.draws += 1;
+                matchup_stats.draws += 1;
                 result.aggregate.draws += 1;
             } else {
                 deck_stats.losses += 1;
+                matchup_stats.losses += 1;
                 result.aggregate.losses += 1;
             }
         }
