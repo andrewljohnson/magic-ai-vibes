@@ -1,0 +1,185 @@
+#pragma once
+
+// Self-Play Zero (SPZ): a general, self-taught bot.
+//
+// SPZ learns a value network purely from mirror self-play outcomes and acts
+// greedily over one-step afterstates computed with the engine's public,
+// rules-only transitions. It consumes only perspective-safe observations
+// (PlayerObservation plus both original decklists), never hidden opponent
+// state, and never uses hand-authored card values or card-specific policy
+// switches. It attaches to a game seat through HumanController callbacks.
+
+#include "old_school/game.hpp"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <iosfwd>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace old_school::selfplay_zero {
+
+inline constexpr std::size_t kSpzDeckCount = 5;
+
+// The five-deck metagame environment, in canonical order.
+const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks();
+std::string_view spz_deck_name(std::size_t deck_index);
+
+// ---------------------------------------------------------------------------
+// Features
+
+inline constexpr std::size_t kSpzPhaseCount = 7;
+
+std::size_t spz_feature_count();
+
+// Perspective-safe feature vector for `observation.observer`. `phase` is the
+// decision/evaluation phase context, which the observation itself does not
+// carry. `original_decks` provides both public decklists so the extractor can
+// derive the observer's remaining library pool and the opponent's unseen
+// (hand + library) pool; identities inside those hidden zones are never read.
+std::vector<float> spz_features(
+    const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase);
+
+// Rebuilds a full GameState from a perspective-safe observation. Hidden zones
+// (the opponent's hand and both libraries) are filled with placeholder cards
+// of the correct sizes; callers must pass the result through
+// sample_determinization before any transition that reads hidden identities.
+GameState reconstruct_observed_state(const PlayerObservation& observation);
+
+// ---------------------------------------------------------------------------
+// Value network
+
+class SpzNet {
+  public:
+    SpzNet(std::size_t inputs, std::size_t hidden, std::uint64_t seed);
+
+    std::size_t input_count() const { return inputs_; }
+    std::size_t hidden_count() const { return hidden_; }
+
+    // Win probability in [0, 1] for the perspective the features encode.
+    double value(const std::vector<float>& features) const;
+
+    // One SGD-with-momentum minibatch step on binary cross-entropy.
+    // Returns the mean pre-update loss of the batch.
+    double train_batch(const std::vector<const std::vector<float>*>& features,
+                       const std::vector<float>& targets,
+                       double learning_rate);
+
+    void save(std::ostream& out) const;
+    static SpzNet load(std::istream& in);
+
+  private:
+    SpzNet() = default;
+
+    std::size_t inputs_ = 0;
+    std::size_t hidden_ = 0;
+    // Row-major hidden x inputs, then hidden biases, then output weights and
+    // a single output bias. Momentum buffers mirror the parameter layout.
+    std::vector<double> hidden_weights_;
+    std::vector<double> hidden_bias_;
+    std::vector<double> output_weights_;
+    double output_bias_ = 0.0;
+    std::vector<double> momentum_;
+};
+
+void save_spz_net(const SpzNet& net, const std::string& path);
+SpzNet load_spz_net(const std::string& path);
+
+// ---------------------------------------------------------------------------
+// Policy / controller
+
+struct SpzPolicyConfig {
+    // Determinized worlds averaged per priority-action evaluation.
+    std::size_t worlds = 2;
+    // Worlds averaged when predicting opponent blocks during attack search.
+    std::size_t block_prediction_worlds = 2;
+    // Epsilon-greedy exploration over priority actions and combat choices.
+    // Zero is the deterministic greedy policy used for evaluation.
+    double epsilon = 0.0;
+    std::uint64_t seed = 1;
+};
+
+// Outcome-labeled training example. Targets are filled in after the game.
+struct SpzSample {
+    std::vector<float> features;
+    float target = 0.5f;
+};
+
+// Per-seat recording sink for self-play training.
+struct SpzRecorder {
+    std::vector<std::vector<float>> feature_rows;
+};
+
+// Builds the full five-callback controller for `seat`. `recorder` may be null
+// outside training. The controller owns an independent RNG stream seeded from
+// `config.seed`; a fixed (net, decks, seat, config) tuple replays the same
+// decisions for the same game.
+HumanController make_spz_controller(
+    std::shared_ptr<const SpzNet> net,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    std::size_t seat, const SpzPolicyConfig& config,
+    SpzRecorder* recorder = nullptr);
+
+// ---------------------------------------------------------------------------
+// Training
+
+struct SpzTrainConfig {
+    std::size_t iterations = 60;
+    std::size_t games_per_iteration = 128;
+    std::size_t hidden = 64;
+    std::uint64_t seed = 20260729;
+    std::size_t max_turns = 120;
+    std::size_t training_worlds = 2;
+    double epsilon_start = 0.25;
+    double epsilon_final = 0.03;
+    double learning_rate = 0.01;
+    std::size_t batch_size = 64;
+    // Gradient steps per iteration = replay_passes * new_samples / batch.
+    double replay_passes = 2.0;
+    std::size_t replay_capacity = 150000;
+    std::size_t threads = 1;
+    // Optional warm start; when set, `hidden` is ignored and training
+    // continues from this network's parameters.
+    std::shared_ptr<const SpzNet> initial_net;
+    // Optional progress line sink (already newline-free).
+    std::function<void(const std::string&)> log;
+};
+
+std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config);
+
+// ---------------------------------------------------------------------------
+// Benchmark
+
+struct SpzDeckStats {
+    std::size_t games = 0;
+    std::size_t wins = 0;
+    std::size_t losses = 0;
+    std::size_t draws = 0;
+
+    double win_rate() const;
+};
+
+struct SpzBenchmarkResult {
+    // Indexed by the SPZ seat's deck in spz_decks() order.
+    std::array<SpzDeckStats, kSpzDeckCount> per_deck;
+    SpzDeckStats aggregate;
+    double wilson_lower_bound_95 = 0.0;
+};
+
+// Deck-, seat-, and play/draw-balanced paired benchmark of SPZ against a
+// baseline engine bot. Every (spz deck, opponent deck, repetition) triple
+// plays two games with identical seed and identical SPZ play/draw role,
+// swapping only the seats. Draws count half a win in the Wilson bound.
+SpzBenchmarkResult run_spz_benchmark(
+    std::shared_ptr<const SpzNet> net, BotKind baseline,
+    std::size_t repetitions_per_pairing, std::uint64_t seed,
+    const SpzPolicyConfig& policy, std::size_t max_turns = 200,
+    std::size_t threads = 1,
+    const std::function<void(const std::string&)>& log = {});
+
+}  // namespace old_school::selfplay_zero

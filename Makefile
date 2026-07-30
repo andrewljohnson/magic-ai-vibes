@@ -2498,3 +2498,20 @@ clean:
 		find "$(BUILD_DIR)" -mindepth 1 -maxdepth 1 \
 			! -name model-cache -exec rm -rf -- {} +; \
 	fi
+
+# --------------------------------------------------------------------------
+# Self-Play Zero (SPZ): general self-taught bot trained purely by mirror
+# self-play; attaches through HumanController and public engine transitions.
+SELFPLAY_ZERO_SOURCE := src/selfplay_zero.cpp
+SELFPLAY_ZERO := $(BUILD_DIR)/selfplay-zero
+SELFPLAY_ZERO_TEST_RUNNER := $(BUILD_DIR)/test-selfplay-zero
+
+$(eval $(call link_program,$(SELFPLAY_ZERO),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/selfplay_zero_main.cpp))
+
+$(eval $(call link_program,$(SELFPLAY_ZERO_TEST_RUNNER),$(ENGINE_SOURCE) $(LEARNED_ITERATION_SOURCE) $(SELFPLAY_ZERO_SOURCE) tests/test_selfplay_zero.cpp))
+
+.PHONY: selfplay-zero test-selfplay-zero
+selfplay-zero: $(SELFPLAY_ZERO)
+
+test-selfplay-zero: $(SELFPLAY_ZERO_TEST_RUNNER)
+	./$(SELFPLAY_ZERO_TEST_RUNNER)
