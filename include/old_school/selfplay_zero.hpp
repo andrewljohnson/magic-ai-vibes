@@ -108,6 +108,10 @@ struct SpzPolicyConfig {
     bool rollout = false;
     // Priority candidates advanced to rollout scoring (myopic preranking).
     std::size_t rollout_top_k = 5;
+    // How many of the deciding seat's future turn starts the rollout plays
+    // through before evaluating. 1 stops at the seat's next turn start; 2
+    // additionally plays that turn and the following opponent turn.
+    std::size_t rollout_turn_cycles = 1;
     // Rules-only prune of real-root priority actions that are strictly
     // dominated by Pass (identical settled state, strictly more of the
     // actor's resources consumed) — e.g. an X=0 Braingeyser. No card

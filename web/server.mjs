@@ -14,7 +14,7 @@ const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_LOG_ENTRIES = 2_000;
 const BUG_REPORT_SCHEMA = "old-school-arena-bug-report";
 const BUG_REPORT_VERSION = 1;
-const EVOLUTION_TIMEOUT_MS = 120_000;
+const EVOLUTION_TIMEOUT_MS = 1_200_000;
 const MAX_EVOLUTION_OUTPUT_BYTES = 512 * 1024;
 const MAX_EVOLUTION_RESULTS = 32;
 const MAX_SAVED_DECKS = 32;
@@ -232,7 +232,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
 
 export const EVOLUTION_LIMITS = Object.freeze({
   seed: { min: 0, max: MAX_WEB_EVOLUTION_SEED },
-  generations: { min: 1, max: 20 },
+  generations: { min: 1, max: 200 },
   population: { min: 5, max: 32 },
   games: { min: 1, max: 16 },
   retainedResults: MAX_EVOLUTION_RESULTS,

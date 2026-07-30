@@ -783,10 +783,15 @@ struct SpzAgent {
         if (!pending_combat.has_value()) {
             return;
         }
+        resolve_declared_combat(state, *pending_combat);
+    }
+
+    static void resolve_declared_combat(GameState& state,
+                                        const PendingCombat& declared) {
         const std::size_t attacking_player = state.active_player;
         const std::size_t defender = 1 - attacking_player;
         std::vector<PermanentId> attackers;
-        for (const PermanentId attacker : pending_combat->attackers) {
+        for (const PermanentId attacker : declared.attackers) {
             if (creature_on_battlefield(state, attacking_player, attacker,
                                         false)) {
                 attackers.push_back(attacker);
@@ -796,7 +801,7 @@ struct SpzAgent {
             return;
         }
         std::vector<std::pair<PermanentId, PermanentId>> blocks;
-        for (const auto& block : pending_combat->blocks) {
+        for (const auto& block : declared.blocks) {
             const bool attacker_fighting =
                 std::find(attackers.begin(), attackers.end(),
                           block.first) != attackers.end();
@@ -1003,11 +1008,18 @@ struct SpzAgent {
             if (!attack_set.empty()) {
                 const auto blocks = greedy_blocks(
                     state, attacking_player, attack_set, nullptr);
-                if (resolve_combat(state, attacking_player, attack_set,
-                                   blocks)) {
-                    if (const auto terminal = terminal_value(state)) {
-                        return terminal;
-                    }
+                // Mirror the engine: both players may respond after the
+                // blocks are declared, then combat is sanitized and
+                // resolved with whatever survived.
+                if (const auto terminal = rollout_window(
+                        state, TurnPhase::DeclareBlockers, false,
+                        {attacking_player, 0}, budget)) {
+                    return terminal;
+                }
+                const PendingCombat declared{attack_set, blocks};
+                resolve_declared_combat(state, declared);
+                if (const auto terminal = terminal_value(state)) {
+                    return terminal;
                 }
             }
         }
@@ -1087,7 +1099,9 @@ struct SpzAgent {
         if (const auto terminal = terminal_value(state)) {
             return *terminal;
         }
-        int budget = kRolloutDecisionBudget;
+        int budget = kRolloutDecisionBudget *
+                     static_cast<int>(std::max<std::size_t>(
+                         1, config.rollout_turn_cycles));
         const auto run_second_main =
             [&](GameState& current) -> std::optional<double> {
             return rollout_window(current, TurnPhase::SecondMain, true,
@@ -1143,8 +1157,14 @@ struct SpzAgent {
         }
         rollout_cleanup(state);
 
-        // Time Walk chains permit a few consecutive turns by one player.
-        for (int guard = 0; guard < 4; ++guard) {
+        // Play forward until `seat` has reached `rollout_turn_cycles` of
+        // its own turn starts; deeper settings play the seat's turns too.
+        // The guard bound absorbs Time Walk chains.
+        std::size_t seat_turn_starts_remaining =
+            std::max<std::size_t>(1, config.rollout_turn_cycles);
+        const int guard_limit =
+            static_cast<int>(6 * seat_turn_starts_remaining);
+        for (int guard = 0; guard < guard_limit; ++guard) {
             if (state.turn_number >= 500) {
                 break;
             }
@@ -1158,7 +1178,10 @@ struct SpzAgent {
             active.hand.push_back(active.library.back());
             active.library.pop_back();
             if (state.active_player == seat) {
-                return value_for(state, seat, TurnPhase::FirstMain);
+                seat_turn_starts_remaining -= 1;
+                if (seat_turn_starts_remaining == 0) {
+                    return value_for(state, seat, TurnPhase::FirstMain);
+                }
             }
             terminal = rollout_window(state, TurnPhase::FirstMain, true,
                                       {state.active_player, 0}, budget);

@@ -21,6 +21,7 @@ using namespace old_school::selfplay_zero;
         << "      [--worlds N] [--lr X] [--eps-start X] [--eps-final X]\n"
         << "  selfplay-zero benchmark --model PATH [--reps N] [--seed N]\n"
         << "      [--threads N] [--worlds N] [--max-turns N] [--rollout]\n"
+        << "      [--cycles N] [--top-k N]\n"
         << "      [--baseline handcrafted|random|montecarlo]\n";
     std::exit(2);
 }
@@ -39,6 +40,8 @@ struct Arguments {
     std::size_t max_turns = 0;  // 0 selects the per-command default.
     std::size_t worlds = 0;     // 0 selects the per-command default.
     std::size_t reps = 20;
+    std::size_t cycles = 1;
+    std::size_t top_k = 5;
     bool rollout = false;
     double learning_rate = 0.01;
     double epsilon_start = 0.25;
@@ -86,6 +89,10 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.reps = std::stoull(next());
         } else if (flag == "--rollout") {
             arguments.rollout = true;
+        } else if (flag == "--cycles") {
+            arguments.cycles = std::stoull(next());
+        } else if (flag == "--top-k") {
+            arguments.top_k = std::stoull(next());
         } else if (flag == "--lr") {
             arguments.learning_rate = std::stod(next());
         } else if (flag == "--eps-start") {
@@ -155,6 +162,8 @@ int run_benchmark(const Arguments& arguments) {
     policy.worlds = arguments.worlds == 0 ? 4 : arguments.worlds;
     policy.block_prediction_worlds = policy.worlds;
     policy.rollout = arguments.rollout;
+    policy.rollout_turn_cycles = arguments.cycles;
+    policy.rollout_top_k = arguments.top_k;
     const std::size_t max_turns =
         arguments.max_turns == 0 ? 200 : arguments.max_turns;
     const auto result = run_spz_benchmark(

@@ -129,7 +129,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   });
   assert.deepEqual(meta.body.evolution.limits.generations, {
     min: 1,
-    max: 20,
+    max: 200,
   });
   assert.deepEqual(meta.body.evolution.limits.population, {
     min: 5,
@@ -149,7 +149,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
 
   const invalidBodies = [
     { generations: 0 },
-    { generations: 21 },
+    { generations: 201 },
     { population: 4 },
     { population: 33 },
     { games: 0 },
