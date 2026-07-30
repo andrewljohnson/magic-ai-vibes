@@ -12128,6 +12128,250 @@ and review, will be:
 ./build/old-school-fq0-bellman-audit
 ```
 
+## SPZ independent isolation audit and clean-retrain qualification
+
+Declared 2026-07-29 after rereading `AGENTS.md`, this notebook, and the
+independent `REVIEW.md` through its 18:44 PDT cycle. This entry is on the
+`origin/spz-selfplay-bot` review worktree and does not change or reinterpret
+mainline evidence.
+
+### Frozen v6 audit result: descriptive strength only
+
+The checked-in `data/spz-champion-v6.txt` is a 342-input, 64-hidden-unit
+network with SHA-256
+`ba24b10a8eb0f9167557ccd3aeba04ce75712e5566a1fb8989f0764e89b9d1af`.
+Source inspection found no opponent-hand identity input, no
+`handcrafted_card_value`, no Handcrafted training opponent, and no
+Handcrafted rollout opponent. The controller enters through
+`PlayerObservation`, reconstructs only public state plus its own hand, and
+samples the opponent's hand from the public unseen pool.
+
+Two issues prevent promotion of this artifact:
+
+1. The deployed rollout code contained a literal `CardId::Moat` branch while
+   rebuilding legal attackers. Although it duplicated a rules restriction
+   rather than assigning a hand-authored value, it violates the literal
+   no-card-name/no-card-specific-switch boundary. The engineering repair under
+   test exposes the engine's existing generic legal-attacker query and makes
+   SPZ consume that rules-only API. It does not change the feature schema or
+   network artifact.
+2. The artifact has no immutable training manifest or notebook lineage.
+   Worktree remnants show v1-v6 plus an uncommitted-to-history v4; commit
+   history reports v3's 500-game Handcrafted result before v5/v6 were trained,
+   and v5/v6 warm-start v3. Therefore the repo cannot prove that Handcrafted
+   was milestone-only rather than a checkpoint/hyperparameter selection
+   oracle. The reported 57.7% over 2,000 games versus Handcrafted and the
+   independently reproduced 60.2% over 500 games versus C16 remain useful
+   descriptive results, but they are not clean promotion evidence.
+
+During this audit an external actor advanced this worktree from `965c16e` to
+`1bf8eaf`. That commit contains the generic attack-legality repair and
+hidden-repartition test, plus a default-on rules-only Pass-dominance prune.
+For the currently implemented card/action engine semantics, the prune
+enumerates every legal Priority action, force-settles it and Pass, normalizes
+hidden libraries and the opponent's hand to identity-free placeholders, and
+removes an action only when the public/actor information state is equal while
+the actor consumed a strict superset of resources. It contains no action-kind
+or card-name branch and fails open when the current settlement procedure does
+not prove the comparison. This is not a theorem about unimplemented future
+cards or rules. Its commit message reports same-seed 500-game A/Bs
+(Handcrafted 59.0% with prune versus 59.4% without; C16 60.4% versus 60.2%).
+Those screens were not preregistered, occurred during concurrent review, and
+are descriptive only. They do not qualify v6 or select the clean recipe.
+
+Falsifiable engineering hypothesis: replacing the private named-Moat branch
+with the engine-authoritative generic query preserves engine legality and SPZ
+determinism while leaving no named card identity in deployed SPZ policy code.
+Before any new training evidence, the focused engine and SPZ suites must pass
+`-Werror`, a hidden hand/library repartition must produce identical features
+and rollout choices, debug-only revealed opponent-hand identities must not
+change the choice, and the focused suite must pass ASan/UBSan.
+
+### Clean SPZ-R1 recipe and runtime calibration (preregistered, unopened)
+
+Hypothesis: one from-scratch, never-screened SPZ-R1 run using the v6 training
+recipe family will clear the five-deck direct Handcrafted gate without any
+Handcrafted/C16 input, warm start, or checkpoint selection. The root training
+seed is frozen as `731294681`; stage seeds are `731294681`, `731294682`, and
+`731294683`. Calibration seed `731294680` is disjoint. No stage checkpoint
+will be benchmarked. Only the final stage-C artifact may be frozen and opened
+against another policy.
+
+The exact cheap runtime calibration, after focused tests pass, is:
+
+```sh
+test ! -e /private/tmp/spz-r1-cal-base-s731294680.txt
+test ! -e /private/tmp/spz-r1-cal-rollout-s731294680.txt
+
+/usr/bin/time -p ./build/selfplay-zero train \
+  --out /private/tmp/spz-r1-cal-base-s731294680.txt \
+  --iterations 1 --games 250 --hidden 64 --seed 731294680 \
+  --threads 8 --max-turns 120 --worlds 2 --lr 0.01 \
+  --eps-start 0.30 --eps-final 0.08
+
+/usr/bin/time -p ./build/selfplay-zero train \
+  --out /private/tmp/spz-r1-cal-rollout-s731294680.txt \
+  --init /private/tmp/spz-r1-cal-base-s731294680.txt \
+  --iterations 1 --games 50 --hidden 64 --seed 731294680 \
+  --threads 8 --max-turns 120 --worlds 2 --lr 0.003 \
+  --eps-start 0.06 --eps-final 0.03 --rollout
+```
+
+The base calibration represents 1/120 of stage A. The rollout calibration is
+1/160 of stages B+C together. The preregistered point estimate is therefore
+`120 * base_wall_seconds + 160 * rollout_wall_seconds`; twice that estimate is
+the conservative launch bound. Both calibration sizes are exact multiples of
+the 50-game ordered-pair/play-draw schedule. The production run stays unopened
+unless focused verification passes and the conservative estimate is
+practical.
+
+Exact SPZ-R1 training commands, if licensed by that calibration:
+
+```sh
+test ! -e /private/tmp/spz-r1-a-s731294681.txt
+test ! -e /private/tmp/spz-r1-a-s731294681.txt.ckpt-25.txt
+test ! -e /private/tmp/spz-r1-a-s731294681.txt.ckpt-50.txt
+test ! -e /private/tmp/spz-r1-a-s731294681.txt.ckpt-75.txt
+test ! -e /private/tmp/spz-r1-a-s731294681.txt.ckpt-100.txt
+test ! -e /private/tmp/spz-r1-b-s731294681.txt
+test ! -e /private/tmp/spz-r1-b-s731294681.txt.ckpt-25.txt
+test ! -e /private/tmp/spz-r1-c-s731294681.txt
+test ! -e /private/tmp/spz-r1-c-s731294681.txt.ckpt-25.txt
+
+./build/selfplay-zero train \
+  --out /private/tmp/spz-r1-a-s731294681.txt \
+  --iterations 120 --games 250 --hidden 64 --seed 731294681 \
+  --threads 8 --max-turns 120 --worlds 2 --lr 0.01 \
+  --eps-start 0.30 --eps-final 0.08
+
+./build/selfplay-zero train \
+  --out /private/tmp/spz-r1-b-s731294681.txt \
+  --init /private/tmp/spz-r1-a-s731294681.txt \
+  --iterations 40 --games 100 --hidden 64 --seed 731294682 \
+  --threads 8 --max-turns 120 --worlds 2 --lr 0.01 \
+  --eps-start 0.10 --eps-final 0.04 --rollout
+
+./build/selfplay-zero train \
+  --out /private/tmp/spz-r1-c-s731294681.txt \
+  --init /private/tmp/spz-r1-b-s731294681.txt \
+  --iterations 40 --games 100 --hidden 64 --seed 731294683 \
+  --threads 8 --max-turns 120 --worlds 2 --lr 0.003 \
+  --eps-start 0.06 --eps-final 0.03 --rollout
+```
+
+All unmentioned settings are the checked-in constants: league probability
+0.5, snapshot interval 10, pool size 8, discounted terminal targets, batch
+size 64, replay passes 2.0, and replay capacity 150,000. Stage A is initialized
+from its seed, not any prior model. Stages B/C warm-start only the immediately
+preceding same-run stage. After stage C, record its SHA-256 before any
+evaluation and never retrain or choose among checkpoints.
+
+SPZ-R1 uses 38,000 self-play games versus v6's reported 38,400. Future
+training coordinates cycle all 25 ordered deck pairs and alternate starting
+seat on each repetition. Counts 250/100/100 make every iteration exactly
+balanced by ordered deck pair, physical game seat, and play/draw rather than
+merely balanced in expectation. Mirror self-play has no challenger/baseline
+policy seat. League activation and the physical seat receiving a historical
+snapshot remain seeded stochastic variation and are not claimed exactly
+balanced.
+
+The first strength opening is an exact 2,400-game fixed panel versus
+Handcrafted: seeds `101,202,303,404,505,606,707,808`, each with `--reps 6`,
+`--worlds 4`, `--rollout`, `--max-turns 200`, and `--threads 8`. Six
+repetitions makes each 300-game seed exactly balanced across all five decks,
+both physical game seats, and play/draw; evaluation, unlike mirror training,
+does place distinct SPZ and Handcrafted policies into those seats. Run the
+following command once per listed seed, changing only `SEED`:
+
+```sh
+./build/selfplay-zero benchmark \
+  --model /private/tmp/spz-r1-c-s731294681.txt \
+  --baseline handcrafted --reps 6 --seed SEED \
+  --threads 8 --worlds 4 --max-turns 200 --rollout
+```
+
+The naive independent-game two-sided 5%/80%-power MDE near 50% would be 2.9
+percentage points, but the two seat-swapped games share a pairing seed.
+Treating each two-game pairing as one independent unit gives a conservative
+effective `n=1,200` and MDE of about 4.0 points; no smaller-effect claim will
+be made from this panel. SPZ-R1 passes this first promotion stage only if its
+pooled rate is above 50%, the pooled Wilson 95% lower bound is above 50%, its
+field score when piloting deck `d` is strictly greater than Handcrafted's
+field score when piloting the same deck `d` for all five decks, and every
+evaluation seed is above 50% aggregate. Per-deck and per-seed intervals remain
+descriptive; both requirements are conjunctive gates. Any failure rejects R1
+without C16 evaluation or checkpoint shopping. Passing licenses a separately
+recorded SPZ-vs-C16 panel and implementation of the still-missing SPZ
+mixed-field lift/stability gate; it does not by itself establish “Learned is
+king.”
+
+### SPZ-R1 isolation repair and calibration result
+
+Completed 2026-07-29 without opening Handcrafted, C16, a production training
+seed, or any production checkpoint. `REVIEW.md` was reread after the
+calibration and remained current through its 18:44 PDT cycle.
+
+The exact source audit and focused verification support the engineering
+hypothesis:
+
+- commit `1bf8eaf` removes SPZ's named-Moat branch in favor of
+  `old_school::legal_attackers`; the engine test proves battlefield order,
+  tapped/summoning-sick exclusion, Moat/flying legality, and invalid-seat
+  rejection;
+- deployed `src/selfplay_zero.cpp` now contains no `CardId::...`,
+  `handcrafted_card_value`, Handcrafted policy, or revealed-hand read;
+- for the currently implemented card/action engine, the default
+  Pass-dominance prune is rules-level and action-generic: it contains no
+  card/action-specific case, removes only a strict resource-dominance
+  comparison proved by the current force-settlement procedure, sanitizes
+  hidden zones before comparison, and fails open on any unsettled action; this
+  claim does not extend automatically to future cards or rules;
+- `make -j4 test-selfplay-zero`: **14/14 passed**, including feature and
+  rollout-choice identity under an opponent hidden hand/library repartition,
+  debug-reveal noninterference, exact ordered-pair/play-draw schedule counts,
+  and byte-identical two-iteration artifacts at threads 1 and 8;
+- `./build/old-school-tests`: **185/185 passed**;
+- the focused SPZ suite compiled with `-Wall -Wextra -Wpedantic -Werror
+  -fsanitize=address,undefined` and passed **14/14** with
+  `ASAN_OPTIONS=detect_leaks=0`;
+- `git diff --check` passed.
+
+The training scheduler finding was real: the frozen v6 implementation sampled
+both deck seats independently and was balanced only in expectation. SPZ-R1
+now uses a deterministic global coordinate cycling all 25 ordered pairs and
+alternating starting player per repetition. The production counts frozen
+above make every iteration exactly balanced by ordered deck pair, physical
+game seat, and play/draw. Randomized league activation/snapshot-seat assignment
+is reproducible but not exactly balanced, and no distinct challenger/baseline
+policy-seat claim applies to mirror training.
+
+The calibration output paths were absent before launch. Exact results:
+
+| Calibration | Games | Decisive | Mean turns | New samples | Steps | Wall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| base, seed 731294680 | 250 | 250 | 63.876 | 99,220 | 3,100 | 6.39 s |
+| rollout warm continuation, seed 731294680 | 50 | 50 | 30.020 | 14,493 | 452 | 4.33 s |
+
+The base artifact SHA-256 is
+`3bf9d20662962053aa06b1a0287354601aa0eceaa56bfb556fa556ce5e3d98e1`;
+the rollout calibration artifact SHA-256 is
+`dc650d6376fd7254725afc6fc9ab023479fafd49c876b1d4e029befce17372f2`.
+They are timing artifacts only and cannot be evaluated or promoted.
+
+The preregistered estimate is
+`120 * 6.39 + 160 * 4.33 = 1,459.6 seconds` (**24m19.6s**);
+the conservative 2x launch bound is **2,919.2 seconds (48m39.2s)**. The
+runtime hypothesis passes: the full clean R1 recipe is clearly bounded under
+one hour on this host. The base calibration happened before the added
+threads=1/8 regression was requested; it was timing-only. The rollout
+calibration and this GO followed the passing bit-identity test, and the final
+sanitizer rerun includes that test.
+
+Decision: accept the isolation/scheduler engineering and runtime calibration;
+do not infer strength. The full 38,000-game SPZ-R1 production coordinate and
+all policy benchmarks remain unopened for the owning agent to launch from the
+exact declaration above.
+
 #### FQ0-T0 registered result: valid composite REJECT
 
 Completed 2026-07-27 20:54 PDT from the pushed freeze commit

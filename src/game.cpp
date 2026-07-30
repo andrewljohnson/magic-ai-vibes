@@ -14753,8 +14753,18 @@ double Game::learned_information_set_action_score(
         break;
     case TurnPhase::SecondMain:
         break;
-    case TurnPhase::DeclareAttackers:
     case TurnPhase::DeclareBlockers:
+        // A real post-blockers response window: the continuation cannot see
+        // the declared combat, so it conservatively treats damage as already
+        // settled and finishes the turn from the second main phase.
+        if (const auto score = phase_result_score(
+                simulation.play_priority_window(
+                    true, TurnPhase::SecondMain));
+            score.has_value()) {
+            return *score;
+        }
+        break;
+    case TurnPhase::DeclareAttackers:
     case TurnPhase::DamageOrder:
         throw std::logic_error(
             "priority search started from a declaration phase");
@@ -14938,8 +14948,16 @@ Game::finish_turn_after_priority_phase(TurnPhase phase) {
         break;
     case TurnPhase::SecondMain:
         break;
-    case TurnPhase::DeclareAttackers:
     case TurnPhase::DeclareBlockers:
+        // See the search continuation above: post-blockers roots finish the
+        // turn as if combat damage had already settled.
+        if (const auto result = play_priority_window(
+                true, TurnPhase::SecondMain);
+            result.has_value()) {
+            return result;
+        }
+        break;
+    case TurnPhase::DeclareAttackers:
     case TurnPhase::DamageOrder:
         throw std::logic_error(
             "priority search started from a declaration phase");
@@ -16382,6 +16400,46 @@ std::optional<GameResult> Game::play_combat_with_attackers(
             .attackers = attackers,
             .blocks = declared_blocks,
         });
+    }
+
+    // Both players may respond with instants after blockers are declared
+    // and before combat damage. Responses can remove or alter declared
+    // participants, so combat is re-sanitized before resolution: dead
+    // creatures leave combat and a block whose pairing became illegal is
+    // dropped while its attacker fights on.
+    if (const auto result = play_priority_window(
+            false, TurnPhase::DeclareBlockers);
+        result.has_value()) {
+        return result;
+    }
+    {
+        std::vector<PermanentId> surviving_attackers;
+        surviving_attackers.reserve(attackers.size());
+        for (const PermanentId attacker : attackers) {
+            if (find_creature(attacking_state, attacker) != nullptr) {
+                surviving_attackers.push_back(attacker);
+            }
+        }
+        attackers = std::move(surviving_attackers);
+        for (auto& [attacker_id, blocker_group] : blockers_by_attacker) {
+            const auto* attacker =
+                find_creature(attacking_state, attacker_id);
+            std::vector<PermanentId> surviving_blockers;
+            surviving_blockers.reserve(blocker_group.size());
+            for (const PermanentId blocker_id : blocker_group) {
+                const auto* blocker =
+                    find_creature(defending_state, blocker_id);
+                if (attacker != nullptr && blocker != nullptr &&
+                    !blocker->tapped &&
+                    can_block_creature(*attacker, *blocker)) {
+                    surviving_blockers.push_back(blocker_id);
+                }
+            }
+            blocker_group = std::move(surviving_blockers);
+        }
+    }
+    if (attackers.empty()) {
+        return play_priority_window(false, TurnPhase::EndCombat);
     }
 
     note_learned_priority_macro_phase(

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -353,6 +354,101 @@ SPZ_TEST(pass_dominance_prune_blocks_zero_effect_casts) {
     }
 }
 
+SPZ_TEST(champion_pumps_declared_blocker_in_response_window) {
+    // Post-blockers response window: the defender's Grizzly Bears has
+    // blocked a Hill Giant. Left alone the Bears dies and the Giant lives;
+    // Giant Growth flips the trade. The champion net must find the pump.
+    std::ifstream artifact("data/spz-champion-v6.txt");
+    if (!artifact) {
+        std::cout << "  (skipped: champion artifact not present)\n";
+        return;
+    }
+    const auto net =
+        std::make_shared<const SpzNet>(SpzNet::load(artifact));
+
+    const auto green = green_deck();
+    const auto red = red_deck();
+    GameState state;
+    state.turn_number = 7;
+    state.active_player = 0;  // Red attacks; SPZ defends as player 1.
+    state.starting_player = 0;
+    state.next_permanent_id = 10;
+    const auto remove_one = [](std::vector<CardId>& pool, CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        expect(found != pool.end(), "combat fixture card is in its deck");
+        pool.erase(found);
+    };
+    auto red_pool = red;
+    for (int land = 0; land < 4; ++land) {
+        remove_one(red_pool, CardId::Mountain);
+        state.players[0].lands.push_back({CardId::Mountain, false});
+    }
+    remove_one(red_pool, CardId::HillGiant);
+    state.players[0].creatures.push_back({
+        .id = 1,
+        .card = CardId::HillGiant,
+        .summoning_sick = false,
+    });
+    remove_one(red_pool, CardId::GrayOgre);
+    state.players[0].hand.push_back(CardId::GrayOgre);
+    state.players[0].library = red_pool;
+
+    auto green_pool = green;
+    for (int land = 0; land < 4; ++land) {
+        remove_one(green_pool, CardId::Forest);
+        state.players[1].lands.push_back({CardId::Forest, false});
+    }
+    remove_one(green_pool, CardId::GrizzlyBears);
+    state.players[1].creatures.push_back({
+        .id = 2,
+        .card = CardId::GrizzlyBears,
+        .summoning_sick = false,
+    });
+    remove_one(green_pool, CardId::GiantGrowth);
+    remove_one(green_pool, CardId::Forest);
+    state.players[1].hand.push_back(CardId::GiantGrowth);
+    state.players[1].hand.push_back(CardId::Forest);
+    state.players[1].library = green_pool;
+
+    const std::array<std::vector<CardId>, 2> game_decks = {red, green};
+    SpzPolicyConfig policy;
+    policy.worlds = 2;
+    policy.block_prediction_worlds = 2;
+    policy.rollout = true;
+    policy.seed = 424242;
+    const auto controller =
+        make_spz_controller(net, game_decks, 1, policy);
+
+    const auto observation = observe_game_state(state, 1);
+    controller.observe(observation, {
+        .kind = GameEventKind::AttackersDeclared,
+        .player = 0,
+        .phase = TurnPhase::DeclareAttackers,
+        .attackers = {1},
+    });
+    controller.observe(observation, {
+        .kind = GameEventKind::BlockersDeclared,
+        .player = 1,
+        .phase = TurnPhase::DeclareBlockers,
+        .attackers = {1},
+        .blocks = {{1, 2}},
+    });
+    const auto actions = legal_priority_actions(state, 1, false);
+    bool growth_available = false;
+    for (const auto& action : actions) {
+        growth_available |=
+            action.kind == PriorityActionKind::CastGiantGrowth;
+    }
+    expect(growth_available, "defender can respond with Giant Growth");
+    const std::size_t chosen = controller.choose_priority_action(
+        observation, TurnPhase::DeclareBlockers, actions);
+    expect(actions[chosen].kind == PriorityActionKind::CastGiantGrowth,
+           "champion pumps its blocker in the response window");
+    expect(actions[chosen].target.has_value() &&
+               actions[chosen].target->creature == PermanentId{2},
+           "the pump targets the blocking Grizzly Bears");
+}
+
 SPZ_TEST(recorder_collects_outcome_labeled_rows) {
     const auto net = std::make_shared<const SpzNet>(
         spz_feature_count(), 8, 99);
@@ -382,6 +478,52 @@ SPZ_TEST(recorder_collects_outcome_labeled_rows) {
     }
 }
 
+SPZ_TEST(training_schedule_balances_ordered_decks_and_play_draw) {
+    const auto check_iteration =
+        [](std::size_t iteration, std::size_t games) {
+            std::array<std::array<std::array<std::size_t, 2>,
+                                  kSpzDeckCount>,
+                       kSpzDeckCount>
+                counts{};
+            for (std::size_t game = 0; game < games; ++game) {
+                const SpzTrainingCoordinate coordinate =
+                    spz_training_coordinate(iteration, games, game);
+                expect(coordinate.deck_zero < kSpzDeckCount &&
+                           coordinate.deck_one < kSpzDeckCount,
+                       "training coordinate names valid decks");
+                expect(coordinate.starting_player < 2,
+                       "training coordinate names a valid starting seat");
+                counts[coordinate.deck_zero][coordinate.deck_one]
+                      [coordinate.starting_player] += 1;
+            }
+            const std::size_t expected = games /
+                                         (2 * kSpzDeckCount *
+                                          kSpzDeckCount);
+            for (const auto& first : counts) {
+                for (const auto& second : first) {
+                    expect(second[0] == expected &&
+                               second[1] == expected,
+                           "training iteration is exactly pairing/play-draw "
+                           "balanced");
+                }
+            }
+        };
+    check_iteration(0, 250);
+    check_iteration(1, 100);
+
+    expect(spz_training_coordinate(3, 250, 17) ==
+               spz_training_coordinate(3, 250, 17),
+           "training coordinate is deterministic");
+    bool rejected_bad_index = false;
+    try {
+        static_cast<void>(spz_training_coordinate(0, 25, 25));
+    } catch (const std::out_of_range&) {
+        rejected_bad_index = true;
+    }
+    expect(rejected_bad_index,
+           "training coordinate rejects an out-of-range game");
+}
+
 SPZ_TEST(training_smoke_produces_a_working_net) {
     SpzTrainConfig config;
     config.iterations = 2;
@@ -396,6 +538,37 @@ SPZ_TEST(training_smoke_produces_a_working_net) {
     std::vector<float> probe(spz_feature_count(), 0.1f);
     const double value = net->value(probe);
     expect(value > 0.0 && value < 1.0, "trained net emits probabilities");
+}
+
+SPZ_TEST(training_is_bit_identical_across_thread_counts) {
+    SpzTrainConfig config;
+    config.iterations = 2;
+    config.games_per_iteration = 50;
+    config.hidden = 8;
+    config.seed = 731294679;
+    config.max_turns = 30;
+    config.training_worlds = 1;
+    config.epsilon_start = 0.15;
+    config.epsilon_final = 0.05;
+    config.threads = 1;
+    const auto serial = train_spz(config);
+    config.threads = 8;
+    const auto parallel = train_spz(config);
+
+    std::stringstream serial_artifact;
+    std::stringstream parallel_artifact;
+    serial->save(serial_artifact);
+    parallel->save(parallel_artifact);
+    expect(serial_artifact.str() == parallel_artifact.str(),
+           "training artifact is bit-identical at threads 1 and 8");
+
+    std::vector<float> probe(spz_feature_count(), 0.0f);
+    for (std::size_t index = 0; index < probe.size(); ++index) {
+        probe[index] =
+            static_cast<float>((index * 7U) % 19U) / 19.0f;
+    }
+    expect(serial->value(probe) == parallel->value(probe),
+           "thread-count training values are bit-identical");
 }
 
 SPZ_TEST(benchmark_counts_are_consistent) {

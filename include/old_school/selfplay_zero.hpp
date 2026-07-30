@@ -139,6 +139,26 @@ HumanController make_spz_controller(
 // ---------------------------------------------------------------------------
 // Training
 
+// Deterministic, card-agnostic self-play schedule. Consecutive coordinates
+// cycle through every ordered deck pairing, and consecutive repetitions of a
+// pairing alternate play/draw. A game count divisible by 50 is therefore
+// exactly balanced by ordered deck pairing, physical game seat, and
+// play/draw in every iteration. Mirror training has no challenger/baseline
+// policy seat; randomized league activation and snapshot-seat assignment are
+// seeded stochastic variation, not an exact-balance claim.
+struct SpzTrainingCoordinate {
+    std::size_t deck_zero = 0;
+    std::size_t deck_one = 0;
+    std::size_t pairing_repetition = 0;
+    std::size_t starting_player = 0;
+
+    bool operator==(const SpzTrainingCoordinate&) const = default;
+};
+
+SpzTrainingCoordinate spz_training_coordinate(
+    std::size_t iteration, std::size_t games_per_iteration,
+    std::size_t game_index);
+
 struct SpzTrainConfig {
     std::size_t iterations = 60;
     std::size_t games_per_iteration = 128;

@@ -3364,13 +3364,14 @@ TEST(value_context_challenger_s1_is_deterministic_and_reports_roots) {
         old_school::learned_model_fingerprint(
             original.model());
     // Captured from the inline contextual distance-four target path before
-    // it was routed through n_state_bootstrap_targets.
+    // it was routed through n_state_bootstrap_targets, and re-pinned after
+    // the post-blockers instant response window changed game trajectories.
     CHECK(fingerprint ==
-          "79fd1e93b5a6103fc6b27ff779aeb63f3ba21d9c1aff80b552a7ae78e4cf3b67");
+          "4c552b73c2830494b85b1138e6553b94eac4f9538181d60232351b27460bbe48");
     const old_school::LearnedModelComponentFingerprints
         expected_components = {
             .critic =
-                "b1ff81db63126f3ce68580e1e2ba6f0151b7ab1943bb95f45dbeb455d2bec563",
+                "8b099ca6741fd7b91b5572953a1797ad807f0a21d03287cb89c8a0f13fece833",
             .priority =
                 "82e63faa3724d9909e9215289e38feec7af6cc405e90c0c95ad39e1709efc104",
             .attack =
@@ -7583,23 +7584,21 @@ TEST(priority_macro_transition_runs_attack_block_and_damage_order) {
     CHECK(result.disposition ==
           old_school::LearnedPriorityMacroDisposition::
               PriorityBoundary);
+    // The post-blockers response window is the first real boundary now:
+    // combat damage has not resolved yet.
     CHECK(result.context.phase ==
-          old_school::TurnPhase::EndCombat);
+          old_school::TurnPhase::DeclareBlockers);
     CHECK(result.context.decision_player == 0);
     CHECK(result.context.consecutive_passes == 0);
     CHECK(!result.context.sorcery_actions);
-    CHECK(result.phase_transitions == 4);
+    CHECK(result.phase_transitions == 2);
     CHECK(result.turn_advances == 0);
-    CHECK(result.actions_applied == 4);
+    CHECK(result.actions_applied == 3);
     CHECK(result.priority_actions_applied == 1);
-    CHECK(result.state.players[0].creatures.empty());
-    CHECK(result.state.players[0].graveyard ==
-          std::vector<old_school::CardId>{
-              old_school::CardId::HillGiant});
-    CHECK(result.state.players[1].creatures.size() == 1);
-    CHECK(result.state.players[1].graveyard ==
-          std::vector<old_school::CardId>{
-              old_school::CardId::GrizzlyBears});
+    CHECK(result.state.players[0].creatures.size() == 1);
+    CHECK(result.state.players[0].graveyard.empty());
+    CHECK(result.state.players[1].creatures.size() == 2);
+    CHECK(result.state.players[1].graveyard.empty());
     CHECK(result.state.players[1].life == 1);
     CHECK(result.state.stats[0].decisions == 0);
     CHECK(result.state.stats[1].decisions == 0);

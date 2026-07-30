@@ -550,6 +550,88 @@ struct SpzAgent {
         return unit(rng) < config.epsilon;
     }
 
+    // Declared-but-unresolved combat, learned from the public game events
+    // every seat receives. It supplies post-blockers response windows with
+    // the combat context the observation itself does not carry.
+    struct PendingCombat {
+        std::vector<PermanentId> attackers;
+        std::vector<std::pair<PermanentId, PermanentId>> blocks;
+    };
+    std::optional<PendingCombat> pending_combat;
+
+    void on_event(const GameEvent& event) {
+        switch (event.kind) {
+            case GameEventKind::AttackersDeclared:
+            case GameEventKind::BlockersDeclared:
+            case GameEventKind::DamageOrderChosen:
+                pending_combat =
+                    PendingCombat{event.attackers, event.blocks};
+                break;
+            case GameEventKind::CombatResolved:
+            case GameEventKind::TurnStarted:
+                pending_combat.reset();
+                break;
+            default:
+                break;
+        }
+    }
+
+    static bool creature_on_battlefield(const GameState& state,
+                                        std::size_t player,
+                                        PermanentId id,
+                                        bool require_untapped) {
+        for (const auto& creature : state.players[player].creatures) {
+            if (creature.id == id) {
+                return !require_untapped || !creature.tapped;
+            }
+        }
+        return false;
+    }
+
+    // Resolves the pending combat on `state` the way the engine will after
+    // the response window: dead participants leave combat and a block the
+    // engine would reject is dropped rather than failing the combat.
+    void resolve_pending_combat(GameState& state) const {
+        if (!pending_combat.has_value()) {
+            return;
+        }
+        const std::size_t attacking_player = state.active_player;
+        const std::size_t defender = 1 - attacking_player;
+        std::vector<PermanentId> attackers;
+        for (const PermanentId attacker : pending_combat->attackers) {
+            if (creature_on_battlefield(state, attacking_player, attacker,
+                                        false)) {
+                attackers.push_back(attacker);
+            }
+        }
+        if (attackers.empty()) {
+            return;
+        }
+        std::vector<std::pair<PermanentId, PermanentId>> blocks;
+        for (const auto& block : pending_combat->blocks) {
+            const bool attacker_fighting =
+                std::find(attackers.begin(), attackers.end(),
+                          block.first) != attackers.end();
+            if (attacker_fighting &&
+                creature_on_battlefield(state, defender, block.second,
+                                        true)) {
+                blocks.push_back(block);
+            }
+        }
+        while (true) {
+            GameState trial = state;
+            if (resolve_combat(trial, attacking_player, attackers,
+                               blocks)) {
+                state = std::move(trial);
+                return;
+            }
+            if (blocks.empty()) {
+                return;
+            }
+            blocks.pop_back();
+        }
+    }
+
     // Terminal-aware value of a full state from `perspective`. Terminal
     // detection mirrors the engine's life/failed-draw rules so combat and
     // consequence simulations score wins exactly.
@@ -966,6 +1048,9 @@ struct SpzAgent {
             sampled_worlds.push_back(sample_determinization(
                 reconstructed, decks, seat, rng()));
         }
+        const bool combat_response_window =
+            phase == TurnPhase::DeclareBlockers &&
+            pending_combat.has_value();
         const auto score_action =
             [&](const GameState& sampled, const PriorityAction& action,
                 bool with_rollout) -> double {
@@ -981,6 +1066,21 @@ struct SpzAgent {
                                   consequence->winner) == seat
                                   ? 1.0
                                   : 0.0);
+            }
+            if (combat_response_window) {
+                // Post-blockers response: play the declared combat out on
+                // the resolved consequence before judging the position.
+                GameState post_combat = consequence->state;
+                resolve_pending_combat(post_combat);
+                if (with_rollout) {
+                    const std::size_t combat_active =
+                        post_combat.active_player;
+                    return finish_turn_and_rollout(
+                        std::move(post_combat), TurnPhase::DamageOrder,
+                        {combat_active, 0});
+                }
+                return value_for(post_combat, seat,
+                                 TurnPhase::SecondMain);
             }
             if (with_rollout) {
                 return finish_turn_and_rollout(consequence->state, phase,
@@ -1527,6 +1627,12 @@ HumanController make_spz_controller(
         [agent](const PlayerObservation& observation, std::size_t excess) {
             return agent->choose_cleanup_discards(observation, excess);
         };
+    // Public-event feed: keeps the agent's declared-combat context current
+    // for post-blockers response windows.
+    controller.observe = [agent](const PlayerObservation&,
+                                 const GameEvent& event) {
+        agent->on_event(event);
+    };
     return controller;
 }
 
@@ -1579,6 +1685,34 @@ float outcome_target(const GameResult& result, std::size_t seat,
 
 }  // namespace
 
+SpzTrainingCoordinate spz_training_coordinate(
+    std::size_t iteration, std::size_t games_per_iteration,
+    std::size_t game_index) {
+    if (game_index >= games_per_iteration) {
+        throw std::out_of_range(
+            "SPZ training game index is outside its iteration");
+    }
+    if (games_per_iteration != 0 &&
+        iteration >
+            (std::numeric_limits<std::size_t>::max() - game_index) /
+                games_per_iteration) {
+        throw std::overflow_error(
+            "SPZ training coordinate exceeds size_t");
+    }
+    constexpr std::size_t pairing_count =
+        kSpzDeckCount * kSpzDeckCount;
+    const std::size_t global_game =
+        iteration * games_per_iteration + game_index;
+    const std::size_t pairing = global_game % pairing_count;
+    const std::size_t repetition = global_game / pairing_count;
+    return {
+        .deck_zero = pairing / kSpzDeckCount,
+        .deck_one = pairing % kSpzDeckCount,
+        .pairing_repetition = repetition,
+        .starting_player = repetition % 2,
+    };
+}
+
 std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
     const auto& decks = spz_decks();
     auto net = config.initial_net != nullptr
@@ -1622,10 +1756,13 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
             [&](std::size_t game_index) {
                 std::mt19937_64 game_rng(mix_seed(
                     mix_seed(config.seed, iteration + 1), game_index));
-                const std::size_t deck_zero = game_rng() % kSpzDeckCount;
-                const std::size_t deck_one = game_rng() % kSpzDeckCount;
+                const SpzTrainingCoordinate coordinate =
+                    spz_training_coordinate(
+                        iteration, config.games_per_iteration,
+                        game_index);
                 const std::array<std::vector<CardId>, 2> game_decks = {
-                    decks[deck_zero], decks[deck_one]};
+                    decks[coordinate.deck_zero],
+                    decks[coordinate.deck_one]};
                 GameRecord& record = records[game_index];
                 // League play: sometimes seat an earlier snapshot so the
                 // learner keeps beating past selves, not only its mirror.
@@ -1644,6 +1781,8 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                 }
                 GameConfig game_config;
                 game_config.max_turns = config.max_turns;
+                game_config.starting_player =
+                    coordinate.starting_player;
                 for (std::size_t seat = 0; seat < 2; ++seat) {
                     SpzPolicyConfig policy;
                     policy.worlds = config.training_worlds;
