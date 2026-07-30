@@ -102,6 +102,12 @@ struct SpzPolicyConfig {
     // Zero is the deterministic greedy policy used for evaluation.
     double epsilon = 0.0;
     std::uint64_t seed = 1;
+    // Decision-time lookahead: score root candidates by playing each
+    // determinized world forward with a cheap greedy mirror policy until the
+    // start of the deciding seat's next turn, evaluating the network there.
+    bool rollout = false;
+    // Priority candidates advanced to rollout scoring (myopic preranking).
+    std::size_t rollout_top_k = 5;
 };
 
 // Outcome-labeled training example. Targets are filled in after the game.
@@ -135,6 +141,9 @@ struct SpzTrainConfig {
     std::uint64_t seed = 20260729;
     std::size_t max_turns = 120;
     std::size_t training_worlds = 2;
+    // Generate self-play games with rollout lookahead (slower, stronger
+    // play; used to fine-tune a net toward search-improved targets).
+    bool rollout = false;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
     double learning_rate = 0.01;
@@ -146,6 +155,18 @@ struct SpzTrainConfig {
     // Optional warm start; when set, `hidden` is ignored and training
     // continues from this network's parameters.
     std::shared_ptr<const SpzNet> initial_net;
+    // League play: with this probability a game's second seat is driven by
+    // a uniformly chosen past snapshot instead of the current network,
+    // countering mirror-only self-play drift. Zero restores pure mirrors.
+    double league_probability = 0.5;
+    std::size_t league_snapshot_interval = 10;
+    std::size_t league_pool_size = 8;
+    // Length-discounted outcome targets (the engine's canonical soft label)
+    // instead of raw 0/0.5/1 outcomes.
+    bool discounted_targets = true;
+    // When nonempty, saves "<prefix><iteration>.txt" checkpoints.
+    std::string checkpoint_prefix;
+    std::size_t checkpoint_interval = 25;
     // Optional progress line sink (already newline-free).
     std::function<void(const std::string&)> log;
 };

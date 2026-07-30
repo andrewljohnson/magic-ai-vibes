@@ -571,6 +571,356 @@ struct SpzAgent {
             observe_game_state(state, perspective), decks, phase));
     }
 
+    // ------------------------------------------------------------------
+    // Rollout lookahead: deterministic greedy forward play on a
+    // determinized world until the start of `seat`'s next turn.
+
+    static constexpr int kRolloutDecisionBudget = 300;
+
+    std::optional<double> terminal_value(const GameState& state) const {
+        const bool self_dead = state.players[seat].life <= 0 ||
+                               state.failed_draw[seat];
+        const bool opponent_dead = state.players[1 - seat].life <= 0 ||
+                                   state.failed_draw[1 - seat];
+        if (!self_dead && !opponent_dead) {
+            return std::nullopt;
+        }
+        if (self_dead && opponent_dead) {
+            return 0.5;
+        }
+        return self_dead ? 0.0 : 1.0;
+    }
+
+    static bool moat_on_battlefield(const GameState& state) {
+        for (const PlayerState& player : state.players) {
+            for (const CardId enchantment : player.enchantments) {
+                if (enchantment == CardId::Moat) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static std::vector<PermanentId> eligible_attackers(
+        const GameState& state, std::size_t attacking_player) {
+        const bool moat = moat_on_battlefield(state);
+        std::vector<PermanentId> eligible;
+        for (const auto& creature :
+             state.players[attacking_player].creatures) {
+            if (!creature.tapped && !creature.summoning_sick &&
+                (!moat || card_definition(creature.card).flying)) {
+                eligible.push_back(creature.id);
+            }
+        }
+        return eligible;
+    }
+
+    PriorityAction choose_rollout_priority(
+        const GameState& state, const PriorityState& priority,
+        bool sorcery, TurnPhase phase) const {
+        const auto actions =
+            legal_priority_actions(state, priority.player, sorcery);
+        if (actions.size() <= 1) {
+            return actions.empty() ? PriorityAction::pass() : actions[0];
+        }
+        double best_value = -std::numeric_limits<double>::infinity();
+        PriorityAction chosen = actions[0];
+        for (const PriorityAction& action : actions) {
+            const auto consequence = resolve_priority_action_consequence(
+                state, priority.player, sorcery,
+                std::min(priority.consecutive_passes, 1), action);
+            if (!consequence.has_value()) {
+                continue;
+            }
+            double value = 0.0;
+            if (consequence->terminal) {
+                value = consequence->winner == -1
+                            ? 0.5
+                            : (static_cast<std::size_t>(
+                                   consequence->winner) ==
+                                       priority.player
+                                   ? 1.0
+                                   : 0.0);
+            } else {
+                value = value_for(consequence->state, priority.player,
+                                  phase);
+            }
+            if (value > best_value) {
+                best_value = value;
+                chosen = action;
+            }
+        }
+        return chosen;
+    }
+
+    // Plays one priority window to completion with the greedy mirror
+    // policy. Returns the terminal value when the game ends inside it.
+    std::optional<double> rollout_window(GameState& state, TurnPhase phase,
+                                         bool sorcery,
+                                         PriorityState priority,
+                                         int& budget) const {
+        while (true) {
+            PriorityAction action = PriorityAction::pass();
+            if (budget > 0) {
+                budget -= 1;
+                action = choose_rollout_priority(state, priority, sorcery,
+                                                 phase);
+            }
+            if (action.kind != PriorityActionKind::Pass &&
+                !apply_priority_action(state, priority.player, action,
+                                       sorcery)) {
+                action = PriorityAction::pass();
+            }
+            if (action.kind == PriorityActionKind::Pass) {
+                const PriorityPassResult pass =
+                    pass_priority(state, priority);
+                if (pass == PriorityPassResult::Passed) {
+                    continue;
+                }
+                if (pass == PriorityPassResult::WindowEnded) {
+                    return std::nullopt;
+                }
+                if (const auto terminal = terminal_value(state)) {
+                    return terminal;
+                }
+                continue;
+            }
+            priority.consecutive_passes = 0;
+        }
+    }
+
+    // Myopic greedy attack subset for the current world; shared by rollout
+    // combat and root candidate generation.
+    std::vector<PermanentId> greedy_attack_set(
+        const GameState& state, std::size_t attacking_player,
+        const std::vector<PermanentId>& eligible) const {
+        const auto evaluate_set =
+            [&](const std::vector<PermanentId>& attack_set) -> double {
+            if (attack_set.empty()) {
+                return value_for(state, attacking_player,
+                                 TurnPhase::SecondMain);
+            }
+            const auto blocks = greedy_blocks(state, attacking_player,
+                                              attack_set, nullptr);
+            GameState simulation = state;
+            if (!resolve_combat(simulation, attacking_player, attack_set,
+                                blocks)) {
+                return kIllegalScore;
+            }
+            return value_for(simulation, attacking_player,
+                             TurnPhase::SecondMain);
+        };
+        std::vector<PermanentId> chosen;
+        std::vector<PermanentId> remaining = eligible;
+        double current = evaluate_set(chosen);
+        while (!remaining.empty()) {
+            double best_value = current + kImprovementMargin;
+            std::size_t best_index = remaining.size();
+            for (std::size_t index = 0; index < remaining.size();
+                 ++index) {
+                auto trial = chosen;
+                trial.push_back(remaining[index]);
+                const double trial_value = evaluate_set(trial);
+                if (trial_value > best_value) {
+                    best_value = trial_value;
+                    best_index = index;
+                }
+            }
+            if (best_index == remaining.size()) {
+                break;
+            }
+            chosen.push_back(remaining[best_index]);
+            remaining.erase(remaining.begin() +
+                            static_cast<std::ptrdiff_t>(best_index));
+            current = best_value;
+        }
+        return chosen;
+    }
+
+    std::optional<double> rollout_combat_after_beginning(
+        GameState& state, int& budget) const {
+        const std::size_t attacking_player = state.active_player;
+        const auto eligible = eligible_attackers(state, attacking_player);
+        if (!eligible.empty()) {
+            const auto attack_set =
+                greedy_attack_set(state, attacking_player, eligible);
+            if (!attack_set.empty()) {
+                const auto blocks = greedy_blocks(
+                    state, attacking_player, attack_set, nullptr);
+                if (resolve_combat(state, attacking_player, attack_set,
+                                   blocks)) {
+                    if (const auto terminal = terminal_value(state)) {
+                        return terminal;
+                    }
+                }
+            }
+        }
+        return rollout_window(state, TurnPhase::EndCombat, false,
+                              {state.active_player, 0}, budget);
+    }
+
+    std::optional<double> rollout_combat(GameState& state,
+                                         int& budget) const {
+        if (const auto terminal =
+                rollout_window(state, TurnPhase::BeginCombat, false,
+                               {state.active_player, 0}, budget)) {
+            return terminal;
+        }
+        return rollout_combat_after_beginning(state, budget);
+    }
+
+    // Greedy cleanup discards evaluated on the full state for `player`.
+    std::vector<std::size_t> greedy_discards(const GameState& state,
+                                             std::size_t player,
+                                             std::size_t excess) const {
+        const auto& hand = state.players[player].hand;
+        std::vector<std::size_t> chosen;
+        std::vector<bool> discarded(hand.size(), false);
+        for (std::size_t round = 0; round < excess && round < hand.size();
+             ++round) {
+            double best_value = -std::numeric_limits<double>::infinity();
+            std::size_t best_index = hand.size();
+            for (std::size_t index = 0; index < hand.size(); ++index) {
+                if (discarded[index]) {
+                    continue;
+                }
+                GameState trial = state;
+                std::vector<CardId> remaining;
+                for (std::size_t position = 0; position < hand.size();
+                     ++position) {
+                    if (!discarded[position] && position != index) {
+                        remaining.push_back(hand[position]);
+                    }
+                }
+                trial.players[player].hand = std::move(remaining);
+                trial.players[player].graveyard.push_back(hand[index]);
+                const double value =
+                    value_for(trial, player, TurnPhase::SecondMain);
+                if (value > best_value) {
+                    best_value = value;
+                    best_index = index;
+                }
+            }
+            if (best_index == hand.size()) {
+                break;
+            }
+            discarded[best_index] = true;
+            chosen.push_back(best_index);
+        }
+        std::sort(chosen.begin(), chosen.end());
+        return chosen;
+    }
+
+    void rollout_cleanup(GameState& state) const {
+        const auto& hand = state.players[state.active_player].hand;
+        std::vector<std::size_t> discards;
+        if (hand.size() > kMaximumHandSize) {
+            discards = greedy_discards(state, state.active_player,
+                                       hand.size() - kMaximumHandSize);
+        }
+        cleanup_turn(state, state.active_player, discards);
+    }
+
+    // Completes the current turn from `entry_phase` (resuming its priority
+    // window when applicable), then plays full turns until `seat` would
+    // receive its next turn; evaluates the network at that boundary.
+    // Combat-decision roots pass a combat phase and a state where combat
+    // has already been resolved.
+    double finish_turn_and_rollout(GameState state, TurnPhase entry_phase,
+                                   PriorityState resume) const {
+        if (const auto terminal = terminal_value(state)) {
+            return *terminal;
+        }
+        int budget = kRolloutDecisionBudget;
+        const auto run_second_main =
+            [&](GameState& current) -> std::optional<double> {
+            return rollout_window(current, TurnPhase::SecondMain, true,
+                                  {current.active_player, 0}, budget);
+        };
+        std::optional<double> terminal;
+        switch (entry_phase) {
+            case TurnPhase::FirstMain:
+                terminal = rollout_window(state, TurnPhase::FirstMain,
+                                          true, resume, budget);
+                if (!terminal) {
+                    terminal = rollout_combat(state, budget);
+                }
+                if (!terminal) {
+                    terminal = run_second_main(state);
+                }
+                break;
+            case TurnPhase::BeginCombat:
+                terminal = rollout_window(state, TurnPhase::BeginCombat,
+                                          false, resume, budget);
+                if (!terminal) {
+                    terminal =
+                        rollout_combat_after_beginning(state, budget);
+                }
+                if (!terminal) {
+                    terminal = run_second_main(state);
+                }
+                break;
+            case TurnPhase::EndCombat:
+                terminal = rollout_window(state, TurnPhase::EndCombat,
+                                          false, resume, budget);
+                if (!terminal) {
+                    terminal = run_second_main(state);
+                }
+                break;
+            case TurnPhase::SecondMain:
+                terminal = rollout_window(state, TurnPhase::SecondMain,
+                                          true, resume, budget);
+                break;
+            default:
+                // Combat decision roots: combat already resolved.
+                terminal = rollout_window(state, TurnPhase::EndCombat,
+                                          false,
+                                          {state.active_player, 0},
+                                          budget);
+                if (!terminal) {
+                    terminal = run_second_main(state);
+                }
+                break;
+        }
+        if (terminal) {
+            return *terminal;
+        }
+        rollout_cleanup(state);
+
+        // Time Walk chains permit a few consecutive turns by one player.
+        for (int guard = 0; guard < 4; ++guard) {
+            if (state.turn_number >= 500) {
+                break;
+            }
+            state.turn_number += 1;
+            advance_turn_player(state);
+            begin_turn(state, state.active_player);
+            auto& active = state.players[state.active_player];
+            if (active.library.empty()) {
+                return state.active_player == seat ? 0.0 : 1.0;
+            }
+            active.hand.push_back(active.library.back());
+            active.library.pop_back();
+            if (state.active_player == seat) {
+                return value_for(state, seat, TurnPhase::FirstMain);
+            }
+            terminal = rollout_window(state, TurnPhase::FirstMain, true,
+                                      {state.active_player, 0}, budget);
+            if (!terminal) {
+                terminal = rollout_combat(state, budget);
+            }
+            if (!terminal) {
+                terminal = run_second_main(state);
+            }
+            if (terminal) {
+                return *terminal;
+            }
+            rollout_cleanup(state);
+        }
+        return value_for(state, seat, TurnPhase::FirstMain);
+    }
+
     void record(const PlayerObservation& observation, TurnPhase phase) {
         if (recorder != nullptr) {
             recorder->feature_rows.push_back(
@@ -605,31 +955,69 @@ struct SpzAgent {
              phase == TurnPhase::SecondMain) &&
             observation.active_player == observation.observer;
         const std::size_t worlds = std::max<std::size_t>(1, config.worlds);
-        std::vector<double> totals(actions.size(), 0.0);
+        std::vector<GameState> sampled_worlds;
+        sampled_worlds.reserve(worlds);
         for (std::size_t world = 0; world < worlds; ++world) {
-            const GameState sampled = sample_determinization(
-                reconstructed, decks, seat, rng());
-            for (std::size_t index = 0; index < actions.size(); ++index) {
-                const auto consequence =
-                    resolve_priority_action_consequence(
-                        sampled, seat, sorcery_actions, 0, actions[index]);
-                if (!consequence.has_value()) {
-                    totals[index] += kIllegalScore;
-                    continue;
-                }
-                if (consequence->terminal) {
-                    totals[index] +=
-                        consequence->winner == -1
-                            ? 0.5
-                            : (static_cast<std::size_t>(
-                                   consequence->winner) == seat
-                                   ? 1.0
-                                   : 0.0);
-                    continue;
-                }
-                totals[index] +=
-                    value_for(consequence->state, seat, phase);
+            sampled_worlds.push_back(sample_determinization(
+                reconstructed, decks, seat, rng()));
+        }
+        const auto score_action =
+            [&](const GameState& sampled, const PriorityAction& action,
+                bool with_rollout) -> double {
+            const auto consequence = resolve_priority_action_consequence(
+                sampled, seat, sorcery_actions, 0, action);
+            if (!consequence.has_value()) {
+                return kIllegalScore;
             }
+            if (consequence->terminal) {
+                return consequence->winner == -1
+                           ? 0.5
+                           : (static_cast<std::size_t>(
+                                  consequence->winner) == seat
+                                  ? 1.0
+                                  : 0.0);
+            }
+            if (with_rollout) {
+                return finish_turn_and_rollout(consequence->state, phase,
+                                               consequence->priority);
+            }
+            return value_for(consequence->state, seat, phase);
+        };
+        std::vector<double> totals(actions.size(), 0.0);
+        for (const GameState& sampled : sampled_worlds) {
+            for (std::size_t index = 0; index < actions.size(); ++index) {
+                totals[index] += score_action(sampled, actions[index],
+                                              false);
+            }
+        }
+        if (config.rollout) {
+            // Rollout-rescore the myopically strongest candidates.
+            std::vector<std::size_t> order(actions.size());
+            for (std::size_t index = 0; index < order.size(); ++index) {
+                order[index] = index;
+            }
+            std::stable_sort(order.begin(), order.end(),
+                             [&](std::size_t left, std::size_t right) {
+                                 return totals[left] > totals[right];
+                             });
+            const std::size_t candidates = std::min(
+                std::max<std::size_t>(config.rollout_top_k, 2),
+                order.size());
+            std::vector<double> rollout_totals(actions.size(),
+                                               kIllegalScore);
+            for (std::size_t rank = 0; rank < candidates; ++rank) {
+                const std::size_t index = order[rank];
+                if (totals[index] <=
+                    kIllegalScore * static_cast<double>(worlds) / 2.0) {
+                    continue;
+                }
+                double total = 0.0;
+                for (const GameState& sampled : sampled_worlds) {
+                    total += score_action(sampled, actions[index], true);
+                }
+                rollout_totals[index] = total;
+            }
+            totals = std::move(rollout_totals);
         }
         const std::size_t best = static_cast<std::size_t>(
             std::max_element(totals.begin(), totals.end()) -
@@ -748,29 +1136,64 @@ struct SpzAgent {
         }
 
         const auto evaluate_set =
-            [&](const std::vector<PermanentId>& attack_set) -> double {
-            if (attack_set.empty()) {
-                return value_for(reconstructed, seat,
-                                 TurnPhase::SecondMain);
-            }
+            [&](const std::vector<PermanentId>& attack_set,
+                bool with_rollout) -> double {
             double total = 0.0;
             for (const GameState& world : sampled_worlds) {
-                const auto predicted_blocks =
-                    greedy_blocks(world, seat, attack_set, nullptr);
                 GameState simulation = world;
-                if (!resolve_combat(simulation, seat, attack_set,
-                                    predicted_blocks)) {
-                    return kIllegalScore;
+                if (!attack_set.empty()) {
+                    const auto predicted_blocks = greedy_blocks(
+                        world, seat, attack_set, nullptr);
+                    if (!resolve_combat(simulation, seat, attack_set,
+                                        predicted_blocks)) {
+                        return kIllegalScore;
+                    }
                 }
-                total +=
-                    value_for(simulation, seat, TurnPhase::SecondMain);
+                if (with_rollout) {
+                    total += finish_turn_and_rollout(
+                        std::move(simulation),
+                        TurnPhase::DeclareAttackers, {seat, 0});
+                } else if (attack_set.empty()) {
+                    total += value_for(world, seat,
+                                       TurnPhase::SecondMain);
+                } else {
+                    total += value_for(simulation, seat,
+                                       TurnPhase::SecondMain);
+                }
             }
             return total / static_cast<double>(worlds);
         };
 
+        if (config.rollout) {
+            // Candidate sets: no attack, the myopic greedy set, and all-in.
+            std::vector<std::vector<PermanentId>> candidates;
+            candidates.push_back({});
+            const auto greedy_set =
+                greedy_attack_set(sampled_worlds.front(), seat, eligible);
+            if (!greedy_set.empty()) {
+                candidates.push_back(greedy_set);
+            }
+            if (eligible.size() > greedy_set.size()) {
+                candidates.push_back(eligible);
+            }
+            double best_value =
+                -std::numeric_limits<double>::infinity();
+            std::size_t best_candidate = 0;
+            for (std::size_t index = 0; index < candidates.size();
+                 ++index) {
+                const double value =
+                    evaluate_set(candidates[index], true);
+                if (value > best_value) {
+                    best_value = value;
+                    best_candidate = index;
+                }
+            }
+            return candidates[best_candidate];
+        }
+
         std::vector<PermanentId> chosen;
         std::vector<PermanentId> remaining = eligible;
-        double current = evaluate_set(chosen);
+        double current = evaluate_set(chosen, false);
         while (!remaining.empty()) {
             double best_value = current + kImprovementMargin;
             std::size_t best_index = remaining.size();
@@ -778,7 +1201,7 @@ struct SpzAgent {
                  ++index) {
                 auto trial = chosen;
                 trial.push_back(remaining[index]);
-                const double trial_value = evaluate_set(trial);
+                const double trial_value = evaluate_set(trial, false);
                 if (trial_value > best_value) {
                     best_value = trial_value;
                     best_index = index;
@@ -823,6 +1246,52 @@ struct SpzAgent {
                 return random_blocks;
             }
             return {};
+        }
+        if (config.rollout) {
+            // Compare the myopic greedy assignment against declining to
+            // block, judged by where the whole turn cycle actually lands.
+            const auto greedy = greedy_blocks(
+                reconstructed, attacking_player, attackers, &choices);
+            std::vector<std::vector<std::pair<PermanentId, PermanentId>>>
+                candidates;
+            candidates.push_back(greedy);
+            if (!greedy.empty()) {
+                candidates.push_back({});
+            }
+            const std::size_t worlds = std::max<std::size_t>(
+                1, config.block_prediction_worlds);
+            std::vector<GameState> sampled_worlds;
+            sampled_worlds.reserve(worlds);
+            for (std::size_t world = 0; world < worlds; ++world) {
+                sampled_worlds.push_back(sample_determinization(
+                    reconstructed, decks, seat, rng()));
+            }
+            double best_value =
+                -std::numeric_limits<double>::infinity();
+            std::size_t best_candidate = 0;
+            for (std::size_t index = 0; index < candidates.size();
+                 ++index) {
+                double total = 0.0;
+                bool legal = true;
+                for (const GameState& world : sampled_worlds) {
+                    GameState simulation = world;
+                    if (!resolve_combat(simulation, attacking_player,
+                                        attackers,
+                                        candidates[index])) {
+                        legal = false;
+                        break;
+                    }
+                    total += finish_turn_and_rollout(
+                        std::move(simulation),
+                        TurnPhase::DeclareBlockers,
+                        {attacking_player, 0});
+                }
+                if (legal && total > best_value) {
+                    best_value = total;
+                    best_candidate = index;
+                }
+            }
+            return candidates[best_candidate];
         }
         // Block evaluation reads only public zones and the observer's own
         // hand, so a single reconstructed world is exact.
@@ -993,7 +1462,12 @@ void run_indexed_jobs(std::size_t job_count, std::size_t threads,
     }
 }
 
-float outcome_target(const GameResult& result, std::size_t seat) {
+float outcome_target(const GameResult& result, std::size_t seat,
+                     bool discounted) {
+    if (discounted) {
+        return static_cast<float>(
+            learned_discounted_terminal_target(result, seat));
+    }
     if (result.winner == -1) {
         return 0.5f;
     }
@@ -1012,6 +1486,7 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
     replay.reserve(std::min<std::size_t>(config.replay_capacity, 1 << 20));
     std::size_t replay_cursor = 0;
     std::mt19937_64 trainer_rng(mix_seed(config.seed, 0xABCDEF));
+    std::vector<std::shared_ptr<const SpzNet>> league_pool;
 
     struct GameRecord {
         SpzRecorder recorders[2];
@@ -1031,6 +1506,13 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
             (config.epsilon_final - config.epsilon_start) * progress;
 
         auto frozen = std::make_shared<const SpzNet>(*net);
+        if (config.league_snapshot_interval > 0 &&
+            iteration % config.league_snapshot_interval == 0) {
+            league_pool.push_back(frozen);
+            if (league_pool.size() > config.league_pool_size) {
+                league_pool.erase(league_pool.begin());
+            }
+        }
         std::vector<GameRecord> records(config.games_per_iteration);
         run_indexed_jobs(
             config.games_per_iteration, config.threads,
@@ -1042,6 +1524,21 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                 const std::array<std::vector<CardId>, 2> game_decks = {
                     decks[deck_zero], decks[deck_one]};
                 GameRecord& record = records[game_index];
+                // League play: sometimes seat an earlier snapshot so the
+                // learner keeps beating past selves, not only its mirror.
+                std::array<std::shared_ptr<const SpzNet>, 2> seat_nets = {
+                    frozen, frozen};
+                std::array<bool, 2> record_seat = {true, true};
+                std::uniform_real_distribution<double> unit(0.0, 1.0);
+                if (!league_pool.empty() &&
+                    unit(game_rng) < config.league_probability) {
+                    const std::size_t snapshot =
+                        game_rng() % league_pool.size();
+                    const std::size_t league_seat = game_rng() % 2;
+                    seat_nets[league_seat] = league_pool[snapshot];
+                    // Snapshot trajectories are still true outcome-labeled
+                    // observations, so both seats keep recording.
+                }
                 GameConfig game_config;
                 game_config.max_turns = config.max_turns;
                 for (std::size_t seat = 0; seat < 2; ++seat) {
@@ -1049,11 +1546,13 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                     policy.worlds = config.training_worlds;
                     policy.block_prediction_worlds = config.training_worlds;
                     policy.epsilon = epsilon;
+                    policy.rollout = config.rollout;
                     policy.seed = game_rng();
                     game_config.human_controllers[seat] =
-                        make_spz_controller(frozen, game_decks, seat,
-                                            policy,
-                                            &record.recorders[seat]);
+                        make_spz_controller(
+                            seat_nets[seat], game_decks, seat, policy,
+                            record_seat[seat] ? &record.recorders[seat]
+                                              : nullptr);
                 }
                 Game game(game_decks[0], game_decks[1], game_rng(),
                           game_config);
@@ -1068,8 +1567,8 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
             decisive += record.result.winner == -1 ? 0 : 1;
             total_turns += record.turns;
             for (std::size_t seat = 0; seat < 2; ++seat) {
-                const float target =
-                    outcome_target(record.result, seat);
+                const float target = outcome_target(
+                    record.result, seat, config.discounted_targets);
                 for (const auto& row :
                      record.recorders[seat].feature_rows) {
                     SpzSample sample{row, target};
@@ -1128,6 +1627,13 @@ std::shared_ptr<SpzNet> train_spz(const SpzTrainConfig& config) {
                  << replay.size() << " steps " << steps << " loss "
                  << std::setprecision(4) << mean_loss;
             config.log(line.str());
+        }
+        if (!config.checkpoint_prefix.empty() &&
+            config.checkpoint_interval > 0 &&
+            (iteration + 1) % config.checkpoint_interval == 0) {
+            save_spz_net(*net, config.checkpoint_prefix +
+                                   std::to_string(iteration + 1) +
+                                   ".txt");
         }
     }
     return net;

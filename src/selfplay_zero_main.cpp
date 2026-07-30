@@ -39,6 +39,7 @@ struct Arguments {
     std::size_t max_turns = 0;  // 0 selects the per-command default.
     std::size_t worlds = 0;     // 0 selects the per-command default.
     std::size_t reps = 20;
+    bool rollout = false;
     double learning_rate = 0.01;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
@@ -83,6 +84,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.worlds = std::stoull(next());
         } else if (flag == "--reps") {
             arguments.reps = std::stoull(next());
+        } else if (flag == "--rollout") {
+            arguments.rollout = true;
         } else if (flag == "--lr") {
             arguments.learning_rate = std::stod(next());
         } else if (flag == "--eps-start") {
@@ -116,10 +119,12 @@ int run_train(const Arguments& arguments) {
     if (arguments.worlds != 0) {
         config.training_worlds = arguments.worlds;
     }
+    config.rollout = arguments.rollout;
     if (!arguments.init.empty()) {
         config.initial_net = std::make_shared<const SpzNet>(
             load_spz_net(arguments.init));
     }
+    config.checkpoint_prefix = arguments.out + ".ckpt-";
     config.log = [](const std::string& line) {
         std::cout << line << std::endl;
     };
@@ -149,6 +154,7 @@ int run_benchmark(const Arguments& arguments) {
     SpzPolicyConfig policy;
     policy.worlds = arguments.worlds == 0 ? 4 : arguments.worlds;
     policy.block_prediction_worlds = policy.worlds;
+    policy.rollout = arguments.rollout;
     const std::size_t max_turns =
         arguments.max_turns == 0 ? 200 : arguments.max_turns;
     const auto result = run_spz_benchmark(

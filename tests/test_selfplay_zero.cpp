@@ -169,6 +169,35 @@ SPZ_TEST(controller_plays_complete_legal_games) {
     }
 }
 
+SPZ_TEST(rollout_controller_plays_complete_legal_games) {
+    const auto net = std::make_shared<const SpzNet>(
+        spz_feature_count(), 8, 20260730);
+    for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {
+        const std::array<std::vector<CardId>, 2> game_decks = {
+            spz_decks()[deck],
+            spz_decks()[(deck + 2) % kSpzDeckCount]};
+        std::vector<GameResult> results;
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            GameConfig config;
+            config.max_turns = 25;
+            for (std::size_t seat = 0; seat < 2; ++seat) {
+                SpzPolicyConfig policy;
+                policy.worlds = 1;
+                policy.block_prediction_worlds = 1;
+                policy.rollout = true;
+                policy.rollout_top_k = 3;
+                policy.seed = 21 + seat;
+                config.human_controllers[seat] = make_spz_controller(
+                    net, game_decks, seat, policy);
+            }
+            Game game(game_decks[0], game_decks[1], 4243 + deck, config);
+            results.push_back(game.run());
+        }
+        expect(results[0] == results[1],
+               "rollout policy replays identically for identical seeds");
+    }
+}
+
 SPZ_TEST(recorder_collects_outcome_labeled_rows) {
     const auto net = std::make_shared<const SpzNet>(
         spz_feature_count(), 8, 99);
