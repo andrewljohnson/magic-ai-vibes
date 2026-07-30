@@ -112,6 +112,14 @@ struct SpzPolicyConfig {
     // through before evaluating. 1 stops at the seat's next turn start; 2
     // additionally plays that turn and the following opponent turn.
     std::size_t rollout_turn_cycles = 1;
+    // Priority-decision search mode. GreedyRollout is the deployed champion
+    // behavior. Ismcts searches a per-world tree over both players' priority
+    // decisions (combat stays on the greedy machinery) with value-net
+    // leaves, myopic priors, and PUCT selection.
+    enum class Search : std::uint8_t { GreedyRollout, Ismcts };
+    Search search = Search::GreedyRollout;
+    // Total tree simulations per decision, split across the sampled worlds.
+    std::size_t ismcts_iterations = 160;
     // Rules-only prune of real-root priority actions that are strictly
     // dominated by Pass (identical settled state, strictly more of the
     // actor's resources consumed) — e.g. an X=0 Braingeyser. No card
@@ -232,11 +240,15 @@ struct SpzBenchmarkResult {
 // baseline engine bot. Every (spz deck, opponent deck, repetition) triple
 // plays two games with identical seed and identical SPZ play/draw role,
 // swapping only the seats. Draws count half a win in the Wilson bound.
+// When `baseline_spz_policy` is set the baseline seat is driven by a second
+// SPZ controller (same net, that policy) instead of an engine bot — the
+// contender-versus-champion gate.
 SpzBenchmarkResult run_spz_benchmark(
     std::shared_ptr<const SpzNet> net, BotKind baseline,
     std::size_t repetitions_per_pairing, std::uint64_t seed,
     const SpzPolicyConfig& policy, std::size_t max_turns = 200,
     std::size_t threads = 1,
-    const std::function<void(const std::string&)>& log = {});
+    const std::function<void(const std::string&)>& log = {},
+    const SpzPolicyConfig* baseline_spz_policy = nullptr);
 
 }  // namespace old_school::selfplay_zero

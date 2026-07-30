@@ -1199,6 +1199,472 @@ struct SpzAgent {
         return value_for(state, seat, TurnPhase::FirstMain);
     }
 
+    // ------------------------------------------------------------------
+    // ISMCTS: per-world PUCT trees over both players' priority decisions.
+    //
+    // Tree moves are priority actions (including Pass); combat declarations,
+    // damage, discards, and turn structure advance through the same greedy
+    // machinery the rollout uses. Every tree position is normalized to a
+    // real decision point (two or more legal actions), a terminal, or the
+    // value-net horizon at the deciding seat's future turn start.
+
+    enum class TreeStage : std::uint8_t {
+        Main1,
+        BeginCombatWindow,
+        DeclareBlockersWindow,
+        EndCombatWindow,
+        Main2,
+    };
+
+    struct TreePosition {
+        GameState state;
+        TreeStage stage = TreeStage::Main1;
+        TurnPhase phase = TurnPhase::FirstMain;
+        bool sorcery = false;
+        PriorityState priority;
+        std::optional<PendingCombat> declared;
+        std::size_t seat_turn_starts_remaining = 1;
+        std::optional<double> terminal;  // seat perspective
+        bool horizon = false;
+    };
+
+    static TurnPhase stage_phase(TreeStage stage) {
+        switch (stage) {
+            case TreeStage::Main1:
+                return TurnPhase::FirstMain;
+            case TreeStage::BeginCombatWindow:
+                return TurnPhase::BeginCombat;
+            case TreeStage::DeclareBlockersWindow:
+                return TurnPhase::DeclareBlockers;
+            case TreeStage::EndCombatWindow:
+                return TurnPhase::EndCombat;
+            case TreeStage::Main2:
+                return TurnPhase::SecondMain;
+        }
+        return TurnPhase::FirstMain;
+    }
+
+    void open_window(TreePosition& position, TreeStage stage) const {
+        position.stage = stage;
+        position.phase = stage_phase(stage);
+        position.sorcery = stage == TreeStage::Main1 ||
+                           stage == TreeStage::Main2;
+        position.priority = {position.state.active_player, 0};
+    }
+
+    void set_terminal_from_state(TreePosition& position) const {
+        position.terminal = terminal_value(position.state);
+    }
+
+    // Advances past the end of the current window to the next window,
+    // terminal, or horizon, mirroring the engine turn structure.
+    void advance_after_window_end(TreePosition& position) const {
+        switch (position.stage) {
+            case TreeStage::Main1: {
+                open_window(position, TreeStage::BeginCombatWindow);
+                return;
+            }
+            case TreeStage::BeginCombatWindow: {
+                const std::size_t attacker =
+                    position.state.active_player;
+                const auto eligible = old_school::legal_attackers(
+                    position.state, attacker);
+                std::vector<PermanentId> attack_set;
+                if (!eligible.empty()) {
+                    attack_set = greedy_attack_set(position.state,
+                                                   attacker, eligible);
+                }
+                if (attack_set.empty()) {
+                    position.declared.reset();
+                    open_window(position, TreeStage::EndCombatWindow);
+                    return;
+                }
+                const auto blocks = greedy_blocks(
+                    position.state, attacker, attack_set, nullptr);
+                position.declared = PendingCombat{attack_set, blocks};
+                open_window(position, TreeStage::DeclareBlockersWindow);
+                return;
+            }
+            case TreeStage::DeclareBlockersWindow: {
+                if (position.declared.has_value()) {
+                    resolve_declared_combat(position.state,
+                                            *position.declared);
+                    position.declared.reset();
+                    set_terminal_from_state(position);
+                    if (position.terminal.has_value()) {
+                        return;
+                    }
+                }
+                open_window(position, TreeStage::EndCombatWindow);
+                return;
+            }
+            case TreeStage::EndCombatWindow: {
+                open_window(position, TreeStage::Main2);
+                return;
+            }
+            case TreeStage::Main2: {
+                rollout_cleanup(position.state);
+                if (position.state.turn_number >= 500) {
+                    position.horizon = true;
+                    return;
+                }
+                position.state.turn_number += 1;
+                advance_turn_player(position.state);
+                begin_turn(position.state,
+                           position.state.active_player);
+                auto& active = position.state.players[
+                    position.state.active_player];
+                if (active.library.empty()) {
+                    position.terminal =
+                        position.state.active_player == seat ? 0.0 : 1.0;
+                    return;
+                }
+                active.hand.push_back(active.library.back());
+                active.library.pop_back();
+                if (position.state.active_player == seat) {
+                    position.seat_turn_starts_remaining -= 1;
+                    if (position.seat_turn_starts_remaining == 0) {
+                        position.phase = TurnPhase::FirstMain;
+                        position.horizon = true;
+                        return;
+                    }
+                }
+                open_window(position, TreeStage::Main1);
+                return;
+            }
+        }
+    }
+
+    // Auto-plays forced passes until the position is a decision point with
+    // at least two legal actions, a terminal, or the horizon.
+    // Normalizes to the deciding seat's next real choice. Forced passes
+    // auto-play, and the opponent's decisions are played by the greedy
+    // policy rather than branching the tree: a determinized tree that lets
+    // the opponent respond optimally per world plays them as clairvoyant,
+    // which measurably poisons the search.
+    void normalize_position(TreePosition& position) const {
+        for (int guard = 0; guard < 400; ++guard) {
+            if (position.terminal.has_value() || position.horizon) {
+                return;
+            }
+            const auto actions = legal_priority_actions(
+                position.state, position.priority.player,
+                position.sorcery);
+            PriorityAction forced = PriorityAction::pass();
+            if (actions.size() > 1) {
+                if (position.priority.player == seat) {
+                    return;
+                }
+                forced = choose_rollout_priority(
+                    position.state, position.priority,
+                    position.sorcery, position.phase);
+            }
+            if (forced.kind != PriorityActionKind::Pass &&
+                apply_priority_action(position.state,
+                                      position.priority.player, forced,
+                                      position.sorcery)) {
+                position.priority.consecutive_passes = 0;
+                continue;
+            }
+            const PriorityPassResult pass =
+                pass_priority(position.state, position.priority);
+            if (pass == PriorityPassResult::WindowEnded) {
+                advance_after_window_end(position);
+            } else if (pass ==
+                       PriorityPassResult::StackObjectResolved) {
+                set_terminal_from_state(position);
+            }
+        }
+        position.horizon = true;
+    }
+
+    TreePosition advance_with_action(const TreePosition& parent,
+                                     const PriorityAction& action) const {
+        TreePosition next = parent;
+        if (action.kind == PriorityActionKind::Pass ||
+            !apply_priority_action(next.state, next.priority.player,
+                                   action, next.sorcery)) {
+            const PriorityPassResult pass =
+                pass_priority(next.state, next.priority);
+            if (pass == PriorityPassResult::WindowEnded) {
+                advance_after_window_end(next);
+            } else if (pass ==
+                       PriorityPassResult::StackObjectResolved) {
+                set_terminal_from_state(next);
+            }
+        } else {
+            next.priority.consecutive_passes = 0;
+        }
+        normalize_position(next);
+        return next;
+    }
+
+    // Champion-strength leaf evaluation: greedy playout from a normalized
+    // tree position to the horizon, using the same window/combat machinery
+    // as the deployed rollout.
+    double playout_from_position(TreePosition position) const {
+        int budget = kRolloutDecisionBudget;
+        for (int guard = 0; guard < 40; ++guard) {
+            if (position.terminal.has_value()) {
+                return *position.terminal;
+            }
+            if (position.horizon) {
+                return value_for(position.state, seat, position.phase);
+            }
+            const auto terminal = rollout_window(
+                position.state, position.phase, position.sorcery,
+                position.priority, budget);
+            if (terminal.has_value()) {
+                return *terminal;
+            }
+            advance_after_window_end(position);
+        }
+        return value_for(position.state, seat, position.phase);
+    }
+
+    struct IsmctsNode {
+        TreePosition position;
+        bool expanded = false;
+        double state_value = 0.5;  // seat perspective, net estimate
+        std::vector<PriorityAction> actions;
+        std::vector<double> priors;
+        std::vector<int> child_visits;
+        std::vector<double> child_value_sums;  // seat perspective
+        std::vector<std::unique_ptr<IsmctsNode>> children;
+    };
+
+    static void softmax_priors(std::vector<double>& scores) {
+        constexpr double kTemperature = 0.04;
+        double best = -std::numeric_limits<double>::infinity();
+        for (const double score : scores) {
+            best = std::max(best, score);
+        }
+        double total = 0.0;
+        for (double& score : scores) {
+            score = std::exp((score - best) / kTemperature);
+            total += score;
+        }
+        for (double& score : scores) {
+            score /= total;
+        }
+    }
+
+    // Expands `node`: legal actions minus no-upside waste, myopic priors
+    // from the acting player's perspective, and the node's own net value.
+    // Returns the seat-perspective estimate for backpropagation.
+    double expand_node(IsmctsNode& node) const {
+        const TreePosition& position = node.position;
+        node.expanded = true;
+        node.state_value = playout_from_position(position);
+        auto actions = legal_priority_actions(
+            position.state, position.priority.player,
+            position.sorcery);
+        const auto pass_settled = resolve_priority_action_consequence(
+            position.state, position.priority.player, position.sorcery,
+            std::min(position.priority.consecutive_passes, 1),
+            PriorityAction::pass());
+        std::vector<double> scores;
+        for (const PriorityAction& action : actions) {
+            const auto consequence = resolve_priority_action_consequence(
+                position.state, position.priority.player,
+                position.sorcery,
+                std::min(position.priority.consecutive_passes, 1),
+                action);
+            if (!consequence.has_value()) {
+                continue;
+            }
+            if (action.kind != PriorityActionKind::Pass &&
+                pass_settled.has_value() &&
+                no_upside_versus_pass(position.priority.player,
+                                      *consequence, *pass_settled)) {
+                continue;
+            }
+            double score = 0.0;
+            if (consequence->terminal) {
+                score = consequence->winner == -1
+                            ? 0.5
+                            : (static_cast<std::size_t>(
+                                   consequence->winner) ==
+                                       position.priority.player
+                                   ? 1.0
+                                   : 0.0);
+            } else {
+                score = value_for(consequence->state,
+                                  position.priority.player,
+                                  position.phase);
+            }
+            node.actions.push_back(action);
+            scores.push_back(score);
+        }
+        if (node.actions.empty()) {
+            node.actions.push_back(PriorityAction::pass());
+            scores.push_back(0.5);
+        }
+        softmax_priors(scores);
+        node.priors = std::move(scores);
+        node.child_visits.assign(node.actions.size(), 0);
+        node.child_value_sums.assign(node.actions.size(), 0.0);
+        node.children.resize(node.actions.size());
+        return node.state_value;
+    }
+
+    std::size_t puct_select(const IsmctsNode& node) const {
+        constexpr double kPuct = 1.5;
+        constexpr double kFirstPlayPenalty = 0.1;
+        const std::size_t actor = node.position.priority.player;
+        int total_visits = 0;
+        for (const int visits : node.child_visits) {
+            total_visits += visits;
+        }
+        const double parent_actor_value =
+            actor == seat ? node.state_value : 1.0 - node.state_value;
+        const double exploration_scale =
+            std::sqrt(static_cast<double>(total_visits) + 1.0);
+        double best = -std::numeric_limits<double>::infinity();
+        std::size_t best_index = 0;
+        for (std::size_t index = 0; index < node.actions.size();
+             ++index) {
+            const int visits = node.child_visits[index];
+            double actor_q = parent_actor_value - kFirstPlayPenalty;
+            if (visits > 0) {
+                const double seat_q =
+                    node.child_value_sums[index] / visits;
+                actor_q = actor == seat ? seat_q : 1.0 - seat_q;
+            }
+            const double bound =
+                actor_q + kPuct * node.priors[index] *
+                              exploration_scale / (1.0 + visits);
+            if (bound > best) {
+                best = bound;
+                best_index = index;
+            }
+        }
+        return best_index;
+    }
+
+    // One tree simulation; returns a seat-perspective value.
+    double ismcts_simulate(IsmctsNode& node) const {
+        if (node.position.terminal.has_value()) {
+            return *node.position.terminal;
+        }
+        if (node.position.horizon) {
+            if (!node.expanded) {
+                node.expanded = true;
+                node.state_value = value_for(node.position.state, seat,
+                                             node.position.phase);
+            }
+            return node.state_value;
+        }
+        if (!node.expanded) {
+            return expand_node(node);
+        }
+        const std::size_t choice = puct_select(node);
+        if (node.children[choice] == nullptr) {
+            node.children[choice] = std::make_unique<IsmctsNode>();
+            node.children[choice]->position = advance_with_action(
+                node.position, node.actions[choice]);
+        }
+        const double value = ismcts_simulate(*node.children[choice]);
+        node.child_visits[choice] += 1;
+        node.child_value_sums[choice] += value;
+        return value;
+    }
+
+    // Root search: one tree per determinized world with the engine's real
+    // action list at the root; visits are pooled across worlds.
+    std::size_t ismcts_choose(
+        const std::vector<PriorityAction>& actions,
+        const std::vector<bool>& dominated,
+        const std::vector<double>& myopic_totals,
+        const std::vector<GameState>& worlds, TurnPhase phase,
+        bool sorcery_actions) const {
+        std::vector<double> root_scores;
+        std::vector<std::size_t> root_action_indices;
+        for (std::size_t index = 0; index < actions.size(); ++index) {
+            if (!dominated[index]) {
+                root_action_indices.push_back(index);
+                root_scores.push_back(
+                    myopic_totals[index] /
+                    static_cast<double>(worlds.size()));
+            }
+        }
+        if (root_action_indices.size() <= 1) {
+            return root_action_indices.empty()
+                       ? 0
+                       : root_action_indices.front();
+        }
+        std::vector<double> priors = root_scores;
+        softmax_priors(priors);
+
+        std::vector<std::unique_ptr<IsmctsNode>> roots;
+        for (const GameState& world : worlds) {
+            auto root = std::make_unique<IsmctsNode>();
+            root->position.state = world;
+            root->position.seat_turn_starts_remaining =
+                std::max<std::size_t>(1, config.rollout_turn_cycles);
+            switch (phase) {
+                case TurnPhase::FirstMain:
+                    root->position.stage = TreeStage::Main1;
+                    break;
+                case TurnPhase::BeginCombat:
+                    root->position.stage =
+                        TreeStage::BeginCombatWindow;
+                    break;
+                case TurnPhase::EndCombat:
+                    root->position.stage = TreeStage::EndCombatWindow;
+                    break;
+                default:
+                    root->position.stage = TreeStage::Main2;
+                    break;
+            }
+            root->position.phase = phase;
+            root->position.sorcery = sorcery_actions;
+            root->position.priority = {seat, 0};
+            root->expanded = true;
+            root->state_value =
+                value_for(world, seat, phase);
+            for (const std::size_t index : root_action_indices) {
+                root->actions.push_back(actions[index]);
+            }
+            root->priors = priors;
+            root->child_visits.assign(root->actions.size(), 0);
+            root->child_value_sums.assign(root->actions.size(), 0.0);
+            root->children.resize(root->actions.size());
+            roots.push_back(std::move(root));
+        }
+
+        const std::size_t iterations =
+            std::max<std::size_t>(config.ismcts_iterations,
+                                  root_action_indices.size() * 2);
+        for (std::size_t iteration = 0; iteration < iterations;
+             ++iteration) {
+            ismcts_simulate(*roots[iteration % roots.size()]);
+        }
+
+        std::size_t best_root_slot = 0;
+        long best_visits = -1;
+        double best_value = -std::numeric_limits<double>::infinity();
+        for (std::size_t slot = 0; slot < root_action_indices.size();
+             ++slot) {
+            long visits = 0;
+            double value_sum = 0.0;
+            for (const auto& root : roots) {
+                visits += root->child_visits[slot];
+                value_sum += root->child_value_sums[slot];
+            }
+            const double mean_value =
+                visits > 0 ? value_sum / visits
+                           : -std::numeric_limits<double>::infinity();
+            if (visits > best_visits ||
+                (visits == best_visits && mean_value > best_value)) {
+                best_visits = visits;
+                best_value = mean_value;
+                best_root_slot = slot;
+            }
+        }
+        return root_action_indices[best_root_slot];
+    }
+
     void record(const PlayerObservation& observation, TurnPhase phase) {
         if (recorder != nullptr) {
             recorder->feature_rows.push_back(
@@ -1346,6 +1812,22 @@ struct SpzAgent {
                 totals[index] += score_action(sampled, actions[index],
                                               false);
             }
+        }
+        if (config.search == SpzPolicyConfig::Search::Ismcts &&
+            !combat_response_window) {
+            const std::size_t best_index = ismcts_choose(
+                actions, dominated, totals, sampled_worlds, phase,
+                sorcery_actions);
+            if (recorder != nullptr) {
+                const auto consequence =
+                    resolve_priority_action_consequence(
+                        sampled_worlds.front(), seat, sorcery_actions,
+                        0, actions[best_index]);
+                if (consequence.has_value() && !consequence->terminal) {
+                    record_state(consequence->state, phase);
+                }
+            }
+            return best_index;
         }
         if (config.rollout) {
             // Rollout-rescore the myopically strongest candidates.
@@ -2172,7 +2654,8 @@ SpzBenchmarkResult run_spz_benchmark(
     std::size_t repetitions_per_pairing, std::uint64_t seed,
     const SpzPolicyConfig& policy, std::size_t max_turns,
     std::size_t threads,
-    const std::function<void(const std::string&)>& log) {
+    const std::function<void(const std::string&)>& log,
+    const SpzPolicyConfig* baseline_spz_policy) {
     const auto& decks = spz_decks();
 
     struct Job {
@@ -2215,6 +2698,9 @@ SpzBenchmarkResult run_spz_benchmark(
             game_config.starting_player =
                 spz_on_play ? spz_seat : baseline_seat;
             game_config.bots[baseline_seat].kind = baseline;
+            if (baseline_spz_policy != nullptr) {
+                game_config.bots[baseline_seat].kind = BotKind::Random;
+            }
             std::array<std::vector<CardId>, 2> game_decks;
             game_decks[spz_seat] = decks[job.spz_deck];
             game_decks[baseline_seat] = decks[job.opponent_deck];
@@ -2225,6 +2711,15 @@ SpzBenchmarkResult run_spz_benchmark(
             game_config.human_controllers[spz_seat] =
                 make_spz_controller(net, game_decks, spz_seat,
                                     game_policy);
+            if (baseline_spz_policy != nullptr) {
+                SpzPolicyConfig opponent_policy = *baseline_spz_policy;
+                opponent_policy.epsilon = 0.0;
+                opponent_policy.seed =
+                    mix_seed(pairing_seed, 200 + game_index);
+                game_config.human_controllers[baseline_seat] =
+                    make_spz_controller(net, game_decks, baseline_seat,
+                                        opponent_policy);
+            }
             Game game(game_decks[0], game_decks[1], pairing_seed,
                       game_config);
             const GameResult result = game.run();

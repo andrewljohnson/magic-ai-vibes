@@ -21,7 +21,8 @@ using namespace old_school::selfplay_zero;
         << "      [--worlds N] [--lr X] [--eps-start X] [--eps-final X]\n"
         << "  selfplay-zero benchmark --model PATH [--reps N] [--seed N]\n"
         << "      [--threads N] [--worlds N] [--max-turns N] [--rollout]\n"
-        << "      [--cycles N] [--top-k N]\n"
+        << "      [--cycles N] [--top-k N] [--ismcts] [--sims N]\n"
+        << "      [--versus-champion]\n"
         << "      [--baseline handcrafted|random|montecarlo]\n";
     std::exit(2);
 }
@@ -42,7 +43,10 @@ struct Arguments {
     std::size_t reps = 20;
     std::size_t cycles = 1;
     std::size_t top_k = 5;
+    std::size_t sims = 160;
     bool rollout = false;
+    bool ismcts = false;
+    bool versus_champion = false;
     double learning_rate = 0.01;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
@@ -93,6 +97,12 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.cycles = std::stoull(next());
         } else if (flag == "--top-k") {
             arguments.top_k = std::stoull(next());
+        } else if (flag == "--ismcts") {
+            arguments.ismcts = true;
+        } else if (flag == "--sims") {
+            arguments.sims = std::stoull(next());
+        } else if (flag == "--versus-champion") {
+            arguments.versus_champion = true;
         } else if (flag == "--lr") {
             arguments.learning_rate = std::stod(next());
         } else if (flag == "--eps-start") {
@@ -164,12 +174,21 @@ int run_benchmark(const Arguments& arguments) {
     policy.rollout = arguments.rollout;
     policy.rollout_turn_cycles = arguments.cycles;
     policy.rollout_top_k = arguments.top_k;
+    if (arguments.ismcts) {
+        policy.search = SpzPolicyConfig::Search::Ismcts;
+        policy.ismcts_iterations = arguments.sims;
+    }
+    SpzPolicyConfig champion_policy;
+    champion_policy.worlds = 4;
+    champion_policy.block_prediction_worlds = 4;
+    champion_policy.rollout = true;
     const std::size_t max_turns =
         arguments.max_turns == 0 ? 200 : arguments.max_turns;
     const auto result = run_spz_benchmark(
         net, baseline, arguments.reps, arguments.seed, policy, max_turns,
         arguments.threads,
-        [](const std::string& line) { std::cout << line << std::endl; });
+        [](const std::string& line) { std::cout << line << std::endl; },
+        arguments.versus_champion ? &champion_policy : nullptr);
     std::cout << std::fixed << std::setprecision(4);
     for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {
         const SpzDeckStats& stats = result.per_deck[deck];
