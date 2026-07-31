@@ -77,6 +77,8 @@ int main(int argc, char** argv) {
             model = argv[++arg];
         } else if (flag == "--top-k") {
             top_k = std::stoul(argv[++arg]);
+        } else if (flag == "--advantage-path") {
+            advantage_path = argv[++arg];
         } else if (flag == "--no-advantage") {
             use_advantage = false;
         } else if (flag == "--verbose") {
