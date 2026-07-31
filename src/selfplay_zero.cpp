@@ -2010,7 +2010,8 @@ struct SpzAgent {
 
     PriorityAction choose_rollout_priority(
         const GameState& state, const PriorityState& priority,
-        bool sorcery, TurnPhase phase) const {
+        bool sorcery, TurnPhase phase,
+        const PendingCombat* pending = nullptr) const {
         const auto actions =
             legal_priority_actions(state, priority.player, sorcery);
         if (actions.size() <= 1) {
@@ -2044,6 +2045,21 @@ struct SpzAgent {
                                        priority.player
                                    ? 1.0
                                    : 0.0);
+            } else if (pending != nullptr) {
+                // Post-blockers response: judge each candidate through
+                // the declared combat, exactly as the root does, so a
+                // held trick's payoff (flipping the declared trade) is
+                // visible inside imagined futures too.
+                GameState post_combat = consequence->state;
+                resolve_declared_combat(post_combat, *pending);
+                if (const auto terminal = terminal_value(post_combat)) {
+                    value = priority.player == seat
+                                ? *terminal
+                                : 1.0 - *terminal;
+                } else {
+                    value = value_for(post_combat, priority.player,
+                                      TurnPhase::SecondMain);
+                }
             } else {
                 value = value_for(consequence->state, priority.player,
                                   phase);
@@ -2058,16 +2074,16 @@ struct SpzAgent {
 
     // Plays one priority window to completion with the greedy mirror
     // policy. Returns the terminal value when the game ends inside it.
-    std::optional<double> rollout_window(GameState& state, TurnPhase phase,
-                                         bool sorcery,
-                                         PriorityState priority,
-                                         int& budget) const {
+    std::optional<double> rollout_window(
+        GameState& state, TurnPhase phase, bool sorcery,
+        PriorityState priority, int& budget,
+        const PendingCombat* pending = nullptr) const {
         while (true) {
             PriorityAction action = PriorityAction::pass();
             if (budget > 0) {
                 budget -= 1;
                 action = choose_rollout_priority(state, priority, sorcery,
-                                                 phase);
+                                                 phase, pending);
             }
             if (action.kind != PriorityActionKind::Pass &&
                 !apply_priority_action(state, priority.player, action,
@@ -2153,13 +2169,14 @@ struct SpzAgent {
                     state, attacking_player, attack_set, nullptr);
                 // Mirror the engine: both players may respond after the
                 // blocks are declared, then combat is sanitized and
-                // resolved with whatever survived.
+                // resolved with whatever survived. Responders see the
+                // declaration, so held tricks price in the real trade.
+                const PendingCombat declared{attack_set, blocks};
                 if (const auto terminal = rollout_window(
                         state, TurnPhase::DeclareBlockers, false,
-                        {attacking_player, 0}, budget)) {
+                        {attacking_player, 0}, budget, &declared)) {
                     return terminal;
                 }
-                const PendingCombat declared{attack_set, blocks};
                 resolve_declared_combat(state, declared);
                 if (const auto terminal = terminal_value(state)) {
                     return terminal;

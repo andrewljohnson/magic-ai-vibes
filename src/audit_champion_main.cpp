@@ -322,6 +322,7 @@ int main(int argc, char** argv) {
     const bool random_pilot =
         argc > 2 && std::string(argv[2]) == "--random-pilot";
     double gamma = 1.0;
+    double tie_band = 0.008;
     std::optional<std::size_t> spz_deck;
     std::optional<std::size_t> opp_deck;
     std::string advantage_path;
@@ -335,6 +336,9 @@ int main(int argc, char** argv) {
         }
         if (std::string(argv[i]) == "--no-guardrails") {
             guardrails = false;
+        }
+        if (std::string(argv[i]) == "--tie-band" && i + 1 < argc) {
+            tie_band = std::stod(argv[i + 1]);
         }
         if (std::string(argv[i]) == "--spz-deck" && i + 1 < argc) {
             spz_deck = std::stoul(argv[i + 1]);
@@ -419,6 +423,7 @@ int main(int argc, char** argv) {
             policy.epsilon = random_pilot ? 1.0 : 0.0;
             policy.pass_dominance_prune = !random_pilot && guardrails;
             policy.gamma_per_turn = gamma;
+            policy.advantage_tie_band = tie_band;
             policy.seed = (seat_auditor->seed ^ 0xA0D17) + seat;
             auto controller = make_spz_controller(
                 net, game_decks, seat, policy, nullptr, nullptr,
