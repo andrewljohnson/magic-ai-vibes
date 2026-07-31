@@ -46,6 +46,7 @@ struct Arguments {
     std::size_t games = 128;
     std::size_t hidden = 64;
     std::size_t schema = 0;
+    bool hard_targets = false;
     std::uint64_t seed = 20260729;
     std::size_t threads = 1;
     std::size_t max_turns = 0;  // 0 selects the per-command default.
@@ -111,6 +112,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.schema = 2;
         } else if (flag == "--schema-v3") {
             arguments.schema = 3;
+        } else if (flag == "--hard-targets") {
+            arguments.hard_targets = true;
         } else if (flag == "--hidden") {
             arguments.hidden = std::stoull(next());
         } else if (flag == "--seed") {
@@ -158,6 +161,7 @@ int run_train(const Arguments& arguments) {
     config.games_per_iteration = arguments.games;
     config.hidden = arguments.hidden;
     config.schema = arguments.schema;
+    config.discounted_targets = !arguments.hard_targets;
     config.seed = arguments.seed;
     config.threads = arguments.threads;
     config.learning_rate = arguments.learning_rate;
