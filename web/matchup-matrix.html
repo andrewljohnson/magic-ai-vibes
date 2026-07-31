@@ -41,9 +41,9 @@
   <section>
     <h2>Bots × decks — pilot strength</h2>
     <p class="desc" id="summary-desc">Each cell: this bot pilots the deck
-      against the other six decks flown by the reference pilot. Rows are
-      comparable — a stronger bot scores higher with the same deck, so the
-      rows should sort weakest to strongest pilot.</p>
+      against the other six decks flown by the reference pilot. Read down
+      a column to compare pilots on the same deck; row means give overall
+      pilot strength.</p>
     <div class="scroll"><table id="summary"></table></div>
   </section>
   <div id="per-bot"></div>
@@ -92,9 +92,11 @@ async function load() {
 
   document.getElementById("summary-desc").textContent =
     "Each cell: this bot pilots the deck against the other six decks " +
-    `flown by ${data.reference_pilot}. Rows are comparable - a stronger ` +
-    "bot scores higher with the same deck, so rows should sort weakest " +
-    "to strongest pilot.";
+    `flown by ${data.reference_pilot}. A cell mixes deck strength with ` +
+    "pilot skill, so read DOWN a column (same deck, same opponents - " +
+    "only the pilot changes) or compare row means for overall pilot " +
+    `strength. The ${data.reference_pilot} row is its own baseline: ` +
+    "its cells measure raw deck strength and its mean sits near 50%.";
   document.getElementById("summary").innerHTML = matrixTable(
     decks,
     data.bots.map((bot) => bot.vs_field),
