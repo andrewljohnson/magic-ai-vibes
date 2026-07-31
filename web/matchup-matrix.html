@@ -47,15 +47,6 @@
     <p class="desc">Finished bots appear in the tables below as each
       completes; this page refreshes them automatically.</p>
   </section>
-  <section id="training-strip" style="display:none">
-    <h2>Training in progress</h2>
-    <p class="desc" id="training-status"></p>
-    <div class="scroll"><svg id="training-spark" viewBox="0 0 960 120"
-      style="width:100%;max-width:960px;height:auto"></svg></div>
-    <p class="desc">Blue: value loss (left scale, lower is better). Green:
-      win rate vs Handcrafted probes (0-100%). Full charts on the
-      <a href="monitor.html" style="color:inherit">training monitor</a>.</p>
-  </section>
   <section>
     <h2>Bots × decks — pilot strength</h2>
     <p class="desc" id="summary-desc">Each cell: this bot pilots the deck
@@ -140,54 +131,7 @@ async function load() {
 load();
 setInterval(load, 60_000);
 
-async function pollTraining() {
-  try {
-    const response = await fetch("telemetry.jsonl", {cache: "no-store"});
-    if (!response.ok) throw new Error(response.status);
-    const text = await response.text();
-    let rows = text.split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
-    let runStart = 0;
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i].iteration <= rows[i - 1].iteration) runStart = i;
-    }
-    rows = rows.slice(runStart);
-    if (!rows.length) throw new Error("empty");
-    const strip = document.getElementById("training-strip");
-    strip.style.display = "";
-    const last = rows[rows.length - 1];
-    const lastProbe = [...rows].reverse().find(r => r.vs_handcrafted !== undefined);
-    const lossKey = rows.some(r => r.loss > 0) ? "loss"
-      : rows.some(r => r.advantage_rank_loss > 0) ? "advantage_rank_loss"
-      : "advantage_loss";
-    document.getElementById("training-status").textContent =
-      `Latest run: iteration ${last.iteration} \u00b7 ${last.games} games` +
-      ` \u00b7 ${lossKey.replace(/_/g, " ")} ${(last[lossKey] ?? 0).toFixed(3)}` +
-      (lastProbe ? ` \u00b7 vs Handcrafted ${(100 * lastProbe.vs_handcrafted).toFixed(1)}%` : "");
-    const svg = document.getElementById("training-spark");
-    const W = 960, H = 120, m = 8;
-    const xs = rows.map((r, i) => m + (W - 2 * m) * (rows.length < 2 ? 0 : i / (rows.length - 1)));
-    const lossMax = Math.max(...rows.map(r => r[lossKey] ?? 0), 1e-9);
-    const lossPts = rows.map((r, i) =>
-      `${xs[i]},${H - m - (H - 2 * m) * ((r[lossKey] ?? 0) / lossMax)}`).join(" ");
-    const probeRows = rows.filter(r => r.vs_handcrafted !== undefined);
-    const probePts = probeRows.map(r => {
-      const i = rows.indexOf(r);
-      return `${xs[i]},${H - m - (H - 2 * m) * r.vs_handcrafted}`;
-    }).join(" ");
-    svg.innerHTML =
-      `<polyline points="${lossPts}" fill="none" stroke="#3987e5" stroke-width="1.6"/>` +
-      (probePts ? `<polyline points="${probePts}" fill="none" stroke="#199e70" stroke-width="2" stroke-dasharray="1 0"/>` +
-        probeRows.map(r => {
-          const i = rows.indexOf(r);
-          return `<circle cx="${xs[i]}" cy="${H - m - (H - 2 * m) * r.vs_handcrafted}" r="3" fill="#199e70"/>`;
-        }).join("") : "") +
-      `<line x1="${m}" y1="${H - m - (H - 2 * m) * 0.5}" x2="${W - m}" y2="${H - m - (H - 2 * m) * 0.5}" stroke="#9a9891" stroke-dasharray="4 4" stroke-width="1"/>`;
-  } catch (error) {
-    document.getElementById("training-strip").style.display = "none";
-  }
-}
-pollTraining();
-setInterval(pollTraining, 15_000);
+
 
 async function pollCalc() {
   const strip = document.getElementById("calc-strip");
