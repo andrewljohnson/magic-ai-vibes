@@ -46,6 +46,8 @@ struct Arguments {
     std::string telemetry;
     std::string spar_model;
     double spar_rules = 0.0;
+    std::size_t focus_deck = 0;
+    double focus_weight = 0.0;
     std::size_t probe_every = 0;
     std::size_t probe_reps = 2;
     std::string baseline = "handcrafted";
@@ -114,6 +116,10 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.telemetry = next();
         } else if (flag == "--spar-model") {
             arguments.spar_model = next();
+        } else if (flag == "--focus-deck") {
+            arguments.focus_deck = std::stoull(next());
+        } else if (flag == "--focus-weight") {
+            arguments.focus_weight = std::stod(next());
         } else if (flag == "--spar-rules") {
             arguments.spar_rules = std::stod(next());
         } else if (flag == "--probe-every") {
@@ -227,6 +233,8 @@ int run_train(const Arguments& raw_arguments) {
             load_spz_net(arguments.init));
     }
     config.rules_spar_probability = arguments.spar_rules;
+    config.focus_probability = arguments.focus_weight;
+    config.focus_deck = arguments.focus_deck;
     if (!arguments.spar_model.empty()) {
         config.spar_net = std::make_shared<const SpzNet>(
             load_spz_net(arguments.spar_model));

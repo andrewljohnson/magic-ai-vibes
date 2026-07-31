@@ -4116,9 +4116,24 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                     spz_training_coordinate(
                         iteration, config.games_per_iteration,
                         game_index);
+                std::size_t deck_zero = coordinate.deck_zero;
+                std::size_t deck_one = coordinate.deck_one;
+                {
+                    std::uniform_real_distribution<double> focus_unit(
+                        0.0, 1.0);
+                    if (focus_unit(game_rng) <
+                        config.focus_probability) {
+                        const std::size_t opponent =
+                            game_rng() % kSpzDeckCount;
+                        const bool focus_first = game_rng() % 2 == 0;
+                        deck_zero = focus_first ? config.focus_deck
+                                                : opponent;
+                        deck_one = focus_first ? opponent
+                                               : config.focus_deck;
+                    }
+                }
                 const std::array<std::vector<CardId>, 2> game_decks = {
-                    decks[coordinate.deck_zero],
-                    decks[coordinate.deck_one]};
+                    decks[deck_zero], decks[deck_one]};
                 GameRecord& record = records[game_index];
                 // League play: sometimes seat an earlier snapshot so the
                 // learner keeps beating past selves, not only its mirror.

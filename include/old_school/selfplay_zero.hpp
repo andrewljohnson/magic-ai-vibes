@@ -383,6 +383,12 @@ struct SpzTrainConfig {
     // Fraction of games where one seat is the Handcrafted rules bot: a
     // league opponent whose disciplined combat the mirror never shows.
     double rules_spar_probability = 0.0;
+    // Curriculum focus: this fraction of games seats `focus_deck`
+    // against a uniformly drawn opponent deck instead of the balanced
+    // schedule - for outcome classes (like decking races) too rare in
+    // the uniform metagame to carry training signal.
+    double focus_probability = 0.0;
+    std::size_t focus_deck = 0;
     std::shared_ptr<const SpzNet> spar_net;
     // Live telemetry: every iteration appends a JSONL line (losses, games,
     // turns) to `telemetry_path`; every `probe_interval` iterations the
