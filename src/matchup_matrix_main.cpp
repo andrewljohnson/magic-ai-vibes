@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
         // all flown by the reference pilot. Comparable across bots: a
         // stronger pilot scores higher with the same deck.
         const std::size_t field_games =
-            std::max<std::size_t>(2, games_per_pairing / 6) & ~1ULL;
+            std::max<std::size_t>(2, games_per_pairing / 2) & ~1ULL;
         std::vector<double> field_points(deck_count, 0.0);
         std::vector<std::size_t> field_totals(deck_count, 0);
         run_jobs(
