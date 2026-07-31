@@ -372,6 +372,9 @@ struct SpzTrainConfig {
     // policy), keeping the learner honest against the configuration it
     // must beat.
     double champion_spar_probability = 0.25;
+    // Fraction of games where one seat is the Handcrafted rules bot: a
+    // league opponent whose disciplined combat the mirror never shows.
+    double rules_spar_probability = 0.0;
     std::shared_ptr<const SpzNet> spar_net;
     // Live telemetry: every iteration appends a JSONL line (losses, games,
     // turns) to `telemetry_path`; every `probe_interval` iterations the

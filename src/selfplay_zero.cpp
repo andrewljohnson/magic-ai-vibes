@@ -4045,12 +4045,22 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 std::array<std::shared_ptr<const SpzNet>, 2> seat_nets = {
                     frozen, frozen};
                 std::array<bool, 2> champion_seat = {false, false};
+                std::array<bool, 2> rules_seat = {false, false};
                 std::array<bool, 2> record_seat = {true, true};
                 std::uniform_real_distribution<double> unit(0.0, 1.0);
                 const auto sparring_net = config.spar_net != nullptr
                                               ? config.spar_net
                                               : config.initial_net;
-                if (sparring_net != nullptr &&
+                if (unit(game_rng) < config.rules_spar_probability) {
+                    // A rules-bot seat diversifies the league: the learner
+                    // sees disciplined attack/block futures its own mirror
+                    // never produces. The rules seat has no observations
+                    // to record; the learner's seat keeps its true
+                    // outcome-labeled trajectory.
+                    const std::size_t spar_seat = game_rng() % 2;
+                    rules_seat[spar_seat] = true;
+                    record_seat[spar_seat] = false;
+                } else if (sparring_net != nullptr &&
                     unit(game_rng) < config.champion_spar_probability) {
                     // Frozen champion sparring partner under the deployed
                     // greedy-rollout configuration.
@@ -4077,6 +4087,13 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 game_config.starting_player =
                     coordinate.starting_player;
                 for (std::size_t seat = 0; seat < 2; ++seat) {
+                    if (rules_seat[seat]) {
+                        game_config.bots[seat] = {
+                            .kind = BotKind::Handcrafted,
+                            .rollouts_per_action = 1,
+                        };
+                        continue;
+                    }
                     SpzPolicyConfig policy;
                     policy.worlds = config.training_worlds;
                     policy.block_prediction_worlds = config.training_worlds;

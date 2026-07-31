@@ -45,6 +45,7 @@ struct Arguments {
     std::string baseline_model;
     std::string telemetry;
     std::string spar_model;
+    double spar_rules = 0.0;
     std::size_t probe_every = 0;
     std::size_t probe_reps = 2;
     std::string baseline = "handcrafted";
@@ -113,6 +114,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.telemetry = next();
         } else if (flag == "--spar-model") {
             arguments.spar_model = next();
+        } else if (flag == "--spar-rules") {
+            arguments.spar_rules = std::stod(next());
         } else if (flag == "--probe-every") {
             arguments.probe_every = std::stoull(next());
         } else if (flag == "--probe-reps") {
@@ -223,6 +226,7 @@ int run_train(const Arguments& raw_arguments) {
         config.initial_net = std::make_shared<const SpzNet>(
             load_spz_net(arguments.init));
     }
+    config.rules_spar_probability = arguments.spar_rules;
     if (!arguments.spar_model.empty()) {
         config.spar_net = std::make_shared<const SpzNet>(
             load_spz_net(arguments.spar_model));
