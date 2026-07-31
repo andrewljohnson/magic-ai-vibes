@@ -41,7 +41,7 @@ struct Arguments {
     std::string advantage_init;
     bool no_value_training = false;
     bool no_guardrails = false;
-    double advantage_scale = 1.0;
+
     std::string baseline_model;
     std::string telemetry;
     std::string spar_model;
@@ -109,8 +109,6 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.no_value_training = true;
         } else if (flag == "--no-guardrails") {
             arguments.no_guardrails = true;
-        } else if (flag == "--advantage-scale") {
-            arguments.advantage_scale = std::stod(next());
         } else if (flag == "--telemetry") {
             arguments.telemetry = next();
         } else if (flag == "--spar-model") {
@@ -277,7 +275,6 @@ int run_benchmark(const Arguments& arguments) {
     policy.rollout_top_k = arguments.top_k;
     policy.gamma_per_turn = arguments.gamma;
     policy.pass_dominance_prune = !arguments.no_guardrails;
-    policy.advantage_scale = arguments.advantage_scale;
     if (arguments.ismcts) {
         policy.search = SpzPolicyConfig::Search::Ismcts;
         policy.ismcts_iterations = arguments.sims;

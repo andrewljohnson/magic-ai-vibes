@@ -259,10 +259,11 @@ struct SpzPolicyConfig {
     // (undiscounted) sooner and later wins tie and rules-based tie-breaks
     // compensate; below 1.0 urgency is part of the value itself.
     double gamma_per_turn = 1.0;
-    // Weight applied to the advantage head's learned delta when it is
-    // added to rollout scores: 1.0 trusts it fully, smaller values let it
-    // decide ties while deferring to the rollout in contested spots.
-    double advantage_scale = 1.0;
+    // Per-world width of the rollout-score noise band inside which the
+    // advantage head re-ranks otherwise-tied actions. The head never
+    // moves scores outside the band: search settles contested decisions,
+    // the head settles ties (where waste otherwise wins by coin flip).
+    double advantage_tie_band = 0.008;
     // Record paired all-action rollout deltas at priority decisions (the
     // advantage head's training data). Guardrail prunes still steer play;
     // pruned actions are scored for the record only.

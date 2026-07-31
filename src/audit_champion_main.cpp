@@ -419,7 +419,6 @@ int main(int argc, char** argv) {
             policy.epsilon = random_pilot ? 1.0 : 0.0;
             policy.pass_dominance_prune = !random_pilot && guardrails;
             policy.gamma_per_turn = gamma;
-            policy.advantage_scale = 0.6;
             policy.seed = (seat_auditor->seed ^ 0xA0D17) + seat;
             auto controller = make_spz_controller(
                 net, game_decks, seat, policy, nullptr, nullptr,

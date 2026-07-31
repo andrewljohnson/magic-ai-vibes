@@ -3195,15 +3195,34 @@ struct SpzAgent {
                 }
             }
             if (advantage_net != nullptr) {
+                // The head is trained to ORDER actions, not to move
+                // scores: search alone settles contested decisions, and
+                // the head re-ranks only the actions whose rollout
+                // totals tie the best within the evaluation noise band
+                // (where waste otherwise wins by coin flip).
+                const double band =
+                    config.advantage_tie_band *
+                    static_cast<double>(worlds);
+                const double top =
+                    *std::max_element(totals.begin(), totals.end());
+                double best_delta =
+                    -std::numeric_limits<double>::infinity();
+                std::size_t best_tied = actions.size();
                 for (std::size_t index = 0; index < actions.size();
                      ++index) {
-                    if (totals[index] > kIllegalScore / 2.0) {
-                        totals[index] +=
-                            static_cast<double>(worlds) *
-                            config.advantage_scale *
-                            advantage_net->delta(state_row,
-                                                 action_rows[index]);
+                    if (totals[index] <= kIllegalScore / 2.0 ||
+                        totals[index] < top - band) {
+                        continue;
                     }
+                    const double delta = advantage_net->delta(
+                        state_row, action_rows[index]);
+                    if (delta > best_delta) {
+                        best_delta = delta;
+                        best_tied = index;
+                    }
+                }
+                if (best_tied < actions.size()) {
+                    totals[best_tied] = top + band;
                 }
             }
         }

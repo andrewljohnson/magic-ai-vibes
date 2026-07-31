@@ -1588,7 +1588,7 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             const std::filesystem::path advantage_path =
                 std::filesystem::path(config.spz_artifact_path)
                     .parent_path() /
-                "spz-advantage-v3.txt";
+                "spz-advantage-v4.txt";
             std::ifstream probe(advantage_path);
             if (probe.good()) {
                 spz_advantage = std::make_shared<
@@ -1596,7 +1596,6 @@ int run_bridge_session(std::istream& input, std::ostream& output,
                     selfplay_zero::load_spz_advantage_net(
                         advantage_path.string()));
                 spz_policy.pass_dominance_prune = false;
-                spz_policy.advantage_scale = 0.6;
             }
         }
         spz_policy.seed = config.game_seed ^ 0x53505AULL;

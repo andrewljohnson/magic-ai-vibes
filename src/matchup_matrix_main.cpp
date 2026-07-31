@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     std::uint64_t seed = 20260730;
     std::string output_path = "build/telemetry/matchup-matrix.json";
     std::string spz_model = "data/spz-champion-v8.txt";
-    std::string spz_advantage = "data/spz-advantage-v3.txt";
+    std::string spz_advantage = "data/spz-advantage-v4.txt";
     std::size_t threads = std::thread::hardware_concurrency();
     std::optional<std::string> only_bot;
     for (int arg = 1; arg < argc; ++arg) {
@@ -170,7 +170,6 @@ int main(int argc, char** argv) {
                  policy.seed = game_seed + seat;
                  if (spz_advantage_net) {
                      policy.pass_dominance_prune = false;
-                     policy.advantage_scale = 0.6;
                  }
                  config.human_controllers[seat] =
                      spz::make_spz_controller(spz_net, game_decks, seat,
