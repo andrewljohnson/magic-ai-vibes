@@ -3590,6 +3590,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
         }
 
         double mean_loss = 0.0;
+        double loss_floor = 0.0;
+        std::size_t floor_samples = 0;
         std::size_t steps = 0;
         if (!replay.empty()) {
             const std::size_t batch =
@@ -3608,6 +3610,14 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                     const SpzSample& sample = replay[pick(trainer_rng)];
                     batch_features[slot] = &sample.features;
                     batch_targets[slot] = sample.target;
+                    // Soft targets carry irreducible entropy; report the
+                    // floor so the monitor can show excess loss.
+                    const double t = std::clamp(
+                        static_cast<double>(sample.target), 1e-6,
+                        1.0 - 1e-6);
+                    loss_floor += -(t * std::log(t) +
+                                    (1.0 - t) * std::log(1.0 - t));
+                    floor_samples += 1;
                 }
                 mean_loss += net->train_batch(batch_features,
                                               batch_targets,
@@ -3724,12 +3734,16 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             std::ofstream telemetry(config.telemetry_path,
                                     std::ios::app);
             if (telemetry) {
+                if (floor_samples > 0) {
+                    loss_floor /= static_cast<double>(floor_samples);
+                }
                 telemetry << "{\"iteration\":" << (iteration + 1)
                           << ",\"games\":"
                           << (iteration + 1) *
                                  config.games_per_iteration
                           << ",\"loss\":" << std::setprecision(6)
-                          << mean_loss << ",\"policy_loss\":"
+                          << mean_loss << ",\"loss_floor\":"
+                          << loss_floor << ",\"policy_loss\":"
                           << policy_loss << ",\"avg_turns\":"
                           << (config.games_per_iteration == 0
                                   ? 0.0

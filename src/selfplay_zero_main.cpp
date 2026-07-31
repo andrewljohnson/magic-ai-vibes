@@ -262,6 +262,7 @@ int run_benchmark(const Arguments& arguments) {
     champion_policy.worlds = 4;
     champion_policy.block_prediction_worlds = 4;
     champion_policy.rollout = true;
+    champion_policy.gamma_per_turn = 0.98;  // deployed arena config
     const std::size_t max_turns =
         arguments.max_turns == 0 ? 200 : arguments.max_turns;
     const auto result = run_spz_benchmark(
