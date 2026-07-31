@@ -1188,6 +1188,27 @@ class JsonController {
             output_ << ",\"cards\":";
             write_cards(output_, event.cards);
         }
+        // Combat structure for client visuals: attacker ids and
+        // (attacker, blocker) pairs accompany every combat event.
+        if (event.kind == GameEventKind::AttackersDeclared ||
+            event.kind == GameEventKind::BlockersDeclared ||
+            event.kind == GameEventKind::DamageOrderChosen ||
+            event.kind == GameEventKind::CombatResolved) {
+            output_ << ",\"attackers\":[";
+            for (std::size_t index = 0;
+                 index < event.attackers.size(); ++index) {
+                output_ << (index == 0 ? "" : ",")
+                        << event.attackers[index];
+            }
+            output_ << "],\"blocks\":[";
+            for (std::size_t index = 0; index < event.blocks.size();
+                 ++index) {
+                output_ << (index == 0 ? "" : ",") << '['
+                        << event.blocks[index].first << ','
+                        << event.blocks[index].second << ']';
+            }
+            output_ << ']';
+        }
         output_ << "}}\n" << std::flush;
     }
 

@@ -737,6 +737,8 @@ function PermanentRow({
   blockerOriginIds,
   selectedBlockerId,
   blockAssignments,
+  permanentNames,
+  targetedByStackIds,
   draggingPriority,
   onToggle,
   onChoosePriorityDestination,
@@ -760,6 +762,8 @@ function PermanentRow({
   blockerOriginIds?: ReadonlySet<string>;
   selectedBlockerId?: string;
   blockAssignments?: Readonly<Record<string, string>>;
+  permanentNames?: Readonly<Record<string, string>>;
+  targetedByStackIds?: ReadonlySet<string>;
   draggingPriority?: boolean;
   onToggle?: (id: string) => void;
   onChoosePriorityDestination?: (id: string) => void;
@@ -811,7 +815,11 @@ function PermanentRow({
                 permanent.tapped ? "is-tapped" : ""
               } ${priorityDestination ? "is-priority-destination" : ""} ${
                 priorityOrigin ? "is-priority-origin" : ""
-              } ${blockerOrigin ? "is-blocker-origin" : ""}`}
+              } ${blockerOrigin ? "is-blocker-origin" : ""} ${
+                blockAssignments?.[id] ? "is-blocking" : ""
+              } ${
+                targetedByStackIds?.has(id) ? "is-spell-target" : ""
+              }`}
               key={id}
               onDragOver={(event) =>
                 onPriorityDragOver?.(`permanent:${id}`, event)
@@ -878,8 +886,13 @@ function PermanentRow({
               />
               {blockAssignments?.[id] && (
                 <span className="block-assignment-badge">
-                  BLOCKS #{blockAssignments[id]}
+                  BLOCKS{" "}
+                  {permanentNames?.[blockAssignments[id]] ??
+                    `#${blockAssignments[id]}`}
                 </span>
+              )}
+              {targetedByStackIds?.has(id) && (
+                <span className="spell-target-badge">TARGETED</span>
               )}
             </div>
           );
@@ -893,6 +906,7 @@ function CombatLane({
   attackers,
   legalTargetIds,
   assignments,
+  permanentNames,
   draggingBlocker,
   onChooseTarget,
   onDragOverTarget,
@@ -901,6 +915,7 @@ function CombatLane({
   attackers: Permanent[];
   legalTargetIds?: ReadonlySet<string>;
   assignments?: Readonly<Record<string, string>>;
+  permanentNames?: Readonly<Record<string, string>>;
   draggingBlocker?: boolean;
   onChooseTarget?: (id: string) => void;
   onDragOverTarget?: (
@@ -920,9 +935,10 @@ function CombatLane({
         {attackers.map((attacker) => {
           const id = permanentId(attacker);
           const legalTarget = legalTargetIds?.has(id) ?? false;
-          const blockerCount = Object.values(assignments ?? {}).filter(
-            (attackerId) => attackerId === id,
-          ).length;
+          const blockerIds = Object.entries(assignments ?? {})
+            .filter(([, attackerId]) => attackerId === id)
+            .map(([blockerId]) => blockerId);
+          const blockerCount = blockerIds.length;
           return (
             <div
               className={`combat-attacker-slot ${
@@ -949,6 +965,11 @@ function CombatLane({
                   BLOCKED{blockerCount > 1 ? ` ×${blockerCount}` : ""}
                 </span>
               )}
+              {blockerIds.map((blockerId) => (
+                <span className="combat-blocker-chip" key={blockerId}>
+                  ⛨ {permanentNames?.[blockerId] ?? `#${blockerId}`}
+                </span>
+              ))}
               {legalTarget && draggingBlocker && (
                 <span className="combat-drop-label">DROP BLOCKER</span>
               )}
@@ -990,6 +1011,8 @@ function BattlefieldSide({
   selectedBlockerId,
   blockTargetIds,
   blockAssignments,
+  permanentNames,
+  targetedByStackIds,
   draggingBlocker,
   onSelectBlocker,
   onStartBlockerDrag,
@@ -1036,6 +1059,8 @@ function BattlefieldSide({
   selectedBlockerId?: string;
   blockTargetIds?: ReadonlySet<string>;
   blockAssignments?: Readonly<Record<string, string>>;
+  permanentNames?: Readonly<Record<string, string>>;
+  targetedByStackIds?: ReadonlySet<string>;
   draggingBlocker?: boolean;
   onSelectBlocker?: (id: string) => void;
   onStartBlockerDrag?: (
@@ -1162,6 +1187,8 @@ function BattlefieldSide({
           blockerOriginIds={blockerOriginIds}
           selectedBlockerId={selectedBlockerId}
           blockAssignments={blockAssignments}
+          permanentNames={permanentNames}
+          targetedByStackIds={targetedByStackIds}
           onSelectBlocker={onSelectBlocker}
           onStartBlockerDrag={onStartBlockerDrag}
           onEndBlockerDrag={onEndBlockerDrag}
@@ -1170,6 +1197,7 @@ function BattlefieldSide({
           attackers={combatAttackers}
           legalTargetIds={blockTargetIds}
           assignments={blockAssignments}
+          permanentNames={permanentNames}
           draggingBlocker={draggingBlocker}
           onChooseTarget={onChooseBlockTarget}
           onDragOverTarget={onBlockDragOver}
@@ -1354,6 +1382,11 @@ function StackRail({
                   aria-label={`Controlled by ${controller}`}
                 >
                   {controller.toUpperCase()}
+                </span>
+              )}
+              {formatTargetLabel(entry.target) && (
+                <span className="stack-target-line">
+                  → {formatTargetLabel(entry.target)}
                 </span>
               )}
               {entry.card ? (
@@ -3450,9 +3483,48 @@ export default function App() {
   const blockerOriginIds = new Set(
     blockerDecision?.choices.map((choice) => String(choice.blocker)) ?? [],
   );
-  const combatAttackerIds = new Set(
-    blockerDecision?.attackers.map((id) => String(id)) ?? [],
+  const pendingCombat =
+    (snapshot as {
+      pendingCombat?: {
+        attackers?: Array<string | number>;
+        blocks?: Array<Array<string | number>>;
+      } | null;
+    }).pendingCombat ?? null;
+  const pendingAttackerIds = new Set(
+    (pendingCombat?.attackers ?? []).map((id) => String(id)),
   );
+  const pendingBlockAssignments: Record<string, string> = {};
+  for (const pair of pendingCombat?.blocks ?? []) {
+    if (Array.isArray(pair) && pair.length === 2) {
+      pendingBlockAssignments[String(pair[1])] = String(pair[0]);
+    }
+  }
+  const mergedBlockAssignments = {
+    ...pendingBlockAssignments,
+    ...blockAssignments,
+  };
+  const permanentNames: Record<string, string> = {};
+  for (const sidePlayer of snapshot.state?.players ?? []) {
+    for (const creature of sidePlayer.creatures ?? []) {
+      permanentNames[String(creature.permanentId)] =
+        creature.card?.name ?? "creature";
+    }
+  }
+  const targetedByStackIds = new Set(
+    (snapshot.state?.stack ?? []).flatMap((entry) => {
+      const target = entry.target;
+      return typeof target === "object" &&
+             target !== null &&
+             "creature" in target &&
+             target.creature !== undefined
+        ? [String(target.creature)]
+        : [];
+    }),
+  );
+  const combatAttackerIds = new Set([
+    ...(blockerDecision?.attackers.map((id) => String(id)) ?? []),
+    ...pendingAttackerIds,
+  ]);
   const selectedBlockerChoice = blockerDecision?.choices.find(
     (choice) => String(choice.blocker) === selectedBlockerId,
   );
@@ -3836,7 +3908,9 @@ export default function App() {
                   onPriorityDrop={dropPriorityDestination}
                   combatAttackerIds={combatAttackerIds}
                   blockTargetIds={blockTargetIds}
-                  blockAssignments={blockAssignments}
+                  blockAssignments={mergedBlockAssignments}
+                  permanentNames={permanentNames}
+                  targetedByStackIds={targetedByStackIds}
                   draggingBlocker={Boolean(selectedBlockerId)}
                   onChooseBlockTarget={chooseBlockTarget}
                   onBlockDragOver={dragOverBlockTarget}
@@ -3885,7 +3959,9 @@ export default function App() {
                   onPriorityDrop={dropPriorityDestination}
                   blockerOriginIds={blockerOriginIds}
                   selectedBlockerId={selectedBlockerId ?? undefined}
-                  blockAssignments={blockAssignments}
+                  blockAssignments={mergedBlockAssignments}
+                  permanentNames={permanentNames}
+                  targetedByStackIds={targetedByStackIds}
                   onSelectBlocker={selectBlocker}
                   onStartBlockerDrag={startBlockerDrag}
                   onEndBlockerDrag={finishBlockerDrag}

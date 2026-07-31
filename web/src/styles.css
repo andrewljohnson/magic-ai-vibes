@@ -3733,3 +3733,52 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Combat + targeting visuals */
+.combat-attacker-card .card-face {
+  transform: rotate(90deg);
+}
+
+.combat-attacker-card {
+  padding: 8px 0;
+}
+
+.combat-blocker-chip {
+  display: block;
+  font-size: var(--type-floor);
+  letter-spacing: 0.04em;
+  color: #cfe3d6;
+  background: rgba(38, 66, 50, 0.85);
+  border: 1px solid rgba(120, 190, 150, 0.5);
+  border-radius: 8px;
+  padding: 1px 7px;
+  margin-top: 3px;
+}
+
+.permanent-slot.is-blocking .card-face {
+  box-shadow: 0 0 0 2px rgba(120, 190, 150, 0.85);
+}
+
+.permanent-slot.is-spell-target .card-face {
+  box-shadow: 0 0 0 2px rgba(228, 90, 82, 0.9), 0 0 12px rgba(228, 90, 82, 0.5);
+}
+
+.spell-target-badge {
+  display: block;
+  font-size: var(--type-floor);
+  letter-spacing: 0.08em;
+  color: #ffd9d6;
+  background: rgba(112, 34, 30, 0.9);
+  border: 1px solid rgba(228, 90, 82, 0.7);
+  border-radius: 8px;
+  padding: 1px 6px;
+  margin-top: 3px;
+}
+
+.stack-target-line {
+  display: block;
+  font-size: var(--type-floor);
+  color: #e8c9c6;
+  letter-spacing: 0.02em;
+}

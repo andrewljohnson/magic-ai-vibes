@@ -396,9 +396,15 @@ export function formatGameResultReason(reason: unknown): string | null {
   return `Match ended: ${readable.charAt(0).toUpperCase()}${readable.slice(1)}.`;
 }
 
+export interface PendingCombat {
+  attackers: Array<string | number>;
+  blocks: Array<Array<string | number>>;
+}
+
 export interface GameSnapshot {
   id: string;
   status: "playing" | "finished" | "error";
+  pendingCombat?: PendingCombat | null;
   config?: GameConfig | Record<string, unknown>;
   state?: GameState;
   decision?: Decision | null;

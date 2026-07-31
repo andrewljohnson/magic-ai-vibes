@@ -1906,6 +1906,31 @@ class GameSession {
         type: "event",
         event: publicEvent,
       });
+      if (isRecord(rawEvent)) {
+        // Track declared-but-unresolved combat for client visuals.
+        if (rawEvent.kind === "attackers_declared") {
+          this.pendingCombat =
+            Array.isArray(rawEvent.attackers) &&
+            rawEvent.attackers.length > 0
+              ? { attackers: rawEvent.attackers, blocks: [] }
+              : null;
+        } else if (
+          rawEvent.kind === "blockers_declared" ||
+          rawEvent.kind === "damage_order"
+        ) {
+          if (this.pendingCombat && Array.isArray(rawEvent.blocks)) {
+            this.pendingCombat = {
+              attackers: this.pendingCombat.attackers,
+              blocks: rawEvent.blocks,
+            };
+          }
+        } else if (
+          rawEvent.kind === "combat_resolved" ||
+          rawEvent.kind === "turn_started"
+        ) {
+          this.pendingCombat = null;
+        }
+      }
       return;
     }
     if (envelope.type === "decision") {
@@ -1987,6 +2012,7 @@ class GameSession {
       status: this.status,
       message: this.message,
       snapshot: this.snapshot,
+      pendingCombat: this.pendingCombat ?? null,
       decision: this.decision,
       events: this.events,
       log: this.log,
