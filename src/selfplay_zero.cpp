@@ -753,6 +753,7 @@ GameState reconstruct_observed_state(const PlayerObservation& observation) {
         reconstructed.mana_pool = public_state.mana_pool;
         reconstructed.land_played_this_turn =
             public_state.land_played_this_turn;
+        reconstructed.channel_active = public_state.channel_active;
         reconstructed.library.assign(public_state.library_size, CardId{});
     }
     state.players[me].hand = observation.hand;

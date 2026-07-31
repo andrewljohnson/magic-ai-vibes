@@ -26,6 +26,10 @@ struct ComboStats {
     std::size_t channel_castable_decisions = 0;
     std::size_t lethal_line_open = 0;
     std::size_t lethal_line_taken_now = 0;
+    // channel_active with a lethal X already payable: the kill is one
+    // action away.
+    std::size_t kill_available = 0;
+    std::size_t kill_taken = 0;
     std::map<int, std::size_t> disintegrate_x;
     std::size_t wins_by_life = 0;
     std::size_t wins_by_mill = 0;
@@ -147,6 +151,19 @@ int main(int argc, char** argv) {
                     const bool lethal_open = lethal_channel_line_open(
                         me, me.life, observation.hand, opponent.life);
                     stats.lethal_line_open += lethal_open ? 1 : 0;
+                    bool kill_now = false;
+                    for (const PriorityAction& candidate : actions) {
+                        kill_now =
+                            kill_now ||
+                            (candidate.kind ==
+                                 PriorityActionKind::CastDisintegrate &&
+                             candidate.target.has_value() &&
+                             !candidate.target->creature.has_value() &&
+                             candidate.target->player !=
+                                 observation.observer &&
+                             candidate.x_value >= opponent.life);
+                    }
+                    stats.kill_available += kill_now ? 1 : 0;
 
                     const PriorityAction& action = actions[chosen];
                     if (action.kind == PriorityActionKind::CastArtifact &&
@@ -162,6 +179,22 @@ int main(int argc, char** argv) {
                     if (action.kind ==
                         PriorityActionKind::CastDisintegrate) {
                         stats.disintegrate_x[action.x_value] += 1;
+                        stats.kill_taken +=
+                            (kill_now &&
+                             action.x_value >= opponent.life)
+                                ? 1
+                                : 0;
+                    }
+                    if (verbose && kill_now &&
+                        !(action.kind ==
+                              PriorityActionKind::CastDisintegrate &&
+                          action.x_value >= opponent.life)) {
+                        std::cout
+                            << "game " << game_index << " seat " << seat
+                            << " turn " << observation.turn_number
+                            << " KILL AVAILABLE, chose kind "
+                            << static_cast<int>(action.kind) << " x "
+                            << action.x_value << "\n";
                     }
                     if (verbose && lethal_open) {
                         std::cout
@@ -212,6 +245,8 @@ int main(int argc, char** argv) {
     std::cout << "lethal-line-open-decisions " << stats.lethal_line_open
               << " channel-cast-when-lethal "
               << stats.lethal_line_taken_now << "\n";
+    std::cout << "kill-available-decisions " << stats.kill_available
+              << " kill-taken " << stats.kill_taken << "\n";
     std::cout << "disintegrate X histogram:";
     for (const auto& [x, count] : stats.disintegrate_x) {
         std::cout << " X=" << x << ":" << count;
