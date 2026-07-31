@@ -238,6 +238,16 @@ function render() {
   const hasPolicy = rows.some(r => r.policy_loss > 0);
   const lossMax = Math.max(...rows.map(r => Math.max(r.loss, hasPolicy ? r.policy_loss : 0)));
   const hasFloor = rows.some(r => r.loss_floor > 0);
+  const valueFrozen = rows.every(r => !(r.loss > 0));
+  const hasAdvantage = rows.some(r => r.advantage_loss > 0);
+  if (valueFrozen && hasAdvantage) {
+    const advMax = Math.max(...rows.map(r => r.advantage_loss ?? 0));
+    drawChart("loss", "tip-loss", rows,
+      [{ key: "advantage_loss", label: "advantage loss (MSE)", color: "--s2", dots: false }],
+      [0, advMax * 1.2 || 0.01], v => v.toFixed(4), null);
+    document.getElementById("loss-legend").innerHTML =
+      `<span style="--c: var(--s2)">advantage loss (value net frozen)</span>`;
+  } else {
   drawChart("loss", "tip-loss", rows,
     [{ key: "loss", label: "value loss", color: "--s1", dots: false },
      ...(hasFloor ? [{ key: "loss_floor", label: "target-entropy floor", color: "--s4", dots: false }] : []),
@@ -247,6 +257,7 @@ function render() {
     `<span style="--c: var(--s1)">value loss</span>` +
     (hasFloor ? `<span style="--c: var(--s4)">target-entropy floor (unbeatable)</span>` : "") +
     (hasPolicy ? `<span style="--c: var(--s2)">policy loss</span>` : "");
+  }
 
   const recent = rows.slice(-40).reverse();
   document.getElementById("table").innerHTML =

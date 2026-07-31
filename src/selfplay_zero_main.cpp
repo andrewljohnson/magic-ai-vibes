@@ -36,6 +36,12 @@ struct Arguments {
     std::string policy;
     std::string policy_out;
     std::string policy_init;
+    std::string advantage;
+    std::string advantage_out;
+    std::string advantage_init;
+    bool no_value_training = false;
+    bool no_guardrails = false;
+    double advantage_scale = 1.0;
     std::string baseline_model;
     std::string telemetry;
     std::string spar_model;
@@ -94,6 +100,18 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.policy_out = next();
         } else if (flag == "--policy-init") {
             arguments.policy_init = next();
+        } else if (flag == "--advantage") {
+            arguments.advantage = next();
+        } else if (flag == "--advantage-out") {
+            arguments.advantage_out = next();
+        } else if (flag == "--advantage-init") {
+            arguments.advantage_init = next();
+        } else if (flag == "--no-value-training") {
+            arguments.no_value_training = true;
+        } else if (flag == "--no-guardrails") {
+            arguments.no_guardrails = true;
+        } else if (flag == "--advantage-scale") {
+            arguments.advantage_scale = std::stod(next());
         } else if (flag == "--telemetry") {
             arguments.telemetry = next();
         } else if (flag == "--spar-model") {
@@ -193,6 +211,15 @@ int run_train(const Arguments& raw_arguments) {
     config.rollout = arguments.rollout;
     config.ismcts = arguments.ismcts;
     config.ismcts_iterations = arguments.sims;
+    if (!arguments.advantage_out.empty()) {
+        config.train_advantage = true;
+        if (!arguments.advantage_init.empty()) {
+            config.initial_advantage =
+                std::make_shared<const SpzAdvantageNet>(
+                    load_spz_advantage_net(arguments.advantage_init));
+        }
+    }
+    config.train_value = !arguments.no_value_training;
     if (!arguments.policy_out.empty()) {
         config.train_policy = true;
         if (!arguments.policy_init.empty()) {
@@ -227,6 +254,12 @@ int run_train(const Arguments& raw_arguments) {
         save_spz_policy_net(*output.policy, arguments.policy_out);
         std::cout << "saved " << arguments.policy_out << std::endl;
     }
+    if (output.advantage != nullptr &&
+        !arguments.advantage_out.empty()) {
+        save_spz_advantage_net(*output.advantage,
+                               arguments.advantage_out);
+        std::cout << "saved " << arguments.advantage_out << std::endl;
+    }
     return 0;
 }
 
@@ -254,6 +287,8 @@ int run_benchmark(const Arguments& arguments) {
     policy.rollout_turn_cycles = arguments.cycles;
     policy.rollout_top_k = arguments.top_k;
     policy.gamma_per_turn = arguments.gamma;
+    policy.pass_dominance_prune = !arguments.no_guardrails;
+    policy.advantage_scale = arguments.advantage_scale;
     if (arguments.ismcts) {
         policy.search = SpzPolicyConfig::Search::Ismcts;
         policy.ismcts_iterations = arguments.sims;
@@ -278,6 +313,11 @@ int run_benchmark(const Arguments& arguments) {
             ? nullptr
             : std::make_shared<const SpzPolicyNet>(
                   load_spz_policy_net(arguments.policy)),
+        nullptr,
+        arguments.advantage.empty()
+            ? nullptr
+            : std::make_shared<const SpzAdvantageNet>(
+                  load_spz_advantage_net(arguments.advantage)),
         nullptr);
     std::cout << std::fixed << std::setprecision(4);
     for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {

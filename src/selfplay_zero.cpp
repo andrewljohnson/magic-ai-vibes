@@ -1255,6 +1255,218 @@ SpzPolicyNet load_spz_policy_net(const std::string& path) {
 }
 
 // ---------------------------------------------------------------------------
+// Advantage head
+
+SpzAdvantageNet::SpzAdvantageNet(std::size_t state_inputs,
+                                 std::size_t action_inputs,
+                                 std::size_t hidden, std::uint64_t seed)
+    : state_inputs_(state_inputs),
+      action_inputs_(action_inputs),
+      hidden_(hidden) {
+    if (state_inputs == 0 || action_inputs == 0 || hidden == 0) {
+        throw std::invalid_argument(
+            "SpzAdvantageNet requires nonzero dimensions");
+    }
+    const std::size_t inputs = state_inputs + action_inputs;
+    std::mt19937_64 random(seed);
+    const double scale = 1.0 / std::sqrt(static_cast<double>(inputs));
+    std::uniform_real_distribution<double> hidden_init(-scale, scale);
+    hidden_weights_.resize(hidden * inputs);
+    for (double& weight : hidden_weights_) {
+        weight = hidden_init(random);
+    }
+    hidden_bias_.assign(hidden, 0.0);
+    const double output_scale =
+        0.1 / std::sqrt(static_cast<double>(hidden));
+    std::uniform_real_distribution<double> output_init(-output_scale,
+                                                       output_scale);
+    output_weights_.resize(hidden);
+    for (double& weight : output_weights_) {
+        weight = output_init(random);
+    }
+    momentum_.assign(hidden * inputs + hidden + hidden + 1, 0.0);
+}
+
+double SpzAdvantageNet::delta(
+    const std::vector<float>& state_features,
+    const std::vector<float>& action_features) const {
+    if (state_features.size() != state_inputs_ ||
+        action_features.size() != action_inputs_) {
+        throw std::invalid_argument(
+            "SpzAdvantageNet feature size mismatch");
+    }
+    const std::size_t inputs = state_inputs_ + action_inputs_;
+    double output = output_bias_;
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        const double* row = hidden_weights_.data() + unit * inputs;
+        double activation = hidden_bias_[unit];
+        for (std::size_t index = 0; index < state_inputs_; ++index) {
+            activation += row[index] * state_features[index];
+        }
+        for (std::size_t index = 0; index < action_inputs_; ++index) {
+            activation +=
+                row[state_inputs_ + index] * action_features[index];
+        }
+        output += output_weights_[unit] * std::tanh(activation);
+    }
+    return output;
+}
+
+double SpzAdvantageNet::train_batch(const std::vector<Sample>& samples,
+                                    double learning_rate) {
+    if (samples.empty()) {
+        return 0.0;
+    }
+    const std::size_t inputs = state_inputs_ + action_inputs_;
+    const std::size_t weight_count = hidden_ * inputs;
+    std::vector<double> gradient(weight_count + hidden_ + hidden_ + 1,
+                                 0.0);
+    std::vector<double> activations(hidden_);
+    double total_loss = 0.0;
+    for (const Sample& sample : samples) {
+        double output = output_bias_;
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            const double* row = hidden_weights_.data() + unit * inputs;
+            double activation = hidden_bias_[unit];
+            for (std::size_t index = 0; index < state_inputs_;
+                 ++index) {
+                activation += row[index] * (*sample.state)[index];
+            }
+            for (std::size_t index = 0; index < action_inputs_;
+                 ++index) {
+                activation += row[state_inputs_ + index] *
+                              (*sample.action)[index];
+            }
+            activations[unit] = std::tanh(activation);
+            output += output_weights_[unit] * activations[unit];
+        }
+        const double error = output - sample.target;
+        total_loss += error * error;
+        const double output_delta = 2.0 * error;
+        gradient[weight_count + hidden_ + hidden_] += output_delta;
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            gradient[weight_count + hidden_ + unit] +=
+                output_delta * activations[unit];
+            const double hidden_delta =
+                output_delta * output_weights_[unit] *
+                (1.0 - activations[unit] * activations[unit]);
+            gradient[weight_count + unit] += hidden_delta;
+            double* row_gradient = gradient.data() + unit * inputs;
+            for (std::size_t index = 0; index < state_inputs_;
+                 ++index) {
+                row_gradient[index] +=
+                    hidden_delta * (*sample.state)[index];
+            }
+            for (std::size_t index = 0; index < action_inputs_;
+                 ++index) {
+                row_gradient[state_inputs_ + index] +=
+                    hidden_delta * (*sample.action)[index];
+            }
+        }
+    }
+    const double batch_scale = 1.0 / static_cast<double>(samples.size());
+    constexpr double kMomentum = 0.9;
+    const auto apply = [&](std::size_t offset, double* parameter) {
+        momentum_[offset] = kMomentum * momentum_[offset] -
+                            learning_rate * gradient[offset] * batch_scale;
+        *parameter += momentum_[offset];
+    };
+    for (std::size_t index = 0; index < weight_count; ++index) {
+        apply(index, &hidden_weights_[index]);
+    }
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        apply(weight_count + unit, &hidden_bias_[unit]);
+    }
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        apply(weight_count + hidden_ + unit, &output_weights_[unit]);
+    }
+    apply(weight_count + hidden_ + hidden_, &output_bias_);
+    return total_loss * batch_scale;
+}
+
+void SpzAdvantageNet::save(std::ostream& out) const {
+    out << "spz-advantage-v1\n"
+        << state_inputs_ << ' ' << action_inputs_ << ' ' << hidden_
+        << '\n';
+    out << std::hexfloat;
+    for (const double weight : hidden_weights_) {
+        out << weight << '\n';
+    }
+    for (const double bias : hidden_bias_) {
+        out << bias << '\n';
+    }
+    for (const double weight : output_weights_) {
+        out << weight << '\n';
+    }
+    out << output_bias_ << '\n';
+}
+
+SpzAdvantageNet SpzAdvantageNet::load(std::istream& in) {
+    std::string magic;
+    in >> magic;
+    if (magic != "spz-advantage-v1") {
+        throw std::runtime_error(
+            "unrecognized SPZ advantage artifact header");
+    }
+    SpzAdvantageNet net;
+    in >> net.state_inputs_ >> net.action_inputs_ >> net.hidden_;
+    if (!in || net.state_inputs_ == 0 || net.action_inputs_ == 0 ||
+        net.hidden_ == 0) {
+        throw std::runtime_error(
+            "malformed SPZ advantage dimensions");
+    }
+    const auto read_value = [&in]() {
+        std::string token;
+        in >> token;
+        if (!in) {
+            throw std::runtime_error(
+                "truncated SPZ advantage artifact");
+        }
+        return std::strtod(token.c_str(), nullptr);
+    };
+    const std::size_t inputs = net.state_inputs_ + net.action_inputs_;
+    net.hidden_weights_.resize(net.hidden_ * inputs);
+    for (double& weight : net.hidden_weights_) {
+        weight = read_value();
+    }
+    net.hidden_bias_.resize(net.hidden_);
+    for (double& bias : net.hidden_bias_) {
+        bias = read_value();
+    }
+    net.output_weights_.resize(net.hidden_);
+    for (double& weight : net.output_weights_) {
+        weight = read_value();
+    }
+    net.output_bias_ = read_value();
+    net.momentum_.assign(net.hidden_ * inputs + net.hidden_ * 2 + 1,
+                         0.0);
+    return net;
+}
+
+void save_spz_advantage_net(const SpzAdvantageNet& net,
+                            const std::string& path) {
+    std::ofstream out(path);
+    if (!out) {
+        throw std::runtime_error(
+            "cannot open SPZ advantage artifact for writing: " + path);
+    }
+    net.save(out);
+    if (!out) {
+        throw std::runtime_error(
+            "failed writing SPZ advantage artifact: " + path);
+    }
+}
+
+SpzAdvantageNet load_spz_advantage_net(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open SPZ advantage artifact: " +
+                                 path);
+    }
+    return SpzAdvantageNet::load(in);
+}
+
+// ---------------------------------------------------------------------------
 // Agent
 
 namespace {
@@ -1262,6 +1474,7 @@ namespace {
 struct SpzAgent {
     std::shared_ptr<const SpzNet> net;
     std::shared_ptr<const SpzPolicyNet> policy_net;
+    std::shared_ptr<const SpzAdvantageNet> advantage_net;
     std::array<std::vector<CardId>, 2> decks;
     std::size_t seat = 0;
     SpzPolicyConfig config;
@@ -1272,9 +1485,11 @@ struct SpzAgent {
              const std::array<std::vector<CardId>, 2>& original_decks,
              std::size_t player_seat, const SpzPolicyConfig& policy,
              SpzRecorder* sample_recorder,
-             std::shared_ptr<const SpzPolicyNet> shared_policy)
+             std::shared_ptr<const SpzPolicyNet> shared_policy,
+             std::shared_ptr<const SpzAdvantageNet> shared_advantage)
         : net(std::move(shared_net)),
           policy_net(std::move(shared_policy)),
+          advantage_net(std::move(shared_advantage)),
           decks(original_decks),
           seat(player_seat),
           config(policy),
@@ -2777,12 +2992,78 @@ struct SpzAgent {
             }
             totals = std::move(rollout_totals);
         }
+        if (advantage_net != nullptr || 
+            (config.record_advantage && recorder != nullptr &&
+             config.rollout)) {
+            const auto state_row = spz_features_for(
+                net->input_count(),
+                observe_game_state(sampled_worlds.front(), seat), decks,
+                phase);
+            std::vector<std::vector<float>> action_rows;
+            action_rows.reserve(actions.size());
+            for (const PriorityAction& action : actions) {
+                action_rows.push_back(spz_action_features(
+                    action, seat, sampled_worlds.front()));
+            }
+            if (config.record_advantage && recorder != nullptr &&
+                config.rollout) {
+                // Paired deltas versus pass over the SAME worlds, for
+                // every action including guarded ones: the head must see
+                // waste's true cost.
+                double pass_total = 0.0;
+                for (const GameState& sampled : sampled_worlds) {
+                    pass_total += score_action(
+                        sampled, PriorityAction::pass(), true);
+                }
+                SpzAdvantageSample sample;
+                sample.state = state_row;
+                for (std::size_t index = 0; index < actions.size();
+                     ++index) {
+                    double total = 0.0;
+                    bool legal = true;
+                    for (const GameState& sampled : sampled_worlds) {
+                        const double value = score_action(
+                            sampled, actions[index], true);
+                        if (value <= kIllegalScore / 2.0) {
+                            legal = false;
+                            break;
+                        }
+                        total += value;
+                    }
+                    if (!legal) {
+                        continue;
+                    }
+                    sample.actions.push_back(action_rows[index]);
+                    sample.deltas.push_back(static_cast<float>(
+                        (total - pass_total) /
+                        static_cast<double>(worlds)));
+                }
+                if (sample.actions.size() > 1) {
+                    recorder->advantage_samples.push_back(
+                        std::move(sample));
+                }
+            }
+            if (advantage_net != nullptr) {
+                for (std::size_t index = 0; index < actions.size();
+                     ++index) {
+                    if (totals[index] > kIllegalScore / 2.0) {
+                        totals[index] +=
+                            static_cast<double>(worlds) *
+                            config.advantage_scale *
+                            advantage_net->delta(state_row,
+                                                 action_rows[index]);
+                    }
+                }
+            }
+        }
         std::size_t best = static_cast<std::size_t>(
             std::max_element(totals.begin(), totals.end()) -
             totals.begin());
         // A free land drop is strictly resource-positive; when its score
         // ties the best within noise, take it rather than passing on it.
-        if (actions[best].kind != PriorityActionKind::PlayLand) {
+        // (Guardrail: retired when the advantage head carries the signal.)
+        if (config.pass_dominance_prune &&
+            actions[best].kind != PriorityActionKind::PlayLand) {
             constexpr double kTieMargin = 0.004;
             for (std::size_t index = 0; index < actions.size();
                  ++index) {
@@ -3270,10 +3551,11 @@ HumanController make_spz_controller(
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t seat, const SpzPolicyConfig& config,
     SpzRecorder* recorder,
-    std::shared_ptr<const SpzPolicyNet> policy_net) {
-    auto agent = std::make_shared<SpzAgent>(std::move(net), original_decks,
-                                            seat, config, recorder,
-                                            std::move(policy_net));
+    std::shared_ptr<const SpzPolicyNet> policy_net,
+    std::shared_ptr<const SpzAdvantageNet> advantage_net) {
+    auto agent = std::make_shared<SpzAgent>(
+        std::move(net), original_decks, seat, config, recorder,
+        std::move(policy_net), std::move(advantage_net));
     HumanController controller;
     controller.choose_priority_action =
         [agent](const PlayerObservation& observation, TurnPhase phase,
@@ -3412,6 +3694,19 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                    ? std::make_shared<SpzNet>(*config.initial_net)
                    : std::make_shared<SpzNet>(state_inputs,
                                               config.hidden, config.seed);
+    std::shared_ptr<SpzAdvantageNet> advantage_net;
+    if (config.train_advantage) {
+        advantage_net =
+            config.initial_advantage != nullptr
+                ? std::make_shared<SpzAdvantageNet>(
+                      *config.initial_advantage)
+                : std::make_shared<SpzAdvantageNet>(
+                      net->input_count(), spz_action_feature_count(),
+                      config.advantage_hidden,
+                      mix_seed(config.seed, 99));
+    }
+    std::vector<SpzAdvantageSample> advantage_replay;
+    std::size_t advantage_cursor = 0;
     std::shared_ptr<SpzPolicyNet> policy_net;
     if (config.train_policy) {
         policy_net =
@@ -3451,6 +3746,10 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             policy_net != nullptr
                 ? std::make_shared<const SpzPolicyNet>(*policy_net)
                 : std::shared_ptr<const SpzPolicyNet>{};
+        const auto frozen_advantage =
+            advantage_net != nullptr
+                ? std::make_shared<const SpzAdvantageNet>(*advantage_net)
+                : std::shared_ptr<const SpzAdvantageNet>{};
         if (config.league_snapshot_interval > 0 &&
             iteration % config.league_snapshot_interval == 0) {
             league_pool.push_back(frozen);
@@ -3516,6 +3815,9 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                     policy.rollout = config.rollout;
                     policy.gamma_per_turn =
                         config.gamma < 1.0 ? config.gamma : 1.0;
+                    policy.record_advantage =
+                        config.train_advantage &&
+                        !champion_seat[seat] && record_seat[seat];
                     if (config.ismcts && !champion_seat[seat]) {
                         policy.search = SpzPolicyConfig::Search::Ismcts;
                         policy.ismcts_iterations =
@@ -3528,7 +3830,9 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                             record_seat[seat] ? &record.recorders[seat]
                                               : nullptr,
                             champion_seat[seat] ? nullptr
-                                                : frozen_policy);
+                                                : frozen_policy,
+                            champion_seat[seat] ? nullptr
+                                                : frozen_advantage);
                 }
                 Game game(game_decks[0], game_decks[1], game_rng(),
                           game_config);
@@ -3589,11 +3893,63 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             }
         }
 
+        std::size_t new_advantage_samples = 0;
+        if (advantage_net != nullptr) {
+            for (GameRecord& record : records) {
+                for (auto& seat_recorder : record.recorders) {
+                    for (auto& sample :
+                         seat_recorder.advantage_samples) {
+                        if (advantage_replay.size() <
+                            config.advantage_replay_capacity) {
+                            advantage_replay.push_back(
+                                std::move(sample));
+                        } else {
+                            advantage_replay[advantage_cursor] =
+                                std::move(sample);
+                            advantage_cursor =
+                                (advantage_cursor + 1) %
+                                config.advantage_replay_capacity;
+                        }
+                        new_advantage_samples += 1;
+                    }
+                }
+            }
+        }
+        double advantage_loss = 0.0;
+        if (advantage_net != nullptr && !advantage_replay.empty() &&
+            new_advantage_samples > 0) {
+            const std::size_t batch = 64;
+            const std::size_t advantage_steps = std::max<std::size_t>(
+                1, (new_advantage_samples * 4) / batch);
+            std::uniform_int_distribution<std::size_t> pick(
+                0, advantage_replay.size() - 1);
+            std::vector<SpzAdvantageNet::Sample> batch_samples;
+            for (std::size_t step = 0; step < advantage_steps; ++step) {
+                batch_samples.clear();
+                while (batch_samples.size() < batch) {
+                    const SpzAdvantageSample& decision =
+                        advantage_replay[pick(trainer_rng)];
+                    for (std::size_t option = 0;
+                         option < decision.actions.size() &&
+                         batch_samples.size() < batch;
+                         ++option) {
+                        batch_samples.push_back(
+                            {&decision.state,
+                             &decision.actions[option],
+                             decision.deltas[option]});
+                    }
+                }
+                advantage_loss += advantage_net->train_batch(
+                    batch_samples, config.advantage_learning_rate);
+            }
+            advantage_loss /= static_cast<double>(advantage_steps);
+        }
+
         double mean_loss = 0.0;
         double loss_floor = 0.0;
         std::size_t floor_samples = 0;
         std::size_t steps = 0;
-        if (!replay.empty()) {
+        if (config.train_value && !replay.empty()) {
             const std::size_t batch =
                 std::max<std::size_t>(1, config.batch_size);
             steps = static_cast<std::size_t>(
@@ -3660,7 +4016,10 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                          : static_cast<double>(total_turns) /
                                static_cast<double>(
                                    config.games_per_iteration))
-                 << " new-samples " << new_samples << " replay "
+                 << " new-samples " << new_samples
+                 << " adv-samples " << new_advantage_samples
+                 << " adv-loss " << std::setprecision(5)
+                 << advantage_loss << " replay "
                  << replay.size() << " steps " << steps << " loss "
                  << std::setprecision(4) << mean_loss
                  << " policy-samples " << new_policy_samples
@@ -3743,7 +4102,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                  config.games_per_iteration
                           << ",\"loss\":" << std::setprecision(6)
                           << mean_loss << ",\"loss_floor\":"
-                          << loss_floor << ",\"policy_loss\":"
+                          << loss_floor << ",\"advantage_loss\":"
+                          << advantage_loss << ",\"policy_loss\":"
                           << policy_loss << ",\"avg_turns\":"
                           << (config.games_per_iteration == 0
                                   ? 0.0
@@ -3783,7 +4143,7 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                    ".txt");
         }
     }
-    return {net, policy_net};
+    return {net, policy_net, advantage_net};
 }
 
 // ---------------------------------------------------------------------------
@@ -3838,7 +4198,9 @@ SpzBenchmarkResult run_spz_benchmark(
     const SpzPolicyConfig* baseline_spz_policy,
     std::shared_ptr<const SpzNet> baseline_net,
     std::shared_ptr<const SpzPolicyNet> policy_net,
-    std::shared_ptr<const SpzPolicyNet> baseline_policy_net) {
+    std::shared_ptr<const SpzPolicyNet> baseline_policy_net,
+    std::shared_ptr<const SpzAdvantageNet> advantage_net,
+    std::shared_ptr<const SpzAdvantageNet> baseline_advantage_net) {
     const auto& decks = spz_decks();
 
     struct Job {
@@ -3893,7 +4255,8 @@ SpzBenchmarkResult run_spz_benchmark(
                 mix_seed(pairing_seed, 100 + game_index);
             game_config.human_controllers[spz_seat] =
                 make_spz_controller(net, game_decks, spz_seat,
-                                    game_policy, nullptr, policy_net);
+                                    game_policy, nullptr, policy_net,
+                                    advantage_net);
             if (baseline_spz_policy != nullptr) {
                 SpzPolicyConfig opponent_policy = *baseline_spz_policy;
                 opponent_policy.epsilon = 0.0;
@@ -3903,7 +4266,8 @@ SpzBenchmarkResult run_spz_benchmark(
                     make_spz_controller(
                         baseline_net != nullptr ? baseline_net : net,
                         game_decks, baseline_seat, opponent_policy,
-                        nullptr, baseline_policy_net);
+                        nullptr, baseline_policy_net,
+                        baseline_advantage_net);
             }
             Game game(game_decks[0], game_decks[1], pairing_seed,
                       game_config);

@@ -165,6 +165,52 @@ void save_spz_policy_net(const SpzPolicyNet& net, const std::string& path);
 SpzPolicyNet load_spz_policy_net(const std::string& path);
 
 // ---------------------------------------------------------------------------
+// Advantage head (card-sized action deltas)
+
+// Regresses (state, action) onto the action's paired-evaluation delta
+// versus passing, measured on shared determinized worlds during self-play.
+// Common random worlds cancel evaluation noise, so systematic card-sized
+// costs (a wasted pump, a skipped land drop) become learnable even though
+// they are invisible in single-game outcomes.
+class SpzAdvantageNet {
+  public:
+    SpzAdvantageNet(std::size_t state_inputs, std::size_t action_inputs,
+                    std::size_t hidden, std::uint64_t seed);
+
+    double delta(const std::vector<float>& state_features,
+                 const std::vector<float>& action_features) const;
+
+    struct Sample {
+        const std::vector<float>* state = nullptr;
+        const std::vector<float>* action = nullptr;
+        float target = 0.0f;
+    };
+    // One SGD-with-momentum step on mean squared error; returns the mean
+    // pre-update loss.
+    double train_batch(const std::vector<Sample>& samples,
+                       double learning_rate);
+
+    void save(std::ostream& out) const;
+    static SpzAdvantageNet load(std::istream& in);
+
+  private:
+    SpzAdvantageNet() = default;
+
+    std::size_t state_inputs_ = 0;
+    std::size_t action_inputs_ = 0;
+    std::size_t hidden_ = 0;
+    std::vector<double> hidden_weights_;
+    std::vector<double> hidden_bias_;
+    std::vector<double> output_weights_;
+    double output_bias_ = 0.0;
+    std::vector<double> momentum_;
+};
+
+void save_spz_advantage_net(const SpzAdvantageNet& net,
+                            const std::string& path);
+SpzAdvantageNet load_spz_advantage_net(const std::string& path);
+
+// ---------------------------------------------------------------------------
 // Policy / controller
 
 struct SpzPolicyConfig {
@@ -199,6 +245,14 @@ struct SpzPolicyConfig {
     // (undiscounted) sooner and later wins tie and rules-based tie-breaks
     // compensate; below 1.0 urgency is part of the value itself.
     double gamma_per_turn = 1.0;
+    // Weight applied to the advantage head's learned delta when it is
+    // added to rollout scores: 1.0 trusts it fully, smaller values let it
+    // decide ties while deferring to the rollout in contested spots.
+    double advantage_scale = 1.0;
+    // Record paired all-action rollout deltas at priority decisions (the
+    // advantage head's training data). Guardrail prunes still steer play;
+    // pruned actions are scored for the record only.
+    bool record_advantage = false;
     // Rules-only prune of real-root priority actions that are strictly
     // dominated by Pass (identical settled state, strictly more of the
     // actor's resources consumed) — e.g. an X=0 Braingeyser. No card
@@ -221,8 +275,16 @@ struct SpzPolicySample {
 };
 
 // Per-seat recording sink for self-play training.
+// One decision's paired action deltas versus pass, for advantage training.
+struct SpzAdvantageSample {
+    std::vector<float> state;
+    std::vector<std::vector<float>> actions;
+    std::vector<float> deltas;
+};
+
 struct SpzRecorder {
     std::vector<std::vector<float>> feature_rows;
+    std::vector<SpzAdvantageSample> advantage_samples;
     // Turn number of each recorded row, aligned with feature_rows; lets
     // training discount targets per state rather than per game.
     std::vector<std::size_t> feature_turns;
@@ -238,7 +300,8 @@ HumanController make_spz_controller(
     const std::array<std::vector<CardId>, 2>& original_decks,
     std::size_t seat, const SpzPolicyConfig& config,
     SpzRecorder* recorder = nullptr,
-    std::shared_ptr<const SpzPolicyNet> policy_net = nullptr);
+    std::shared_ptr<const SpzPolicyNet> policy_net = nullptr,
+    std::shared_ptr<const SpzAdvantageNet> advantage_net = nullptr);
 
 // ---------------------------------------------------------------------------
 // Training
@@ -314,6 +377,14 @@ struct SpzTrainConfig {
     // Optional warm start; when set, `hidden` is ignored and training
     // continues from this network's parameters.
     std::shared_ptr<const SpzNet> initial_net;
+    // When false the value net stays frozen (advantage-only training).
+    bool train_value = true;
+    // Train the advantage head on recorded paired deltas.
+    bool train_advantage = false;
+    double advantage_learning_rate = 0.002;
+    std::size_t advantage_hidden = 64;
+    std::size_t advantage_replay_capacity = 30000;
+    std::shared_ptr<const SpzAdvantageNet> initial_advantage;
     // League play: with this probability a game's second seat is driven by
     // a uniformly chosen past snapshot instead of the current network,
     // countering mirror-only self-play drift. Zero restores pure mirrors.
@@ -337,6 +408,7 @@ struct SpzTrainConfig {
 struct SpzTrainOutput {
     std::shared_ptr<SpzNet> value;
     std::shared_ptr<SpzPolicyNet> policy;  // null unless train_policy
+    std::shared_ptr<SpzAdvantageNet> advantage;  // null unless trained
 };
 
 SpzTrainOutput train_spz(const SpzTrainConfig& config);
@@ -383,6 +455,9 @@ SpzBenchmarkResult run_spz_benchmark(
     const SpzPolicyConfig* baseline_spz_policy = nullptr,
     std::shared_ptr<const SpzNet> baseline_net = nullptr,
     std::shared_ptr<const SpzPolicyNet> policy_net = nullptr,
-    std::shared_ptr<const SpzPolicyNet> baseline_policy_net = nullptr);
+    std::shared_ptr<const SpzPolicyNet> baseline_policy_net = nullptr,
+    std::shared_ptr<const SpzAdvantageNet> advantage_net = nullptr,
+    std::shared_ptr<const SpzAdvantageNet> baseline_advantage_net =
+        nullptr);
 
 }  // namespace old_school::selfplay_zero

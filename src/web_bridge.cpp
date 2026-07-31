@@ -1565,11 +1565,31 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         // Discounted lookahead: sooner wins outrank later ones, so the
         // champion presses lethal from the objective itself.
         spz_policy.gamma_per_turn = 0.98;
+        // When the learned advantage head ships beside the champion, it
+        // carries the card-sized waste signal and the rules guardrails
+        // retire.
+        std::shared_ptr<const selfplay_zero::SpzAdvantageNet>
+            spz_advantage;
+        {
+            const std::filesystem::path advantage_path =
+                std::filesystem::path(config.spz_artifact_path)
+                    .parent_path() /
+                "spz-advantage-v1.txt";
+            std::ifstream probe(advantage_path);
+            if (probe.good()) {
+                spz_advantage = std::make_shared<
+                    const selfplay_zero::SpzAdvantageNet>(
+                    selfplay_zero::load_spz_advantage_net(
+                        advantage_path.string()));
+                spz_policy.pass_dominance_prune = false;
+                spz_policy.advantage_scale = 0.6;
+            }
+        }
         spz_policy.seed = config.game_seed ^ 0x53505AULL;
         game_config.human_controllers[1] =
             selfplay_zero::make_spz_controller(
-                spz_net,
-                {human_cards, opponent_cards}, 1, spz_policy);
+                spz_net, {human_cards, opponent_cards}, 1, spz_policy,
+                nullptr, nullptr, spz_advantage);
         std::ifstream spz_bytes(config.spz_artifact_path,
                                 std::ios::binary);
         std::ostringstream spz_contents;
