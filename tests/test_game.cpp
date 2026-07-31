@@ -2631,7 +2631,6 @@ TEST(millstone_spell_and_activated_ability_use_the_stack) {
     CHECK(old_school::resolve_top_of_stack(state));
     CHECK(state.players[1].library.size() == 1);
     CHECK(state.players[1].graveyard.size() == 2);
-    CHECK(state.stats[0].cards_milled == 2);
 }
 
 TEST(moat_is_a_counterable_spell_and_stops_ground_attackers) {

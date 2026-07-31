@@ -1718,7 +1718,6 @@ bool resolve_top_of_stack(
              ++card) {
             target.graveyard.push_back(target.library.back());
             target.library.pop_back();
-            ++state.stats[spell.controller].cards_milled;
         }
         return true;
     }
@@ -4260,10 +4259,6 @@ double DeckSimulationStats::average_damage_to_opponent() const {
                    games);
 }
 
-double DeckSimulationStats::average_cards_milled() const {
-    return average(static_cast<std::int64_t>(total_cards_milled), games);
-}
-
 double BotSimulationStats::win_rate() const {
     return percentage(wins, games);
 }
@@ -4358,7 +4353,6 @@ void record_deck_result(DeckSimulationStats& deck,
         result.player_stats[player].spells_countered;
     deck.total_damage_to_opponent +=
         result.player_stats[player].damage_to_opponent;
-    deck.total_cards_milled += result.player_stats[player].cards_milled;
 }
 
 void record_bot_result(BotSimulationStats& bot,

@@ -25,6 +25,7 @@ struct PilotStats {
     double lands = 0.0;
     double spells = 0.0;
     double damage = 0.0;
+    double opp_graveyard = 0.0;
     double creatures_cast = 0.0;
     double attacks_declared = 0.0;
     double attackers_total = 0.0;
@@ -171,6 +172,7 @@ int main(int argc, char** argv) {
     };
     std::vector<Divergence> divergences;
 
+    std::size_t opponent_graveyard = 0;
     const auto play = [&](bool spz_pilots, std::size_t opponent_deck,
                           std::uint64_t game_seed,
                           std::size_t focus_seat,
@@ -214,7 +216,11 @@ int main(int argc, char** argv) {
                 std::move(controller);
         }
         Game game(game_decks[0], game_decks[1], game_seed, config);
-        return game.run();
+        const GameResult result = game.run();
+        opponent_graveyard = game.state()
+                                 .players[1 - focus_seat]
+                                 .graveyard.size();
+        return result;
     };
 
     for (std::size_t opponent_deck = 0; opponent_deck < decks.size();
@@ -233,9 +239,11 @@ int main(int argc, char** argv) {
             const GameResult with_spz =
                 play(true, opponent_deck, game_seed, focus_seat,
                      &spz_track);
+            const std::size_t spz_opp_graveyard = opponent_graveyard;
             const GameResult with_rules =
                 play(false, opponent_deck, game_seed, focus_seat,
                      nullptr);
+            const std::size_t rules_opp_graveyard = opponent_graveyard;
 
             const auto absorb = [&](PilotStats& stats,
                                     const GameResult& result,
@@ -250,6 +258,9 @@ int main(int argc, char** argv) {
                 stats.spells += static_cast<double>(mine.spells_cast);
                 stats.damage +=
                     static_cast<double>(mine.damage_to_opponent);
+                stats.opp_graveyard += static_cast<double>(
+                    track != nullptr ? spz_opp_graveyard
+                                     : rules_opp_graveyard);
                 if (track != nullptr) {
                     stats.creatures_cast +=
                         static_cast<double>(track->creatures_cast);
@@ -288,7 +299,8 @@ int main(int argc, char** argv) {
                   << stats.turns / games << " lands "
                   << stats.lands / games << " spells "
                   << stats.spells / games << " damage-dealt "
-                  << stats.damage / games << "\n";
+                  << stats.damage / games << " opp-graveyard "
+                  << stats.opp_graveyard / games << "\n";
     };
     report("spz-pilots ", learned);
     report("rules-pilot", rules);

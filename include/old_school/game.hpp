@@ -163,7 +163,6 @@ struct PlayerGameStats {
     std::size_t spells_cast = 0;
     std::size_t spells_countered = 0;
     std::size_t damage_to_opponent = 0;
-    std::size_t cards_milled = 0;
     std::size_t decisions = 0;
     std::size_t monte_carlo_rollouts = 0;
 
@@ -655,7 +654,6 @@ struct DeckSimulationStats {
     std::size_t total_spells_cast = 0;
     std::size_t total_spells_countered = 0;
     std::size_t total_damage_to_opponent = 0;
-    std::size_t total_cards_milled = 0;
 
     double win_rate() const;
     double on_play_win_rate() const;
@@ -666,7 +664,6 @@ struct DeckSimulationStats {
     double average_spells_cast() const;
     double average_spells_countered() const;
     double average_damage_to_opponent() const;
-    double average_cards_milled() const;
 };
 
 struct BotSimulationStats {

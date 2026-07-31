@@ -127,6 +127,7 @@ int main(int argc, char** argv) {
     std::size_t spz_deck = 1;
     std::size_t opp_deck = 0;
     bool mirror = false;
+    bool swap_pilots = false;
     bool web = true;
     std::string name = "replay";
     for (int arg = 1; arg < argc; ++arg) {
@@ -139,6 +140,8 @@ int main(int argc, char** argv) {
             opp_deck = std::stoul(argv[++arg]);
         } else if (flag == "--mirror") {
             mirror = true;
+        } else if (flag == "--swap") {
+            swap_pilots = true;
         } else if (flag == "--name") {
             name = argv[++arg];
         } else {
@@ -222,8 +225,9 @@ int main(int argc, char** argv) {
 
     GameConfig config;
     config.max_turns = 200;
+    const std::size_t watched_seat = swap_pilots ? 0 : 1;
     for (std::size_t seat = 0; seat < 2; ++seat) {
-        const bool spz_seat = seat == 1 || mirror;
+        const bool spz_seat = seat == watched_seat || mirror;
         if (!spz_seat) {
             config.bots[seat] = {.kind = BotKind::Handcrafted,
                                  .rollouts_per_action = 1};
@@ -242,7 +246,7 @@ int main(int argc, char** argv) {
                                 : (seed ^ 0x53505AULL) + 1;
         HumanController controller = spz::make_spz_controller(
             net, game_decks, seat, policy, nullptr, nullptr, advantage);
-        if (seat == 1) {
+        if (seat == watched_seat) {
             controller.observe = observe;
         }
         config.human_controllers[seat] = std::move(controller);
@@ -261,8 +265,10 @@ int main(int argc, char** argv) {
     out << ',';
     write_string(out, std::string(spz::spz_deck_name(spz_deck)));
     out << "],\"pilots\":[";
-    write_string(out, mirror ? "spz" : "handcrafted");
-    out << ",\"spz\"],\"winner\":" << result.winner
+    write_string(out, mirror || swap_pilots ? "spz" : "handcrafted");
+    out << ',';
+    write_string(out, mirror || !swap_pilots ? "spz" : "handcrafted");
+    out << "],\"winner\":" << result.winner
         << ",\"turns\":" << result.turns << ",\"steps\":[\n"
         << steps.str() << "\n]}\n";
     // Maintain the static-site index of available replays.
