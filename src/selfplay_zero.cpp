@@ -3720,6 +3720,11 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                               config.hidden, config.seed);
     std::shared_ptr<SpzAdvantageNet> advantage_net;
     if (config.train_advantage) {
+        if (!config.rollout) {
+            throw std::invalid_argument(
+                "advantage training requires rollout self-play: paired "
+                "action deltas are only measured during rollout scoring");
+        }
         advantage_net =
             config.initial_advantage != nullptr
                 ? std::make_shared<SpzAdvantageNet>(
@@ -3918,11 +3923,32 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
         }
 
         std::size_t new_advantage_samples = 0;
+        double advantage_agreement = -1.0;
         if (advantage_net != nullptr) {
+            std::size_t agreements = 0;
             for (GameRecord& record : records) {
                 for (auto& seat_recorder : record.recorders) {
                     for (auto& sample :
                          seat_recorder.advantage_samples) {
+                        std::size_t predicted_best = 0;
+                        std::size_t measured_best = 0;
+                        for (std::size_t option = 1;
+                             option < sample.actions.size(); ++option) {
+                            if (advantage_net->delta(
+                                    sample.state,
+                                    sample.actions[option]) >
+                                advantage_net->delta(
+                                    sample.state,
+                                    sample.actions[predicted_best])) {
+                                predicted_best = option;
+                            }
+                            if (sample.deltas[option] >
+                                sample.deltas[measured_best]) {
+                                measured_best = option;
+                            }
+                        }
+                        agreements +=
+                            predicted_best == measured_best ? 1 : 0;
                         if (advantage_replay.size() <
                             config.advantage_replay_capacity) {
                             advantage_replay.push_back(
@@ -3937,6 +3963,11 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         new_advantage_samples += 1;
                     }
                 }
+            }
+            if (new_advantage_samples > 0) {
+                advantage_agreement =
+                    static_cast<double>(agreements) /
+                    static_cast<double>(new_advantage_samples);
             }
         }
         double advantage_loss = 0.0;
@@ -4043,7 +4074,10 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                  << " new-samples " << new_samples
                  << " adv-samples " << new_advantage_samples
                  << " adv-loss " << std::setprecision(5)
-                 << advantage_loss << " replay "
+                 << advantage_loss << " adv-agree "
+                 << (advantage_agreement >= 0.0 ? advantage_agreement
+                                                : 0.0)
+                 << " replay "
                  << replay.size() << " steps " << steps << " loss "
                  << std::setprecision(4) << mean_loss
                  << " policy-samples " << new_policy_samples
@@ -4127,6 +4161,10 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                         static_cast<double>(
                                             config
                                                 .games_per_iteration));
+                if (advantage_agreement >= 0.0) {
+                    telemetry << ",\"advantage_agreement\":"
+                              << advantage_agreement;
+                }
                 if (vs_random >= 0.0) {
                     telemetry << ",\"vs_random\":" << vs_random;
                 }

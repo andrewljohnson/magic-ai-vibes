@@ -255,7 +255,22 @@ function render() {
   const hasFloor = rows.some(r => r.loss_floor > 0);
   const valueFrozen = rows.every(r => !(r.loss > 0));
   const hasAdvantage = rows.some(r => r.advantage_loss > 0);
-  if (valueFrozen && hasAdvantage) {
+  const hasAgreement = rows.some(r => r.advantage_agreement !== undefined);
+  if (valueFrozen && hasAgreement) {
+    // Frozen value net: the trending signals are the head's decision
+    // agreement with measured rollout deltas (up = learning) and its MSE
+    // scaled onto the same axis (down = fitting).
+    const advMax = Math.max(...rows.map(r => r.advantage_loss ?? 0)) || 1;
+    const scaled = rows.map(r => ({ ...r,
+      advantage_loss_scaled: r.advantage_loss > 0 ? r.advantage_loss / advMax : undefined }));
+    drawChart("loss", "tip-loss", scaled,
+      [{ key: "advantage_agreement", label: "decision agreement", color: "--s2", dots: true },
+       { key: "advantage_loss_scaled", label: "advantage loss (scaled)", color: "--s4", dots: false }],
+      [0, 1], fmtPct, 0.5);
+    document.getElementById("loss-legend").innerHTML =
+      `<span style="--c: var(--s2)">decision agreement — % of decisions where the head picks the measured-best action (up = learning)</span>` +
+      `<span style="--c: var(--s4)">advantage loss, scaled to its max (down = fitting)</span>`;
+  } else if (valueFrozen && hasAdvantage) {
     const advMax = Math.max(...rows.map(r => r.advantage_loss ?? 0));
     drawChart("loss", "tip-loss", rows,
       [{ key: "advantage_loss", label: "advantage loss (MSE)", color: "--s2", dots: false }],
