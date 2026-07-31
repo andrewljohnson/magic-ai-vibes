@@ -104,6 +104,14 @@ async function poll() {
     if (!response.ok) throw new Error(response.status);
     const text = await response.text();
     rows = text.split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
+    // The trainer appends across runs; keep only the latest run so stale
+    // artifacts never mix into the charts (iteration restarting marks a
+    // new run).
+    let runStart = 0;
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i].iteration <= rows[i - 1].iteration) runStart = i;
+    }
+    rows = rows.slice(runStart);
     render();
     document.getElementById("status").textContent =
       `Live — updated ${new Date().toLocaleTimeString()}, polling every 15 s.`;
