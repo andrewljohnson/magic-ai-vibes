@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matchup matrices</title>
+<style>
+  :root {
+    --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e7e6e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --grid: #34332f;
+    }
+  }
+  html, body { margin: 0; background: var(--surface); color: var(--ink);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: var(--ink-2); margin: 0 0 18px; font-size: 13px; }
+  .sub a { color: inherit; }
+  section { margin-bottom: 30px; }
+  h2 { font-size: 14px; margin: 0 0 2px; }
+  .desc { color: var(--ink-2); font-size: 12px; margin: 0 0 8px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: 12px;
+    font-variant-numeric: tabular-nums; }
+  th, td { border: 1px solid var(--grid); padding: 4px 9px; text-align: right;
+    min-width: 52px; }
+  th { color: var(--ink-2); font-weight: 550; }
+  th.row { text-align: left; }
+  td.mid { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Matchup matrices</h1>
+  <p class="sub" id="status">Loading matchup-matrix.json… (regenerate with
+    <code>make matchup-matrix && ./build/matchup-matrix</code>) ·
+    <a href="monitor.html">training monitor</a></p>
+  <section>
+    <h2>Bots × decks</h2>
+    <p class="desc">Each cell: that deck's mean win rate across the other six
+      decks when this bot pilots every seat. Read a column down to see which
+      pilot gets the most out of a deck; read a row across to see how the bot
+      ranks the field.</p>
+    <div class="scroll"><table id="summary"></table></div>
+  </section>
+  <div id="per-bot"></div>
+</main>
+<script>
+const pct = (value) => value == null ? "–" : value.toFixed(1);
+
+// Green above 50, red below, neutral near coin-flip; readable in both themes.
+function shade(value) {
+  if (value == null) return "";
+  const spread = Math.max(-1, Math.min(1, (value - 50) / 35));
+  const alpha = Math.abs(spread) * 0.55;
+  const color = spread >= 0 ? "26, 152, 96" : "214, 69, 56";
+  return `background: rgba(${color}, ${alpha.toFixed(3)});`;
+}
+
+function matrixTable(decks, rows, rowLabels, cornerLabel) {
+  let html = `<tr><th class="row">${cornerLabel}</th>` +
+    decks.map((deck) => `<th>${deck}</th>`).join("") + "</tr>";
+  rows.forEach((row, index) => {
+    html += `<tr><th class="row">${rowLabels[index]}</th>` +
+      row.map((value) => value == null
+        ? '<td class="mid">–</td>'
+        : `<td style="${shade(value)}">${pct(value)}</td>`).join("") +
+      "</tr>";
+  });
+  return html;
+}
+
+async function load() {
+  let data;
+  try {
+    const response = await fetch("matchup-matrix.json", {cache: "no-store"});
+    if (!response.ok) throw new Error(response.status);
+    data = await response.json();
+  } catch (error) {
+    document.getElementById("status").textContent =
+      "No matchup-matrix.json yet — run: make matchup-matrix && " +
+      "./build/matchup-matrix";
+    return;
+  }
+  const decks = data.decks;
+  document.getElementById("status").innerHTML =
+    `${data.games_per_pairing} paired games per matchup · seed ${data.seed}` +
+    ` · <a href="monitor.html">training monitor</a>`;
+
+  document.getElementById("summary").innerHTML = matrixTable(
+    decks,
+    data.bots.map((bot) => bot.deck_means),
+    data.bots.map((bot) => bot.name),
+    "bot \\ deck");
+
+  const holder = document.getElementById("per-bot");
+  holder.innerHTML = data.bots.map((bot) => `
+    <section>
+      <h2>${bot.name} — deck vs deck</h2>
+      <p class="desc">Row deck's win % against the column deck, both seats
+        piloted by ${bot.name}. Rows and columns mirror (a 65 here is a 35
+        there).</p>
+      <div class="scroll"><table>${
+        matrixTable(decks, bot.matrix, decks, "deck \\ deck")
+      }</table></div>
+    </section>`).join("");
+}
+load();
+setInterval(load, 60_000);
+</script>
+</body>
+</html>
