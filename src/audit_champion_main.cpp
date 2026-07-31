@@ -50,6 +50,7 @@ struct Auditor {
     std::vector<std::string> flags;
     std::optional<std::tuple<std::size_t, PermanentId, bool>>
         pending_growth;
+    bool cast_a_spell_this_turn = false;
 
     void flag(std::size_t turn, const std::string& what) {
         std::ostringstream line;
@@ -212,12 +213,67 @@ struct Auditor {
             }
         }
 
+        if (ev.kind == GameEventKind::PriorityActionSelected &&
+            ev.player == spz_seat && ev.priority_action.has_value() &&
+            ev.priority_action->kind != PriorityActionKind::Pass &&
+            ev.priority_action->kind != PriorityActionKind::PlayLand) {
+            cast_a_spell_this_turn = true;
+        }
         if (ev.kind == GameEventKind::TurnStarted) {
             // Look back: did SPZ end its just-finished turn without a free
             // land drop?
             if (!trail.empty()) {
                 const Snapshot& last = trail.back();
                 const auto& prev_obs = last.observation;
+                if (prev_obs.active_player == spz_seat &&
+                    prev_obs.turn_number >= 1 &&
+                    !cast_a_spell_this_turn) {
+                    // Failure to develop: turn ended with a castable
+                    // creature and nothing cast. Holding is excused when
+                    // an instant in hand needed the open mana.
+                    PlayerState projected;
+                    const auto& me = prev_obs.players[spz_seat];
+                    projected.life = me.life;
+                    projected.channel_active = me.channel_active;
+                    projected.lands = me.lands;
+                    projected.artifacts = me.artifacts;
+                    projected.mana_pool = me.mana_pool;
+                    int instant_reserve = 0;
+                    for (const CardId card : prev_obs.hand) {
+                        const auto& definition = card_definition(card);
+                        if (definition.type == CardType::Instant) {
+                            const auto& cost = definition.cost;
+                            const int total = cost.generic +
+                                              cost.green + cost.red +
+                                              cost.blue + cost.white;
+                            instant_reserve =
+                                instant_reserve == 0
+                                    ? total
+                                    : std::min(instant_reserve, total);
+                        }
+                    }
+                    for (const CardId card : prev_obs.hand) {
+                        const auto& definition = card_definition(card);
+                        if (definition.type != CardType::Creature ||
+                            !can_pay(projected, definition.cost)) {
+                            continue;
+                        }
+                        const auto& cost = definition.cost;
+                        const int total = cost.generic + cost.green +
+                                          cost.red + cost.blue +
+                                          cost.white;
+                        if (maximum_available_mana(projected) <
+                            total + instant_reserve) {
+                            continue;
+                        }
+                        flag(prev_obs.turn_number,
+                             std::string("SKIPPED DEVELOPMENT: ended "
+                                         "turn with castable ") +
+                                 std::string(definition.name) +
+                                 " and cast nothing");
+                        break;
+                    }
+                }
                 if (prev_obs.active_player == spz_seat &&
                     prev_obs.turn_number >= 1 &&
                     !prev_obs.players[spz_seat].land_played_this_turn &&
@@ -311,6 +367,7 @@ struct Auditor {
         }
         if (ev.kind == GameEventKind::TurnStarted) {
             pending_growth.reset();
+            cast_a_spell_this_turn = false;
         }
     }
 };
