@@ -158,10 +158,11 @@ void append_player_scalars(std::vector<float>& features,
     push(static_cast<double>(player.enchantments.size()) / 2.0);
     push(mana_pool_total(player.mana_pool) / 4.0);
     push(player.land_played_this_turn ? 1.0 : 0.0);
+    push(player.channel_active ? 1.0 : 0.0);
 }
 
 constexpr std::size_t kGlobalScalarCount = 12;
-constexpr std::size_t kPlayerScalarCount = 22;
+constexpr std::size_t kPlayerScalarCount = 23;
 constexpr std::size_t kCardBlockCount = 11;
 
 }  // namespace
@@ -1696,7 +1697,10 @@ struct SpzAgent {
 
         // Opponent: identical apart from possibly raised temporary
         // bonuses on their creatures.
-        if (acted_opponent.life != passed_opponent.life ||
+        if (acted_self.channel_active != passed_self.channel_active ||
+            acted_opponent.channel_active !=
+                passed_opponent.channel_active ||
+            acted_opponent.life != passed_opponent.life ||
             acted_opponent.hand.size() != passed_opponent.hand.size() ||
             acted_opponent.library.size() !=
                 passed_opponent.library.size() ||

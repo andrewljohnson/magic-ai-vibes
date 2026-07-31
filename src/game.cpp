@@ -3231,6 +3231,31 @@ double Game::handcrafted_action_score(const PriorityAction& action,
     const std::size_t opponent = opponent_of(player);
     const auto& opponent_state = state_.players[opponent];
 
+    // Greedy ceiling on face damage castable this turn from hand burn:
+    // each Lightning Bolt is three damage for one mana, one Disintegrate
+    // then spends whatever mana remains (X plus its red). The mana
+    // ceiling already counts Black Lotuses and an active Channel's life.
+    const auto potential_burn_damage = [](const PlayerState& caster) {
+        int mana = maximum_available_mana(caster);
+        int damage = 0;
+        int bolts = 0;
+        bool holds_disintegrate = false;
+        for (const CardId card : caster.hand) {
+            bolts += card == CardId::LightningBolt ? 1 : 0;
+            holds_disintegrate =
+                holds_disintegrate || card == CardId::Disintegrate;
+        }
+        const int cast_bolts = std::min(bolts, mana);
+        damage += 3 * cast_bolts;
+        mana -= cast_bolts;
+        if (holds_disintegrate && mana >= 2) {
+            damage += mana - 1;
+        }
+        return damage;
+    };
+    const bool burn_lethal_this_turn =
+        potential_burn_damage(player_state) >= opponent_state.life;
+
     switch (action.kind) {
     case PriorityActionKind::Pass:
         if (!state_.stack.empty() &&
@@ -3301,6 +3326,23 @@ double Game::handcrafted_action_score(const PriorityAction& action,
         if (action.card == CardId::TimeWalk) {
             return 4'500.0;
         }
+        if (action.card == CardId::Channel) {
+            if (player_state.channel_active) {
+                return -1'000.0;
+            }
+            PlayerState channeled = player_state;
+            channeled.channel_active = true;
+            // Channel's own GG plus Disintegrate's red leave the rest as X.
+            const int x_ceiling =
+                maximum_available_mana(channeled) - 3;
+            const bool holds_disintegrate =
+                has_card(player_state.hand, CardId::Disintegrate);
+            if (holds_disintegrate &&
+                x_ceiling >= opponent_state.life) {
+                return 9'800.0;
+            }
+            return -200.0;
+        }
         const auto count_islands = [](const PlayerState& state) {
             return std::count_if(
                 state.lands.begin(), state.lands.end(),
@@ -3341,6 +3383,9 @@ double Game::handcrafted_action_score(const PriorityAction& action,
             if (opponent_state.life <= 3) {
                 return 10'000.0;
             }
+            if (burn_lethal_this_turn) {
+                return 9'500.0;
+            }
             return 900.0 +
                    10.0 * static_cast<double>(20 - opponent_state.life);
         } else {
@@ -3375,6 +3420,14 @@ double Game::handcrafted_action_score(const PriorityAction& action,
         if (!action.target->creature.has_value()) {
             if (opponent_state.life <= action.x_value) {
                 return 10'000.0;
+            }
+            if (burn_lethal_this_turn) {
+                return 9'000.0 +
+                       150.0 * static_cast<double>(action.x_value);
+            }
+            if (player_state.channel_active) {
+                // A non-lethal X funded by Channel life is suicide.
+                return -5'000.0;
             }
             return 700.0 +
                    150.0 * static_cast<double>(action.x_value) +

@@ -449,6 +449,71 @@ SPZ_TEST(champion_pumps_declared_blocker_in_response_window) {
            "the pump targets the blocking Grizzly Bears");
 }
 
+SPZ_TEST(channel_combo_kill_survives_prunes_and_rollout_finds_it) {
+    // Reported from live play: SPZ holding Channels and Disintegrates with
+    // Black Lotuses on the battlefield never cast Channel — the no-upside
+    // prune saw only spent resources (channel_active was unchecked) and a
+    // schema without the flag could not value the combo state. With both
+    // fixed, casting Channel rolls out into a lethal Disintegrate and any
+    // net must find the line.
+    const auto combo = lotus_combo_deck();
+    GameState state;
+    state.turn_number = 5;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.next_permanent_id = 10;
+    const auto remove_one = [](std::vector<CardId>& pool, CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        expect(found != pool.end(), "combo fixture card is in its deck");
+        pool.erase(found);
+    };
+    auto my_pool = combo;
+    for (int lotus = 0; lotus < 2; ++lotus) {
+        remove_one(my_pool, CardId::BlackLotus);
+        state.players[0].artifacts.push_back(
+            {.id = static_cast<PermanentId>(1 + lotus),
+             .card = CardId::BlackLotus});
+    }
+    for (int copy = 0; copy < 2; ++copy) {
+        remove_one(my_pool, CardId::Channel);
+        state.players[0].hand.push_back(CardId::Channel);
+        remove_one(my_pool, CardId::Disintegrate);
+        state.players[0].hand.push_back(CardId::Disintegrate);
+    }
+    state.players[0].library = my_pool;
+    state.players[1].library = combo;
+
+    const std::array<std::vector<CardId>, 2> game_decks = {combo, combo};
+    const auto observation = observe_game_state(state, 0);
+    const auto actions = legal_priority_actions(state, 0, true);
+    const auto casts_channel = [&](std::size_t index) {
+        const PriorityAction& action = actions[index];
+        return action.kind == PriorityActionKind::CastSorcery &&
+               action.card == CardId::Channel;
+    };
+    bool channel_available = false;
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        channel_available = channel_available || casts_channel(index);
+    }
+    expect(channel_available, "Channel is a legal sorcery here");
+
+    const auto net = std::make_shared<const SpzNet>(
+        spz_feature_count(), 8, 20260736);
+    SpzPolicyConfig policy;
+    policy.worlds = 1;
+    policy.block_prediction_worlds = 1;
+    policy.rollout = true;
+    policy.rollout_top_k = actions.size();
+    policy.gamma_per_turn = 0.98;
+    policy.seed = 0xC0FFEE;
+    const auto controller =
+        make_spz_controller(net, game_decks, 0, policy);
+    const std::size_t chosen = controller.choose_priority_action(
+        observation, TurnPhase::FirstMain, actions);
+    expect(casts_channel(chosen),
+           "rollout policy opens the Channel kill line");
+}
+
 SPZ_TEST(no_upside_prune_blocks_pumping_enemy_creatures) {
     // Reported from live play: SPZ (green, active player) with no creatures
     // of its own cast Giant Growth on the opponent's summoning-sick Orcs.
