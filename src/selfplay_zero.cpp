@@ -1641,6 +1641,21 @@ struct SpzAgent {
 
     static constexpr int kRolloutDecisionBudget = 300;
 
+    // Discounts an exact terminal outcome by the turns elapsed since the
+    // lookahead root; the identity at gamma 1.0.
+    double discount_outcome(double value, std::size_t root_turn,
+                            std::size_t end_turn) const {
+        if (config.gamma_per_turn >= 1.0 || value == 0.5) {
+            return value;
+        }
+        const double elapsed = end_turn > root_turn
+                                   ? static_cast<double>(end_turn -
+                                                         root_turn)
+                                   : 0.0;
+        return 0.5 + (value - 0.5) *
+                         std::pow(config.gamma_per_turn, elapsed);
+    }
+
     std::optional<double> terminal_value(const GameState& state) const {
         const bool self_dead = state.players[seat].life <= 0 ||
                                state.failed_draw[seat];
@@ -1886,8 +1901,13 @@ struct SpzAgent {
     // has already been resolved.
     double finish_turn_and_rollout(GameState state, TurnPhase entry_phase,
                                    PriorityState resume) const {
+        const std::size_t root_turn = state.turn_number;
+        const auto settle = [&](double value) {
+            return discount_outcome(value, root_turn,
+                                    state.turn_number);
+        };
         if (const auto terminal = terminal_value(state)) {
-            return *terminal;
+            return settle(*terminal);
         }
         int budget = kRolloutDecisionBudget *
                      static_cast<int>(std::max<std::size_t>(
@@ -1943,7 +1963,7 @@ struct SpzAgent {
                 break;
         }
         if (terminal) {
-            return *terminal;
+            return settle(*terminal);
         }
         rollout_cleanup(state);
 
@@ -1963,14 +1983,15 @@ struct SpzAgent {
             begin_turn(state, state.active_player);
             auto& active = state.players[state.active_player];
             if (active.library.empty()) {
-                return state.active_player == seat ? 0.0 : 1.0;
+                return settle(state.active_player == seat ? 0.0 : 1.0);
             }
             active.hand.push_back(active.library.back());
             active.library.pop_back();
             if (state.active_player == seat) {
                 seat_turn_starts_remaining -= 1;
                 if (seat_turn_starts_remaining == 0) {
-                    return value_for(state, seat, TurnPhase::FirstMain);
+                    return settle(
+                        value_for(state, seat, TurnPhase::FirstMain));
                 }
             }
             terminal = rollout_window(state, TurnPhase::FirstMain, true,
@@ -1982,11 +2003,11 @@ struct SpzAgent {
                 terminal = run_second_main(state);
             }
             if (terminal) {
-                return *terminal;
+                return settle(*terminal);
             }
             rollout_cleanup(state);
         }
-        return value_for(state, seat, TurnPhase::FirstMain);
+        return settle(value_for(state, seat, TurnPhase::FirstMain));
     }
 
     // ------------------------------------------------------------------
@@ -2531,6 +2552,7 @@ struct SpzAgent {
         if (recorder != nullptr) {
             recorder->feature_rows.push_back(spz_features_for(
                 net->input_count(), observation, decks, phase));
+            recorder->feature_turns.push_back(observation.turn_number);
         }
     }
 
@@ -2540,6 +2562,7 @@ struct SpzAgent {
             recorder->feature_rows.push_back(spz_features_for(
                 net->input_count(),
                 observe_game_state(state, seat), decks, phase));
+            recorder->feature_turns.push_back(state.turn_number);
         }
     }
 
@@ -2975,6 +2998,7 @@ struct SpzAgent {
                 // by attacking with more creatures. In contested games
                 // the values differ and the tie-break never fires.
                 const bool decided_tie =
+                    config.gamma_per_turn >= 1.0 &&
                     value >= best_value - kExactTie &&
                     value >= 0.99 &&
                     candidates[index].size() >
@@ -3323,7 +3347,21 @@ void run_indexed_jobs(std::size_t job_count, std::size_t threads,
 }
 
 float outcome_target(const GameResult& result, std::size_t seat,
-                     bool discounted) {
+                     bool discounted, double gamma,
+                     std::size_t sample_turn) {
+    if (gamma < 1.0) {
+        if (result.winner == -1) {
+            return 0.5f;
+        }
+        const double z =
+            static_cast<std::size_t>(result.winner) == seat ? 1.0 : 0.0;
+        const double elapsed =
+            result.turns > sample_turn
+                ? static_cast<double>(result.turns - sample_turn)
+                : 0.0;
+        return static_cast<float>(0.5 +
+                                  (z - 0.5) * std::pow(gamma, elapsed));
+    }
     if (discounted) {
         return static_cast<float>(
             discounted_terminal_target(result, seat));
@@ -3476,6 +3514,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                     policy.block_prediction_worlds = config.training_worlds;
                     policy.epsilon = epsilon;
                     policy.rollout = config.rollout;
+                    policy.gamma_per_turn =
+                        config.gamma < 1.0 ? config.gamma : 1.0;
                     if (config.ismcts && !champion_seat[seat]) {
                         policy.search = SpzPolicyConfig::Search::Ismcts;
                         policy.ismcts_iterations =
@@ -3503,10 +3543,19 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             decisive += record.result.winner == -1 ? 0 : 1;
             total_turns += record.turns;
             for (std::size_t seat = 0; seat < 2; ++seat) {
-                const float target = outcome_target(
-                    record.result, seat, config.discounted_targets);
-                for (const auto& row :
-                     record.recorders[seat].feature_rows) {
+                auto& seat_recorder = record.recorders[seat];
+                for (std::size_t row_index = 0;
+                     row_index < seat_recorder.feature_rows.size();
+                     ++row_index) {
+                    const auto& row =
+                        seat_recorder.feature_rows[row_index];
+                    const std::size_t sample_turn =
+                        row_index < seat_recorder.feature_turns.size()
+                            ? seat_recorder.feature_turns[row_index]
+                            : 0;
+                    const float target = outcome_target(
+                        record.result, seat, config.discounted_targets,
+                        config.gamma, sample_turn);
                     SpzSample sample{row, target};
                     if (replay.size() < config.replay_capacity) {
                         replay.push_back(std::move(sample));

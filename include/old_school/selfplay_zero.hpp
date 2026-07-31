@@ -194,6 +194,11 @@ struct SpzPolicyConfig {
     Search search = Search::GreedyRollout;
     // Total tree simulations per decision, split across the sampled worlds.
     std::size_t ismcts_iterations = 160;
+    // Per-turn discount applied to terminal outcomes reached inside
+    // lookahead: a win N turns out is worth 0.5 + 0.5 * gamma^N. At 1.0
+    // (undiscounted) sooner and later wins tie and rules-based tie-breaks
+    // compensate; below 1.0 urgency is part of the value itself.
+    double gamma_per_turn = 1.0;
     // Rules-only prune of real-root priority actions that are strictly
     // dominated by Pass (identical settled state, strictly more of the
     // actor's resources consumed) — e.g. an X=0 Braingeyser. No card
@@ -218,6 +223,9 @@ struct SpzPolicySample {
 // Per-seat recording sink for self-play training.
 struct SpzRecorder {
     std::vector<std::vector<float>> feature_rows;
+    // Turn number of each recorded row, aligned with feature_rows; lets
+    // training discount targets per state rather than per game.
+    std::vector<std::size_t> feature_turns;
     std::vector<SpzPolicySample> policy_samples;
 };
 
@@ -313,8 +321,12 @@ struct SpzTrainConfig {
     std::size_t league_snapshot_interval = 10;
     std::size_t league_pool_size = 8;
     // Length-discounted outcome targets (the engine's canonical soft label)
-    // instead of raw 0/0.5/1 outcomes.
+    // instead of raw 0/0.5/1 outcomes. Superseded by gamma below.
     bool discounted_targets = true;
+    // Per-state discount: a sample recorded at turn t of a game ending at
+    // turn T trains toward 0.5 + (z - 0.5) * gamma^(T - t). 1.0 disables
+    // (and defers to discounted_targets for backward compatibility).
+    double gamma = 1.0;
     // When nonempty, saves "<prefix><iteration>.txt" checkpoints.
     std::string checkpoint_prefix;
     std::size_t checkpoint_interval = 25;

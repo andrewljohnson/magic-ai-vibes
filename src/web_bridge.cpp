@@ -1562,6 +1562,9 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         spz_policy.worlds = config.spz_worlds;
         spz_policy.block_prediction_worlds = config.spz_worlds;
         spz_policy.rollout = config.spz_rollout;
+        // Discounted lookahead: sooner wins outrank later ones, so the
+        // champion presses lethal from the objective itself.
+        spz_policy.gamma_per_turn = 0.98;
         spz_policy.seed = config.game_seed ^ 0x53505AULL;
         game_config.human_controllers[1] =
             selfplay_zero::make_spz_controller(

@@ -1,6 +1,7 @@
 #include "old_school/selfplay_zero.hpp"
 
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -47,6 +48,7 @@ struct Arguments {
     std::size_t hidden = 64;
     std::size_t schema = 0;
     bool hard_targets = false;
+    double gamma = 1.0;
     std::uint64_t seed = 20260729;
     std::size_t threads = 1;
     std::size_t max_turns = 0;  // 0 selects the per-command default.
@@ -114,6 +116,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.schema = 3;
         } else if (flag == "--hard-targets") {
             arguments.hard_targets = true;
+        } else if (flag == "--gamma") {
+            arguments.gamma = std::stod(next());
         } else if (flag == "--hidden") {
             arguments.hidden = std::stoull(next());
         } else if (flag == "--seed") {
@@ -152,9 +156,21 @@ Arguments parse_arguments(int argc, char** argv) {
     return arguments;
 }
 
-int run_train(const Arguments& arguments) {
+int run_train(const Arguments& raw_arguments) {
+    Arguments arguments = raw_arguments;
     if (arguments.out.empty()) {
         usage();
+    }
+    // Every training run reports to the live monitor by default.
+    if (arguments.telemetry.empty()) {
+        arguments.telemetry = "build/telemetry/telemetry.jsonl";
+    }
+    if (arguments.probe_every == 0) {
+        arguments.probe_every = 10;
+    }
+    if (arguments.probe_baseline.empty() &&
+        std::ifstream("data/spz-champion-v6.txt").good()) {
+        arguments.probe_baseline = "data/spz-champion-v6.txt";
     }
     SpzTrainConfig config;
     config.iterations = arguments.iterations;
@@ -162,6 +178,7 @@ int run_train(const Arguments& arguments) {
     config.hidden = arguments.hidden;
     config.schema = arguments.schema;
     config.discounted_targets = !arguments.hard_targets;
+    config.gamma = arguments.gamma;
     config.seed = arguments.seed;
     config.threads = arguments.threads;
     config.learning_rate = arguments.learning_rate;
@@ -236,6 +253,7 @@ int run_benchmark(const Arguments& arguments) {
     policy.rollout = arguments.rollout;
     policy.rollout_turn_cycles = arguments.cycles;
     policy.rollout_top_k = arguments.top_k;
+    policy.gamma_per_turn = arguments.gamma;
     if (arguments.ismcts) {
         policy.search = SpzPolicyConfig::Search::Ismcts;
         policy.ismcts_iterations = arguments.sims;

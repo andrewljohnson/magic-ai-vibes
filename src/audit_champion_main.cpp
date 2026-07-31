@@ -310,6 +310,12 @@ int main(int argc, char** argv) {
     const bool mirror = argc > 2 && std::string(argv[2]) == "--mirror";
     const bool random_pilot =
         argc > 2 && std::string(argv[2]) == "--random-pilot";
+    double gamma = 1.0;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--gamma") {
+            gamma = std::stod(argv[i + 1]);
+        }
+    }
     if (argc > 1 && std::string(argv[1]) == "--self-test") {
         // Fabricated events must trip every detector.
         std::size_t passed = 0;
@@ -374,6 +380,7 @@ int main(int argc, char** argv) {
             policy.rollout = !random_pilot;
             policy.epsilon = random_pilot ? 1.0 : 0.0;
             policy.pass_dominance_prune = !random_pilot;
+            policy.gamma_per_turn = gamma;
             policy.seed = (seat_auditor->seed ^ 0xA0D17) + seat;
             auto controller =
                 make_spz_controller(net, game_decks, seat, policy);
