@@ -66,8 +66,8 @@ bool lethal_channel_line_open(const PublicPlayerState& me, int my_life,
 int main(int argc, char** argv) {
     std::size_t games = 20;
     std::uint64_t seed = 20260741;
-    std::string model = "data/spz-champion-v7.txt";
-    std::string advantage_path = "data/spz-advantage-v2.txt";
+    std::string model = "data/spz-champion-v8.txt";
+    std::string advantage_path = "data/spz-advantage-v3.txt";
     bool use_advantage = true;
     std::size_t top_k = 5;
     bool verbose = false;
