@@ -4323,11 +4323,12 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             // measured deltas disagree. Order is the deployed use of the
             // head, and consistent tiny deltas (a wasted pump, a skipped
             // land) survive here where they drown in squared error.
-            // Low threshold: paired common-random-number deltas make
-            // even sub-noise gaps (a land drop, a held trick) reliable
-            // in sign, and those are precisely the ties the head must
-            // arbitrate. Noise pairs contribute canceling gradients.
-            constexpr double kPairMargin = 2e-4;
+            // Pairs need a real measured gap: below this the deltas'
+            // own pricing error dominates (a land drop's value at the
+            // rollout horizon reads near zero), and training on such
+            // pairs teaches confident wrong orderings - the v5 head
+            // doubled land skips at its best-ever agreement.
+            constexpr double kPairMargin = 1e-3;
             std::vector<SpzAdvantageNet::RankedPair> pair_batch;
             for (std::size_t step = 0; step < advantage_steps; ++step) {
                 pair_batch.clear();
