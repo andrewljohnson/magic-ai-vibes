@@ -38,6 +38,15 @@
   <p class="sub" id="status">Loading matchup-matrix.json… (regenerate with
     <code>make matchup-matrix && ./build/matchup-matrix</code>) ·
     <a href="monitor.html">training monitor</a></p>
+  <section id="calc-strip" style="display:none">
+    <h2>Matrix calculation in progress</h2>
+    <p class="desc" id="calc-status"></p>
+    <div style="background:var(--grid);border-radius:6px;height:10px;max-width:960px">
+      <div id="calc-bar" style="background:#199e70;height:10px;border-radius:6px;width:0%"></div>
+    </div>
+    <p class="desc">Finished bots appear in the tables below as each
+      completes; this page refreshes them automatically.</p>
+  </section>
   <section id="training-strip" style="display:none">
     <h2>Training in progress</h2>
     <p class="desc" id="training-status"></p>
@@ -179,6 +188,31 @@ async function pollTraining() {
 }
 pollTraining();
 setInterval(pollTraining, 15_000);
+
+async function pollCalc() {
+  const strip = document.getElementById("calc-strip");
+  try {
+    const response = await fetch("matchup-progress.json", {cache: "no-store"});
+    if (!response.ok) throw new Error(response.status);
+    const p = await response.json();
+    if (p.status !== "running") { strip.style.display = "none"; return; }
+    strip.style.display = "";
+    const stagePct = p.total > 0 ? p.done / p.total : 0;
+    document.getElementById("calc-status").textContent =
+      `Bot ${p.botIndex + 1} of ${p.botCount}: ${p.bot} \u00b7 ${p.stage}` +
+      ` \u00b7 ${(100 * stagePct).toFixed(0)}% (${p.done}/${p.total} games)`;
+    // Two stages per bot; overall = bots finished + this bot's share.
+    const overall =
+      (p.botIndex + (p.stage === "vs field" ? 0.5 : 0) + stagePct / 2) /
+      p.botCount;
+    document.getElementById("calc-bar").style.width =
+      `${Math.min(100, 100 * overall).toFixed(1)}%`;
+  } catch (error) {
+    strip.style.display = "none";
+  }
+}
+pollCalc();
+setInterval(pollCalc, 5_000);
 </script>
 </body>
 </html>

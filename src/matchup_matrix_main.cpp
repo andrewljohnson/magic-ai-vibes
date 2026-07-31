@@ -307,6 +307,32 @@ int main(int argc, char** argv) {
         head << "],\n  \"bots\": [\n";
         header = head.str();
     }
+    const std::string progress_path = [&output_path]() {
+        const auto slash = output_path.find_last_of('/');
+        const std::string dir =
+            slash == std::string::npos
+                ? std::string()
+                : output_path.substr(0, slash + 1);
+        return dir + "matchup-progress.json";
+    }();
+    std::atomic<std::size_t> stage_done{0};
+    const auto write_progress = [&](const std::string& status,
+                                    const std::string& bot_name,
+                                    std::size_t bot_index,
+                                    std::size_t bot_count,
+                                    const std::string& stage,
+                                    std::size_t done,
+                                    std::size_t total) {
+        std::ofstream out(progress_path);
+        if (!out) {
+            return;
+        }
+        out << "{\"status\":\"" << status << "\",\"bot\":\""
+            << bot_name << "\",\"botIndex\":" << bot_index
+            << ",\"botCount\":" << bot_count << ",\"stage\":\""
+            << stage << "\",\"done\":" << done << ",\"total\":"
+            << total << "}\n";
+    };
     std::vector<std::string> finished_bots;
     const auto write_snapshot = [&]() {
         std::ofstream out(output_path);
@@ -331,9 +357,21 @@ int main(int argc, char** argv) {
         std::vector<std::vector<double>> matrix(
             deck_count, std::vector<double>(deck_count, 50.0));
         std::vector<double> pairing_points(pairings.size(), 0.0);
+        const std::size_t mirror_total =
+            pairings.size() * games_per_pairing;
+        stage_done.store(0);
+        write_progress("running", entry.name, bot, bots.size(),
+                       "mirror grid", 0, mirror_total);
         run_jobs(
-            pairings.size() * games_per_pairing, threads,
+            mirror_total, threads,
             [&](std::size_t job) {
+                const std::size_t finished =
+                    stage_done.fetch_add(1) + 1;
+                if (finished % 100 == 0) {
+                    write_progress("running", entry.name, bot,
+                                   bots.size(), "mirror grid",
+                                   finished, mirror_total);
+                }
                 const std::size_t pairing = job / games_per_pairing;
                 const std::size_t game = job % games_per_pairing;
                 const auto [low, high] = pairings[pairing];
@@ -366,9 +404,21 @@ int main(int argc, char** argv) {
             std::max<std::size_t>(2, games_per_pairing / 2) & ~1ULL;
         std::vector<double> field_points(deck_count, 0.0);
         std::vector<std::size_t> field_totals(deck_count, 0);
+        const std::size_t field_total =
+            deck_count * (deck_count - 1) * field_games;
+        stage_done.store(0);
+        write_progress("running", entry.name, bot, bots.size(),
+                       "vs field", 0, field_total);
         run_jobs(
-            deck_count * (deck_count - 1) * field_games, threads,
+            field_total, threads,
             [&](std::size_t job) {
+                const std::size_t finished =
+                    stage_done.fetch_add(1) + 1;
+                if (finished % 100 == 0) {
+                    write_progress("running", entry.name, bot,
+                                   bots.size(), "vs field", finished,
+                                   field_total);
+                }
                 const std::size_t game = job % field_games;
                 const std::size_t pair = job / field_games;
                 const std::size_t mine = pair / (deck_count - 1);
@@ -414,6 +464,8 @@ int main(int argc, char** argv) {
         write_snapshot();
         std::cout << entry.name << " done\n";
     }
+    write_progress("complete", "", bots.size(), bots.size(), "done",
+                   0, 0);
     std::cout << "wrote " << output_path << "\n";
     return 0;
 }
