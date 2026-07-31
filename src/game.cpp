@@ -30,7 +30,7 @@ namespace old_school {
 
 namespace {
 
-constexpr std::array<CardDefinition, 26> kCardDefinitions = {{
+constexpr std::array<CardDefinition, 28> kCardDefinitions = {{
     {CardId::Forest, "Forest", CardType::Land, {}, 0, 0, 0},
     {CardId::Mountain, "Mountain", CardType::Land, {}, 0, 0, 0},
     {CardId::GrizzlyBears,
@@ -197,6 +197,22 @@ constexpr std::array<CardDefinition, 26> kCardDefinitions = {{
      4,
      0,
      true},
+    {CardId::BlackLotus,
+     "Black Lotus",
+     CardType::Artifact,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Channel,
+     "Channel",
+     CardType::Sorcery,
+     {.green = 2},
+     0,
+     0,
+     0,
+     false},
 }};
 
 constexpr std::array<CardId, 9> kCreatureCards = {
@@ -211,15 +227,17 @@ constexpr std::array<CardId, 9> kCreatureCards = {
     CardId::AirElemental,
 };
 
-constexpr std::array<CardId, 2> kSorceryCards = {
+constexpr std::array<CardId, 3> kSorceryCards = {
     CardId::Tsunami,
     CardId::TimeWalk,
+    CardId::Channel,
 };
 
-constexpr std::array<CardId, 3> kArtifactCards = {
+constexpr std::array<CardId, 4> kArtifactCards = {
     CardId::Millstone,
     CardId::MoxSapphire,
     CardId::SolRing,
+    CardId::BlackLotus,
 };
 
 constexpr std::array<CardId, 1> kEnchantmentCards = {
@@ -396,6 +414,11 @@ struct ManaPaymentPlan {
     bool possible = false;
     std::vector<bool> tap_lands;
     std::vector<bool> tap_artifacts;
+    // Black Lotus is sacrificed, not tapped, and yields three mana of one
+    // chosen color (tracked by adding it directly to the pool).
+    std::vector<bool> sacrifice_artifacts;
+    // Channel converts life into mana, one for one, down to one life.
+    int channel_life = 0;
     ManaCost remaining_pool;
 };
 
@@ -413,6 +436,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         .tap_lands = std::vector<bool>(player.lands.size(), false),
         .tap_artifacts =
             std::vector<bool>(player.artifacts.size(), false),
+        .sacrifice_artifacts =
+            std::vector<bool>(player.artifacts.size(), false),
         .remaining_pool = player.mana_pool,
     };
 
@@ -426,6 +451,20 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         add_mana(plan.remaining_pool,
                  artifact_mana(player.artifacts[index].card));
     };
+    const auto sacrifice_lotus_for = [&](int ManaCost::*color) {
+        for (std::size_t index = 0; index < player.artifacts.size();
+             ++index) {
+            if (!player.artifacts[index].tapped &&
+                !plan.tap_artifacts[index] &&
+                !plan.sacrifice_artifacts[index] &&
+                player.artifacts[index].card == CardId::BlackLotus) {
+                plan.sacrifice_artifacts[index] = true;
+                plan.remaining_pool.*color += 3;
+                return true;
+            }
+        }
+        return false;
+    };
     const auto select_land_color =
         [&](CardId land, int needed) {
             for (std::size_t index = 0;
@@ -437,6 +476,18 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                     tap_land(index);
                     --needed;
                 }
+            }
+            // A Black Lotus covers up to three missing mana of one color.
+            while (needed > 0) {
+                int ManaCost::*color = &ManaCost::generic;
+                if (land == CardId::Forest) color = &ManaCost::green;
+                if (land == CardId::Mountain) color = &ManaCost::red;
+                if (land == CardId::Island) color = &ManaCost::blue;
+                if (land == CardId::Plains) color = &ManaCost::white;
+                if (!sacrifice_lotus_for(color)) {
+                    break;
+                }
+                needed = std::max(0, needed - 3);
             }
             return needed == 0;
         };
@@ -509,6 +560,16 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             tap_artifact(index);
         }
     }
+    while (needs_more_mana() &&
+           sacrifice_lotus_for(&ManaCost::generic)) {
+    }
+    if (player.channel_active && needs_more_mana()) {
+        const int shortfall = required_total -
+                              mana_total(plan.remaining_pool);
+        const int payable = std::max(0, player.life - 1);
+        plan.channel_life = std::min(shortfall, payable);
+        plan.remaining_pool.generic += plan.channel_life;
+    }
 
     if (plan.remaining_pool.green < cost.green ||
         plan.remaining_pool.red < cost.red ||
@@ -542,6 +603,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
     return plan;
 }
 
+}  // namespace
+
 bool can_pay(const PlayerState& player, const ManaCost& cost) {
     return plan_mana_payment(player, cost).possible;
 }
@@ -562,12 +625,25 @@ bool pay_mana(PlayerState& player, const ManaCost& cost) {
             player.artifacts[index].tapped = true;
         }
     }
+    // Sacrificed Black Lotuses leave the battlefield for the graveyard.
+    for (std::size_t index = player.artifacts.size(); index-- > 0;) {
+        if (plan.sacrifice_artifacts[index]) {
+            player.graveyard.push_back(player.artifacts[index].card);
+            player.artifacts.erase(
+                player.artifacts.begin() +
+                static_cast<std::ptrdiff_t>(index));
+        }
+    }
+    player.life -= plan.channel_life;
     player.mana_pool = plan.remaining_pool;
     return true;
 }
 
 int maximum_available_mana(const PlayerState& player) {
     int total = mana_total(player.mana_pool);
+    if (player.channel_active) {
+        total += std::max(0, player.life - 1);
+    }
     for (const auto& land : player.lands) {
         if (!land.tapped) {
             total += mana_total(land_mana(land.card));
@@ -576,10 +652,15 @@ int maximum_available_mana(const PlayerState& player) {
     for (const auto& artifact : player.artifacts) {
         if (!artifact.tapped) {
             total += mana_total(artifact_mana(artifact.card));
+            if (artifact.card == CardId::BlackLotus) {
+                total += 3;
+            }
         }
     }
     return total;
 }
+
+namespace {
 
 CreaturePermanent* find_creature(PlayerState& player, PermanentId id) {
     const auto position = std::find_if(
@@ -765,6 +846,10 @@ double handcrafted_card_value(CardId card) {
         return 750.0;
     case CardId::AirElemental:
         return 1'050.0;
+    case CardId::BlackLotus:
+        return 1'650.0;
+    case CardId::Channel:
+        return 900.0;
     }
     return 0.0;
 }
@@ -795,6 +880,20 @@ std::vector<CardId> red_deck() {
     deck.insert(deck.end(), 4, CardId::GrayOgre);
     deck.insert(deck.end(), 3, CardId::HillGiant);
     deck.insert(deck.end(), 2, CardId::FireElemental);
+    return deck;
+}
+
+std::vector<CardId> lotus_combo_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 10, CardId::Disintegrate);
+    deck.insert(deck.end(), 10, CardId::Channel);
+    deck.insert(deck.end(), 20, CardId::BlackLotus);
+    return deck;
+}
+
+std::vector<CardId> burn_deck() {
+    std::vector<CardId> deck(15, CardId::Mountain);
+    deck.insert(deck.end(), 25, CardId::LightningBolt);
     return deck;
 }
 
@@ -1741,6 +1840,14 @@ bool resolve_top_of_stack(
         return true;
     }
 
+    if (spell.card == CardId::Channel) {
+        // Until end of turn the controller may pay life for mana; the
+        // payment itself happens inside mana planning.
+        controller.channel_active = true;
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
     return false;
 }
 
@@ -2655,6 +2762,7 @@ std::vector<CardId> cleanup_turn(
     // effects.
     for (auto& player : state.players) {
         player.mana_pool = {};
+        player.channel_active = false;
         for (auto& creature : player.creatures) {
             creature.damage = 0;
             creature.temporary_power_bonus = 0;
@@ -2686,6 +2794,7 @@ PlayerObservation observe_game_state(const GameState& state,
         const auto& source = state.players[player];
         observation.players[player] = {
             .life = source.life,
+            .channel_active = source.channel_active,
             .library_size = source.library.size(),
             .hand_size = source.hand.size(),
             .graveyard = source.graveyard,

@@ -2755,6 +2755,61 @@ TEST(legal_attackers_is_engine_authoritative_and_preserves_order) {
     CHECK(rejected_invalid_player);
 }
 
+TEST(black_lotus_sacrifices_for_three_of_one_color) {
+    old_school::PlayerState player;
+    player.artifacts.push_back(
+        {.id = 1, .card = old_school::CardId::BlackLotus});
+    CHECK(old_school::maximum_available_mana(player) == 3);
+    CHECK(old_school::can_pay(player, {.green = 2}));
+    CHECK(old_school::pay_mana(player, {.green = 2}));
+    CHECK(player.artifacts.empty());
+    CHECK(player.graveyard ==
+          std::vector<old_school::CardId>{
+              old_school::CardId::BlackLotus});
+    CHECK(player.mana_pool.green == 1);
+}
+
+TEST(channel_converts_life_to_mana_down_to_one) {
+    old_school::PlayerState player;
+    player.life = 8;
+    player.channel_active = true;
+    CHECK(old_school::maximum_available_mana(player) == 7);
+    CHECK(!old_school::can_pay(player, {.generic = 8}));
+    CHECK(old_school::pay_mana(player, {.generic = 5}));
+    CHECK(player.life == 3);
+    old_school::GameState state;
+    state.players[0] = player;
+    state.players[0].hand = {};
+    old_school::cleanup_turn(state, 0, {});
+    CHECK(!state.players[0].channel_active);
+}
+
+TEST(lotus_combo_deck_threatens_lethal_disintegrate) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.turn_number = 1;
+    state.players[0].hand = {old_school::CardId::Disintegrate};
+    state.players[0].artifacts.push_back(
+        {.id = 1, .card = old_school::CardId::BlackLotus});
+    state.players[0].channel_active = true;
+    state.players[0].life = 20;
+    state.players[0].library = old_school::lotus_combo_deck();
+    state.players[1].library = old_school::burn_deck();
+    const auto actions =
+        old_school::legal_priority_actions(state, 0, true);
+    int best_x = 0;
+    for (const auto& action : actions) {
+        if (action.kind ==
+                old_school::PriorityActionKind::CastDisintegrate &&
+            action.target.has_value() &&
+            action.target->player == 1 &&
+            !action.target->creature.has_value()) {
+            best_x = std::max(best_x, action.x_value);
+        }
+    }
+    CHECK(best_x >= 20);
+}
+
 TEST(grizzly_bears_trade_in_combat) {
     old_school::GameState state;
     state.players[0].creatures = {bear(1)};

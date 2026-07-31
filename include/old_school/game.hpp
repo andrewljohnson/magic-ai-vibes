@@ -43,10 +43,12 @@ enum class CardId : std::uint8_t {
     Braingeyser,
     ForceSpike,
     AirElemental,
+    BlackLotus,
+    Channel,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::AirElemental) + 1;
+    static_cast<std::size_t>(CardId::Channel) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -87,6 +89,9 @@ std::vector<CardId> red_deck();
 std::vector<CardId> blue_deck();
 std::vector<CardId> white_control_deck();
 std::vector<CardId> ru_aggro_deck();
+// Stress decks outside the five-deck metagame environment.
+std::vector<CardId> lotus_combo_deck();
+std::vector<CardId> burn_deck();
 
 using PermanentId = std::uint64_t;
 
@@ -120,6 +125,8 @@ struct ArtifactPermanent {
 
 struct PlayerState {
     int life = 20;
+    // Channel's until-end-of-turn effect: pay 1 life for 1 mana.
+    bool channel_active = false;
     std::vector<CardId> library;
     std::vector<CardId> hand;
     std::vector<CardId> graveyard;
@@ -256,6 +263,13 @@ struct PriorityAction {
 
 // Sorcery actions means the active player is in a main phase. Lands and
 // creatures additionally require an empty stack; instants do not.
+// Mana arithmetic over the implicit (stackless) mana system. Payment taps
+// producers, sacrifices Black Lotuses, and converts life through an active
+// Channel, exactly as spell casting does.
+bool can_pay(const PlayerState& player, const ManaCost& cost);
+bool pay_mana(PlayerState& player, const ManaCost& cost);
+int maximum_available_mana(const PlayerState& player);
+
 std::vector<PriorityAction>
 legal_priority_actions(const GameState& state, std::size_t player,
                        bool sorcery_actions);
@@ -300,6 +314,7 @@ enum class TurnPhase : std::uint8_t {
 // controller explicitly opts into the debug-only opponent-hand reveal below.
 struct PublicPlayerState {
     int life = 20;
+    bool channel_active = false;
     std::size_t library_size = 0;
     std::size_t hand_size = 0;
     std::vector<CardId> graveyard;
