@@ -146,6 +146,8 @@ int main(int argc, char** argv) {
             seed = std::stoull(argv[++arg]);
         } else if (flag == "--narrations") {
             narrations = std::stoul(argv[++arg]);
+        } else if (flag == "--model") {
+            model = argv[++arg];
         } else {
             std::cerr << "unknown flag " << flag << "\n";
             return 1;
