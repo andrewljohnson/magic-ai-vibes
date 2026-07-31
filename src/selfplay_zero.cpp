@@ -1501,6 +1501,58 @@ struct SpzAgent {
                               0);
     }
 
+    // True when the action's settled consequence differs from passing only
+    // by raised temporary bonuses on the actor's own creatures (plus the
+    // actor's spent resources). Such a pump has no upside when it provably
+    // expires unused: in the actor's second main, or when none of the
+    // pumped creatures could legally attack this turn. Bonuses vanish at
+    // the end of the actor's own turn, so they can never help defense.
+    static bool own_pump_only_versus_pass(
+        std::size_t actor,
+        const ResolvedPriorityActionConsequence& action_settled,
+        const ResolvedPriorityActionConsequence& pass_settled,
+        std::vector<PermanentId>* pumped) {
+        if (action_settled.terminal || pass_settled.terminal) {
+            return false;
+        }
+        const GameState& acted = action_settled.state;
+        const GameState& passed = pass_settled.state;
+        if (acted.stack != passed.stack ||
+            acted.players[1 - actor] != passed.players[1 - actor]) {
+            return false;
+        }
+        const PlayerState& acted_self = acted.players[actor];
+        const PlayerState& passed_self = passed.players[actor];
+        if (acted_self.life != passed_self.life ||
+            acted_self.library.size() != passed_self.library.size() ||
+            acted_self.creatures.size() != passed_self.creatures.size()) {
+            return false;
+        }
+        for (const auto& creature : acted_self.creatures) {
+            const auto* other =
+                creature_by_id(passed_self.creatures, creature.id);
+            if (other == nullptr || other->card != creature.card ||
+                other->tapped != creature.tapped ||
+                other->summoning_sick != creature.summoning_sick ||
+                other->damage != creature.damage) {
+                return false;
+            }
+            if (creature.temporary_power_bonus <
+                    other->temporary_power_bonus ||
+                creature.temporary_toughness_bonus <
+                    other->temporary_toughness_bonus) {
+                return false;
+            }
+            if (creature.temporary_power_bonus >
+                    other->temporary_power_bonus ||
+                creature.temporary_toughness_bonus >
+                    other->temporary_toughness_bonus) {
+                pumped->push_back(creature.id);
+            }
+        }
+        return !pumped->empty();
+    }
+
     static bool creature_on_battlefield(const GameState& state,
                                         std::size_t player,
                                         PermanentId id,
@@ -2538,10 +2590,43 @@ struct SpzAgent {
                         resolve_priority_action_consequence(
                             reconstructed, seat, sorcery_actions, 0,
                             actions[index]);
-                    if (settled.has_value() &&
-                        no_upside_versus_pass(seat, *settled,
+                    if (!settled.has_value()) {
+                        continue;
+                    }
+                    if (no_upside_versus_pass(seat, *settled,
                                               *pass_settled)) {
                         dominated[index] = true;
+                        continue;
+                    }
+                    std::vector<PermanentId> pumped;
+                    if (own_pump_only_versus_pass(seat, *settled,
+                                                  *pass_settled,
+                                                  &pumped)) {
+                        const bool my_turn =
+                            observation.active_player == seat;
+                        if (!my_turn) {
+                            continue;  // defensive pre-pump stays legal
+                        }
+                        if (phase == TurnPhase::SecondMain) {
+                            dominated[index] = true;
+                            continue;
+                        }
+                        // Before combat on the actor's own turn the pump
+                        // only matters if a pumped creature could attack.
+                        const auto eligible = old_school::legal_attackers(
+                            settled->state, seat);
+                        bool pumped_can_attack = false;
+                        for (const PermanentId id : pumped) {
+                            if (std::find(eligible.begin(),
+                                          eligible.end(),
+                                          id) != eligible.end()) {
+                                pumped_can_attack = true;
+                            }
+                        }
+                        if (!pumped_can_attack &&
+                            phase != TurnPhase::DeclareBlockers) {
+                            dominated[index] = true;
+                        }
                     }
                 }
             }
@@ -2669,9 +2754,27 @@ struct SpzAgent {
             }
             totals = std::move(rollout_totals);
         }
-        const std::size_t best = static_cast<std::size_t>(
+        std::size_t best = static_cast<std::size_t>(
             std::max_element(totals.begin(), totals.end()) -
             totals.begin());
+        // A free land drop is strictly resource-positive; when its score
+        // ties the best within noise, take it rather than passing on it.
+        if (actions[best].kind != PriorityActionKind::PlayLand) {
+            constexpr double kTieMargin = 0.004;
+            for (std::size_t index = 0; index < actions.size();
+                 ++index) {
+                if (!dominated[index] &&
+                    actions[index].kind ==
+                        PriorityActionKind::PlayLand &&
+                    totals[index] >=
+                        totals[best] -
+                            kTieMargin *
+                                static_cast<double>(worlds)) {
+                    best = index;
+                    break;
+                }
+            }
+        }
         if (recorder != nullptr) {
             const GameState sampled = sample_determinization(
                 reconstructed, decks, seat, rng());
@@ -2862,12 +2965,22 @@ struct SpzAgent {
             double best_value =
                 -std::numeric_limits<double>::infinity();
             std::size_t best_candidate = 0;
+            constexpr double kExactTie = 5e-4;
             for (std::size_t index = 0; index < candidates.size();
                  ++index) {
                 const double value =
                     evaluate_set(candidates[index], true);
-                if (value > best_value) {
-                    best_value = value;
+                // In effectively decided positions every plan evaluates
+                // as won (or lost) and ties are arbitrary; press the win
+                // by attacking with more creatures. In contested games
+                // the values differ and the tie-break never fires.
+                const bool decided_tie =
+                    value >= best_value - kExactTie &&
+                    value >= 0.99 &&
+                    candidates[index].size() >
+                        candidates[best_candidate].size();
+                if (value > best_value + kExactTie || decided_tie) {
+                    best_value = std::max(best_value, value);
                     best_candidate = index;
                 }
             }
