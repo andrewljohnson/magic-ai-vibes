@@ -8,12 +8,14 @@
   :root {
     --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e7e6e2;
     --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #4a3aa7; --s5: #e34948;
+    --s6: #0e8f8f; --s7: #b0578c;
     --ref: #9a9891;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --grid: #34332f;
       --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #9085e9; --s5: #e66767;
+      --s6: #2aa9a9; --s7: #c9739f;
       --ref: #6f6d66;
     }
   }
@@ -56,7 +58,7 @@
     <div class="tile"><div class="k">Iterations · games</div><div class="v" id="t-iter">–</div><div class="lift" id="t-games"></div></div>
     <div class="tile"><div class="k">vs Random</div><div class="v" id="t-rand">–</div><div class="lift" id="l-rand"></div></div>
     <div class="tile"><div class="k">vs Handcrafted</div><div class="v" id="t-hc">–</div><div class="lift" id="l-hc"></div></div>
-    <div class="tile"><div class="k">vs v6 champion</div><div class="v" id="t-champ">–</div><div class="lift" id="l-champ"></div></div>
+    <div class="tile"><div class="k">vs Deep MC</div><div class="v" id="t-champ">–</div><div class="lift" id="l-champ"></div></div>
     <div class="tile"><div class="k">Mean deck lift</div><div class="v" id="t-lift">–</div><div class="lift">bot pilot vs Random pilot</div></div>
   </div>
 
@@ -66,7 +68,7 @@
     <div class="chartwrap"><svg id="strength" viewBox="0 0 960 300"></svg><div class="tooltip" id="tip-strength"></div></div>
     <div class="legend">
       <span style="--c: var(--s1)">vs Handcrafted</span>
-      <span style="--c: var(--s2)">vs v6 champion (head-to-head)</span>
+      <span style="--c: var(--s2)">vs Deep Monte Carlo</span>
       <span style="--c: var(--s3)">vs Random</span>
     </div>
   </section>
@@ -81,6 +83,8 @@
       <span style="--c: var(--s3)">White</span>
       <span style="--c: var(--s4)">RU Aggro</span>
       <span style="--c: var(--s5)">Red</span>
+      <span style="--c: var(--s6)">Lotus Combo</span>
+      <span style="--c: var(--s7)">Burn</span>
     </div>
   </section>
 
@@ -190,7 +194,7 @@ function drawChart(svgId, tipId, data, seriesList, yDomain, yFmt, refLine) {
 
 const PROBE_KEYS = [
   { key: "vs_handcrafted", label: "vs Handcrafted", color: "--s1" },
-  { key: "vs_champion", label: "vs v6 champion", color: "--s2" },
+  { key: "vs_deep_monte_carlo", label: "vs Deep Monte Carlo", color: "--s2" },
   { key: "vs_random", label: "vs Random", color: "--s3" },
 ];
 // Deck colors follow the deck identity, alphabetical-stable order.
@@ -200,6 +204,8 @@ const DECK_KEYS = [
   { deck: "White", color: "--s3" },
   { deck: "RU Aggro", color: "--s4" },
   { deck: "Red", color: "--s5" },
+  { deck: "Lotus Combo", color: "--s6" },
+  { deck: "Burn", color: "--s7" },
 ];
 
 function render() {
@@ -211,7 +217,7 @@ function render() {
   document.getElementById("t-iter").textContent = last.iteration;
   document.getElementById("t-games").textContent = last.games.toLocaleString() + " games";
 
-  const tiles = [["vs_random", "t-rand", "l-rand"], ["vs_handcrafted", "t-hc", "l-hc"], ["vs_champion", "t-champ", "l-champ"]];
+  const tiles = [["vs_random", "t-rand", "l-rand"], ["vs_handcrafted", "t-hc", "l-hc"], ["vs_deep_monte_carlo", "t-champ", "l-champ"]];
   for (const [key, valueId, liftId] of tiles) {
     const has = lastProbe && lastProbe[key] !== undefined;
     document.getElementById(valueId).textContent = has ? fmtPct(lastProbe[key]) : "–";
@@ -270,7 +276,7 @@ function render() {
 
   const recent = rows.slice(-40).reverse();
   document.getElementById("table").innerHTML =
-    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs v6</th><th>mean lift</th></tr>" +
+    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs DeepMC</th><th>mean lift</th></tr>" +
     recent.map(r => {
       let lift = "";
       if (r.deck_lift) {
@@ -284,7 +290,7 @@ function render() {
       return `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${lossCell}</td>` +
         `<td>${r.vs_random !== undefined ? fmtPct(r.vs_random) : ""}</td>` +
         `<td>${r.vs_handcrafted !== undefined ? fmtPct(r.vs_handcrafted) : ""}</td>` +
-        `<td>${r.vs_champion !== undefined ? fmtPct(r.vs_champion) : ""}</td><td>${lift}</td></tr>`;
+        `<td>${r.vs_deep_monte_carlo !== undefined ? fmtPct(r.vs_deep_monte_carlo) : ""}</td><td>${lift}</td></tr>`;
     }).join("") +
     "</table>";
 }

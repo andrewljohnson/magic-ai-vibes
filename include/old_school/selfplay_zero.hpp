@@ -361,13 +361,11 @@ struct SpzTrainConfig {
     std::shared_ptr<const SpzNet> spar_net;
     // Live telemetry: every iteration appends a JSONL line (losses, games,
     // turns) to `telemetry_path`; every `probe_interval` iterations the
-    // current net additionally plays quick paired strength probes — vs
-    // Handcrafted and, when `probe_baseline_net` is set, head-to-head
-    // against it under the deployed champion settings.
+    // current net additionally plays quick paired strength probes vs
+    // Random, Deep Monte Carlo, and Handcrafted.
     std::string telemetry_path;
     std::size_t probe_interval = 0;
     std::size_t probe_reps = 2;
-    std::shared_ptr<const SpzNet> probe_baseline_net;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
     double learning_rate = 0.01;

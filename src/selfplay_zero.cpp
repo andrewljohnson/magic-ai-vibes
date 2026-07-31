@@ -4087,21 +4087,13 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         mix_seed(config.seed, 9100 + iteration),
                         probe_policy, 200, config.threads)
                         .aggregate.win_rate();
-                if (config.probe_baseline_net != nullptr) {
-                    SpzPolicyConfig baseline_policy;
-                    baseline_policy.worlds = 4;
-                    baseline_policy.block_prediction_worlds = 4;
-                    baseline_policy.rollout = true;
-                    vs_baseline =
-                        run_spz_benchmark(
-                            probe_net, BotKind::Random,
-                            config.probe_reps,
-                            mix_seed(config.seed, 9200 + iteration),
-                            probe_policy, 200, config.threads, {},
-                            &baseline_policy,
-                            config.probe_baseline_net)
-                            .aggregate.win_rate();
-                }
+                vs_baseline =
+                    run_spz_benchmark(
+                        probe_net, BotKind::DeepMonteCarlo,
+                        config.probe_reps,
+                        mix_seed(config.seed, 9200 + iteration),
+                        probe_policy, 200, config.threads)
+                        .aggregate.win_rate();
                 if (config.log) {
                     std::ostringstream probe_line;
                     probe_line << "probe iteration " << (iteration + 1)
@@ -4109,7 +4101,7 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                << std::setprecision(3) << vs_random
                                << " vs-handcrafted " << vs_handcrafted;
                     if (vs_baseline >= 0.0) {
-                        probe_line << " vs-champion " << vs_baseline;
+                        probe_line << " vs-deep-mc " << vs_baseline;
                     }
                     config.log(probe_line.str());
                 }
@@ -4143,7 +4135,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                               << vs_handcrafted;
                 }
                 if (vs_baseline >= 0.0) {
-                    telemetry << ",\"vs_champion\":" << vs_baseline;
+                    telemetry << ",\"vs_deep_monte_carlo\":"
+                              << vs_baseline;
                 }
                 if (have_deck_lift) {
                     telemetry << ",\"deck_lift\":{";
