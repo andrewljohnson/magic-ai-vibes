@@ -4025,7 +4025,12 @@ std::optional<GameResult> Game::play_combat_with_attackers(
         std::vector<PermanentId> surviving_attackers;
         surviving_attackers.reserve(attackers.size());
         for (const PermanentId attacker : attackers) {
-            if (find_creature(attacking_state, attacker) != nullptr) {
+            const auto* creature =
+                find_creature(attacking_state, attacker);
+            // An attacker tapped during the response window (a mana
+            // creature paying for its controller's own trick) leaves
+            // combat, mirroring how dead attackers drop out.
+            if (creature != nullptr && !creature->tapped) {
                 surviving_attackers.push_back(attacker);
             }
         }
