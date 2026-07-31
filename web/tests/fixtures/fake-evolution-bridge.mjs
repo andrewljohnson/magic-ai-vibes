@@ -43,6 +43,8 @@ if (args.includes("--evolve-json")) {
     ["blue", "Blue"],
     ["white", "White"],
     ["ru-aggro", "RU Aggro"],
+    ["lotus-combo", "Lotus Combo"],
+    ["burn", "Burn"],
   ];
   const games = gamesPerOpponent * 4;
   const fitness = {

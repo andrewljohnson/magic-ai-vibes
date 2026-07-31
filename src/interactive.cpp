@@ -1404,6 +1404,10 @@ std::vector<CardId> interactive_deck(DeckId deck) {
         return white_control_deck();
     case DeckId::RUAggro:
         return ru_aggro_deck();
+    case DeckId::LotusCombo:
+        return lotus_combo_deck();
+    case DeckId::Burn:
+        return burn_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }

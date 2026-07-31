@@ -2909,7 +2909,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 5,
+        .population = 7,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -2922,11 +2922,11 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 5);
-    CHECK(first.best.total.games == 20);
+    CHECK(first.best.by_opponent.size() == 7);
+    CHECK(first.best.total.games == 28);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          20);
+          28);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
@@ -2937,6 +2937,8 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
              old_school::blue_deck(),
              old_school::white_control_deck(),
              old_school::ru_aggro_deck(),
+             old_school::lotus_combo_deck(),
+             old_school::burn_deck(),
          }) {
         metagame_pool.insert(
             metagame_pool.end(), deck.begin(), deck.end());

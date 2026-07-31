@@ -131,6 +131,29 @@ export const DECKS = Object.freeze([
       { name: "Disintegrate", count: 2 },
     ],
   },
+  {
+    id: "lotus-combo",
+    label: "Lotus Combo",
+    name: "Lotus Combo",
+    colors: ["green", "red"],
+    deckList: "20 Black Lotus / 10 Channel / 10 Disintegrate",
+    cards: [
+      { name: "Black Lotus", count: 20 },
+      { name: "Channel", count: 10 },
+      { name: "Disintegrate", count: 10 },
+    ],
+  },
+  {
+    id: "burn",
+    label: "Burn",
+    name: "Burn",
+    colors: ["red"],
+    deckList: "15 Mountain / 25 Lightning Bolt",
+    cards: [
+      { name: "Mountain", count: 15 },
+      { name: "Lightning Bolt", count: 25 },
+    ],
+  },
 ]);
 
 export const POLICIES = Object.freeze([
@@ -233,7 +256,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
 export const EVOLUTION_LIMITS = Object.freeze({
   seed: { min: 0, max: MAX_WEB_EVOLUTION_SEED },
   generations: { min: 1, max: 200 },
-  population: { min: 5, max: 32 },
+  population: { min: 7, max: 32 },
   games: { min: 1, max: 16 },
   retainedResults: MAX_EVOLUTION_RESULTS,
   savedDecks: MAX_SAVED_DECKS,

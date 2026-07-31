@@ -169,14 +169,15 @@ constexpr std::size_t kCardBlockCount = 11;
 const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
         green_deck(), red_deck(), blue_deck(), white_control_deck(),
-        ru_aggro_deck(),
+        ru_aggro_deck(), lotus_combo_deck(), burn_deck(),
     };
     return decks;
 }
 
 std::string_view spz_deck_name(std::size_t deck_index) {
     static constexpr std::array<std::string_view, kSpzDeckCount> names = {
-        "Green", "Red", "Blue", "White", "RU Aggro",
+        "Green", "Red", "Blue", "White", "RU Aggro", "Lotus Combo",
+        "Burn",
     };
     return names.at(deck_index);
 }
@@ -283,9 +284,12 @@ std::vector<float> spz_features(
 namespace {
 
 constexpr std::size_t kCreatureSlots = 8;
-constexpr std::size_t kCreatureSlotFeatures = 36;
+// Present flag + card one-hot + nine combat/state scalars.
+constexpr std::size_t kCreatureSlotFeatures = kCardCount + 10;
 constexpr std::size_t kStackSlots = 3;
-constexpr std::size_t kStackSlotFeatures = 61;
+// Present flag + card one-hot + controller/ability + five-way target class
+// + target-card one-hot + X value.
+constexpr std::size_t kStackSlotFeatures = 2 * kCardCount + 9;
 constexpr std::size_t kCastabilityFeatures = kCardCount + 2;
 constexpr std::size_t kRaceFeatures = 10;
 

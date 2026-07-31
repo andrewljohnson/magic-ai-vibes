@@ -4342,6 +4342,10 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return white_control_deck();
     case DeckId::RUAggro:
         return ru_aggro_deck();
+    case DeckId::LotusCombo:
+        return lotus_combo_deck();
+    case DeckId::Burn:
+        return burn_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -4366,6 +4370,10 @@ std::string_view deck_name(DeckId deck) {
         return "White";
     case DeckId::RUAggro:
         return "RU Aggro";
+    case DeckId::LotusCombo:
+        return "Lotus Combo";
+    case DeckId::Burn:
+        return "Burn";
     }
     return "Unknown";
 }
@@ -4389,6 +4397,10 @@ std::string_view deck_list(DeckId deck) {
         return "13 Mountain / 4 Island / 3 Flying Men / "
                "5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / "
                "3 Lightning Bolt / 2 Disintegrate";
+    case DeckId::LotusCombo:
+        return "20 Black Lotus / 10 Channel / 10 Disintegrate";
+    case DeckId::Burn:
+        return "15 Mountain / 25 Lightning Bolt";
     }
     return "Unknown";
 }
@@ -4586,7 +4598,7 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
     }
     if (config.population < kDeckCount) {
         throw std::invalid_argument(
-            "deck evolution population must be at least five");
+            "deck evolution population must cover the metagame deck count");
     }
     if (config.repetitions_per_opponent == 0) {
         throw std::invalid_argument(
@@ -4606,6 +4618,8 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         deck_cards(DeckId::Blue),
         deck_cards(DeckId::White),
         deck_cards(DeckId::RUAggro),
+        deck_cards(DeckId::LotusCombo),
+        deck_cards(DeckId::Burn),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kCardCount> seen_cards{};

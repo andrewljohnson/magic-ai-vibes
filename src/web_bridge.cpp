@@ -39,6 +39,10 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return white_control_deck();
     case DeckId::RUAggro:
         return ru_aggro_deck();
+    case DeckId::LotusCombo:
+        return lotus_combo_deck();
+    case DeckId::Burn:
+        return burn_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -83,6 +87,10 @@ std::string_view deck_id_token(DeckId deck) {
         return "white";
     case DeckId::RUAggro:
         return "ru-aggro";
+    case DeckId::LotusCombo:
+        return "lotus-combo";
+    case DeckId::Burn:
+        return "burn";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -1238,6 +1246,12 @@ DeckId parse_deck_id(std::string_view value) {
     if (value == "ru-aggro" || value == "ru") {
         return DeckId::RUAggro;
     }
+    if (value == "lotus-combo" || value == "lotus") {
+        return DeckId::LotusCombo;
+    }
+    if (value == "burn") {
+        return DeckId::Burn;
+    }
     throw std::invalid_argument(
         "unknown deck: " + std::string(value));
 }
@@ -1423,7 +1437,7 @@ int run_evolution_json(
     }
     if (config.population < kDeckCount) {
         throw std::invalid_argument(
-            "evolution population must be at least five");
+            "evolution population must cover the metagame deck count");
     }
 
     DeckEvolutionConfig evolution = {

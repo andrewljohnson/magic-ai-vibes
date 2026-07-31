@@ -41,9 +41,9 @@ std::size_t parse_positive_size(std::string_view option,
 void print_help(std::ostream& output) {
     output
         << "Usage: old-school-web-bridge [session options]\n"
-        << "  --human-deck green|red|blue|white|ru-aggro\n"
+        << "  --human-deck green|red|blue|white|ru-aggro|lotus-combo|burn\n"
         << "  --human-deck-cards ID,ID,... (exactly 40)\n"
-        << "  --opponent-deck green|red|blue|white|ru-aggro\n"
+        << "  --opponent-deck green|red|blue|white|ru-aggro|lotus-combo|burn\n"
         << "  --opponent-deck-cards ID,ID,... (exactly 40)\n"
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
            "handcrafted|spz\n"

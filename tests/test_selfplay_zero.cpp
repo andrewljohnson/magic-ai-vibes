@@ -687,8 +687,10 @@ SPZ_TEST(training_schedule_balances_ordered_decks_and_play_draw) {
                 }
             }
         };
-    check_iteration(0, 250);
-    check_iteration(1, 100);
+    constexpr std::size_t balance_unit =
+        2 * kSpzDeckCount * kSpzDeckCount;
+    check_iteration(0, 5 * balance_unit);
+    check_iteration(1, 2 * balance_unit);
 
     expect(spz_training_coordinate(3, 250, 17) ==
                spz_training_coordinate(3, 250, 17),

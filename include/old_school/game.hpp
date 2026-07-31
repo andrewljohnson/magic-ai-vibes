@@ -718,9 +718,11 @@ enum class DeckId : std::uint8_t {
     Blue,
     White,
     RUAggro,
+    LotusCombo,
+    Burn,
 };
 
-inline constexpr std::size_t kDeckCount = 5;
+inline constexpr std::size_t kDeckCount = 7;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 
