@@ -268,6 +268,10 @@ struct SpzPolicyConfig {
     // finalists on this many total worlds before the head arbitrates:
     // extra thinking exactly where the cheap estimate is uncertain.
     std::size_t tie_break_worlds = 12;
+    // Horizon (in own-turn cycles) for RECORDED advantage deltas only;
+    // decision-time rollouts keep rollout_turn_cycles. Compounding value
+    // needs the deeper look to appear in training targets.
+    std::size_t advantage_record_cycles = 2;
     // Record paired all-action rollout deltas at priority decisions (the
     // advantage head's training data). Guardrail prunes still steer play;
     // pruned actions are scored for the record only.

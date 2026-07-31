@@ -2255,7 +2255,8 @@ struct SpzAgent {
     // Combat-decision roots pass a combat phase and a state where combat
     // has already been resolved.
     double finish_turn_and_rollout(GameState state, TurnPhase entry_phase,
-                                   PriorityState resume) const {
+                                   PriorityState resume,
+                                   std::size_t cycles) const {
         const std::size_t root_turn = state.turn_number;
         const auto settle = [&](double value) {
             return discount_outcome(value, root_turn,
@@ -2265,8 +2266,7 @@ struct SpzAgent {
             return settle(*terminal);
         }
         int budget = kRolloutDecisionBudget *
-                     static_cast<int>(std::max<std::size_t>(
-                         1, config.rollout_turn_cycles));
+                     static_cast<int>(std::max<std::size_t>(1, cycles));
         const auto run_second_main =
             [&](GameState& current) -> std::optional<double> {
             return rollout_window(current, TurnPhase::SecondMain, true,
@@ -2326,7 +2326,7 @@ struct SpzAgent {
         // its own turn starts; deeper settings play the seat's turns too.
         // The guard bound absorbs Time Walk chains.
         std::size_t seat_turn_starts_remaining =
-            std::max<std::size_t>(1, config.rollout_turn_cycles);
+            std::max<std::size_t>(1, cycles);
         const int guard_limit =
             static_cast<int>(6 * seat_turn_starts_remaining);
         for (int guard = 0; guard < guard_limit; ++guard) {
@@ -3036,7 +3036,8 @@ struct SpzAgent {
             pending_combat.has_value();
         const auto score_action =
             [&](const GameState& sampled, const PriorityAction& action,
-                bool with_rollout) -> double {
+                bool with_rollout,
+                std::size_t cycles) -> double {
             const auto consequence = resolve_priority_action_consequence(
                 sampled, seat, sorcery_actions, 0, action);
             if (!consequence.has_value()) {
@@ -3060,14 +3061,15 @@ struct SpzAgent {
                         post_combat.active_player;
                     return finish_turn_and_rollout(
                         std::move(post_combat), TurnPhase::DamageOrder,
-                        {combat_active, 0});
+                        {combat_active, 0}, cycles);
                 }
                 return value_for(post_combat, seat,
                                  TurnPhase::SecondMain);
             }
             if (with_rollout) {
                 return finish_turn_and_rollout(consequence->state, phase,
-                                               consequence->priority);
+                                               consequence->priority,
+                                               cycles);
             }
             return value_for(consequence->state, seat, phase);
         };
@@ -3083,8 +3085,9 @@ struct SpzAgent {
                 if (dominated[index]) {
                     continue;
                 }
-                totals[index] += score_action(sampled, actions[index],
-                                              false);
+                totals[index] += score_action(
+                    sampled, actions[index], false,
+                    config.rollout_turn_cycles);
             }
         }
         if (config.search == SpzPolicyConfig::Search::Ismcts &&
@@ -3154,7 +3157,8 @@ struct SpzAgent {
                 }
                 double total = 0.0;
                 for (const GameState& sampled : sampled_worlds) {
-                    total += score_action(sampled, actions[index], true);
+                    total += score_action(sampled, actions[index], true,
+                                          config.rollout_turn_cycles);
                 }
                 rollout_totals[index] = total;
             }
@@ -3178,10 +3182,15 @@ struct SpzAgent {
                 // Paired deltas versus pass over the SAME worlds, for
                 // every action including guarded ones: the head must see
                 // waste's true cost.
+                // Targets are scored at a deeper horizon than
+                // decisions: compounding value (a land drop, an early
+                // creature) is invisible one turn out but shows over
+                // two turn cycles.
                 double pass_total = 0.0;
                 for (const GameState& sampled : sampled_worlds) {
                     pass_total += score_action(
-                        sampled, PriorityAction::pass(), true);
+                        sampled, PriorityAction::pass(), true,
+                        config.advantage_record_cycles);
                 }
                 SpzAdvantageSample sample;
                 sample.state = state_row;
@@ -3191,7 +3200,8 @@ struct SpzAgent {
                     bool legal = true;
                     for (const GameState& sampled : sampled_worlds) {
                         const double value = score_action(
-                            sampled, actions[index], true);
+                            sampled, actions[index], true,
+                            config.advantage_record_cycles);
                         if (value <= kIllegalScore / 2.0) {
                             legal = false;
                             break;
@@ -3250,7 +3260,8 @@ struct SpzAgent {
                             reconstructed, decks, seat, rng());
                         for (const std::size_t index : finalists) {
                             refined[index] += score_action(
-                                world, actions[index], config.rollout);
+                                world, actions[index], config.rollout,
+                                config.rollout_turn_cycles);
                         }
                     }
                     const double refined_band =
@@ -3534,7 +3545,8 @@ struct SpzAgent {
                 if (with_rollout) {
                     total += finish_turn_and_rollout(
                         std::move(simulation),
-                        TurnPhase::DeclareAttackers, {seat, 0});
+                        TurnPhase::DeclareAttackers, {seat, 0},
+                        config.rollout_turn_cycles);
                 } else if (attack_set.empty()) {
                     total += value_for(world, seat,
                                        TurnPhase::SecondMain);
@@ -3766,7 +3778,8 @@ struct SpzAgent {
                     total += finish_turn_and_rollout(
                         std::move(simulation),
                         TurnPhase::DeclareBlockers,
-                        {attacking_player, 0});
+                        {attacking_player, 0},
+                        config.rollout_turn_cycles);
                 }
                 if (legal && total > best_value) {
                     best_value = total;
