@@ -1410,6 +1410,100 @@ double SpzAdvantageNet::train_batch(const std::vector<Sample>& samples,
     return total_loss * batch_scale;
 }
 
+double SpzAdvantageNet::train_ranking_batch(
+    const std::vector<RankedPair>& pairs, double learning_rate) {
+    if (pairs.empty()) {
+        return 0.0;
+    }
+    const std::size_t inputs = state_inputs_ + action_inputs_;
+    const std::size_t weight_count = hidden_ * inputs;
+    std::vector<double> gradient(weight_count + hidden_ + hidden_ + 1,
+                                 0.0);
+    std::vector<double> better_activations(hidden_);
+    std::vector<double> worse_activations(hidden_);
+    double total_loss = 0.0;
+    const auto forward = [&](const std::vector<float>& state,
+                             const std::vector<float>& action,
+                             std::vector<double>& activations) {
+        double output = output_bias_;
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            const double* row = hidden_weights_.data() + unit * inputs;
+            double activation = hidden_bias_[unit];
+            for (std::size_t index = 0; index < state_inputs_;
+                 ++index) {
+                activation += row[index] * state[index];
+            }
+            for (std::size_t index = 0; index < action_inputs_;
+                 ++index) {
+                activation += row[state_inputs_ + index] * action[index];
+            }
+            activations[unit] = std::tanh(activation);
+            output += output_weights_[unit] * activations[unit];
+        }
+        return output;
+    };
+    const auto backward = [&](const std::vector<float>& state,
+                              const std::vector<float>& action,
+                              const std::vector<double>& activations,
+                              double output_delta) {
+        gradient[weight_count + hidden_ + hidden_] += output_delta;
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            gradient[weight_count + hidden_ + unit] +=
+                output_delta * activations[unit];
+            const double hidden_delta =
+                output_delta * output_weights_[unit] *
+                (1.0 - activations[unit] * activations[unit]);
+            gradient[weight_count + unit] += hidden_delta;
+            double* row_gradient = gradient.data() + unit * inputs;
+            for (std::size_t index = 0; index < state_inputs_;
+                 ++index) {
+                row_gradient[index] += hidden_delta * state[index];
+            }
+            for (std::size_t index = 0; index < action_inputs_;
+                 ++index) {
+                row_gradient[state_inputs_ + index] +=
+                    hidden_delta * action[index];
+            }
+        }
+    };
+    for (const RankedPair& pair : pairs) {
+        const double better_output =
+            forward(*pair.state, *pair.better, better_activations);
+        const double worse_output =
+            forward(*pair.state, *pair.worse, worse_activations);
+        const double margin = better_output - worse_output;
+        // Logistic ranking loss ln(1 + e^-margin); its gradient
+        // magnitude is the misordering probability.
+        total_loss += margin > 30.0
+                          ? 0.0
+                          : std::log1p(std::exp(-margin));
+        const double misordered = 1.0 / (1.0 + std::exp(margin));
+        backward(*pair.state, *pair.better, better_activations,
+                 -misordered);
+        backward(*pair.state, *pair.worse, worse_activations,
+                 misordered);
+    }
+    const double batch_scale = 1.0 / static_cast<double>(pairs.size());
+    constexpr double kMomentum = 0.9;
+    const auto apply = [&](std::size_t offset, double* parameter) {
+        momentum_[offset] = kMomentum * momentum_[offset] -
+                            learning_rate * gradient[offset] *
+                                batch_scale;
+        *parameter += momentum_[offset];
+    };
+    for (std::size_t index = 0; index < weight_count; ++index) {
+        apply(index, &hidden_weights_[index]);
+    }
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        apply(weight_count + unit, &hidden_bias_[unit]);
+    }
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        apply(weight_count + hidden_ + unit, &output_weights_[unit]);
+    }
+    apply(weight_count + hidden_ + hidden_, &output_bias_);
+    return total_loss * batch_scale;
+}
+
 void SpzAdvantageNet::save(std::ostream& out) const {
     out << "spz-advantage-v1\n"
         << state_inputs_ << ' ' << action_inputs_ << ' ' << hidden_
@@ -4004,6 +4098,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             }
         }
         double advantage_loss = 0.0;
+        double advantage_rank_loss = 0.0;
+        std::size_t advantage_rank_steps = 0;
         if (advantage_net != nullptr && !advantage_replay.empty() &&
             new_advantage_samples > 0) {
             const std::size_t batch = 64;
@@ -4031,6 +4127,53 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                     batch_samples, config.advantage_learning_rate);
             }
             advantage_loss /= static_cast<double>(advantage_steps);
+
+            // Ranking pass: same replay, pairs within one decision whose
+            // measured deltas disagree. Order is the deployed use of the
+            // head, and consistent tiny deltas (a wasted pump, a skipped
+            // land) survive here where they drown in squared error.
+            constexpr double kPairMargin = 1e-3;
+            std::vector<SpzAdvantageNet::RankedPair> pair_batch;
+            for (std::size_t step = 0; step < advantage_steps; ++step) {
+                pair_batch.clear();
+                std::size_t attempts = 0;
+                while (pair_batch.size() < batch &&
+                       attempts < batch * 8) {
+                    attempts += 1;
+                    const SpzAdvantageSample& decision =
+                        advantage_replay[pick(trainer_rng)];
+                    if (decision.actions.size() < 2) {
+                        continue;
+                    }
+                    std::uniform_int_distribution<std::size_t> option(
+                        0, decision.actions.size() - 1);
+                    const std::size_t first = option(trainer_rng);
+                    const std::size_t second = option(trainer_rng);
+                    const double gap = decision.deltas[first] -
+                                       decision.deltas[second];
+                    if (std::abs(gap) < kPairMargin) {
+                        continue;
+                    }
+                    const std::size_t better =
+                        gap > 0.0 ? first : second;
+                    const std::size_t worse =
+                        gap > 0.0 ? second : first;
+                    pair_batch.push_back(
+                        {&decision.state, &decision.actions[better],
+                         &decision.actions[worse]});
+                }
+                if (!pair_batch.empty()) {
+                    advantage_rank_loss +=
+                        advantage_net->train_ranking_batch(
+                            pair_batch,
+                            config.advantage_learning_rate);
+                    advantage_rank_steps += 1;
+                }
+            }
+            if (advantage_rank_steps > 0) {
+                advantage_rank_loss /=
+                    static_cast<double>(advantage_rank_steps);
+            }
         }
 
         double mean_loss = 0.0;
@@ -4107,7 +4250,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                  << " new-samples " << new_samples
                  << " adv-samples " << new_advantage_samples
                  << " adv-loss " << std::setprecision(5)
-                 << advantage_loss << " adv-agree "
+                 << advantage_loss << " adv-rank " << advantage_rank_loss
+                 << " adv-agree "
                  << (advantage_agreement >= 0.0 ? advantage_agreement
                                                 : 0.0)
                  << " replay "
@@ -4186,7 +4330,9 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                           << ",\"loss\":" << std::setprecision(6)
                           << mean_loss << ",\"loss_floor\":"
                           << loss_floor << ",\"advantage_loss\":"
-                          << advantage_loss << ",\"policy_loss\":"
+                          << advantage_loss
+                          << ",\"advantage_rank_loss\":"
+                          << advantage_rank_loss << ",\"policy_loss\":"
                           << policy_loss << ",\"avg_turns\":"
                           << (config.games_per_iteration == 0
                                   ? 0.0

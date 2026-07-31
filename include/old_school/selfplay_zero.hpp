@@ -191,6 +191,19 @@ class SpzAdvantageNet {
     double train_batch(const std::vector<Sample>& samples,
                        double learning_rate);
 
+    // Pairwise logistic ranking step: for two actions from one decision,
+    // push the measured-better action's output above the worse one's.
+    // Order is what the head is used for at evaluation (breaking rollout
+    // ties), and ranking learns consistent sub-noise deltas that mean
+    // squared error underweights. Returns the mean pre-update loss.
+    struct RankedPair {
+        const std::vector<float>* state = nullptr;
+        const std::vector<float>* better = nullptr;
+        const std::vector<float>* worse = nullptr;
+    };
+    double train_ranking_batch(const std::vector<RankedPair>& pairs,
+                               double learning_rate);
+
     void save(std::ostream& out) const;
     static SpzAdvantageNet load(std::istream& in);
 

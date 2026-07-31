@@ -260,10 +260,21 @@ struct Auditor {
             ev.player == spz_seat && ev.priority_action.has_value() &&
             ev.priority_action->kind ==
                 PriorityActionKind::CastGiantGrowth &&
+            ev.priority_action->target.has_value() &&
+            ev.priority_action->target->creature.has_value() &&
+            ev.priority_action->target->player != spz_seat) {
+            flag(obs.turn_number,
+                 "ENEMY GROWTH: pumped an opponent creature");
+        }
+        if (ev.kind == GameEventKind::PriorityActionSelected &&
+            ev.player == spz_seat && ev.priority_action.has_value() &&
+            ev.priority_action->kind ==
+                PriorityActionKind::CastGiantGrowth &&
             (ev.phase == TurnPhase::FirstMain ||
              ev.phase == TurnPhase::SecondMain) &&
             ev.priority_action->target.has_value() &&
-            ev.priority_action->target->creature.has_value()) {
+            ev.priority_action->target->creature.has_value() &&
+            ev.priority_action->target->player == spz_seat) {
             pending_growth = {obs.turn_number,
                               *ev.priority_action->target->creature,
                               obs.active_player == spz_seat};
@@ -311,6 +322,8 @@ int main(int argc, char** argv) {
     const bool random_pilot =
         argc > 2 && std::string(argv[2]) == "--random-pilot";
     double gamma = 1.0;
+    std::optional<std::size_t> spz_deck;
+    std::optional<std::size_t> opp_deck;
     std::string advantage_path;
     bool guardrails = true;
     for (int i = 1; i < argc; ++i) {
@@ -322,6 +335,12 @@ int main(int argc, char** argv) {
         }
         if (std::string(argv[i]) == "--no-guardrails") {
             guardrails = false;
+        }
+        if (std::string(argv[i]) == "--spz-deck" && i + 1 < argc) {
+            spz_deck = std::stoul(argv[i + 1]);
+        }
+        if (std::string(argv[i]) == "--opp-deck" && i + 1 < argc) {
+            opp_deck = std::stoul(argv[i + 1]);
         }
     }
     const auto advantage =
@@ -368,13 +387,19 @@ int main(int argc, char** argv) {
     }
     const std::size_t games = argc > 1 ? std::stoul(argv[1]) : 16;
     const auto net = std::make_shared<const SpzNet>(
-        load_spz_net("data/spz-champion-v7.txt"));
+        load_spz_net("data/spz-champion-v8.txt"));
     const auto& decks = spz_decks();
     std::size_t total_flags = 0, wins = 0;
     for (std::size_t g = 0; g < games; ++g) {
         const std::size_t spz_seat = g % 2;
-        const std::size_t d0 = (g * 7 + 1) % kSpzDeckCount;
-        const std::size_t d1 = (g * 3 + 2) % kSpzDeckCount;
+        std::size_t d0 = (g * 7 + 1) % kSpzDeckCount;
+        std::size_t d1 = (g * 3 + 2) % kSpzDeckCount;
+        if (spz_deck.has_value()) {
+            (spz_seat == 0 ? d0 : d1) = *spz_deck;
+        }
+        if (opp_deck.has_value()) {
+            (spz_seat == 0 ? d1 : d0) = *opp_deck;
+        }
         const std::array<std::vector<CardId>, 2> game_decks = {
             decks[d0], decks[d1]};
         auto auditor = std::make_shared<Auditor>();
