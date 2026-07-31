@@ -12,6 +12,7 @@ WEB_BRIDGE_SOURCE := src/web_bridge.cpp src/artifact_integrity.cpp
 SELFPLAY_ZERO := $(BUILD_DIR)/selfplay-zero
 AUDIT_CHAMPION := $(BUILD_DIR)/audit-champion
 MATCHUP_MATRIX := $(BUILD_DIR)/matchup-matrix
+COMBO_PROBE := $(BUILD_DIR)/combo-probe
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 GAME_TESTS := $(BUILD_DIR)/old-school-tests
 SELFPLAY_ZERO_TESTS := $(BUILD_DIR)/test-selfplay-zero
@@ -36,6 +37,7 @@ endef
 $(eval $(call link_program,$(SELFPLAY_ZERO),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/selfplay_zero_main.cpp))
 $(eval $(call link_program,$(AUDIT_CHAMPION),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/audit_champion_main.cpp))
 $(eval $(call link_program,$(MATCHUP_MATRIX),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/matchup_matrix_main.cpp))
+$(eval $(call link_program,$(COMBO_PROBE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/combo_probe_main.cpp))
 $(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp))
 $(eval $(call link_program,$(GAME_TESTS),$(ENGINE_SOURCE) src/interactive.cpp tests/test_game.cpp))
 $(eval $(call link_program,$(SELFPLAY_ZERO_TESTS),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) tests/test_selfplay_zero.cpp))
@@ -46,7 +48,7 @@ $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci
 	@touch $(WEB_DEPENDENCIES)
 
-.PHONY: all test test-selfplay-zero test-web test-web-ui test-web-rendered selfplay-zero audit-champion matchup-matrix web-target-stack web-interaction web-journey web-delayed-journey web-build web clean
+.PHONY: all test test-selfplay-zero test-web test-web-ui test-web-rendered selfplay-zero audit-champion matchup-matrix combo-probe web-target-stack web-interaction web-journey web-delayed-journey web-build web clean
 
 audit-champion: $(AUDIT_CHAMPION)
 	./$(AUDIT_CHAMPION) --self-test
@@ -55,6 +57,8 @@ audit-champion: $(AUDIT_CHAMPION)
 selfplay-zero: $(SELFPLAY_ZERO)
 
 matchup-matrix: $(MATCHUP_MATRIX)
+
+combo-probe: $(COMBO_PROBE)
 
 test: $(GAME_TESTS) $(SELFPLAY_ZERO_TESTS) $(WEB_BRIDGE_TESTS) $(ARTIFACT_INTEGRITY_TESTS) $(WEB_BRIDGE) $(WEB_DEPENDENCIES)
 	./$(GAME_TESTS)

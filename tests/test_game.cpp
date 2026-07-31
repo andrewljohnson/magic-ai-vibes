@@ -773,7 +773,8 @@ TEST(handcrafted_old_school_spell_scores_follow_the_declared_policy) {
     CHECK(burn_scores.size() == burn_actions.size());
     CHECK(burn_scores[0] == -10'000.0);
     CHECK(burn_scores[1] == -10'000.0);
-    CHECK(burn_scores[2] == 10'000.0);
+    // Lethal X prefers the cheapest sufficient kill: 10'000 minus 10 per X.
+    CHECK(burn_scores[2] == 9'950.0);
     CHECK(burn_scores[3] == 1'150.0);
     CHECK(burn_scores[4] == 2'550.0);
     CHECK(burn_scores[5] == 500.0);
@@ -2808,6 +2809,76 @@ TEST(lotus_combo_deck_threatens_lethal_disintegrate) {
         }
     }
     CHECK(best_x >= 20);
+}
+
+TEST(handcrafted_sequences_the_channel_kill_and_takes_exact_lethal) {
+    // Reported from live play (seed 42, Lotus Combo vs RU Aggro): with
+    // Lotus, Lotus, Channel, Disintegrate in hand the handcrafted pilot
+    // fired a non-lethal X=19 Disintegrate instead of Channel into the
+    // kill. Channel must outrank every pre-Channel Disintegrate, and with
+    // Channel active the exact lethal X must outrank both bigger and
+    // smaller X values.
+    old_school::GameState state;
+    state.turn_number = 4;
+    state.active_player = 0;
+    state.starting_player = 0;
+    state.next_permanent_id = 10;
+    auto pool = old_school::lotus_combo_deck();
+    const auto take = [&pool](old_school::CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        CHECK(found != pool.end());
+        pool.erase(found);
+    };
+    for (int lotus = 0; lotus < 2; ++lotus) {
+        take(old_school::CardId::BlackLotus);
+        state.players[0].artifacts.push_back(
+            {.id = static_cast<old_school::PermanentId>(1 + lotus),
+             .card = old_school::CardId::BlackLotus});
+    }
+    take(old_school::CardId::Channel);
+    state.players[0].hand.push_back(old_school::CardId::Channel);
+    take(old_school::CardId::Disintegrate);
+    state.players[0].hand.push_back(old_school::CardId::Disintegrate);
+    state.players[0].library = pool;
+    state.players[1].library = old_school::ru_aggro_deck();
+
+    const auto best_action =
+        [&](const old_school::GameState& position) {
+            const auto actions = old_school::legal_priority_actions(
+                position, 0, true);
+            const auto scores = old_school::handcrafted_priority_scores(
+                position, 0, actions);
+            std::size_t best = 0;
+            for (std::size_t index = 1; index < actions.size();
+                 ++index) {
+                if (scores[index] > scores[best]) {
+                    best = index;
+                }
+            }
+            return actions[best];
+        };
+
+    const auto opening = best_action(state);
+    CHECK(opening.kind == old_school::PriorityActionKind::CastSorcery);
+    CHECK(opening.card == old_school::CardId::Channel);
+
+    // With Channel resolved, the pilot must take exactly-lethal X at the
+    // opponent's face - never a bigger X (needless life paid) and never a
+    // smaller one.
+    old_school::GameState channeled = state;
+    channeled.players[0].channel_active = true;
+    auto& hand = channeled.players[0].hand;
+    hand.erase(std::find(hand.begin(), hand.end(),
+                         old_school::CardId::Channel));
+    channeled.players[0].graveyard.push_back(
+        old_school::CardId::Channel);
+    const auto kill = best_action(channeled);
+    CHECK(kill.kind ==
+          old_school::PriorityActionKind::CastDisintegrate);
+    CHECK(kill.target.has_value());
+    CHECK(!kill.target->creature.has_value());
+    CHECK(kill.target->player == 1);
+    CHECK(kill.x_value == channeled.players[1].life);
 }
 
 TEST(grizzly_bears_trade_in_combat) {

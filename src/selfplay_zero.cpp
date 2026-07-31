@@ -2992,10 +2992,38 @@ struct SpzAgent {
             return best_index;
         }
         if (config.rollout) {
-            // Rollout-rescore the myopically strongest candidates.
-            std::vector<std::size_t> order(actions.size());
-            for (std::size_t index = 0; index < order.size(); ++index) {
-                order[index] = index;
+            // Rollout-rescore the myopically strongest candidates. X-value
+            // and target variants of one play score near-identically and
+            // would flood the shortlist, crowding out genuinely different
+            // plays (the setup spell that wins a turn later loses its slot
+            // to the fifth-best X). Keep only the myopically best variant
+            // per (kind, card, target class), then rank plays.
+            std::vector<std::size_t> order;
+            {
+                std::map<std::tuple<int, int, int>, std::size_t> best;
+                for (std::size_t index = 0; index < actions.size();
+                     ++index) {
+                    const PriorityAction& action = actions[index];
+                    int target_class = 0;
+                    if (action.target.has_value()) {
+                        target_class =
+                            1 +
+                            (action.target->player == seat ? 0 : 2) +
+                            (action.target->creature.has_value() ? 1
+                                                                 : 0);
+                    }
+                    const auto key = std::make_tuple(
+                        static_cast<int>(action.kind),
+                        static_cast<int>(action.card), target_class);
+                    const auto found = best.find(key);
+                    if (found == best.end() ||
+                        totals[index] > totals[found->second]) {
+                        best[key] = index;
+                    }
+                }
+                for (const auto& [key, index] : best) {
+                    order.push_back(index);
+                }
             }
             std::stable_sort(order.begin(), order.end(),
                              [&](std::size_t left, std::size_t right) {

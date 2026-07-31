@@ -3419,11 +3419,17 @@ double Game::handcrafted_action_score(const PriorityAction& action,
         }
         if (!action.target->creature.has_value()) {
             if (opponent_state.life <= action.x_value) {
-                return 10'000.0;
+                // Cheapest sufficient kill: extra X buys nothing and a
+                // Channel-funded overpay can hand the response window a
+                // lethal burn spell against us.
+                return 10'000.0 -
+                       10.0 * static_cast<double>(action.x_value);
             }
             if (burn_lethal_this_turn) {
+                // Part of a lethal sequence, but never above the direct
+                // kill: 9000 + 40 * X stays under any lethal X's score.
                 return 9'000.0 +
-                       150.0 * static_cast<double>(action.x_value);
+                       40.0 * static_cast<double>(action.x_value);
             }
             if (player_state.channel_active) {
                 // A non-lethal X funded by Channel life is suicide.
