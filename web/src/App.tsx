@@ -2804,6 +2804,31 @@ function EvolutionDialog({
                     </div>
                   </section>
 
+                  {result.top && result.top.length > 1 ? (
+                    <section className="evolution-top">
+                      <h2>Top decks of the final generation</h2>
+                      <ol className="evolution-top-list">
+                        {result.top.map((entry, index) => (
+                          <li key={index}>
+                            <span className="evolution-top-rate">
+                              {formatEvolutionPercent(
+                                entry.stats.winRate,
+                              )}
+                            </span>
+                            <span className="evolution-top-cards">
+                              {entry.cards
+                                .map(
+                                  (card) =>
+                                    `${card.count} ${card.name}`,
+                                )
+                                .join(" / ")}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  ) : null}
+
                   <section className="evolution-save">
                     <label>
                       <span>Deck name</span>

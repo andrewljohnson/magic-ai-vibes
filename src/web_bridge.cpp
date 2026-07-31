@@ -1412,6 +1412,38 @@ void write_evolution_json(
             output, summary.best.by_opponent[opponent]);
         output << '}';
     }
+    output << "],\"top\":[";
+    for (std::size_t rank = 0; rank < summary.top.size(); ++rank) {
+        const EvolvedDeck& entry = summary.top[rank];
+        validate_exact_deck_cards(entry.cards, "top evolved deck");
+        validate_stats(entry.total);
+        if (rank != 0) {
+            output << ',';
+        }
+        output << "{\"cards\":[";
+        std::array<std::size_t, kCardCount> entry_counts{};
+        for (const CardId card : entry.cards) {
+            ++entry_counts[static_cast<std::size_t>(card)];
+        }
+        bool wrote_entry_card = false;
+        for (std::size_t card = 0; card < entry_counts.size();
+             ++card) {
+            if (entry_counts[card] == 0) {
+                continue;
+            }
+            if (wrote_entry_card) {
+                output << ',';
+            }
+            wrote_entry_card = true;
+            const auto id = static_cast<CardId>(card);
+            output << "{\"id\":" << card << ",\"name\":";
+            write_json_string(output, card_definition(id).name);
+            output << ",\"count\":" << entry_counts[card] << '}';
+        }
+        output << "],\"fitness\":";
+        write_evolution_stats(output, entry.total);
+        output << '}';
+    }
     output << "],\"generationBestWinRates\":[";
     for (std::size_t generation = 0;
          generation <

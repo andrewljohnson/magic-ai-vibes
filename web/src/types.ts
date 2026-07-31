@@ -610,6 +610,10 @@ export interface EvolutionResult {
     stats: EvolutionStats;
     byOpponent: EvolutionOpponentStats[];
   };
+  top?: {
+    cards: EvolvedCard[];
+    stats: EvolutionStats;
+  }[];
 }
 
 export function formatPolicyVersionDate(value: string): string {

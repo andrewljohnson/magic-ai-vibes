@@ -223,6 +223,34 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
         winRate: 50,
       })),
     },
+    top: [
+      {
+        cards: [
+          { id: 0, name: "Forest", count: 20 },
+          { id: 2, name: "Grizzly Bears", count: 20 },
+        ],
+        stats: {
+          games: 28,
+          wins: 14,
+          losses: 14,
+          draws: 0,
+          winRate: 50,
+        },
+      },
+      {
+        cards: [
+          { id: 0, name: "Forest", count: 19 },
+          { id: 2, name: "Grizzly Bears", count: 21 },
+        ],
+        stats: {
+          games: 28,
+          wins: 13,
+          losses: 15,
+          draws: 0,
+          winRate: (100 * 13) / 28,
+        },
+      },
+    ],
   });
 
   const clientAuthoredCards = await json(

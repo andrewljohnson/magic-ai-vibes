@@ -89,6 +89,39 @@ if (args.includes("--evolve-json")) {
       name,
       fitness,
     })),
+    top: [
+      {
+        cards: [
+          { id: 0, name: "Forest", count: 20 },
+          { id: 2, name: "Grizzly Bears", count: 20 },
+        ],
+        fitness: {
+          games: games * opponentDecks.length,
+          wins: aggregateWins,
+          losses: games * opponentDecks.length - aggregateWins,
+          draws: 0,
+          winRate:
+            (100 * aggregateWins) /
+            (games * opponentDecks.length),
+        },
+      },
+      {
+        cards: [
+          { id: 0, name: "Forest", count: 19 },
+          { id: 2, name: "Grizzly Bears", count: 21 },
+        ],
+        fitness: {
+          games: games * opponentDecks.length,
+          wins: aggregateWins - 1,
+          losses:
+            games * opponentDecks.length - aggregateWins + 1,
+          draws: 0,
+          winRate:
+            (100 * (aggregateWins - 1)) /
+            (games * opponentDecks.length),
+        },
+      },
+    ],
     generationBestWinRates: Array.from(
       { length: generations },
       (_, index) => 50 + index,

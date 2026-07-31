@@ -3782,3 +3782,26 @@ select {
   color: #e8c9c6;
   letter-spacing: 0.02em;
 }
+
+.evolution-top h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+}
+.evolution-top-list {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: grid;
+  gap: 0.45rem;
+}
+.evolution-top-list li {
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.evolution-top-rate {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.55rem;
+}
+.evolution-top-cards {
+  color: var(--text-muted, #667);
+}

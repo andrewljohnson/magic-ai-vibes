@@ -4845,6 +4845,23 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
                 summary.best.total.win_rate()) {
             summary.best = generation_best;
         }
+        if (generation + 1 == config.generations) {
+            summary.top.clear();
+            for (const std::size_t index : order) {
+                const EvolvedDeck& candidate = evaluations[index];
+                const bool duplicate = std::any_of(
+                    summary.top.begin(), summary.top.end(),
+                    [&](const EvolvedDeck& kept) {
+                        return kept.cards == candidate.cards;
+                    });
+                if (!duplicate) {
+                    summary.top.push_back(candidate);
+                }
+                if (summary.top.size() == 5) {
+                    break;
+                }
+            }
+        }
 
         const std::size_t elite_count =
             std::max<std::size_t>(2, config.population / 4);

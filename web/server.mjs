@@ -1186,6 +1186,75 @@ export function validateEvolutionResult(value, config) {
     );
   }
 
+  const validatedCardRows = (rows, fieldName) => {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new ApiError(
+        502,
+        "evolution_protocol_error",
+        `${fieldName} is not a valid card list`,
+      );
+    }
+    const seen = new Set();
+    let total = 0;
+    const validated = rows.map((card, index) => {
+      if (
+        !isRecord(card) ||
+        !Number.isSafeInteger(card.id) ||
+        card.id < 0 ||
+        card.id >= CARD_NAMES.length ||
+        typeof card.name !== "string" ||
+        card.name !== CARD_NAMES[card.id] ||
+        !Number.isSafeInteger(card.count) ||
+        card.count < 1 ||
+        seen.has(card.id)
+      ) {
+        throw new ApiError(
+          502,
+          "evolution_protocol_error",
+          `${fieldName}[${index}] is not a valid unique card row`,
+        );
+      }
+      seen.add(card.id);
+      total += card.count;
+      return { id: card.id, name: card.name, count: card.count };
+    });
+    if (total !== 40) {
+      throw new ApiError(
+        502,
+        "evolution_protocol_error",
+        `${fieldName} must contain exactly 40 cards`,
+      );
+    }
+    return validated;
+  };
+  let top = [];
+  if (value.top !== undefined) {
+    if (!Array.isArray(value.top) || value.top.length > 5) {
+      throw new ApiError(
+        502,
+        "evolution_protocol_error",
+        "top must list at most five decks",
+      );
+    }
+    top = value.top.map((entry, index) => {
+      if (!isRecord(entry)) {
+        throw new ApiError(
+          502,
+          "evolution_protocol_error",
+          `top[${index}] is invalid`,
+        );
+      }
+      return {
+        cards: validatedCardRows(entry.cards, `top[${index}].cards`),
+        stats: validatedEvolutionStats(
+          entry.fitness,
+          `top[${index}].fitness`,
+          gamesPerOpponent * DECKS.length,
+        ),
+      };
+    });
+  }
+
   return {
     result: {
       seed,
@@ -1194,6 +1263,7 @@ export function validateEvolutionResult(value, config) {
       population: config.population,
       games: config.games,
       best: { cards, stats, byOpponent },
+      top,
     },
     cardIds: [...value.deck.cardIds],
   };

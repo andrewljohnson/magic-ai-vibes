@@ -756,6 +756,9 @@ struct EvolvedDeck {
 
 struct DeckEvolutionSummary {
     EvolvedDeck best;
+    // The final generation's strongest distinct decks (best first,
+    // up to five), with the same evaluation stats as `best`.
+    std::vector<EvolvedDeck> top;
     std::vector<double> generation_best_win_rates;
 };
 
