@@ -222,15 +222,35 @@ int main(int argc, char** argv) {
             return bot.name == "handcrafted";
         });
 
-    std::ostringstream json;
-    json << "{\n  \"games_per_pairing\": " << games_per_pairing
-         << ",\n  \"seed\": " << seed
-         << ",\n  \"reference_pilot\": \"" << reference.name
-         << "\",\n  \"decks\": [";
-    for (std::size_t deck = 0; deck < deck_count; ++deck) {
-        json << (deck ? ", " : "") << '"' << decks[deck].name << '"';
+    std::string header;
+    {
+        std::ostringstream head;
+        head << "{\n  \"games_per_pairing\": " << games_per_pairing
+             << ",\n  \"seed\": " << seed
+             << ",\n  \"reference_pilot\": \"" << reference.name
+             << "\",\n  \"decks\": [";
+        for (std::size_t deck = 0; deck < deck_count; ++deck) {
+            head << (deck ? ", " : "") << '"' << decks[deck].name
+                 << '"';
+        }
+        head << "],\n  \"bots\": [\n";
+        header = head.str();
     }
-    json << "],\n  \"bots\": [\n";
+    std::vector<std::string> finished_bots;
+    const auto write_snapshot = [&]() {
+        std::ofstream out(output_path);
+        if (!out) {
+            std::cerr << "cannot write " << output_path << "\n";
+            std::exit(1);
+        }
+        out << header;
+        for (std::size_t index = 0; index < finished_bots.size();
+             ++index) {
+            out << finished_bots[index]
+                << (index + 1 < finished_bots.size() ? ",\n" : "\n");
+        }
+        out << "  ]\n}\n";
+    };
 
     std::mutex points_mutex;
     for (std::size_t bot = 0; bot < bots.size(); ++bot) {
@@ -300,6 +320,7 @@ int main(int argc, char** argv) {
                 field_totals[mine] += 1;
             });
 
+        std::ostringstream json;
         json << "    {\"name\": \"" << entry.name
              << "\", \"matrix\": [";
         for (std::size_t row = 0; row < deck_count; ++row) {
@@ -317,18 +338,11 @@ int main(int argc, char** argv) {
                  << (100.0 * field_points[deck] /
                      static_cast<double>(field_totals[deck]));
         }
-        json << "]}" << (bot + 1 < bots.size() ? "," : "") << "\n";
-
+        json << "]}";
+        finished_bots.push_back(json.str());
+        write_snapshot();
         std::cout << entry.name << " done\n";
     }
-    json << "  ]\n}\n";
-
-    std::ofstream out(output_path);
-    if (!out) {
-        std::cerr << "cannot write " << output_path << "\n";
-        return 1;
-    }
-    out << json.str();
     std::cout << "wrote " << output_path << "\n";
     return 0;
 }
