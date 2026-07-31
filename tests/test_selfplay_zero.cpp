@@ -365,6 +365,13 @@ SPZ_TEST(champion_pumps_declared_blocker_in_response_window) {
     }
     const auto net =
         std::make_shared<const SpzNet>(SpzNet::load(artifact));
+    if (net->input_count() != spz_feature_count() &&
+        net->input_count() != spz_feature_count_v2() &&
+        net->input_count() != spz_feature_count_v3()) {
+        std::cout << "  (skipped: champion artifact predates the "
+                     "current card pool)\n";
+        return;
+    }
 
     const auto green = green_deck();
     const auto red = red_deck();

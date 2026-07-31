@@ -373,8 +373,12 @@ void append_creature_slots_range(std::vector<float>& features,
 // draw from matching producers first, generic from what remains.
 struct ManaAvailable {
     int green = 0, red = 0, blue = 0, white = 0, generic = 0;
+    // Mana usable as any single color (Black Lotus, Channel life).
+    int wild = 0;
 
-    int total() const { return green + red + blue + white + generic; }
+    int total() const {
+        return green + red + blue + white + generic + wild;
+    }
 };
 
 ManaAvailable available_mana(const PublicPlayerState& player) {
@@ -399,7 +403,12 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
             mana.blue += 1;
         } else if (artifact.card == CardId::SolRing) {
             mana.generic += 2;
+        } else if (artifact.card == CardId::BlackLotus) {
+            mana.wild += 3;
         }
+    }
+    if (player.channel_active) {
+        mana.wild += std::max(0, player.life - 1);
     }
     mana.green += player.mana_pool.green;
     mana.red += player.mana_pool.red;
@@ -415,8 +424,19 @@ bool roughly_castable(const CardDefinition& definition,
         return !land_played;
     }
     const ManaCost& cost = definition.cost;
-    if (cost.green > mana.green || cost.red > mana.red ||
-        cost.blue > mana.blue || cost.white > mana.white) {
+    int wild = mana.wild;
+    const auto shortfall = [&wild](int have, int need) {
+        const int missing = std::max(0, need - have);
+        if (missing > wild) {
+            return true;
+        }
+        wild -= missing;
+        return false;
+    };
+    if (shortfall(mana.green, cost.green) ||
+        shortfall(mana.red, cost.red) ||
+        shortfall(mana.blue, cost.blue) ||
+        shortfall(mana.white, cost.white)) {
         return false;
     }
     const int leftover = mana.total() - cost.green - cost.red -
