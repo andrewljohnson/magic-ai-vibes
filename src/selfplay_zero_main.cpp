@@ -187,8 +187,8 @@ int run_train(const Arguments& raw_arguments) {
         arguments.probe_every = 10;
     }
     if (arguments.probe_baseline.empty() &&
-        std::ifstream("data/spz-champion-v6.txt").good()) {
-        arguments.probe_baseline = "data/spz-champion-v6.txt";
+        std::ifstream("data/spz-champion-v7.txt").good()) {
+        arguments.probe_baseline = "data/spz-champion-v7.txt";
     }
     SpzTrainConfig config;
     config.iterations = arguments.iterations;

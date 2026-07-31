@@ -39,11 +39,11 @@
     <code>make matchup-matrix && ./build/matchup-matrix</code>) ·
     <a href="monitor.html">training monitor</a></p>
   <section>
-    <h2>Bots × decks</h2>
-    <p class="desc">Each cell: that deck's mean win rate across the other six
-      decks when this bot pilots every seat. Read a column down to see which
-      pilot gets the most out of a deck; read a row across to see how the bot
-      ranks the field.</p>
+    <h2>Bots × decks — pilot strength</h2>
+    <p class="desc" id="summary-desc">Each cell: this bot pilots the deck
+      against the other six decks flown by the reference pilot. Rows are
+      comparable — a stronger bot scores higher with the same deck, so the
+      rows should sort weakest to strongest pilot.</p>
     <div class="scroll"><table id="summary"></table></div>
   </section>
   <div id="per-bot"></div>
@@ -90,9 +90,14 @@ async function load() {
     `${data.games_per_pairing} paired games per matchup · seed ${data.seed}` +
     ` · <a href="monitor.html">training monitor</a>`;
 
+  document.getElementById("summary-desc").textContent =
+    "Each cell: this bot pilots the deck against the other six decks " +
+    `flown by ${data.reference_pilot}. Rows are comparable - a stronger ` +
+    "bot scores higher with the same deck, so rows should sort weakest " +
+    "to strongest pilot.";
   document.getElementById("summary").innerHTML = matrixTable(
     decks,
-    data.bots.map((bot) => bot.deck_means),
+    data.bots.map((bot) => bot.vs_field),
     data.bots.map((bot) => bot.name),
     "bot \\ deck");
 

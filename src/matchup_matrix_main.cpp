@@ -6,6 +6,7 @@
 #include "old_school/game.hpp"
 #include "old_school/selfplay_zero.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <functional>
@@ -29,10 +30,12 @@ struct DeckEntry {
 
 struct BotEntry {
     std::string name;
-    // Builds one game's config (bot seats + optional SPZ controllers).
-    std::function<GameConfig(const std::array<std::vector<CardId>, 2>&,
-                             std::uint64_t)>
-        configure;
+    // Installs this bot as the pilot of one seat (BotConfig or an SPZ
+    // controller), so mirror and cross-pilot games share one codepath.
+    std::function<void(GameConfig&, std::size_t,
+                       const std::array<std::vector<CardId>, 2>&,
+                       std::uint64_t)>
+        pilot_seat;
 };
 
 void run_jobs(std::size_t job_count, std::size_t threads,
@@ -71,8 +74,8 @@ int main(int argc, char** argv) {
     std::size_t games_per_pairing = 100;
     std::uint64_t seed = 20260730;
     std::string output_path = "build/telemetry/matchup-matrix.json";
-    std::string spz_model = "data/spz-champion-v6.txt";
-    std::string spz_advantage = "data/spz-advantage-v1.txt";
+    std::string spz_model = "data/spz-champion-v7.txt";
+    std::string spz_advantage = "data/spz-advantage-v2.txt";
     std::size_t threads = std::thread::hardware_concurrency();
     std::optional<std::string> only_bot;
     for (int arg = 1; arg < argc; ++arg) {
@@ -116,14 +119,11 @@ int main(int argc, char** argv) {
 
     const auto plain_bot = [](BotKind kind, std::size_t rollouts) {
         return [kind, rollouts](
+                   GameConfig& config, std::size_t seat,
                    const std::array<std::vector<CardId>, 2>&,
                    std::uint64_t) {
-            GameConfig config;
-            config.bots = {
-                BotConfig{.kind = kind, .rollouts_per_action = rollouts},
-                BotConfig{.kind = kind, .rollouts_per_action = rollouts},
-            };
-            return config;
+            config.bots[seat] =
+                BotConfig{.kind = kind, .rollouts_per_action = rollouts};
         };
     };
 
@@ -142,22 +142,13 @@ int main(int argc, char** argv) {
     {
         std::ifstream probe(spz_model);
         if (probe) {
-            auto net = std::make_shared<const spz::SpzNet>(
+            spz_net = std::make_shared<const spz::SpzNet>(
                 spz::load_spz_net(spz_model));
-            const std::size_t inputs = net->input_count();
-            if (inputs == spz::spz_feature_count() ||
-                inputs == spz::spz_feature_count_v2() ||
-                inputs == spz::spz_feature_count_v3()) {
-                spz_net = std::move(net);
-                std::ifstream advantage_probe(spz_advantage);
-                if (advantage_probe) {
-                    spz_advantage_net = std::make_shared<
-                        const spz::SpzAdvantageNet>(
+            std::ifstream advantage_probe(spz_advantage);
+            if (advantage_probe) {
+                spz_advantage_net =
+                    std::make_shared<const spz::SpzAdvantageNet>(
                         spz::load_spz_advantage_net(spz_advantage));
-                }
-            } else {
-                std::cout << "spz skipped: " << spz_model
-                          << " predates the current card pool\n";
             }
         } else {
             std::cout << "spz skipped: " << spz_model
@@ -168,26 +159,23 @@ int main(int argc, char** argv) {
         bots.push_back(
             {"spz",
              [spz_net, spz_advantage_net](
+                 GameConfig& config, std::size_t seat,
                  const std::array<std::vector<CardId>, 2>& game_decks,
                  std::uint64_t game_seed) {
-                 GameConfig config;
-                 for (std::size_t seat = 0; seat < 2; ++seat) {
-                     spz::SpzPolicyConfig policy;
-                     policy.worlds = 4;
-                     policy.block_prediction_worlds = 4;
-                     policy.rollout = true;
-                     policy.gamma_per_turn = 0.98;
-                     policy.seed = game_seed + seat;
-                     if (spz_advantage_net) {
-                         policy.pass_dominance_prune = false;
-                         policy.advantage_scale = 0.6;
-                     }
-                     config.human_controllers[seat] =
-                         spz::make_spz_controller(
-                             spz_net, game_decks, seat, policy, nullptr,
-                             nullptr, spz_advantage_net);
+                 spz::SpzPolicyConfig policy;
+                 policy.worlds = 4;
+                 policy.block_prediction_worlds = 4;
+                 policy.rollout = true;
+                 policy.gamma_per_turn = 0.98;
+                 policy.seed = game_seed + seat;
+                 if (spz_advantage_net) {
+                     policy.pass_dominance_prune = false;
+                     policy.advantage_scale = 0.6;
                  }
-                 return config;
+                 config.human_controllers[seat] =
+                     spz::make_spz_controller(spz_net, game_decks, seat,
+                                              policy, nullptr, nullptr,
+                                              spz_advantage_net);
              }});
     }
     if (only_bot) {
@@ -208,21 +196,50 @@ int main(int argc, char** argv) {
         }
     }
 
+    // One paired game: `pilots[seat]` flies decks[deck_ids[seat]]. Returns
+    // seat-zero points (win 1, draw 0.5).
+    const auto play_game = [&](const BotEntry& zero, const BotEntry& one,
+                               std::size_t deck_zero, std::size_t deck_one,
+                               std::uint64_t game_seed,
+                               std::size_t starting_player) {
+        const std::array<std::vector<CardId>, 2> game_decks = {
+            decks[deck_zero].cards, decks[deck_one].cards};
+        GameConfig config;
+        config.starting_player = starting_player;
+        zero.pilot_seat(config, 0, game_decks, game_seed);
+        one.pilot_seat(config, 1, game_decks, game_seed);
+        Game match(game_decks[0], game_decks[1], game_seed,
+                   std::move(config));
+        const GameResult result = match.run();
+        if (result.winner == 0) {
+            return 1.0;
+        }
+        return result.winner == 1 ? 0.0 : 0.5;
+    };
+
+    const BotEntry& reference =
+        *std::find_if(bots.begin(), bots.end(), [](const BotEntry& bot) {
+            return bot.name == "handcrafted";
+        });
+
     std::ostringstream json;
     json << "{\n  \"games_per_pairing\": " << games_per_pairing
-         << ",\n  \"seed\": " << seed << ",\n  \"decks\": [";
+         << ",\n  \"seed\": " << seed
+         << ",\n  \"reference_pilot\": \"" << reference.name
+         << "\",\n  \"decks\": [";
     for (std::size_t deck = 0; deck < deck_count; ++deck) {
         json << (deck ? ", " : "") << '"' << decks[deck].name << '"';
     }
     json << "],\n  \"bots\": [\n";
 
-    std::mutex progress_mutex;
+    std::mutex points_mutex;
     for (std::size_t bot = 0; bot < bots.size(); ++bot) {
         const BotEntry& entry = bots[bot];
+
+        // Mirror grid: this bot pilots every seat, deck against deck.
         std::vector<std::vector<double>> matrix(
             deck_count, std::vector<double>(deck_count, 50.0));
         std::vector<double> pairing_points(pairings.size(), 0.0);
-
         run_jobs(
             pairings.size() * games_per_pairing, threads,
             [&](std::size_t job) {
@@ -232,28 +249,16 @@ int main(int argc, char** argv) {
                 // Balance seats and starting player; pairs of games share
                 // a seed with swapped seats.
                 const bool low_first = (game % 2) == 0;
-                const std::size_t deck_zero = low_first ? low : high;
-                const std::size_t deck_one = low_first ? high : low;
                 const std::uint64_t game_seed =
                     seed + 7919 * (bot * 1000 + pairing) + game / 2;
-                const std::array<std::vector<CardId>, 2> game_decks = {
-                    decks[deck_zero].cards, decks[deck_one].cards};
-                GameConfig config =
-                    entry.configure(game_decks, game_seed);
-                config.starting_player = (game / 2) % 2;
-                Game match(game_decks[0], game_decks[1], game_seed,
-                           std::move(config));
-                const GameResult result = match.run();
-                double low_points = 0.5;
-                if (result.winner == 0) {
-                    low_points = low_first ? 1.0 : 0.0;
-                } else if (result.winner == 1) {
-                    low_points = low_first ? 0.0 : 1.0;
-                }
-                std::lock_guard<std::mutex> lock(progress_mutex);
+                const double zero_points = play_game(
+                    entry, entry, low_first ? low : high,
+                    low_first ? high : low, game_seed, (game / 2) % 2);
+                const double low_points =
+                    low_first ? zero_points : 1.0 - zero_points;
+                std::lock_guard<std::mutex> lock(points_mutex);
                 pairing_points[pairing] += low_points;
             });
-
         for (std::size_t pairing = 0; pairing < pairings.size();
              ++pairing) {
             const auto [low, high] = pairings[pairing];
@@ -262,6 +267,38 @@ int main(int argc, char** argv) {
             matrix[low][high] = rate;
             matrix[high][low] = 100.0 - rate;
         }
+
+        // Field row: this bot pilots each deck against the other decks,
+        // all flown by the reference pilot. Comparable across bots: a
+        // stronger pilot scores higher with the same deck.
+        const std::size_t field_games =
+            std::max<std::size_t>(2, games_per_pairing / 6) & ~1ULL;
+        std::vector<double> field_points(deck_count, 0.0);
+        std::vector<std::size_t> field_totals(deck_count, 0);
+        run_jobs(
+            deck_count * (deck_count - 1) * field_games, threads,
+            [&](std::size_t job) {
+                const std::size_t game = job % field_games;
+                const std::size_t pair = job / field_games;
+                const std::size_t mine = pair / (deck_count - 1);
+                std::size_t theirs = pair % (deck_count - 1);
+                theirs += theirs >= mine ? 1 : 0;
+                const bool mine_first = (game % 2) == 0;
+                const std::uint64_t game_seed =
+                    seed + 6007 * (bot * 1000 + pair) + game / 2;
+                const double zero_points =
+                    mine_first ? play_game(entry, reference, mine,
+                                           theirs, game_seed,
+                                           (game / 2) % 2)
+                               : play_game(reference, entry, theirs,
+                                           mine, game_seed,
+                                           (game / 2) % 2);
+                const double my_points =
+                    mine_first ? zero_points : 1.0 - zero_points;
+                std::lock_guard<std::mutex> lock(points_mutex);
+                field_points[mine] += my_points;
+                field_totals[mine] += 1;
+            });
 
         json << "    {\"name\": \"" << entry.name
              << "\", \"matrix\": [";
@@ -274,21 +311,15 @@ int main(int argc, char** argv) {
             }
             json << "]";
         }
-        json << "], \"deck_means\": [";
-        for (std::size_t row = 0; row < deck_count; ++row) {
-            double total = 0.0;
-            for (std::size_t col = 0; col < deck_count; ++col) {
-                if (col != row) {
-                    total += matrix[row][col];
-                }
-            }
-            json << (row ? ", " : "")
-                 << (total / static_cast<double>(deck_count - 1));
+        json << "], \"vs_field\": [";
+        for (std::size_t deck = 0; deck < deck_count; ++deck) {
+            json << (deck ? ", " : "")
+                 << (100.0 * field_points[deck] /
+                     static_cast<double>(field_totals[deck]));
         }
         json << "]}" << (bot + 1 < bots.size() ? "," : "") << "\n";
 
-        std::cout << entry.name << " done ("
-                  << pairings.size() * games_per_pairing << " games)\n";
+        std::cout << entry.name << " done\n";
     }
     json << "  ]\n}\n";
 
