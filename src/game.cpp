@@ -30,7 +30,7 @@ namespace old_school {
 
 namespace {
 
-constexpr std::array<CardDefinition, 28> kCardDefinitions = {{
+constexpr std::array<CardDefinition, 31> kCardDefinitions = {{
     {CardId::Forest, "Forest", CardType::Land, {}, 0, 0, 0},
     {CardId::Mountain, "Mountain", CardType::Land, {}, 0, 0, 0},
     {CardId::GrizzlyBears,
@@ -213,9 +213,33 @@ constexpr std::array<CardDefinition, 28> kCardDefinitions = {{
      0,
      0,
      false},
+    {CardId::LlanowarElves,
+     "Llanowar Elves",
+     CardType::Creature,
+     {.green = 1},
+     1,
+     1,
+     0,
+     false},
+    {CardId::MossBeast,
+     "Moss Beast",
+     CardType::Creature,
+     {.generic = 2, .green = 2},
+     4,
+     5,
+     0,
+     false},
+    {CardId::ForestColossus,
+     "Forest Colossus",
+     CardType::Creature,
+     {.generic = 4, .green = 2},
+     7,
+     7,
+     0,
+     false},
 }};
 
-constexpr std::array<CardId, 9> kCreatureCards = {
+constexpr std::array<CardId, 12> kCreatureCards = {
     CardId::GrizzlyBears,
     CardId::IronrootTreefolk,
     CardId::FireElemental,
@@ -225,6 +249,9 @@ constexpr std::array<CardId, 9> kCreatureCards = {
     CardId::GrayOgre,
     CardId::HillGiant,
     CardId::AirElemental,
+    CardId::LlanowarElves,
+    CardId::MossBeast,
+    CardId::ForestColossus,
 };
 
 constexpr std::array<CardId, 3> kSorceryCards = {
@@ -414,6 +441,9 @@ struct ManaPaymentPlan {
     bool possible = false;
     std::vector<bool> tap_lands;
     std::vector<bool> tap_artifacts;
+    // Mana creatures (Llanowar Elves) tap for their color; summoning
+    // sickness gates the tap ability like attacking.
+    std::vector<bool> tap_creatures;
     // Black Lotus is sacrificed, not tapped, and yields three mana of one
     // chosen color (tracked by adding it directly to the pool).
     std::vector<bool> sacrifice_artifacts;
@@ -438,6 +468,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             std::vector<bool>(player.artifacts.size(), false),
         .sacrifice_artifacts =
             std::vector<bool>(player.artifacts.size(), false),
+        .tap_creatures =
+            std::vector<bool>(player.creatures.size(), false),
         .remaining_pool = player.mana_pool,
     };
 
@@ -450,6 +482,20 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         plan.tap_artifacts[index] = true;
         add_mana(plan.remaining_pool,
                  artifact_mana(player.artifacts[index].card));
+    };
+    const auto tap_elf = [&]() {
+        for (std::size_t index = 0; index < player.creatures.size();
+             ++index) {
+            const auto& creature = player.creatures[index];
+            if (creature.card == CardId::LlanowarElves &&
+                !creature.tapped && !creature.summoning_sick &&
+                !plan.tap_creatures[index]) {
+                plan.tap_creatures[index] = true;
+                plan.remaining_pool.green += 1;
+                return true;
+            }
+        }
+        return false;
     };
     const auto sacrifice_lotus_for = [&](int ManaCost::*color) {
         for (std::size_t index = 0; index < player.artifacts.size();
@@ -476,6 +522,9 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                     tap_land(index);
                     --needed;
                 }
+            }
+            while (needed > 0 && land == CardId::Forest && tap_elf()) {
+                --needed;
             }
             // A Black Lotus covers up to three missing mana of one color.
             while (needed > 0) {
@@ -560,6 +609,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             tap_artifact(index);
         }
     }
+    while (needs_more_mana() && tap_elf()) {
+    }
     while (needs_more_mana() &&
            sacrifice_lotus_for(&ManaCost::generic)) {
     }
@@ -625,6 +676,12 @@ bool pay_mana(PlayerState& player, const ManaCost& cost) {
             player.artifacts[index].tapped = true;
         }
     }
+    for (std::size_t index = 0;
+         index < player.creatures.size(); ++index) {
+        if (plan.tap_creatures[index]) {
+            player.creatures[index].tapped = true;
+        }
+    }
     // Sacrificed Black Lotuses leave the battlefield for the graveyard.
     for (std::size_t index = player.artifacts.size(); index-- > 0;) {
         if (plan.sacrifice_artifacts[index]) {
@@ -643,6 +700,12 @@ int maximum_available_mana(const PlayerState& player) {
     int total = mana_total(player.mana_pool);
     if (player.channel_active) {
         total += std::max(0, player.life - 1);
+    }
+    for (const auto& creature : player.creatures) {
+        if (creature.card == CardId::LlanowarElves &&
+            !creature.tapped && !creature.summoning_sick) {
+            total += 1;
+        }
     }
     for (const auto& land : player.lands) {
         if (!land.tapped) {
@@ -850,6 +913,12 @@ double handcrafted_card_value(CardId card) {
         return 1'650.0;
     case CardId::Channel:
         return 900.0;
+    case CardId::LlanowarElves:
+        return 750.0;
+    case CardId::MossBeast:
+        return 950.0;
+    case CardId::ForestColossus:
+        return 1'500.0;
     }
     return 0.0;
 }
@@ -865,11 +934,13 @@ const CardDefinition& card_definition(CardId card) {
 }
 
 std::vector<CardId> green_deck() {
-    std::vector<CardId> deck(18, CardId::Forest);
-    deck.insert(deck.end(), 9, CardId::GrizzlyBears);
-    deck.insert(deck.end(), 8, CardId::IronrootTreefolk);
+    std::vector<CardId> deck(16, CardId::Forest);
+    deck.insert(deck.end(), 4, CardId::LlanowarElves);
+    deck.insert(deck.end(), 6, CardId::GrizzlyBears);
+    deck.insert(deck.end(), 2, CardId::IronrootTreefolk);
+    deck.insert(deck.end(), 4, CardId::MossBeast);
+    deck.insert(deck.end(), 4, CardId::ForestColossus);
     deck.insert(deck.end(), 4, CardId::GiantGrowth);
-    deck.insert(deck.end(), 1, CardId::Tsunami);
     return deck;
 }
 
@@ -919,14 +990,15 @@ std::vector<CardId> white_control_deck() {
 }
 
 std::vector<CardId> ru_aggro_deck() {
-    std::vector<CardId> deck(13, CardId::Mountain);
-    deck.insert(deck.end(), 4, CardId::Island);
-    deck.insert(deck.end(), 3, CardId::FlyingMen);
-    deck.insert(deck.end(), 5, CardId::IronclawOrcs);
-    deck.insert(deck.end(), 2, CardId::GrayOgre);
-    deck.insert(deck.end(), 8, CardId::HillGiant);
-    deck.insert(deck.end(), 3, CardId::LightningBolt);
-    deck.insert(deck.end(), 2, CardId::Disintegrate);
+    std::vector<CardId> deck(10, CardId::Mountain);
+    deck.insert(deck.end(), 7, CardId::Island);
+    deck.insert(deck.end(), 4, CardId::FlyingMen);
+    deck.insert(deck.end(), 4, CardId::IronclawOrcs);
+    deck.insert(deck.end(), 3, CardId::GrayOgre);
+    deck.insert(deck.end(), 2, CardId::HillGiant);
+    deck.insert(deck.end(), 4, CardId::LightningBolt);
+    deck.insert(deck.end(), 4, CardId::ForceSpike);
+    deck.insert(deck.end(), 2, CardId::Counterspell);
     return deck;
 }
 
@@ -4440,8 +4512,9 @@ std::string_view deck_name(DeckId deck) {
 std::string_view deck_list(DeckId deck) {
     switch (deck) {
     case DeckId::Green:
-        return "18 Forest / 9 Grizzly Bears / 8 Ironroot Treefolk / "
-               "4 Giant Growth / 1 Tsunami";
+        return "16 Forest / 4 Llanowar Elves / 6 Grizzly Bears / "
+               "2 Ironroot Treefolk / 4 Moss Beast / "
+               "4 Forest Colossus / 4 Giant Growth";
     case DeckId::Red:
         return "15 Mountain / 9 Lightning Bolt / 7 Ironclaw Orcs / "
                "4 Gray Ogre / 3 Hill Giant / 2 Fire Elemental";
@@ -4453,9 +4526,9 @@ std::string_view deck_list(DeckId deck) {
     case DeckId::White:
         return "22 Plains / 3 Millstone / 15 Moat";
     case DeckId::RUAggro:
-        return "13 Mountain / 4 Island / 3 Flying Men / "
-               "5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / "
-               "3 Lightning Bolt / 2 Disintegrate";
+        return "10 Mountain / 7 Island / 4 Flying Men / "
+               "4 Ironclaw Orcs / 3 Gray Ogre / 2 Hill Giant / "
+               "4 Lightning Bolt / 4 Force Spike / 2 Counterspell";
     case DeckId::LotusCombo:
         return "20 Black Lotus / 10 Channel / 10 Disintegrate";
     case DeckId::Burn:

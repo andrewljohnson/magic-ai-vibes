@@ -533,11 +533,13 @@ TEST(old_school_card_definitions_are_complete) {
 TEST(starting_decks_have_the_requested_cards) {
     const auto green_deck = old_school::green_deck();
     CHECK(green_deck.size() == 40);
-    CHECK(count_card(green_deck, old_school::CardId::Forest) == 18);
-    CHECK(count_card(green_deck, old_school::CardId::GrizzlyBears) == 9);
-    CHECK(count_card(green_deck, old_school::CardId::IronrootTreefolk) == 8);
+    CHECK(count_card(green_deck, old_school::CardId::Forest) == 16);
+    CHECK(count_card(green_deck, old_school::CardId::LlanowarElves) == 4);
+    CHECK(count_card(green_deck, old_school::CardId::GrizzlyBears) == 6);
+    CHECK(count_card(green_deck, old_school::CardId::IronrootTreefolk) == 2);
+    CHECK(count_card(green_deck, old_school::CardId::MossBeast) == 4);
+    CHECK(count_card(green_deck, old_school::CardId::ForestColossus) == 4);
     CHECK(count_card(green_deck, old_school::CardId::GiantGrowth) == 4);
-    CHECK(count_card(green_deck, old_school::CardId::Tsunami) == 1);
 
     const auto red_deck = old_school::red_deck();
     CHECK(red_deck.size() == 40);
@@ -569,14 +571,15 @@ TEST(starting_decks_have_the_requested_cards) {
 
     const auto ru_deck = old_school::ru_aggro_deck();
     CHECK(ru_deck.size() == 40);
-    CHECK(count_card(ru_deck, old_school::CardId::Mountain) == 13);
-    CHECK(count_card(ru_deck, old_school::CardId::Island) == 4);
-    CHECK(count_card(ru_deck, old_school::CardId::FlyingMen) == 3);
-    CHECK(count_card(ru_deck, old_school::CardId::IronclawOrcs) == 5);
-    CHECK(count_card(ru_deck, old_school::CardId::GrayOgre) == 2);
-    CHECK(count_card(ru_deck, old_school::CardId::HillGiant) == 8);
-    CHECK(count_card(ru_deck, old_school::CardId::LightningBolt) == 3);
-    CHECK(count_card(ru_deck, old_school::CardId::Disintegrate) == 2);
+    CHECK(count_card(ru_deck, old_school::CardId::Mountain) == 10);
+    CHECK(count_card(ru_deck, old_school::CardId::Island) == 7);
+    CHECK(count_card(ru_deck, old_school::CardId::FlyingMen) == 4);
+    CHECK(count_card(ru_deck, old_school::CardId::IronclawOrcs) == 4);
+    CHECK(count_card(ru_deck, old_school::CardId::GrayOgre) == 3);
+    CHECK(count_card(ru_deck, old_school::CardId::HillGiant) == 2);
+    CHECK(count_card(ru_deck, old_school::CardId::LightningBolt) == 4);
+    CHECK(count_card(ru_deck, old_school::CardId::ForceSpike) == 4);
+    CHECK(count_card(ru_deck, old_school::CardId::Counterspell) == 2);
 }
 
 TEST(determinization_is_reproducible_and_preserves_observer_hand) {
@@ -2879,6 +2882,36 @@ TEST(handcrafted_sequences_the_channel_kill_and_takes_exact_lethal) {
     CHECK(!kill.target->creature.has_value());
     CHECK(kill.target->player == 1);
     CHECK(kill.x_value == channeled.players[1].life);
+}
+
+TEST(llanowar_elves_tap_for_green_after_sickness) {
+    old_school::PlayerState player;
+    player.creatures.push_back({.id = 1,
+                                .card = old_school::CardId::LlanowarElves,
+                                .summoning_sick = true});
+    CHECK(old_school::maximum_available_mana(player) == 0);
+    CHECK(!old_school::can_pay(player, {.green = 1}));
+    player.creatures[0].summoning_sick = false;
+    CHECK(old_school::maximum_available_mana(player) == 1);
+    CHECK(old_school::can_pay(player, {.green = 1}));
+    player.lands.push_back({old_school::CardId::Forest, false});
+    // Elves cover the green Bears needs beyond the single Forest.
+    CHECK(old_school::pay_mana(
+        player, {.generic = 0, .green = 2}));
+    CHECK(player.creatures[0].tapped);
+    CHECK(player.lands[0].tapped);
+}
+
+TEST(green_vanillas_have_the_requested_stats) {
+    const auto& beast =
+        old_school::card_definition(old_school::CardId::MossBeast);
+    CHECK(beast.type == old_school::CardType::Creature);
+    CHECK(beast.cost.generic == 2 && beast.cost.green == 2);
+    CHECK(beast.power == 4 && beast.toughness == 5);
+    const auto& colossus =
+        old_school::card_definition(old_school::CardId::ForestColossus);
+    CHECK(colossus.cost.generic == 4 && colossus.cost.green == 2);
+    CHECK(colossus.power == 7 && colossus.toughness == 7);
 }
 
 TEST(grizzly_bears_trade_in_combat) {

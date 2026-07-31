@@ -133,8 +133,8 @@ int main(int argc, char** argv) {
     std::size_t games_per_opponent = 12;
     std::uint64_t seed = 20260798;
     std::size_t narrations = 3;
-    std::string model = "data/spz-champion-v8.txt";
-    std::string advantage_path = "data/spz-advantage-v4.txt";
+    std::string model = "data/spz-champion-v9.txt";
+    std::string advantage_path = "data/spz-advantage-v5.txt";
     for (int arg = 1; arg < argc; ++arg) {
         const std::string flag = argv[arg];
         if (flag == "--deck") {

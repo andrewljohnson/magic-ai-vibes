@@ -47,6 +47,11 @@ const CARD_NAMES = Object.freeze([
   "Braingeyser",
   "Force Spike",
   "Air Elemental",
+  "Black Lotus",
+  "Channel",
+  "Llanowar Elves",
+  "Moss Beast",
+  "Forest Colossus",
 ]);
 
 export const DECKS = Object.freeze([
@@ -56,13 +61,15 @@ export const DECKS = Object.freeze([
     name: "Green",
     colors: ["green"],
     deckList:
-      "18 Forest / 9 Grizzly Bears / 8 Ironroot Treefolk / 4 Giant Growth / 1 Tsunami",
+      "16 Forest / 4 Llanowar Elves / 6 Grizzly Bears / 2 Ironroot Treefolk / 4 Moss Beast / 4 Forest Colossus / 4 Giant Growth",
     cards: [
-      { name: "Forest", count: 18 },
-      { name: "Grizzly Bears", count: 9 },
-      { name: "Ironroot Treefolk", count: 8 },
+      { name: "Forest", count: 16 },
+      { name: "Llanowar Elves", count: 4 },
+      { name: "Grizzly Bears", count: 6 },
+      { name: "Ironroot Treefolk", count: 2 },
+      { name: "Moss Beast", count: 4 },
+      { name: "Forest Colossus", count: 4 },
       { name: "Giant Growth", count: 4 },
-      { name: "Tsunami", count: 1 },
     ],
   },
   {
@@ -119,16 +126,17 @@ export const DECKS = Object.freeze([
     name: "RU Aggro",
     colors: ["red", "blue"],
     deckList:
-      "13 Mountain / 4 Island / 3 Flying Men / 5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / 3 Lightning Bolt / 2 Disintegrate",
+      "10 Mountain / 7 Island / 4 Flying Men / 4 Ironclaw Orcs / 3 Gray Ogre / 2 Hill Giant / 4 Lightning Bolt / 4 Force Spike / 2 Counterspell",
     cards: [
-      { name: "Mountain", count: 13 },
-      { name: "Island", count: 4 },
-      { name: "Flying Men", count: 3 },
-      { name: "Ironclaw Orcs", count: 5 },
-      { name: "Gray Ogre", count: 2 },
-      { name: "Hill Giant", count: 8 },
-      { name: "Lightning Bolt", count: 3 },
-      { name: "Disintegrate", count: 2 },
+      { name: "Mountain", count: 10 },
+      { name: "Island", count: 7 },
+      { name: "Flying Men", count: 4 },
+      { name: "Ironclaw Orcs", count: 4 },
+      { name: "Gray Ogre", count: 3 },
+      { name: "Hill Giant", count: 2 },
+      { name: "Lightning Bolt", count: 4 },
+      { name: "Force Spike", count: 4 },
+      { name: "Counterspell", count: 2 },
     ],
   },
   {

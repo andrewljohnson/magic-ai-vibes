@@ -45,10 +45,13 @@ enum class CardId : std::uint8_t {
     AirElemental,
     BlackLotus,
     Channel,
+    LlanowarElves,
+    MossBeast,
+    ForestColossus,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::Channel) + 1;
+    static_cast<std::size_t>(CardId::ForestColossus) + 1;
 
 enum class CardType : std::uint8_t {
     Land,

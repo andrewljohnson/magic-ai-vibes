@@ -57,7 +57,7 @@ std::vector<float> spz_features_v2(
     const std::array<std::vector<CardId>, 2>& original_decks,
     TurnPhase phase);
 // Schema v3: lossless play zones — individual slots for every creature
-// (18 per player), untapped-by-card counts for all permanent types,
+// (20 per player), untapped-by-card counts for all permanent types,
 // per-color mana pools, six stack objects. v2 is an exact prefix.
 std::size_t spz_feature_count_v3();
 std::vector<float> spz_features_v3(

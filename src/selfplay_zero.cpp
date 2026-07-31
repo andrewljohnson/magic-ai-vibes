@@ -412,6 +412,12 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
             mana.wild += 3;
         }
     }
+    for (const auto& creature : player.creatures) {
+        if (creature.card == CardId::LlanowarElves &&
+            !creature.tapped && !creature.summoning_sick) {
+            mana.green += 1;
+        }
+    }
     if (player.channel_active) {
         mana.wild += std::max(0, player.life - 1);
     }
@@ -590,7 +596,7 @@ std::vector<float> spz_features_v2(
 
 namespace {
 
-constexpr std::size_t kCreatureSlotsV3 = 18;
+constexpr std::size_t kCreatureSlotsV3 = 20;
 constexpr std::size_t kStackSlotsV3 = 6;
 
 void append_stack_slot(std::vector<float>& features,

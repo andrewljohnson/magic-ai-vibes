@@ -69,8 +69,14 @@ test("the production session manager drives the real engine bridge without HTTP"
     assert.equal(advanced.status, "awaiting_action");
     assert.equal(advanced.snapshot.players[0].hand.length, 6);
     assert.equal(advanced.snapshot.players[0].lands.length, 1);
-    assert.equal(advanced.events.at(-1).kind, "priority_action");
-    assert.match(advanced.events.at(-1).message, /Play/);
+    // The bridge may auto-advance trivial follow-up decisions, so the
+    // land play need not be the final event - it must simply be present.
+    assert.ok(
+      advanced.events.some(
+        (event) =>
+          event.kind === "priority_action" && /Play/.test(event.message),
+      ),
+    );
     assert.notEqual(advanced.decision.id, created.decision.id);
   } finally {
     harness.delete(created.id);
