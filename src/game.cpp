@@ -272,6 +272,12 @@ constexpr std::array<CardId, 1> kEnchantmentCards = {
 };
 
 constexpr ManaCost kMillstoneActivationCost = {.generic = 2};
+// Cards milled per Millstone activation. Overridable at compile time
+// for dose-response diagnostics (payoff distance vs learnability).
+#ifndef MILLSTONE_CARDS
+#define MILLSTONE_CARDS 2
+#endif
+constexpr int kMillstoneCards = MILLSTONE_CARDS;
 
 ManaCost disintegrate_cost(int x_value) {
     return {.generic = x_value, .red = 1};
@@ -1714,7 +1720,8 @@ bool resolve_top_of_stack(
             return false;
         }
         auto& target = state.players[spell.target->player];
-        for (int card = 0; card < 2 && !target.library.empty();
+        for (int card = 0;
+             card < kMillstoneCards && !target.library.empty();
              ++card) {
             target.graveyard.push_back(target.library.back());
             target.library.pop_back();

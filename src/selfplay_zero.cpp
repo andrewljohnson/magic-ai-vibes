@@ -2014,12 +2014,30 @@ struct SpzAgent {
         return self_dead ? 0.0 : 1.0;
     }
 
+    // A counterfactual ban: the given seat never takes actions matching
+    // this (kind, card) signature inside the rollout. Used only when
+    // recording advantage deltas, so "do it now" is contrasted with a
+    // future that truly goes without - not one where the stand-in does
+    // it a window later (which made every delayable action look free).
+    struct BannedAction {
+        PriorityActionKind kind = PriorityActionKind::Pass;
+        CardId card = CardId::Forest;
+        std::size_t seat = 0;
+    };
+
     PriorityAction choose_rollout_priority(
         const GameState& state, const PriorityState& priority,
         bool sorcery, TurnPhase phase,
-        const PendingCombat* pending = nullptr) const {
-        const auto actions =
+        const PendingCombat* pending = nullptr,
+        const BannedAction* banned = nullptr) const {
+        auto actions =
             legal_priority_actions(state, priority.player, sorcery);
+        if (banned != nullptr && priority.player == banned->seat) {
+            std::erase_if(actions, [&](const PriorityAction& action) {
+                return action.kind == banned->kind &&
+                       action.card == banned->card;
+            });
+        }
         if (actions.size() <= 1) {
             return actions.empty() ? PriorityAction::pass() : actions[0];
         }
@@ -2083,13 +2101,14 @@ struct SpzAgent {
     std::optional<double> rollout_window(
         GameState& state, TurnPhase phase, bool sorcery,
         PriorityState priority, int& budget,
-        const PendingCombat* pending = nullptr) const {
+        const PendingCombat* pending = nullptr,
+        const BannedAction* banned = nullptr) const {
         while (true) {
             PriorityAction action = PriorityAction::pass();
             if (budget > 0) {
                 budget -= 1;
                 action = choose_rollout_priority(state, priority, sorcery,
-                                                 phase, pending);
+                                                 phase, pending, banned);
             }
             if (action.kind != PriorityActionKind::Pass &&
                 !apply_priority_action(state, priority.player, action,
@@ -2163,7 +2182,8 @@ struct SpzAgent {
     }
 
     std::optional<double> rollout_combat_after_beginning(
-        GameState& state, int& budget) const {
+        GameState& state, int& budget,
+        const BannedAction* banned = nullptr) const {
         const std::size_t attacking_player = state.active_player;
         const auto eligible =
             old_school::legal_attackers(state, attacking_player);
@@ -2180,7 +2200,8 @@ struct SpzAgent {
                 const PendingCombat declared{attack_set, blocks};
                 if (const auto terminal = rollout_window(
                         state, TurnPhase::DeclareBlockers, false,
-                        {attacking_player, 0}, budget, &declared)) {
+                        {attacking_player, 0}, budget, &declared,
+                        banned)) {
                     return terminal;
                 }
                 resolve_declared_combat(state, declared);
@@ -2190,17 +2211,19 @@ struct SpzAgent {
             }
         }
         return rollout_window(state, TurnPhase::EndCombat, false,
-                              {state.active_player, 0}, budget);
+                              {state.active_player, 0}, budget, nullptr,
+                              banned);
     }
 
-    std::optional<double> rollout_combat(GameState& state,
-                                         int& budget) const {
-        if (const auto terminal =
-                rollout_window(state, TurnPhase::BeginCombat, false,
-                               {state.active_player, 0}, budget)) {
+    std::optional<double> rollout_combat(
+        GameState& state, int& budget,
+        const BannedAction* banned = nullptr) const {
+        if (const auto terminal = rollout_window(
+                state, TurnPhase::BeginCombat, false,
+                {state.active_player, 0}, budget, nullptr, banned)) {
             return terminal;
         }
-        return rollout_combat_after_beginning(state, budget);
+        return rollout_combat_after_beginning(state, budget, banned);
     }
 
     // Greedy cleanup discards evaluated on the full state for `player`.
@@ -2262,7 +2285,9 @@ struct SpzAgent {
     // has already been resolved.
     double finish_turn_and_rollout(GameState state, TurnPhase entry_phase,
                                    PriorityState resume,
-                                   std::size_t cycles) const {
+                                   std::size_t cycles,
+                                   const BannedAction* banned =
+                                       nullptr) const {
         const std::size_t root_turn = state.turn_number;
         const auto settle = [&](double value) {
             return discount_outcome(value, root_turn,
@@ -2276,15 +2301,17 @@ struct SpzAgent {
         const auto run_second_main =
             [&](GameState& current) -> std::optional<double> {
             return rollout_window(current, TurnPhase::SecondMain, true,
-                                  {current.active_player, 0}, budget);
+                                  {current.active_player, 0}, budget,
+                                  nullptr, banned);
         };
         std::optional<double> terminal;
         switch (entry_phase) {
             case TurnPhase::FirstMain:
                 terminal = rollout_window(state, TurnPhase::FirstMain,
-                                          true, resume, budget);
+                                          true, resume, budget, nullptr,
+                                          banned);
                 if (!terminal) {
-                    terminal = rollout_combat(state, budget);
+                    terminal = rollout_combat(state, budget, banned);
                 }
                 if (!terminal) {
                     terminal = run_second_main(state);
@@ -2292,10 +2319,11 @@ struct SpzAgent {
                 break;
             case TurnPhase::BeginCombat:
                 terminal = rollout_window(state, TurnPhase::BeginCombat,
-                                          false, resume, budget);
+                                          false, resume, budget, nullptr,
+                                          banned);
                 if (!terminal) {
-                    terminal =
-                        rollout_combat_after_beginning(state, budget);
+                    terminal = rollout_combat_after_beginning(
+                        state, budget, banned);
                 }
                 if (!terminal) {
                     terminal = run_second_main(state);
@@ -2303,21 +2331,23 @@ struct SpzAgent {
                 break;
             case TurnPhase::EndCombat:
                 terminal = rollout_window(state, TurnPhase::EndCombat,
-                                          false, resume, budget);
+                                          false, resume, budget, nullptr,
+                                          banned);
                 if (!terminal) {
                     terminal = run_second_main(state);
                 }
                 break;
             case TurnPhase::SecondMain:
                 terminal = rollout_window(state, TurnPhase::SecondMain,
-                                          true, resume, budget);
+                                          true, resume, budget, nullptr,
+                                          banned);
                 break;
             default:
                 // Combat decision roots: combat already resolved.
                 terminal = rollout_window(state, TurnPhase::EndCombat,
                                           false,
                                           {state.active_player, 0},
-                                          budget);
+                                          budget, nullptr, banned);
                 if (!terminal) {
                     terminal = run_second_main(state);
                 }
@@ -2356,9 +2386,10 @@ struct SpzAgent {
                 }
             }
             terminal = rollout_window(state, TurnPhase::FirstMain, true,
-                                      {state.active_player, 0}, budget);
+                                      {state.active_player, 0}, budget,
+                                      nullptr, banned);
             if (!terminal) {
-                terminal = rollout_combat(state, budget);
+                terminal = rollout_combat(state, budget, banned);
             }
             if (!terminal) {
                 terminal = run_second_main(state);
@@ -3042,8 +3073,8 @@ struct SpzAgent {
             pending_combat.has_value();
         const auto score_action =
             [&](const GameState& sampled, const PriorityAction& action,
-                bool with_rollout,
-                std::size_t cycles) -> double {
+                bool with_rollout, std::size_t cycles,
+                const BannedAction* banned = nullptr) -> double {
             const auto consequence = resolve_priority_action_consequence(
                 sampled, seat, sorcery_actions, 0, action);
             if (!consequence.has_value()) {
@@ -3067,7 +3098,7 @@ struct SpzAgent {
                         post_combat.active_player;
                     return finish_turn_and_rollout(
                         std::move(post_combat), TurnPhase::DamageOrder,
-                        {combat_active, 0}, cycles);
+                        {combat_active, 0}, cycles, banned);
                 }
                 return value_for(post_combat, seat,
                                  TurnPhase::SecondMain);
@@ -3075,7 +3106,7 @@ struct SpzAgent {
             if (with_rollout) {
                 return finish_turn_and_rollout(consequence->state, phase,
                                                consequence->priority,
-                                               cycles);
+                                               cycles, banned);
             }
             return value_for(consequence->state, seat, phase);
         };
@@ -3188,20 +3219,41 @@ struct SpzAgent {
                 // Paired deltas versus pass over the SAME worlds, for
                 // every action including guarded ones: the head must see
                 // waste's true cost.
-                // Targets are scored at a deeper horizon than
-                // decisions: compounding value (a land drop, an early
-                // creature) is invisible one turn out but shows over
-                // two turn cycles.
-                double pass_total = 0.0;
-                for (const GameState& sampled : sampled_worlds) {
-                    pass_total += score_action(
-                        sampled, PriorityAction::pass(), true,
-                        config.advantage_record_cycles);
-                }
+                // Each action's baseline is a COUNTERFACTUAL pass:
+                // the rollout's stand-in never takes that same action,
+                // so delayable-but-compounding plays (a land, a mill
+                // activation) show their true with-vs-without value
+                // instead of converging with "future me does it later".
+                // Targets also use a deeper horizon than decisions.
+                std::map<std::pair<int, int>, double>
+                    counterfactual_pass;
                 SpzAdvantageSample sample;
                 sample.state = state_row;
                 for (std::size_t index = 0; index < actions.size();
                      ++index) {
+                    const PriorityAction& action = actions[index];
+                    const auto signature = std::make_pair(
+                        static_cast<int>(action.kind),
+                        static_cast<int>(action.card));
+                    double pass_total = 0.0;
+                    const auto found =
+                        counterfactual_pass.find(signature);
+                    if (found != counterfactual_pass.end()) {
+                        pass_total = found->second;
+                    } else {
+                        const BannedAction ban{action.kind,
+                                               action.card, seat};
+                        for (const GameState& sampled :
+                             sampled_worlds) {
+                            pass_total += score_action(
+                                sampled, PriorityAction::pass(), true,
+                                config.advantage_record_cycles,
+                                action.kind == PriorityActionKind::Pass
+                                    ? nullptr
+                                    : &ban);
+                        }
+                        counterfactual_pass[signature] = pass_total;
+                    }
                     double total = 0.0;
                     bool legal = true;
                     for (const GameState& sampled : sampled_worlds) {
