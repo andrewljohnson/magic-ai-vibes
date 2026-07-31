@@ -252,10 +252,22 @@ struct Auditor {
                                     : std::min(instant_reserve, total);
                         }
                     }
+                    // Under an enemy Moat, holding ground creatures is
+                    // discipline, not passivity: they cannot attack.
+                    const auto& their_enchantments =
+                        prev_obs.players[1 - spz_seat].enchantments;
+                    const bool moat_locked =
+                        std::find(their_enchantments.begin(),
+                                  their_enchantments.end(),
+                                  CardId::Moat) !=
+                        their_enchantments.end();
                     for (const CardId card : prev_obs.hand) {
                         const auto& definition = card_definition(card);
                         if (definition.type != CardType::Creature ||
                             !can_pay(projected, definition.cost)) {
+                            continue;
+                        }
+                        if (moat_locked && !definition.flying) {
                             continue;
                         }
                         const auto& cost = definition.cost;
