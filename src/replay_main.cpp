@@ -260,7 +260,8 @@ int main(int argc, char** argv) {
                      "build/telemetry/replays?)\n";
         return 1;
     }
-    out << "{\"seed\":" << seed << ",\"decks\":[";
+    out << "{\"seed\":" << seed << ",\"observerSeat\":"
+        << watched_seat << ",\"decks\":[";
     write_string(out, std::string(spz::spz_deck_name(opp_deck)));
     out << ',';
     write_string(out, std::string(spz::spz_deck_name(spz_deck)));

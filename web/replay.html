@@ -98,7 +98,8 @@ function render() {
   for (let seat = 0; seat < 2; seat++) {
     const p = s.players[seat];
     const pilots = replay.pilots ?? ["?", "?"];
-    const hand = seat === 1 && s.observerHand
+    const observerSeat = replay.observerSeat ?? 1;
+    const hand = seat === observerSeat && s.observerHand
       ? `<div class="zone"><b>Hand:</b> ${s.observerHand.map(c =>
           `<span class="card">${c}</span>`).join("")}</div>`
       : `<div class="zone"><b>Hand:</b> ${p.handSize} cards</div>`;
