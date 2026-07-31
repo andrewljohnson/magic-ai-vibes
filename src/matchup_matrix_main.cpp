@@ -259,6 +259,50 @@ int main(int argc, char** argv) {
         }
     }
 
+    {
+        // Deck catalog for the telemetry site's decks page.
+        std::ofstream deck_out("build/telemetry/decks.json");
+        if (deck_out) {
+            deck_out << "{\"decks\":[";
+            for (std::size_t deck = 0; deck < decks.size(); ++deck) {
+                if (deck != 0) {
+                    deck_out << ',';
+                }
+                deck_out << "{\"name\":\"" << decks[deck].name
+                         << "\",\"cards\":[";
+                std::array<std::size_t, kCardCount> counts{};
+                for (const CardId card : decks[deck].cards) {
+                    ++counts[static_cast<std::size_t>(card)];
+                }
+                bool wrote = false;
+                for (std::size_t card = 0; card < counts.size();
+                     ++card) {
+                    if (counts[card] == 0) {
+                        continue;
+                    }
+                    const auto& definition =
+                        card_definition(static_cast<CardId>(card));
+                    if (wrote) {
+                        deck_out << ',';
+                    }
+                    wrote = true;
+                    const auto& cost = definition.cost;
+                    deck_out << "{\"name\":\"" << definition.name
+                             << "\",\"count\":" << counts[card]
+                             << ",\"type\":"
+                             << static_cast<int>(definition.type)
+                             << ",\"cost\":"
+                             << cost.generic + cost.green + cost.red +
+                                    cost.blue + cost.white
+                             << ",\"power\":" << definition.power
+                             << ",\"toughness\":"
+                             << definition.toughness << '}';
+                }
+                deck_out << "]}";
+            }
+            deck_out << "]}\n";
+        }
+    }
     const std::size_t deck_count = decks.size();
     std::vector<std::pair<std::size_t, std::size_t>> pairings;
     for (std::size_t low = 0; low < deck_count; ++low) {

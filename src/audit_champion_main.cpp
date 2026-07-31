@@ -391,7 +391,9 @@ int main(int argc, char** argv) {
     const bool random_pilot =
         argc > 2 && std::string(argv[2]) == "--random-pilot";
     double gamma = 1.0;
-    double tie_band = 0.008;
+    double tie_band = 0.02;
+    bool web_mode = false;
+    std::uint64_t seed_base = 424900;
     std::optional<std::size_t> spz_deck;
     std::optional<std::size_t> opp_deck;
     std::string advantage_path;
@@ -405,6 +407,12 @@ int main(int argc, char** argv) {
         }
         if (std::string(argv[i]) == "--no-guardrails") {
             guardrails = false;
+        }
+        if (std::string(argv[i]) == "--web") {
+            web_mode = true;
+        }
+        if (std::string(argv[i]) == "--seed-base" && i + 1 < argc) {
+            seed_base = std::stoull(argv[i + 1]);
         }
         if (std::string(argv[i]) == "--tie-band" && i + 1 < argc) {
             tie_band = std::stod(argv[i + 1]);
@@ -464,7 +472,7 @@ int main(int argc, char** argv) {
     const auto& decks = spz_decks();
     std::size_t total_flags = 0, wins = 0;
     for (std::size_t g = 0; g < games; ++g) {
-        const std::size_t spz_seat = g % 2;
+        const std::size_t spz_seat = web_mode ? 1 : g % 2;
         std::size_t d0 = (g * 7 + 1) % kSpzDeckCount;
         std::size_t d1 = (g * 3 + 2) % kSpzDeckCount;
         if (spz_deck.has_value()) {
@@ -477,7 +485,7 @@ int main(int argc, char** argv) {
             decks[d0], decks[d1]};
         auto auditor = std::make_shared<Auditor>();
         auditor->spz_seat = spz_seat;
-        auditor->seed = 424900 + g;
+        auditor->seed = seed_base + g;
         auto mirror_auditor = std::make_shared<Auditor>();
         mirror_auditor->spz_seat = 1 - spz_seat;
         mirror_auditor->seed = auditor->seed;
@@ -493,7 +501,9 @@ int main(int argc, char** argv) {
             policy.pass_dominance_prune = !random_pilot && guardrails;
             policy.gamma_per_turn = gamma;
             policy.advantage_tie_band = tie_band;
-            policy.seed = (seat_auditor->seed ^ 0xA0D17) + seat;
+            policy.seed = web_mode
+                              ? (seat_auditor->seed ^ 0x53505AULL)
+                              : (seat_auditor->seed ^ 0xA0D17) + seat;
             auto controller = make_spz_controller(
                 net, game_decks, seat, policy, nullptr, nullptr,
                 advantage);
