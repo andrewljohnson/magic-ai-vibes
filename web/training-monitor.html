@@ -268,7 +268,11 @@ function render() {
         const values = Object.values(r.deck_lift);
         lift = fmtDelta(values.reduce((a, b) => a + b, 0) / values.length);
       }
-      return `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${r.loss.toFixed(3)}</td>` +
+      const lossCell =
+        r.loss > 0 ? r.loss.toFixed(3)
+        : r.advantage_loss > 0 ? r.advantage_loss.toFixed(4) + " (adv)"
+        : "frozen";
+      return `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${lossCell}</td>` +
         `<td>${r.vs_random !== undefined ? fmtPct(r.vs_random) : ""}</td>` +
         `<td>${r.vs_handcrafted !== undefined ? fmtPct(r.vs_handcrafted) : ""}</td>` +
         `<td>${r.vs_champion !== undefined ? fmtPct(r.vs_champion) : ""}</td><td>${lift}</td></tr>`;
