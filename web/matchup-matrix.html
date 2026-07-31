@@ -98,8 +98,9 @@ async function load() {
     `strength. The ${data.reference_pilot} row is its own baseline: ` +
     "its cells measure raw deck strength and its mean sits near 50%.";
   document.getElementById("summary").innerHTML = matrixTable(
-    decks,
-    data.bots.map((bot) => bot.vs_field),
+    [...decks, "mean"],
+    data.bots.map((bot) => [...bot.vs_field,
+      bot.vs_field.reduce((a, b) => a + b, 0) / bot.vs_field.length]),
     data.bots.map((bot) => bot.name),
     "bot \\ deck");
 
