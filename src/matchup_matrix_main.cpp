@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -107,7 +108,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    const std::vector<DeckEntry> decks = {
+    std::vector<DeckEntry> decks = {
         {"green", green_deck()},
         {"red", red_deck()},
         {"blue", blue_deck()},
@@ -116,6 +117,35 @@ int main(int argc, char** argv) {
         {"lotus-combo", lotus_combo_deck()},
         {"burn", burn_deck()},
     };
+    // Persisted evolved decks join the matrix: data/*.deck holds forty
+    // whitespace-separated card ids; the filename stem is the deck name.
+    if (std::filesystem::is_directory("data")) {
+        std::vector<std::filesystem::path> deck_files;
+        for (const auto& entry :
+             std::filesystem::directory_iterator("data")) {
+            if (entry.path().extension() == ".deck") {
+                deck_files.push_back(entry.path());
+            }
+        }
+        std::sort(deck_files.begin(), deck_files.end());
+        for (const auto& path : deck_files) {
+            std::ifstream in(path);
+            std::vector<CardId> cards;
+            unsigned int id = 0;
+            while (in >> id && cards.size() < 40) {
+                if (id >= kCardCount) {
+                    break;
+                }
+                cards.push_back(static_cast<CardId>(id));
+            }
+            if (cards.size() == 40) {
+                decks.push_back({path.stem().string(), cards});
+            } else {
+                std::cout << "skipping " << path
+                          << ": not 40 valid card ids\n";
+            }
+        }
+    }
 
     const auto plain_bot = [](BotKind kind, std::size_t rollouts) {
         return [kind, rollouts](
@@ -155,6 +185,31 @@ int main(int argc, char** argv) {
                       << " not found\n";
         }
     }
+    // The previous champion keeps a row for old-vs-new comparison when
+    // its artifacts are preserved on promotion.
+    const auto add_spz_bot = [&bots](
+                                 const std::string& name,
+                                 std::shared_ptr<const spz::SpzNet> bot_net,
+                                 std::shared_ptr<const spz::SpzAdvantageNet>
+                                     bot_advantage) {
+        bots.push_back(
+            {name,
+             [bot_net, bot_advantage](
+                 GameConfig& config, std::size_t seat,
+                 const std::array<std::vector<CardId>, 2>& game_decks,
+                 std::uint64_t game_seed) {
+                 spz::SpzPolicyConfig policy;
+                 policy.worlds = 4;
+                 policy.block_prediction_worlds = 4;
+                 policy.rollout = true;
+                 policy.gamma_per_turn = 0.98;
+                 policy.seed = game_seed + seat;
+                 config.human_controllers[seat] =
+                     spz::make_spz_controller(bot_net, game_decks, seat,
+                                              policy, nullptr, nullptr,
+                                              bot_advantage);
+             }});
+    };
     if (spz_net) {
         bots.push_back(
             {"spz",
@@ -176,6 +231,23 @@ int main(int argc, char** argv) {
                                               policy, nullptr, nullptr,
                                               spz_advantage_net);
              }});
+    }
+    {
+        std::ifstream prev_probe("data/spz-champion-prev.txt");
+        if (prev_probe) {
+            auto prev_net = std::make_shared<const spz::SpzNet>(
+                spz::load_spz_net("data/spz-champion-prev.txt"));
+            std::shared_ptr<const spz::SpzAdvantageNet> prev_advantage;
+            std::ifstream prev_adv_probe("data/spz-advantage-prev.txt");
+            if (prev_adv_probe) {
+                prev_advantage =
+                    std::make_shared<const spz::SpzAdvantageNet>(
+                        spz::load_spz_advantage_net(
+                            "data/spz-advantage-prev.txt"));
+            }
+            add_spz_bot("spz-prev", std::move(prev_net),
+                        std::move(prev_advantage));
+        }
     }
     if (only_bot) {
         std::erase_if(bots, [&](const BotEntry& bot) {
