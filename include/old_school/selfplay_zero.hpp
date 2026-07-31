@@ -264,6 +264,10 @@ struct SpzPolicyConfig {
     // moves scores outside the band: search settles contested decisions,
     // the head settles ties (where waste otherwise wins by coin flip).
     double advantage_tie_band = 0.02;
+    // When several actions tie within the band, re-judge just those
+    // finalists on this many total worlds before the head arbitrates:
+    // extra thinking exactly where the cheap estimate is uncertain.
+    std::size_t tie_break_worlds = 12;
     // Record paired all-action rollout deltas at priority decisions (the
     // advantage head's training data). Guardrail prunes still steer play;
     // pruned actions are scored for the record only.

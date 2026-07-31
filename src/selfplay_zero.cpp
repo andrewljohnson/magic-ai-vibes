@@ -3222,15 +3222,76 @@ struct SpzAgent {
                     static_cast<double>(worlds);
                 const double top =
                     *std::max_element(totals.begin(), totals.end());
+                // Candidates for refinement use a wider net than the
+                // arbitration band: an action a little outside the band
+                // may be there on noise alone.
+                const double candidate_band = 3.0 * band;
+                std::vector<std::size_t> finalists;
+                for (std::size_t index = 0; index < actions.size();
+                     ++index) {
+                    if (totals[index] > kIllegalScore / 2.0 &&
+                        totals[index] >= top - candidate_band) {
+                        finalists.push_back(index);
+                    }
+                }
+                // Adaptive resampling: a tie may be genuine or may be
+                // rollout noise exceeding the band. Before the head
+                // arbitrates, re-judge the finalists alone on extra
+                // determinized worlds - thinking harder exactly where
+                // the cheap estimate is uncertain.
+                if (finalists.size() > 1 &&
+                    config.tie_break_worlds > worlds) {
+                    const std::size_t extra_count =
+                        config.tie_break_worlds - worlds;
+                    std::vector<double> refined(totals);
+                    for (std::size_t extra = 0; extra < extra_count;
+                         ++extra) {
+                        const GameState world = sample_determinization(
+                            reconstructed, decks, seat, rng());
+                        for (const std::size_t index : finalists) {
+                            refined[index] += score_action(
+                                world, actions[index], config.rollout);
+                        }
+                    }
+                    const double refined_band =
+                        config.advantage_tie_band *
+                        static_cast<double>(config.tie_break_worlds);
+                    double refined_top =
+                        -std::numeric_limits<double>::infinity();
+                    for (const std::size_t index : finalists) {
+                        refined_top =
+                            std::max(refined_top, refined[index]);
+                    }
+                    std::vector<std::size_t> still_tied;
+                    for (const std::size_t index : finalists) {
+                        if (refined[index] >=
+                            refined_top - refined_band) {
+                            still_tied.push_back(index);
+                        }
+                    }
+                    // The refined estimate separated the field: trust
+                    // it. Otherwise the survivors are genuinely tied
+                    // and the head arbitrates below.
+                    if (still_tied.size() == 1) {
+                        totals[still_tied.front()] = top + band;
+                        finalists.clear();
+                    } else {
+                        finalists = std::move(still_tied);
+                    }
+                } else {
+                    // No refinement ran: arbitrate only genuine ties.
+                    std::vector<std::size_t> tight;
+                    for (const std::size_t index : finalists) {
+                        if (totals[index] >= top - band) {
+                            tight.push_back(index);
+                        }
+                    }
+                    finalists = std::move(tight);
+                }
                 double best_delta =
                     -std::numeric_limits<double>::infinity();
                 std::size_t best_tied = actions.size();
-                for (std::size_t index = 0; index < actions.size();
-                     ++index) {
-                    if (totals[index] <= kIllegalScore / 2.0 ||
-                        totals[index] < top - band) {
-                        continue;
-                    }
+                for (const std::size_t index : finalists) {
                     const double delta = advantage_net->delta(
                         state_row, action_rows[index]);
                     if (delta > best_delta) {
@@ -4262,7 +4323,11 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             // measured deltas disagree. Order is the deployed use of the
             // head, and consistent tiny deltas (a wasted pump, a skipped
             // land) survive here where they drown in squared error.
-            constexpr double kPairMargin = 1e-3;
+            // Low threshold: paired common-random-number deltas make
+            // even sub-noise gaps (a land drop, a held trick) reliable
+            // in sign, and those are precisely the ties the head must
+            // arbitrate. Noise pairs contribute canceling gradients.
+            constexpr double kPairMargin = 2e-4;
             std::vector<SpzAdvantageNet::RankedPair> pair_batch;
             for (std::size_t step = 0; step < advantage_steps; ++step) {
                 pair_batch.clear();
