@@ -3351,6 +3351,83 @@ struct SpzAgent {
         return blocks;
     }
 
+    // Defense prediction for root attack sizing: the defender picks the
+    // best-for-them assignment among the greedy hill-climb result and its
+    // structured variants (decline, single-block removals, gang-block
+    // additions the one-at-a-time climb cannot reach). Attacks are then
+    // judged against the strongest visible defense instead of a single
+    // greedy guess - assuming a sharper opponent, not a known one.
+    std::vector<std::pair<PermanentId, PermanentId>> predicted_defense(
+        const GameState& state, std::size_t attacking_player,
+        const std::vector<PermanentId>& attackers) const {
+        const std::size_t defender = 1 - attacking_player;
+        const auto base =
+            greedy_blocks(state, attacking_player, attackers, nullptr);
+
+        std::vector<std::vector<std::pair<PermanentId, PermanentId>>>
+            candidates;
+        candidates.push_back(base);
+        if (!base.empty()) {
+            candidates.push_back({});
+        }
+        for (const auto& removed : base) {
+            std::vector<std::pair<PermanentId, PermanentId>> reduced;
+            for (const auto& kept : base) {
+                if (kept != removed) {
+                    reduced.push_back(kept);
+                }
+            }
+            candidates.push_back(std::move(reduced));
+        }
+        std::vector<PermanentId> unassigned;
+        for (const auto& creature : state.players[defender].creatures) {
+            if (creature.tapped) {
+                continue;
+            }
+            const bool used = std::any_of(
+                base.begin(), base.end(), [&](const auto& block) {
+                    return block.second == creature.id;
+                });
+            if (!used) {
+                unassigned.push_back(creature.id);
+            }
+        }
+        constexpr std::size_t kGangLimit = 8;
+        std::size_t gangs = 0;
+        for (const PermanentId attacker : attackers) {
+            for (std::size_t first = 0;
+                 first < unassigned.size() && gangs < kGangLimit;
+                 ++first) {
+                for (std::size_t second = first + 1;
+                     second < unassigned.size() && gangs < kGangLimit;
+                     ++second) {
+                    auto gang = base;
+                    gang.emplace_back(attacker, unassigned[first]);
+                    gang.emplace_back(attacker, unassigned[second]);
+                    candidates.push_back(std::move(gang));
+                    gangs += 1;
+                }
+            }
+        }
+
+        double best_value = -std::numeric_limits<double>::infinity();
+        std::size_t best_candidate = 0;
+        for (std::size_t index = 0; index < candidates.size(); ++index) {
+            GameState simulation = state;
+            if (!resolve_combat(simulation, attacking_player, attackers,
+                                candidates[index])) {
+                continue;
+            }
+            const double value =
+                value_for(simulation, defender, TurnPhase::SecondMain);
+            if (value > best_value) {
+                best_value = value;
+                best_candidate = index;
+            }
+        }
+        return candidates[best_candidate];
+    }
+
     std::vector<PermanentId> choose_attackers(
         const PlayerObservation& observation,
         const std::vector<PermanentId>& eligible) {
@@ -3386,8 +3463,8 @@ struct SpzAgent {
             for (const GameState& world : sampled_worlds) {
                 GameState simulation = world;
                 if (!attack_set.empty()) {
-                    const auto predicted_blocks = greedy_blocks(
-                        world, seat, attack_set, nullptr);
+                    const auto predicted_blocks =
+                        predicted_defense(world, seat, attack_set);
                     if (!resolve_combat(simulation, seat, attack_set,
                                         predicted_blocks)) {
                         return kIllegalScore;
