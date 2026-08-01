@@ -3805,3 +3805,26 @@ select {
 .evolution-top-cards {
   color: var(--text-muted, #667);
 }
+
+.combat-attacker-card.is-attacking-tapped {
+  transform: rotate(14deg);
+  transition: transform 160ms ease;
+}
+.combat-attacker-card.is-blocked {
+  filter: drop-shadow(0 0 6px rgba(214, 69, 56, 0.55));
+}
+.combat-blocker-chip {
+  display: inline-block;
+  background: rgba(214, 69, 56, 0.14);
+  border: 1px solid rgba(214, 69, 56, 0.5);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  margin-top: 0.25rem;
+}
+.combat-blocked-label {
+  color: #d64538;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}

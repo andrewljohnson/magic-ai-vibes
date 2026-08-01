@@ -948,7 +948,11 @@ function CombatLane({
               onDragOver={(event) => onDragOverTarget?.(id, event)}
               onDrop={(event) => onDropTarget?.(id, event)}
             >
-              <div className="combat-attacker-card">
+              <div
+                className={`combat-attacker-card is-attacking-tapped${
+                  blockerCount > 0 ? " is-blocked" : ""
+                }`}
+              >
                 <CardFace
                   card={attacker.card}
                   permanent={attacker}
@@ -967,7 +971,9 @@ function CombatLane({
               )}
               {blockerIds.map((blockerId) => (
                 <span className="combat-blocker-chip" key={blockerId}>
-                  ⛨ {permanentNames?.[blockerId] ?? `#${blockerId}`}
+                  ⛨ blocked by{" "}
+                  {permanentNames?.[blockerId] ?? "creature"} #
+                  {blockerId}
                 </span>
               ))}
               {legalTarget && draggingBlocker && (
@@ -2039,7 +2045,7 @@ function SetupDrawer({
     if (open && initialConfig) {
       setConfig({
         ...initialConfig,
-        debugReveal: false,
+        debugReveal: true,
       });
     }
   }, [initialConfig, open]);
@@ -3196,7 +3202,7 @@ export default function App() {
       currentConfig
         ? {
             ...currentConfig,
-            debugReveal: false,
+            debugReveal: true,
           }
         : null,
     [currentConfig],

@@ -1116,6 +1116,20 @@ class JsonController {
         return result;
     }
 
+    static std::string combat_creature_label(
+        const PlayerObservation& observation, PermanentId id) {
+        for (const auto& player : observation.players) {
+            for (const auto& creature : player.creatures) {
+                if (creature.id == id) {
+                    return std::string(
+                               card_definition(creature.card).name) +
+                           " #" + std::to_string(id);
+                }
+            }
+        }
+        return "creature #" + std::to_string(id);
+    }
+
     std::string event_label(
         const PlayerObservation& observation,
         const GameEvent& event) const {
@@ -1141,21 +1155,37 @@ class JsonController {
             return "Resolved " +
                    stack_label(
                        observation, *event.stack_object);
-        case GameEventKind::AttackersDeclared:
-            return actor +
-                   (event.attackers.empty()
-                        ? " declared no attackers"
-                        : " declared " +
-                              std::to_string(
-                                  event.attackers.size()) +
-                              " attacker(s)");
-        case GameEventKind::BlockersDeclared:
-            return actor +
-                   (event.blocks.empty()
-                        ? " declared no blockers"
-                        : " declared " +
-                              std::to_string(event.blocks.size()) +
-                              " block(s)");
+        case GameEventKind::AttackersDeclared: {
+            if (event.attackers.empty()) {
+                return actor + " declared no attackers";
+            }
+            std::string text = actor + " attacked with ";
+            for (std::size_t i = 0; i < event.attackers.size(); ++i) {
+                if (i != 0) {
+                    text += ", ";
+                }
+                text += combat_creature_label(observation,
+                                              event.attackers[i]);
+            }
+            return text;
+        }
+        case GameEventKind::BlockersDeclared: {
+            if (event.blocks.empty()) {
+                return actor + " declared no blockers";
+            }
+            std::string text = actor + " blocked ";
+            for (std::size_t i = 0; i < event.blocks.size(); ++i) {
+                if (i != 0) {
+                    text += "; ";
+                }
+                text += combat_creature_label(observation,
+                                              event.blocks[i].first) +
+                        " with " +
+                        combat_creature_label(observation,
+                                              event.blocks[i].second);
+            }
+            return text;
+        }
         case GameEventKind::DamageOrderChosen:
             return actor + " ordered combat damage";
         case GameEventKind::CombatResolved:

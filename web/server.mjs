@@ -208,7 +208,7 @@ const DEFAULT_CONFIG = Object.freeze({
     { deckId: "ru-aggro", policyId: "human" },
     { deckId: "ru-aggro", policyId: "handcrafted" },
   ],
-  debugReveal: false,
+  debugReveal: true,
   bluffMode: false,
   rollouts: 2,
   deepRollouts: 8,
@@ -823,7 +823,7 @@ export function normalizeGameConfig(body, validDeckIds = DECK_IDS) {
       body.opponentPolicy ?? body.botPolicy ?? body.policy;
   }
 
-  const debugReveal = body.debugReveal ?? body.debug ?? false;
+  const debugReveal = body.debugReveal ?? body.debug ?? true;
   if (typeof debugReveal !== "boolean") {
     throw new ApiError(
       400,
