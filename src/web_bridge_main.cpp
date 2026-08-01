@@ -48,7 +48,7 @@ void print_help(std::ostream& output) {
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
            "handcrafted|spz\n"
         << "  --spz-artifact PATH (Self-Play Zero net; default "
-           "data/spz-champion-v9.txt beside the repo)\n"
+           "data/spz-champion-v10.txt beside the repo)\n"
         << "  --seed N\n"
         << "  --rollouts N --deep-rollouts N\n"
         << "  --debug-reveal\n"
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
             std::filesystem::absolute(argv[0]);
         const std::string spz_artifact_path =
             (executable.parent_path().parent_path() / "data" /
-             "spz-champion-v9.txt")
+             "spz-champion-v10.txt")
                 .string();
         if (argc == 2 &&
             std::string_view(argv[1]) == "--help") {

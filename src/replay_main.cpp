@@ -152,14 +152,14 @@ int main(int argc, char** argv) {
     (void)web;
 
     const auto net = std::make_shared<const spz::SpzNet>(
-        spz::load_spz_net("data/spz-champion-v9.txt"));
+        spz::load_spz_net("data/spz-champion-v10.txt"));
     std::shared_ptr<const spz::SpzAdvantageNet> advantage;
     {
-        std::ifstream probe("data/spz-advantage-v6.txt");
+        std::ifstream probe("data/spz-advantage-v7.txt");
         if (probe) {
             advantage = std::make_shared<const spz::SpzAdvantageNet>(
                 spz::load_spz_advantage_net(
-                    "data/spz-advantage-v6.txt"));
+                    "data/spz-advantage-v7.txt"));
         }
     }
     const auto& decks = spz::spz_decks();

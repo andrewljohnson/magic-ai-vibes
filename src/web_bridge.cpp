@@ -1620,7 +1620,7 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             const std::filesystem::path advantage_path =
                 std::filesystem::path(config.spz_artifact_path)
                     .parent_path() /
-                "spz-advantage-v6.txt";
+                "spz-advantage-v7.txt";
             std::ifstream probe(advantage_path);
             if (probe.good()) {
                 spz_advantage = std::make_shared<
