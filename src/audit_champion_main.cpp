@@ -493,7 +493,7 @@ int main(int argc, char** argv) {
     }
     const std::size_t games = argc > 1 ? std::stoul(argv[1]) : 16;
     const auto net = std::make_shared<const SpzNet>(
-        load_spz_net("data/spz-champion-v10.txt"));
+        load_spz_net("data/spz-champion-v11.txt"));
     const auto& decks = spz_decks();
     std::size_t total_flags = 0, wins = 0;
     for (std::size_t g = 0; g < games; ++g) {
