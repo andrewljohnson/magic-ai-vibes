@@ -210,6 +210,9 @@ int main(int argc, char** argv) {
             message = actor + " discards " +
                       std::to_string(event.cards.size()) + " card(s)";
             break;
+        case GameEventKind::MulliganTaken:
+            message = actor + " takes a mulligan";
+            break;
         }
         if (step_count != 0) {
             steps << ",\n";

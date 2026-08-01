@@ -4174,6 +4174,47 @@ struct SpzAgent {
         std::sort(chosen.begin(), chosen.end());
         return chosen;
     }
+
+    // Value-based Paris mulligan: compare the net's opinion of keeping
+    // this hand against the average of sampled one-card-smaller redraws.
+    // The decision sharpens as the value net trains; the trainer probes
+    // the resulting mulligan rate every iteration.
+    bool choose_mulligan(const PlayerObservation& observation) {
+        constexpr std::size_t kMulliganWorlds = 8;
+        constexpr double kMulliganMargin = 0.02;
+        const std::size_t hand_size = observation.hand.size();
+        if (hand_size < 5) {
+            // Never dig below four cards on value noise.
+            return false;
+        }
+        const GameState reconstructed =
+            reconstruct_observed_state(observation);
+        double keep_total = 0.0;
+        double mulligan_total = 0.0;
+        for (std::size_t world = 0; world < kMulliganWorlds; ++world) {
+            GameState sampled = sample_determinization(
+                reconstructed, decks, seat, rng());
+            keep_total += value_for(sampled, seat, TurnPhase::FirstMain);
+            auto& player_state = sampled.players[seat];
+            player_state.library.insert(player_state.library.end(),
+                                        player_state.hand.begin(),
+                                        player_state.hand.end());
+            player_state.hand.clear();
+            std::shuffle(player_state.library.begin(),
+                         player_state.library.end(), rng);
+            for (std::size_t card = 0; card + 1 < hand_size; ++card) {
+                player_state.hand.push_back(
+                    player_state.library.back());
+                player_state.library.pop_back();
+            }
+            mulligan_total +=
+                value_for(sampled, seat, TurnPhase::FirstMain);
+        }
+        return mulligan_total >
+               keep_total +
+                   kMulliganMargin *
+                       static_cast<double>(kMulliganWorlds);
+    }
 };
 
 }  // namespace
@@ -4215,6 +4256,10 @@ HumanController make_spz_controller(
     controller.choose_cleanup_discards =
         [agent](const PlayerObservation& observation, std::size_t excess) {
             return agent->choose_cleanup_discards(observation, excess);
+        };
+    controller.choose_mulligan =
+        [agent](const PlayerObservation& observation) {
+            return agent->choose_mulligan(observation);
         };
     // Public-event feed: keeps the agent's declared-combat context current
     // for post-blockers response windows.
@@ -4514,9 +4559,12 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
         std::size_t new_samples = 0;
         std::size_t decisive = 0;
         std::size_t total_turns = 0;
+        std::size_t total_mulligans = 0;
         for (const GameRecord& record : records) {
             decisive += record.result.winner == -1 ? 0 : 1;
             total_turns += record.turns;
+            total_mulligans += record.result.player_stats[0].mulligans +
+                               record.result.player_stats[1].mulligans;
             for (std::size_t seat = 0; seat < 2; ++seat) {
                 auto& seat_recorder = record.recorders[seat];
                 for (std::size_t row_index = 0;
@@ -4779,7 +4827,13 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                  << std::setprecision(4) << mean_loss
                  << " policy-samples " << new_policy_samples
                  << " policy-loss " << std::setprecision(4)
-                 << policy_loss;
+                 << policy_loss << " mull-rate "
+                 << std::setprecision(3)
+                 << (config.games_per_iteration == 0
+                         ? 0.0
+                         : static_cast<double>(total_mulligans) /
+                               (2.0 * static_cast<double>(
+                                          config.games_per_iteration)));
             config.log(line.str());
         }
         if (!config.telemetry_path.empty()) {
@@ -4853,7 +4907,16 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                           << advantage_loss
                           << ",\"advantage_rank_loss\":"
                           << advantage_rank_loss << ",\"policy_loss\":"
-                          << policy_loss << ",\"avg_turns\":"
+                          << policy_loss << ",\"mulligan_rate\":"
+                          << (config.games_per_iteration == 0
+                                  ? 0.0
+                                  : static_cast<double>(
+                                        total_mulligans) /
+                                        (2.0 *
+                                         static_cast<double>(
+                                             config
+                                                 .games_per_iteration)))
+                          << ",\"avg_turns\":"
                           << (config.games_per_iteration == 0
                                   ? 0.0
                                   : static_cast<double>(total_turns) /

@@ -171,6 +171,8 @@ std::string_view event_kind_name(GameEventKind kind) {
         return "combat_resolved";
     case GameEventKind::CardsDiscarded:
         return "cards_discarded";
+    case GameEventKind::MulliganTaken:
+        return "mulligan_taken";
     }
     throw std::logic_error("unknown game event");
 }
@@ -1212,6 +1214,8 @@ class JsonController {
                    (event.cards.size() == 1
                         ? " card"
                         : " cards");
+        case GameEventKind::MulliganTaken:
+            return actor + " took a mulligan";
         }
         throw std::logic_error("unknown event");
     }

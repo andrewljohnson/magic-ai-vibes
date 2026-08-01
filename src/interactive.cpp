@@ -1384,6 +1384,13 @@ class TerminalSession {
         case GameEventKind::CombatResolved:
             output_ << "[COMBAT] Combat resolves.\n";
             return;
+        case GameEventKind::MulliganTaken:
+            output_ << "[MULLIGAN] "
+                    << player_name(observation, event.player)
+                    << (event.player == observation.observer
+                            ? " mulligan to a smaller hand.\n"
+                            : " mulligans to a smaller hand.\n");
+            return;
         case GameEventKind::CardsDiscarded: {
             std::ostringstream discard_log;
             discard_log

@@ -3445,6 +3445,24 @@ bool resolve_combat(
     return true;
 }
 
+bool default_mulligan_choice(const std::vector<CardId>& hand) {
+    if (hand.size() < 6) {
+        return false;
+    }
+    std::size_t sources = 0;
+    for (const CardId card : hand) {
+        const auto& definition = card_definition(card);
+        if (definition.type == CardType::Land ||
+            card == CardId::MoxSapphire || card == CardId::MoxPearl ||
+            card == CardId::MoxRuby || card == CardId::SolRing ||
+            card == CardId::BlackLotus ||
+            card == CardId::LlanowarElves) {
+            ++sources;
+        }
+    }
+    return sources < 2 || sources > 5;
+}
+
 void begin_turn(GameState& state, std::size_t player) {
     for (auto& participant : state.players) {
         participant.mana_pool = {};
@@ -3786,6 +3804,58 @@ void Game::initialize() {
                                 EndReason::EmptyLibrary);
                 return;
             }
+        }
+    }
+
+    // Paris mulligans: starting player decides first each round; a
+    // mulligan reshuffles the hand and draws one card fewer.
+    const std::array<std::size_t, 2> order = {
+        state_.starting_player, opponent_of(state_.starting_player)};
+    std::array<bool, 2> kept = {false, false};
+    while (!(kept[0] && kept[1])) {
+        bool any_mulligan = false;
+        for (const std::size_t player : order) {
+            if (kept[player]) {
+                continue;
+            }
+            auto& player_state = state_.players[player];
+            if (player_state.hand.empty()) {
+                kept[player] = true;
+                continue;
+            }
+            bool mulligan = false;
+            if (const auto* controller = human_controller(player)) {
+                mulligan = controller->choose_mulligan &&
+                           controller->choose_mulligan(
+                               human_observation(player));
+            } else {
+                mulligan = default_mulligan_choice(player_state.hand);
+            }
+            if (!mulligan) {
+                kept[player] = true;
+                continue;
+            }
+            const std::size_t next_size = player_state.hand.size() - 1;
+            player_state.library.insert(player_state.library.end(),
+                                        player_state.hand.begin(),
+                                        player_state.hand.end());
+            player_state.hand.clear();
+            std::shuffle(player_state.library.begin(),
+                         player_state.library.end(), random_);
+            for (std::size_t card = 0; card < next_size; ++card) {
+                draw_card(player);
+            }
+            ++state_.stats[player].mulligans;
+            any_mulligan = true;
+            if (has_human_observer()) {
+                notify_human_observers({
+                    .kind = GameEventKind::MulliganTaken,
+                    .player = player,
+                });
+            }
+        }
+        if (!any_mulligan) {
+            break;
         }
     }
 }

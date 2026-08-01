@@ -8,14 +8,14 @@
   :root {
     --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e7e6e2;
     --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #4a3aa7; --s5: #e34948;
-    --s6: #0e8f8f; --s7: #b0578c;
+    --s6: #0e8f8f; --s7: #b0578c; --s8: #7a6a12;
     --ref: #9a9891;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --grid: #34332f;
       --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #9085e9; --s5: #e66767;
-      --s6: #2aa9a9; --s7: #c9739f;
+      --s6: #2aa9a9; --s7: #c9739f; --s8: #c9b64a;
       --ref: #6f6d66;
     }
   }
@@ -85,7 +85,15 @@
       <span style="--c: var(--s5)">Red</span>
       <span style="--c: var(--s6)">Lotus Combo</span>
       <span style="--c: var(--s7)">Burn</span>
+      <span style="--c: var(--s8)">UWR Aggro</span>
     </div>
+  </section>
+
+  <section>
+    <h2>Mulligan rate</h2>
+    <p class="desc">Mulligans per hand dealt across the iteration's self-play games. The value-based keep/mulligan decision sharpens as the net learns hand quality — a flat zero early is normal (an indifferent net never clears the decision margin).</p>
+    <div class="chartwrap"><svg id="mulligans" viewBox="0 0 960 220"></svg><div class="tooltip" id="tip-mulligans"></div></div>
+    <div class="legend"><span style="--c: var(--s2)">mulligans per hand</span></div>
   </section>
 
   <section>
@@ -207,6 +215,7 @@ const DECK_KEYS = [
   { deck: "Red", color: "--s5" },
   { deck: "Lotus Combo", color: "--s6" },
   { deck: "Burn", color: "--s7" },
+  { deck: "UWR Aggro", color: "--s8" },
 ];
 
 function render() {
@@ -249,6 +258,14 @@ function render() {
     drawChart("deck-lift", "tip-deck-lift", liftRows,
       DECK_KEYS.map(s => ({ key: "lift_" + s.deck, label: s.deck, color: s.color, dots: true })),
       [Math.min(0, -0.05), bound], v => fmtDelta(v), 0);
+  }
+
+  const mullRows = rows.filter(r => r.mulligan_rate !== undefined);
+  if (mullRows.length) {
+    const mullMax = Math.max(0.1, ...mullRows.map(r => r.mulligan_rate));
+    drawChart("mulligans", "tip-mulligans", mullRows,
+      [{ key: "mulligan_rate", label: "mulligans per hand", color: "--s2", dots: false }],
+      [0, mullMax * 1.15], v => v.toFixed(3), null);
   }
 
   const hasPolicy = rows.some(r => r.policy_loss > 0);

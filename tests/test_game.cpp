@@ -4491,6 +4491,75 @@ TEST(uwr_deck_is_sixty_cards_and_determinization_conserves_new_zones) {
           state.players[1].library.size());
 }
 
+TEST(default_mulligan_heuristic_rejects_unplayable_hands) {
+    using old_school::CardId;
+    CHECK(old_school::default_mulligan_choice(
+        std::vector<CardId>(7, CardId::LightningBolt)));
+    CHECK(old_school::default_mulligan_choice(
+        {CardId::Mountain, CardId::Mountain, CardId::Mountain,
+         CardId::Mountain, CardId::Mountain, CardId::Mountain,
+         CardId::LightningBolt}));
+    CHECK(!old_school::default_mulligan_choice(
+        {CardId::Mountain, CardId::Mountain, CardId::Mountain,
+         CardId::LightningBolt, CardId::LightningBolt,
+         CardId::LightningBolt, CardId::LightningBolt}));
+    // Fast mana and Elves count as sources.
+    CHECK(!old_school::default_mulligan_choice(
+        {CardId::BlackLotus, CardId::LlanowarElves,
+         CardId::LightningBolt, CardId::LightningBolt,
+         CardId::LightningBolt, CardId::LightningBolt,
+         CardId::LightningBolt}));
+    // Hands of five or fewer always keep.
+    CHECK(!old_school::default_mulligan_choice(
+        std::vector<CardId>(5, CardId::LightningBolt)));
+}
+
+TEST(paris_mulligans_shrink_hands_and_are_counted_and_announced) {
+    const auto deck = two_card_deck(
+        old_school::CardId::Mountain,
+        old_school::CardId::LightningBolt);
+    std::vector<old_school::GameEvent> events;
+    std::vector<old_school::PlayerObservation> observations;
+    old_school::GameConfig config;
+    config.max_turns = 6;
+    config.starting_player = 0;
+    config.human_controllers[0] =
+        burn_human_controller(0, &events, &observations);
+    config.human_controllers[1] = burn_human_controller(1);
+    // Seat 0 mulligans exactly twice, seat 1 keeps (no callback).
+    int remaining_mulligans = 2;
+    std::vector<std::size_t> observed_hand_sizes;
+    config.human_controllers[0]->choose_mulligan =
+        [&](const old_school::PlayerObservation& observation) {
+            observed_hand_sizes.push_back(observation.hand.size());
+            return remaining_mulligans-- > 0;
+        };
+    old_school::Game game(deck, deck, 0x4D554CULL, config);
+    std::vector<old_school::GameState> trace;
+    const auto result = game.run_with_trace(trace);
+    CHECK(!trace.empty());
+    CHECK(observed_hand_sizes ==
+          (std::vector<std::size_t>{7, 6, 5}));
+    // First turn-start snapshot: seat 0 kept five cards, seat 1 seven,
+    // and every card is conserved inside hand + library.
+    const auto& start = trace.front();
+    CHECK(start.players[0].hand.size() == 5);
+    CHECK(start.players[1].hand.size() == 7);
+    CHECK(start.players[0].hand.size() +
+              start.players[0].library.size() ==
+          deck.size());
+    CHECK(start.stats[0].mulligans == 2);
+    CHECK(start.stats[1].mulligans == 0);
+    CHECK(result.player_stats[0].mulligans == 2);
+    const auto announcements = std::count_if(
+        events.begin(), events.end(),
+        [](const old_school::GameEvent& event) {
+            return event.kind ==
+                   old_school::GameEventKind::MulliganTaken;
+        });
+    CHECK(announcements == 2);
+}
+
 int main() {
     std::size_t failures = 0;
     for (const auto& test : tests()) {

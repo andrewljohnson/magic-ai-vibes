@@ -188,6 +188,7 @@ struct PlayerGameStats {
     std::size_t damage_to_opponent = 0;
     std::size_t decisions = 0;
     std::size_t monte_carlo_rollouts = 0;
+    std::size_t mulligans = 0;
 
     bool operator==(const PlayerGameStats&) const = default;
 };
@@ -412,6 +413,7 @@ enum class GameEventKind : std::uint8_t {
     DamageOrderChosen,
     CombatResolved,
     CardsDiscarded,
+    MulliganTaken,
 };
 
 // Event payloads contain public game information only. `blocks` uses
@@ -459,6 +461,11 @@ struct HumanController {
     std::function<std::vector<std::size_t>(
         const PlayerObservation&, std::size_t excess)>
         choose_cleanup_discards;
+    // Optional Paris-mulligan decision at game start: return true to
+    // shuffle the hand away and draw one fewer card. Absent, a
+    // controller seat always keeps; a pure-bot seat uses the default
+    // heuristic.
+    std::function<bool(const PlayerObservation&)> choose_mulligan;
     // Optional transcript hook. It receives this controller's observation
     // after public state changes (or at the declaration point for passes).
     std::function<void(const PlayerObservation&, const GameEvent&)>
@@ -547,6 +554,10 @@ bool resolve_combat(
     const std::vector<std::pair<PermanentId, PermanentId>>& blocks);
 
 void begin_turn(GameState& state, std::size_t player);
+// Default keep/mulligan heuristic: mulligan seven- and six-card hands
+// whose mana-source count is unplayable (fewer than two or more than
+// five sources).
+bool default_mulligan_choice(const std::vector<CardId>& hand);
 inline constexpr std::size_t kMaximumHandSize = 7;
 std::vector<CardId> cleanup_turn(
     GameState& state, std::size_t active_player,
