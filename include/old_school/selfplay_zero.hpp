@@ -60,6 +60,15 @@ std::vector<float> spz_features_v2(
 // (20 per player), untapped-by-card counts for all permanent types,
 // per-color mana pools, six stack objects. v2 is an exact prefix.
 std::size_t spz_feature_count_v3();
+// v1 plus per-player color-mana visibility: untapped basic lands by
+// color and the floating pool by color - the minimal fix for the
+// horizon-boundary blindspot where "Island open with Counterspell in
+// hand" was invisible (v1 tracks only total untapped lands).
+std::size_t spz_feature_count_colors();
+std::vector<float> spz_features_colors(
+    const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase);
 std::vector<float> spz_features_v3(
     const PlayerObservation& observation,
     const std::array<std::vector<CardId>, 2>& original_decks,

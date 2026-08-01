@@ -139,6 +139,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.schema = 2;
         } else if (flag == "--schema-v3") {
             arguments.schema = 3;
+        } else if (flag == "--schema-colors") {
+            arguments.schema = 4;
         } else if (flag == "--hard-targets") {
             arguments.hard_targets = true;
         } else if (flag == "--gamma") {

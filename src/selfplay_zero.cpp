@@ -167,6 +167,50 @@ constexpr std::size_t kCardBlockCount = 11;
 
 }  // namespace
 
+std::size_t spz_feature_count_colors() {
+    // v1 plus, per player: untapped basic lands by color (4) and the
+    // floating mana pool by color (4).
+    return spz_feature_count() + 2 * 8;
+}
+
+std::vector<float> spz_features_colors(
+    const PlayerObservation& observation,
+    const std::array<std::vector<CardId>, 2>& original_decks,
+    TurnPhase phase) {
+    std::vector<float> features =
+        spz_features(observation, original_decks, phase);
+    features.reserve(spz_feature_count_colors());
+    const std::size_t me = observation.observer;
+    for (const std::size_t player : {me, 1 - me}) {
+        const auto& state = observation.players[player];
+        std::array<int, 4> untapped{};
+        for (const auto& land : state.lands) {
+            if (land.tapped) {
+                continue;
+            }
+            switch (land.card) {
+                case CardId::Forest: untapped[0] += 1; break;
+                case CardId::Mountain: untapped[1] += 1; break;
+                case CardId::Island: untapped[2] += 1; break;
+                case CardId::Plains: untapped[3] += 1; break;
+                default: break;
+            }
+        }
+        for (const int count : untapped) {
+            features.push_back(static_cast<float>(count) / 10.0f);
+        }
+        features.push_back(state.mana_pool.green / 4.0f);
+        features.push_back(state.mana_pool.red / 4.0f);
+        features.push_back(state.mana_pool.blue / 4.0f);
+        features.push_back(state.mana_pool.white / 4.0f);
+    }
+    if (features.size() != spz_feature_count_colors()) {
+        throw std::logic_error(
+            "spz color feature schema size mismatch");
+    }
+    return features;
+}
+
 const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
         green_deck(), red_deck(), blue_deck(), white_control_deck(),
@@ -735,6 +779,9 @@ std::vector<float> spz_features_for(
     }
     if (input_count == spz_feature_count_v3()) {
         return spz_features_v3(observation, original_decks, phase);
+    }
+    if (input_count == spz_feature_count_colors()) {
+        return spz_features_colors(observation, original_decks, phase);
     }
     throw std::invalid_argument(
         "unknown SPZ feature schema for input count " +
@@ -4085,6 +4132,7 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
     const std::size_t state_inputs =
         config.schema == 3   ? spz_feature_count_v3()
         : config.schema == 2 ? spz_feature_count_v2()
+        : config.schema == 4 ? spz_feature_count_colors()
                              : spz_feature_count();
     auto net = config.initial_net != nullptr
                    ? std::make_shared<SpzNet>(*config.initial_net)
