@@ -46,6 +46,7 @@ struct Arguments {
     std::string telemetry;
     std::string spar_model;
     double spar_rules = 0.0;
+    double tie_band = 0.0;
     std::size_t focus_deck = 0;
     double focus_weight = 0.0;
     std::size_t probe_every = 0;
@@ -116,6 +117,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.telemetry = next();
         } else if (flag == "--spar-model") {
             arguments.spar_model = next();
+        } else if (flag == "--tie-band") {
+            arguments.tie_band = std::stod(next());
         } else if (flag == "--focus-deck") {
             arguments.focus_deck = std::stoull(next());
         } else if (flag == "--focus-weight") {
@@ -286,6 +289,9 @@ int run_benchmark(const Arguments& arguments) {
     policy.rollout_turn_cycles = arguments.cycles;
     policy.rollout_top_k = arguments.top_k;
     policy.gamma_per_turn = arguments.gamma;
+    if (arguments.tie_band > 0.0) {
+        policy.advantage_tie_band = arguments.tie_band;
+    }
     policy.pass_dominance_prune = !arguments.no_guardrails;
     if (arguments.ismcts) {
         policy.search = SpzPolicyConfig::Search::Ismcts;
