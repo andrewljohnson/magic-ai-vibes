@@ -3894,6 +3894,15 @@ export default function App() {
     }
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", renderKey);
+    // Pin the drag image to the card button itself: with transformed
+    // ancestors Chrome otherwise snapshots the whole hand panel.
+    const cardElement = event.currentTarget;
+    const bounds = cardElement.getBoundingClientRect();
+    event.dataTransfer.setDragImage(
+      cardElement,
+      event.clientX - bounds.left,
+      event.clientY - bounds.top,
+    );
     setPendingPriorityOptions([]);
     const origin: PriorityOriginSelection = {
       kind: "hand",

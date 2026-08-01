@@ -390,7 +390,16 @@ std::string creature_label(const PlayerObservation& observation,
                            PermanentId permanent) {
     const auto found = find_creature(observation, permanent);
     if (!found.has_value()) {
-        return "creature #" + std::to_string(permanent);
+        for (const auto& player : observation.players) {
+            for (const auto& land : player.lands) {
+                if (land.id == permanent) {
+                    return std::string(
+                               card_definition(land.card).name) +
+                           " #" + std::to_string(permanent);
+                }
+            }
+        }
+        return "permanent #" + std::to_string(permanent);
     }
     return std::string(
                card_definition(found->second->card).name) +
@@ -413,12 +422,18 @@ std::string action_label(const PlayerObservation& observation,
         return "Pass priority";
     }
     const std::string card(card_definition(action.card).name);
+    const bool activation =
+        action.kind == PriorityActionKind::ActivateMillstone ||
+        action.kind == PriorityActionKind::ActivateLibrary ||
+        action.kind == PriorityActionKind::ActivateStripMine;
     std::string result =
         action.kind == PriorityActionKind::PlayLand
             ? "Play " + card
-            : action.kind == PriorityActionKind::ActivateMillstone
-                  ? "Activate " + card
-                  : "Cast " + card;
+            : action.kind ==
+                      PriorityActionKind::ActivateMishrasFactory
+                  ? "Animate " + card
+                  : activation ? "Activate " + card
+                               : "Cast " + card;
     if (action.kind == PriorityActionKind::CastDisintegrate ||
         action.kind == PriorityActionKind::CastBraingeyser) {
         result += " (X=" + std::to_string(action.x_value) + ")";
@@ -472,8 +487,15 @@ void write_target(std::ostream& output,
 void write_land(std::ostream& output,
                 const LandPermanent& land,
                 std::size_t index) {
-    output << "{\"permanentId\":\"land-" << index
-           << "\",\"card\":";
+    // Engine permanent ids let the client wire lands as ability
+    // origins and targets (Strip Mine, Factory); the index-keyed
+    // "land-N" form survives only for id-less snapshots.
+    if (land.id != 0) {
+        output << "{\"permanentId\":" << land.id << ",\"card\":";
+    } else {
+        output << "{\"permanentId\":\"land-" << index
+               << "\",\"card\":";
+    }
     write_card(output, land.card);
     output << ",\"tapped\":"
            << (land.tapped ? "true" : "false") << '}';
