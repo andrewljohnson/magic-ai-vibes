@@ -379,7 +379,29 @@ function render() {
     (hasPolicy ? `<span style="--c: var(--s2)">policy loss</span>` : "");
   }
 
-  const recent = rows.slice(-1000).reverse();
+  // Async probes attach to the row of the iteration where they finish;
+  // fold each result back onto the iteration whose net it measured.
+  const tableRows = rows.map(r => ({ ...r }));
+  const byIteration = new Map(tableRows.map(r => [r.iteration, r]));
+  for (const row of tableRows) {
+    if (row.probe_iteration === undefined) continue;
+    const home = byIteration.get(row.probe_iteration);
+    if (!home || home === row) continue;
+    for (const key of [
+      "vs_random",
+      "vs_handcrafted",
+      "vs_deep_monte_carlo",
+      "deck_lift",
+      "behaviors",
+    ]) {
+      if (row[key] !== undefined) {
+        home[key] = row[key];
+        delete row[key];
+      }
+    }
+    delete row.probe_iteration;
+  }
+  const recent = tableRows.slice(-1000).reverse();
   document.getElementById("table").innerHTML =
     "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs DeepMC</th><th>mean lift</th></tr>" +
     recent.map(r => {
