@@ -89,10 +89,12 @@ GameState reconstruct_observed_state(const PlayerObservation& observation);
 
 class SpzNet {
   public:
-    SpzNet(std::size_t inputs, std::size_t hidden, std::uint64_t seed);
+    SpzNet(std::size_t inputs, std::size_t hidden, std::uint64_t seed,
+           std::size_t hidden2 = 0);
 
     std::size_t input_count() const { return inputs_; }
     std::size_t hidden_count() const { return hidden_; }
+    std::size_t hidden2_count() const { return hidden2_; }
 
     // Win probability in [0, 1] for the perspective the features encode.
     double value(const std::vector<float>& features) const;
@@ -111,6 +113,10 @@ class SpzNet {
 
     std::size_t inputs_ = 0;
     std::size_t hidden_ = 0;
+    // Optional second hidden layer (0 = classic single-layer net).
+    std::size_t hidden2_ = 0;
+    std::vector<double> hidden2_weights_;  // hidden2 x hidden
+    std::vector<double> hidden2_bias_;
     // Row-major hidden x inputs, then hidden biases, then output weights and
     // a single output bias. Momentum buffers mirror the parameter layout.
     std::vector<double> hidden_weights_;
@@ -363,6 +369,7 @@ struct SpzTrainConfig {
     std::size_t iterations = 60;
     std::size_t games_per_iteration = 128;
     std::size_t hidden = 64;
+    std::size_t hidden2 = 0;
     // Fresh nets: 0 = v1, 2 = v2, 3 = v3 (lossless play zones). Warm
     // starts inherit their net's schema regardless.
     std::size_t schema = 0;

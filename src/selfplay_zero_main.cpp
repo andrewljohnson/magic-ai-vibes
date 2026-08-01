@@ -55,6 +55,7 @@ struct Arguments {
     std::size_t iterations = 60;
     std::size_t games = 128;
     std::size_t hidden = 64;
+    std::size_t hidden2 = 0;
     std::size_t schema = 0;
     bool hard_targets = false;
     double gamma = 1.0;
@@ -147,6 +148,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.gamma = std::stod(next());
         } else if (flag == "--hidden") {
             arguments.hidden = std::stoull(next());
+        } else if (flag == "--hidden2") {
+            arguments.hidden2 = std::stoull(next());
         } else if (flag == "--seed") {
             arguments.seed = std::stoull(next());
         } else if (flag == "--threads") {
@@ -199,6 +202,7 @@ int run_train(const Arguments& raw_arguments) {
     config.iterations = arguments.iterations;
     config.games_per_iteration = arguments.games;
     config.hidden = arguments.hidden;
+    config.hidden2 = arguments.hidden2;
     config.schema = arguments.schema;
     config.discounted_targets = !arguments.hard_targets;
     config.gamma = arguments.gamma;

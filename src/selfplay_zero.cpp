@@ -839,8 +839,9 @@ GameState reconstruct_observed_state(const PlayerObservation& observation) {
 // ---------------------------------------------------------------------------
 // Value network
 
-SpzNet::SpzNet(std::size_t inputs, std::size_t hidden, std::uint64_t seed)
-    : inputs_(inputs), hidden_(hidden) {
+SpzNet::SpzNet(std::size_t inputs, std::size_t hidden,
+               std::uint64_t seed, std::size_t hidden2)
+    : inputs_(inputs), hidden_(hidden), hidden2_(hidden2) {
     if (inputs == 0 || hidden == 0) {
         throw std::invalid_argument("SpzNet requires nonzero dimensions");
     }
@@ -853,16 +854,31 @@ SpzNet::SpzNet(std::size_t inputs, std::size_t hidden, std::uint64_t seed)
         weight = hidden_init(random);
     }
     hidden_bias_.assign(hidden, 0.0);
+    const std::size_t final_layer = hidden2 > 0 ? hidden2 : hidden;
+    if (hidden2 > 0) {
+        const double second_scale =
+            1.0 / std::sqrt(static_cast<double>(hidden));
+        std::uniform_real_distribution<double> second_init(
+            -second_scale, second_scale);
+        hidden2_weights_.resize(hidden2 * hidden);
+        for (double& weight : hidden2_weights_) {
+            weight = second_init(random);
+        }
+        hidden2_bias_.assign(hidden2, 0.0);
+    }
     const double output_scale =
-        1.0 / std::sqrt(static_cast<double>(hidden));
+        1.0 / std::sqrt(static_cast<double>(final_layer));
     std::uniform_real_distribution<double> output_init(-output_scale,
                                                        output_scale);
-    output_weights_.resize(hidden);
+    output_weights_.resize(final_layer);
     for (double& weight : output_weights_) {
         weight = output_init(random);
     }
     output_bias_ = 0.0;
-    momentum_.assign(hidden * inputs + hidden + hidden + 1, 0.0);
+    momentum_.assign(hidden * inputs + hidden +
+                         hidden2 * hidden + hidden2 +
+                         final_layer + 1,
+                     0.0);
 }
 
 namespace {
@@ -877,12 +893,33 @@ double SpzNet::value(const std::vector<float>& features) const {
     if (features.size() != inputs_) {
         throw std::invalid_argument("SpzNet feature size mismatch");
     }
-    double output = output_bias_;
+    if (hidden2_ == 0) {
+        double output = output_bias_;
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            double activation = hidden_bias_[unit];
+            const double* row = hidden_weights_.data() + unit * inputs_;
+            for (std::size_t input = 0; input < inputs_; ++input) {
+                activation += row[input] * features[input];
+            }
+            output += output_weights_[unit] * std::tanh(activation);
+        }
+        return sigmoid(output);
+    }
+    std::vector<double> first(hidden_);
     for (std::size_t unit = 0; unit < hidden_; ++unit) {
         double activation = hidden_bias_[unit];
         const double* row = hidden_weights_.data() + unit * inputs_;
         for (std::size_t input = 0; input < inputs_; ++input) {
             activation += row[input] * features[input];
+        }
+        first[unit] = std::tanh(activation);
+    }
+    double output = output_bias_;
+    for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+        double activation = hidden2_bias_[unit];
+        const double* row = hidden2_weights_.data() + unit * hidden_;
+        for (std::size_t prev = 0; prev < hidden_; ++prev) {
+            activation += row[prev] * first[prev];
         }
         output += output_weights_[unit] * std::tanh(activation);
     }
@@ -894,6 +931,111 @@ double SpzNet::train_batch(
     const std::vector<float>& targets, double learning_rate) {
     if (features.size() != targets.size() || features.empty()) {
         throw std::invalid_argument("SpzNet batch size mismatch");
+    }
+    if (hidden2_ > 0) {
+        // Stacked variant: gradients laid out W1, b1, W2, b2, w_out,
+        // b_out (matching the momentum buffer from the constructor).
+        const std::size_t w1 = hidden_ * inputs_;
+        const std::size_t w2 = hidden2_ * hidden_;
+        const std::size_t off_b1 = w1;
+        const std::size_t off_w2 = w1 + hidden_;
+        const std::size_t off_b2 = off_w2 + w2;
+        const std::size_t off_wo = off_b2 + hidden2_;
+        const std::size_t off_bo = off_wo + hidden2_;
+        std::vector<double> gradient(off_bo + 1, 0.0);
+        std::vector<double> first(hidden_), second(hidden2_);
+        double total_loss = 0.0;
+        for (std::size_t example = 0; example < features.size();
+             ++example) {
+            const std::vector<float>& row = *features[example];
+            if (row.size() != inputs_) {
+                throw std::invalid_argument(
+                    "SpzNet feature size mismatch");
+            }
+            for (std::size_t unit = 0; unit < hidden_; ++unit) {
+                double activation = hidden_bias_[unit];
+                const double* w = hidden_weights_.data() +
+                                  unit * inputs_;
+                for (std::size_t input = 0; input < inputs_;
+                     ++input) {
+                    activation += w[input] * row[input];
+                }
+                first[unit] = std::tanh(activation);
+            }
+            double output = output_bias_;
+            for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+                double activation = hidden2_bias_[unit];
+                const double* w = hidden2_weights_.data() +
+                                  unit * hidden_;
+                for (std::size_t prev = 0; prev < hidden_; ++prev) {
+                    activation += w[prev] * first[prev];
+                }
+                second[unit] = std::tanh(activation);
+                output += output_weights_[unit] * second[unit];
+            }
+            const double prediction = sigmoid(output);
+            const double target = targets[example];
+            const double epsilon = 1e-7;
+            total_loss -=
+                target * std::log(prediction + epsilon) +
+                (1.0 - target) * std::log(1.0 - prediction + epsilon);
+            const double output_delta = prediction - target;
+            gradient[off_bo] += output_delta;
+            std::vector<double> first_delta(hidden_, 0.0);
+            for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+                gradient[off_wo + unit] += output_delta * second[unit];
+                const double second_delta =
+                    output_delta * output_weights_[unit] *
+                    (1.0 - second[unit] * second[unit]);
+                gradient[off_b2 + unit] += second_delta;
+                double* row_gradient =
+                    gradient.data() + off_w2 + unit * hidden_;
+                const double* w = hidden2_weights_.data() +
+                                  unit * hidden_;
+                for (std::size_t prev = 0; prev < hidden_; ++prev) {
+                    row_gradient[prev] += second_delta * first[prev];
+                    first_delta[prev] += second_delta * w[prev];
+                }
+            }
+            for (std::size_t unit = 0; unit < hidden_; ++unit) {
+                const double delta =
+                    first_delta[unit] *
+                    (1.0 - first[unit] * first[unit]);
+                gradient[off_b1 + unit] += delta;
+                double* row_gradient =
+                    gradient.data() + unit * inputs_;
+                for (std::size_t input = 0; input < inputs_;
+                     ++input) {
+                    row_gradient[input] += delta * row[input];
+                }
+            }
+        }
+        const double batch_scale =
+            1.0 / static_cast<double>(features.size());
+        constexpr double kMomentum = 0.9;
+        const auto apply = [&](std::size_t offset, double* parameter) {
+            momentum_[offset] =
+                kMomentum * momentum_[offset] -
+                learning_rate * gradient[offset] * batch_scale;
+            *parameter += momentum_[offset];
+        };
+        for (std::size_t index = 0; index < w1; ++index) {
+            apply(index, &hidden_weights_[index]);
+        }
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            apply(off_b1 + unit, &hidden_bias_[unit]);
+        }
+        for (std::size_t index = 0; index < w2; ++index) {
+            apply(off_w2 + index, &hidden2_weights_[index]);
+        }
+        for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+            apply(off_b2 + unit, &hidden2_bias_[unit]);
+        }
+        for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+            apply(off_wo + unit, &output_weights_[unit]);
+        }
+        apply(off_bo, &output_bias_);
+        return total_loss * batch_scale;
     }
     const std::size_t weight_count = hidden_ * inputs_;
     std::vector<double> gradient(weight_count + hidden_ + hidden_ + 1, 0.0);
@@ -958,6 +1100,19 @@ double SpzNet::train_batch(
 }
 
 void SpzNet::save(std::ostream& out) const {
+    if (hidden2_ > 0) {
+        out << "spz-net-v2\n"
+            << inputs_ << ' ' << hidden_ << ' ' << hidden2_ << '\n';
+        for (const double weight : hidden_weights_) out << weight << '\n';
+        for (const double bias : hidden_bias_) out << bias << '\n';
+        for (const double weight : hidden2_weights_) {
+            out << weight << '\n';
+        }
+        for (const double bias : hidden2_bias_) out << bias << '\n';
+        for (const double weight : output_weights_) out << weight << '\n';
+        out << output_bias_ << '\n';
+        return;
+    }
     out << "spz-net-v1\n" << inputs_ << ' ' << hidden_ << '\n';
     out << std::hexfloat;
     for (const double weight : hidden_weights_) {
@@ -975,6 +1130,31 @@ void SpzNet::save(std::ostream& out) const {
 SpzNet SpzNet::load(std::istream& in) {
     std::string magic;
     in >> magic;
+    if (magic == "spz-net-v2") {
+        SpzNet net;
+        std::size_t hidden2 = 0;
+        in >> net.inputs_ >> net.hidden_ >> hidden2;
+        net.hidden2_ = hidden2;
+        net.hidden_weights_.resize(net.hidden_ * net.inputs_);
+        for (double& weight : net.hidden_weights_) in >> weight;
+        net.hidden_bias_.resize(net.hidden_);
+        for (double& bias : net.hidden_bias_) in >> bias;
+        net.hidden2_weights_.resize(hidden2 * net.hidden_);
+        for (double& weight : net.hidden2_weights_) in >> weight;
+        net.hidden2_bias_.resize(hidden2);
+        for (double& bias : net.hidden2_bias_) in >> bias;
+        net.output_weights_.resize(hidden2);
+        for (double& weight : net.output_weights_) in >> weight;
+        in >> net.output_bias_;
+        if (!in) {
+            throw std::runtime_error("truncated SPZ artifact");
+        }
+        net.momentum_.assign(net.hidden_ * net.inputs_ + net.hidden_ +
+                                 hidden2 * net.hidden_ + hidden2 +
+                                 hidden2 + 1,
+                             0.0);
+        return net;
+    }
     if (magic != "spz-net-v1") {
         throw std::runtime_error("unrecognized SPZ net artifact header");
     }
@@ -4137,7 +4317,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
     auto net = config.initial_net != nullptr
                    ? std::make_shared<SpzNet>(*config.initial_net)
                    : std::make_shared<SpzNet>(state_inputs,
-                                              config.hidden, config.seed);
+                                              config.hidden, config.seed,
+                                              config.hidden2);
     std::shared_ptr<SpzAdvantageNet> advantage_net;
     if (config.train_advantage) {
         if (!config.rollout) {
