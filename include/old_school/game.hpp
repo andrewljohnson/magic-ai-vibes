@@ -558,6 +558,12 @@ void begin_turn(GameState& state, std::size_t player);
 // whose mana-source count is unplayable (fewer than two or more than
 // five sources).
 bool default_mulligan_choice(const std::vector<CardId>& hand);
+// Handcrafted keep/mulligan: mulligan hands with fewer than three lands
+// (down to four cards). The lotus-combo deck instead digs for the kill
+// (two Black Lotus, a Channel, and a Disintegrate), also stopping at
+// four cards.
+bool handcrafted_mulligan_choice(const std::vector<CardId>& hand,
+                                 const std::vector<CardId>& deck);
 inline constexpr std::size_t kMaximumHandSize = 7;
 std::vector<CardId> cleanup_turn(
     GameState& state, std::size_t active_player,

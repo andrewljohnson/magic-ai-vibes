@@ -53,6 +53,7 @@ import {
   type BlockersDecision,
   type Card,
   type CleanupDiscardDecision,
+  type MulliganDecision,
   type DamageOrderDecision,
   type Decision,
   type DeckMeta,
@@ -1784,6 +1785,45 @@ function DamageOrderControls({
   );
 }
 
+function MulliganControls({
+  decision,
+  onSubmit,
+  busy,
+}: {
+  decision: MulliganDecision;
+  onSubmit: (action: ActionRequest) => void;
+  busy: boolean;
+}) {
+  const keep = decision.options.find((option) => option.index === 0);
+  const mulligan = decision.options.find((option) => option.index === 1);
+  return (
+    <div className="mulligan-control">
+      <div className="decision-actions">
+        <button
+          type="button"
+          className="button-primary"
+          onClick={() =>
+            onSubmit({ decisionId: decision.decisionId, index: 0 })
+          }
+          disabled={busy}
+        >
+          {keep?.label ?? "Keep this hand"}
+        </button>
+        <button
+          type="button"
+          className="button-secondary"
+          onClick={() =>
+            onSubmit({ decisionId: decision.decisionId, index: 1 })
+          }
+          disabled={busy}
+        >
+          {mulligan?.label ?? `Mulligan to ${decision.handSize - 1}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CleanupDiscardControls({
   decision,
   selected,
@@ -1907,6 +1947,11 @@ function DecisionDock({
     helper = `Select exactly ${decision.count} ${
       decision.count === 1 ? "card" : "cards"
     } from your hand.`;
+  } else if (decision.kind === "mulligan") {
+    heading = "Keep or mulligan?";
+    helper = `Keep this ${decision.handSize}-card hand, or shuffle it away and draw ${
+      decision.handSize - 1
+    }.`;
   }
 
   return (
@@ -1991,6 +2036,13 @@ function DecisionDock({
             decision={decision}
             selected={selectedDiscardIndices}
             setSelected={setSelectedDiscardIndices}
+            onSubmit={onSubmit}
+            busy={busy}
+          />
+        )}
+        {decision.kind === "mulligan" && (
+          <MulliganControls
+            decision={decision}
             onSubmit={onSubmit}
             busy={busy}
           />

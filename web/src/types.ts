@@ -320,6 +320,18 @@ export interface CleanupDiscardDecision {
   options: CleanupDiscardOption[];
 }
 
+export interface MulliganOption {
+  index: number;
+  label: string;
+}
+
+export interface MulliganDecision {
+  kind: "mulligan";
+  decisionId: string | number;
+  handSize: number;
+  options: MulliganOption[];
+}
+
 export function restoreOpaqueIds(
   selectedKeys: Iterable<string>,
   legalIds: readonly (string | number)[],
@@ -358,7 +370,8 @@ export type Decision =
   | AttackersDecision
   | BlockersDecision
   | DamageOrderDecision
-  | CleanupDiscardDecision;
+  | CleanupDiscardDecision
+  | MulliganDecision;
 
 export interface GameResult {
   winner?: number | null;

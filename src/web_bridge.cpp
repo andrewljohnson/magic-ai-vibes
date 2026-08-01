@@ -841,6 +841,10 @@ class JsonController {
                     return choose_cleanup_discards(
                         observation, excess);
                 },
+            .choose_mulligan =
+                [this](const PlayerObservation& observation) {
+                    return choose_mulligan(observation);
+                },
             .observe =
                 [this](const PlayerObservation& observation,
                        const GameEvent& event) {
@@ -1132,6 +1136,27 @@ class JsonController {
                 static_cast<std::size_t>(position));
         }
         return result;
+    }
+
+    bool choose_mulligan(const PlayerObservation& observation) {
+        const std::uint64_t id = next_decision_id();
+        output_ << "{\"type\":\"decision\",\"state\":";
+        write_state(output_, observation, phase_);
+        output_ << ",\"decision\":{\"id\":" << id
+                << ",\"kind\":\"mulligan\",\"handSize\":"
+                << observation.hand.size() << ",\"options\":["
+                << "{\"index\":0,\"label\":\"Keep this hand\"},"
+                << "{\"index\":1,\"label\":\"Mulligan to "
+                << (observation.hand.size() - 1)
+                << "\"}]}}\n"
+                << std::flush;
+        const auto selected = parse_unsigned_field(
+            read_response(id), "index");
+        if (selected > 1) {
+            throw std::invalid_argument(
+                "mulligan response must choose option 0 or 1");
+        }
+        return selected == 1;
     }
 
     static std::string combat_creature_label(

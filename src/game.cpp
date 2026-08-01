@@ -3463,6 +3463,34 @@ bool default_mulligan_choice(const std::vector<CardId>& hand) {
     return sources < 2 || sources > 5;
 }
 
+bool handcrafted_mulligan_choice(const std::vector<CardId>& hand,
+                                 const std::vector<CardId>& deck) {
+    if (hand.size() <= 4) {
+        return false;
+    }
+    const auto count_in = [](const std::vector<CardId>& cards,
+                             CardId card) {
+        return std::count(cards.begin(), cards.end(), card);
+    };
+    const bool lotus_combo_deck =
+        count_in(deck, CardId::BlackLotus) > 0 &&
+        count_in(deck, CardId::Channel) > 0 &&
+        count_in(deck, CardId::Disintegrate) > 0;
+    if (lotus_combo_deck) {
+        // Dig for the kill: Lotus, Lotus, Channel, Disintegrate.
+        return count_in(hand, CardId::BlackLotus) < 2 ||
+               count_in(hand, CardId::Channel) < 1 ||
+               count_in(hand, CardId::Disintegrate) < 1;
+    }
+    std::size_t lands = 0;
+    for (const CardId card : hand) {
+        if (card_definition(card).type == CardType::Land) {
+            ++lands;
+        }
+    }
+    return lands < 3;
+}
+
 void begin_turn(GameState& state, std::size_t player) {
     for (auto& participant : state.players) {
         participant.mana_pool = {};
@@ -3828,6 +3856,10 @@ void Game::initialize() {
                 mulligan = controller->choose_mulligan &&
                            controller->choose_mulligan(
                                human_observation(player));
+            } else if (config_.bots[player].kind ==
+                       BotKind::Handcrafted) {
+                mulligan = handcrafted_mulligan_choice(
+                    player_state.hand, decks_[player]);
             } else {
                 mulligan = default_mulligan_choice(player_state.hand);
             }

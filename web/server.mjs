@@ -630,6 +630,26 @@ function reportDecision(value) {
           .map(reportId)
           .filter((id) => id !== undefined)
       : [];
+  } else if (value.kind === "mulligan") {
+    decision.handSize = Number.isSafeInteger(value.handSize)
+      ? value.handSize
+      : 0;
+    decision.options = Array.isArray(value.options)
+      ? value.options.flatMap((option) => {
+          if (!isRecord(option) || !Number.isSafeInteger(option.index)) {
+            return [];
+          }
+          return [{
+            index: option.index,
+            label:
+              typeof option.label === "string"
+                ? option.label
+                : option.index === 0
+                  ? "Keep this hand"
+                  : "Mulligan",
+          }];
+        })
+      : [];
   } else if (value.kind === "cleanup_discard") {
     decision.count = Number.isSafeInteger(value.count) ? value.count : 0;
     decision.options = Array.isArray(value.options)
@@ -1892,6 +1912,25 @@ function validateActionForDecision(input, decision) {
     return { decisionId: decision.id, ids: input.ids };
   }
 
+  if (decision.kind === "mulligan") {
+    if (!Number.isSafeInteger(input.index)) {
+      throw new ApiError(
+        422,
+        "illegal_action",
+        "A mulligan choice needs an integer option index",
+      );
+    }
+    const options = Array.isArray(decision.options) ? decision.options : [];
+    if (!options.some((option) => option?.index === input.index)) {
+      throw new ApiError(
+        422,
+        "illegal_action",
+        "That mulligan option is not legal",
+      );
+    }
+    return { decisionId: decision.id, index: input.index };
+  }
+
   if (decision.kind === "cleanup_discard") {
     const count = decision.count;
     const options = Array.isArray(decision.options) ? decision.options : [];
@@ -2453,6 +2492,7 @@ export function webGameMetadata(deckCatalog = null, evolutionManager = null) {
       "blockers",
       "damage_order",
       "cleanup_discard",
+      "mulligan",
     ],
     defaults: DEFAULT_CONFIG,
     limits: LIMITS,

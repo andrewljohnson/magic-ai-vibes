@@ -154,6 +154,7 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     "blockers",
     "damage_order",
     "cleanup_discard",
+    "mulligan",
   ]);
 });
 

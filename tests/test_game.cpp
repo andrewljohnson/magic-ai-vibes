@@ -4514,6 +4514,45 @@ TEST(default_mulligan_heuristic_rejects_unplayable_hands) {
         std::vector<CardId>(5, CardId::LightningBolt)));
 }
 
+TEST(handcrafted_mulligan_demands_three_lands_or_digs_for_the_combo) {
+    using old_school::CardId;
+    const auto red = old_school::red_deck();
+    // Two lands: mulligan. Three lands: keep.
+    CHECK(old_school::handcrafted_mulligan_choice(
+        {CardId::Mountain, CardId::Mountain, CardId::LightningBolt,
+         CardId::LightningBolt, CardId::GrayOgre, CardId::HillGiant,
+         CardId::IronclawOrcs},
+        red));
+    CHECK(!old_school::handcrafted_mulligan_choice(
+        {CardId::Mountain, CardId::Mountain, CardId::Mountain,
+         CardId::LightningBolt, CardId::GrayOgre, CardId::HillGiant,
+         CardId::IronclawOrcs},
+        red));
+    // Four cards is the floor even without lands.
+    CHECK(!old_school::handcrafted_mulligan_choice(
+        {CardId::LightningBolt, CardId::LightningBolt,
+         CardId::LightningBolt, CardId::LightningBolt},
+        red));
+
+    const auto lotus = old_school::lotus_combo_deck();
+    // Three lands but no combo: the lotus deck still mulligans.
+    CHECK(old_school::handcrafted_mulligan_choice(
+        {CardId::Mountain, CardId::Mountain, CardId::Mountain,
+         CardId::BlackLotus, CardId::BlackLotus, CardId::BlackLotus,
+         CardId::BlackLotus},
+        lotus));
+    // Lotus, Lotus, Channel, Disintegrate: keep.
+    CHECK(!old_school::handcrafted_mulligan_choice(
+        {CardId::BlackLotus, CardId::BlackLotus, CardId::Channel,
+         CardId::Disintegrate, CardId::Mountain},
+        lotus));
+    // The floor holds at four cards even short of the combo.
+    CHECK(!old_school::handcrafted_mulligan_choice(
+        {CardId::BlackLotus, CardId::Mountain, CardId::Mountain,
+         CardId::Mountain},
+        lotus));
+}
+
 TEST(paris_mulligans_shrink_hands_and_are_counted_and_announced) {
     const auto deck = two_card_deck(
         old_school::CardId::Mountain,

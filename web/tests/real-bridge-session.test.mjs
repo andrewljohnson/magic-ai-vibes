@@ -43,26 +43,43 @@ test("the production session manager drives the real engine bridge without HTTP"
       ...requestedConfig,
       seed: "42",
     });
-    assert.equal(created.snapshot.turnNumber, 1);
-    assert.equal(created.snapshot.phase, "first_main");
+    // The opening decision is the keep-or-mulligan choice on the
+    // freshly dealt seven cards.
     assert.equal(created.snapshot.players[0].hand.length, 7);
     assert.equal(created.snapshot.players[0].handSize, 7);
     assert.equal(
       Object.hasOwn(created.snapshot.players[1], "hand"),
       false,
     );
-    assert.equal(created.events.at(-1).kind, "turn_started");
     assert.equal(typeof created.decision.id, "number");
-    assert.equal(created.decision.kind, "priority");
+    assert.equal(created.decision.kind, "mulligan");
+    assert.equal(created.decision.handSize, 7);
+    assert.deepEqual(
+      created.decision.options.map(({ index }) => index),
+      [0, 1],
+    );
 
-    const land = created.decision.options.find(
+    const { game: kept } = await harness.action(created.id, {
+      decisionId: created.decision.id,
+      index: 0,
+    });
+    assert.equal(kept.status, "awaiting_action");
+    assert.equal(kept.snapshot.turnNumber, 1);
+    assert.equal(kept.snapshot.phase, "first_main");
+    assert.equal(kept.snapshot.players[0].hand.length, 7);
+    assert.ok(
+      kept.events.some((event) => event.kind === "turn_started"),
+    );
+    assert.equal(kept.decision.kind, "priority");
+
+    const land = kept.decision.options.find(
       ({ kind }) => kind === "play_land",
     );
     assert.ok(land, "seeded opening hand should expose a legal land play");
     assert.equal(typeof land.card?.name, "string");
 
     const { game: advanced } = await harness.action(created.id, {
-      decisionId: created.decision.id,
+      decisionId: kept.decision.id,
       index: land.index,
     });
     assert.equal(advanced.id, created.id);
@@ -77,7 +94,7 @@ test("the production session manager drives the real engine bridge without HTTP"
           event.kind === "priority_action" && /Play/.test(event.message),
       ),
     );
-    assert.notEqual(advanced.decision.id, created.decision.id);
+    assert.notEqual(advanced.decision.id, kept.decision.id);
   } finally {
     harness.delete(created.id);
   }
