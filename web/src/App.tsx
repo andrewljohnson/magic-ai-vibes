@@ -3261,6 +3261,7 @@ export default function App() {
     const firstDeck = meta.decks[0].id;
     const secondDeck = meta.decks[1]?.id ?? firstDeck;
     const defaultOpponentPolicy =
+      meta.policies.find((policy) => policy.id === "spz")?.id ??
       meta.policies.find((policy) => policy.id === "handcrafted")?.id ??
       meta.policies[0]?.id ??
       "handcrafted";
