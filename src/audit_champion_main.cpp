@@ -384,9 +384,22 @@ struct Auditor {
             const auto kind = ev.priority_action->kind;
             if (kind == PriorityActionKind::PlayLand &&
                 cast_a_spell_this_turn) {
-                flag(obs.turn_number,
-                     "LAND AFTER SPELL: land drop sequenced after a "
-                     "cast, taxing other mana sources");
+                // Harmful only when the earlier cast taxed a mana
+                // creature: a tapped, battle-ready creature during the
+                // owner's own precombat main means it paid for a spell
+                // the land could have covered.
+                bool taxed_creature = false;
+                for (const auto& creature :
+                     obs.players[spz_seat].creatures) {
+                    taxed_creature =
+                        taxed_creature ||
+                        (creature.tapped && !creature.summoning_sick);
+                }
+                if (taxed_creature) {
+                    flag(obs.turn_number,
+                         "LAND AFTER SPELL: land drop sequenced after "
+                         "a cast that taxed a mana creature");
+                }
             }
         }
         if (ev.kind == GameEventKind::TurnStarted) {
