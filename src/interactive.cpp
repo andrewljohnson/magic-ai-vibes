@@ -214,6 +214,27 @@ std::string action_name(const PlayerObservation& observation,
     switch (action.kind) {
     case PriorityActionKind::Pass:
         return "Pass priority";
+    case PriorityActionKind::CastPsionicBlast:
+    case PriorityActionKind::CastSwordsToPlowshares:
+    case PriorityActionKind::CastDisenchant:
+        return "Cast " + card +
+               (action.target.has_value()
+                    ? action.target->creature.has_value()
+                          ? " -> #" + std::to_string(
+                                          *action.target->creature)
+                          : " -> player " +
+                                std::to_string(action.target->player)
+                    : "");
+    case PriorityActionKind::ActivateLibrary:
+        return "Library of Alexandria: draw";
+    case PriorityActionKind::ActivateMishrasFactory:
+        return "Animate Mishra's Factory";
+    case PriorityActionKind::ActivateStripMine:
+        return "Strip Mine: destroy land" +
+               (action.target.has_value() &&
+                        action.target->creature.has_value()
+                    ? " #" + std::to_string(*action.target->creature)
+                    : "");
     case PriorityActionKind::PlayLand:
         return "Play " + card;
     case PriorityActionKind::CastCreature:
@@ -1408,6 +1429,8 @@ std::vector<CardId> interactive_deck(DeckId deck) {
         return lotus_combo_deck();
     case DeckId::Burn:
         return burn_deck();
+    case DeckId::UWR:
+        return uwr_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }

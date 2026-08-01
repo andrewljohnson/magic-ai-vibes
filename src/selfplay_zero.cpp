@@ -214,7 +214,7 @@ std::vector<float> spz_features_colors(
 const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
         green_deck(), red_deck(), blue_deck(), white_control_deck(),
-        ru_aggro_deck(), lotus_combo_deck(), burn_deck(),
+        ru_aggro_deck(), lotus_combo_deck(), burn_deck(), uwr_deck(),
     };
     return decks;
 }
@@ -222,7 +222,7 @@ const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
 std::string_view spz_deck_name(std::size_t deck_index) {
     static constexpr std::array<std::string_view, kSpzDeckCount> names = {
         "Green", "Red", "Blue", "White", "RU Aggro", "Lotus Combo",
-        "Burn",
+        "Burn", "UWR Aggro",
     };
     return names.at(deck_index);
 }
@@ -441,6 +441,11 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
             case CardId::Mountain: mana.red += 1; break;
             case CardId::Island: mana.blue += 1; break;
             case CardId::Plains: mana.white += 1; break;
+            case CardId::Plateau:
+            case CardId::Tundra:
+            case CardId::VolcanicIsland:
+                mana.wild += 1;
+                break;
             default: mana.generic += 1; break;
         }
     }
@@ -450,6 +455,10 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
         }
         if (artifact.card == CardId::MoxSapphire) {
             mana.blue += 1;
+        } else if (artifact.card == CardId::MoxPearl) {
+            mana.white += 1;
+        } else if (artifact.card == CardId::MoxRuby) {
+            mana.red += 1;
         } else if (artifact.card == CardId::SolRing) {
             mana.generic += 2;
         } else if (artifact.card == CardId::BlackLotus) {
@@ -1216,7 +1225,7 @@ std::size_t spz_action_feature_count() {
     // kind one-hot + card one-hot + target class (none/self/opponent
     // player, own/enemy creature) + target creature card + countered spell
     // card + x scale + source-permanent flag.
-    return 14 + kCardCount + 5 + kCardCount + kCardCount + 1 + 1;
+    return 20 + kCardCount + 5 + kCardCount + kCardCount + 1 + 1;
 }
 
 std::vector<float> spz_action_features(const PriorityAction& action,
@@ -1225,7 +1234,7 @@ std::vector<float> spz_action_features(const PriorityAction& action,
     std::vector<float> features(spz_action_feature_count(), 0.0f);
     std::size_t offset = 0;
     features[offset + static_cast<std::size_t>(action.kind)] = 1.0f;
-    offset += 14;
+    offset += 20;
     features[offset + static_cast<std::size_t>(action.card)] = 1.0f;
     offset += kCardCount;
     if (!action.target.has_value()) {

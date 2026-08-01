@@ -113,6 +113,7 @@ std::vector<CardId> ru_aggro_deck();
 // Stress decks outside the five-deck metagame environment.
 std::vector<CardId> lotus_combo_deck();
 std::vector<CardId> burn_deck();
+std::vector<CardId> uwr_deck();
 
 using PermanentId = std::uint64_t;
 
@@ -254,6 +255,12 @@ enum class PriorityActionKind : std::uint8_t {
     CastBraingeyser,
     CastForceSpike,
     ActivateMillstone,
+    CastPsionicBlast,
+    CastSwordsToPlowshares,
+    CastDisenchant,
+    ActivateLibrary,
+    ActivateMishrasFactory,
+    ActivateStripMine,
 };
 
 struct PriorityAction {
@@ -279,6 +286,19 @@ struct PriorityAction {
     static PriorityAction cast_braingeyser(int x_value,
                                            Target draw_target);
     static PriorityAction cast_force_spike(StackObjectId target_spell);
+    static PriorityAction cast_psionic_blast(Target blast_target);
+    static PriorityAction cast_swords(Target creature_target);
+    // Disenchant: artifact by permanent id, or an enchantment by index
+    // into its controller's enchantment row (creature field empty).
+    static PriorityAction cast_disenchant_artifact(std::size_t owner,
+                                                   PermanentId artifact);
+    static PriorityAction cast_disenchant_enchantment(std::size_t owner,
+                                                       int index);
+    static PriorityAction activate_library(PermanentId library);
+    static PriorityAction animate_factory(PermanentId factory);
+    static PriorityAction activate_strip_mine(PermanentId strip_mine,
+                                              std::size_t owner,
+                                              PermanentId land);
     static PriorityAction activate_millstone(PermanentId millstone,
                                              Target mill_target);
 
@@ -292,6 +312,8 @@ struct PriorityAction {
 // Channel, exactly as spell casting does.
 bool can_pay(const PlayerState& player, const ManaCost& cost);
 bool pay_mana(PlayerState& player, const ManaCost& cost);
+// True when the land can produce the given colored mana face.
+bool land_provides(CardId land, int ManaCost::*color);
 int maximum_available_mana(const PlayerState& player);
 
 std::vector<PriorityAction>
@@ -742,9 +764,10 @@ enum class DeckId : std::uint8_t {
     RUAggro,
     LotusCombo,
     Burn,
+    UWR,
 };
 
-inline constexpr std::size_t kDeckCount = 7;
+inline constexpr std::size_t kDeckCount = 8;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 

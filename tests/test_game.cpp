@@ -3012,7 +3012,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 7,
+        .population = 8,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -3025,11 +3025,11 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 7);
-    CHECK(first.best.total.games == 28);
+    CHECK(first.best.by_opponent.size() == 8);
+    CHECK(first.best.total.games == 32);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          28);
+          32);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
@@ -3042,6 +3042,7 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
              old_school::ru_aggro_deck(),
              old_school::lotus_combo_deck(),
              old_school::burn_deck(),
+             old_school::uwr_deck(),
          }) {
         metagame_pool.insert(
             metagame_pool.end(), deck.begin(), deck.end());
@@ -4056,6 +4057,439 @@ TEST(human_priority_attack_block_and_damage_choices_are_validated) {
 }
 
 } // namespace
+
+TEST(upkeep_triggers_sting_serendib_owner_and_vise_squeezes_full_hands) {
+    old_school::GameState state;
+    state.players[0].life = 20;
+    state.players[0].creatures = {
+        {.id = 11,
+         .card = old_school::CardId::SerendibEfreet,
+         .tapped = true,
+         .summoning_sick = false,
+         .damage = 0},
+    };
+    state.players[0].hand.assign(7, old_school::CardId::Plains);
+    state.players[1].artifacts = {
+        {.id = 21, .card = old_school::CardId::BlackVise, .tapped = false},
+    };
+
+    old_school::begin_turn(state, 0);
+    // Serendib -1, Black Vise -(7-4) = -3.
+    CHECK(state.players[0].life == 16);
+    CHECK(!state.players[0].creatures[0].tapped);
+
+    // Small hands escape the Vise entirely.
+    state.players[0].hand.assign(4, old_school::CardId::Plains);
+    old_school::begin_turn(state, 0);
+    CHECK(state.players[0].life == 15);
+}
+
+TEST(vigilant_serra_angel_attacks_without_tapping) {
+    old_school::GameState state;
+    state.active_player = 0;
+    state.players[0].creatures = {
+        creature(31, old_school::CardId::SerraAngel),
+        creature(32, old_school::CardId::GrizzlyBears),
+    };
+    CHECK(old_school::card_definition(old_school::CardId::SerraAngel)
+              .vigilance);
+
+    CHECK(old_school::resolve_combat(state, 0, {31, 32}, {}));
+    const auto& serra = state.players[0].creatures[0];
+    const auto& bears = state.players[0].creatures[1];
+    CHECK(!serra.tapped);
+    CHECK(bears.tapped);
+    CHECK(state.players[1].life == 20 - 4 - 2);
+}
+
+TEST(dual_lands_pay_either_face_and_wheel_refills_both_hands) {
+    using old_school::CardId;
+    CHECK(old_school::land_provides(CardId::Plateau,
+                                    &old_school::ManaCost::red));
+    CHECK(old_school::land_provides(CardId::Plateau,
+                                    &old_school::ManaCost::white));
+    CHECK(!old_school::land_provides(CardId::Plateau,
+                                     &old_school::ManaCost::blue));
+    CHECK(old_school::land_provides(CardId::Tundra,
+                                    &old_school::ManaCost::blue));
+    CHECK(old_school::land_provides(CardId::VolcanicIsland,
+                                    &old_school::ManaCost::red));
+
+    old_school::GameState state;
+    auto& caster = state.players[0];
+    caster.lands = {
+        {.card = CardId::Plateau},
+        {.card = CardId::Mountain},
+        {.card = CardId::Mountain},
+    };
+    caster.hand = {CardId::WheelOfFortune,
+                   CardId::LightningBolt,
+                   CardId::LightningBolt};
+    caster.library.assign(8, CardId::Mountain);
+    state.players[1].hand = {CardId::Island, CardId::Island};
+    state.players[1].library.assign(6, CardId::Island);
+
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_sorcery(
+            CardId::WheelOfFortune),
+        true));
+    old_school::PriorityState priority = {.player = 0,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+
+    CHECK(caster.hand.size() == 7);
+    CHECK(state.players[1].hand.size() == 6);
+    CHECK(state.failed_draw[1]);
+    CHECK(count_card(caster.graveyard, CardId::WheelOfFortune) == 1);
+    CHECK(count_card(caster.graveyard, CardId::LightningBolt) == 2);
+    CHECK(count_card(state.players[1].graveyard, CardId::Island) == 2);
+}
+
+TEST(psionic_blast_hits_face_or_creature_and_stings_its_caster) {
+    old_school::GameState state;
+    auto& caster = state.players[0];
+    caster.hand = {old_school::CardId::PsionicBlast,
+                   old_school::CardId::PsionicBlast};
+    caster.lands = {
+        {.card = old_school::CardId::VolcanicIsland},
+        {.card = old_school::CardId::Tundra},
+        {.card = old_school::CardId::Island},
+        {.card = old_school::CardId::Island},
+    };
+    state.players[1].creatures = {
+        creature(41, old_school::CardId::HillGiant),
+    };
+
+    const auto face = old_school::PriorityAction::cast_psionic_blast(
+        old_school::Target::player_target(1));
+    CHECK(has_action(
+        old_school::legal_priority_actions(state, 0, false), face));
+    CHECK(old_school::apply_priority_action(state, 0, face, false));
+    old_school::PriorityState priority = {.player = 0,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(state.players[1].life == 16);
+    CHECK(caster.life == 18);
+    CHECK(count_card(caster.graveyard,
+                     old_school::CardId::PsionicBlast) == 1);
+
+    for (auto& land : caster.lands) {
+        land.tapped = false;
+    }
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_psionic_blast(
+            old_school::Target::creature_target(1, 41)),
+        false));
+    priority = {.player = 0, .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(state.players[1].creatures.empty());
+    CHECK(caster.life == 16);
+    CHECK(count_card(state.players[1].graveyard,
+                     old_school::CardId::HillGiant) == 1);
+}
+
+TEST(swords_exiles_the_creature_and_its_owner_gains_power_in_life) {
+    old_school::GameState state;
+    auto& caster = state.players[0];
+    caster.hand = {old_school::CardId::SwordsToPlowshares};
+    caster.lands = {{.card = old_school::CardId::Plains}};
+    state.players[1].creatures = {
+        creature(51, old_school::CardId::FireElemental),
+    };
+
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_swords(
+            old_school::Target::creature_target(1, 51)),
+        false));
+    old_school::PriorityState priority = {.player = 0,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+
+    CHECK(state.players[1].creatures.empty());
+    CHECK(state.players[1].life == 25);
+    CHECK(count_card(state.players[1].exile,
+                     old_school::CardId::FireElemental) == 1);
+    CHECK(count_card(state.players[1].graveyard,
+                     old_school::CardId::FireElemental) == 0);
+    CHECK(count_card(caster.graveyard,
+                     old_school::CardId::SwordsToPlowshares) == 1);
+}
+
+TEST(disenchant_destroys_artifacts_and_enchantments) {
+    old_school::GameState state;
+    auto& caster = state.players[0];
+    caster.hand = {old_school::CardId::Disenchant,
+                   old_school::CardId::Disenchant};
+    caster.lands = {
+        {.card = old_school::CardId::Plains},
+        {.card = old_school::CardId::Tundra},
+        {.card = old_school::CardId::Plateau},
+        {.card = old_school::CardId::Plains},
+    };
+    state.players[1].artifacts = {
+        {.id = 61, .card = old_school::CardId::BlackVise,
+         .tapped = false},
+    };
+    state.players[1].enchantments = {old_school::CardId::Moat};
+
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_disenchant_artifact(1, 61),
+        false));
+    old_school::PriorityState priority = {.player = 0,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(state.players[1].artifacts.empty());
+    CHECK(count_card(state.players[1].graveyard,
+                     old_school::CardId::BlackVise) == 1);
+
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_disenchant_enchantment(1, 0),
+        false));
+    priority = {.player = 0, .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(state.players[1].enchantments.empty());
+    CHECK(count_card(state.players[1].graveyard,
+                     old_school::CardId::Moat) == 1);
+    CHECK(count_card(caster.graveyard,
+                     old_school::CardId::Disenchant) == 2);
+}
+
+TEST(library_of_alexandria_draws_only_on_exactly_seven_cards) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    player.hand.assign(7, old_school::CardId::Plains);
+    player.library.assign(5, old_school::CardId::Island);
+    player.lands = {
+        {.id = 71,
+         .card = old_school::CardId::LibraryOfAlexandria,
+         .tapped = false},
+    };
+
+    const auto draw = old_school::PriorityAction::activate_library(71);
+    CHECK(has_action(
+        old_school::legal_priority_actions(state, 0, false), draw));
+    CHECK(old_school::apply_priority_action(state, 0, draw, false));
+    CHECK(player.lands[0].tapped);
+    old_school::PriorityState priority = {.player = 0,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(player.hand.size() == 8);
+    CHECK(player.library.size() == 4);
+
+    // Eight cards in hand: no activation offered.
+    player.lands[0].tapped = false;
+    CHECK(!has_action(
+        old_school::legal_priority_actions(state, 0, false), draw));
+    CHECK(!old_school::apply_priority_action(state, 0, draw, false));
+}
+
+TEST(mishras_factory_animates_fights_and_returns_to_land_at_cleanup) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.lands = {
+        {.id = 81,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false},
+        {.card = old_school::CardId::Mountain},
+    };
+
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::animate_factory(81),
+        false));
+    old_school::PriorityState priority = {.player = 0,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+
+    CHECK(player.lands.size() == 1);
+    CHECK(player.creatures.size() == 1);
+    const auto& animated = player.creatures[0];
+    CHECK(animated.id == 81);
+    CHECK(animated.card == old_school::CardId::MishrasFactory);
+    CHECK(!animated.summoning_sick);
+    CHECK(old_school::card_definition(animated.card).power == 2);
+
+    CHECK(old_school::resolve_combat(state, 0, {81}, {}));
+    CHECK(state.players[1].life == 18);
+
+    old_school::cleanup_turn(state, 0, {});
+    CHECK(player.creatures.empty());
+    CHECK(player.lands.size() == 2);
+    const auto returned = std::find_if(
+        player.lands.begin(), player.lands.end(),
+        [](const old_school::LandPermanent& land) {
+            return land.card == old_school::CardId::MishrasFactory;
+        });
+    CHECK(returned != player.lands.end());
+    CHECK(returned->id == 81);
+}
+
+TEST(strip_mine_sacrifices_itself_to_destroy_a_land) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    player.lands = {
+        {.id = 91,
+         .card = old_school::CardId::StripMine,
+         .tapped = false},
+    };
+    state.players[1].lands = {
+        {.id = 92, .card = old_school::CardId::Tundra,
+         .tapped = false},
+    };
+
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::activate_strip_mine(91, 1, 92),
+        false));
+    CHECK(player.lands.empty());
+    CHECK(count_card(player.graveyard,
+                     old_school::CardId::StripMine) == 1);
+    old_school::PriorityState priority = {.player = 0,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+    CHECK(state.players[1].lands.empty());
+    CHECK(count_card(state.players[1].graveyard,
+                     old_school::CardId::Tundra) == 1);
+}
+
+TEST(smart_payer_spends_offcolor_lands_before_demanded_colors) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    // Hand demands blue; generic cost should tap the Plateau (red or
+    // white faces, neither demanded) rather than the Volcanic Island.
+    player.hand = {old_school::CardId::Counterspell};
+    player.lands = {
+        {.card = old_school::CardId::VolcanicIsland},
+        {.card = old_school::CardId::Plateau},
+        {.card = old_school::CardId::Plains},
+    };
+    CHECK(old_school::pay_mana(player, {.generic = 1, .white = 1}));
+    const auto untapped = std::count_if(
+        player.lands.begin(), player.lands.end(),
+        [](const old_school::LandPermanent& land) {
+            return !land.tapped;
+        });
+    CHECK(untapped == 1);
+    CHECK(!player.lands[0].tapped);
+    CHECK(player.lands[1].tapped);
+    CHECK(player.lands[2].tapped);
+}
+
+TEST(uwr_deck_is_sixty_cards_and_determinization_conserves_new_zones) {
+    const auto deck = old_school::uwr_deck();
+    CHECK(deck.size() == 60);
+    CHECK(count_card(deck, old_school::CardId::LightningBolt) == 8);
+    CHECK(count_card(deck, old_school::CardId::WheelOfFortune) == 2);
+    CHECK(count_card(deck, old_school::CardId::MishrasFactory) == 4);
+
+    // Mid-game state exercising every new zone move: an exiled creature
+    // (Swords), spent instants in the graveyard, an animated Factory,
+    // and a sacrificed Strip Mine. Conservation must still hold.
+    old_school::GameState state;
+    auto& uwr = state.players[0];
+    uwr.hand = {old_school::CardId::LightningBolt,
+                old_school::CardId::Disenchant};
+    uwr.lands = {
+        {.id = 1, .card = old_school::CardId::Plateau},
+        {.id = 2, .card = old_school::CardId::Tundra},
+        {.id = 3, .card = old_school::CardId::Plains},
+    };
+    uwr.creatures = {
+        creature(4, old_school::CardId::SavannahLions),
+        {.id = 5,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false,
+         .summoning_sick = false,
+         .damage = 0},
+    };
+    uwr.artifacts = {
+        {.id = 6, .card = old_school::CardId::MoxPearl,
+         .tapped = false},
+    };
+    uwr.graveyard = {old_school::CardId::StripMine,
+                     old_school::CardId::SwordsToPlowshares,
+                     old_school::CardId::PsionicBlast,
+                     old_school::CardId::WheelOfFortune};
+    auto library = old_school::uwr_deck();
+    for (const auto& zone :
+         {uwr.hand, uwr.graveyard,
+          std::vector<old_school::CardId>{
+              old_school::CardId::Plateau, old_school::CardId::Tundra,
+              old_school::CardId::Plains,
+              old_school::CardId::SavannahLions,
+              old_school::CardId::MishrasFactory,
+              old_school::CardId::MoxPearl}}) {
+        for (const auto card : zone) {
+            remove_fixture_card(library, card);
+        }
+    }
+    uwr.library = library;
+
+    auto& red = state.players[1];
+    red.hand = {old_school::CardId::LightningBolt};
+    red.lands = {{.id = 7, .card = old_school::CardId::Mountain}};
+    red.creatures = {creature(8, old_school::CardId::GrayOgre)};
+    red.exile = {old_school::CardId::FireElemental};
+    red.graveyard = {old_school::CardId::Mountain};
+    auto red_library = old_school::red_deck();
+    for (const auto card : std::vector<old_school::CardId>{
+             old_school::CardId::LightningBolt,
+             old_school::CardId::Mountain, old_school::CardId::GrayOgre,
+             old_school::CardId::FireElemental,
+             old_school::CardId::Mountain}) {
+        remove_fixture_card(red_library, card);
+    }
+    red.library.assign(red_library.begin(),
+                       red_library.begin() + 20);
+    for (auto card = red_library.begin() + 20;
+         card != red_library.end(); ++card) {
+        red.graveyard.push_back(*card);
+    }
+
+    const std::array<std::vector<old_school::CardId>, 2> decks = {
+        old_school::uwr_deck(), old_school::red_deck()};
+    const auto sampled =
+        old_school::sample_determinization(state, decks, 0, 0xBEEF);
+    CHECK(sampled.players[0].hand == state.players[0].hand);
+    CHECK(sampled.players[0].library.size() ==
+          state.players[0].library.size());
+    CHECK(sampled.players[1].hand.size() ==
+          state.players[1].hand.size());
+    CHECK(sampled.players[1].library.size() ==
+          state.players[1].library.size());
+}
 
 int main() {
     std::size_t failures = 0;

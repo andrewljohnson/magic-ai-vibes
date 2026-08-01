@@ -570,29 +570,13 @@ ManaCost land_mana(CardId card) {
         return {.white = 1};
     case CardId::VolcanicIsland:
         return {.blue = 1};
+    case CardId::LibraryOfAlexandria:
+    case CardId::MishrasFactory:
+    case CardId::StripMine:
+        return {.generic = 1};
     default:
         return {};
     }
-}
-
-// True when the land can produce the given colored mana.
-bool land_provides(CardId land, int ManaCost::*color) {
-    if (color == &ManaCost::green) {
-        return land == CardId::Forest;
-    }
-    if (color == &ManaCost::red) {
-        return land == CardId::Mountain || land == CardId::Plateau ||
-               land == CardId::VolcanicIsland;
-    }
-    if (color == &ManaCost::blue) {
-        return land == CardId::Island || land == CardId::Tundra ||
-               land == CardId::VolcanicIsland;
-    }
-    if (color == &ManaCost::white) {
-        return land == CardId::Plains || land == CardId::Plateau ||
-               land == CardId::Tundra;
-    }
-    return false;
 }
 
 ManaCost artifact_mana(CardId card) {
@@ -795,6 +779,15 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             if (land_provides(land, &ManaCost::white)) {
                 score += 1 + demand[3] * 4;
             }
+            // Ability lands are a last resort for generic costs: their
+            // activations are usually worth more than one mana.
+            if (land == CardId::LibraryOfAlexandria) {
+                score += 10;
+            } else if (land == CardId::MishrasFactory) {
+                score += 6;
+            } else if (land == CardId::StripMine) {
+                score += 4;
+            }
             return score;
         };
         std::vector<std::size_t> order;
@@ -875,6 +868,27 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
 }
 
 }  // namespace
+
+// True when the land can produce the given colored mana.
+bool land_provides(CardId land, int ManaCost::*color) {
+    if (color == &ManaCost::green) {
+        return land == CardId::Forest;
+    }
+    if (color == &ManaCost::red) {
+        return land == CardId::Mountain || land == CardId::Plateau ||
+               land == CardId::VolcanicIsland;
+    }
+    if (color == &ManaCost::blue) {
+        return land == CardId::Island || land == CardId::Tundra ||
+               land == CardId::VolcanicIsland;
+    }
+    if (color == &ManaCost::white) {
+        return land == CardId::Plains || land == CardId::Plateau ||
+               land == CardId::Tundra;
+    }
+    return false;
+}
+
 
 bool can_pay(const PlayerState& player, const ManaCost& cost) {
     return plan_mana_payment(player, cost).possible;
@@ -1217,6 +1231,33 @@ std::vector<CardId> burn_deck() {
     return deck;
 }
 
+std::vector<CardId> uwr_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 4, CardId::SavannahLions);
+    deck.insert(deck.end(), 4, CardId::SerendibEfreet);
+    deck.insert(deck.end(), 2, CardId::SerraAngel);
+    deck.insert(deck.end(), 4, CardId::BlackVise);
+    deck.push_back(CardId::MoxPearl);
+    deck.push_back(CardId::MoxRuby);
+    deck.push_back(CardId::MoxSapphire);
+    deck.push_back(CardId::SolRing);
+    deck.push_back(CardId::AncestralRecall);
+    deck.insert(deck.end(), 4, CardId::Disenchant);
+    deck.insert(deck.end(), 8, CardId::LightningBolt);
+    deck.insert(deck.end(), 4, CardId::PsionicBlast);
+    deck.insert(deck.end(), 3, CardId::SwordsToPlowshares);
+    deck.push_back(CardId::TimeWalk);
+    deck.insert(deck.end(), 2, CardId::WheelOfFortune);
+    deck.push_back(CardId::LibraryOfAlexandria);
+    deck.insert(deck.end(), 4, CardId::MishrasFactory);
+    deck.push_back(CardId::Plains);
+    deck.insert(deck.end(), 4, CardId::Plateau);
+    deck.push_back(CardId::StripMine);
+    deck.insert(deck.end(), 4, CardId::Tundra);
+    deck.insert(deck.end(), 4, CardId::VolcanicIsland);
+    return deck;
+}
+
 std::vector<CardId> blue_deck() {
     std::vector<CardId> deck(15, CardId::Island);
     deck.push_back(CardId::MoxSapphire);
@@ -1476,6 +1517,53 @@ PriorityAction::cast_force_spike(StackObjectId target_spell) {
     };
 }
 
+PriorityAction PriorityAction::cast_psionic_blast(Target blast_target) {
+    return {.kind = PriorityActionKind::CastPsionicBlast,
+            .card = CardId::PsionicBlast,
+            .target = blast_target};
+}
+
+PriorityAction PriorityAction::cast_swords(Target creature_target) {
+    return {.kind = PriorityActionKind::CastSwordsToPlowshares,
+            .card = CardId::SwordsToPlowshares,
+            .target = creature_target};
+}
+
+PriorityAction PriorityAction::cast_disenchant_artifact(
+    std::size_t owner, PermanentId artifact) {
+    return {.kind = PriorityActionKind::CastDisenchant,
+            .card = CardId::Disenchant,
+            .target = Target::creature_target(owner, artifact)};
+}
+
+PriorityAction PriorityAction::cast_disenchant_enchantment(
+    std::size_t owner, int index) {
+    return {.kind = PriorityActionKind::CastDisenchant,
+            .card = CardId::Disenchant,
+            .target = Target::player_target(owner),
+            .x_value = index};
+}
+
+PriorityAction PriorityAction::activate_library(PermanentId library) {
+    return {.kind = PriorityActionKind::ActivateLibrary,
+            .card = CardId::LibraryOfAlexandria,
+            .source_permanent = library};
+}
+
+PriorityAction PriorityAction::animate_factory(PermanentId factory) {
+    return {.kind = PriorityActionKind::ActivateMishrasFactory,
+            .card = CardId::MishrasFactory,
+            .source_permanent = factory};
+}
+
+PriorityAction PriorityAction::activate_strip_mine(
+    PermanentId strip_mine, std::size_t owner, PermanentId land) {
+    return {.kind = PriorityActionKind::ActivateStripMine,
+            .card = CardId::StripMine,
+            .target = Target::creature_target(owner, land),
+            .source_permanent = strip_mine};
+}
+
 PriorityAction
 PriorityAction::activate_millstone(PermanentId millstone,
                                    Target mill_target) {
@@ -1611,6 +1699,55 @@ legal_priority_actions(const GameState& state, std::size_t player,
         }
     }
 
+    const auto& psionic = card_definition(CardId::PsionicBlast);
+    if (has_card(player_state.hand, CardId::PsionicBlast) &&
+        can_pay(player_state, psionic.cost)) {
+        for (std::size_t controller = 0;
+             controller < state.players.size(); ++controller) {
+            actions.push_back(PriorityAction::cast_psionic_blast(
+                Target::player_target(controller)));
+            for (const auto& creature :
+                 state.players[controller].creatures) {
+                actions.push_back(PriorityAction::cast_psionic_blast(
+                    Target::creature_target(controller, creature.id)));
+            }
+        }
+    }
+
+    const auto& swords = card_definition(CardId::SwordsToPlowshares);
+    if (has_card(player_state.hand, CardId::SwordsToPlowshares) &&
+        can_pay(player_state, swords.cost)) {
+        for (std::size_t controller = 0;
+             controller < state.players.size(); ++controller) {
+            for (const auto& creature :
+                 state.players[controller].creatures) {
+                actions.push_back(PriorityAction::cast_swords(
+                    Target::creature_target(controller, creature.id)));
+            }
+        }
+    }
+
+    const auto& disenchant = card_definition(CardId::Disenchant);
+    if (has_card(player_state.hand, CardId::Disenchant) &&
+        can_pay(player_state, disenchant.cost)) {
+        for (std::size_t owner = 0; owner < state.players.size();
+             ++owner) {
+            for (const auto& artifact :
+                 state.players[owner].artifacts) {
+                actions.push_back(
+                    PriorityAction::cast_disenchant_artifact(
+                        owner, artifact.id));
+            }
+            for (std::size_t index = 0;
+                 index < state.players[owner].enchantments.size();
+                 ++index) {
+                actions.push_back(
+                    PriorityAction::cast_disenchant_enchantment(
+                        owner, static_cast<int>(index)));
+            }
+        }
+    }
+
     const auto& giant_growth =
         card_definition(CardId::GiantGrowth);
     if (has_card(player_state.hand, CardId::GiantGrowth) &&
@@ -1650,6 +1787,42 @@ legal_priority_actions(const GameState& state, std::size_t player,
         }
     }
 
+    if (player_state.hand.size() == 7) {
+        for (const auto& land : player_state.lands) {
+            if (land.card == CardId::LibraryOfAlexandria &&
+                !land.tapped) {
+                actions.push_back(
+                    PriorityAction::activate_library(land.id));
+            }
+        }
+    }
+    {
+        constexpr ManaCost kFactoryCost = {.generic = 1};
+        if (can_pay(player_state, kFactoryCost)) {
+            for (const auto& land : player_state.lands) {
+                if (land.card == CardId::MishrasFactory) {
+                    actions.push_back(
+                        PriorityAction::animate_factory(land.id));
+                }
+            }
+        }
+    }
+    for (const auto& land : player_state.lands) {
+        if (land.card != CardId::StripMine) {
+            continue;
+        }
+        for (std::size_t owner = 0; owner < state.players.size();
+             ++owner) {
+            for (const auto& target_land :
+                 state.players[owner].lands) {
+                if (target_land.id == land.id) {
+                    continue;
+                }
+                actions.push_back(PriorityAction::activate_strip_mine(
+                    land.id, owner, target_land.id));
+            }
+        }
+    }
     if (can_pay(player_state, kMillstoneActivationCost)) {
         for (const auto& artifact : player_state.artifacts) {
             if (artifact.card != CardId::Millstone ||
@@ -1917,6 +2090,118 @@ bool apply_priority_action(GameState& state, std::size_t player,
         return true;
     }
 
+    case PriorityActionKind::CastPsionicBlast:
+    case PriorityActionKind::CastSwordsToPlowshares:
+    case PriorityActionKind::CastDisenchant: {
+        const auto& definition = card_definition(action.card);
+        if (!action.target.has_value() ||
+            !pay_mana(player_state, definition.cost) ||
+            !remove_card(player_state.hand, action.card)) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = action.card,
+            .controller = player,
+            .target = action.target,
+            .spell_target = std::nullopt,
+            .x_value = action.x_value,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::ActivateLibrary: {
+        if (!action.source_permanent.has_value() ||
+            player_state.hand.size() != 7) {
+            return false;
+        }
+        for (auto& land : player_state.lands) {
+            if (land.id == *action.source_permanent &&
+                land.card == CardId::LibraryOfAlexandria &&
+                !land.tapped) {
+                land.tapped = true;
+                state.stack.push_back({
+                    .kind = StackObjectKind::ActivatedAbility,
+                    .id = state.next_stack_object_id++,
+                    .card = CardId::LibraryOfAlexandria,
+                    .controller = player,
+                });
+                return true;
+            }
+        }
+        return false;
+    }
+
+    case PriorityActionKind::ActivateMishrasFactory: {
+        constexpr ManaCost kFactoryCost = {.generic = 1};
+        if (!action.source_permanent.has_value()) {
+            return false;
+        }
+        auto factory = std::find_if(
+            player_state.lands.begin(), player_state.lands.end(),
+            [&](const LandPermanent& land) {
+                return land.id == *action.source_permanent &&
+                       land.card == CardId::MishrasFactory;
+            });
+        if (factory == player_state.lands.end()) {
+            return false;
+        }
+        // The factory itself must not pay for its own animation:
+        // shield it from the auto-payer while the cost is paid.
+        const bool was_tapped = factory->tapped;
+        factory->tapped = true;
+        if (!pay_mana(player_state, kFactoryCost)) {
+            factory->tapped = was_tapped;
+            return false;
+        }
+        factory->tapped = was_tapped;
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::MishrasFactory,
+            .controller = player,
+            .target = Target::creature_target(
+                player, *action.source_permanent),
+        });
+        return true;
+    }
+
+    case PriorityActionKind::ActivateStripMine: {
+        if (!action.source_permanent.has_value() ||
+            !action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        // Sacrificing the Strip Mine is the activation cost.
+        bool sacrificed = false;
+        for (std::size_t index = 0;
+             index < player_state.lands.size(); ++index) {
+            if (player_state.lands[index].id ==
+                    *action.source_permanent &&
+                player_state.lands[index].card == CardId::StripMine) {
+                player_state.graveyard.push_back(CardId::StripMine);
+                player_state.lands.erase(
+                    player_state.lands.begin() +
+                    static_cast<std::ptrdiff_t>(index));
+                sacrificed = true;
+                break;
+            }
+        }
+        if (!sacrificed) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::StripMine,
+            .controller = player,
+            .target = action.target,
+        });
+        return true;
+    }
+
     case PriorityActionKind::ActivateMillstone: {
         if (!action.source_permanent.has_value() ||
             !action.target.has_value() ||
@@ -1959,19 +2244,74 @@ bool resolve_top_of_stack(
     const auto& definition = card_definition(spell.card);
 
     if (spell.kind == StackObjectKind::ActivatedAbility) {
-        if (spell.card != CardId::Millstone ||
-            !spell.target.has_value() ||
-            spell.target->creature.has_value()) {
-            return false;
+        if (spell.card == CardId::Millstone) {
+            if (!spell.target.has_value() ||
+                spell.target->creature.has_value()) {
+                return false;
+            }
+            auto& target = state.players[spell.target->player];
+            for (int card = 0;
+                 card < kMillstoneCards && !target.library.empty();
+                 ++card) {
+                target.graveyard.push_back(target.library.back());
+                target.library.pop_back();
+            }
+            return true;
         }
-        auto& target = state.players[spell.target->player];
-        for (int card = 0;
-             card < kMillstoneCards && !target.library.empty();
-             ++card) {
-            target.graveyard.push_back(target.library.back());
-            target.library.pop_back();
+        if (spell.card == CardId::LibraryOfAlexandria) {
+            if (controller.library.empty()) {
+                state.failed_draw[spell.controller] = true;
+                return true;
+            }
+            controller.hand.push_back(controller.library.back());
+            controller.library.pop_back();
+            ++state.stats[spell.controller].cards_drawn;
+            return true;
         }
-        return true;
+        if (spell.card == CardId::MishrasFactory) {
+            // Animate: the land fights as a 2/2 until cleanup.
+            if (!spell.target.has_value() ||
+                !spell.target->creature.has_value()) {
+                return false;
+            }
+            for (std::size_t index = 0;
+                 index < controller.lands.size(); ++index) {
+                if (controller.lands[index].id ==
+                    *spell.target->creature) {
+                    controller.creatures.push_back({
+                        .id = controller.lands[index].id,
+                        .card = CardId::MishrasFactory,
+                        .tapped = controller.lands[index].tapped,
+                        .summoning_sick = false,
+                    });
+                    controller.lands.erase(
+                        controller.lands.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                    return true;
+                }
+            }
+            return true;  // already animated or gone: fizzle quietly
+        }
+        if (spell.card == CardId::StripMine) {
+            if (!spell.target.has_value() ||
+                !spell.target->creature.has_value()) {
+                return false;
+            }
+            auto& owner = state.players[spell.target->player];
+            for (std::size_t index = 0; index < owner.lands.size();
+                 ++index) {
+                if (owner.lands[index].id == *spell.target->creature) {
+                    owner.graveyard.push_back(
+                        owner.lands[index].card);
+                    owner.lands.erase(
+                        owner.lands.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                    return true;
+                }
+            }
+            return true;  // land already gone: fizzles
+        }
+        return false;
     }
 
     if (definition.type == CardType::Creature) {
@@ -2160,6 +2500,87 @@ bool resolve_top_of_stack(
             }
         }
         controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
+    if (spell.card == CardId::PsionicBlast) {
+        if (!spell.target.has_value()) {
+            return false;
+        }
+        controller.graveyard.push_back(spell.card);
+        controller.life -= 2;
+        if (!spell.target->creature.has_value()) {
+            state.players[spell.target->player].life -= 4;
+            state.stats[spell.controller].damage_to_opponent +=
+                spell.target->player == opponent_of(spell.controller)
+                    ? 4
+                    : 0;
+            return true;
+        }
+        auto& owner = state.players[spell.target->player];
+        auto* creature =
+            find_creature(owner, *spell.target->creature);
+        if (creature == nullptr) {
+            return true;  // fizzles
+        }
+        creature->damage += 4;
+        remove_dead_creatures(owner);
+        return true;
+    }
+
+    if (spell.card == CardId::SwordsToPlowshares) {
+        if (!spell.target.has_value() ||
+            !spell.target->creature.has_value()) {
+            return false;
+        }
+        controller.graveyard.push_back(spell.card);
+        auto& owner = state.players[spell.target->player];
+        auto* creature =
+            find_creature(owner, *spell.target->creature);
+        if (creature == nullptr) {
+            return true;  // fizzles
+        }
+        owner.life += creature_power(*creature);
+        owner.exile.push_back(creature->card);
+        owner.creatures.erase(
+            std::find_if(owner.creatures.begin(),
+                         owner.creatures.end(),
+                         [&](const CreaturePermanent& candidate) {
+                             return candidate.id ==
+                                    *spell.target->creature;
+                         }));
+        return true;
+    }
+
+    if (spell.card == CardId::Disenchant) {
+        if (!spell.target.has_value()) {
+            return false;
+        }
+        controller.graveyard.push_back(spell.card);
+        auto& owner = state.players[spell.target->player];
+        if (spell.target->creature.has_value()) {
+            for (std::size_t index = 0;
+                 index < owner.artifacts.size(); ++index) {
+                if (owner.artifacts[index].id ==
+                    *spell.target->creature) {
+                    owner.graveyard.push_back(
+                        owner.artifacts[index].card);
+                    owner.artifacts.erase(
+                        owner.artifacts.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                    return true;
+                }
+            }
+            return true;  // fizzles
+        }
+        const std::size_t index =
+            static_cast<std::size_t>(std::max(0, spell.x_value));
+        if (index < owner.enchantments.size()) {
+            owner.graveyard.push_back(owner.enchantments[index]);
+            owner.enchantments.erase(
+                owner.enchantments.begin() +
+                static_cast<std::ptrdiff_t>(index));
+        }
         return true;
     }
 
@@ -3127,6 +3548,19 @@ std::vector<CardId> cleanup_turn(
     for (auto& player : state.players) {
         player.mana_pool = {};
         player.channel_active = false;
+        for (std::size_t index = player.creatures.size();
+             index-- > 0;) {
+            if (player.creatures[index].card ==
+                CardId::MishrasFactory) {
+                player.lands.push_back(
+                    {.card = CardId::MishrasFactory,
+                     .tapped = player.creatures[index].tapped,
+                     .id = player.creatures[index].id});
+                player.creatures.erase(
+                    player.creatures.begin() +
+                    static_cast<std::ptrdiff_t>(index));
+            }
+        }
         for (auto& creature : player.creatures) {
             creature.damage = 0;
             creature.temporary_power_bonus = 0;
@@ -3981,6 +4415,87 @@ double Game::handcrafted_action_score(const PriorityAction& action,
         return 3'000.0 + handcrafted_card_value(target->card);
     }
 
+    case PriorityActionKind::CastPsionicBlast:
+        if (!action.target.has_value()) {
+            return -10'000.0;
+        }
+        if (!action.target->creature.has_value()) {
+            if (action.target->player == player) {
+                return -10'000.0;
+            }
+            if (opponent_state.life <= 4) {
+                return 10'000.0;
+            }
+            if (burn_lethal_this_turn) {
+                return 9'400.0;
+            }
+            return 850.0 +
+                   10.0 * static_cast<double>(20 - opponent_state.life);
+        }
+        if (action.target->player == player) {
+            return -10'000.0;
+        }
+        {
+            const auto blast_target = std::find_if(
+                opponent_state.creatures.begin(),
+                opponent_state.creatures.end(),
+                [&](const CreaturePermanent& creature) {
+                    return creature.id == *action.target->creature;
+                });
+            if (blast_target == opponent_state.creatures.end()) {
+                return -10'000.0;
+            }
+            const bool lethal =
+                blast_target->damage + 4 >=
+                creature_toughness(*blast_target);
+            return (lethal ? 1'900.0 : 450.0) +
+                   handcrafted_card_value(blast_target->card);
+        }
+
+    case PriorityActionKind::CastSwordsToPlowshares:
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value() ||
+            action.target->player == player) {
+            return -10'000.0;
+        }
+        {
+            const auto swords_target = std::find_if(
+                opponent_state.creatures.begin(),
+                opponent_state.creatures.end(),
+                [&](const CreaturePermanent& creature) {
+                    return creature.id == *action.target->creature;
+                });
+            if (swords_target == opponent_state.creatures.end()) {
+                return -10'000.0;
+            }
+            return 2'100.0 +
+                   handcrafted_card_value(swords_target->card);
+        }
+
+    case PriorityActionKind::CastDisenchant:
+        if (!action.target.has_value() ||
+            action.target->player == player) {
+            return -10'000.0;
+        }
+        return 1'400.0;
+
+    case PriorityActionKind::ActivateLibrary:
+        return 4'200.0;
+
+    case PriorityActionKind::ActivateMishrasFactory:
+        // Animate before combat when attacking is plausible.
+        return phase == TurnPhase::FirstMain &&
+                       state_.active_player == player
+                   ? 900.0
+                   : -200.0;
+
+    case PriorityActionKind::ActivateStripMine:
+        if (!action.target.has_value() ||
+            action.target->player == player) {
+            return -10'000.0;
+        }
+        return 650.0;
+
     case PriorityActionKind::ActivateMillstone:
         if (!action.target.has_value() ||
             action.target->player == player) {
@@ -4772,6 +5287,8 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return lotus_combo_deck();
     case DeckId::Burn:
         return burn_deck();
+    case DeckId::UWR:
+        return uwr_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -4800,6 +5317,8 @@ std::string_view deck_name(DeckId deck) {
         return "Lotus Combo";
     case DeckId::Burn:
         return "Burn";
+    case DeckId::UWR:
+        return "UWR Aggro";
     }
     return "Unknown";
 }
@@ -4828,6 +5347,15 @@ std::string_view deck_list(DeckId deck) {
         return "20 Black Lotus / 10 Channel / 10 Disintegrate";
     case DeckId::Burn:
         return "15 Mountain / 25 Lightning Bolt";
+    case DeckId::UWR:
+        return "4 Savannah Lions / 4 Serendib Efreet / 2 Serra Angel / "
+               "4 Black Vise / Mox Pearl / Mox Ruby / Mox Sapphire / "
+               "Sol Ring / Ancestral Recall / 4 Disenchant / "
+               "8 Lightning Bolt / 4 Psionic Blast / "
+               "3 Swords to Plowshares / Time Walk / "
+               "2 Wheel of Fortune / Library of Alexandria / "
+               "4 Mishra's Factory / 1 Plains / 4 Plateau / "
+               "Strip Mine / 4 Tundra / 4 Volcanic Island";
     }
     return "Unknown";
 }
@@ -5047,6 +5575,7 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         deck_cards(DeckId::RUAggro),
         deck_cards(DeckId::LotusCombo),
         deck_cards(DeckId::Burn),
+        deck_cards(DeckId::UWR),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kCardCount> seen_cards{};

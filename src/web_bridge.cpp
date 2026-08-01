@@ -43,6 +43,8 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return lotus_combo_deck();
     case DeckId::Burn:
         return burn_deck();
+    case DeckId::UWR:
+        return uwr_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -91,6 +93,8 @@ std::string_view deck_id_token(DeckId deck) {
         return "lotus-combo";
     case DeckId::Burn:
         return "burn";
+    case DeckId::UWR:
+        return "uwr";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -1281,6 +1285,9 @@ DeckId parse_deck_id(std::string_view value) {
     }
     if (value == "burn") {
         return DeckId::Burn;
+    }
+    if (value == "uwr" || value == "uwr-aggro") {
+        return DeckId::UWR;
     }
     throw std::invalid_argument(
         "unknown deck: " + std::string(value));
