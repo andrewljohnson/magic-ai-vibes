@@ -598,7 +598,7 @@ textarea:focus-visible,
 }
 
 .game-shell {
-  --player-hand-height: 142px;
+  --player-hand-height: 248px;
   --player-decision-height: 150px;
   --player-console-height: var(--player-hand-height);
   height: 100vh;
@@ -915,6 +915,11 @@ textarea:focus-visible,
 
 .opponent-side {
   grid-template-rows: auto 1fr;
+}
+
+.permanent-zone.is-opponent-zone {
+  display: flex;
+  flex-direction: column-reverse;
 }
 
 .player-hud {
@@ -1581,7 +1586,7 @@ textarea:focus-visible,
 
 .opponent-hand-space {
   min-width: 0;
-  min-height: 172px;
+  min-height: 196px;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1589,11 +1594,12 @@ textarea:focus-visible,
   z-index: 2;
 }
 
-/* MTG-Arena style: the opponent placard sits centered at the top with
-   the hand arcing over it; cards paint above, placard peeks below. */
+/* MTG-Arena style: the opponent placard is pinned at the top and the
+   hand hangs below it, cupping around the placard with an inverted
+   arc; cards still paint above where they overlap. */
 .opponent-hand-space .player-hud {
   position: absolute;
-  top: 55px;
+  top: 4px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1;
@@ -1606,6 +1612,13 @@ textarea:focus-visible,
   background: none;
   border: 0;
   overflow: visible;
+  margin-top: 92px;
+}
+
+.opponent-hand-space .face-hand .hand-fan {
+  overflow: visible;
+  height: auto;
+  padding: 0 24px;
 }
 
 .hidden-hand {
@@ -1676,7 +1689,6 @@ textarea:focus-visible,
   grid-template-rows:
     var(--player-hand-height)
     var(--player-decision-height);
-  --player-hand-height: 200px;
   border-top: 0;
   background: rgba(6, 10, 9, 0.94);
   position: relative;
@@ -1700,18 +1712,22 @@ textarea:focus-visible,
   z-index: 2;
   background: none;
   align-items: start;
-  padding-top: 4px;
+  padding-top: 0;
+  overflow: visible;
 }
 
 .player-console > .face-hand .hand-fan {
-  height: 144px;
+  height: 152px;
   align-items: flex-start;
+  overflow: visible;
+  padding: 0 24px;
 }
 
-/* Your placard: centered at the bottom, hand arcing above it. */
+/* Your placard: centered beneath the hand, cards just brushing its
+   top edge. */
 .player-console > .player-hud {
   position: absolute;
-  top: 85px;
+  top: 124px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1;
@@ -1758,9 +1774,9 @@ textarea:focus-visible,
 }
 
 .hand-card-wrap {
-  width: 58px;
-  height: 130px;
-  flex: 0 0 58px;
+  width: 68px;
+  height: 134px;
+  flex: 0 0 68px;
   position: relative;
   transform:
     rotate(var(--fan-angle))
@@ -1769,6 +1785,19 @@ textarea:focus-visible,
   transition:
     transform 150ms ease,
     z-index 0ms;
+}
+
+.opponent-hand-space .hand-card-wrap {
+  transform:
+    rotate(calc(var(--fan-angle) * -1))
+    translateY(var(--fan-lift));
+  transform-origin: top center;
+}
+
+.opponent-hand-space .card-back {
+  transform:
+    rotate(calc(var(--hand-angle) * -1))
+    translateY(calc(var(--hand-lift) * -1));
 }
 
 .hand-card-wrap:hover {
@@ -1850,7 +1879,7 @@ textarea:focus-visible,
 }
 
 .hand-card-wrap .card-name {
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .hand-card-wrap .card-type {
@@ -1873,14 +1902,18 @@ textarea:focus-visible,
 }
 
 .debug-hand .hand-card-wrap {
-  width: 40px;
-  height: 88px;
-  flex-basis: 40px;
+  width: 48px;
+  height: 92px;
+  flex-basis: 48px;
 }
 
 .debug-hand .hand-card-wrap .card-face {
-  width: 52px;
-  height: 75px;
+  width: 62px;
+  height: 78px;
+}
+
+.debug-hand .hand-card-wrap .card-name {
+  font-size: var(--card-type-floor);
 }
 
 .debug-pill {
@@ -3490,12 +3523,29 @@ select {
 
 @media (max-height: 780px) {
   .game-shell {
-    --player-hand-height: 112px;
+    --player-hand-height: 170px;
     --player-decision-height: 150px;
   }
 
   .table-stage {
-    grid-template-rows: 44px minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+
+  .player-console > .face-hand .hand-fan {
+    height: 104px;
+  }
+
+  .player-console > .player-hud {
+    top: 92px;
+  }
+
+  .opponent-hand-space {
+    min-height: 168px;
+  }
+
+  .opponent-hand-space .face-hand,
+  .opponent-hand-space .hidden-hand {
+    margin-top: 80px;
   }
 
   .hand-card-wrap {
@@ -3872,6 +3922,30 @@ select {
 .stack-rail.is-empty {
   opacity: 0.75;
 }
+.stack-pass-button {
+  margin: auto 12px 14px;
+  padding: 12px 10px;
+  border: 1px solid var(--gold-bright, #f1d38a);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f1d38a, #c8a766);
+  color: #17130a;
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 0 18px rgba(241, 211, 138, 0.35);
+}
+
+.stack-pass-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.stack-pass-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .stack-empty-note {
   font-size: 0.78rem;
   color: var(--text-muted, #667);

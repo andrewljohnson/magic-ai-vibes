@@ -779,8 +779,7 @@ function PermanentRow({
 }) {
   if (permanents.length === 0) return null;
   return (
-    <div className="permanent-row">
-      <span className="row-label">{title}</span>
+    <div className="permanent-row" aria-label={title}>
       <div className="permanent-list">
         {permanents.map((permanent) => {
           const id = permanentId(permanent);
@@ -1143,7 +1142,7 @@ function BattlefieldSide({
           />
         </div>
       )}
-      <div className="permanent-zone">
+      <div className={`permanent-zone ${opponent ? "is-opponent-zone" : ""}`}>
         <PermanentRow
           title="Permanents"
           permanents={nonlands}
@@ -1320,6 +1319,8 @@ function StackRail({
   onEndPriorityDrag,
   onPriorityDragOver,
   onPriorityDrop,
+  onPass,
+  passBusy,
 }: {
   stack: StackEntry[];
   observerSeat: PlayerIndex;
@@ -1335,6 +1336,8 @@ function StackRail({
     destination: PriorityDestinationKey,
     event: ReactDragEvent<HTMLElement>,
   ) => void;
+  onPass?: () => void;
+  passBusy?: boolean;
 }) {
   return (
     <aside
@@ -1436,6 +1439,16 @@ function StackRail({
           );
         })}
       </div>
+      {onPass && (
+        <button
+          type="button"
+          className="stack-pass-button"
+          onClick={onPass}
+          disabled={passBusy}
+        >
+          Pass priority
+        </button>
+      )}
     </aside>
   );
 }
@@ -4111,41 +4124,7 @@ export default function App() {
                   onBlockDrop={dropBlockTarget}
                 />
                 <div className="midline">
-                  <div
-                    className={`player-box ${
-                      state.activePlayer === farSeat ? "is-active" : ""
-                    }`}
-                  >
-                    <span className="player-box-name">
-                      {playerLabel(snapshot, farSeat)}
-                    </span>
-                    <span className="player-box-life">
-                      {state.players[farSeat].life}
-                    </span>
-                    <span className="player-box-counts">
-                      ✋{state.players[farSeat].handSize} · 📚
-                      {state.players[farSeat].librarySize} · 🪦
-                      {state.players[farSeat].graveyard.length}
-                    </span>
-                  </div>
                   <strong>{formatPhase(state.phase)}</strong>
-                  <div
-                    className={`player-box ${
-                      state.activePlayer === nearSeat ? "is-active" : ""
-                    }`}
-                  >
-                    <span className="player-box-name">
-                      {playerLabel(snapshot, nearSeat)}
-                    </span>
-                    <span className="player-box-life">
-                      {state.players[nearSeat].life}
-                    </span>
-                    <span className="player-box-counts">
-                      ✋{state.players[nearSeat].handSize} · 📚
-                      {state.players[nearSeat].librarySize} · 🪦
-                      {state.players[nearSeat].graveyard.length}
-                    </span>
-                  </div>
                 </div>
                 <BattlefieldSide
                   player={state.players[nearSeat]}
@@ -4281,6 +4260,23 @@ export default function App() {
               onEndPriorityDrag={finishPriorityDrag}
               onPriorityDragOver={dragOverPriorityDestination}
               onPriorityDrop={dropPriorityDestination}
+              onPass={
+                priorityDecision
+                  ? (() => {
+                      const pass = priorityDecision.options.find(
+                        (option) => option.kind === "pass",
+                      );
+                      return pass
+                        ? () =>
+                            act({
+                              decisionId: priorityDecision.decisionId,
+                              index: pass.index,
+                            })
+                        : undefined;
+                    })()
+                  : undefined
+              }
+              passBusy={acting}
             />
           </div>
           {acting && snapshot.status === "playing" ? (

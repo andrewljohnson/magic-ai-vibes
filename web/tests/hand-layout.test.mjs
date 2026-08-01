@@ -449,7 +449,7 @@ test("match typography keeps a readable floor without enlarging fixed regions", 
     cssRule(css, ".card-name"),
     /font-size:\s*var\(--card-name-size\)/,
   );
-  assert.match(cssRule(css, ".hand-card-wrap .card-name"), /font-size:\s*13px/);
+  assert.match(cssRule(css, ".hand-card-wrap .card-name"), /font-size:\s*12px/);
 
   const undersizedLiterals = [...css.matchAll(/font-size:\s*(\d+)px/g)]
     .map(([, value]) => Number(value))
@@ -476,8 +476,8 @@ test("match typography keeps a readable floor without enlarging fixed regions", 
   );
   assert.ok(compactViewport, "missing 1280x720 compact-height layout");
   const compactShellRule = cssRule(compactViewport[1], ".game-shell");
-  assert.equal(pixels(shellRule, "--player-hand-height"), 142);
-  assert.equal(pixels(compactShellRule, "--player-hand-height"), 112);
+  assert.equal(pixels(shellRule, "--player-hand-height"), 248);
+  assert.equal(pixels(compactShellRule, "--player-hand-height"), 170);
   assert.ok(
     pixels(compactShellRule, "--player-decision-height") >= 150,
     "the 1280x720 decision row must fit the 12px heading copy with margin",
