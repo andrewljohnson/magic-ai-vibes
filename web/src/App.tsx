@@ -3158,7 +3158,7 @@ export default function App() {
     >(defaults, ["players"], []);
     return {
       seed: Number(readDefault(defaults, ["seed", "gameSeed"], 42)),
-      debugReveal: false,
+      debugReveal: true,
       bluffMode: Boolean(readDefault(defaults, ["bluffMode"], false)),
       rollouts: Number(readDefault(defaults, ["rollouts"], 2)),
       deepRollouts: Number(readDefault(defaults, ["deepRollouts"], 8)),
