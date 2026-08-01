@@ -30,7 +30,7 @@ namespace old_school {
 
 namespace {
 
-constexpr std::array<CardDefinition, 31> kCardDefinitions = {{
+constexpr std::array<CardDefinition, 47> kCardDefinitions = {{
     {CardId::Forest, "Forest", CardType::Land, {}, 0, 0, 0},
     {CardId::Mountain, "Mountain", CardType::Land, {}, 0, 0, 0},
     {CardId::GrizzlyBears,
@@ -237,6 +237,136 @@ constexpr std::array<CardDefinition, 31> kCardDefinitions = {{
      7,
      0,
      false},
+    {CardId::SavannahLions,
+     "Savannah Lions",
+     CardType::Creature,
+     {.white = 1},
+     2,
+     1,
+     0,
+     false},
+    {CardId::SerendibEfreet,
+     "Serendib Efreet",
+     CardType::Creature,
+     {.generic = 2, .blue = 1},
+     3,
+     4,
+     0,
+     true},
+    {CardId::SerraAngel,
+     "Serra Angel",
+     CardType::Creature,
+     {.generic = 3, .white = 2},
+     4,
+     4,
+     0,
+     true,
+     0,
+     true},
+    {CardId::BlackVise,
+     "Black Vise",
+     CardType::Artifact,
+     {.generic = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::MoxPearl,
+     "Mox Pearl",
+     CardType::Artifact,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::MoxRuby,
+     "Mox Ruby",
+     CardType::Artifact,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Disenchant,
+     "Disenchant",
+     CardType::Instant,
+     {.generic = 1, .white = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::PsionicBlast,
+     "Psionic Blast",
+     CardType::Instant,
+     {.generic = 2, .blue = 1},
+     0,
+     0,
+     4,
+     false},
+    {CardId::SwordsToPlowshares,
+     "Swords to Plowshares",
+     CardType::Instant,
+     {.white = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Plateau,
+     "Plateau",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Tundra,
+     "Tundra",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::VolcanicIsland,
+     "Volcanic Island",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::WheelOfFortune,
+     "Wheel of Fortune",
+     CardType::Sorcery,
+     {.generic = 2, .red = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::LibraryOfAlexandria,
+     "Library of Alexandria",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::MishrasFactory,
+     "Mishra's Factory",
+     CardType::Land,
+     {},
+     2,
+     2,
+     0,
+     false},
+    {CardId::StripMine,
+     "Strip Mine",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
 }};
 
 constexpr std::array<CardId, 12> kCreatureCards = {
@@ -254,17 +384,21 @@ constexpr std::array<CardId, 12> kCreatureCards = {
     CardId::ForestColossus,
 };
 
-constexpr std::array<CardId, 3> kSorceryCards = {
+constexpr std::array<CardId, 4> kSorceryCards = {
     CardId::Tsunami,
     CardId::TimeWalk,
     CardId::Channel,
+    CardId::WheelOfFortune,
 };
 
-constexpr std::array<CardId, 4> kArtifactCards = {
+constexpr std::array<CardId, 7> kArtifactCards = {
     CardId::Millstone,
     CardId::MoxSapphire,
     CardId::SolRing,
     CardId::BlackLotus,
+    CardId::BlackVise,
+    CardId::MoxPearl,
+    CardId::MoxRuby,
 };
 
 constexpr std::array<CardId, 1> kEnchantmentCards = {
@@ -427,15 +561,48 @@ ManaCost land_mana(CardId card) {
         return {.blue = 1};
     case CardId::Plains:
         return {.white = 1};
+    // Dual lands: land_mana reports one face for aggregate counting;
+    // the payment planner treats them as either color via
+    // land_provides().
+    case CardId::Plateau:
+        return {.red = 1};
+    case CardId::Tundra:
+        return {.white = 1};
+    case CardId::VolcanicIsland:
+        return {.blue = 1};
     default:
         return {};
     }
+}
+
+// True when the land can produce the given colored mana.
+bool land_provides(CardId land, int ManaCost::*color) {
+    if (color == &ManaCost::green) {
+        return land == CardId::Forest;
+    }
+    if (color == &ManaCost::red) {
+        return land == CardId::Mountain || land == CardId::Plateau ||
+               land == CardId::VolcanicIsland;
+    }
+    if (color == &ManaCost::blue) {
+        return land == CardId::Island || land == CardId::Tundra ||
+               land == CardId::VolcanicIsland;
+    }
+    if (color == &ManaCost::white) {
+        return land == CardId::Plains || land == CardId::Plateau ||
+               land == CardId::Tundra;
+    }
+    return false;
 }
 
 ManaCost artifact_mana(CardId card) {
     switch (card) {
     case CardId::MoxSapphire:
         return {.blue = 1};
+    case CardId::MoxPearl:
+        return {.white = 1};
+    case CardId::MoxRuby:
+        return {.red = 1};
     case CardId::SolRing:
         return {.generic = 2};
     default:
@@ -517,52 +684,56 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         }
         return false;
     };
-    const auto select_land_color =
-        [&](CardId land, int needed) {
-            for (std::size_t index = 0;
-                 index < player.lands.size() && needed > 0;
-                 ++index) {
-                if (!player.lands[index].tapped &&
-                    !plan.tap_lands[index] &&
-                    player.lands[index].card == land) {
-                    tap_land(index);
-                    --needed;
-                }
-            }
-            while (needed > 0 && land == CardId::Forest && tap_elf()) {
-                --needed;
-            }
-            // A Black Lotus covers up to three missing mana of one color.
-            while (needed > 0) {
-                int ManaCost::*color = &ManaCost::generic;
-                if (land == CardId::Forest) color = &ManaCost::green;
-                if (land == CardId::Mountain) color = &ManaCost::red;
-                if (land == CardId::Island) color = &ManaCost::blue;
-                if (land == CardId::Plains) color = &ManaCost::white;
-                if (!sacrifice_lotus_for(color)) {
-                    break;
-                }
-                needed = std::max(0, needed - 3);
-            }
-            return needed == 0;
-        };
-    const auto select_blue = [&](int needed) {
+    const auto mox_for_color = [](int ManaCost::*color) {
+        if (color == &ManaCost::blue) return CardId::MoxSapphire;
+        if (color == &ManaCost::white) return CardId::MoxPearl;
+        if (color == &ManaCost::red) return CardId::MoxRuby;
+        return CardId::Forest;  // sentinel: no mox for this color
+    };
+    const auto select_color = [&](int ManaCost::*color, int needed) {
+        // Color-matched moxen first (they only ever make this color),
+        // then basics, then duals (kept flexible as long as possible),
+        // then elves for green, then Lotus.
+        const CardId mox = mox_for_color(color);
         for (std::size_t index = 0;
-             index < player.artifacts.size() && needed > 0;
-             ++index) {
+             index < player.artifacts.size() && needed > 0; ++index) {
             if (!player.artifacts[index].tapped &&
                 !plan.tap_artifacts[index] &&
-                player.artifacts[index].card ==
-                    CardId::MoxSapphire) {
+                player.artifacts[index].card == mox &&
+                mox != CardId::Forest) {
                 tap_artifact(index);
                 --needed;
             }
         }
-        if (needed > 0 &&
-            !select_land_color(CardId::Island, needed)) {
-            return false;
+        const auto tap_matching = [&](bool duals, int remaining) {
+            for (std::size_t index = 0;
+                 index < player.lands.size() && remaining > 0;
+                 ++index) {
+                const CardId land = player.lands[index].card;
+                const bool dual = land == CardId::Plateau ||
+                                  land == CardId::Tundra ||
+                                  land == CardId::VolcanicIsland;
+                if (dual == duals && !player.lands[index].tapped &&
+                    !plan.tap_lands[index] &&
+                    land_provides(land, color)) {
+                    tap_land(index);
+                    --remaining;
+                }
+            }
+            return remaining;
+        };
+        needed = tap_matching(false, needed);
+        needed = tap_matching(true, needed);
+        while (needed > 0 && color == &ManaCost::green && tap_elf()) {
+            --needed;
         }
-        return true;
+        while (needed > 0) {
+            if (!sacrifice_lotus_for(color)) {
+                break;
+            }
+            needed = std::max(0, needed - 3);
+        }
+        return needed == 0;
     };
 
     const int green_needed =
@@ -573,10 +744,10 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         std::max(0, cost.blue - plan.remaining_pool.blue);
     const int white_needed =
         std::max(0, cost.white - plan.remaining_pool.white);
-    if (!select_land_color(CardId::Forest, green_needed) ||
-        !select_land_color(CardId::Mountain, red_needed) ||
-        !select_blue(blue_needed) ||
-        !select_land_color(CardId::Plains, white_needed)) {
+    if (!select_color(&ManaCost::green, green_needed) ||
+        !select_color(&ManaCost::red, red_needed) ||
+        !select_color(&ManaCost::blue, blue_needed) ||
+        !select_color(&ManaCost::white, white_needed)) {
         return plan;
     }
 
@@ -597,11 +768,54 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             tap_artifact(index);
         }
     }
-    for (std::size_t index = 0;
-         index < player.lands.size() && needs_more_mana();
-         ++index) {
-        if (!player.lands[index].tapped &&
-            !plan.tap_lands[index]) {
+    {
+        // Generic payment prefers the lands the rest of the hand wants
+        // least: rank each color by how many hand cards still demand
+        // it, then spend low-demand basics first and flexible duals
+        // last, so held instants and abilities keep their colors open.
+        std::array<int, 4> demand{};  // green, red, blue, white
+        for (const CardId held : player.hand) {
+            const auto& held_cost = card_definition(held).cost;
+            demand[0] += held_cost.green > 0 ? 1 : 0;
+            demand[1] += held_cost.red > 0 ? 1 : 0;
+            demand[2] += held_cost.blue > 0 ? 1 : 0;
+            demand[3] += held_cost.white > 0 ? 1 : 0;
+        }
+        const auto land_score = [&](CardId land) {
+            int score = 0;
+            if (land_provides(land, &ManaCost::green)) {
+                score += 1 + demand[0] * 4;
+            }
+            if (land_provides(land, &ManaCost::red)) {
+                score += 1 + demand[1] * 4;
+            }
+            if (land_provides(land, &ManaCost::blue)) {
+                score += 1 + demand[2] * 4;
+            }
+            if (land_provides(land, &ManaCost::white)) {
+                score += 1 + demand[3] * 4;
+            }
+            return score;
+        };
+        std::vector<std::size_t> order;
+        for (std::size_t index = 0; index < player.lands.size();
+             ++index) {
+            if (!player.lands[index].tapped &&
+                !plan.tap_lands[index]) {
+                order.push_back(index);
+            }
+        }
+        std::stable_sort(order.begin(), order.end(),
+                         [&](std::size_t left, std::size_t right) {
+                             return land_score(
+                                        player.lands[left].card) <
+                                    land_score(
+                                        player.lands[right].card);
+                         });
+        for (const std::size_t index : order) {
+            if (!needs_more_mana()) {
+                break;
+            }
             tap_land(index);
         }
     }
@@ -925,6 +1139,35 @@ double handcrafted_card_value(CardId card) {
         return 950.0;
     case CardId::ForestColossus:
         return 1'500.0;
+    case CardId::SavannahLions:
+        return 500.0;
+    case CardId::SerendibEfreet:
+        return 950.0;
+    case CardId::SerraAngel:
+        return 1'400.0;
+    case CardId::BlackVise:
+        return 850.0;
+    case CardId::MoxPearl:
+    case CardId::MoxRuby:
+        return 1'600.0;
+    case CardId::Disenchant:
+        return 600.0;
+    case CardId::PsionicBlast:
+        return 850.0;
+    case CardId::SwordsToPlowshares:
+        return 900.0;
+    case CardId::Plateau:
+    case CardId::Tundra:
+    case CardId::VolcanicIsland:
+        return 150.0;
+    case CardId::WheelOfFortune:
+        return 1'200.0;
+    case CardId::LibraryOfAlexandria:
+        return 400.0;
+    case CardId::MishrasFactory:
+        return 300.0;
+    case CardId::StripMine:
+        return 200.0;
     }
     return 0.0;
 }
@@ -1443,7 +1686,9 @@ bool apply_priority_action(GameState& state, std::size_t player,
             !remove_card(player_state.hand, action.card)) {
             return false;
         }
-        player_state.lands.push_back({.card = action.card, .tapped = false});
+        player_state.lands.push_back({.card = action.card,
+                                      .tapped = false,
+                                      .id = state.next_permanent_id++});
         player_state.land_played_this_turn = true;
         ++state.stats[player].lands_played;
         return true;
@@ -1912,6 +2157,30 @@ bool resolve_top_of_stack(
                 } else {
                     ++land;
                 }
+            }
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
+    if (spell.card == CardId::WheelOfFortune) {
+        for (auto& wheel_player : state.players) {
+            for (const CardId held : wheel_player.hand) {
+                wheel_player.graveyard.push_back(held);
+            }
+            wheel_player.hand.clear();
+        }
+        for (std::size_t seat = 0; seat < 2; ++seat) {
+            auto& wheel_player = state.players[seat];
+            for (int draw = 0; draw < 7; ++draw) {
+                if (wheel_player.library.empty()) {
+                    state.failed_draw[seat] = true;
+                    break;
+                }
+                wheel_player.hand.push_back(
+                    wheel_player.library.back());
+                wheel_player.library.pop_back();
+                ++state.stats[seat].cards_drawn;
             }
         }
         controller.graveyard.push_back(spell.card);
@@ -2714,7 +2983,9 @@ bool resolve_combat(
     for (const PermanentId attacker_id : attackers) {
         auto* attacker =
             find_creature(state.players[attacking_player], attacker_id);
-        attacker->tapped = true;
+        if (!card_definition(attacker->card).vigilance) {
+            attacker->tapped = true;
+        }
         const int attacker_power = creature_power(*attacker);
         const auto blocker_group = blockers_by_attacker.find(attacker_id);
 
@@ -2759,6 +3030,21 @@ void begin_turn(GameState& state, std::size_t player) {
     }
     auto& player_state = state.players.at(player);
     player_state.land_played_this_turn = false;
+    // Upkeep triggers, resolved deterministically at turn start:
+    // each Serendib Efreet stings its controller; each opposing Black
+    // Vise squeezes the active player for cards above four in hand.
+    for (const auto& creature : player_state.creatures) {
+        if (creature.card == CardId::SerendibEfreet) {
+            player_state.life -= 1;
+        }
+    }
+    const auto& opponent_state = state.players.at(opponent_of(player));
+    for (const auto& artifact : opponent_state.artifacts) {
+        if (artifact.card == CardId::BlackVise) {
+            player_state.life -= std::max(
+                0, static_cast<int>(player_state.hand.size()) - 4);
+        }
+    }
     for (auto& land : player_state.lands) {
         land.tapped = false;
     }
@@ -4162,6 +4448,9 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
             advance_turn_player(state_);
         }
         begin_turn(state_, state_.active_player);
+        if (const auto upkeep_result = life_total_result()) {
+            return *upkeep_result;
+        }
 
         const bool starting_player_first_turn =
             turn == 1 && state_.active_player == state_.starting_player;

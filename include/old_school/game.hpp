@@ -48,10 +48,26 @@ enum class CardId : std::uint8_t {
     LlanowarElves,
     MossBeast,
     ForestColossus,
+    SavannahLions,
+    SerendibEfreet,
+    SerraAngel,
+    BlackVise,
+    MoxPearl,
+    MoxRuby,
+    Disenchant,
+    PsionicBlast,
+    SwordsToPlowshares,
+    Plateau,
+    Tundra,
+    VolcanicIsland,
+    WheelOfFortune,
+    LibraryOfAlexandria,
+    MishrasFactory,
+    StripMine,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::ForestColossus) + 1;
+    static_cast<std::size_t>(CardId::StripMine) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -83,6 +99,8 @@ struct CardDefinition {
     bool flying = false;
     // Zero means the creature has no power-based blocking restriction.
     int cannot_block_power_at_least = 0;
+    // Vigilant creatures do not tap when attacking.
+    bool vigilance = false;
 };
 
 const CardDefinition& card_definition(CardId card);
@@ -101,6 +119,10 @@ using PermanentId = std::uint64_t;
 struct LandPermanent {
     CardId card;
     bool tapped = false;
+    // Assigned when the land enters play; targeting (Strip Mine, the
+    // simplified Chaos Orb) needs stable identities. Defaulted last so
+    // existing aggregate initializers stay valid.
+    PermanentId id = 0;
 
     bool operator==(const LandPermanent&) const = default;
 };
