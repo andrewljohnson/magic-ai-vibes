@@ -124,7 +124,7 @@
     <div class="legend" id="loss-legend"><span style="--c: var(--s1)">value loss</span></div>
   </section>
 
-  <details><summary>Data table (latest 40 rows)</summary><div id="table"></div></details>
+  <details><summary>Data table (latest 1000 rows)</summary><div id="table"></div></details>
 </main>
 <script src="site-nav.js"></script>
 <script>
@@ -379,7 +379,7 @@ function render() {
     (hasPolicy ? `<span style="--c: var(--s2)">policy loss</span>` : "");
   }
 
-  const recent = rows.slice(-40).reverse();
+  const recent = rows.slice(-1000).reverse();
   document.getElementById("table").innerHTML =
     "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs DeepMC</th><th>mean lift</th></tr>" +
     recent.map(r => {
