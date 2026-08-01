@@ -377,6 +377,18 @@ struct Auditor {
             }
             pending_growth.reset();
         }
+        if (ev.kind == GameEventKind::PriorityActionSelected &&
+            ev.player == spz_seat &&
+            obs.active_player == spz_seat &&
+            ev.priority_action.has_value()) {
+            const auto kind = ev.priority_action->kind;
+            if (kind == PriorityActionKind::PlayLand &&
+                cast_a_spell_this_turn) {
+                flag(obs.turn_number,
+                     "LAND AFTER SPELL: land drop sequenced after a "
+                     "cast, taxing other mana sources");
+            }
+        }
         if (ev.kind == GameEventKind::TurnStarted) {
             pending_growth.reset();
             cast_a_spell_this_turn = false;
