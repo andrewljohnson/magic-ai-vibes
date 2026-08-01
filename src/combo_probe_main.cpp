@@ -119,7 +119,6 @@ int main(int argc, char** argv) {
             policy.gamma_per_turn = 0.98;
             policy.seed = seed + 31 * game_index + seat;
             if (advantage) {
-                policy.pass_dominance_prune = false;
             }
             HumanController controller = spz::make_spz_controller(
                 net, game_decks, seat, policy, nullptr, nullptr,

@@ -224,7 +224,6 @@ int main(int argc, char** argv) {
                  policy.gamma_per_turn = 0.98;
                  policy.seed = game_seed + seat;
                  if (spz_advantage_net) {
-                     policy.pass_dominance_prune = false;
                  }
                  config.human_controllers[seat] =
                      spz::make_spz_controller(spz_net, game_decks, seat,

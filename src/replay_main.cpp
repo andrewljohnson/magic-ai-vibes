@@ -239,7 +239,6 @@ int main(int argc, char** argv) {
         policy.rollout = true;
         policy.gamma_per_turn = 0.98;
         if (advantage) {
-            policy.pass_dominance_prune = false;
         }
         // Match the arena bridge exactly for seat 1.
         policy.seed = seat == 1 ? (seed ^ 0x53505AULL)

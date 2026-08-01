@@ -1627,7 +1627,12 @@ int run_bridge_session(std::istream& input, std::ostream& output,
                     const selfplay_zero::SpzAdvantageNet>(
                     selfplay_zero::load_spz_advantage_net(
                         advantage_path.string()));
-                spz_policy.pass_dominance_prune = false;
+                // Exact dominance filtering stays on even with the
+                // learned head: the head arbitrates ties among
+                // non-dominated actions, but a provably no-upside
+                // action (an X=0 self-Disintegrate) should never
+                // survive on rollout noise. Live regression at seed
+                // 4148072829 without it.
             }
         }
         spz_policy.seed = config.game_seed ^ 0x53505AULL;
