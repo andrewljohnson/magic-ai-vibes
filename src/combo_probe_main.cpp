@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
     std::size_t games = 20;
     std::uint64_t seed = 20260741;
     std::string model = "data/spz-champion-v9.txt";
-    std::string advantage_path = "data/spz-advantage-v5.txt";
+    std::string advantage_path = "data/spz-advantage-v6.txt";
     bool use_advantage = true;
     std::size_t top_k = 5;
     bool verbose = false;

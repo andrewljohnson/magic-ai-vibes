@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
     std::uint64_t seed = 20260798;
     std::size_t narrations = 3;
     std::string model = "data/spz-champion-v9.txt";
-    std::string advantage_path = "data/spz-advantage-v5.txt";
+    std::string advantage_path = "data/spz-advantage-v6.txt";
     for (int arg = 1; arg < argc; ++arg) {
         const std::string flag = argv[arg];
         if (flag == "--deck") {
@@ -148,6 +148,8 @@ int main(int argc, char** argv) {
             narrations = std::stoul(argv[++arg]);
         } else if (flag == "--model") {
             model = argv[++arg];
+        } else if (flag == "--advantage-path") {
+            advantage_path = argv[++arg];
         } else {
             std::cerr << "unknown flag " << flag << "\n";
             return 1;

@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     std::uint64_t seed = 20260730;
     std::string output_path = "build/telemetry/matchup-matrix.json";
     std::string spz_model = "data/spz-champion-v9.txt";
-    std::string spz_advantage = "data/spz-advantage-v5.txt";
+    std::string spz_advantage = "data/spz-advantage-v6.txt";
     std::size_t threads = std::thread::hardware_concurrency();
     std::optional<std::string> only_bot;
     for (int arg = 1; arg < argc; ++arg) {
