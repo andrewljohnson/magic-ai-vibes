@@ -64,7 +64,7 @@
 
   <section>
     <h2>Strength probes</h2>
-    <p class="desc">Paired win rate of the current net, probed every 10 iterations (100 games per opponent per probe, so ±10 points of noise per dot — watch trends, not wiggles). Above the gray 50% line means winning.</p>
+    <p class="desc">Paired win rate of the current net. Probes run beside training on spare cores and land every ~40 iterations at low reps (±12 points of noise per dot — watch trends, not wiggles). Above the gray 50% line means winning.</p>
     <div class="chartwrap"><svg id="strength" viewBox="0 0 960 300"></svg><div class="tooltip" id="tip-strength"></div></div>
     <div class="legend">
       <span style="--c: var(--s1)">vs Handcrafted</span>
@@ -242,7 +242,9 @@ const DECK_KEYS = [
 function render() {
   if (!rows.length) return;
   const last = rows[rows.length - 1];
-  const probes = rows.filter(r => r.vs_handcrafted !== undefined);
+  const probes = rows
+    .filter(r => r.vs_handcrafted !== undefined)
+    .map(r => ({ ...r, iteration: r.probe_iteration ?? r.iteration }));
   const lastProbe = probes[probes.length - 1];
   const firstProbe = probes[0];
   document.getElementById("t-iter").textContent = last.iteration;
@@ -283,7 +285,11 @@ function render() {
 
   const behaviorRows = rows
     .filter(r => r.behaviors)
-    .map(r => ({ iteration: r.iteration, games: r.games, ...r.behaviors }));
+    .map(r => ({
+      iteration: r.probe_iteration ?? r.iteration,
+      games: r.games,
+      ...r.behaviors,
+    }));
   if (behaviorRows.length) {
     drawChart("behaviors", "tip-behaviors", behaviorRows,
       [{ key: "land_drop", label: "land drop", color: "--s1", dots: true },

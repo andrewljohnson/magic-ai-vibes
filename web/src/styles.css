@@ -193,10 +193,9 @@ textarea:focus-visible,
 .repro-panel {
   width: min(600px, calc(100vw - 48px));
   position: absolute;
-  left: 50%;
+  left: 0;
   top: calc(100% + 13px);
   z-index: 50;
-  transform: translateX(-50%);
   padding: 16px;
   border: 1px solid rgba(200, 167, 102, 0.34);
   border-radius: 9px;
@@ -352,14 +351,9 @@ textarea:focus-visible,
 }
 
 .debug-reveal-warning {
-  padding: 5px 8px;
-  border: 1px solid #ff9b8c;
-  border-radius: 5px;
-  color: #fff5f1;
-  background: #8d3028;
-  box-shadow: 0 0 14px rgba(224, 84, 68, 0.34);
+  color: #e07767;
   font-size: var(--type-floor);
-  font-weight: 850;
+  font-weight: 600;
   letter-spacing: 0.08em;
   white-space: nowrap;
 }
@@ -598,8 +592,8 @@ textarea:focus-visible,
 }
 
 .game-shell {
-  --player-hand-height: 248px;
-  --player-decision-height: 150px;
+  --player-hand-height: 216px;
+  --player-decision-height: 118px;
   --player-console-height: var(--player-hand-height);
   height: 100vh;
   display: flex;
@@ -878,9 +872,11 @@ textarea:focus-visible,
 .battlefield {
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
-  padding: 8px 20px;
-  overflow: hidden;
+  grid-template-rows: auto auto auto;
+  align-content: space-between;
+  padding: 4px 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .battlefield-side {
@@ -898,6 +894,10 @@ textarea:focus-visible,
 .battlefield-side.is-active {
   border-color: rgba(200, 167, 102, 0.16);
   background: rgba(200, 167, 102, 0.025);
+}
+
+.player-side .permanent-zone {
+  min-height: 96px;
 }
 
 .player-side.is-play-destination {
@@ -919,16 +919,30 @@ textarea:focus-visible,
 
 .permanent-zone.is-opponent-zone {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
+}
+
+/* Opponent zones mirror yours: lands behind (top), permanents toward
+   the middle, and declared attackers in front of everything. */
+.permanent-zone.is-opponent-zone > .permanent-row:first-of-type {
+  order: 2;
+}
+
+.permanent-zone.is-opponent-zone > .permanent-row:last-of-type {
+  order: 1;
+}
+
+.permanent-zone.is-opponent-zone > .combat-lane {
+  order: 3;
 }
 
 .player-hud {
   grid-row: 1 / -1;
-  width: 202px;
+  width: 230px;
   align-self: center;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) 48px;
-  grid-template-rows: 48px auto;
+  grid-template-columns: 68px minmax(0, 1fr) 48px;
+  grid-template-rows: 64px auto;
   align-items: center;
   gap: 6px 8px;
   padding: 9px;
@@ -972,16 +986,24 @@ textarea:focus-visible,
 }
 
 .identity-orb {
-  width: 35px;
-  height: 35px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   color: var(--gold-bright);
-  font-family: Georgia, serif;
-  font-size: 16px;
   border: 1px solid rgba(200, 167, 102, 0.4);
   background: radial-gradient(circle at 35% 30%, #28352f, #111715 70%);
+}
+
+.avatar-svg {
+  width: 42px;
+  height: 42px;
+}
+
+.identity-orb.is-robot {
+  color: #9fc4d8;
+  border-color: rgba(129, 178, 210, 0.45);
 }
 
 .player-copy {
@@ -1038,6 +1060,72 @@ textarea:focus-visible,
   font-size: 23px;
   font-weight: 400;
   line-height: 1;
+}
+
+.zone-piles {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 10px;
+}
+
+.zone-pile {
+  position: relative;
+  width: 30px;
+  height: 40px;
+}
+
+.pile-card {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(200, 167, 102, 0.45);
+  border-radius: 3px;
+  background:
+    repeating-radial-gradient(circle at center, #16251f 0 3px, #0d1613 4px 7px);
+}
+
+.zone-pile .pile-card:nth-child(2) {
+  transform: translate(2px, -2px);
+}
+
+.zone-pile .pile-card:nth-child(3) {
+  transform: translate(4px, -4px);
+}
+
+.zone-graveyard .pile-card {
+  border-color: rgba(160, 160, 165, 0.5);
+  background: linear-gradient(150deg, #23262a, #141619);
+  transform: rotate(6deg);
+}
+
+.zone-graveyard .pile-card:nth-child(2) {
+  transform: rotate(-4deg) translate(2px, -2px);
+}
+
+.zone-exile .pile-card {
+  border-color: rgba(220, 180, 120, 0.5);
+  background: linear-gradient(150deg, #2a2216, #191411);
+}
+
+.pile-count {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: rgba(8, 12, 11, 0.95);
+  color: var(--gold-bright);
+  font-size: var(--type-floor);
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  padding: 0 3px;
+  z-index: 1;
 }
 
 .hud-zones {
@@ -1144,9 +1232,10 @@ textarea:focus-visible,
 
 .permanent-list {
   min-width: 0;
-  height: 97px;
+  height: 80px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -1159,17 +1248,17 @@ textarea:focus-visible,
 }
 
 .permanent-slot {
-  width: 75px;
-  height: 91px;
-  flex: 0 0 75px;
+  width: 62px;
+  height: 76px;
+  flex: 0 0 62px;
   display: grid;
   place-items: center;
   position: relative;
 }
 
 .permanent-slot.is-tapped {
-  flex-basis: 94px;
-  width: 94px;
+  flex-basis: 78px;
+  width: 78px;
 }
 
 .permanent-slot.is-tapped .card-face {
@@ -1275,8 +1364,8 @@ textarea:focus-visible,
 .card-face {
   --card-accent: #797e78;
   appearance: none;
-  width: 72px;
-  height: 88px;
+  width: 60px;
+  height: 72px;
   padding: 4px;
   border: 1px solid rgba(255, 255, 255, 0.26);
   border-radius: 5px;
@@ -1586,7 +1675,7 @@ textarea:focus-visible,
 
 .opponent-hand-space {
   min-width: 0;
-  min-height: 196px;
+  min-height: 112px;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1599,7 +1688,7 @@ textarea:focus-visible,
    arc; cards still paint above where they overlap. */
 .opponent-hand-space .player-hud {
   position: absolute;
-  top: 4px;
+  top: 2px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1;
@@ -1612,7 +1701,7 @@ textarea:focus-visible,
   background: none;
   border: 0;
   overflow: visible;
-  margin-top: 92px;
+  margin-top: 50px;
 }
 
 .opponent-hand-space .face-hand .hand-fan {
@@ -1727,7 +1816,7 @@ textarea:focus-visible,
    top edge. */
 .player-console > .player-hud {
   position: absolute;
-  top: 124px;
+  top: 138px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1;
@@ -1902,14 +1991,14 @@ textarea:focus-visible,
 }
 
 .debug-hand .hand-card-wrap {
-  width: 48px;
-  height: 92px;
-  flex-basis: 48px;
+  width: 38px;
+  height: 60px;
+  flex-basis: 38px;
 }
 
 .debug-hand .hand-card-wrap .card-face {
-  width: 62px;
-  height: 78px;
+  width: 46px;
+  height: 56px;
 }
 
 .debug-hand .hand-card-wrap .card-name {
@@ -4087,6 +4176,14 @@ select {
   .table-stage.is-rumbling {
     animation: none;
   }
+}
+
+.repro-match-line {
+  color: var(--faint);
+  font-size: var(--type-floor);
+  letter-spacing: 0.08em;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--line);
 }
 
 .stack-pass-button {

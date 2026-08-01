@@ -15,6 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <future>
 #include <utility>
 
 namespace old_school::selfplay_zero {
@@ -4698,6 +4699,18 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
         std::size_t turns = 0;
     };
 
+    struct ProbeOutcome {
+        std::size_t iteration = 0;
+        double vs_random = -1.0;
+        double vs_handcrafted = -1.0;
+        double vs_baseline = -1.0;
+        std::array<double, kSpzDeckCount> deck_lift{};
+        bool have_deck_lift = false;
+        SpzBehaviorRates behaviors;
+        bool have_behaviors = false;
+    };
+    std::future<ProbeOutcome> probe_future;
+
     for (std::size_t iteration = 0; iteration < config.iterations;
          ++iteration) {
         const double progress =
@@ -5134,46 +5147,170 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             bool have_deck_lift = false;
             SpzBehaviorRates behavior_rates;
             bool have_behaviors = false;
+            std::size_t probe_iteration = 0;
+            // Probes run beside training on a background thread; each
+            // section is caught so a probe defect degrades to a logged
+            // gap instead of a dead run. Results attach to the row of
+            // the iteration where they complete.
             if (config.probe_interval > 0 &&
-                (iteration + 1) % config.probe_interval == 0) {
+                (iteration + 1) % config.probe_interval == 0 &&
+                !probe_future.valid()) {
                 const auto probe_net =
                     std::make_shared<const SpzNet>(*net);
-                SpzPolicyConfig probe_policy;
-                probe_policy.worlds = 4;
-                probe_policy.block_prediction_worlds = 4;
-                probe_policy.rollout = true;
-                const auto random_probe = run_spz_benchmark(
-                    probe_net, BotKind::Random, config.probe_reps,
-                    mix_seed(config.seed, 9300 + iteration),
-                    probe_policy, 200, config.threads);
-                vs_random = random_probe.aggregate.win_rate();
-                // Classic deck lift: on identical pairings, how much
-                // better each deck wins piloted by the current net than
-                // piloted by Random.
-                for (std::size_t deck = 0; deck < kSpzDeckCount;
-                     ++deck) {
-                    deck_lift[deck] =
-                        random_probe.per_deck[deck].win_rate() -
-                        random_probe.baseline_deck_win_rate(deck);
-                }
-                have_deck_lift = true;
-                try {
-                    behavior_rates = run_behavior_probes(
-                        probe_net,
-                        mix_seed(config.seed, 9500 + iteration));
-                    have_behaviors = true;
-                } catch (const std::exception& error) {
-                    // A probe defect must never kill a training run.
-                    if (config.log) {
-                        config.log(std::string(
-                                       "behavior probe failed: ") +
-                                   error.what());
-                    }
-                }
+                const std::size_t launched_iteration = iteration + 1;
+                const std::uint64_t base_seed = config.seed;
+                const std::size_t probe_reps = config.probe_reps;
+                const std::size_t probe_threads =
+                    std::max<std::size_t>(2, config.threads / 2);
+                const auto log = config.log;
                 if (config.log) {
+                    config.log("probe launched at iteration " +
+                               std::to_string(launched_iteration));
+                }
+                probe_future = std::async(
+                    std::launch::async,
+                    [probe_net, launched_iteration, base_seed,
+                     probe_reps, probe_threads, log]() {
+                        const auto probe_start =
+                            std::chrono::steady_clock::now();
+                        const auto elapsed = [&probe_start]() {
+                            return std::chrono::duration_cast<
+                                       std::chrono::seconds>(
+                                       std::chrono::steady_clock::
+                                           now() -
+                                       probe_start)
+                                .count();
+                        };
+                        ProbeOutcome outcome;
+                        outcome.iteration = launched_iteration;
+                        SpzPolicyConfig probe_policy;
+                        probe_policy.worlds = 4;
+                        probe_policy.block_prediction_worlds = 4;
+                        probe_policy.rollout = true;
+                        try {
+                            const auto random_probe =
+                                run_spz_benchmark(
+                                    probe_net, BotKind::Random,
+                                    probe_reps,
+                                    mix_seed(base_seed,
+                                             9300 + launched_iteration),
+                                    probe_policy, 200, probe_threads);
+                            outcome.vs_random =
+                                random_probe.aggregate.win_rate();
+                            for (std::size_t deck = 0;
+                                 deck < kSpzDeckCount; ++deck) {
+                                outcome.deck_lift[deck] =
+                                    random_probe.per_deck[deck]
+                                        .win_rate() -
+                                    random_probe
+                                        .baseline_deck_win_rate(deck);
+                            }
+                            outcome.have_deck_lift = true;
+                        } catch (const std::exception& error) {
+                            if (log) {
+                                log(std::string(
+                                        "random probe failed: ") +
+                                    error.what());
+                            }
+                        }
+                        if (log) {
+                            log("probe " +
+                                std::to_string(launched_iteration) +
+                                " random section done at " +
+                                std::to_string(elapsed()) + "s");
+                        }
+                        try {
+                            outcome.behaviors = run_behavior_probes(
+                                probe_net,
+                                mix_seed(base_seed,
+                                         9500 + launched_iteration));
+                            outcome.have_behaviors = true;
+                        } catch (const std::exception& error) {
+                            if (log) {
+                                log(std::string(
+                                        "behavior probe failed: ") +
+                                    error.what());
+                            }
+                        }
+                        try {
+                            outcome.vs_handcrafted =
+                                run_spz_benchmark(
+                                    probe_net, BotKind::Handcrafted,
+                                    probe_reps,
+                                    mix_seed(base_seed,
+                                             9100 + launched_iteration),
+                                    probe_policy, 200, probe_threads)
+                                    .aggregate.win_rate();
+                        } catch (const std::exception& error) {
+                            if (log) {
+                                log(std::string(
+                                        "handcrafted probe failed: ") +
+                                    error.what());
+                            }
+                        }
+                        if (log) {
+                            log("probe " +
+                                std::to_string(launched_iteration) +
+                                " handcrafted section done at " +
+                                std::to_string(elapsed()) + "s");
+                        }
+                        try {
+                            outcome.vs_baseline =
+                                run_spz_benchmark(
+                                    probe_net,
+                                    BotKind::DeepMonteCarlo,
+                                    probe_reps,
+                                    mix_seed(base_seed,
+                                             9200 + launched_iteration),
+                                    probe_policy, 200, probe_threads)
+                                    .aggregate.win_rate();
+                        } catch (const std::exception& error) {
+                            if (log) {
+                                log(std::string(
+                                        "deep-mc probe failed: ") +
+                                    error.what());
+                            }
+                        }
+                        if (log) {
+                            log("probe " +
+                                std::to_string(launched_iteration) +
+                                " complete in " +
+                                std::to_string(elapsed()) + "s");
+                        }
+                        return outcome;
+                    });
+            }
+            const bool final_iteration =
+                iteration + 1 == config.iterations;
+            if (probe_future.valid() &&
+                (final_iteration ||
+                 probe_future.wait_for(std::chrono::seconds(0)) ==
+                     std::future_status::ready)) {
+                const ProbeOutcome outcome = probe_future.get();
+                probe_iteration = outcome.iteration;
+                vs_random = outcome.vs_random;
+                vs_handcrafted = outcome.vs_handcrafted;
+                vs_baseline = outcome.vs_baseline;
+                deck_lift = outcome.deck_lift;
+                have_deck_lift = outcome.have_deck_lift;
+                behavior_rates = outcome.behaviors;
+                have_behaviors = outcome.have_behaviors;
+                if (config.log) {
+                    std::ostringstream probe_line;
+                    probe_line << "probe iteration "
+                               << outcome.iteration << " vs-random "
+                               << std::fixed << std::setprecision(3)
+                               << vs_random << " vs-handcrafted "
+                               << vs_handcrafted;
+                    if (vs_baseline >= 0.0) {
+                        probe_line << " vs-deep-mc " << vs_baseline;
+                    }
+                    config.log(probe_line.str());
+                }
+                if (config.log && have_behaviors) {
                     std::ostringstream behavior_line;
                     behavior_line
-                        << "behaviors iteration " << (iteration + 1)
+                        << "behaviors iteration " << outcome.iteration
                         << std::fixed << std::setprecision(2)
                         << " land-drop " << behavior_rates.land_drop
                         << " no-self-bolt "
@@ -5184,31 +5321,6 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         << " spike-restraint "
                         << behavior_rates.spike_restraint;
                     config.log(behavior_line.str());
-                }
-                vs_handcrafted =
-                    run_spz_benchmark(
-                        probe_net, BotKind::Handcrafted,
-                        config.probe_reps,
-                        mix_seed(config.seed, 9100 + iteration),
-                        probe_policy, 200, config.threads)
-                        .aggregate.win_rate();
-                vs_baseline =
-                    run_spz_benchmark(
-                        probe_net, BotKind::DeepMonteCarlo,
-                        config.probe_reps,
-                        mix_seed(config.seed, 9200 + iteration),
-                        probe_policy, 200, config.threads)
-                        .aggregate.win_rate();
-                if (config.log) {
-                    std::ostringstream probe_line;
-                    probe_line << "probe iteration " << (iteration + 1)
-                               << " vs-random " << std::fixed
-                               << std::setprecision(3) << vs_random
-                               << " vs-handcrafted " << vs_handcrafted;
-                    if (vs_baseline >= 0.0) {
-                        probe_line << " vs-deep-mc " << vs_baseline;
-                    }
-                    config.log(probe_line.str());
                 }
             }
             std::ofstream telemetry(config.telemetry_path,
@@ -5262,6 +5374,10 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 if (advantage_agreement >= 0.0) {
                     telemetry << ",\"advantage_agreement\":"
                               << advantage_agreement;
+                }
+                if (probe_iteration > 0) {
+                    telemetry << ",\"probe_iteration\":"
+                              << probe_iteration;
                 }
                 if (vs_random >= 0.0) {
                     telemetry << ",\"vs_random\":" << vs_random;

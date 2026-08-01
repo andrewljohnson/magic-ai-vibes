@@ -248,10 +248,7 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   assert.match(app, /option\.spellTarget/);
   assert.match(app, /describeTopOfStack\(state\.stack \?\? \[\]\)/);
   assert.match(app, /"Respond to the stack"/);
-  assert.match(
-    app,
-    /\? "Pass toward resolution with the gold button by the stack\."/,
-  );
+  assert.match(app, /className="stack-pass-button"/);
   assert.match(app, /concisePriorityOptionLabel\(option\)/);
   assert.match(app, /target\s*\?\s*`Target → \$\{target\}`/);
   assert.match(app, /stackPermanentTargetIds\(stack\)/);
@@ -363,7 +360,7 @@ test("priority origins route to exact Arena surfaces without a legal-action wall
   );
   assert.match(
     app,
-    /decision\.kind !== "priority" && \([\s\S]+?className="decision-heading"/,
+    /decision\.kind !== "priority" &&[\s\S]+?className="decision-heading"/,
   );
   assert.match(css, /\.decision-dock\.is-priority\s*\{/);
   assert.match(

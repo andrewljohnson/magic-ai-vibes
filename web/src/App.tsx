@@ -134,13 +134,17 @@ function randomSeed(): number {
 function phaseIndex(phase: string): number {
   const value = phase.toLowerCase();
   if (
-    value.includes("untap") ||
-    value.includes("upkeep") ||
-    value.includes("draw") ||
-    value.includes("begin")
+    value.includes("first_main") ||
+    value.includes("precombat") ||
+    value.includes("main 1")
   )
-    return 0;
-  if (value.includes("precombat") || value.includes("main 1")) return 1;
+    return 1;
+  if (
+    value.includes("second_main") ||
+    value.includes("postcombat") ||
+    value.includes("main 2")
+  )
+    return 3;
   if (
     value.includes("combat") ||
     value.includes("attack") ||
@@ -148,7 +152,13 @@ function phaseIndex(phase: string): number {
     value.includes("damage")
   )
     return 2;
-  if (value.includes("postcombat") || value.includes("main 2")) return 3;
+  if (
+    value.includes("untap") ||
+    value.includes("upkeep") ||
+    value.includes("draw") ||
+    value.includes("begin")
+  )
+    return 0;
   return 4;
 }
 
@@ -841,8 +851,30 @@ function PlayerHud({
       }
       onDrop={(event) => onPriorityDrop?.(`player:${seat}`, event)}
     >
-      <div className="identity-orb" aria-hidden="true">
-        {label.slice(0, 1)}
+      <div
+        className={`identity-orb ${opponent ? "is-robot" : "is-human"}`}
+        aria-hidden="true"
+      >
+        {opponent ? (
+          <svg viewBox="0 0 24 24" className="avatar-svg">
+            <rect x="5" y="7" width="14" height="11" rx="2.5" fill="currentColor" />
+            <rect x="11" y="3" width="2" height="4" fill="currentColor" />
+            <circle cx="12" cy="2.6" r="1.6" fill="currentColor" />
+            <circle cx="9" cy="12" r="1.8" fill="#0d1211" />
+            <circle cx="15" cy="12" r="1.8" fill="#0d1211" />
+            <rect x="8.5" y="15" width="7" height="1.6" rx="0.8" fill="#0d1211" />
+            <rect x="2.5" y="10" width="2" height="5" rx="1" fill="currentColor" />
+            <rect x="19.5" y="10" width="2" height="5" rx="1" fill="currentColor" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" className="avatar-svg">
+            <circle cx="12" cy="7.4" r="4.4" fill="currentColor" />
+            <path
+              d="M12 13.2c-4.9 0-8 2.7-8 6.3V21h16v-1.5c0-3.6-3.1-6.3-8-6.3Z"
+              fill="currentColor"
+            />
+          </svg>
+        )}
       </div>
       <div className="player-copy">
         <div className="player-line">
@@ -857,13 +889,36 @@ function PlayerHud({
         <span>LIFE</span>
         <strong>{player.life}</strong>
       </div>
-      <div className="hud-zones">
-        <ZoneBadge label="LIB" count={player.librarySize} />
+      <div className="zone-piles" aria-label="Zones">
+        <div
+          className="zone-pile zone-library"
+          title={`Library: ${player.librarySize}`}
+        >
+          <span className="pile-card" />
+          <span className="pile-card" />
+          <span className="pile-card" />
+          <span className="pile-count">{player.librarySize}</span>
+        </div>
         {zoneCount(player.graveyard) > 0 && (
-          <ZoneBadge label="GY" count={zoneCount(player.graveyard)} />
+          <div
+            className="zone-pile zone-graveyard"
+            title={`Graveyard: ${zoneCount(player.graveyard)}`}
+          >
+            <span className="pile-card" />
+            <span className="pile-card" />
+            <span className="pile-count">
+              {zoneCount(player.graveyard)}
+            </span>
+          </div>
         )}
         {zoneCount(player.exile) > 0 && (
-          <ZoneBadge label="EX" count={zoneCount(player.exile)} />
+          <div
+            className="zone-pile zone-exile"
+            title={`Exile: ${zoneCount(player.exile)}`}
+          >
+            <span className="pile-card" />
+            <span className="pile-count">{zoneCount(player.exile)}</span>
+          </div>
         )}
       </div>
       <ManaPool value={player.manaPool} />
@@ -1670,9 +1725,6 @@ function PriorityControls({
   pendingOptions: PriorityOption[];
   onChooseExact: (option: PriorityOption) => void;
 }) {
-  const passOptions = decision.options.filter(
-    (option) => option.kind === "pass",
-  );
   return (
     <div
       className={`priority-control arena-priority ${
@@ -1710,15 +1762,7 @@ function PriorityControls({
           </div>
         )}
 
-        <div className="pass-priority-controls">
-          {passOptions.length > 0 && (
-            <span className="pass-priority-hint">
-              {stackInteraction
-                ? "Pass toward resolution with the gold button by the stack."
-                : "Pass with the gold button by the stack."}
-            </span>
-          )}
-        </div>
+
       </div>
     </div>
   );
@@ -1764,22 +1808,6 @@ function AttackersControls({
   };
   return (
     <div className="combat-control">
-      <div className="combat-picks" aria-label="Eligible attackers">
-        {decision.eligible.map((id) => {
-          const permanent = findPermanent(player, id);
-          return (
-            <button
-              type="button"
-              className={selected.has(String(id)) ? "is-selected" : ""}
-              onClick={() => toggle(String(id))}
-              key={String(id)}
-            >
-              <span className="pick-dot" />
-              {cardFromPermanent(permanent)?.name ?? `Permanent ${id}`}
-            </button>
-          );
-        })}
-      </div>
       <div className="decision-actions">
         <button
           type="button"
@@ -2165,7 +2193,11 @@ function DecisionDock({
           {helper}
         </span>
       </div>
-      {decision.kind !== "priority" && (
+      {decision.kind !== "priority" &&
+        !(
+          decision.kind === "attackers" &&
+          decision.eligible.length > 0
+        ) && (
         <div className="decision-heading">
           <span className="decision-pulse" />
           <div>
@@ -4691,14 +4723,19 @@ function ReproductionSummary({
   return (
     <details className="repro-summary">
       <summary aria-label="Open exact reproduction settings">
-        <span>REPRO</span>
-        {config.debugReveal && <em>REVEAL</em>}
+        <span>Debug</span>
       </summary>
       <section className="repro-panel" aria-label="Exact reproduction settings">
         <header>
           <span className="eyebrow">REPRODUCTION</span>
           <strong>Exact setup + public state</strong>
         </header>
+        <div className="repro-match-line">
+          SEED <strong>{String(config.seed)}</strong> · MATCH{" "}
+          <strong>
+            {String(snapshot.id ?? "").slice(0, 8).toUpperCase()}
+          </strong>
+        </div>
         <div className="repro-seats">
           {([0, 1] as PlayerIndex[]).map((seat) => (
             <span key={seat}>
@@ -4815,16 +4852,6 @@ function TopBar({
         </span>
       </div>
       <div className="top-context">
-        {seed !== undefined && (
-          <span>
-            SEED <strong>{seed}</strong>
-          </span>
-        )}
-        {gameId && (
-          <span className="game-id" title={gameId}>
-            MATCH <strong>{gameId.slice(0, 8).toUpperCase()}</strong>
-          </span>
-        )}
         {inGame && config && snapshot && (
           <ReproductionSummary
             config={config}
@@ -4834,10 +4861,9 @@ function TopBar({
         )}
         {inGame && config?.debugReveal && (
           <span className="debug-reveal-warning" role="status">
-            DEBUG REVEAL ON
+            debug reveal on
           </span>
         )}
-        {inGame && <span className="live-indicator">LIVE</span>}
       </div>
       <div className="top-actions">
         <button

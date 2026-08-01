@@ -476,7 +476,7 @@ test("match typography keeps a readable floor without enlarging fixed regions", 
   );
   assert.ok(compactViewport, "missing 1280x720 compact-height layout");
   const compactShellRule = cssRule(compactViewport[1], ".game-shell");
-  assert.equal(pixels(shellRule, "--player-hand-height"), 248);
+  assert.equal(pixels(shellRule, "--player-hand-height"), 216);
   assert.equal(pixels(compactShellRule, "--player-hand-height"), 170);
   assert.ok(
     pixels(compactShellRule, "--player-decision-height") >= 150,
@@ -773,7 +773,7 @@ test("debug reveal is persistently warned and defaults on for practice", async (
   assert.match(app, /<SetupDrawer[\s\S]+?initialConfig=\{newMatchConfig\}/);
   assert.match(
     topBar,
-    /inGame && config\?\.debugReveal[\s\S]+?className="debug-reveal-warning"[\s\S]+?role="status"[\s\S]+?DEBUG REVEAL ON/,
+    /inGame && config\?\.debugReveal[\s\S]+?className="debug-reveal-warning"[\s\S]+?role="status"[\s\S]+?debug reveal on/,
   );
   assert.doesNotMatch(
     topBar.slice(topBar.indexOf("debug-reveal-warning")),
@@ -782,9 +782,7 @@ test("debug reveal is persistently warned and defaults on for practice", async (
   assert.match(app, /const replay = \(\) => \{[\s\S]+?startGame\(currentConfig\)/);
 
   const warning = cssRule(css, ".debug-reveal-warning");
-  assert.match(warning, /border:\s*1px solid #ff9b8c/);
-  assert.match(warning, /background:\s*#8d3028/);
-  assert.match(warning, /font-weight:\s*850/);
+  assert.match(warning, /color:\s*#e07767/);
   assert.match(warning, /white-space:\s*nowrap/);
 });
 

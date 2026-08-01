@@ -9,7 +9,7 @@ LOG=build/telemetry/uwr-v1-pipeline.log
 echo "=== stage 1: UWR-era value net (colors schema, h128, 900 iters) ===" >> "$LOG"
 ./build/selfplay-zero train --out data/spz-uwr-stage1.txt \
   --iterations 900 --games 196 --schema-colors --hidden 128 \
-  --threads 10 --seed 42 --probe-every 10 --probe-reps 50 \
+  --threads 8 --seed 42 --probe-every 10 --probe-reps 8 \
   --telemetry build/telemetry/telemetry.jsonl >> "$LOG" 2>&1
 echo "=== stage 2: advantage head on frozen stage-1 net ===" >> "$LOG"
 ./build/selfplay-zero train --out data/spz-uwr-stage1.txt \
