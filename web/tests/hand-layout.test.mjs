@@ -768,7 +768,7 @@ test("debug reveal is persistently warned and defaults on for practice", async (
   );
   assert.match(
     app,
-    /useEffect\(\(\) => \{\s*if \(open && initialConfig\) \{\s*setConfig\(\{\s*\.\.\.initialConfig,\s*debugReveal: false/,
+    /useEffect\(\(\) => \{\s*if \(open && initialConfig\) \{\s*setConfig\(\{\s*\.\.\.initialConfig,\s*debugReveal: true/,
   );
   assert.match(app, /<SetupDrawer[\s\S]+?initialConfig=\{newMatchConfig\}/);
   assert.match(
