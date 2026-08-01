@@ -1831,10 +1831,8 @@ textarea:focus-visible,
 }
 
 .debug-hand {
-  position: absolute;
-  left: 8%;
-  right: 8%;
-  top: 47px;
+  position: static;
+  margin: 4px 8% 6px;
   height: 95px;
   grid-template-columns: 80px 1fr;
   border: 1px solid rgba(224, 119, 103, 0.28);
@@ -3827,4 +3825,77 @@ select {
   color: #d64538;
   font-weight: 750;
   letter-spacing: 0.04em;
+}
+
+.table-stage {
+  position: relative;
+}
+.target-arrow-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 40;
+}
+.target-arrow {
+  fill: none;
+  stroke: var(--arrow, #eda100);
+  stroke-width: 2.5;
+  stroke-dasharray: 7 5;
+  opacity: 0.9;
+  animation: arrow-march 0.9s linear infinite;
+}
+@keyframes arrow-march {
+  to { stroke-dashoffset: -12; }
+}
+
+.stack-rail.is-empty {
+  opacity: 0.75;
+}
+.stack-empty-note {
+  font-size: 0.78rem;
+  color: var(--text-muted, #667);
+  margin: 0.4rem 0 0;
+}
+
+.player-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 108px;
+  padding: 5px 12px;
+  border: 1px solid var(--line, #3a3a44);
+  border-radius: 10px;
+  background: var(--panel, rgba(20, 20, 26, 0.85));
+}
+.player-box.is-active {
+  border-color: #eda100;
+  box-shadow: 0 0 8px rgba(237, 161, 0, 0.35);
+}
+.player-box-name {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+.player-box-life {
+  font-size: 1.25rem;
+  font-weight: 750;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.player-box-counts {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+.midline {
+  align-items: center;
+  gap: 14px;
+}
+.table-stage .phase-ribbon {
+  order: 99;
+  margin-top: 6px;
 }

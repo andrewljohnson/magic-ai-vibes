@@ -821,6 +821,7 @@ function PermanentRow({
                 targetedByStackIds?.has(id) ? "is-spell-target" : ""
               }`}
               key={id}
+              data-arrow-pid={id}
               onDragOver={(event) =>
                 onPriorityDragOver?.(`permanent:${id}`, event)
               }
@@ -1111,6 +1112,7 @@ function BattlefieldSide({
         priorityPlayTarget && draggingPriority ? "is-drop-target" : ""
       }`}
       aria-label={`${playerLabel(snapshot, seat)} battlefield`}
+      data-arrow-player={seat}
       data-priority-play-target={priorityPlayTarget || undefined}
       onClick={(event) => {
         if (!priorityPlayTarget) return;
@@ -1344,14 +1346,20 @@ function StackRail({
     event: ReactDragEvent<HTMLElement>,
   ) => void;
 }) {
-  if (stack.length === 0) return null;
   return (
-    <aside className="stack-rail" aria-label="The stack" aria-live="polite">
+    <aside
+      className={`stack-rail ${stack.length === 0 ? "is-empty" : ""}`}
+      aria-label="The stack"
+      aria-live="polite"
+    >
       <div className="panel-heading">
         <span className="eyebrow">RESOLVING</span>
         <h2>The Stack</h2>
         <span className="event-count">{stack.length}</span>
       </div>
+      {stack.length === 0 && (
+        <p className="stack-empty-note">Empty — spells resolve here</p>
+      )}
       <div className="stack-list">
         {[...stack].reverse().map((entry, index) => {
           const label = formatStackEntryLabel(entry);
@@ -1370,6 +1378,7 @@ function StackRail({
                 priorityTarget ? "is-priority-destination" : ""
               }`}
               key={stackId ?? `${label}-${index}`}
+              data-arrow-stack={index}
               onDragOver={(event) => {
                 if (stackId === undefined) return;
                 onPriorityDragOver?.(`stack:${String(stackId)}`, event);
@@ -3084,6 +3093,107 @@ type PriorityOriginSelection =
       permanentId: string;
     };
 
+function TargetArrows({ snapshot }: { snapshot: GameSnapshot }) {
+  const stack = snapshot.state?.stack ?? [];
+  const arrowTargets = stack.map((entry) => {
+    const target = entry.target;
+    return typeof target === "object" && target !== null
+      ? target
+      : null;
+  });
+  const signature = JSON.stringify(
+    arrowTargets.map((target, index) => [
+      index,
+      target?.player ?? null,
+      target?.creature ?? null,
+    ]),
+  );
+  const [paths, setPaths] = useState<
+    Array<{ d: string; key: string }>
+  >([]);
+  useEffect(() => {
+    const host = document.querySelector(".table-stage");
+    if (!host) {
+      setPaths([]);
+      return;
+    }
+    const measure = () => {
+      const hostRect = host.getBoundingClientRect();
+      const next: Array<{ d: string; key: string }> = [];
+      arrowTargets.forEach((target, index) => {
+        if (!target || target.player === undefined) return;
+        const source = document.querySelector(
+          `[data-arrow-stack="${index}"]`,
+        );
+        const destination =
+          target.creature !== undefined && target.creature !== null
+            ? document.querySelector(
+                `[data-arrow-pid="${String(target.creature)}"]`,
+              )
+            : document.querySelector(
+                `[data-arrow-player="${target.player}"]`,
+              );
+        if (!source || !destination) return;
+        const a = source.getBoundingClientRect();
+        const b = destination.getBoundingClientRect();
+        const x1 = a.left + a.width / 2 - hostRect.left;
+        const y1 = a.top + a.height / 2 - hostRect.top;
+        const x2 = b.left + b.width / 2 - hostRect.left;
+        const y2 = b.top + b.height / 2 - hostRect.top;
+        // Arc control point: perpendicular offset from the midpoint.
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.max(1, Math.hypot(dx, dy));
+        const lift = Math.min(120, length * 0.25);
+        const cx = mx - (dy / length) * lift;
+        const cy = my + (dx / length) * lift;
+        next.push({
+          d: `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`,
+          key: `${index}-${target.player}-${String(
+            target.creature ?? "player",
+          )}`,
+        });
+      });
+      setPaths(next);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    const interval = window.setInterval(measure, 500);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+  if (paths.length === 0) return null;
+  return (
+    <svg className="target-arrow-overlay" aria-hidden="true">
+      <defs>
+        <marker
+          id="target-arrowhead"
+          markerWidth="9"
+          markerHeight="9"
+          refX="7"
+          refY="4.5"
+          orient="auto"
+        >
+          <path d="M0,0 L9,4.5 L0,9 z" fill="var(--arrow, #eda100)" />
+        </marker>
+      </defs>
+      {paths.map((path) => (
+        <path
+          key={path.key}
+          d={path.d}
+          className="target-arrow"
+          markerEnd="url(#target-arrowhead)"
+        />
+      ))}
+    </svg>
+  );
+}
+
 export default function App() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
@@ -3094,6 +3204,7 @@ export default function App() {
   const [acting, setActing] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [gameError, setGameError] = useState<string | null>(null);
+  const priorityDropConsumedRef = useRef(false);
   const [selectedPriorityOrigin, setSelectedPriorityOrigin] =
     useState<PriorityOriginSelection | null>(null);
   const [draggedPriorityOrigin, setDraggedPriorityOrigin] =
@@ -3649,6 +3760,15 @@ export default function App() {
     }
   };
   const finishPriorityDrag = () => {
+    // dragend fires after any drop handler. If no drop consumed the
+    // drag (released over empty space or an illegal target), clear the
+    // origin selection too - otherwise the UI stays armed in
+    // click-a-target mode the user never asked for.
+    if (!priorityDropConsumedRef.current) {
+      setSelectedPriorityOrigin(null);
+      setPendingPriorityOptions([]);
+    }
+    priorityDropConsumedRef.current = false;
     draggedPriorityOriginRef.current = null;
     setDraggedPriorityOrigin(null);
   };
@@ -3678,6 +3798,7 @@ export default function App() {
     if (!origin) return;
     const options = matchingPriorityDropOptions(origin, destination);
     if (options.length === 0) return;
+    priorityDropConsumedRef.current = true;
     event.preventDefault();
     event.stopPropagation();
     finishPriorityDrag();
@@ -3878,8 +3999,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-shell game-shell ${
-        stack.length ? "has-stack" : ""
+      className={`app-shell game-shell has-stack ${""
       } ${snapshot.decision && hasVisibleDecision ? "has-decision" : ""} ${
         priorityDecision && hasVisibleDecision ? "has-priority-decision" : ""
       }`}
@@ -3899,15 +4019,7 @@ export default function App() {
           <div className="game-layout">
             <MatchLog entries={snapshot.log ?? []} />
             <main className="table-stage">
-              <PhaseRibbon
-                phase={state.phase}
-                turn={state.turnNumber}
-                activeLabel={playerLabel(
-                  snapshot,
-                  state.activePlayer as PlayerIndex,
-                )}
-                hasPriority={Boolean(snapshot.decision && hasVisibleDecision)}
-              />
+              <TargetArrows snapshot={snapshot} />
               <div className="battlefield">
                 <BattlefieldSide
                   player={state.players[farSeat]}
@@ -3948,9 +4060,41 @@ export default function App() {
                   onBlockDrop={dropBlockTarget}
                 />
                 <div className="midline">
-                  <span />
+                  <div
+                    className={`player-box ${
+                      state.activePlayer === farSeat ? "is-active" : ""
+                    }`}
+                  >
+                    <span className="player-box-name">
+                      {playerLabel(snapshot, farSeat)}
+                    </span>
+                    <span className="player-box-life">
+                      {state.players[farSeat].life}
+                    </span>
+                    <span className="player-box-counts">
+                      ✋{state.players[farSeat].handSize} · 📚
+                      {state.players[farSeat].librarySize} · 🪦
+                      {state.players[farSeat].graveyard.length}
+                    </span>
+                  </div>
                   <strong>{formatPhase(state.phase)}</strong>
-                  <span />
+                  <div
+                    className={`player-box ${
+                      state.activePlayer === nearSeat ? "is-active" : ""
+                    }`}
+                  >
+                    <span className="player-box-name">
+                      {playerLabel(snapshot, nearSeat)}
+                    </span>
+                    <span className="player-box-life">
+                      {state.players[nearSeat].life}
+                    </span>
+                    <span className="player-box-counts">
+                      ✋{state.players[nearSeat].handSize} · 📚
+                      {state.players[nearSeat].librarySize} · 🪦
+                      {state.players[nearSeat].graveyard.length}
+                    </span>
+                  </div>
                 </div>
                 <BattlefieldSide
                   player={state.players[nearSeat]}
@@ -4046,7 +4190,16 @@ export default function App() {
                   />
                 )}
               </div>
-            </main>
+                          <PhaseRibbon
+                phase={state.phase}
+                turn={state.turnNumber}
+                activeLabel={playerLabel(
+                  snapshot,
+                  state.activePlayer as PlayerIndex,
+                )}
+                hasPriority={Boolean(snapshot.decision && hasVisibleDecision)}
+              />
+</main>
             <StackRail
               stack={stack}
               observerSeat={nearSeat}
