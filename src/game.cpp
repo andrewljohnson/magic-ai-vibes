@@ -369,7 +369,7 @@ constexpr std::array<CardDefinition, 47> kCardDefinitions = {{
      false},
 }};
 
-constexpr std::array<CardId, 12> kCreatureCards = {
+constexpr std::array<CardId, 15> kCreatureCards = {
     CardId::GrizzlyBears,
     CardId::IronrootTreefolk,
     CardId::FireElemental,
@@ -382,6 +382,9 @@ constexpr std::array<CardId, 12> kCreatureCards = {
     CardId::LlanowarElves,
     CardId::MossBeast,
     CardId::ForestColossus,
+    CardId::SavannahLions,
+    CardId::SerendibEfreet,
+    CardId::SerraAngel,
 };
 
 constexpr std::array<CardId, 4> kSorceryCards = {
@@ -534,8 +537,7 @@ CardCounts physical_card_counts(const GameState& state,
 }
 
 bool is_land(CardId card) {
-    return card == CardId::Forest || card == CardId::Mountain ||
-           card == CardId::Island || card == CardId::Plains;
+    return card_definition(card).type == CardType::Land;
 }
 
 int mana_total(const ManaCost& mana) {
@@ -1590,11 +1592,13 @@ legal_priority_actions(const GameState& state, std::size_t player,
         state.stack.empty();
 
     if (has_sorcery_timing && !player_state.land_played_this_turn) {
-        for (const CardId land :
-             {CardId::Forest, CardId::Mountain, CardId::Island,
-              CardId::Plains}) {
-            if (has_card(player_state.hand, land)) {
-                actions.push_back(PriorityAction::play_land(land));
+        std::vector<CardId> seen_lands;
+        for (const CardId card : player_state.hand) {
+            if (is_land(card) &&
+                std::find(seen_lands.begin(), seen_lands.end(), card) ==
+                    seen_lands.end()) {
+                seen_lands.push_back(card);
+                actions.push_back(PriorityAction::play_land(card));
             }
         }
     }
@@ -1796,15 +1800,19 @@ legal_priority_actions(const GameState& state, std::size_t player,
             }
         }
     }
-    {
-        constexpr ManaCost kFactoryCost = {.generic = 1};
-        if (can_pay(player_state, kFactoryCost)) {
-            for (const auto& land : player_state.lands) {
-                if (land.card == CardId::MishrasFactory) {
-                    actions.push_back(
-                        PriorityAction::animate_factory(land.id));
-                }
-            }
+    for (const auto& land : player_state.lands) {
+        if (land.card != CardId::MishrasFactory) {
+            continue;
+        }
+        // The factory cannot pay for its own animation (the apply
+        // shields it), so an untapped factory must find one generic
+        // among the OTHER sources: two total, one of which is itself.
+        const ManaCost animation_cost =
+            land.tapped ? ManaCost{.generic = 1}
+                        : ManaCost{.generic = 2};
+        if (can_pay(player_state, animation_cost)) {
+            actions.push_back(
+                PriorityAction::animate_factory(land.id));
         }
     }
     for (const auto& land : player_state.lands) {
@@ -3482,13 +3490,21 @@ bool handcrafted_mulligan_choice(const std::vector<CardId>& hand,
                count_in(hand, CardId::Channel) < 1 ||
                count_in(hand, CardId::Disintegrate) < 1;
     }
-    std::size_t lands = 0;
+    std::size_t sources = 0;
     for (const CardId card : hand) {
-        if (card_definition(card).type == CardType::Land) {
-            ++lands;
+        if (card_definition(card).type == CardType::Land ||
+            card == CardId::MoxSapphire || card == CardId::MoxPearl ||
+            card == CardId::MoxRuby || card == CardId::SolRing ||
+            card == CardId::BlackLotus) {
+            ++sources;
         }
     }
-    return lands < 3;
+    // Three lands at seven cards, easing one per mulligan so the
+    // Paris ladder converges instead of digging to oblivion.
+    const std::size_t needed = hand.size() >= 7 ? 3
+                               : hand.size() == 6 ? 2
+                                                  : 1;
+    return sources < needed;
 }
 
 void begin_turn(GameState& state, std::size_t player) {
@@ -4009,7 +4025,33 @@ Game::continue_priority_window(bool sorcery_actions,
 
         if (!apply_priority_action(state_, priority.player, action,
                                    sorcery_actions)) {
-            throw std::logic_error("bot policy selected an illegal action");
+            {
+                std::string detail =
+                    "bot policy selected an illegal action: kind " +
+                    std::to_string(static_cast<int>(action.kind)) +
+                    " card " +
+                    std::to_string(static_cast<int>(action.card)) +
+                    " lands";
+                for (const auto& land :
+                     state_.players[priority.player].lands) {
+                    detail += ' ';
+                    detail +=
+                        std::to_string(static_cast<int>(land.card)) +
+                        (land.tapped ? "T" : "u");
+                }
+                detail += " artifacts";
+                for (const auto& artifact :
+                     state_.players[priority.player].artifacts) {
+                    detail += ' ';
+                    detail += std::to_string(
+                                  static_cast<int>(artifact.card)) +
+                              (artifact.tapped ? "T" : "u");
+                }
+                detail += " pool g" +
+                          std::to_string(state_.players[priority.player]
+                                             .mana_pool.generic);
+                throw std::logic_error(detail);
+            }
         }
         if (notify_observers) {
             notify_human_observers({

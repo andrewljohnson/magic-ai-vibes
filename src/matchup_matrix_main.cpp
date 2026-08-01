@@ -116,6 +116,7 @@ int main(int argc, char** argv) {
         {"ru-aggro", ru_aggro_deck()},
         {"lotus-combo", lotus_combo_deck()},
         {"burn", burn_deck()},
+        {"uwr", uwr_deck()},
     };
     // Persisted evolved decks join the matrix: data/*.deck holds forty
     // whitespace-separated card ids; the filename stem is the deck name.

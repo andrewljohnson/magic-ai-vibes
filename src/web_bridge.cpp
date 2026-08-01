@@ -1688,7 +1688,9 @@ int run_bridge_session(std::istream& input, std::ostream& output,
         write_model_status(
             output,
             "Champion artifact unavailable; handcrafted opponent",
-            "handcrafted", 0, 0, 0, "fallback", "");
+            "handcrafted", 0, 1, 0, "fallback",
+            "0000000000000000000000000000000000000000000000000000"
+            "000000000000");
     }
     if (opponent_spz) {
         // Self-Play Zero drives the opponent seat through the same

@@ -1354,8 +1354,8 @@ function StackRail({
       aria-live="polite"
     >
       <div className="panel-heading">
-        <span className="eyebrow">RESOLVING</span>
-        <h2>The Stack</h2>
+        <span className="eyebrow">THE</span>
+        <h2>Stack</h2>
         <span className="event-count">{stack.length}</span>
       </div>
       {stack.length === 0 && (

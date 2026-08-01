@@ -4528,6 +4528,15 @@ TEST(handcrafted_mulligan_demands_three_lands_or_digs_for_the_combo) {
          CardId::LightningBolt, CardId::GrayOgre, CardId::HillGiant,
          CardId::IronclawOrcs},
         red));
+    // The bar eases as the hand shrinks: two lands keep a six.
+    CHECK(!old_school::handcrafted_mulligan_choice(
+        {CardId::Mountain, CardId::Mountain, CardId::LightningBolt,
+         CardId::LightningBolt, CardId::GrayOgre, CardId::HillGiant},
+        red));
+    CHECK(old_school::handcrafted_mulligan_choice(
+        {CardId::Mountain, CardId::LightningBolt, CardId::LightningBolt,
+         CardId::LightningBolt, CardId::GrayOgre, CardId::HillGiant},
+        red));
     // Four cards is the floor even without lands.
     CHECK(!old_school::handcrafted_mulligan_choice(
         {CardId::LightningBolt, CardId::LightningBolt,

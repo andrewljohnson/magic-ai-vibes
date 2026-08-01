@@ -771,7 +771,7 @@ textarea:focus-visible,
   min-height: 0;
   position: relative;
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   overflow: hidden;
   background:
     linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
@@ -878,7 +878,7 @@ textarea:focus-visible,
 .battlefield {
   min-height: 0;
   display: grid;
-  grid-template-rows: 1fr 24px 1fr;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
   padding: 8px 20px;
   overflow: hidden;
 }
@@ -1577,16 +1577,6 @@ textarea:focus-visible,
   font-size: var(--type-floor);
   letter-spacing: 0.2em;
   text-transform: uppercase;
-}
-
-.midline span {
-  width: min(12vw, 120px);
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(200, 167, 102, 0.2));
-}
-
-.midline span:last-child {
-  transform: rotate(180deg);
 }
 
 .opponent-hand-space {
